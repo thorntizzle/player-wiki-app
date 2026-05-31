@@ -2467,7 +2467,8 @@ def register_api(app) -> None:
         except (CampaignCombatValidationError, TypeError, ValueError) as exc:
             return json_error(str(exc) if str(exc) else "Choose a valid DM Content statblock to add.", 400, code="validation_error")
 
-        statblock = current_app.extensions["campaign_dm_content_service"].get_statblock(campaign_slug, statblock_id)
+        dm_content_service = current_app.extensions["campaign_dm_content_service"]
+        statblock = dm_content_service.get_statblock(campaign_slug, statblock_id)
         if statblock is None:
             return json_error("Choose a valid DM Content statblock to add.", 400, code="validation_error")
 
@@ -2477,7 +2478,7 @@ def register_api(app) -> None:
                 display_name=str(payload.get("display_name") or "").strip() or statblock.title,
                 turn_value=payload.get("turn_value") if payload.get("turn_value") not in (None, "") else statblock.initiative_bonus,
                 initiative_bonus=statblock.initiative_bonus,
-                dexterity_modifier=statblock.initiative_bonus,
+                dexterity_modifier=dm_content_service.get_statblock_dexterity_modifier(statblock),
                 initiative_priority=payload.get("initiative_priority"),
                 current_hp=statblock.max_hp,
                 max_hp=statblock.max_hp,

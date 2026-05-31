@@ -1560,6 +1560,46 @@ def test_api_combat_endpoints_allow_dm_management_and_owner_player_vitals_update
     assert live_state.get_json()["tracker"]["combatant_count"] == 2
 
 
+def test_api_combat_statblock_seed_uses_dex_modifier_for_tie_breaker(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-combat-statblock-api")
+    with app.app_context():
+        statblock = app.extensions["campaign_dm_content_service"].create_statblock(
+            "linden-pass",
+            filename="alert-guard.md",
+            data_blob=b"""---
+title: Alert Guard
+armor_class: 14
+hp: 24
+speed: 30 ft.
+initiative_bonus: 7
+---
+
+STR 10 (+0)  DEX 14 (+2)  CON 12 (+1)  INT 10 (+0)  WIS 10 (+0)  CHA 10 (+0)
+
+## Actions
+
+### Spear
+
++4 to hit, 5 piercing damage.
+""",
+            created_by_user_id=users["dm"]["id"],
+        )
+
+    response = client.post(
+        "/api/v1/campaigns/linden-pass/combat/statblock-combatants",
+        headers=api_headers(dm_token),
+        json={"statblock_id": statblock.id},
+    )
+
+    assert response.status_code == 200
+    combatant = _find_tracker_combatant(response.get_json(), name="Alert Guard")
+    assert combatant is not None
+    assert combatant["turn_value"] == 7
+    assert combatant["initiative_bonus_label"] == "+7"
+    assert combatant["dexterity_modifier"] == 2
+    assert combatant["dexterity_modifier_label"] == "+2"
+
+
 def test_api_combat_resource_update_rejects_stale_combatant_revision(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-combat-conflict-api")
 

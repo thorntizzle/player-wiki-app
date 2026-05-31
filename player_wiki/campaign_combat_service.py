@@ -776,17 +776,28 @@ class CampaignCombatService:
         if not isinstance(raw_ability_scores, dict):
             return 0
         ability_scores = dict(raw_ability_scores)
-        dexterity = ability_scores.get("dex") or ability_scores.get("DEX") or {}
-        if not isinstance(dexterity, dict):
+        dexterity = (
+            ability_scores.get("dex")
+            or ability_scores.get("DEX")
+            or ability_scores.get("dexterity")
+            or ability_scores.get("Dexterity")
+            or ability_scores.get("DEXTERITY")
+            or {}
+        )
+        if isinstance(dexterity, (int, float, str)):
+            raw_modifier = None
+            raw_score = dexterity
+        elif isinstance(dexterity, dict):
+            raw_modifier = dexterity.get("modifier")
+            raw_score = dexterity.get("score")
+        else:
             return 0
-        raw_modifier = dexterity.get("modifier")
         if raw_modifier is not None and str(raw_modifier).strip() != "":
             try:
                 return int(raw_modifier)
             except (TypeError, ValueError):
                 return 0
 
-        raw_score = dexterity.get("score")
         if raw_score is None or str(raw_score).strip() == "":
             return 0
         try:

@@ -1760,6 +1760,9 @@ def test_turn_order_uses_dexterity_modifier_then_dm_priority_for_ties(
     )
     arden_payload = yaml.safe_load(arden_definition_path.read_text(encoding="utf-8")) or {}
     arden_payload["stats"]["initiative_bonus"] = 8
+    arden_ability_scores = dict(arden_payload["stats"].get("ability_scores") or {})
+    arden_ability_scores["dexterity"] = dict(arden_ability_scores.pop("dex"))
+    arden_payload["stats"]["ability_scores"] = arden_ability_scores
     arden_definition_path.write_text(yaml.safe_dump(arden_payload, sort_keys=False), encoding="utf-8")
 
     client.post(
@@ -1883,6 +1886,49 @@ def test_turn_order_uses_dexterity_modifier_then_dm_priority_for_ties(
         "Selene Brook",
         "Zeta Guard",
     ]
+
+
+def test_dm_content_statblock_seeds_dex_modifier_separately_from_initiative_bonus(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    statblock = _create_dm_statblock(
+        app,
+        created_by_user_id=users["dm"]["id"],
+        filename="alert-guard.md",
+        markdown_text="""---
+title: Alert Guard
+armor_class: 14
+hp: 24
+speed: 30 ft.
+initiative_bonus: 7
+---
+
+STR 10 (+0)  DEX 14 (+2)  CON 12 (+1)  INT 10 (+0)  WIS 10 (+0)  CHA 10 (+0)
+
+## Actions
+
+### Spear
+
++4 to hit, 5 piercing damage.
+""",
+    )
+
+    response = client.post(
+        "/campaigns/linden-pass/combat/statblock-combatants",
+        data={"statblock_id": statblock.id},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    combatant = _find_combatant(app, name="Alert Guard")
+    assert combatant is not None
+    assert combatant.turn_value == 7
+    assert combatant.initiative_bonus == 7
+    assert combatant.dexterity_modifier == 2
 
 
 def test_dm_can_set_current_turn_and_advance_turn_refreshing_resources(app, client, sign_in, users):
@@ -2275,9 +2321,12 @@ def test_owner_player_combat_page_uses_character_workspace_layout(app, client, s
     assert "Combat sections" in body
     assert "Turn order" in body
     assert 'class="section-list combat-workspace-stack"' in body
-    assert "Actions" in body
-    assert "Bonus Actions" in body
-    assert "Reactions" in body
+    assert 'data-combat-section-toggle="actions"' not in body
+    assert 'data-combat-section-toggle="bonus_actions"' not in body
+    assert 'data-combat-section-toggle="reactions"' not in body
+    assert 'data-combat-section-toggle="attacks"' in body
+    assert 'data-combat-section-toggle="spells"' in body
+    assert 'data-combat-section-toggle="resources"' in body
     assert "Abilities and Skills" in body
     assert "Selected / inspected" in body
     assert "combat-spellcasting-panel" in body
@@ -2292,6 +2341,52 @@ def test_owner_player_combat_page_uses_character_workspace_layout(app, client, s
     assert "Borrowed Spark" in body
     assert "Current limits" not in body
     assert "Encounter context" not in body
+
+
+def test_player_combat_workspace_hides_empty_sections_until_they_have_content(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    initial_response = client.get("/campaigns/linden-pass/combat")
+
+    assert initial_response.status_code == 200
+    initial_body = initial_response.get_data(as_text=True)
+    assert 'data-combat-section-toggle="actions"' not in initial_body
+    assert 'data-combat-section-toggle="bonus_actions"' not in initial_body
+    assert 'data-combat-section-toggle="attacks"' in initial_body
+
+    def _add_bonus_action_feature(payload: dict) -> None:
+        features = [dict(feature or {}) for feature in list(payload.get("features") or [])]
+        features.append(
+            {
+                "id": "quickened-test",
+                "name": "Quickened Test",
+                "category": "class_feature",
+                "description_markdown": "Use a spark of training as a bonus action.",
+                "activation_type": "bonus_action",
+            }
+        )
+        payload["features"] = features
+
+    _write_character_definition(app, "arden-march", _add_bonus_action_feature)
+    changed_response = client.get("/campaigns/linden-pass/combat")
+
+    assert changed_response.status_code == 200
+    changed_body = changed_response.get_data(as_text=True)
+    assert 'data-combat-section-toggle="bonus_actions"' in changed_body
+    assert 'data-combat-section-panel="bonus_actions"' in changed_body
+    assert "Quickened Test" in changed_body
 
 
 def test_owner_player_combat_page_uses_full_width_workspace_layout_and_preserves_live_rerender_state(
@@ -2968,7 +3063,7 @@ def test_arcane_armor_state_gates_guardian_combat_actions(app, client, sign_in, 
     body = page.get_data(as_text=True)
     assert "Save Arcane Armor" in body
     assert "Arcane Armor enabled" in body
-    assert "Guardian Armor: Defensive Field" not in _workspace_panel(body, "bonus_actions")
+    assert 'data-combat-section-panel="bonus_actions"' not in body
     assert "Guardian Armor: Thunder Gauntlets" not in _workspace_panel(body, "actions")
 
     record = get_character("arden-march")
@@ -4071,7 +4166,7 @@ def test_dm_status_page_renders_only_selected_pc_detail(app, client, sign_in, us
     assert 'aria-label="Current HP for Arden March"' in body
     assert "Character sections" in body
     assert 'data-combat-section-group' in body
-    assert 'data-combat-section-toggle="actions"' in body
+    assert 'data-combat-section-toggle="actions"' not in body
     assert 'data-combat-section-toggle="resources"' in body
     assert 'data-combat-section-panel="spells"' in body
     assert "Arden March" in body
@@ -4104,7 +4199,7 @@ def test_dm_status_page_in_default_status_mode_includes_player_workspace_section
     assert 'name="view" value="status"' in body
     assert "Character sections" in body
     assert 'data-combat-section-group' in body
-    assert 'data-combat-section-toggle="actions"' in body
+    assert 'data-combat-section-toggle="actions"' not in body
     assert 'data-combat-section-toggle="resources"' in body
     assert f'data-combatant-id="{arden.id}"' in body
 
@@ -4198,7 +4293,7 @@ def test_status_live_state_renders_player_workspace_sections_for_selected_pc(
     assert payload["selected_combatant_id"] == arden.id
     assert "Character sections" in payload["detail_html"]
     assert 'data-combat-section-group' in payload["detail_html"]
-    assert 'data-combat-section-toggle="actions"' in payload["detail_html"]
+    assert 'data-combat-section-toggle="actions"' not in payload["detail_html"]
     assert 'data-combat-section-panel="resources"' in payload["detail_html"]
 
 

@@ -7140,7 +7140,8 @@ def create_app() -> Flask:
                 "empty_message": "No ability or skill details are recorded on this sheet yet.",
             },
         ]
-        default_section = next((section["slug"] for section in sections if section["has_content"]), "actions")
+        sections = [section for section in sections if section["has_content"]]
+        default_section = next((section["slug"] for section in sections), "")
         for section in sections:
             section["is_default"] = section["slug"] == default_section
         return sections, default_section
@@ -11788,7 +11789,7 @@ def create_app() -> Flask:
                 display_name=request.form.get("display_name", "").strip() or statblock.title,
                 turn_value=request.form.get("turn_value", "").strip() or statblock.initiative_bonus,
                 initiative_bonus=statblock.initiative_bonus,
-                dexterity_modifier=statblock.initiative_bonus,
+                dexterity_modifier=get_campaign_dm_content_service().get_statblock_dexterity_modifier(statblock),
                 initiative_priority=request.form.get("initiative_priority"),
                 current_hp=statblock.max_hp,
                 max_hp=statblock.max_hp,

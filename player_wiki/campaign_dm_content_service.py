@@ -44,6 +44,16 @@ def format_statblock_initiative_bonus(value: int) -> str:
     return f"+{value}" if value > 0 else str(value)
 
 
+def extract_statblock_dexterity_modifier(markdown_text: str, *, fallback: int = 0) -> int:
+    dex_match = STATBLOCK_DEX_MODIFIER_PATTERN.search(markdown_text or "")
+    if dex_match is None:
+        return fallback
+    try:
+        return int(dex_match.group("value"))
+    except (TypeError, ValueError):
+        return fallback
+
+
 def build_statblock_parser_feedback(statblock: CampaignDMStatblockRecord) -> dict[str, object]:
     armor_class_label = (
         f"AC {statblock.armor_class}"
@@ -114,6 +124,12 @@ class CampaignDMContentService:
 
     def get_statblock(self, campaign_slug: str, statblock_id: int) -> CampaignDMStatblockRecord | None:
         return self.store.get_statblock(campaign_slug, statblock_id)
+
+    def get_statblock_dexterity_modifier(self, statblock: CampaignDMStatblockRecord) -> int:
+        return extract_statblock_dexterity_modifier(
+            statblock.body_markdown,
+            fallback=statblock.initiative_bonus,
+        )
 
     def create_statblock(
         self,
@@ -357,8 +373,7 @@ class CampaignDMContentService:
 
         initiative_bonus = self._parse_optional_int(metadata.get("initiative_bonus") or metadata.get("initiative"))
         if initiative_bonus is None:
-            dex_match = STATBLOCK_DEX_MODIFIER_PATTERN.search(normalized_body)
-            initiative_bonus = int(dex_match.group("value")) if dex_match is not None else 0
+            initiative_bonus = extract_statblock_dexterity_modifier(normalized_body)
 
         return DMStatblockUpload(
             title=normalized_title,
