@@ -2251,6 +2251,15 @@ button {
   margin-bottom: 0;
 }
 
+.item-detail-button {
+  justify-self: start;
+  margin-top: 0.1rem;
+}
+
+.item-detail-content .item-property-summary {
+  margin-top: 0;
+}
+
 .spell-level-stack {
   display: grid;
   gap: 1rem;

@@ -3,21 +3,55 @@
 {% block title %}{{ character.name }} | {{ campaign.title }}{% endblock %}
 
 {% block content %}
-  {% macro character_item_description_details(item) %}
+  {% macro character_item_description_details(item, dialog_id) %}
     {% if item.href and (item.description_html or item.notes) %}
-      <details class="item-description-detail">
-        <summary>Item details</summary>
-        <div class="item-description-detail__body">
+      <button
+        type="button"
+        class="ghost-button item-detail-button"
+        data-character-spell-modal-trigger
+        aria-haspopup="dialog"
+        aria-controls="{{ dialog_id }}"
+      >
+        Item details
+      </button>
+      <dialog id="{{ dialog_id }}" class="spell-detail-dialog item-detail-dialog" data-character-spell-modal>
+        <div class="spell-detail-dialog__panel">
+          <div class="spell-detail-dialog__header">
+            <div>
+              <p class="meta">Item details</p>
+              <h3>{{ item.name }}</h3>
+            </div>
+            <button type="button" class="ghost-button" data-character-spell-modal-close>Close</button>
+          </div>
+          <div class="spell-detail-content item-detail-content">
+            {% if item.notes %}
+              <p>{{ item.notes }}</p>
+            {% endif %}
+            {% if item.description_html %}
+              <div class="article-body article-body--compact">{{ item.description_html | safe }}</div>
+            {% endif %}
+          </div>
+        </div>
+      </dialog>
+    {% elif item.notes %}
+      <p>{{ item.notes }}</p>
+    {% endif %}
+  {% endmacro %}
+  {% macro character_item_fallback_details(item) %}
+    {% if item.href and (item.description_html or item.notes) %}
+      <noscript>
+        <div class="item-description-detail">
+          <h4>Item details</h4>
+          <div class="item-description-detail__body">
           {% if item.notes %}
             <p>{{ item.notes }}</p>
           {% endif %}
           {% if item.description_html %}
             <div class="article-body article-body--compact">{{ item.description_html | safe }}</div>
           {% endif %}
+          </div>
         </div>
-      </details>
-    {% elif item.notes %}
-      <p>{{ item.notes }}</p>
+      </noscript>
     {% endif %}
   {% endmacro %}
   <div class="page-layout character-layout">
@@ -520,7 +554,7 @@
           {% include "_character_session_panels.html" %}
         {% endwith %}
       {% elif character_inline_state_controls_enabled and show_inventory_sections %}
-        {% with session_character_controls_scope="inventory", session_character_form_mode="read", session_character_form_page=character_subpage, session_character_hide_inventory_controls=true %}
+        {% with session_character_controls_scope="inventory", session_character_form_mode="read", session_character_form_page=character_subpage, session_character_hide_inventory_controls=true, session_character_hide_currency_controls=true %}
           {% include "_character_session_panels.html" %}
         {% endwith %}
       {% endif %}
@@ -833,6 +867,7 @@
           {% if character.inventory %}
             <div class="inventory-list">
               {% for item in character.inventory %}
+                {% set item_dialog_id = "item-detail-dialog-" ~ loop.index %}
                 <article class="inventory-row">
                   <div class="inventory-row__header">
                     <h3>
@@ -858,7 +893,8 @@
                   {% if item.tags %}
                     <p class="meta">{{ item.tags | join(", ") }}</p>
                   {% endif %}
-                  {{ character_item_description_details(item) }}
+                  {{ character_item_description_details(item, item_dialog_id) }}
+                  {{ character_item_fallback_details(item) }}
                   {% if can_use_session_mode %}
                     <div class="inventory-row__controls">
                       <form

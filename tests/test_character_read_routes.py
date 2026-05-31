@@ -8591,6 +8591,7 @@ def test_dnd_character_normal_page_shows_inline_state_controls_for_assigned_play
     assert 'data-character-sheet-edit-form="currency"' in inventory_html
     assert 'name="cp"' in inventory_html
     assert 'class="currency-grid"' in inventory_html
+    assert inventory_html.count('class="currency-grid"') == 1
     assert 'name="delta" value="cp:-1"' in inventory_html
     assert 'name="delta" value="gp:1"' in inventory_html
     assert "Save currency" not in inventory_html
@@ -9576,6 +9577,10 @@ def test_character_sheet_collapses_linked_spell_and_item_descriptions(
     assert "Spell details" in spellcasting_html
     assert "Character spell detail body from Systems." in spellcasting_html
     assert "Item details" in inventory_html
+    assert 'class="ghost-button item-detail-button"' in inventory_html
+    assert 'aria-controls="item-detail-dialog-' in inventory_html
+    assert 'class="spell-detail-dialog item-detail-dialog" data-character-spell-modal' in inventory_html
+    assert '<details class="item-description-detail">' not in inventory_html
     assert "Item properties" in inventory_html
     assert "1d4 piercing" in inventory_html
     assert "Finesse, Light, Thrown" in inventory_html
@@ -10238,6 +10243,7 @@ def test_legacy_session_mode_inventory_renders_normal_character_view_without_bat
     assert 'name="gp"' in html
     assert 'name="pp"' in html
     assert 'class="currency-grid"' in html
+    assert html.count('class="currency-grid"') == 1
     assert 'name="delta" value="cp:-1"' in html
     assert "Save pending changes" not in html
     assert "Save currency" not in html

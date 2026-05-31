@@ -1,6 +1,7 @@
 {% set session_character_controls_scope = session_character_controls_scope | default("legacy", true) %}
 {% set session_character_form_mode = session_character_form_mode | default("session", true) %}
 {% set session_character_compact_controls = session_character_compact_controls | default(false) %}
+{% set session_character_hide_currency_controls = session_character_hide_currency_controls | default(false) %}
 <section class="session-panels">
   {% if rest_preview and session_character_controls_scope in ["legacy", "overview"] %}
     <section class="card session-card">
@@ -195,7 +196,7 @@
     </section>
   {% endif %}
 
-  {% if session_character_controls_scope == "inventory" or (session_character_controls_scope == "legacy" and show_inventory_sections) %}
+  {% if not session_character_hide_currency_controls and (session_character_controls_scope == "inventory" or (session_character_controls_scope == "legacy" and show_inventory_sections)) %}
   <section class="read-section" id="session-currency">
     <div class="section-heading">
       <h2>Currency</h2>

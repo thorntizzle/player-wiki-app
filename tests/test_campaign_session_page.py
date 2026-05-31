@@ -1096,6 +1096,11 @@ def test_session_character_active_controls_live_in_matching_dnd_panels(
         'data-combat-section-panel="resources"',
         'data-combat-section-panel="features"',
     )
+    inventory_panel = _html_segment_between(
+        html,
+        'data-combat-section-panel="inventory"',
+        'data-combat-section-panel="abilities_skills"',
+    )
     assert "Save vitals" in overview_panel
     assert 'name="page" value="overview"' in overview_panel
     assert (
@@ -1107,6 +1112,9 @@ def test_session_character_active_controls_live_in_matching_dnd_panels(
     assert 'name="page" value="spells"' in spells_panel
     assert 'data-character-sheet-edit-form="resource"' in resources_panel
     assert 'name="page" value="resources"' in resources_panel
+    assert inventory_panel.count('data-character-sheet-edit-form="currency"') == 5
+    assert inventory_panel.count('class="currency-grid"') == 1
+    assert inventory_panel.find("Inventory and currency") < inventory_panel.find('class="currency-grid"')
 
 
 def test_session_character_equipment_panel_exposes_state_controls_during_active_session(
