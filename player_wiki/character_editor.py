@@ -1025,7 +1025,7 @@ def _build_spell_management_rows(
             badges.append("Ritual book")
         elif mode == "known":
             badges.append("Known")
-        elif mode == "prepared" or is_prepared:
+        elif is_prepared:
             badges.append("Prepared")
         if bool(normalized_payload.get("is_always_prepared")):
             badges.append("Always prepared")
@@ -1159,7 +1159,13 @@ def _normalize_spell_management_payload(
         return payload, spell_entry, spell_level
 
     if mode == "prepared":
-        payload["mark"] = "Prepared"
+        payload["mark"] = (
+            "Prepared"
+            if always_prepared
+            or normalized_mark in {"p", "po"}
+            or "prepared" in normalized_mark
+            else ""
+        )
         return payload, spell_entry, spell_level
 
     if mode == "known":
