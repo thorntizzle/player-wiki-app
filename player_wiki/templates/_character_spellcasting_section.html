@@ -221,328 +221,534 @@
     </div>
   {% endif %}
 
-  {% if show_spell_list and spell_manager and not has_session_spell_workspace %}
-    <div class="detail-grid" id="character-spell-manager">
-      {% if character.spellcasting.preparation_row_sections %}
-        <div class="section-heading spellcasting-view-heading spellcasting-view-heading--full" id="character-spell-preparation">
-          <div>
-            <h3>Preparation</h3>
-          </div>
-        </div>
-        {% for prep_section in character.spellcasting.preparation_row_sections %}
-          {% set manager_section = ((spell_manager.sections | selectattr('class_row_id', 'equalto', prep_section.class_row_id) | list | first) if spell_manager else none) %}
-          {% set leveled_spell_count = namespace(value=0) %}
-          {% for prep_spell in prep_section.spells %}
-            {% if not prep_spell.is_cantrip %}
-              {% set leveled_spell_count.value = leveled_spell_count.value + 1 %}
-            {% endif %}
-          {% endfor %}
-          {% if leveled_spell_count.value %}
-            <article class="detail-card session-card spell-preparation-section-card">
-              <div class="section-heading">
-                <div>
-                  <h3>{{ prep_section.title }}</h3>
-                  {% if manager_section and manager_section.counts %}
-                    <dl class="spellcasting-count-grid">
-                      {% for count in manager_section.counts %}
-                        {% if count.label != "Cantrips" %}
-                          <div class="spellcasting-count-grid__item">
-                            <dt>{{ count.label }}</dt>
-                            <dd>{{ count.value }}</dd>
-                          </div>
-                        {% endif %}
-                      {% endfor %}
-                    </dl>
-                  {% endif %}
-                </div>
-              </div>
-              <div class="spell-preparation-grid">
-                {% for prep_spell in prep_section.spells %}
-                  {% if not prep_spell.is_cantrip %}
-                    <article class="spell-preparation-card">
-                      <div>
-                        <p class="meta">{{ prep_spell.level_label }}{% if prep_spell.school %} | {{ prep_spell.school }}{% endif %}</p>
-                        <h4>{{ prep_spell.name }}</h4>
-                        {% if prep_spell.badges %}
-                          <span class="badge-list spell-card__badges">
-                            {% for badge in prep_spell.badges %}
-                              <span class="meta-badge">{{ badge }}</span>
-                            {% endfor %}
-                          </span>
-                        {% endif %}
-                        {% if prep_spell.management_note %}
-                          <p class="meta">{{ prep_spell.management_note }}</p>
-                        {% endif %}
-                      </div>
-                      {% if prep_spell.is_fixed %}
-                        <span class="meta-badge">Locked</span>
-                      {% elif manager_section and manager_section.can_manage and prep_spell.can_toggle_prepared %}
-                        <form method="post" action="{{ spell_manager.update_url }}" class="hero-actions">
-                          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-                          <input type="hidden" name="mode" value="read">
-                          <input type="hidden" name="page" value="{{ character_subpage }}">
-                          <input type="hidden" name="spell_key" value="{{ prep_spell.spell_key }}">
-                          <input type="hidden" name="prepared_value" value="{{ 0 if prep_spell.is_prepared else 1 }}">
-                          <input type="hidden" name="target_class_row_id" value="{{ prep_section.class_row_id }}">
-                          <button type="submit" class="ghost-button">{{ "Unprepare" if prep_spell.is_prepared else "Prepare" }}</button>
-                        </form>
-                      {% endif %}
-                    </article>
-                  {% endif %}
-                {% endfor %}
-              </div>
-            </article>
-          {% endif %}
-        {% endfor %}
-      {% endif %}
-      {% for manager_section in spell_manager.sections %}
-        {% if can_use_session_mode and not is_session_mode and manager_section.can_manage and manager_section.show_cantrip_form %}
-          <article class="detail-card session-card">
-            <div class="section-heading">
-              <h3>{{ manager_section.title }}: Add cantrip</h3>
-            </div>
-            <p class="meta">
-              {% if manager_section.can_add_cantrip %}
-                Search enabled Systems spells and add a cantrip to this durable class-row spell list.
-              {% else %}
-                This class row is already at its current cantrip count.
-              {% endif %}
-            </p>
-            <form
-              class="stack-form"
-              method="post"
-              action="{{ spell_manager.add_url }}"
-              data-character-spell-search-form
-              data-character-spell-search-url="{{ spell_manager.search_url }}"
-              data-character-spell-search-kind="cantrip"
-              data-character-spell-search-empty-label="Search to load matching cantrips"
-              data-character-spell-search-prompt="Type at least 2 letters to search eligible class cantrips."
-              data-character-spell-search-target-row="{{ manager_section.class_row_id }}"
-            >
-              <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-              <input type="hidden" name="mode" value="read">
-              <input type="hidden" name="page" value="{{ character_subpage }}">
-              <input type="hidden" name="kind" value="cantrip">
-              <input type="hidden" name="target_class_row_id" value="{{ manager_section.class_row_id }}">
-              <label class="field">
-                <span>Search cantrips</span>
-                <input
-                  type="search"
-                  placeholder="Type at least 2 letters"
-                  data-character-spell-query
-                  {% if not manager_section.can_add_cantrip %}disabled{% endif %}
-                >
-              </label>
-              <label class="field">
-                <span>Matching cantrips</span>
-                <select
-                  name="selected_value"
-                  data-character-spell-results
-                  {% if not manager_section.can_add_cantrip %}disabled{% endif %}
-                >
-                  <option value="">Search to load matching cantrips</option>
-                </select>
-              </label>
-              <p class="meta" data-character-spell-status>
-                {% if manager_section.can_add_cantrip %}
-                  Type at least 2 letters to search eligible class cantrips.
-                {% else %}
-                  This class row is already at its current cantrip count.
-                {% endif %}
-              </p>
-              <button type="submit" {% if not manager_section.can_add_cantrip %}disabled{% endif %}>Add cantrip</button>
-            </form>
-          </article>
-        {% endif %}
-
-        {% if can_use_session_mode and not is_session_mode and manager_section.can_manage and manager_section.show_spell_form %}
-          <article class="detail-card session-card">
-            <div class="section-heading">
-              <h3>{{ manager_section.title }}: {{ manager_section.spell_add_label }}</h3>
-            </div>
-            <p class="meta">
-              {% if manager_section.can_add_spell %}
-                {% if manager_section.mode == 'ritual_book' %}
-                  Search enabled Systems ritual spells from this class list and add them to the ritual book.
-                {% else %}
-                  Search enabled Systems spells from this class list and add them to the sheet.
-                {% endif %}
-              {% elif manager_section.mode == 'wizard' %}
-                Search enabled Systems spells from this class list and add them to the spellbook.
-              {% elif manager_section.mode == 'ritual_book' %}
-                This ritual book cannot add more spells right now.
-              {% else %}
-                This class row is already at its current spell count. Remove or unprepare one first.
-              {% endif %}
-            </p>
-            <form
-              class="stack-form"
-              method="post"
-              action="{{ spell_manager.add_url }}"
-              data-character-spell-search-form
-              data-character-spell-search-url="{{ spell_manager.search_url }}"
-              data-character-spell-search-kind="{{ manager_section.spell_add_kind }}"
-              data-character-spell-search-empty-label="Search to load matching spells"
-              data-character-spell-search-prompt="{% if manager_section.mode == 'ritual_book' %}Type at least 2 letters to search eligible ritual spells.{% else %}Type at least 2 letters to search eligible class spells.{% endif %}"
-              data-character-spell-search-target-row="{{ manager_section.class_row_id }}"
-            >
-              <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-              <input type="hidden" name="mode" value="read">
-              <input type="hidden" name="page" value="{{ character_subpage }}">
-              <input type="hidden" name="kind" value="{{ manager_section.spell_add_kind }}">
-              <input type="hidden" name="target_class_row_id" value="{{ manager_section.class_row_id }}">
-              <label class="field">
-                <span>Search spells</span>
-                <input
-                  type="search"
-                  placeholder="Type at least 2 letters"
-                  data-character-spell-query
-                  {% if not manager_section.can_add_spell %}disabled{% endif %}
-                >
-              </label>
-              <label class="field">
-                <span>Matching spells</span>
-                <select
-                  name="selected_value"
-                  data-character-spell-results
-                  {% if not manager_section.can_add_spell %}disabled{% endif %}
-                >
-                  <option value="">Search to load matching spells</option>
-                </select>
-              </label>
-              <p class="meta" data-character-spell-status>
-                {% if manager_section.can_add_spell %}
-                  {% if manager_section.mode == 'ritual_book' %}
-                    Type at least 2 letters to search eligible ritual spells.
-                  {% else %}
-                    Type at least 2 letters to search eligible class spells.
-                  {% endif %}
-                {% else %}
-                  {% if manager_section.mode == 'ritual_book' %}
-                    This ritual book cannot add more spells right now.
-                  {% else %}
-                    This class row is already at its current spell count. Remove or unprepare one first.
-                  {% endif %}
-                {% endif %}
-              </p>
-              <button type="submit" {% if not manager_section.can_add_spell %}disabled{% endif %}>{{ manager_section.spell_add_label }}</button>
-            </form>
-          </article>
-        {% endif %}
-      {% endfor %}
-    </div>
-  {% endif %}
-
+  {% set character_preparation_row_sections = character.spellcasting.preparation_row_sections | default([], true) %}
+  {% set character_current_row_sections = character.spellcasting.current_row_sections | default([], true) %}
+  {% set has_preparation_spellcasting_view = spell_manager and not has_session_spell_workspace and (character_preparation_row_sections | length) > 0 %}
   {% if show_spell_list %}
-    <div class="section-heading spellcasting-view-heading" id="character-current-spells">
-      <div>
-        <h3>Current spells</h3>
-      </div>
-    </div>
-    {% if character.spellcasting.row_sections %}
-      {% for spell_section in character.spellcasting.row_sections %}
-        {% set spell_section_loop_index = loop.index %}
-        {% set manager_section = ((spell_manager.sections | selectattr('class_row_id', 'equalto', spell_section.class_row_id) | list | first) if spell_manager else none) %}
-        {% if spell_section.row_kind == "class" or spell_section.spell_mode == "ritual_book" %}
-          <div class="section-heading spell-row-section-heading">
+    <section
+      class="spellcasting-view-switcher"
+      data-character-spellcasting-view-switch
+      data-character-spellcasting-default-view="current"
+      {% if not has_preparation_spellcasting_view %}
+        data-character-spellcasting-has-single-view="1"
+      {% endif %}
+    >
+      {% if has_preparation_spellcasting_view %}
+        <div class="character-subpage-nav-card spellcasting-view-nav-card">
+          <nav class="character-subpage-nav" role="tablist" aria-label="Spellcasting views">
+            <button
+              type="button"
+              class="button-link"
+              role="tab"
+              aria-controls="character-spell-current-view"
+              aria-selected="true"
+              id="character-spell-current-tab"
+              data-character-spellcasting-view-button="current"
+            >
+              Current spells
+            </button>
+            <button
+              type="button"
+              class="ghost-button"
+              role="tab"
+              aria-controls="character-spell-preparation-view"
+              aria-selected="false"
+              id="character-spell-preparation-tab"
+              data-character-spellcasting-view-button="preparation"
+            >
+              Preparation
+            </button>
+          </nav>
+        </div>
+      {% endif %}
+
+      {% if has_preparation_spellcasting_view %}
+        <section
+          class="spellcasting-view-panel"
+          id="character-spell-preparation-view"
+          role="tabpanel"
+          data-character-spellcasting-view-panel="preparation"
+          tabindex="-1"
+          aria-labelledby="character-spell-preparation-tab"
+          aria-hidden="true"
+          hidden
+        >
+          <div class="section-heading spellcasting-view-heading spellcasting-view-heading--full" id="character-spell-preparation">
             <div>
-              <h3>{{ spell_section.title }}</h3>
+              <h3>Preparation</h3>
             </div>
           </div>
-        {% endif %}
-        {% if spell_section.spell_level_sections %}
-          <div class="spell-level-stack">
-            {% for level_section in spell_section.spell_level_sections %}
-              {% set spell_level_loop_index = loop.index %}
-              <section class="spell-level-section">
-                <h4>{{ level_section.title }}</h4>
-                {% for spell_group in level_section.groups %}
-                  {% set spell_group_loop_index = loop.index %}
-                  {% if spell_group.title %}
-                    <aside class="spell-source-package">
-                      <h5>{{ spell_group.title }}</h5>
-                      {% if spell_group.meta %}
-                        <p class="meta">{{ spell_group.meta }}</p>
-                      {% endif %}
-                      {% if spell_group.note %}
-                        <p>{{ spell_group.note }}</p>
-                      {% endif %}
-                    </aside>
-                  {% endif %}
-                  <div class="spell-card-grid">
-                    {% for spell in spell_group.spells %}
-                      {% set spell_dialog_id = "spell-detail-dialog-" ~ spell_section_loop_index ~ "-" ~ spell_level_loop_index ~ "-" ~ spell_group_loop_index ~ "-" ~ loop.index %}
-                      <article class="spell-card">
-                        <button
-                          type="button"
-                          class="spell-card__main"
-                          data-character-spell-modal-trigger
-                          aria-haspopup="dialog"
-                          aria-controls="{{ spell_dialog_id }}"
-                        >
-                          <span class="spell-card__eyebrow">
-                            {{ spell.level_label }}{% if spell.school %} | {{ spell.school }}{% endif %}
-                          </span>
-                          <span class="spell-card__name">{{ spell.name }}</span>
-                          {% if spell.badges %}
-                            <span class="badge-list spell-card__badges">
-                              {% for badge in spell.badges %}
-                                <span class="meta-badge">{{ badge }}</span>
-                              {% endfor %}
-                            </span>
-                          {% endif %}
-                          <span class="spell-card__meta">
-                            {% if spell.casting_time and spell.casting_time != '--' %}{{ spell.casting_time }}{% endif %}
-                            {% if spell.range and spell.range != '--' %}{% if spell.casting_time and spell.casting_time != '--' %} | {% endif %}{{ spell.range }}{% endif %}
-                          </span>
-                        </button>
-                        {{ character_spell_fallback_details(spell) }}
-                        <dialog id="{{ spell_dialog_id }}" class="spell-detail-dialog" data-character-spell-modal>
-                          <div class="spell-detail-dialog__panel">
-                            <div class="spell-detail-dialog__header">
-                              <div>
-                                <p class="meta">{{ spell.level_label }}{% if spell.school %} | {{ spell.school }}{% endif %}</p>
-                                <h3>{{ spell.name }}</h3>
+          {% if character_preparation_row_sections %}
+            {% for prep_section in character_preparation_row_sections %}
+              {% set manager_section = ((spell_manager.sections | selectattr('class_row_id', 'equalto', prep_section.class_row_id) | list | first) if spell_manager else none) %}
+              {% set leveled_spell_count = namespace(value=0) %}
+              {% for prep_spell in prep_section.spells %}
+                {% if not prep_spell.is_cantrip %}
+                  {% set leveled_spell_count.value = leveled_spell_count.value + 1 %}
+                {% endif %}
+              {% endfor %}
+              {% if leveled_spell_count.value %}
+                <article class="detail-card session-card spell-preparation-section-card">
+                  <div class="section-heading">
+                    <div>
+                      <h3>{{ prep_section.title }}</h3>
+                      {% if manager_section and manager_section.counts %}
+                        <dl class="spellcasting-count-grid">
+                          {% for count in manager_section.counts %}
+                            {% if count.label != "Cantrips" %}
+                              <div class="spellcasting-count-grid__item">
+                                <dt>{{ count.label }}</dt>
+                                <dd>{{ count.value }}</dd>
                               </div>
-                              <button type="button" class="ghost-button" data-character-spell-modal-close>Close</button>
-                            </div>
-                            {% if spell.badges %}
-                              <div class="badge-list">
-                                {% for badge in spell.badges %}
+                            {% endif %}
+                          {% endfor %}
+                        </dl>
+                      {% endif %}
+                    </div>
+                  </div>
+                  <div class="spell-preparation-grid">
+                    {% for prep_spell in prep_section.spells %}
+                      {% if not prep_spell.is_cantrip %}
+                        <article class="spell-preparation-card">
+                          <div>
+                            <p class="meta">{{ prep_spell.level_label }}{% if prep_spell.school %} | {{ prep_spell.school }}{% endif %}</p>
+                            <h4>{{ prep_spell.name }}</h4>
+                            {% if prep_spell.badges %}
+                              <span class="badge-list spell-card__badges">
+                                {% for badge in prep_spell.badges %}
                                   <span class="meta-badge">{{ badge }}</span>
                                 {% endfor %}
-                              </div>
+                              </span>
                             {% endif %}
-                            {{ character_spell_detail_content(spell) }}
-                          </div>
-                        </dialog>
-                        {% if manager_section and can_use_session_mode and not is_session_mode and manager_section.can_manage and spell.can_remove %}
-                          <div class="spell-card__actions hero-actions">
-                            {% if spell.can_remove %}
-                              <form method="post" action="{{ spell_manager.remove_url }}">
-                                <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-                                <input type="hidden" name="mode" value="read">
-                                <input type="hidden" name="page" value="{{ character_subpage }}">
-                                <input type="hidden" name="spell_key" value="{{ spell.spell_key }}">
-                                <input type="hidden" name="target_class_row_id" value="{{ spell_section.class_row_id }}">
-                                <button type="submit" class="ghost-button">{{ spell.remove_label }}</button>
-                              </form>
+                            {% if prep_spell.management_note %}
+                              <p class="meta">{{ prep_spell.management_note }}</p>
                             {% endif %}
                           </div>
-                        {% endif %}
-                      </article>
+                          {% if prep_spell.is_fixed %}
+                            <span class="meta-badge">Locked</span>
+                          {% elif manager_section and manager_section.can_manage and prep_spell.can_toggle_prepared %}
+                            <form method="post" action="{{ spell_manager.update_url }}" class="hero-actions">
+                              <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                              <input type="hidden" name="mode" value="read">
+                              <input type="hidden" name="page" value="{{ character_subpage }}">
+                              <input type="hidden" name="spell_key" value="{{ prep_spell.spell_key }}">
+                              <input type="hidden" name="prepared_value" value="{{ 0 if prep_spell.is_prepared else 1 }}">
+                              <input type="hidden" name="target_class_row_id" value="{{ prep_section.class_row_id }}">
+                              <button type="submit" class="ghost-button">{{ "Unprepare" if prep_spell.is_prepared else "Prepare" }}</button>
+                            </form>
+                          {% endif %}
+                        </article>
+                      {% endif %}
                     {% endfor %}
                   </div>
-                {% endfor %}
-              </section>
+                </article>
+              {% endif %}
             {% endfor %}
-          </div>
-        {% else %}
-          <p class="meta">No spells recorded yet for this class row.</p>
+          {% endif %}
+          {% if show_spell_list and spell_manager and not has_session_spell_workspace %}
+            <div class="detail-grid" id="character-spell-manager">
+              {% for manager_section in spell_manager.sections %}
+                {% if can_use_session_mode and not is_session_mode and manager_section.can_manage and manager_section.show_cantrip_form %}
+                  <article class="detail-card session-card">
+                    <div class="section-heading">
+                      <h3>{{ manager_section.title }}: Add cantrip</h3>
+                    </div>
+                    <p class="meta">
+                      {% if manager_section.can_add_cantrip %}
+                        Search enabled Systems spells and add a cantrip to this durable class-row spell list.
+                      {% else %}
+                        This class row is already at its current cantrip count.
+                      {% endif %}
+                    </p>
+                    <form
+                      class="stack-form"
+                      method="post"
+                      action="{{ spell_manager.add_url }}"
+                      data-character-spell-search-form
+                      data-character-spell-search-url="{{ spell_manager.search_url }}"
+                      data-character-spell-search-kind="cantrip"
+                      data-character-spell-search-empty-label="Search to load matching cantrips"
+                      data-character-spell-search-prompt="Type at least 2 letters to search eligible class cantrips."
+                      data-character-spell-search-target-row="{{ manager_section.class_row_id }}"
+                    >
+                      <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                      <input type="hidden" name="mode" value="read">
+                      <input type="hidden" name="page" value="{{ character_subpage }}">
+                      <input type="hidden" name="kind" value="cantrip">
+                      <input type="hidden" name="target_class_row_id" value="{{ manager_section.class_row_id }}">
+                      <label class="field">
+                        <span>Search cantrips</span>
+                        <input
+                          type="search"
+                          placeholder="Type at least 2 letters"
+                          data-character-spell-query
+                          {% if not manager_section.can_add_cantrip %}disabled{% endif %}
+                        >
+                      </label>
+                      <label class="field">
+                        <span>Matching cantrips</span>
+                        <select
+                          name="selected_value"
+                          data-character-spell-results
+                          {% if not manager_section.can_add_cantrip %}disabled{% endif %}
+                        >
+                          <option value="">Search to load matching cantrips</option>
+                        </select>
+                      </label>
+                      <p class="meta" data-character-spell-status>
+                        {% if manager_section.can_add_cantrip %}
+                          Type at least 2 letters to search eligible class cantrips.
+                        {% else %}
+                          This class row is already at its current cantrip count.
+                        {% endif %}
+                      </p>
+                      <button type="submit" {% if not manager_section.can_add_cantrip %}disabled{% endif %}>Add cantrip</button>
+                    </form>
+                  </article>
+                {% endif %}
+
+                {% if can_use_session_mode and not is_session_mode and manager_section.can_manage and manager_section.show_spell_form %}
+                  <article class="detail-card session-card">
+                    <div class="section-heading">
+                      <h3>{{ manager_section.title }}: {{ manager_section.spell_add_label }}</h3>
+                    </div>
+                    <p class="meta">
+                      {% if manager_section.can_add_spell %}
+                        {% if manager_section.mode == 'ritual_book' %}
+                          Search enabled Systems ritual spells from this class list and add them to the ritual book.
+                        {% else %}
+                          Search enabled Systems spells from this class list and add them to the sheet.
+                        {% endif %}
+                      {% elif manager_section.mode == 'wizard' %}
+                        Search enabled Systems spells from this class list and add them to the spellbook.
+                      {% elif manager_section.mode == 'ritual_book' %}
+                        This ritual book cannot add more spells right now.
+                      {% else %}
+                        This class row is already at its current spell count. Remove or unprepare one first.
+                      {% endif %}
+                    </p>
+                    <form
+                      class="stack-form"
+                      method="post"
+                      action="{{ spell_manager.add_url }}"
+                      data-character-spell-search-form
+                      data-character-spell-search-url="{{ spell_manager.search_url }}"
+                      data-character-spell-search-kind="{{ manager_section.spell_add_kind }}"
+                      data-character-spell-search-empty-label="Search to load matching spells"
+                      data-character-spell-search-prompt="{% if manager_section.mode == 'ritual_book' %}Type at least 2 letters to search eligible ritual spells.{% else %}Type at least 2 letters to search eligible class spells.{% endif %}"
+                      data-character-spell-search-target-row="{{ manager_section.class_row_id }}"
+                    >
+                      <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                      <input type="hidden" name="mode" value="read">
+                      <input type="hidden" name="page" value="{{ character_subpage }}">
+                      <input type="hidden" name="kind" value="{{ manager_section.spell_add_kind }}">
+                      <input type="hidden" name="target_class_row_id" value="{{ manager_section.class_row_id }}">
+                      <label class="field">
+                        <span>Search spells</span>
+                        <input
+                          type="search"
+                          placeholder="Type at least 2 letters"
+                          data-character-spell-query
+                          {% if not manager_section.can_add_spell %}disabled{% endif %}
+                        >
+                      </label>
+                      <label class="field">
+                        <span>Matching spells</span>
+                        <select
+                          name="selected_value"
+                          data-character-spell-results
+                          {% if not manager_section.can_add_spell %}disabled{% endif %}
+                        >
+                          <option value="">Search to load matching spells</option>
+                        </select>
+                      </label>
+                      <p class="meta" data-character-spell-status>
+                        {% if manager_section.can_add_spell %}
+                          {% if manager_section.mode == 'ritual_book' %}
+                            Type at least 2 letters to search eligible ritual spells.
+                          {% else %}
+                            Type at least 2 letters to search eligible class spells.
+                          {% endif %}
+                        {% else %}
+                          {% if manager_section.mode == 'ritual_book' %}
+                            This ritual book cannot add more spells right now.
+                          {% else %}
+                            This class row is already at its current spell count. Remove or unprepare one first.
+                          {% endif %}
+                        {% endif %}
+                      </p>
+                      <button type="submit" {% if not manager_section.can_add_spell %}disabled{% endif %}>{{ manager_section.spell_add_label }}</button>
+                    </form>
+                  </article>
+                {% endif %}
+              {% endfor %}
+            </div>
+          {% endif %}
+        </section>
+      {% endif %}
+
+      <section
+        class="spellcasting-view-panel"
+        id="character-spell-current-view"
+        role="{% if has_preparation_spellcasting_view %}tabpanel{% else %}region{% endif %}"
+        data-character-spellcasting-view-panel="current"
+        tabindex="-1"
+        aria-labelledby="{% if has_preparation_spellcasting_view %}character-spell-current-tab{% else %}character-current-spells{% endif %}"
+        aria-hidden="false"
+      >
+        {% if not has_preparation_spellcasting_view %}
+          {% if show_spell_list and spell_manager and not has_session_spell_workspace %}
+            <div class="detail-grid" id="character-spell-manager">
+              {% for manager_section in spell_manager.sections %}
+                {% if can_use_session_mode and not is_session_mode and manager_section.can_manage and manager_section.show_cantrip_form %}
+                  <article class="detail-card session-card">
+                    <div class="section-heading">
+                      <h3>{{ manager_section.title }}: Add cantrip</h3>
+                    </div>
+                    <p class="meta">
+                      {% if manager_section.can_add_cantrip %}
+                        Search enabled Systems spells and add a cantrip to this durable class-row spell list.
+                      {% else %}
+                        This class row is already at its current cantrip count.
+                      {% endif %}
+                    </p>
+                    <form
+                      class="stack-form"
+                      method="post"
+                      action="{{ spell_manager.add_url }}"
+                      data-character-spell-search-form
+                      data-character-spell-search-url="{{ spell_manager.search_url }}"
+                      data-character-spell-search-kind="cantrip"
+                      data-character-spell-search-empty-label="Search to load matching cantrips"
+                      data-character-spell-search-prompt="Type at least 2 letters to search eligible class cantrips."
+                      data-character-spell-search-target-row="{{ manager_section.class_row_id }}"
+                    >
+                      <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                      <input type="hidden" name="mode" value="read">
+                      <input type="hidden" name="page" value="{{ character_subpage }}">
+                      <input type="hidden" name="kind" value="cantrip">
+                      <input type="hidden" name="target_class_row_id" value="{{ manager_section.class_row_id }}">
+                      <label class="field">
+                        <span>Search cantrips</span>
+                        <input
+                          type="search"
+                          placeholder="Type at least 2 letters"
+                          data-character-spell-query
+                          {% if not manager_section.can_add_cantrip %}disabled{% endif %}
+                        >
+                      </label>
+                      <label class="field">
+                        <span>Matching cantrips</span>
+                        <select
+                          name="selected_value"
+                          data-character-spell-results
+                          {% if not manager_section.can_add_cantrip %}disabled{% endif %}
+                        >
+                          <option value="">Search to load matching cantrips</option>
+                        </select>
+                      </label>
+                      <p class="meta" data-character-spell-status>
+                        {% if manager_section.can_add_cantrip %}
+                          Type at least 2 letters to search eligible class cantrips.
+                        {% else %}
+                          This class row is already at its current cantrip count.
+                        {% endif %}
+                      </p>
+                      <button type="submit" {% if not manager_section.can_add_cantrip %}disabled{% endif %}>Add cantrip</button>
+                    </form>
+                  </article>
+                {% endif %}
+
+                {% if can_use_session_mode and not is_session_mode and manager_section.can_manage and manager_section.show_spell_form %}
+                  <article class="detail-card session-card">
+                    <div class="section-heading">
+                      <h3>{{ manager_section.title }}: {{ manager_section.spell_add_label }}</h3>
+                    </div>
+                    <p class="meta">
+                      {% if manager_section.can_add_spell %}
+                        {% if manager_section.mode == 'ritual_book' %}
+                          Search enabled Systems ritual spells from this class list and add them to the ritual book.
+                        {% else %}
+                          Search enabled Systems spells from this class list and add them to the sheet.
+                        {% endif %}
+                      {% elif manager_section.mode == 'wizard' %}
+                        Search enabled Systems spells from this class list and add them to the spellbook.
+                      {% elif manager_section.mode == 'ritual_book' %}
+                        This ritual book cannot add more spells right now.
+                      {% else %}
+                        This class row is already at its current spell count. Remove or unprepare one first.
+                      {% endif %}
+                    </p>
+                    <form
+                      class="stack-form"
+                      method="post"
+                      action="{{ spell_manager.add_url }}"
+                      data-character-spell-search-form
+                      data-character-spell-search-url="{{ spell_manager.search_url }}"
+                      data-character-spell-search-kind="{{ manager_section.spell_add_kind }}"
+                      data-character-spell-search-empty-label="Search to load matching spells"
+                      data-character-spell-search-prompt="{% if manager_section.mode == 'ritual_book' %}Type at least 2 letters to search eligible ritual spells.{% else %}Type at least 2 letters to search eligible class spells.{% endif %}"
+                      data-character-spell-search-target-row="{{ manager_section.class_row_id }}"
+                    >
+                      <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                      <input type="hidden" name="mode" value="read">
+                      <input type="hidden" name="page" value="{{ character_subpage }}">
+                      <input type="hidden" name="kind" value="{{ manager_section.spell_add_kind }}">
+                      <input type="hidden" name="target_class_row_id" value="{{ manager_section.class_row_id }}">
+                      <label class="field">
+                        <span>Search spells</span>
+                        <input
+                          type="search"
+                          placeholder="Type at least 2 letters"
+                          data-character-spell-query
+                          {% if not manager_section.can_add_spell %}disabled{% endif %}
+                        >
+                      </label>
+                      <label class="field">
+                        <span>Matching spells</span>
+                        <select
+                          name="selected_value"
+                          data-character-spell-results
+                          {% if not manager_section.can_add_spell %}disabled{% endif %}
+                        >
+                          <option value="">Search to load matching spells</option>
+                        </select>
+                      </label>
+                      <p class="meta" data-character-spell-status>
+                        {% if manager_section.can_add_spell %}
+                          {% if manager_section.mode == 'ritual_book' %}
+                            Type at least 2 letters to search eligible ritual spells.
+                          {% else %}
+                            Type at least 2 letters to search eligible class spells.
+                          {% endif %}
+                        {% else %}
+                          {% if manager_section.mode == 'ritual_book' %}
+                            This ritual book cannot add more spells right now.
+                          {% else %}
+                            This class row is already at its current spell count. Remove or unprepare one first.
+                          {% endif %}
+                        {% endif %}
+                      </p>
+                      <button type="submit" {% if not manager_section.can_add_spell %}disabled{% endif %}>{{ manager_section.spell_add_label }}</button>
+                    </form>
+                  </article>
+                {% endif %}
+              {% endfor %}
+            </div>
+          {% endif %}
         {% endif %}
-      {% endfor %}
-    {% else %}
-      <p class="meta">No spells recorded yet.</p>
-    {% endif %}
+
+        <div class="section-heading spellcasting-view-heading" id="character-current-spells">
+          <div>
+            <h3>Current spells</h3>
+          </div>
+        </div>
+        {% if character_current_row_sections %}
+          {% for spell_section in character_current_row_sections %}
+            {% set spell_section_loop_index = loop.index %}
+            {% set manager_section = ((spell_manager.sections | selectattr('class_row_id', 'equalto', spell_section.class_row_id) | list | first) if spell_manager else none) %}
+            {% if spell_section.row_kind == "class" or spell_section.spell_mode == "ritual_book" %}
+              <div class="section-heading spell-row-section-heading">
+                <div>
+                  <h3>{{ spell_section.title }}</h3>
+                </div>
+              </div>
+            {% endif %}
+            {% if spell_section.spell_level_sections %}
+              <div class="spell-level-stack">
+                {% for level_section in spell_section.spell_level_sections %}
+                  {% set spell_level_loop_index = loop.index %}
+                  <section class="spell-level-section">
+                    <h4>{{ level_section.title }}</h4>
+                    {% for spell_group in level_section.groups %}
+                      {% set spell_group_loop_index = loop.index %}
+                      {% if spell_group.title %}
+                        <aside class="spell-source-package">
+                          <h5>{{ spell_group.title }}</h5>
+                          {% if spell_group.meta %}
+                            <p class="meta">{{ spell_group.meta }}</p>
+                          {% endif %}
+                          {% if spell_group.note %}
+                            <p>{{ spell_group.note }}</p>
+                          {% endif %}
+                        </aside>
+                      {% endif %}
+                      <div class="spell-card-grid">
+                        {% for spell in spell_group.spells %}
+                          {% set spell_dialog_id = "spell-detail-dialog-" ~ spell_section_loop_index ~ "-" ~ spell_level_loop_index ~ "-" ~ spell_group_loop_index ~ "-" ~ loop.index %}
+                          <article class="spell-card">
+                            <button
+                              type="button"
+                              class="spell-card__main"
+                              data-character-spell-modal-trigger
+                              aria-haspopup="dialog"
+                              aria-controls="{{ spell_dialog_id }}"
+                            >
+                              <span class="spell-card__eyebrow">
+                                {{ spell.level_label }}{% if spell.school %} | {{ spell.school }}{% endif %}
+                              </span>
+                              <span class="spell-card__name">{{ spell.name }}</span>
+                              {% if spell.badges %}
+                                <span class="badge-list spell-card__badges">
+                                  {% for badge in spell.badges %}
+                                    <span class="meta-badge">{{ badge }}</span>
+                                  {% endfor %}
+                                </span>
+                              {% endif %}
+                              <span class="spell-card__meta">
+                                {% if spell.casting_time and spell.casting_time != '--' %}{{ spell.casting_time }}{% endif %}
+                                {% if spell.range and spell.range != '--' %}{% if spell.casting_time and spell.casting_time != '--' %} | {% endif %}{{ spell.range }}{% endif %}
+                              </span>
+                            </button>
+                            {{ character_spell_fallback_details(spell) }}
+                            <dialog id="{{ spell_dialog_id }}" class="spell-detail-dialog" data-character-spell-modal>
+                              <div class="spell-detail-dialog__panel">
+                                <div class="spell-detail-dialog__header">
+                                  <div>
+                                    <p class="meta">{{ spell.level_label }}{% if spell.school %} | {{ spell.school }}{% endif %}</p>
+                                    <h3>{{ spell.name }}</h3>
+                                  </div>
+                                  <button type="button" class="ghost-button" data-character-spell-modal-close>Close</button>
+                                </div>
+                                {% if spell.badges %}
+                                  <div class="badge-list">
+                                    {% for badge in spell.badges %}
+                                      <span class="meta-badge">{{ badge }}</span>
+                                    {% endfor %}
+                                  </div>
+                                {% endif %}
+                                {{ character_spell_detail_content(spell) }}
+                              </div>
+                            </dialog>
+                            {% if manager_section and can_use_session_mode and not is_session_mode and manager_section.can_manage and spell.can_remove %}
+                              <div class="spell-card__actions hero-actions">
+                                {% if spell.can_remove %}
+                                  <form method="post" action="{{ spell_manager.remove_url }}">
+                                    <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                                    <input type="hidden" name="mode" value="read">
+                                    <input type="hidden" name="page" value="{{ character_subpage }}">
+                                    <input type="hidden" name="spell_key" value="{{ spell.spell_key }}">
+                                    <input type="hidden" name="target_class_row_id" value="{{ spell_section.class_row_id }}">
+                                    <button type="submit" class="ghost-button">{{ spell.remove_label }}</button>
+                                  </form>
+                                {% endif %}
+                              </div>
+                            {% endif %}
+                          </article>
+                        {% endfor %}
+                      </div>
+                    {% endfor %}
+                  </section>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p class="meta">No spells recorded yet for this class row.</p>
+            {% endif %}
+          {% endfor %}
+        {% else %}
+          <p class="meta">No spells recorded yet.</p>
+        {% endif %}
+      </section>
+    </section>
   {% endif %}
 </section>

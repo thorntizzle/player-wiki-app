@@ -126,11 +126,29 @@
         index,
         open: !!details.open,
       }));
+      const spellcastingViews = Array.from(root.querySelectorAll("[data-character-spellcasting-view-switch]"))
+        .map((viewSwitch, index) => {
+          if (!(viewSwitch instanceof HTMLElement)) {
+            return null;
+          }
+          const activePanel = Array.from(
+            viewSwitch.querySelectorAll("[data-character-spellcasting-view-panel]"),
+          ).find((panel) => panel instanceof HTMLElement && !panel.hidden);
+          if (!(activePanel instanceof HTMLElement)) {
+            return null;
+          }
+          return {
+            index,
+            view: activePanel.dataset.characterSpellcastingViewPanel || "",
+          };
+        })
+        .filter(Boolean);
       const focusState = captureFocus ? captureFocus(root) : null;
       const viewportAnchor = captureViewportAnchor ? captureViewportAnchor(root) : null;
       return {
         trackedFields,
         openDetails,
+        spellcastingViews,
         focusState,
         viewportAnchor,
       };
@@ -190,6 +208,20 @@
             && details[detailsIndex];
           if (detailsNode instanceof HTMLDetailsElement) {
             detailsNode.open = !!detailState.open;
+          }
+        }
+      }
+
+      if (Array.isArray(snapshot.spellcastingViews)) {
+        const viewSwitches = Array.from(root.querySelectorAll("[data-character-spellcasting-view-switch]"));
+        for (const spellcastingViewState of snapshot.spellcastingViews) {
+          const viewSwitchIndex = Number(spellcastingViewState?.index);
+          const viewSwitch = spellcastingViewState
+            && Number.isInteger(viewSwitchIndex)
+            && viewSwitches[viewSwitchIndex];
+          const activateView = viewSwitch && viewSwitch.__characterSpellcastingActivateView;
+          if (viewSwitch instanceof HTMLElement && typeof activateView === "function") {
+            activateView(String(spellcastingViewState.view || ""));
           }
         }
       }
@@ -259,6 +291,7 @@
     const initializedSystemsItemSearchForms = new WeakSet();
     const initializedSpellModalTriggers = new WeakSet();
     const initializedSpellModalDialogs = new WeakSet();
+    const initializedSpellcastingViewSwitches = new WeakSet();
     const isDialogElement = (element) => (
       element instanceof HTMLElement
       && element.tagName.toLowerCase() === "dialog"
@@ -266,6 +299,57 @@
     const initPanelScriptForms = (scope) => {
       if (!(scope instanceof Element)) {
         return;
+      }
+
+      const spellcastingViewSwitches = Array.from(scope.querySelectorAll("[data-character-spellcasting-view-switch]"));
+      for (const viewSwitch of spellcastingViewSwitches) {
+        if (!(viewSwitch instanceof HTMLElement) || initializedSpellcastingViewSwitches.has(viewSwitch)) {
+          continue;
+        }
+        initializedSpellcastingViewSwitches.add(viewSwitch);
+        const buttons = Array.from(
+          viewSwitch.querySelectorAll("[data-character-spellcasting-view-button]"),
+        ).filter((button) => button instanceof HTMLElement);
+        const panels = Array.from(
+          viewSwitch.querySelectorAll("[data-character-spellcasting-view-panel]"),
+        ).filter((panel) => panel instanceof HTMLElement);
+        if (!buttons.length || !panels.length) {
+          continue;
+        }
+
+        const panelViews = new Set(panels.map((panel) => panel.dataset.characterSpellcastingViewPanel || ""));
+        const defaultView = panelViews.has(viewSwitch.dataset.characterSpellcastingDefaultView || "")
+          ? viewSwitch.dataset.characterSpellcastingDefaultView
+          : panels[0].dataset.characterSpellcastingViewPanel || "current";
+
+        const activateView = (requestedView, { focusPanel = false } = {}) => {
+          const nextView = panelViews.has(requestedView) ? requestedView : defaultView;
+          for (const panel of panels) {
+            const isActive = (panel.dataset.characterSpellcastingViewPanel || "") === nextView;
+            panel.hidden = !isActive;
+            panel.setAttribute("aria-hidden", isActive ? "false" : "true");
+            if (isActive && focusPanel) {
+              panel.focus({ preventScroll: true });
+            }
+          }
+          for (const button of buttons) {
+            const isActive = (button.dataset.characterSpellcastingViewButton || "") === nextView;
+            button.classList.toggle("button-link", isActive);
+            button.classList.toggle("ghost-button", !isActive);
+            button.setAttribute("aria-selected", isActive ? "true" : "false");
+          }
+        };
+
+        for (const button of buttons) {
+          button.addEventListener("click", () => {
+            activateView(button.dataset.characterSpellcastingViewButton || "", {
+              focusPanel: true,
+            });
+          });
+        }
+
+        viewSwitch.__characterSpellcastingActivateView = activateView;
+        activateView(defaultView);
       }
 
       const spellModalTriggers = Array.from(scope.querySelectorAll("[data-character-spell-modal-trigger]"));

@@ -2308,6 +2308,21 @@ button {
   gap: 0.85rem;
 }
 
+.spellcasting-view-switcher {
+  display: grid;
+  gap: 1rem;
+}
+
+.spellcasting-view-nav-card {
+  max-width: max-content;
+}
+
+.spellcasting-view-panel {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
 .spellcasting-view-heading--full {
   grid-column: 1 / -1;
 }

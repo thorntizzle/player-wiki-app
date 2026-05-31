@@ -6444,9 +6444,14 @@ def test_spellcasting_subpage_can_prepare_spells_and_protect_always_prepared_ent
     assert "Prepare spell" in page_html
     assert "Preparation" in page_html
     assert "Current spells" in page_html
+    assert 'data-character-spellcasting-view-switch' in page_html
+    assert 'data-character-spellcasting-view-button="current"' in page_html
+    assert 'data-character-spellcasting-view-button="preparation"' in page_html
+    assert 'data-character-spellcasting-view-panel="current"' in page_html
+    assert 'data-character-spellcasting-view-panel="preparation"' in page_html
+    assert re.search(r'id="character-spell-preparation-view"[^>]+hidden', page_html)
     assert "Always prepared" in page_html
     assert page_html.count("Cure Wounds") == 1
-    assert page_html.index("Cure Wounds") < page_html.index("Current spells")
 
     session_response = client.get("/campaigns/linden-pass/session/character?character=arden-march&page=spells")
     assert session_response.status_code == 200
