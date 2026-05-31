@@ -736,7 +736,7 @@
           {% endif %}
 
           {% if equipment_state_manager.rows %}
-            <div class="character-edit-stack" id="character-equipment-state">
+            <div class="equipment-state-grid" id="character-equipment-state">
               {% for item in equipment_state_manager.rows %}
                 <article class="detail-card character-edit-row">
                   <div class="section-heading">
@@ -749,11 +749,6 @@
                     </h3>
                     <span class="meta">{{ item.source_label }}</span>
                   </div>
-                  <p class="meta">
-                    x{{ item.quantity }}
-                    {% if item.weight %} | {{ item.weight }}{% endif %}
-                    {% if item.requires_attunement %} | Requires attunement{% endif %}
-                  </p>
                   <p class="meta">
                     {{ item.equipped_label }}
                     {% if item.requires_attunement %}
@@ -801,7 +796,7 @@
                           </label>
                         {% endif %}
                       </div>
-                      {% if item.attunement_hint %}
+                      {% if item.attunement_hint and item.attunement_hint != "Requires attunement" %}
                         <p class="meta">{{ item.attunement_hint }}</p>
                       {% endif %}
                       <div class="hero-actions">

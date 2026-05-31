@@ -1984,6 +1984,10 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .equipment-state-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .inventory-list,
   .currency-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2009,6 +2013,10 @@ button {
   }
 
   .spell-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .equipment-state-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -2293,6 +2301,12 @@ button {
 }
 
 .spell-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.equipment-state-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.85rem;
@@ -3820,12 +3834,20 @@ button {
   .spell-card-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .equipment-state-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 520px) {
   .inventory-list,
   .currency-grid,
   .spell-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .equipment-state-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }

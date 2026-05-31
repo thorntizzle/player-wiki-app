@@ -7519,6 +7519,8 @@ def test_equipment_subpage_filters_inventory_only_rows_and_only_shows_attunement
     page_response = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
     assert page_response.status_code == 200
     html = page_response.get_data(as_text=True)
+    assert 'id="character-equipment-state"' in html
+    assert 'class="equipment-state-grid"' in html
     assert "Light Crossbow" in html
     assert "Quarterstaff" in html
     assert "Boots of Elvenkind" in html
@@ -7533,6 +7535,9 @@ def test_equipment_subpage_filters_inventory_only_rows_and_only_shows_attunement
     assert "Main Hand" in html
     assert "Off Hand" in html
     assert "Two-Handed" in html
+    assert "Requires attunement" not in html
+    assert "x1 | 1 lb." not in html
+    assert "| 1 lb." not in html
     assert "Use attunement only when the item's rules call for it." not in html
 
 
