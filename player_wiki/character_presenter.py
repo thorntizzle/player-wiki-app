@@ -644,9 +644,21 @@ def present_character_detail(
                 "class_row_id": str(dict(row or {}).get("source_row_id") or "").strip(),
                 "class_name": str(dict(row or {}).get("title") or "").strip() or "Feature spells",
                 "level": 0,
-                "spellcasting_ability": str(dict(row or {}).get("spellcasting_ability") or "").strip(),
-                "spell_save_dc": dict(row or {}).get("spell_save_dc"),
-                "spell_attack_bonus": dict(row or {}).get("spell_attack_bonus"),
+                "spellcasting_ability": str(
+                    dict(row or {}).get("spellcasting_ability")
+                    or spellcasting_payload.get("spellcasting_ability")
+                    or ""
+                ).strip(),
+                "spell_save_dc": (
+                    dict(row or {}).get("spell_save_dc")
+                    if dict(row or {}).get("spell_save_dc") is not None
+                    else spellcasting_payload.get("spell_save_dc")
+                ),
+                "spell_attack_bonus": (
+                    dict(row or {}).get("spell_attack_bonus")
+                    if dict(row or {}).get("spell_attack_bonus") is not None
+                    else spellcasting_payload.get("spell_attack_bonus")
+                ),
                 "spell_mode": str(dict(row or {}).get("spell_mode") or "").strip(),
                 "row_kind": str(dict(row or {}).get("source_row_kind") or "source").strip() or "source",
             }
@@ -688,14 +700,40 @@ def present_character_detail(
             else ""
         )
         for spell in list(spellcasting_payload.get("spells") or []):
+            linked_systems_entry = resolve_linked_systems_entry(
+                campaign,
+                dict(spell or {}),
+                systems_service=systems_service,
+            )
+            linked_systems_metadata = dict(getattr(linked_systems_entry, "metadata", None) or {})
+            spell_level = spell_presentation_level(
+                dict(spell or {}),
+                linked_systems_metadata=linked_systems_metadata,
+            )
+            description_html = (
+                resolve_spell_description_html(
+                    campaign,
+                    spell,
+                    systems_service=systems_service,
+                    campaign_page_records=campaign_page_records,
+                )
+                if build_character_entry_href(
+                    campaign.slug,
+                    systems_ref=spell.get("systems_ref"),
+                    page_ref=spell.get("page_ref"),
+                )
+                else ""
+            )
             always_prepared = _spell_payload_is_always_prepared(dict(spell or {}))
             badges = []
             if bool(spell.get("is_bonus_known")):
                 badges.append("Feature granted")
             if always_prepared:
                 badges.append("Always prepared")
-            if bool(spell.get("is_ritual")):
+            if bool(spell.get("is_ritual")) or bool(linked_systems_metadata.get("ritual")):
                 badges.append("Ritual")
+            if spell_payload_has_concentration(dict(spell or {}), linked_systems_metadata=linked_systems_metadata):
+                badges.append("Concentration")
             access_badge = _spell_access_badge_label(dict(spell or {}))
             if access_badge and access_badge not in badges:
                 badges.append(access_badge)
@@ -718,15 +756,14 @@ def present_character_detail(
                 {
                     "name": str(spell.get("name") or "Spell"),
                     "href": spell_href,
-                    "description_html": (
-                        resolve_spell_description_html(
-                            campaign,
-                            spell,
-                            systems_service=systems_service,
-                            campaign_page_records=campaign_page_records,
-                        )
-                        if spell_href
-                        else ""
+                    "description_html": description_html,
+                    "level": spell_level,
+                    "level_sort": spell_level if spell_level is not None else 99,
+                    "level_label": spell_presentation_level_label(spell_level),
+                    "level_section_title": spell_presentation_level_section_title(spell_level),
+                    "school": spell_presentation_school(
+                        dict(spell or {}),
+                        linked_systems_metadata=linked_systems_metadata,
                     ),
                     "casting_time": str(spell.get("casting_time") or "--"),
                     "range": str(spell.get("range") or "--"),
@@ -740,14 +777,59 @@ def present_character_detail(
                         spell.get("class_row_id") or spell.get("spell_source_row_id") or fallback_row_id
                     ).strip(),
                     "management_note": management_note,
+                    "is_upcastable": spell_payload_can_upcast(
+                        dict(spell or {}),
+                        spell_level=spell_level,
+                        linked_systems_entry=linked_systems_entry,
+                        description_html=description_html,
+                    ),
                 }
             )
             target_row_id = str(presented_spell.get("class_row_id") or "").strip()
             row_payload = dict(spell_rows_by_id.get(target_row_id) or {})
             row_mode = str(row_payload.get("spell_mode") or "").strip()
             row_kind = str(row_payload.get("row_kind") or "class").strip() or "class"
+            source_package_label = ""
+            source_package_note = ""
+            source_package_meta = ""
+            source_package_key = ""
+            source_package_kind_label = ""
+            if row_kind != "class" and target_row_id:
+                source_package_label = str(row_payload.get("class_name") or "").strip()
+                if row_kind == "feat":
+                    source_package_kind_label = "Feat spells"
+                    source_package_note = "Feat-granted spells stay read-only here in this slice."
+                elif row_kind == "item":
+                    source_package_kind_label = "Item spells"
+                    source_package_note = "Item-granted spells stay read-only here in this slice."
+                else:
+                    source_package_kind_label = "Feature spells"
+                    source_package_note = (
+                        "Feature-granted spell packages are preserved on the sheet here, "
+                        "but stay read-only in this slice."
+                    )
+                source_package_key = f"{target_row_id}:{source_package_label}"
+            elif source_label and (always_prepared or bool(spell.get("is_bonus_known"))):
+                source_package_label = source_label
+                source_package_note = management_note
+                source_package_key = f"{target_row_id}:{source_label}"
+            if source_package_label:
+                stat_line = spellcasting_stat_line(
+                    str(row_payload.get("spellcasting_ability") or "").strip(),
+                    row_payload.get("spell_save_dc"),
+                    row_payload.get("spell_attack_bonus"),
+                )
+                source_package_meta = " | ".join(
+                    part for part in (source_package_kind_label, stat_line) if part
+                )
+            presented_spell["source_package_label"] = source_package_label
+            presented_spell["source_package_note"] = source_package_note
+            presented_spell["source_package_meta"] = source_package_meta
+            presented_spell["source_package_key"] = source_package_key
+            if presented_spell["is_upcastable"] and "Upcast" not in badges:
+                badges.append("Upcast")
             normalized_mark = normalize_lookup(mark)
-            is_cantrip = "cantrip" in normalized_mark
+            is_cantrip = spell_level == 0 or "cantrip" in normalized_mark
             is_prepared = bool(
                 not is_cantrip
                 and (
@@ -824,9 +906,13 @@ def present_character_detail(
                     "spell_attack_bonus": format_signed(row.get("spell_attack_bonus")),
                     "counts": counts,
                     "spells": row_spells,
+                    "spell_level_sections": spell_level_sections(row_spells),
+                    "row_kind": str(row.get("row_kind") or "class").strip() or "class",
+                    "spell_mode": str(row.get("spell_mode") or "").strip(),
                 }
             )
         if list(spells_by_row_id.get("") or []):
+            unassigned_spells = list(spells_by_row_id.get("") or [])
             row_sections.append(
                 {
                     "class_row_id": "",
@@ -835,7 +921,10 @@ def present_character_detail(
                     "spell_save_dc": None,
                     "spell_attack_bonus": "",
                     "counts": [],
-                    "spells": list(spells_by_row_id.get("") or []),
+                    "spells": unassigned_spells,
+                    "spell_level_sections": spell_level_sections(unassigned_spells),
+                    "row_kind": "class",
+                    "spell_mode": "",
                 }
             )
 
@@ -3507,6 +3596,21 @@ def resolve_item_description_html(
     )
 
 
+def resolve_linked_systems_entry(
+    campaign: Campaign,
+    entry_payload: dict[str, Any],
+    *,
+    systems_service: Any | None = None,
+) -> Any | None:
+    if systems_service is None:
+        return None
+    systems_ref = dict(entry_payload.get("systems_ref") or {})
+    slug = str(systems_ref.get("slug") or "").strip()
+    if not slug:
+        return None
+    return systems_service.get_entry_by_slug_for_campaign(campaign.slug, slug)
+
+
 def resolve_spell_description_html(
     campaign: Campaign,
     spell: dict[str, Any],
@@ -3522,6 +3626,188 @@ def resolve_spell_description_html(
     )
 
 
+SPELL_SCHOOL_LABELS = {
+    "a": "Abjuration",
+    "abj": "Abjuration",
+    "abjuration": "Abjuration",
+    "c": "Conjuration",
+    "conj": "Conjuration",
+    "conjuration": "Conjuration",
+    "d": "Divination",
+    "div": "Divination",
+    "divination": "Divination",
+    "e": "Enchantment",
+    "enc": "Enchantment",
+    "enchantment": "Enchantment",
+    "v": "Evocation",
+    "evoc": "Evocation",
+    "evocation": "Evocation",
+    "i": "Illusion",
+    "ill": "Illusion",
+    "illusion": "Illusion",
+    "n": "Necromancy",
+    "nec": "Necromancy",
+    "necromancy": "Necromancy",
+    "t": "Transmutation",
+    "trans": "Transmutation",
+    "transmutation": "Transmutation",
+}
+
+
+def spell_presentation_level(
+    spell_payload: dict[str, Any],
+    *,
+    linked_systems_metadata: dict[str, Any] | None = None,
+) -> int | None:
+    for source in (spell_payload, dict(spell_payload.get("metadata") or {}), dict(linked_systems_metadata or {})):
+        for key in ("spell_level", "level"):
+            raw_level = source.get(key)
+            if raw_level in {"", None}:
+                continue
+            try:
+                return max(int(raw_level), 0)
+            except (TypeError, ValueError):
+                continue
+    if "cantrip" in normalize_lookup(str(spell_payload.get("mark") or "")):
+        return 0
+    return None
+
+
+def spell_presentation_level_label(level: int | None) -> str:
+    if level is None:
+        return "Spell"
+    if level <= 0:
+        return "Cantrip"
+    return spell_level_label(level)
+
+
+def spell_presentation_level_section_title(level: int | None) -> str:
+    if level is None:
+        return "Other spells"
+    if level <= 0:
+        return "Cantrips"
+    return spell_level_label(level)
+
+
+def spell_presentation_school(
+    spell_payload: dict[str, Any],
+    *,
+    linked_systems_metadata: dict[str, Any] | None = None,
+) -> str:
+    for source in (spell_payload, dict(spell_payload.get("metadata") or {}), dict(linked_systems_metadata or {})):
+        raw_school = str(source.get("school") or "").strip()
+        if not raw_school:
+            continue
+        return SPELL_SCHOOL_LABELS.get(normalize_lookup(raw_school), raw_school)
+    return ""
+
+
+def spell_payload_has_concentration(
+    spell_payload: dict[str, Any],
+    *,
+    linked_systems_metadata: dict[str, Any] | None = None,
+) -> bool:
+    if bool(spell_payload.get("concentration")):
+        return True
+    if "concentration" in normalize_lookup(str(spell_payload.get("duration") or "")):
+        return True
+    for duration in list(dict(linked_systems_metadata or {}).get("duration") or []):
+        if isinstance(duration, dict) and bool(duration.get("concentration")):
+            return True
+    return False
+
+
+def spell_payload_can_upcast(
+    spell_payload: dict[str, Any],
+    *,
+    spell_level: int | None,
+    linked_systems_entry: Any | None = None,
+    description_html: str = "",
+) -> bool:
+    if spell_level is not None and spell_level <= 0:
+        return False
+    for key in (
+        "can_upcast",
+        "is_upcastable",
+        "upcast",
+        "upcastable",
+    ):
+        if bool(spell_payload.get(key)):
+            return True
+    for key in (
+        "at_higher_levels",
+        "higher_level",
+        "higher_levels",
+        "entries_higher_level",
+        "entriesHigherLevel",
+    ):
+        if spell_payload.get(key):
+            return True
+    entry_body = dict(getattr(linked_systems_entry, "body", None) or {})
+    if entry_body.get("entries_higher_level") or entry_body.get("entriesHigherLevel"):
+        return True
+    entry_metadata = dict(getattr(linked_systems_entry, "metadata", None) or {})
+    if entry_metadata.get("entries_higher_level") or entry_metadata.get("entriesHigherLevel"):
+        return True
+    detail_text = normalize_lookup(description_html)
+    return "at higher levels" in detail_text or "using a spell slot of" in detail_text
+
+
+def spellcasting_stat_line(
+    ability: str,
+    save_dc: Any | None,
+    attack_bonus: Any | None,
+) -> str:
+    parts = []
+    if ability:
+        parts.append(f"{ability} spellcasting")
+    if save_dc not in {"", None}:
+        parts.append(f"Save DC {save_dc}")
+    formatted_attack_bonus = format_signed(attack_bonus)
+    if formatted_attack_bonus:
+        parts.append(f"Attack {formatted_attack_bonus}")
+    return " | ".join(parts)
+
+
+def spell_level_sections(row_spells: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    spells_by_level: dict[object, list[dict[str, Any]]] = OrderedDict()
+    for spell in row_spells:
+        level = spell.get("level")
+        key: object = int(level) if level is not None else "unknown"
+        spells_by_level.setdefault(key, [])
+        spells_by_level[key].append(spell)
+
+    def _level_sort_key(level_key: object) -> int:
+        if isinstance(level_key, int):
+            return level_key
+        return 99
+
+    sections: list[dict[str, Any]] = []
+    for level_key in sorted(spells_by_level.keys(), key=_level_sort_key):
+        level_spells = spells_by_level[level_key]
+        spell_groups: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        for spell in level_spells:
+            package_key = str(spell.get("source_package_key") or "").strip()
+            group_key = package_key or "__default__"
+            if group_key not in spell_groups:
+                spell_groups[group_key] = {
+                    "title": str(spell.get("source_package_label") or "").strip(),
+                    "note": str(spell.get("source_package_note") or "").strip(),
+                    "meta": str(spell.get("source_package_meta") or "").strip(),
+                    "spells": [],
+                }
+            spell_groups[group_key]["spells"].append(spell)
+        first_spell = level_spells[0] if level_spells else {}
+        sections.append(
+            {
+                "level": None if level_key == "unknown" else int(level_key),
+                "title": str(first_spell.get("level_section_title") or "Other spells"),
+                "groups": list(spell_groups.values()),
+            }
+        )
+    return sections
+
+
 def resolve_linked_entry_description_html(
     campaign: Campaign,
     entry_payload: dict[str, Any],
@@ -3533,12 +3819,9 @@ def resolve_linked_entry_description_html(
     if description_markdown:
         return render_campaign_markdown(campaign, description_markdown)
 
-    systems_ref = dict(entry_payload.get("systems_ref") or {})
-    slug = str(systems_ref.get("slug") or "").strip()
-    if slug and systems_service is not None:
-        entry = systems_service.get_entry_by_slug_for_campaign(campaign.slug, slug)
-        if entry is not None:
-            return str(systems_service.build_character_sheet_entry_body_html(campaign.slug, entry) or "").strip()
+    entry = resolve_linked_systems_entry(campaign, entry_payload, systems_service=systems_service)
+    if entry is not None and systems_service is not None:
+        return str(systems_service.build_character_sheet_entry_body_html(campaign.slug, entry) or "").strip()
 
     page_slug = normalize_page_ref_slug(entry_payload.get("page_ref"))
     if not page_slug:

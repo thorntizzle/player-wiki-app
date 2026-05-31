@@ -2975,6 +2975,9 @@ def create_app() -> Flask:
                 "spell_attack_bonus": str(section.get("spell_attack_bonus") or "").strip(),
                 "counts": list(section.get("counts") or []),
                 "spells": [],
+                "spell_level_sections": [],
+                "row_kind": str(section.get("row_kind") or "class").strip() or "class",
+                "spell_mode": str(section.get("mode") or "").strip(),
             }
             for section in sections
         ]

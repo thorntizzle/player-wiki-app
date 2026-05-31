@@ -85,6 +85,7 @@ def _assert_character_read_no_overflow(page, viewport_name: str) -> None:
         ".glance-grid--quick-row-3",
         ".resource-grid--compact",
         ".spell-slot-editor-list--compact",
+        ".spell-card-grid",
         ".detail-grid",
         ".ability-grid--skills",
     ]
@@ -262,6 +263,20 @@ def test_character_read_shell_browser_state_and_save_flow(
                 "(element) => getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length"
             )
             assert spell_slot_columns <= 3
+            spell_card_columns = page.locator(".spell-card-grid").nth(0).evaluate(
+                "(element) => getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length"
+            )
+            assert spell_card_columns <= 3
+            spell_trigger = page.locator("[data-character-spell-modal-trigger]").first
+            expect(spell_trigger).to_be_visible(timeout=5000)
+            open_page_count = len(page.context.pages)
+            spell_trigger.click()
+            spell_dialog = page.locator("dialog[data-character-spell-modal][open]").first
+            expect(spell_dialog).to_be_visible(timeout=5000)
+            assert len(page.context.pages) == open_page_count
+            page.keyboard.press("Escape")
+            expect(page.locator("dialog[data-character-spell-modal][open]")).to_have_count(0, timeout=5000)
+            expect(spell_trigger).to_be_focused(timeout=5000)
 
             page.goto(f"{arden_character_slug_path}?mode=read&page=notes")
             expect(page).to_have_url(notes_url_pattern, timeout=5000)

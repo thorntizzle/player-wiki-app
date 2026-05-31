@@ -5909,6 +5909,100 @@ def test_spellcasting_subpage_shows_supported_feat_spell_rows_as_read_only_secti
     assert "Remove cantrip" not in html
 
 
+def test_spellcasting_subpage_groups_compact_cards_by_level_and_local_source_package(
+    app, client, sign_in, users
+):
+    spell_entries = _seed_systems_spell_entries(
+        app,
+        [
+            {"slug": "phb-spell-message", "title": "Message", "level": 0, "class_lists": {"PHB": ["Sorcerer"]}},
+            {"slug": "phb-spell-magic-missile", "title": "Magic Missile", "level": 1, "class_lists": {"PHB": ["Sorcerer"]}},
+            {"slug": "phb-spell-sleep", "title": "Sleep", "level": 1, "class_lists": {"PHB": ["Sorcerer", "Wizard"]}},
+        ],
+    )
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Sorcerer 5"
+        profile["classes"] = [{"class_name": "Sorcerer", "level": 5}]
+        payload["profile"] = profile
+        source_row_id = "feat-spell-source:fey-touched"
+        payload["spellcasting"] = {
+            "spellcasting_class": "Sorcerer",
+            "spellcasting_ability": "Charisma",
+            "spell_save_dc": 15,
+            "spell_attack_bonus": 7,
+            "slot_progression": [
+                {"level": 1, "max_slots": 4},
+                {"level": 2, "max_slots": 3},
+            ],
+            "class_rows": [
+                {
+                    "class_row_id": "class-row-1",
+                    "class_name": "Sorcerer",
+                    "level": 5,
+                    "caster_progression": "full",
+                    "spell_mode": "known",
+                    "spellcasting_ability": "Charisma",
+                    "spell_save_dc": 15,
+                    "spell_attack_bonus": 7,
+                },
+            ],
+            "source_rows": [
+                {
+                    "source_row_id": source_row_id,
+                    "source_row_kind": "feat",
+                    "title": "Fey Touched",
+                    "spellcasting_ability": "Charisma",
+                    "spell_save_dc": 15,
+                    "spell_attack_bonus": 7,
+                }
+            ],
+            "spells": [
+                _spell_payload(
+                    spell_entries["phb-spell-message"],
+                    source="PHB",
+                    mark="Cantrip",
+                    class_row_id="class-row-1",
+                ),
+                _spell_payload(
+                    spell_entries["phb-spell-magic-missile"],
+                    source="PHB",
+                    mark="Known",
+                    class_row_id="class-row-1",
+                    at_higher_levels="The spell creates one more dart for each slot level above 1st.",
+                ),
+                _spell_payload(
+                    spell_entries["phb-spell-sleep"],
+                    source="PHB",
+                    is_bonus_known=True,
+                    spell_source_row_id=source_row_id,
+                    spell_source_row_kind="feat",
+                    grant_source_label="Fey Touched",
+                ),
+            ],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "spellcasting-count-grid" in html
+    assert "spell-card-grid" in html
+    assert html.count('class="spell-card"') == 3
+    assert "data-character-spell-modal-trigger" in html
+    assert "data-character-spell-modal" in html
+    assert "<h4>Cantrips</h4>" in html
+    assert "<h4>1st level</h4>" in html
+    assert "Upcast" in html
+    assert "Feat spells" in html
+    assert "<h3>Fey Touched</h3>" not in html
+    assert html.index("<h4>1st level</h4>") < html.index("Fey Touched") < html.index("Sleep")
+
+
 def test_spellcasting_subpage_can_manage_ritual_caster_ritual_book(app, client, sign_in, users):
     spell_entries = _seed_systems_spell_entries(
         app,

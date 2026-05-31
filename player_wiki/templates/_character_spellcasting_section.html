@@ -1,12 +1,69 @@
 <section class="read-section">
   {% set is_session_character_spell_page = (session_return_view | default("")) == "session-character" %}
   {% set has_session_spell_workspace = is_session_character_spell_page and show_spell_list and character.spellcasting.slot_pools %}
-  {% macro character_spell_description_details(spell) %}
-    {% if spell.href and spell.description_html %}
-      <details class="item-description-detail">
+  {% macro character_spell_detail_content(spell) %}
+    <div class="spell-detail-content">
+      <dl class="spell-detail-content__facts">
+        <div>
+          <dt>Level</dt>
+          <dd>{{ spell.level_label }}{% if spell.school %} ({{ spell.school }}){% endif %}</dd>
+        </div>
+        {% if spell.casting_time and spell.casting_time != '--' %}
+          <div>
+            <dt>Casting time</dt>
+            <dd>{{ spell.casting_time }}</dd>
+          </div>
+        {% endif %}
+        {% if spell.range and spell.range != '--' %}
+          <div>
+            <dt>Range</dt>
+            <dd>{{ spell.range }}</dd>
+          </div>
+        {% endif %}
+        {% if spell.duration and spell.duration != '--' %}
+          <div>
+            <dt>Duration</dt>
+            <dd>{{ spell.duration }}</dd>
+          </div>
+        {% endif %}
+        {% if spell.components and spell.components != '--' %}
+          <div>
+            <dt>Components</dt>
+            <dd>{{ spell.components }}</dd>
+          </div>
+        {% endif %}
+        {% if spell.save_or_hit and spell.save_or_hit != '--' %}
+          <div>
+            <dt>Save / attack</dt>
+            <dd>{{ spell.save_or_hit }}</dd>
+          </div>
+        {% endif %}
+      </dl>
+      {% if spell.source or spell.reference or spell.href %}
+        <p class="meta">
+          {% if spell.source %}{{ spell.source }}{% endif %}
+          {% if spell.source and spell.reference %} | {% endif %}
+          {% if spell.reference %}{{ spell.reference }}{% endif %}
+          {% if (spell.source or spell.reference) and spell.href %} | {% endif %}
+          {% if spell.href %}<a href="{{ spell.href }}">Open source entry</a>{% endif %}
+        </p>
+      {% endif %}
+      {% if spell.management_note %}
+        <p class="meta">{{ spell.management_note }}</p>
+      {% endif %}
+      {% if spell.description_html %}
+        <div class="article-body article-body--compact">{{ spell.description_html | safe }}</div>
+      {% else %}
+        <p class="meta">No linked spell detail text is available for this spell yet.</p>
+      {% endif %}
+    </div>
+  {% endmacro %}
+  {% macro character_spell_fallback_details(spell) %}
+    {% if spell.description_html or spell.href %}
+      <details class="item-description-detail spell-card__fallback" data-character-spell-fallback>
         <summary>Spell details</summary>
         <div class="item-description-detail__body">
-          <div class="article-body article-body--compact">{{ spell.description_html | safe }}</div>
+          {{ character_spell_detail_content(spell) }}
         </div>
       </details>
     {% endif %}
@@ -98,35 +155,37 @@
         {% for spell_section in character.spellcasting.row_sections %}
           {% set manager_section = ((spell_manager.sections | selectattr('class_row_id', 'equalto', spell_section.class_row_id) | list | first) if spell_manager else none) %}
           {% set summary_counts = manager_section.counts if manager_section else spell_section.counts %}
-          <article class="detail-card spellcasting-class-card">
-            <h3>{{ spell_section.title }}</h3>
-            {% if spell_section.spellcasting_ability %}
-              <p class="meta">
-                {{ spell_section.spellcasting_ability }} spellcasting
-                {% if spell_section.spell_save_dc %}| Save DC {{ spell_section.spell_save_dc }}{% endif %}
-                {% if spell_section.spell_attack_bonus %}| Attack {{ spell_section.spell_attack_bonus }}{% endif %}
-              </p>
-            {% endif %}
-            {% if manager_section and manager_section.mode_label %}
-              <p class="meta">{{ manager_section.mode_label }}</p>
-            {% endif %}
-            {% if manager_section and manager_section.rules_note %}
-              <p>{{ manager_section.rules_note }}</p>
-            {% endif %}
-            {% if summary_counts %}
-              <ul class="plain-list session-spellcasting-summary__counts">
-                {% for count in summary_counts %}
-                  <li>
-                    <span>{{ count.label }}</span>
-                    <strong>{{ count.value }}</strong>
-                  </li>
-                {% endfor %}
-              </ul>
-            {% endif %}
-            {% if manager_section and manager_section.unavailable_message %}
-              <p class="meta">{{ manager_section.unavailable_message }}</p>
-            {% endif %}
-          </article>
+          {% if spell_section.row_kind == "class" or spell_section.spell_mode == "ritual_book" %}
+            <article class="detail-card spellcasting-class-card">
+              <h3>{{ spell_section.title }}</h3>
+              {% if spell_section.spellcasting_ability %}
+                <p class="meta">
+                  {{ spell_section.spellcasting_ability }} spellcasting
+                  {% if spell_section.spell_save_dc %}| Save DC {{ spell_section.spell_save_dc }}{% endif %}
+                  {% if spell_section.spell_attack_bonus %}| Attack {{ spell_section.spell_attack_bonus }}{% endif %}
+                </p>
+              {% endif %}
+              {% if manager_section and manager_section.mode_label %}
+                <p class="meta">{{ manager_section.mode_label }}</p>
+              {% endif %}
+              {% if manager_section and manager_section.rules_note %}
+                <p>{{ manager_section.rules_note }}</p>
+              {% endif %}
+              {% if summary_counts %}
+                <dl class="spellcasting-count-grid">
+                  {% for count in summary_counts %}
+                    <div class="spellcasting-count-grid__item">
+                      <dt>{{ count.label }}</dt>
+                      <dd>{{ count.value }}</dd>
+                    </div>
+                  {% endfor %}
+                </dl>
+              {% endif %}
+              {% if manager_section and manager_section.unavailable_message %}
+                <p class="meta">{{ manager_section.unavailable_message }}</p>
+              {% endif %}
+            </article>
+          {% endif %}
         {% endfor %}
       {% else %}
         <article class="detail-card spellcasting-class-card">
@@ -305,79 +364,111 @@
   {% if show_spell_list %}
     {% if character.spellcasting.row_sections %}
       {% for spell_section in character.spellcasting.row_sections %}
+        {% set spell_section_loop_index = loop.index %}
         {% set manager_section = ((spell_manager.sections | selectattr('class_row_id', 'equalto', spell_section.class_row_id) | list | first) if spell_manager else none) %}
-        <div class="section-heading">
-          <div>
-            <h3>{{ spell_section.title }}</h3>
+        {% if spell_section.row_kind == "class" or spell_section.spell_mode == "ritual_book" %}
+          <div class="section-heading spell-row-section-heading">
+            <div>
+              <h3>{{ spell_section.title }}</h3>
+            </div>
           </div>
-        </div>
-        {% if spell_section.spells %}
-          <div class="spell-list">
-            {% for spell in spell_section.spells %}
-              <article class="spell-row">
-                <div class="spell-row__header">
-                  <h3>
-                    {% if spell.href %}
-                      <a href="{{ spell.href }}">{{ spell.name }}</a>
-                    {% else %}
-                      {{ spell.name }}
-                    {% endif %}
-                  </h3>
-                  {% if spell.badges %}
-                    <div class="badge-list">
-                      {% for badge in spell.badges %}
-                        <span class="meta-badge">{{ badge }}</span>
-                      {% endfor %}
-                    </div>
+        {% endif %}
+        {% if spell_section.spell_level_sections %}
+          <div class="spell-level-stack">
+            {% for level_section in spell_section.spell_level_sections %}
+              {% set spell_level_loop_index = loop.index %}
+              <section class="spell-level-section">
+                <h4>{{ level_section.title }}</h4>
+                {% for spell_group in level_section.groups %}
+                  {% set spell_group_loop_index = loop.index %}
+                  {% if spell_group.title %}
+                    <aside class="spell-source-package">
+                      <h5>{{ spell_group.title }}</h5>
+                      {% if spell_group.meta %}
+                        <p class="meta">{{ spell_group.meta }}</p>
+                      {% endif %}
+                      {% if spell_group.note %}
+                        <p>{{ spell_group.note }}</p>
+                      {% endif %}
+                    </aside>
                   {% endif %}
-                </div>
-                <p class="meta">
-                  {{ spell.level_label }}
-                  {% if spell.casting_time %} | {{ spell.casting_time }}{% endif %}
-                  {% if spell.range %} | {{ spell.range }}{% endif %}
-                  {% if spell.duration %} | {{ spell.duration }}{% endif %}
-                  {% if spell.components %} | {{ spell.components }}{% endif %}
-                  {% if spell.save_or_hit and spell.save_or_hit != '--' %}
-                    | {{ spell.save_or_hit }}
-                  {% endif %}
-                </p>
-                {% if spell.source or spell.reference %}
-                  <p class="meta">
-                    {% if spell.source %}{{ spell.source }}{% endif %}
-                    {% if spell.source and spell.reference %} | {% endif %}
-                    {% if spell.reference %}{{ spell.reference }}{% endif %}
-                  </p>
-                {% endif %}
-                {% if spell.management_note %}
-                  <p class="meta">{{ spell.management_note }}</p>
-                {% endif %}
-                {{ character_spell_description_details(spell) }}
-                {% if manager_section and can_use_session_mode and not is_session_mode and manager_section.can_manage and (spell.can_toggle_prepared or spell.can_remove) %}
-                  <div class="hero-actions">
-                    {% if spell.can_toggle_prepared %}
-                      <form method="post" action="{{ spell_manager.update_url }}">
-                        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-                        <input type="hidden" name="mode" value="read">
-                        <input type="hidden" name="page" value="{{ character_subpage }}">
-                        <input type="hidden" name="spell_key" value="{{ spell.spell_key }}">
-                        <input type="hidden" name="prepared_value" value="{{ 0 if spell.is_prepared else 1 }}">
-                        <input type="hidden" name="target_class_row_id" value="{{ spell_section.class_row_id }}">
-                        <button type="submit" class="ghost-button">{{ "Unprepare" if spell.is_prepared else "Prepare" }}</button>
-                      </form>
-                    {% endif %}
-                    {% if spell.can_remove %}
-                      <form method="post" action="{{ spell_manager.remove_url }}">
-                        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-                        <input type="hidden" name="mode" value="read">
-                        <input type="hidden" name="page" value="{{ character_subpage }}">
-                        <input type="hidden" name="spell_key" value="{{ spell.spell_key }}">
-                        <input type="hidden" name="target_class_row_id" value="{{ spell_section.class_row_id }}">
-                        <button type="submit" class="ghost-button">{{ spell.remove_label }}</button>
-                      </form>
-                    {% endif %}
+                  <div class="spell-card-grid">
+                    {% for spell in spell_group.spells %}
+                      {% set spell_dialog_id = "spell-detail-dialog-" ~ spell_section_loop_index ~ "-" ~ spell_level_loop_index ~ "-" ~ spell_group_loop_index ~ "-" ~ loop.index %}
+                      <article class="spell-card">
+                        <button
+                          type="button"
+                          class="spell-card__main"
+                          data-character-spell-modal-trigger
+                          aria-haspopup="dialog"
+                          aria-controls="{{ spell_dialog_id }}"
+                        >
+                          <span class="spell-card__eyebrow">
+                            {{ spell.level_label }}{% if spell.school %} | {{ spell.school }}{% endif %}
+                          </span>
+                          <span class="spell-card__name">{{ spell.name }}</span>
+                          {% if spell.badges %}
+                            <span class="badge-list spell-card__badges">
+                              {% for badge in spell.badges %}
+                                <span class="meta-badge">{{ badge }}</span>
+                              {% endfor %}
+                            </span>
+                          {% endif %}
+                          <span class="spell-card__meta">
+                            {% if spell.casting_time and spell.casting_time != '--' %}{{ spell.casting_time }}{% endif %}
+                            {% if spell.range and spell.range != '--' %}{% if spell.casting_time and spell.casting_time != '--' %} | {% endif %}{{ spell.range }}{% endif %}
+                          </span>
+                        </button>
+                        {{ character_spell_fallback_details(spell) }}
+                        <dialog id="{{ spell_dialog_id }}" class="spell-detail-dialog" data-character-spell-modal>
+                          <div class="spell-detail-dialog__panel">
+                            <div class="spell-detail-dialog__header">
+                              <div>
+                                <p class="meta">{{ spell.level_label }}{% if spell.school %} | {{ spell.school }}{% endif %}</p>
+                                <h3>{{ spell.name }}</h3>
+                              </div>
+                              <button type="button" class="ghost-button" data-character-spell-modal-close>Close</button>
+                            </div>
+                            {% if spell.badges %}
+                              <div class="badge-list">
+                                {% for badge in spell.badges %}
+                                  <span class="meta-badge">{{ badge }}</span>
+                                {% endfor %}
+                              </div>
+                            {% endif %}
+                            {{ character_spell_detail_content(spell) }}
+                          </div>
+                        </dialog>
+                        {% if manager_section and can_use_session_mode and not is_session_mode and manager_section.can_manage and (spell.can_toggle_prepared or spell.can_remove) %}
+                          <div class="spell-card__actions hero-actions">
+                            {% if spell.can_toggle_prepared %}
+                              <form method="post" action="{{ spell_manager.update_url }}">
+                                <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                                <input type="hidden" name="mode" value="read">
+                                <input type="hidden" name="page" value="{{ character_subpage }}">
+                                <input type="hidden" name="spell_key" value="{{ spell.spell_key }}">
+                                <input type="hidden" name="prepared_value" value="{{ 0 if spell.is_prepared else 1 }}">
+                                <input type="hidden" name="target_class_row_id" value="{{ spell_section.class_row_id }}">
+                                <button type="submit" class="ghost-button">{{ "Unprepare" if spell.is_prepared else "Prepare" }}</button>
+                              </form>
+                            {% endif %}
+                            {% if spell.can_remove %}
+                              <form method="post" action="{{ spell_manager.remove_url }}">
+                                <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                                <input type="hidden" name="mode" value="read">
+                                <input type="hidden" name="page" value="{{ character_subpage }}">
+                                <input type="hidden" name="spell_key" value="{{ spell.spell_key }}">
+                                <input type="hidden" name="target_class_row_id" value="{{ spell_section.class_row_id }}">
+                                <button type="submit" class="ghost-button">{{ spell.remove_label }}</button>
+                              </form>
+                            {% endif %}
+                          </div>
+                        {% endif %}
+                      </article>
+                    {% endfor %}
                   </div>
-                {% endif %}
-              </article>
+                {% endfor %}
+              </section>
             {% endfor %}
           </div>
         {% else %}
