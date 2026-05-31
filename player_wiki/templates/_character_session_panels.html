@@ -201,28 +201,39 @@
       <h2>Currency</h2>
     </div>
     <article class="detail-card session-card">
-      <form
-        class="currency-form"
-        data-character-sheet-edit-form="currency"
-        method="post"
-        action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
-      >
-        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-        <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
-        <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
-        {% if session_return_view %}
-          <input type="hidden" name="return_view" value="{{ session_return_view }}">
-        {% endif %}
+      <div class="currency-grid">
         {% for coin in ("cp", "sp", "ep", "gp", "pp") %}
-          <article class="currency-form__coin">
-            <label class="session-field">
+          <form
+            class="currency-form currency-box"
+            data-character-sheet-edit-form="currency"
+            method="post"
+            action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+          >
+            <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+            <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
+            <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
+            {% if session_return_view %}
+              <input type="hidden" name="return_view" value="{{ session_return_view }}">
+            {% endif %}
+            <div class="currency-box__header">
               <span>{{ coin.upper() }}</span>
-              <input type="number" name="{{ coin }}" value="{{ character.currency_values[coin] }}" min="0">
-            </label>
-          </article>
+            </div>
+            <input
+              class="currency-box__amount"
+              type="number"
+              name="{{ coin }}"
+              value="{{ character.currency_values[coin] }}"
+              min="0"
+              onchange="this.form.requestSubmit()"
+            >
+            <div class="session-stepper session-stepper--compact">
+              <button type="submit" name="delta" value="{{ coin }}:-1">-1</button>
+              <button type="submit" name="delta" value="{{ coin }}:1">+1</button>
+            </div>
+            <button type="submit" class="visually-hidden">Update {{ coin.upper() }}</button>
+          </form>
         {% endfor %}
-        <button type="submit">Save currency</button>
-      </form>
+      </div>
     </article>
   </section>
   {% endif %}

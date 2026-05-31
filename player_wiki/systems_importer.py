@@ -28,6 +28,25 @@ SPELL_SCHOOL_LABELS = {
     "T": "Transmutation",
 }
 
+DAMAGE_TYPE_LABELS = {
+    "B": "bludgeoning",
+    "P": "piercing",
+    "S": "slashing",
+}
+
+WEAPON_PROPERTY_LABELS = {
+    "A": "Ammunition",
+    "F": "Finesse",
+    "H": "Heavy",
+    "L": "Light",
+    "LD": "Loading",
+    "R": "Reach",
+    "S": "Special",
+    "T": "Thrown",
+    "2H": "Two-Handed",
+    "V": "Versatile",
+}
+
 SIZE_LABELS = {
     "T": "Tiny",
     "S": "Small",
@@ -1970,12 +1989,21 @@ class Dnd5eSystemsImporter:
         metadata: dict[str, Any]
         metadata_pairs: list[tuple[str, str]]
         if entry_type == "item":
+            item_damage = self._format_item_damage(raw_entry)
+            item_properties = self._format_weapon_properties(raw_entry.get("property"))
             metadata = {
                 "type": self._clean_data(raw_entry.get("type")),
                 "rarity": self._clean_data(raw_entry.get("rarity")),
                 "attunement": self._clean_data(raw_entry.get("reqAttune")),
                 "weight": raw_entry.get("weight"),
                 "base_item": self._clean_data(raw_entry.get("baseItem")),
+                "weapon_category": self._clean_data(raw_entry.get("weaponCategory")),
+                "damage": item_damage,
+                "dmg1": self._clean_data(raw_entry.get("dmg1")),
+                "versatile_damage": self._clean_data(raw_entry.get("dmg2")),
+                "damage_type": self._clean_data(raw_entry.get("dmgType")),
+                "range": self._clean_data(raw_entry.get("range")),
+                "properties": self._clean_data(raw_entry.get("property")),
                 "ac": raw_entry.get("ac"),
                 "armor": bool(raw_entry.get("armor")),
                 "strength": self._clean_data(raw_entry.get("strength")),
@@ -1988,6 +2016,11 @@ class Dnd5eSystemsImporter:
                 ("Attunement", self._format_compact_value(raw_entry.get("reqAttune"))),
                 ("Weight", self._format_weight(raw_entry.get("weight"))),
                 ("Base Item", self._format_compact_value(raw_entry.get("baseItem"))),
+                ("Weapon Category", self._format_compact_value(raw_entry.get("weaponCategory"))),
+                ("Damage", item_damage),
+                ("Versatile Damage", self._format_compact_value(raw_entry.get("dmg2"))),
+                ("Range", self._format_compact_value(raw_entry.get("range"))),
+                ("Weapon Properties", item_properties),
             ]
         elif entry_type == "background":
             metadata = {
@@ -3008,6 +3041,24 @@ class Dnd5eSystemsImporter:
         if value in (None, ""):
             return ""
         return f"{value} lb."
+
+    def _format_item_damage(self, value: dict[str, Any]) -> str:
+        damage = self._format_compact_value(value.get("dmg1"))
+        if not damage:
+            return ""
+        damage_type = str(value.get("dmgType") or "").strip().upper()
+        damage_type_label = DAMAGE_TYPE_LABELS.get(damage_type, self._format_compact_value(value.get("dmgType")))
+        return " ".join(part for part in (damage, damage_type_label) if part)
+
+    def _format_weapon_properties(self, value: Any) -> str:
+        raw_values = value if isinstance(value, list) else [value]
+        labels = []
+        for raw_value in raw_values:
+            clean_value = str(raw_value or "").strip()
+            if not clean_value:
+                continue
+            labels.append(WEAPON_PROPERTY_LABELS.get(clean_value.upper(), clean_value))
+        return ", ".join(labels)
 
     def _format_compact_value(self, value: Any) -> str:
         if value is None:

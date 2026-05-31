@@ -1973,9 +1973,13 @@ def test_xianxia_inventory_currency_renders_and_updates(
     assert session_response.status_code == 200
     session_html = unescape(session_response.get_data(as_text=True))
     assert 'id="session-currency"' in session_html
-    assert 'name="coin" value="0" min="0"' in session_html
-    assert 'name="supply" value="0" min="0"' in session_html
-    assert 'name="spirit_stones" value="0" min="0"' in session_html
+    assert 'class="currency-grid"' in session_html
+    assert 'name="coin"' in session_html
+    assert 'name="supply"' in session_html
+    assert 'name="spirit_stones"' in session_html
+    assert 'name="delta" value="coin:-1"' in session_html
+    assert 'name="delta" value="spirit_stones:1"' in session_html
+    assert "Save currency" not in session_html
     assert "Out of battle: gain +1 Insight. In battle: restore ALL Energy." in session_html
 
     response = client.post(

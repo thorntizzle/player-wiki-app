@@ -190,6 +190,11 @@ def build_test_data_root(root: Path) -> Path:
                     "source": "PHB",
                     "page": 149,
                     "type": "M",
+                    "weaponCategory": "martial",
+                    "dmg1": "1d8",
+                    "dmg2": "1d10",
+                    "dmgType": "S",
+                    "property": ["V"],
                     "weight": 3,
                     "entries": ["A versatile martial weapon."]
                 }
@@ -7525,6 +7530,10 @@ def test_importer_imports_mechanics_only_and_strips_media_fields(app, tmp_path):
         assert phb_entries["Chain Mail"].metadata["type"] == "HA"
         assert phb_entries["Chain Mail"].metadata["strength"] == "13"
         assert phb_entries["Chain Mail"].metadata["stealth_disadvantage"] is True
+        assert phb_entries["Longsword"].metadata["damage"] == "1d8 slashing"
+        assert phb_entries["Longsword"].metadata["weapon_category"] == "martial"
+        assert phb_entries["Longsword"].metadata["properties"] == ["V"]
+        assert "<strong>Weapon Properties:</strong> <span>Versatile</span>" in phb_entries["Longsword"].rendered_html
         assert "martial ranged weapon" in phb_entries["Light Crossbow"].rendered_html
         assert "twenty crossbow bolts" in phb_entries["Crossbow Bolts (20)"].rendered_html
         fighter = phb_entries["Fighter"]

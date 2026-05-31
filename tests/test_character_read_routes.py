@@ -8590,7 +8590,10 @@ def test_dnd_character_normal_page_shows_inline_state_controls_for_assigned_play
     assert 'data-character-sheet-edit-form="inventory"' in inventory_html
     assert 'data-character-sheet-edit-form="currency"' in inventory_html
     assert 'name="cp"' in inventory_html
-    assert "Save currency" in inventory_html
+    assert 'class="currency-grid"' in inventory_html
+    assert 'name="delta" value="cp:-1"' in inventory_html
+    assert 'name="delta" value="gp:1"' in inventory_html
+    assert "Save currency" not in inventory_html
     assert "Inventory and currency" in inventory_html
     assert "Save pending changes" not in inventory_html
     assert 'name="mode" value="read"' in inventory_html
@@ -9536,13 +9539,13 @@ def test_character_sheet_collapses_linked_spell_and_item_descriptions(
         entry_key="dnd-5e|item|phb|backpack",
         entry_type="item",
         slug="phb-item-backpack",
-        title="Backpack",
+        title="Dagger",
         source_page="",
         source_path="",
-        search_text="backpack",
+        search_text="dagger",
         player_safe_default=True,
         dm_heavy=False,
-        metadata={},
+        metadata={"weight": 1},
         body={"entries": ["Character item detail body from Systems."]},
         rendered_html="",
         created_at=datetime.now(timezone.utc),
@@ -9573,6 +9576,9 @@ def test_character_sheet_collapses_linked_spell_and_item_descriptions(
     assert "Spell details" in spellcasting_html
     assert "Character spell detail body from Systems." in spellcasting_html
     assert "Item details" in inventory_html
+    assert "Item properties" in inventory_html
+    assert "1d4 piercing" in inventory_html
+    assert "Finesse, Light, Thrown" in inventory_html
     assert "Character item detail body from Systems." in inventory_html
 
 
@@ -9776,6 +9782,81 @@ def test_character_sheet_shows_systems_feature_text_inline_and_hides_source_meta
     assert 'You can cast spells using your force of personality as your spellcasting focus.' in html
     assert 'Unique Source 77' not in html
     assert 'View source entry' not in html
+
+
+def test_character_sheet_shows_campaign_page_feature_text_inline(app, client, sign_in, users):
+    mechanics_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "content" / "mechanics"
+    mechanics_dir.mkdir(parents=True, exist_ok=True)
+    (mechanics_dir / "wild-magic-modification.md").write_text(
+        "---\n"
+        "title: Wild Magic Modification\n"
+        "section: Mechanics\n"
+        "type: mechanic\n"
+        "---\n\n"
+        "You gain a number of Wild Die equal to half your level. A Wild Die is a d6.\n",
+        encoding="utf-8",
+    )
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+
+    def _mutate(payload: dict) -> None:
+        payload["features"] = [
+            {
+                "id": "wild-magic-mod",
+                "name": "Wild Magic Mod",
+                "category": "feat",
+                "description_markdown": "",
+                "activation_type": "passive",
+                "tracker_ref": "wild-die",
+                "page_ref": {
+                    "slug": "mechanics/wild-magic-modification",
+                    "title": "Wild Magic Modification",
+                },
+            }
+        ]
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=features")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert ">Wild Magic Mod</a>" in html
+    assert "/campaigns/linden-pass/pages/mechanics/wild-magic-modification" in html
+    assert "A Wild Die is a d6." in html
+
+
+def test_temporal_awareness_adds_intelligence_modifier_to_initiative(app, client, sign_in, users):
+    def _mutate(payload: dict) -> None:
+        stats = dict(payload.get("stats") or {})
+        stats["initiative_bonus"] = 1
+        ability_scores = dict(stats.get("ability_scores") or {})
+        ability_scores["dex"] = {"score": 13, "modifier": 1, "save_bonus": 1}
+        ability_scores["int"] = {"score": 20, "modifier": 5, "save_bonus": 8}
+        ability_scores["dexterity"] = {"score": 13, "modifier": 1, "save_bonus": 1}
+        ability_scores["intelligence"] = {"score": 20, "modifier": 5, "save_bonus": 8}
+        stats["ability_scores"] = ability_scores
+        payload["stats"] = stats
+        payload["features"] = [
+            {
+                "id": "temporal-awareness",
+                "name": "Temporal Awareness",
+                "category": "class_feature",
+                "description_markdown": "You can add your Intelligence modifier to your initiative rolls.",
+                "activation_type": "passive",
+            }
+        ]
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Initiative" in html
+    assert "<strong>+6</strong>" in html
 
 
 def test_character_sheet_nests_armorer_armor_model_components(app, client, sign_in, users):
@@ -10156,8 +10237,10 @@ def test_legacy_session_mode_inventory_renders_normal_character_view_without_bat
     assert 'name="ep"' in html
     assert 'name="gp"' in html
     assert 'name="pp"' in html
+    assert 'class="currency-grid"' in html
+    assert 'name="delta" value="cp:-1"' in html
     assert "Save pending changes" not in html
-    assert "Save currency" in html
+    assert "Save currency" not in html
 
 
 def test_character_sheet_renders_long_form_imported_ability_keys(app, client, sign_in, users):

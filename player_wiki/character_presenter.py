@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from copy import deepcopy
+from html import escape
 import re
 from typing import Any
 
@@ -13,10 +14,13 @@ from .character_builder import (
     SKILL_ABILITY_KEYS,
     WEAPON_WIELD_MODE_OFF_HAND,
     WEAPON_WIELD_MODE_TWO_HANDED,
+    DAMAGE_TYPE_LABELS,
+    WEAPON_PROPERTY_LABELS,
     _attack_mode_components,
     CharacterBuildError,
     _format_weight_value,
     _infer_attack_mode_key_from_payload,
+    _load_phb_weapon_profiles,
     _spell_access_badge_label,
     _spell_payload_is_always_prepared,
     _spell_payload_map_key,
@@ -998,6 +1002,7 @@ def present_character_detail(
                     campaign,
                     feature,
                     systems_service=systems_service,
+                    campaign_page_records=campaign_page_records,
                 ),
             }
         )
@@ -1101,7 +1106,12 @@ def present_character_detail(
 
     currency_payload = dict(state.get("currency") or {})
     currency = [
-        {"label": label.upper(), "amount": int(currency_payload.get(label) or 0)}
+        {
+            "label": label.upper(),
+            "amount": int(currency_payload.get(label) or 0),
+            "key": label,
+            "description": "",
+        }
         for label in ("cp", "sp", "ep", "gp", "pp")
     ]
     other_currency = [str(item).strip() for item in list(currency_payload.get("other") or []) if str(item).strip()]
@@ -3565,20 +3575,14 @@ def resolve_feature_description_html(
     feature: dict[str, Any],
     *,
     systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
 ) -> str:
-    description_markdown = str(feature.get("description_markdown") or "").strip()
-    if description_markdown:
-        return render_campaign_markdown(campaign, description_markdown)
-    if systems_service is None:
-        return ""
-    systems_ref = dict(feature.get("systems_ref") or {})
-    slug = str(systems_ref.get("slug") or "").strip()
-    if not slug:
-        return ""
-    entry = systems_service.get_entry_by_slug_for_campaign(campaign.slug, slug)
-    if entry is None:
-        return ""
-    return str(systems_service.build_character_sheet_entry_body_html(campaign.slug, entry) or "").strip()
+    return resolve_linked_entry_description_html(
+        campaign,
+        feature,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+    )
 
 
 def resolve_item_description_html(
@@ -3588,12 +3592,138 @@ def resolve_item_description_html(
     systems_service: Any | None = None,
     campaign_page_records: list[Any] | None = None,
 ) -> str:
+    description_markdown = str(item.get("description_markdown") or "").strip()
+    if description_markdown:
+        return render_campaign_markdown(campaign, description_markdown)
+
+    entry = resolve_linked_systems_entry(campaign, item, systems_service=systems_service)
+    if entry is not None and systems_service is not None:
+        properties_html = build_item_properties_html(entry)
+        body_html = str(systems_service.build_character_sheet_entry_body_html(campaign.slug, entry) or "").strip()
+        return "".join(part for part in (properties_html, body_html) if part)
+
     return resolve_linked_entry_description_html(
         campaign,
         item,
         systems_service=systems_service,
         campaign_page_records=campaign_page_records,
     )
+
+
+def build_item_properties_html(entry: Any) -> str:
+    if str(getattr(entry, "entry_type", "") or "").strip() != "item":
+        return ""
+    rows = item_property_rows(entry)
+    if not rows:
+        return ""
+    row_html = "".join(
+        (
+            "<li>"
+            f"<span>{escape(label)}</span>"
+            f"<strong>{escape(value)}</strong>"
+            "</li>"
+        )
+        for label, value in rows
+        if label and value
+    )
+    if not row_html:
+        return ""
+    return (
+        '<div class="item-property-summary">'
+        "<h5>Item properties</h5>"
+        f'<ul class="plain-list slot-list">{row_html}</ul>'
+        "</div>"
+    )
+
+
+def item_property_rows(entry: Any) -> list[tuple[str, str]]:
+    metadata = dict(getattr(entry, "metadata", {}) or {})
+    profile = item_weapon_profile(entry, metadata)
+    rows: list[tuple[str, str]] = []
+
+    weapon_category = str(metadata.get("weapon_category") or profile.get("weapon_category") or "").strip()
+    weapon_type = item_weapon_type_label(metadata.get("weapon_type") or metadata.get("type") or profile.get("type"))
+    damage = item_damage_label(metadata, profile)
+    versatile_damage = str(metadata.get("versatile_damage") or profile.get("versatile_damage") or "").strip()
+    range_label = str(metadata.get("range") or profile.get("range") or "").strip()
+    properties = item_properties_label(metadata.get("properties") or metadata.get("property") or profile.get("properties"))
+
+    if weapon_category:
+        rows.append(("Weapon Category", weapon_category.title()))
+    if weapon_type:
+        rows.append(("Weapon Type", weapon_type))
+    if damage:
+        rows.append(("Damage", damage))
+    if versatile_damage:
+        rows.append(("Versatile Damage", versatile_damage))
+    if range_label:
+        rows.append(("Range", range_label))
+    if properties:
+        rows.append(("Weapon Properties", properties))
+
+    armor_class = str(metadata.get("ac") or "").strip()
+    if armor_class:
+        rows.append(("Armor Class", armor_class))
+    strength = str(metadata.get("strength") or "").strip()
+    if strength:
+        rows.append(("Strength", strength))
+    if metadata.get("stealth_disadvantage"):
+        rows.append(("Stealth", "Disadvantage"))
+    attunement = str(metadata.get("attunement") or "").strip()
+    if attunement and attunement.lower() not in {"false", "none", "no"}:
+        rows.append(("Attunement", attunement))
+
+    return rows
+
+
+def item_weapon_profile(entry: Any, metadata: dict[str, Any]) -> dict[str, Any]:
+    raw_profile = metadata.get("weapon_profile")
+    if isinstance(raw_profile, dict):
+        return dict(raw_profile)
+    profiles = _load_phb_weapon_profiles()
+    title = str(getattr(entry, "title", "") or "").strip()
+    title_key = normalize_lookup(title)
+    if title_key in profiles:
+        return dict(profiles[title_key])
+    base_item = str(metadata.get("base_item") or "").strip()
+    base_item_key = normalize_lookup(base_item)
+    if base_item_key in profiles:
+        return dict(profiles[base_item_key])
+    return {}
+
+
+def item_weapon_type_label(value: Any) -> str:
+    raw_value = str(value or "").split("|", 1)[0].strip().upper()
+    if raw_value == "M":
+        return "Melee weapon"
+    if raw_value == "R":
+        return "Ranged weapon"
+    return ""
+
+
+def item_damage_label(metadata: dict[str, Any], profile: dict[str, Any]) -> str:
+    explicit_damage = str(metadata.get("damage") or "").strip()
+    if explicit_damage:
+        return explicit_damage
+    damage = str(metadata.get("dmg1") or profile.get("damage") or "").strip()
+    if not damage:
+        return ""
+    damage_type = str(metadata.get("damage_type") or profile.get("damage_type") or "").strip().upper()
+    damage_type_label = DAMAGE_TYPE_LABELS.get(damage_type, str(metadata.get("damage_type") or "").strip())
+    return " ".join(part for part in (damage, damage_type_label) if part)
+
+
+def item_properties_label(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    raw_values = value if isinstance(value, list) else [value]
+    labels = []
+    for raw_value in raw_values:
+        clean_value = str(raw_value or "").strip()
+        if not clean_value:
+            continue
+        labels.append(WEAPON_PROPERTY_LABELS.get(clean_value.upper(), clean_value))
+    return ", ".join(labels)
 
 
 def resolve_linked_systems_entry(

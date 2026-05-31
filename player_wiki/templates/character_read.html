@@ -902,14 +902,45 @@
           <div class="detail-grid">
             <article class="detail-card">
               <h3>Currency</h3>
-              <ul class="plain-list slot-list">
+              <div class="currency-grid" id="session-currency">
                 {% for coin in character.currency %}
-                  <li>
-                    <span>{{ coin.label }}</span>
-                    <strong>{{ coin.amount }}</strong>
-                  </li>
+                  {% if can_use_session_mode %}
+                    <form
+                      class="currency-form currency-box"
+                      data-character-sheet-edit-form="currency"
+                      method="post"
+                      action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+                    >
+                      <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                      <input type="hidden" name="mode" value="read">
+                      <input type="hidden" name="page" value="{{ character_subpage }}">
+                      <div class="currency-box__header">
+                        <span>{{ coin.label }}</span>
+                      </div>
+                      <input
+                        class="currency-box__amount"
+                        type="number"
+                        name="{{ coin.key }}"
+                        value="{{ coin.amount }}"
+                        min="0"
+                        onchange="this.form.requestSubmit()"
+                      >
+                      <div class="session-stepper session-stepper--compact">
+                        <button type="submit" name="delta" value="{{ coin.key }}:-1">-1</button>
+                        <button type="submit" name="delta" value="{{ coin.key }}:1">+1</button>
+                      </div>
+                      <button type="submit" class="visually-hidden">Update {{ coin.label }}</button>
+                    </form>
+                  {% else %}
+                    <article class="currency-box">
+                      <div class="currency-box__header">
+                        <span>{{ coin.label }}</span>
+                      </div>
+                      <strong class="currency-box__amount">{{ coin.amount }}</strong>
+                    </article>
+                  {% endif %}
                 {% endfor %}
-              </ul>
+              </div>
             </article>
             {% if character.other_currency %}
               <article class="detail-card">

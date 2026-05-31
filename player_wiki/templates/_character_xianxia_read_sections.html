@@ -715,37 +715,50 @@
       {% if xianxia_read_inline_controls %}
         <article class="detail-card session-card">
           <h3>Currency</h3>
-          <form
-            class="currency-form"
-            data-character-sheet-edit-form="currency"
-            method="post"
-            action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
-          >
-            <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-            <input type="hidden" name="mode" value="{{ xianxia_read_form_mode }}">
-            <input type="hidden" name="page" value="{{ character_subpage }}">
-            {% if session_return_view | default("") %}
-              <input type="hidden" name="return_view" value="{{ session_return_view }}">
-            {% endif %}
+          <div class="currency-grid">
             {% for currency in xianxia_sheet.inventory.currency %}
-              <article class="currency-form__coin">
-                <label class="session-field">
+              <form
+                class="currency-form currency-box"
+                data-character-sheet-edit-form="currency"
+                method="post"
+                action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+              >
+                <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                <input type="hidden" name="mode" value="{{ xianxia_read_form_mode }}">
+                <input type="hidden" name="page" value="{{ character_subpage }}">
+                {% if session_return_view | default("") %}
+                  <input type="hidden" name="return_view" value="{{ session_return_view }}">
+                {% endif %}
+                <div class="currency-box__header">
                   <span>{{ currency.label }}</span>
-                  <input type="number" name="{{ currency.key }}" value="{{ currency.amount }}" min="0">
-                </label>
+                </div>
+                <input
+                  class="currency-box__amount"
+                  type="number"
+                  name="{{ currency.key }}"
+                  value="{{ currency.amount }}"
+                  min="0"
+                  onchange="this.form.requestSubmit()"
+                >
+                <div class="session-stepper session-stepper--compact">
+                  <button type="submit" name="delta" value="{{ currency.key }}:-1">-1</button>
+                  <button type="submit" name="delta" value="{{ currency.key }}:1">+1</button>
+                </div>
                 {% if currency.description %}
                   <p class="meta">{{ currency.description }}</p>
                 {% endif %}
-              </article>
+                <button type="submit" class="visually-hidden">Update {{ currency.label }}</button>
+              </form>
             {% endfor %}
-            <button type="submit">Save currency</button>
-          </form>
+          </div>
         </article>
       {% else %}
         {% for currency in xianxia_sheet.inventory.currency %}
-          <article class="detail-card">
-            <h3>{{ currency.label }}</h3>
-            <p><strong>{{ currency.amount }}</strong></p>
+          <article class="currency-box">
+            <div class="currency-box__header">
+              <span>{{ currency.label }}</span>
+            </div>
+            <strong class="currency-box__amount">{{ currency.amount }}</strong>
             {% if currency.description %}
               <p class="meta">{{ currency.description }}</p>
             {% endif %}

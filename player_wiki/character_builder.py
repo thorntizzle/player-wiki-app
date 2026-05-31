@@ -5358,16 +5358,25 @@ def _effect_passive_bonus(effect_keys: list[str], *, skill_name: str) -> int:
     return bonus
 
 
-def _effect_initiative_bonus(effect_keys: list[str], *, proficiency_bonus: int) -> int:
+def _effect_initiative_bonus(
+    effect_keys: list[str],
+    *,
+    proficiency_bonus: int,
+    ability_scores: dict[str, int] | None = None,
+) -> int:
     bonus = _initiative_half_proficiency_bonus(effect_keys, proficiency_bonus=proficiency_bonus)
     for effect_key in list(effect_keys or []):
         parts = _split_effect_key(effect_key)
-        if len(parts) != 2 or normalize_lookup(parts[0]) != normalize_lookup("initiative-bonus"):
-            continue
-        try:
-            bonus += int(parts[1])
-        except ValueError:
-            continue
+        effect_kind = normalize_lookup(parts[0]) if parts else ""
+        if len(parts) == 2 and effect_kind == normalize_lookup("initiative-bonus"):
+            try:
+                bonus += int(parts[1])
+            except ValueError:
+                continue
+        if len(parts) == 2 and effect_kind == normalize_lookup("initiative-bonus-ability"):
+            ability_key = normalize_lookup(parts[1])
+            if ability_key in ABILITY_KEYS:
+                bonus += _ability_modifier(dict(ability_scores or {}).get(ability_key, 10))
     return bonus
 
 
@@ -6127,6 +6136,7 @@ def _derive_definition_stats(
     stats["initiative_bonus"] = _ability_modifier(ability_scores["dex"]) + _effect_initiative_bonus(
         effect_keys,
         proficiency_bonus=proficiency_bonus,
+        ability_scores=ability_scores,
     )
     normalized_ability_scores = {
         ability_key: {
@@ -10433,6 +10443,8 @@ def _effect_keys_for_feature(feature: dict[str, Any]) -> list[str]:
             effect_keys.append("half-proficiency:all")
         if normalized_name == normalize_lookup("Remarkable Athlete"):
             effect_keys.append("half-proficiency:abilities:str,dex,con")
+        if normalized_name == normalize_lookup("Temporal Awareness"):
+            effect_keys.append("initiative-bonus-ability:int")
         if normalized_slug == normalize_lookup("phb-feat-medium-armor-master") or (
             not normalized_slug and normalized_name == normalize_lookup("Medium Armor Master")
         ):

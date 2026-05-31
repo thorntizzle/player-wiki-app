@@ -1016,25 +1016,56 @@ button {
 }
 
 .session-vitals-form,
-.session-inline-form,
-.currency-form {
+.session-inline-form {
   display: grid;
   gap: 0.75rem;
 }
 
-.currency-form {
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  align-items: end;
-}
-
-.currency-form__coin {
+.currency-grid {
   display: grid;
-  gap: 0.5rem;
-  align-content: start;
+  gap: 0.75rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.currency-form button {
-  grid-column: 1 / -1;
+.currency-form,
+.currency-box {
+  display: grid;
+  gap: 0.55rem;
+  align-content: start;
+  min-width: 0;
+}
+
+.currency-box {
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-soft-muted);
+}
+
+.currency-box__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.currency-box__amount {
+  display: block;
+  width: 100%;
+  min-height: 2.6rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  padding: 0.55rem 0.65rem;
+  color: var(--ink);
+  font: inherit;
+  font-size: 1.25rem;
+  font-weight: 800;
+  text-align: center;
 }
 
 .currency-form input[type="number"] {
@@ -1072,6 +1103,10 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.session-stepper--compact {
+  justify-content: center;
 }
 
 .session-stepper button {
@@ -1949,6 +1984,11 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .inventory-list,
+  .currency-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .character-sheet .glance-grid--quick-row-2,
   .character-sheet .glance-grid--quick-row-3,
   .character-sheet .glance-grid--quick-row-4,
@@ -1972,6 +2012,11 @@ button {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .inventory-list,
+  .currency-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .spell-detail-dialog__header {
     flex-direction: column;
   }
@@ -1992,10 +2037,16 @@ button {
 .reference-stack,
 .spell-list,
 .spellcasting-summary-grid,
-.inventory-list,
 .feature-stack {
   display: grid;
   gap: 1rem;
+}
+
+.inventory-list {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
 }
 
 .spellcasting-class-card {
@@ -2244,6 +2295,12 @@ button {
   align-content: start;
 }
 
+.inventory-row {
+  display: grid;
+  gap: 0.7rem;
+  align-content: start;
+}
+
 .spell-card__main {
   display: grid;
   gap: 0.45rem;
@@ -2267,6 +2324,17 @@ button {
 .spell-card__meta {
   color: var(--muted);
   font-size: 0.92rem;
+}
+
+.item-property-summary {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
+.item-property-summary h5 {
+  margin: 0;
+  font-size: 0.95rem;
 }
 
 .spell-card__name {
@@ -3734,5 +3802,21 @@ button {
   .session-log-list__row {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+@media (max-width: 820px) {
+  .inventory-list,
+  .currency-grid,
+  .spell-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .inventory-list,
+  .currency-grid,
+  .spell-card-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
