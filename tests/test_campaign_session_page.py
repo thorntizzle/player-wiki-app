@@ -665,7 +665,7 @@ def test_session_character_page_shows_edit_controls_only_while_session_is_active
     assert 'name="return_view" value="session-character"' in html
     assert (
         f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}"
-        "&amp;page=overview&amp;confirm_rest=short"
+        "&amp;page=spells&amp;confirm_rest=short"
     ) in html
 
 
@@ -725,12 +725,11 @@ def test_session_character_page_links_tracked_character_to_combat_workspace_when
     assert "Combat relationship" not in html
     assert "Prefer Combat:" in html
     assert (
-        "Turn-by-turn HP, movement, action economy, tracked resource spends, spell slots, "
-        "and turn order."
+        "turn-by-turn movement, action economy, conditions, and turn order while the combat encounter is active."
     ) in html
     assert (
         "Keep Session for the broader live-session workflow, rests, inventory quantities, "
-        "currency, and player notes."
+        "currency, and player notes, plus HP/temp HP, tracked resources, and spell slot usage."
     ) in html
     assert f'/campaigns/linden-pass/combat?combatant={combatant.id}' in html
     assert ">Open Combat<" in html
@@ -1117,12 +1116,12 @@ def test_session_character_active_controls_live_in_matching_dnd_panels(
         'data-combat-section-panel="inventory"',
         'data-combat-section-panel="abilities_skills"',
     )
-    assert "Save vitals" in overview_panel
-    assert 'name="page" value="overview"' in overview_panel
+    assert 'id="session-vitals"' in html
+    assert f'name="page" value="overview"' in html
     assert (
         f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}"
         "&amp;page=overview&amp;confirm_rest=short"
-    ) in overview_panel
+    ) in html
     assert 'data-character-sheet-edit-form="spell-slot"' in spells_panel
     assert "Use 1" in spells_panel
     assert 'name="page" value="spells"' in spells_panel
@@ -1135,6 +1134,44 @@ def test_session_character_active_controls_live_in_matching_dnd_panels(
     assert 'class="meta-badge">lb.' not in inventory_panel
     assert "<strong>x" not in inventory_panel
     assert "Tracked item" not in inventory_panel
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        "overview",
+        "spells",
+        "resources",
+        "features",
+        "equipment",
+        "inventory",
+        "abilities_skills",
+        "notes",
+        "personal",
+    ],
+)
+def test_session_character_dnd_session_vitals_controls_are_visible_on_all_sections(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    page,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page={page}"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert html.count('id="session-vitals"') == 1
+    assert html.find('id="session-vitals"') < html.find('data-combat-section-panel="overview"')
+    assert f'name="page" value="{page}"' in html
 
 
 def test_session_character_equipment_panel_exposes_state_controls_during_active_session(

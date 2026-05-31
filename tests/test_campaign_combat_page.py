@@ -2504,7 +2504,10 @@ def test_owner_player_combat_workspace_links_back_to_session_character_when_sess
     assert "Session relationship" in body
     assert "Keep Combat for" in body
     assert "Keep Session for" in body
-    assert "Rests, inventory quantities, currency, and player notes" in body
+    assert (
+        "HP, temp HP, tracked resources, spell slot usage, rests, inventory quantities, "
+        "currency, and notes"
+    ) in body
     assert '/campaigns/linden-pass/session/character?character=arden-march' in body
     assert '>Open Session Character<' in body
     assert '>Open Session<' in body

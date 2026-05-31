@@ -51,21 +51,29 @@
   {% endif %}
 {% endmacro %}
 
+{% if session_character_editing_enabled %}
+  {% with
+    session_character_form_page = character_subpage,
+    session_character_compact_controls = true
+  %}
+    {% include "_character_session_bar.html" %}
+  {% endwith %}
+  {% if rest_preview %}
+    {% with
+      session_character_controls_scope = "overview",
+      session_character_form_page = character_subpage,
+      session_character_hide_currency_controls = true
+    %}
+      {% include "_character_session_panels.html" %}
+    {% endwith %}
+  {% endif %}
+{% endif %}
+
 <section
   class="read-section combat-workspace-panel"
   data-combat-section-panel="overview"
   {% if active_session_character_panel != 'overview' %}hidden{% endif %}
 >
-  {% if session_character_editing_enabled %}
-    {% set session_character_form_page = "overview" %}
-    {% include "_character_session_bar.html" %}
-    {% if rest_preview %}
-      {% set session_character_controls_scope = "overview" %}
-      {% set session_character_form_page = "overview" %}
-      {% include "_character_session_panels.html" %}
-    {% endif %}
-  {% endif %}
-
   <section id="session-character-overview">
     <h2>At a glance</h2>
     <div class="glance-grid">

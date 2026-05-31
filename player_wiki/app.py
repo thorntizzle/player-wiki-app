@@ -392,20 +392,20 @@ CHARACTER_SHEET_EDIT_ACCESS_RULES = (
     "Observers and unassigned players stay on the standard Character page without inline state-edit affordances.",
 )
 COMBAT_AND_SESSION_COMBAT_SCOPE = (
-    "HP, temp HP, movement, and action economy",
-    "Tracked resource spends and spell slot usage",
-    "Turn order and other combat-only encounter context",
+    "Turn order and encounter context",
+    "Movement and action economy",
+    "Conditions and other tactical state",
 )
 COMBAT_AND_SESSION_COMBAT_SUMMARY = (
-    "Turn-by-turn HP, movement, action economy, tracked resource spends, spell slots, and turn order"
+    "turn-by-turn movement, action economy, conditions, and turn order while the combat encounter is active"
 )
 COMBAT_AND_SESSION_SESSION_SCOPE = (
     "Chat, revealed articles, and wiki lookup on the main Session page",
-    "Rests, inventory quantities, currency, and player notes",
+    "HP, temp HP, tracked resources, spell slot usage, rests, inventory quantities, currency, and notes",
     "Broader in-play character reference outside the encounter view",
 )
 COMBAT_AND_SESSION_SESSION_SUMMARY = (
-    "the broader live-session workflow, rests, inventory quantities, currency, and player notes"
+    "the broader live-session workflow, rests, inventory quantities, currency, and player notes, plus HP/temp HP, tracked resources, and spell slot usage"
 )
 SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE = "Personal details are edited outside Session Character."
 SESSION_CHARACTER_ADVANCED_PERSONAL_EDIT_BLOCK_MESSAGE = (
