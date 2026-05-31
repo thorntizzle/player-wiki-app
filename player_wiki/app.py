@@ -357,31 +357,33 @@ CHARACTER_READ_TO_SESSION_CHARACTER_PAGE_MAP = {
 SESSION_CHARACTER_ACTIVE_EDIT_SCOPE = (
     "Vitals and rests on Overview",
     "Tracked resource counts and spell slot usage",
+    "Equipment state for equip/unequip, attunement, and weapon wielding",
     "Inventory quantities and currency totals",
     "Player notes",
 )
 SESSION_CHARACTER_ACTIVE_EDIT_SUMMARY = (
-    "Vitals, rests, tracked resources, spell slots, inventory quantities, currency, and player notes"
+    "Vitals, rests, tracked resources, spell slots, equipment state, inventory quantities, currency, and player notes"
 )
 CHARACTER_SHEET_EDIT_FIRST_PASS_SCOPE = (
     "Current HP, temp HP, tracked resources, and spell slot usage",
+    "Equipment state for equip/unequip, attunement, and weapon wielding",
     "Inventory quantities and currency totals",
     "Player notes",
 )
 CHARACTER_SHEET_EDIT_OUTSIDE_FIRST_PASS_SCOPE = (
     "Rests and other relative quick actions",
     "Spell-list changes and other non-slot spell management",
-    "Profile text (physical description, background), equipment state, portrait changes, and broader inventory/equipment maintenance",
+    "Profile text (physical description, background), portrait changes, and broader inventory/equipment maintenance",
     "Advanced character edit, level-up, retraining, and controls",
 )
 SESSION_CHARACTER_FULL_PAGE_ONLY_SCOPE = (
     "Portrait management on Character Personal, and physical description/background in Advanced Editor",
     "Spell-list changes and other non-slot spell management",
-    "Equipment state and broader inventory or equipment maintenance",
+    "Inventory add/remove work and other equipment maintenance beyond equipped, attuned, or wielding state",
     "Advanced character edit, level-up, retraining, and controls",
 )
 SESSION_CHARACTER_FULL_PAGE_ONLY_SUMMARY = (
-    "portrait management, Advanced Editor reference text, spell-list changes, equipment or broader inventory work, and advanced maintenance"
+    "portrait management, Advanced Editor reference text, spell-list changes, inventory add/remove work, and advanced maintenance"
 )
 CHARACTER_SHEET_EDIT_ACCESS_RULES = (
     "Assigned player owners can use inline Character-page state edits for their own characters.",
@@ -408,28 +410,6 @@ COMBAT_AND_SESSION_SESSION_SUMMARY = (
 SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE = "Personal details are edited outside Session Character."
 SESSION_CHARACTER_ADVANCED_PERSONAL_EDIT_BLOCK_MESSAGE = (
     "Physical description and background are edited in Advanced Editor."
-)
-SESSION_CHARACTER_PERMISSION_RULES = (
-    {
-        "label": "Assigned players",
-        "description": "Open only their own session-enabled character here.",
-    },
-    {
-        "label": "DMs",
-        "description": "Open any session-enabled character in the campaign and use the chooser to switch sheets.",
-    },
-    {
-        "label": "Observers",
-        "description": "Stay on the main Session page and do not get a character sheet here.",
-    },
-    {
-        "label": "Admins",
-        "description": "Keep the same cross-character access as DMs.",
-    },
-)
-SESSION_CHARACTER_PERMISSION_NOTE = (
-    "Editing controls appear only during an active DM-started session and stay limited to the "
-    "session-safe slice."
 )
 COMBAT_SUBPAGE_LABELS = {
     "combat": "Combat",
@@ -3784,38 +3764,6 @@ def create_app() -> Flask:
                 return combatant
         return None
 
-    def build_session_character_access_summary(
-        campaign_slug: str,
-        *,
-        can_manage_session: bool,
-        accessible_records: list[object],
-    ) -> str:
-        current_user = get_current_user()
-        role = get_campaign_role(campaign_slug)
-        if current_user is not None and current_user.is_admin:
-            return (
-                "Current access: admin cross-character access. You can open any "
-                "session-enabled character here."
-            )
-        if can_manage_session:
-            return (
-                "Current access: DM cross-character access. You can open any "
-                "session-enabled character here."
-            )
-        if accessible_records:
-            return (
-                "Current access: assigned-player access. This page stays scoped to your "
-                "own session-enabled character."
-            )
-        if role == "observer":
-            return (
-                "Current access: observers stay on the main Session page and do not get a "
-                "session character sheet."
-            )
-        if role == "player":
-            return "Current access: no session-enabled character is assigned to this account yet."
-        return "Current access: only assigned players, DMs, and admins can open this surface."
-
     def build_session_character_empty_state(
         campaign_slug: str,
         *,
@@ -6112,6 +6060,11 @@ def create_app() -> Flask:
                 message_count=len(live_messages),
             )
 
+        close_requested = (
+            selected_character_slug is None
+            and can_manage_session
+            and request.args.get("closed") == "1"
+        )
         requested_character_slug = (
             str(selected_character_slug).strip()
             if selected_character_slug is not None
@@ -6119,12 +6072,17 @@ def create_app() -> Flask:
         )
         if requested_character_slug and requested_character_slug not in accessible_records_by_slug:
             abort(403)
-        selected_character_slug = requested_character_slug or (
-            get_default_session_character_slug(
-                campaign_slug,
-                accessible_records=accessible_records,
+        selected_character_slug = (
+            ""
+            if close_requested
+            else requested_character_slug
+            or (
+                get_default_session_character_slug(
+                    campaign_slug,
+                    accessible_records=accessible_records,
+                )
+                or ""
             )
-            or ""
         )
 
         session_character_cards = []
@@ -6375,13 +6333,16 @@ def create_app() -> Flask:
                 else ""
             ),
             "session_character_cards": session_character_cards,
-            "session_character_access_summary": build_session_character_access_summary(
-                campaign_slug,
-                can_manage_session=can_manage_session,
-                accessible_records=accessible_records,
+            "session_character_can_close": bool(can_manage_session and selected_character_slug),
+            "session_character_close_href": (
+                url_for(
+                    "campaign_session_character_view",
+                    campaign_slug=campaign.slug,
+                    closed="1",
+                )
+                if can_manage_session and selected_character_slug
+                else ""
             ),
-            "session_character_permission_note": SESSION_CHARACTER_PERMISSION_NOTE,
-            "session_character_permission_rules": SESSION_CHARACTER_PERMISSION_RULES,
             "session_character_empty_state_title": session_character_empty_state_title,
             "session_character_empty_state_message": session_character_empty_state_message,
             "character": character,

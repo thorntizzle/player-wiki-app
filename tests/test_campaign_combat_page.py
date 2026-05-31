@@ -3145,10 +3145,13 @@ def test_combat_character_inventory_collapses_linked_item_descriptions(app, clie
     for body in [dm_page.get_data(as_text=True), player_page.get_data(as_text=True)]:
         assert "Stormglass Compass" in body
         assert 'href="/campaigns/linden-pass/pages/items/stormglass-compass"' in body
-        assert '<details class="item-description-detail">' in body
-        assert "<summary>Item details</summary>" in body
+        assert 'data-character-spell-modal-trigger' in body
+        assert 'data-character-spell-modal' in body
+        assert 'combat-inventory-item-detail-' in body
+        assert 'aria-controls="combat-inventory-item-detail-' in body
         assert "This brass compass glows pale blue when a storm front shifts closer to the coast." in body
         assert '<details class="item-description-detail" open' not in body
+        assert "<summary>Item details</summary>" not in body
         assert "Unlinked Field Token" in body
         assert "<p>Marks the safe route.</p>" in body
         assert 'class="meta-badge">x' not in body
@@ -3268,11 +3271,12 @@ def test_combat_character_spells_collapse_linked_spell_descriptions(app, client,
 
     for body in [dm_page.get_data(as_text=True), player_page.get_data(as_text=True)]:
         assert "Message" in body
-        assert 'href="/campaigns/linden-pass/pages/spells/message"' in body
-        assert '<details class="item-description-detail">' in body
-        assert "<summary>Spell details</summary>" in body
+        assert 'data-character-spell-modal-trigger' in body
+        assert 'data-character-spell-modal' in body
+        assert 'combat-spell-detail-dialog-' in body
         assert "You point toward a creature within range and whisper a short message only it can hear." in body
         assert '<details class="item-description-detail" open' not in body
+        assert "<summary>Spell details</summary>" not in body
 
 
 def test_owner_player_combat_workspace_resource_mutations_redirect_back_to_combat(

@@ -14,32 +14,159 @@
       <input type="hidden" name="combat_view" value="status">
     {% endif %}
   {% endmacro %}
-  {% macro combat_item_description_details(item) %}
-    {% if item.href and (item.description_html or item.notes) %}
-      <details class="item-description-detail">
-        <summary>Item details</summary>
-        <div class="item-description-detail__body">
-          {% if item.notes %}
-            <p>{{ item.notes }}</p>
-          {% endif %}
-          {% if item.description_html %}
-            <div class="article-body article-body--compact">{{ item.description_html | safe }}</div>
-          {% endif %}
+  {% macro combat_spell_detail_content(spell) %}
+    <div class="spell-detail-content">
+      <dl class="spell-detail-content__facts">
+        <div>
+          <dt>Level</dt>
+          <dd>{{ spell.level_label }}{% if spell.school %} ({{ spell.school }}){% endif %}</dd>
         </div>
-      </details>
+        {% if spell.casting_time and spell.casting_time != '--' %}
+          <div>
+            <dt>Casting time</dt>
+            <dd>{{ spell.casting_time }}</dd>
+          </div>
+        {% endif %}
+        {% if spell.range and spell.range != '--' %}
+          <div>
+            <dt>Range</dt>
+            <dd>{{ spell.range }}</dd>
+          </div>
+        {% endif %}
+        {% if spell.duration and spell.duration != '--' %}
+          <div>
+            <dt>Duration</dt>
+            <dd>{{ spell.duration }}</dd>
+          </div>
+        {% endif %}
+        {% if spell.components and spell.components != '--' %}
+          <div>
+            <dt>Components</dt>
+            <dd>{{ spell.components }}</dd>
+          </div>
+        {% endif %}
+        {% if spell.save_or_hit and spell.save_or_hit != '--' %}
+          <div>
+            <dt>Save / attack</dt>
+            <dd>{{ spell.save_or_hit }}</dd>
+          </div>
+        {% endif %}
+      </dl>
+      {% if spell.management_note %}
+        <p class="meta">{{ spell.management_note }}</p>
+      {% endif %}
+      {% if spell.description_html %}
+        <div class="article-body article-body--compact">{{ spell.description_html | safe }}</div>
+      {% else %}
+        <p class="meta">No linked spell detail text is available for this spell yet.</p>
+      {% endif %}
+    </div>
+  {% endmacro %}
+  {% macro combat_spell_fallback_details(spell, dialog_id) %}
+    {% if spell.description_html or spell.href %}
+      <noscript>
+        <div class="item-description-detail spell-card__fallback" id="{{ dialog_id }}-fallback">
+          <h4>Spell details</h4>
+          {{ combat_spell_detail_content(spell) }}
+        </div>
+      </noscript>
+    {% endif %}
+  {% endmacro %}
+  {% macro combat_item_description_details(item, dialog_id) %}
+    {% if item.href and (item.description_html or item.notes) %}
+      <button
+        type="button"
+        class="ghost-button item-detail-button"
+        data-character-spell-modal-trigger
+        aria-haspopup="dialog"
+        aria-controls="{{ dialog_id }}"
+      >
+        Item details
+      </button>
+      <dialog id="{{ dialog_id }}" class="spell-detail-dialog item-detail-dialog" data-character-spell-modal>
+        <div class="spell-detail-dialog__panel">
+          <div class="spell-detail-dialog__header">
+            <div>
+              <p class="meta">Item details</p>
+              <h3>{{ item.name }}</h3>
+            </div>
+            <button type="button" class="ghost-button" data-character-spell-modal-close>Close</button>
+          </div>
+          <div class="spell-detail-content item-detail-content">
+            {% if item.notes %}
+              <p>{{ item.notes }}</p>
+            {% endif %}
+            {% if item.description_html %}
+              <div class="article-body article-body--compact">{{ item.description_html | safe }}</div>
+            {% endif %}
+          </div>
+        </div>
+      </dialog>
+      <noscript>
+        <div class="item-description-detail">
+          <h4>Item details</h4>
+          <div class="item-description-detail__body">
+            {% if item.notes %}
+              <p>{{ item.notes }}</p>
+            {% endif %}
+            {% if item.description_html %}
+              <div class="article-body article-body--compact">{{ item.description_html | safe }}</div>
+            {% endif %}
+          </div>
+        </div>
+      </noscript>
     {% elif item.notes %}
       <p>{{ item.notes }}</p>
     {% endif %}
   {% endmacro %}
-  {% macro combat_spell_description_details(spell) %}
-    {% if spell.href and spell.description_html %}
-      <details class="item-description-detail">
-        <summary>Spell details</summary>
-        <div class="item-description-detail__body">
-          <div class="article-body article-body--compact">{{ spell.description_html | safe }}</div>
+  {% macro combat_spell_row_detail_button(spell, dialog_id) %}
+    <button
+      type="button"
+      class="spell-card__main"
+      data-character-spell-modal-trigger
+      aria-haspopup="dialog"
+      aria-controls="{{ dialog_id }}"
+    >
+      <span class="spell-card__eyebrow">{{ spell.level_label }}{% if spell.school %} | {{ spell.school }}{% endif %}</span>
+      <span class="spell-card__name">{{ spell.name }}</span>
+      {% if spell.badges %}
+        <span class="badge-list spell-card__badges">
+          {% for badge in spell.badges %}
+            <span class="meta-badge">{{ badge }}</span>
+          {% endfor %}
+        </span>
+      {% endif %}
+      <span class="spell-card__meta">
+        {% if spell.casting_time and spell.casting_time != '--' %}{{ spell.casting_time }}{% endif %}
+        {% if spell.range and spell.range != '--' %}{% if spell.casting_time and spell.casting_time != '--' %} | {% endif %}{{ spell.range }}{% endif %}
+      </span>
+    </button>
+  {% endmacro %}
+
+  {% macro combat_spell_card_dialog(spell, dialog_id) %}
+    <article class="spell-card">
+      {{ combat_spell_row_detail_button(spell, dialog_id) }}
+      {{ combat_spell_fallback_details(spell, dialog_id) }}
+      <dialog id="{{ dialog_id }}" class="spell-detail-dialog" data-character-spell-modal>
+        <div class="spell-detail-dialog__panel">
+          <div class="spell-detail-dialog__header">
+            <div>
+              <p class="meta">{{ spell.level_label }}{% if spell.school %} | {{ spell.school }}{% endif %}</p>
+              <h3>{{ spell.name }}</h3>
+            </div>
+            <button type="button" class="ghost-button" data-character-spell-modal-close>Close</button>
+          </div>
+          {% if spell.badges %}
+            <div class="badge-list">
+              {% for badge in spell.badges %}
+                <span class="meta-badge">{{ badge }}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
+          {{ combat_spell_detail_content(spell) }}
         </div>
-      </details>
-    {% endif %}
+      </dialog>
+    </article>
   {% endmacro %}
 
   {% set workspace_title = combat_workspace_title | default("Combat sections", true) %}
@@ -284,6 +411,7 @@
                   </div>
                 </div>
               {% endif %}
+              {% set spell_section_loop_index = loop.index %}
               {% if spell_section.counts %}
                 <ul class="plain-list slot-list">
                   {% for count in spell_section.counts %}
@@ -295,33 +423,10 @@
                 </ul>
               {% endif %}
               {% if spell_section.spells %}
-                <div class="spell-list">
+                <div class="spell-card-grid">
                   {% for spell in spell_section.spells %}
-                    <article class="spell-row">
-                      <div class="spell-row__header">
-                        <h3>
-                          {% if spell.href %}
-                            <a href="{{ spell.href }}">{{ spell.name }}</a>
-                          {% else %}
-                            {{ spell.name }}
-                          {% endif %}
-                        </h3>
-                        {% if spell.badges %}
-                          <div class="badge-list">
-                            {% for badge in spell.badges %}
-                              <span class="meta-badge">{{ badge }}</span>
-                            {% endfor %}
-                          </div>
-                        {% endif %}
-                      </div>
-                      <p class="meta">
-                        {{ spell.casting_time }} | {{ spell.range }} | {{ spell.duration }} | {{ spell.components }}
-                        {% if spell.save_or_hit and spell.save_or_hit != '--' %}
-                          | {{ spell.save_or_hit }}
-                        {% endif %}
-                      </p>
-                      {{ combat_spell_description_details(spell) }}
-                    </article>
+                    {% set spell_dialog_id = "combat-spell-detail-dialog-" ~ spell_section_loop_index ~ "-" ~ loop.index %}
+                    {{ combat_spell_card_dialog(spell, spell_dialog_id) }}
                   {% endfor %}
                 </div>
               {% else %}
@@ -483,7 +588,7 @@
             {% include "_arcane_armor_state_card.html" %}
           {% endif %}
           {% if equipment_state.rows %}
-            <div class="character-edit-stack">
+            <div class="equipment-state-grid" id="combat-character-equipment-state">
               {% for item in equipment_state.rows %}
                 <article class="detail-card character-edit-row">
                   <div class="section-heading">
@@ -497,11 +602,6 @@
                     <span class="meta">{{ item.source_label }}</span>
                   </div>
                   <p class="meta">
-                    x{{ item.quantity }}
-                    {% if item.weight %} | {{ item.weight }}{% endif %}
-                    {% if item.requires_attunement %} | Requires attunement{% endif %}
-                  </p>
-                  <p class="meta">
                     {{ item.equipped_label }}
                     {% if item.requires_attunement %}
                       {% if item.is_attuned %} | Attuned{% else %} | Not attuned{% endif %}
@@ -510,7 +610,8 @@
                   {% if item.tags %}
                     <p class="meta">{{ item.tags | join(", ") }}</p>
                   {% endif %}
-                  {{ combat_item_description_details(item) }}
+                  {% set item_dialog_id = "combat-equipment-item-detail-" ~ loop.index %}
+                  {{ combat_item_description_details(item, item_dialog_id) }}
                   {% if can_edit_combat_equipment_state and selected_combatant_id %}
                     <form
                       class="stack-form"
@@ -549,7 +650,7 @@
                           </label>
                         {% endif %}
                       </div>
-                      {% if item.attunement_hint %}
+                      {% if item.attunement_hint and item.attunement_hint != "Requires attunement" %}
                         <p class="meta">{{ item.attunement_hint }}</p>
                       {% endif %}
                       <div class="hero-actions">
@@ -586,6 +687,7 @@
         {% if section.inventory %}
           <div class="inventory-list">
             {% for item in section.inventory %}
+              {% set item_dialog_id = "combat-inventory-item-detail-" ~ loop.index %}
               <article class="inventory-row">
                 <div class="inventory-row__header">
                   <h3>
@@ -609,7 +711,7 @@
                 {% if item.tags %}
                   <p class="meta">{{ item.tags | join(", ") }}</p>
                 {% endif %}
-                {{ combat_item_description_details(item) }}
+                {{ combat_item_description_details(item, item_dialog_id) }}
               </article>
             {% endfor %}
           </div>

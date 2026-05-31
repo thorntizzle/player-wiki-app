@@ -1,4 +1,55 @@
 {% set active_session_character_panel = character_subpage if character_subpage else "overview" %}
+{% macro session_character_item_description_details(item, dialog_id) %}
+  {% if item.href and (item.description_html or item.notes) %}
+    <button
+      type="button"
+      class="ghost-button item-detail-button"
+      data-character-spell-modal-trigger
+      aria-haspopup="dialog"
+      aria-controls="{{ dialog_id }}"
+    >
+      Item details
+    </button>
+    <dialog id="{{ dialog_id }}" class="spell-detail-dialog item-detail-dialog" data-character-spell-modal>
+      <div class="spell-detail-dialog__panel">
+        <div class="spell-detail-dialog__header">
+          <div>
+            <p class="meta">Item details</p>
+            <h3>{{ item.name }}</h3>
+          </div>
+          <button type="button" class="ghost-button" data-character-spell-modal-close>Close</button>
+        </div>
+        <div class="spell-detail-content item-detail-content">
+          {% if item.notes %}
+            <p>{{ item.notes }}</p>
+          {% endif %}
+          {% if item.description_html %}
+            <div class="article-body article-body--compact">{{ item.description_html | safe }}</div>
+          {% endif %}
+        </div>
+      </div>
+    </dialog>
+  {% elif item.notes %}
+    <p>{{ item.notes }}</p>
+  {% endif %}
+{% endmacro %}
+{% macro session_character_item_fallback_details(item) %}
+  {% if item.href and (item.description_html or item.notes) %}
+    <noscript>
+      <div class="item-description-detail">
+        <h4>Item details</h4>
+        <div class="item-description-detail__body">
+          {% if item.notes %}
+            <p>{{ item.notes }}</p>
+          {% endif %}
+          {% if item.description_html %}
+            <div class="article-body article-body--compact">{{ item.description_html | safe }}</div>
+          {% endif %}
+        </div>
+      </div>
+    </noscript>
+  {% endif %}
+{% endmacro %}
 
 <section
   class="read-section combat-workspace-panel"
@@ -197,7 +248,7 @@
   {% endif %}
 
   {% if equipment_state_manager.rows %}
-    <div class="character-edit-stack" id="character-equipment-state">
+    <div class="equipment-state-grid" id="character-equipment-state">
       {% for item in equipment_state_manager.rows %}
         <article class="detail-card character-edit-row">
           <div class="section-heading">
@@ -211,11 +262,6 @@
             <span class="meta">{{ item.source_label }}</span>
           </div>
           <p class="meta">
-            x{{ item.quantity }}
-            {% if item.weight %} | {{ item.weight }}{% endif %}
-            {% if item.requires_attunement %} | Requires attunement{% endif %}
-          </p>
-          <p class="meta">
             {{ item.equipped_label }}
             {% if item.requires_attunement %}
               {% if item.is_attuned %} | Attuned{% else %} | Not attuned{% endif %}
@@ -224,9 +270,9 @@
           {% if item.tags %}
             <p class="meta">{{ item.tags | join(", ") }}</p>
           {% endif %}
-          {% if item.notes %}
-            <p>{{ item.notes }}</p>
-          {% endif %}
+          {% set item_dialog_id = "session-equipment-item-detail-" ~ loop.index %}
+          {{ session_character_item_description_details(item, item_dialog_id) }}
+          {{ session_character_item_fallback_details(item) }}
           {% if session_character_editing_enabled %}
             <form
               class="stack-form"
@@ -264,7 +310,7 @@
                   </label>
                 {% endif %}
               </div>
-              {% if item.attunement_hint %}
+              {% if item.attunement_hint and item.attunement_hint != "Requires attunement" %}
                 <p class="meta">{{ item.attunement_hint }}</p>
               {% endif %}
               <div class="hero-actions">
@@ -298,6 +344,7 @@
   {% if character.inventory %}
     <div class="inventory-list">
       {% for item in character.inventory %}
+        {% set item_dialog_id = "session-inventory-item-detail-" ~ loop.index %}
         <article class="inventory-row">
           <div class="inventory-row__header">
             <h3>
@@ -311,9 +358,8 @@
           {% if item.tags %}
             <p class="meta">{{ item.tags | join(", ") }}</p>
           {% endif %}
-          {% if item.notes %}
-            <p>{{ item.notes }}</p>
-          {% endif %}
+          {{ session_character_item_description_details(item, item_dialog_id) }}
+          {{ session_character_item_fallback_details(item) }}
         </article>
       {% endfor %}
     </div>

@@ -520,6 +520,8 @@ def test_session_character_equipment_page_filters_inventory_only_rows(client, si
     assert "Backpack" in inventory_panel
     assert "Not attuned" not in equipment_panel
     assert "Save equipment state" not in equipment_panel
+    assert 'data-character-spell-modal-trigger' in html
+    assert "<summary>Item details</summary>" not in html
 
 
 def test_session_character_page_keeps_single_sheet_players_out_of_a_redundant_roster_sidebar(
@@ -549,51 +551,65 @@ def test_dm_session_character_page_keeps_character_chooser_for_cross_character_a
     assert "Open any session-enabled character sheet from the current campaign." in html
 
 
-def test_session_character_page_spells_out_role_permissions_for_assigned_player(client, sign_in, users):
+def test_dm_can_close_selected_session_character(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Session character" in html
+    assert "Arden March" in html
+    assert 'href="/campaigns/linden-pass/session/character?closed=1"' in html
+    assert "Close character" in html
+
+    closed_response = client.get("/campaigns/linden-pass/session/character?closed=1")
+
+    assert closed_response.status_code == 200
+    closed_html = closed_response.get_data(as_text=True)
+    assert "Choose a character" in closed_html
+    assert "Select a session-enabled character from the sidebar to open its sheet here." in closed_html
+    assert "Character sections" not in closed_html
+    assert "Close character" not in closed_html
+
+
+def test_session_character_page_omits_permission_module_for_assigned_player(client, sign_in, users):
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
     response = client.get("/campaigns/linden-pass/session/character")
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Permission behavior" in html
-    assert (
-        "Current access: assigned-player access. This page stays scoped to your own "
-        "session-enabled character."
-    ) in html
-    assert (
-        "Editing controls appear only during an active DM-started session and stay limited "
-        "to the session-safe slice."
-    ) in html
+    assert "Permission behavior" not in html
+    assert "Current access: assigned-player access" not in html
+    assert "Editing controls appear only during an active DM-started session" not in html
     assert "/campaigns/linden-pass/help#session" in html
     assert "Open only their own session-enabled character here." not in html
 
 
-def test_dm_session_character_page_explains_dm_cross_character_access(client, sign_in, users):
+def test_dm_session_character_page_omits_permission_module_for_cross_character_access(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
     response = client.get("/campaigns/linden-pass/session/character")
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert (
-        "Current access: DM cross-character access. You can open any session-enabled "
-        "character here."
-    ) in html
+    assert "Permission behavior" not in html
+    assert "Current access: DM cross-character access" not in html
+    assert "Open any session-enabled character sheet from the current campaign." in html
 
 
-def test_admin_session_character_page_explains_admin_cross_character_access(client, sign_in, users):
+def test_admin_session_character_page_omits_permission_module_for_cross_character_access(client, sign_in, users):
     sign_in(users["admin"]["email"], users["admin"]["password"])
 
     response = client.get("/campaigns/linden-pass/session/character")
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Permission behavior" in html
-    assert (
-        "Current access: admin cross-character access. You can open any session-enabled "
-        "character here."
-    ) in html
+    assert "Permission behavior" not in html
+    assert "Current access: admin cross-character access" not in html
 
 
 def test_unassigned_player_session_character_page_explains_assignment_requirement(client, sign_in, users):
@@ -608,7 +624,7 @@ def test_unassigned_player_session_character_page_explains_assignment_requiremen
         "This account does not currently have a session-enabled character assigned in this "
         "campaign. Assigned players can open only their own session-enabled character here."
     ) in html
-    assert "Current access: no session-enabled character is assigned to this account yet." in html
+    assert "Current access:" not in html
 
 
 def test_observer_session_character_page_explains_character_tab_is_unavailable(
@@ -627,10 +643,7 @@ def test_observer_session_character_page_explains_character_tab_is_unavailable(
         "Observers stay on the main Session page. Only assigned players, DMs, and admins can "
         "open the Character surface."
     ) in html
-    assert (
-        "Current access: observers stay on the main Session page and do not get a session "
-        "character sheet."
-    ) in html
+    assert "Current access:" not in html
 
 
 def test_session_character_page_shows_edit_controls_only_while_session_is_active(
@@ -674,10 +687,13 @@ def test_session_character_page_explains_active_session_edit_scope(
     assert "Session editing scope" not in html
     assert "Edit here during an active session" not in html
     assert "Session edits:" in html
-    assert "Vitals, rests, tracked resources, spell slots, inventory quantities, currency, and player notes." in html
+    assert (
+        "Vitals, rests, tracked resources, spell slots, equipment state, inventory quantities, "
+        "currency, and player notes."
+    ) in html
     assert "Full character page:" in html
     assert (
-        "Portrait/background details, spell-list changes, equipment or broader inventory work, "
+        "portrait management, Advanced Editor reference text, spell-list changes, inventory add/remove work, "
         "and advanced maintenance."
     ) in html
 

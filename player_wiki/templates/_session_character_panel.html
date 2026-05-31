@@ -43,9 +43,14 @@
             {% if character.death_save_summary %}
               <p class="meta">Death saves: {{ character.death_save_summary }}</p>
             {% endif %}
-            {% if can_view_full_character_sheet and full_character_sheet_url %}
+            {% if (can_view_full_character_sheet and full_character_sheet_url) or (session_character_can_close and session_character_close_href) %}
               <div class="hero-actions">
-                <a class="ghost-button" href="{{ full_character_sheet_url }}">Open full character page</a>
+                {% if can_view_full_character_sheet and full_character_sheet_url %}
+                  <a class="ghost-button" href="{{ full_character_sheet_url }}">Open full character page</a>
+                {% endif %}
+                {% if session_character_can_close and session_character_close_href %}
+                  <a class="ghost-button" href="{{ session_character_close_href }}">Close character</a>
+                {% endif %}
               </div>
             {% endif %}
           </header>
@@ -594,17 +599,6 @@
         </div>
       </article>
 
-      <article class="card session-sidebar-card">
-        <div class="section-heading">
-          <div>
-            <h2>Permission behavior</h2>
-            <p class="meta">{{ session_character_access_summary }}</p>
-          </div>
-          <a class="ghost-button" href="{{ url_for('campaign_help_view', campaign_slug=campaign.slug) }}#session">Open Help</a>
-        </div>
-        <p class="meta">{{ session_character_permission_note }}</p>
-      </article>
-
       {% set show_character_chooser = can_manage_session or session_character_cards|length > 1 %}
       {% if show_character_chooser %}
       <article class="card session-sidebar-card">
@@ -648,9 +642,14 @@
                     {% endfor %}
                   </ul>
                 {% endif %}
-                <a class="{% if card.is_selected %}button-link{% else %}ghost-button{% endif %}" href="{{ card.href }}">
-                  Open in Session
-                </a>
+                <div class="hero-actions">
+                  <a class="{% if card.is_selected %}button-link{% else %}ghost-button{% endif %}" href="{{ card.href }}">
+                    Open in Session
+                  </a>
+                  {% if card.is_selected and session_character_can_close and session_character_close_href %}
+                    <a class="ghost-button" href="{{ session_character_close_href }}">Close</a>
+                  {% endif %}
+                </div>
               </article>
             {% endfor %}
           </div>
