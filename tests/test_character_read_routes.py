@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from io import BytesIO
+from pathlib import Path
 import re
 import yaml
 from datetime import datetime, timezone
@@ -6450,6 +6451,8 @@ def test_spellcasting_subpage_can_prepare_spells_and_protect_always_prepared_ent
     assert 'data-character-spellcasting-view-panel="current"' in page_html
     assert 'data-character-spellcasting-view-panel="preparation"' in page_html
     assert re.search(r'id="character-spell-preparation-view"[^>]+hidden', page_html)
+    styles_path = Path(app.root_path) / "static" / "styles.css"
+    assert ".spellcasting-view-panel[hidden]" in styles_path.read_text(encoding="utf-8")
     assert "Always prepared" in page_html
     assert page_html.count("Cure Wounds") == 1
 

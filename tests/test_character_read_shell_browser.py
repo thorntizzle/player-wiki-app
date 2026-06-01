@@ -3,6 +3,7 @@ import threading
 from copy import deepcopy
 
 import pytest
+import yaml
 
 
 @pytest.fixture
@@ -34,6 +35,19 @@ def _write_character_state(app, character_slug: str, mutator) -> None:
             payload,
             expected_revision=record.state_record.revision,
         )
+
+
+def _write_character_definition(app, character_slug: str, mutator) -> None:
+    definition_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / character_slug
+        / "definition.yaml"
+    )
+    payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    mutator(payload)
+    definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
 def _check_no_horizontal_overflow(page, selector: str, viewport_name: str, *, required: bool) -> None:
@@ -125,6 +139,105 @@ def _wait_for_app_loading_cover(page) -> None:
         }""",
         timeout=5000,
     )
+
+
+def test_spellcasting_subview_buttons_hide_and_show_panels(
+    app,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Cleric 5"
+        profile["classes"] = [{"class_name": "Cleric", "level": 5}]
+        payload["profile"] = profile
+        payload["spellcasting"] = {
+            "spellcasting_class": "Cleric",
+            "spellcasting_ability": "Wisdom",
+            "spell_save_dc": 14,
+            "spell_attack_bonus": 6,
+            "slot_progression": [
+                {"level": 1, "max_slots": 4},
+                {"level": 2, "max_slots": 3},
+                {"level": 3, "max_slots": 2},
+            ],
+            "spells": [
+                {
+                    "name": "Guidance",
+                    "level": 0,
+                    "casting_time": "1 action",
+                    "range": "Touch",
+                    "duration": "1 minute",
+                    "components": "V, S",
+                    "source": "Cleric",
+                },
+                {
+                    "name": "Cure Wounds",
+                    "level": 1,
+                    "casting_time": "1 action",
+                    "range": "Touch",
+                    "duration": "Instantaneous",
+                    "components": "V, S",
+                    "source": "Cleric",
+                },
+                {
+                    "name": "Bless",
+                    "level": 1,
+                    "casting_time": "1 action",
+                    "range": "30 feet",
+                    "duration": "Concentration, up to 1 minute",
+                    "components": "V, S, M",
+                    "source": "Cleric (Always Prepared)",
+                    "mark": "P",
+                    "is_always_prepared": True,
+                },
+            ],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+    set_campaign_visibility("linden-pass", characters="players")
+    base_url = character_read_shell_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            page.goto(f"{base_url}/sign-in")
+            page.locator("input[name='email']").fill(users["dm"]["email"])
+            page.locator("input[name='password']").fill(users["dm"]["password"])
+            page.locator("button[type='submit']").click()
+            page.wait_for_url(re.compile(rf"^{re.escape(base_url)}/.*"), timeout=5000)
+
+            page.goto(f"{base_url}/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+            _wait_for_app_loading_cover(page)
+
+            current_panel = page.locator("#character-spell-current-view")
+            preparation_panel = page.locator("#character-spell-preparation-view")
+            expect(current_panel).to_be_visible(timeout=5000)
+            expect(preparation_panel).to_be_hidden(timeout=5000)
+            expect(current_panel.locator(".spell-card__name", has_text="Bless")).to_be_visible()
+            expect(current_panel.locator(".spell-card__name", has_text="Cure Wounds")).to_have_count(0)
+
+            page.get_by_role("tab", name="Preparation").click()
+            expect(current_panel).to_be_hidden(timeout=5000)
+            expect(preparation_panel).to_be_visible(timeout=5000)
+            expect(preparation_panel.locator(".spell-preparation-card h4", has_text="Cure Wounds")).to_be_visible()
+
+            page.get_by_role("tab", name="Current spells").click()
+            expect(current_panel).to_be_visible(timeout=5000)
+            expect(preparation_panel).to_be_hidden(timeout=5000)
+        finally:
+            browser.close()
 
 
 def test_character_read_shell_browser_state_and_save_flow(

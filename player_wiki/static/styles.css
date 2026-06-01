@@ -2323,6 +2323,10 @@ button {
   min-width: 0;
 }
 
+.spellcasting-view-panel[hidden] {
+  display: none;
+}
+
 .spellcasting-view-heading--full {
   grid-column: 1 / -1;
 }
