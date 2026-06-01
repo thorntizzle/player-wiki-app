@@ -468,6 +468,24 @@ def test_feedback_item44_browser_header_combat_spells_and_session_chrome(
                 "Echoes of the Alloy Coast",
                 timeout=5000,
             )
+            expect(page.locator(".site-header__campaign-title")).to_be_visible()
+            header_metrics = page.evaluate(
+                """() => {
+                    const primary = document.querySelector(".site-header__primary").getBoundingClientRect();
+                    const actions = document.querySelector(".site-header__actions").getBoundingClientRect();
+                    const title = document.querySelector(".site-header__campaign-title").getBoundingClientRect();
+                    const titleStyle = getComputedStyle(document.querySelector(".site-header__campaign-title"));
+                    return {
+                        gapCenter: (primary.right + actions.left) / 2,
+                        titleCenter: (title.left + title.right) / 2,
+                        backgroundImage: titleStyle.backgroundImage,
+                        borderTopStyle: titleStyle.borderTopStyle,
+                    };
+                }"""
+            )
+            assert abs(header_metrics["gapCenter"] - header_metrics["titleCenter"]) <= 2
+            assert header_metrics["backgroundImage"] != "none"
+            assert header_metrics["borderTopStyle"] == "solid"
             expect(page.locator("h1")).to_have_text("Combat", timeout=5000)
 
             page.locator("[data-combat-section-toggle='spells']").click()

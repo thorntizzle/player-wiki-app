@@ -39,6 +39,8 @@ def test_header_brand_routes_to_campaign_picker_without_separate_campaigns_butto
     body = response.get_data(as_text=True)
     assert '<a class="brand" href="/campaigns">Campaign Player Wiki</a>' in body
     assert '<a class="header-link" href="/campaigns">Campaigns</a>' not in body
+    assert '<div class="site-header__campaign"' in body
+    assert "site-header__campaign-title" in body
 
 
 def test_account_settings_require_sign_in(client):

@@ -230,7 +230,7 @@ a:hover {
 }
 
 .site-header__main--campaign {
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 .site-header__primary,
@@ -246,12 +246,23 @@ a:hover {
 
 .site-header__campaign {
   justify-self: center;
+  display: flex;
+  justify-content: center;
   min-width: 0;
   max-width: min(34rem, 100%);
+  width: 100%;
   color: var(--accent-deep);
   font-weight: 700;
   text-align: center;
   overflow-wrap: anywhere;
+}
+
+.site-header__campaign-title {
+  padding: 0.2rem 0.85rem 0.28rem;
+  border: 1px solid var(--border-accent);
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--surface-soft-strong), var(--surface-soft));
+  box-shadow: inset 0 0 0 1px var(--surface-soft-muted), var(--shadow-soft);
 }
 
 .site-header__actions {
@@ -3807,6 +3818,7 @@ button {
 
   .site-header__campaign {
     justify-self: start;
+    justify-content: flex-start;
     text-align: left;
   }
 
