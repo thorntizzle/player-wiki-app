@@ -2,6 +2,9 @@
 {% set session_character_form_mode = session_character_form_mode | default("session", true) %}
 {% set session_character_compact_controls = session_character_compact_controls | default(false) %}
 {% set session_character_hide_currency_controls = session_character_hide_currency_controls | default(false) %}
+{% set session_character_item_dialog_id_prefix = session_character_item_dialog_id_prefix | default("session-character-item-detail", true) %}
+{% set session_character_item_detail_macro = session_character_item_detail_macro | default(none, true) %}
+{% set session_character_item_fallback_macro = session_character_item_fallback_macro | default(none, true) %}
 <section class="session-panels">
   {% if rest_preview and session_character_controls_scope in ["legacy", "overview"] %}
     <section class="card session-card">
@@ -167,13 +170,27 @@
                 <input type="hidden" name="return_view" value="{{ session_return_view }}">
               {% endif %}
               <div class="inventory-row__header">
-                <h3>{{ item.name }}</h3>
+                <h3>
+                  {% if item.href %}
+                    <a href="{{ item.href }}">{{ item.name }}</a>
+                  {% else %}
+                    {{ item.name }}
+                  {% endif %}
+                </h3>
               </div>
               <label class="session-field">
                 <span>Quantity</span>
                 <input type="number" name="quantity" value="{{ item.quantity }}" min="0">
               </label>
-              {% if item.notes %}
+              {% set item_detail_dialog_id = session_character_item_dialog_id_prefix ~ "-inventory-form-item-detail-" ~ loop.index %}
+              {% if session_character_item_detail_macro %}
+                {{ session_character_item_detail_macro(item, item_detail_dialog_id) }}
+                {% if session_character_item_fallback_macro %}
+                  {{ session_character_item_fallback_macro(item) }}
+                {% endif %}
+              {% elif session_character_item_fallback_macro %}
+                {{ session_character_item_fallback_macro(item) }}
+              {% elif item.notes %}
                 <p class="meta">{{ item.notes }}</p>
               {% endif %}
             </form>

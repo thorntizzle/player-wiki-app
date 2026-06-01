@@ -339,7 +339,14 @@
   {% if active_session_character_panel != 'inventory' %}hidden{% endif %}
 >
   {% if session_character_editing_enabled %}
-    {% with session_character_controls_scope="inventory", session_character_form_page="inventory", session_character_hide_currency_controls=true %}
+    {% with
+      session_character_controls_scope="inventory",
+      session_character_form_page="inventory",
+      session_character_hide_currency_controls=true,
+      session_character_item_detail_macro=session_character_item_description_details,
+      session_character_item_fallback_macro=session_character_item_fallback_details,
+      session_character_item_dialog_id_prefix="session-inventory-item-detail"
+    %}
       {% include "_character_session_panels.html" %}
     {% endwith %}
   {% endif %}

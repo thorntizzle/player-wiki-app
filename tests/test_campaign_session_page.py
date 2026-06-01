@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
 import yaml
@@ -86,6 +87,21 @@ def _write_character_definition(app, character_slug: str, mutator) -> None:
     payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
     mutator(payload)
     definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
+def _write_character_state(app, character_slug: str, mutator) -> None:
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        store = app.extensions["character_state_store"]
+        record = repository.get_character("linden-pass", character_slug)
+        assert record is not None
+        payload = deepcopy(record.state_record.state)
+        mutator(payload)
+        store.replace_state(
+            record.definition,
+            payload,
+            expected_revision=record.state_record.revision,
+        )
 
 
 def _write_campaign_config(app, mutator) -> None:
@@ -1241,6 +1257,60 @@ def test_session_character_active_controls_live_in_matching_dnd_panels(
     assert 'class="ability-grid ability-grid--skills"' in abilities_panel
     assert "ability-skill-list" in abilities_panel
     assert "<h3>Skills</h3>" not in abilities_panel
+
+
+def test_session_character_inventory_row_links_and_details_use_session_item_popup(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    def _mutate_definition(payload: dict) -> None:
+        equipment_catalog = list(payload.get("equipment_catalog") or [])
+        for index, item in enumerate(equipment_catalog):
+            if str(item.get("id") or "") == "light-crossbow-1":
+                equipment_catalog[index] = {
+                    **dict(item),
+                    "name": "Stormglass Compass",
+                    "page_ref": "items/stormglass-compass",
+                }
+                break
+        payload["equipment_catalog"] = equipment_catalog
+
+    def _mutate_state(payload: dict) -> None:
+        inventory = list(payload.get("inventory") or [])
+        for index, item in enumerate(inventory):
+            if str(item.get("catalog_ref") or item.get("id") or "") == "light-crossbow-1":
+                inventory[index] = {
+                    **dict(item),
+                    "name": "Stormglass Compass",
+                    "notes": "A campaign-linked session inventory item.",
+                }
+                break
+        payload["inventory"] = inventory
+
+    _write_character_definition(app, ASSIGNED_CHARACTER_SLUG, _mutate_definition)
+    _write_character_state(app, ASSIGNED_CHARACTER_SLUG, _mutate_state)
+
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=inventory"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    inventory_panel = _html_segment_between(
+        html,
+        'data-combat-section-panel="inventory"',
+        'data-combat-section-panel="abilities_skills"',
+    )
+    assert 'href="/campaigns/linden-pass/pages/items/stormglass-compass"' in inventory_panel
+    assert 'data-character-spell-modal-trigger' in inventory_panel
+    assert 'data-character-spell-modal' in inventory_panel
+    assert 'session-inventory-item-detail-' in inventory_panel
+    assert "<noscript>" in inventory_panel
+    assert "A campaign-linked session inventory item." in inventory_panel
 
 
 @pytest.mark.parametrize(
