@@ -6004,6 +6004,110 @@ def test_spellcasting_subpage_groups_compact_cards_by_level_and_local_source_pac
     assert html.index("<h4>1st level</h4>") < html.index("Fey Touched") < html.index("Sleep")
 
 
+def test_spellcasting_subpage_hides_armorer_always_prepared_source_package(
+    app, client, sign_in, users
+):
+    spell_entries = _seed_systems_spell_entries(
+        app,
+        [
+            {"slug": "phb-spell-message", "title": "Message", "level": 0, "class_lists": {"PHB": ["Artificer"]}},
+            {"slug": "phb-spell-cure-wounds", "title": "Cure Wounds", "level": 1, "class_lists": {"PHB": ["Artificer"]}},
+            {"slug": "phb-spell-magic-missile", "title": "Magic Missile", "level": 1, "class_lists": {"PHB": ["Artificer"]}},
+            {"slug": "phb-spell-thunderwave", "title": "Thunderwave", "level": 1, "class_lists": {"PHB": ["Artificer"]}},
+        ],
+    )
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Artificer 5"
+        profile["classes"] = [{"class_name": "Artificer", "level": 5}]
+        payload["profile"] = profile
+        source_row_id = "subclass-feature:armorer-spells"
+        payload["spellcasting"] = {
+            "spellcasting_class": "Artificer",
+            "spellcasting_ability": "Intelligence",
+            "spell_save_dc": 16,
+            "spell_attack_bonus": 8,
+            "slot_progression": [
+                {"level": 1, "max_slots": 4},
+                {"level": 2, "max_slots": 2},
+            ],
+            "class_rows": [
+                {
+                    "class_row_id": "class-row-1",
+                    "class_name": "Artificer",
+                    "level": 5,
+                    "caster_progression": "artificer",
+                    "spell_mode": "prepared",
+                    "spellcasting_ability": "Intelligence",
+                    "spell_save_dc": 16,
+                    "spell_attack_bonus": 8,
+                },
+            ],
+            "source_rows": [
+                {
+                    "source_row_id": source_row_id,
+                    "source_row_kind": "source",
+                    "title": "Armorer Spells",
+                    "spellcasting_ability": "Intelligence",
+                    "spell_save_dc": 16,
+                    "spell_attack_bonus": 8,
+                }
+            ],
+            "spells": [
+                _spell_payload(
+                    spell_entries["phb-spell-message"],
+                    source="Artificer",
+                    mark="Cantrip",
+                    class_row_id="class-row-1",
+                ),
+                _spell_payload(
+                    spell_entries["phb-spell-cure-wounds"],
+                    source="Artificer",
+                    mark="Prepared",
+                    class_row_id="class-row-1",
+                ),
+                _spell_payload(
+                    spell_entries["phb-spell-magic-missile"],
+                    source="Artificer",
+                    is_always_prepared=True,
+                    spell_source_row_id=source_row_id,
+                    spell_source_row_kind="source",
+                    spell_source_row_title="Armorer Spells",
+                    grant_source_label="Armorer Spells",
+                ),
+                _spell_payload(
+                    spell_entries["phb-spell-thunderwave"],
+                    source="Artificer",
+                    is_always_prepared=True,
+                    spell_source_row_id=source_row_id,
+                    spell_source_row_kind="source",
+                    spell_source_row_title="Armorer Spells",
+                    grant_source_label="Armorer Spells",
+                ),
+            ],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    current_panel_html = html.split('id="character-spell-current-view"', 1)[1]
+    assert "Intelligence spellcasting" in html
+    assert "Save DC 16" in html
+    assert "Attack +8" in html
+    assert "Prepared spells" in html
+    assert "Preparation" in html
+    assert "Magic Missile" in current_panel_html
+    assert "Thunderwave" in current_panel_html
+    assert current_panel_html.count("Always prepared") >= 2
+    assert 'class="spell-source-package"' not in current_panel_html
+    assert "<h5>Armorer Spells</h5>" not in current_panel_html
+
+
 def test_spellcasting_subpage_can_manage_ritual_caster_ritual_book(app, client, sign_in, users):
     spell_entries = _seed_systems_spell_entries(
         app,

@@ -964,7 +964,10 @@ def present_character_detail(
                     **row_common_fields,
                     "counts": current_counts,
                     "spells": current_spells,
-                    "spell_level_sections": spell_level_sections(current_spells),
+                    "spell_level_sections": spell_level_sections(
+                        current_spells,
+                        suppress_always_prepared_source_package=True,
+                    ),
                 }
             )
             if preparation_row_mode:
@@ -990,7 +993,10 @@ def present_character_detail(
                         **row_common_fields,
                         "counts": preparation_counts,
                         "spells": preparation_spells,
-                        "spell_level_sections": spell_level_sections(preparation_spells),
+                        "spell_level_sections": spell_level_sections(
+                            preparation_spells,
+                            suppress_always_prepared_source_package=True,
+                        ),
                     }
                 )
         if list(spells_by_row_id.get("") or []):
@@ -1014,7 +1020,10 @@ def present_character_detail(
                     **unassigned_row_fields,
                     "counts": [],
                     "spells": current_spells,
-                    "spell_level_sections": spell_level_sections(current_spells),
+                    "spell_level_sections": spell_level_sections(
+                        current_spells,
+                        suppress_always_prepared_source_package=True,
+                    ),
                 }
             )
 
@@ -3987,7 +3996,11 @@ def spellcasting_stat_line(
     return " | ".join(parts)
 
 
-def spell_level_sections(row_spells: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def spell_level_sections(
+    row_spells: list[dict[str, Any]],
+    *,
+    suppress_always_prepared_source_package: bool = False,
+) -> list[dict[str, Any]]:
     spells_by_level: dict[object, list[dict[str, Any]]] = OrderedDict()
     for spell in row_spells:
         level = spell.get("level")
@@ -4008,10 +4021,31 @@ def spell_level_sections(row_spells: list[dict[str, Any]]) -> list[dict[str, Any
             package_key = str(spell.get("source_package_key") or "").strip()
             group_key = package_key or "__default__"
             if group_key not in spell_groups:
+                group_spells = [
+                    group_spell
+                    for group_spell in level_spells
+                    if str(group_spell.get("source_package_key") or "").strip() == package_key
+                ]
+                group_is_always_prepared_package = bool(
+                    suppress_always_prepared_source_package
+                    and package_key
+                    and all(
+                        "Always prepared" in list(group_spell.get("badges") or [])
+                        for group_spell in group_spells
+                    )
+                )
+                if group_is_always_prepared_package:
+                    spell_level_title = ""
+                    spell_level_note = ""
+                    spell_level_meta = ""
+                else:
+                    spell_level_title = str(spell.get("source_package_label") or "").strip()
+                    spell_level_note = str(spell.get("source_package_note") or "").strip()
+                    spell_level_meta = str(spell.get("source_package_meta") or "").strip()
                 spell_groups[group_key] = {
-                    "title": str(spell.get("source_package_label") or "").strip(),
-                    "note": str(spell.get("source_package_note") or "").strip(),
-                    "meta": str(spell.get("source_package_meta") or "").strip(),
+                    "title": spell_level_title,
+                    "note": spell_level_note,
+                    "meta": spell_level_meta,
                     "spells": [],
                 }
             spell_groups[group_key]["spells"].append(spell)
