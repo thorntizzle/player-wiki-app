@@ -926,9 +926,7 @@ def present_character_detail(
             cantrip_count = sum(
                 1 for spell in current_spells if "Cantrip" in list(spell.get("badges") or [])
             )
-            prepared_count = sum(
-                1 for spell in current_spells if any("Prepared" in badge for badge in list(spell.get("badges") or []))
-            )
+            prepared_count = sum(1 for spell in current_spells if bool(spell.get("is_prepared")))
             spellbook_count = sum(
                 1 for spell in current_spells if any("Spellbook" in badge for badge in list(spell.get("badges") or []))
             )

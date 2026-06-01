@@ -3,7 +3,80 @@
 {% set session_character_bar_eyebrow = session_character_bar_eyebrow | default("Active session", true) %}
 {% set session_character_show_rest_actions = session_character_show_rest_actions | default(true) %}
 {% set session_character_compact_controls = session_character_compact_controls | default(false) %}
+{% set session_character_use_glance_vitals = session_character_use_glance_vitals | default(false, true) %}
 <section class="session-bar{% if session_character_compact_controls %} session-bar--compact{% endif %}" id="session-vitals">
+  {% if session_character_use_glance_vitals %}
+  <div class="session-vitals-glance-grid">
+    <article class="glance-card glance-card--vitals">
+      <form
+        class="session-vitals-form session-vitals-form--inline session-vitals-form--inline-current"
+        data-character-sheet-edit-form="vitals"
+        method="post"
+        action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+      >
+        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
+        <input type="hidden" name="page" value="{{ session_character_bar_page }}">
+        {% if session_return_view %}
+          <input type="hidden" name="return_view" value="{{ session_return_view }}">
+        {% endif %}
+        <label class="session-field session-vitals-form__row">
+          <span>Current HP</span>
+          <div class="session-number-inline">
+            <input
+              type="number"
+              name="current_hp"
+              value="{{ character.current_hp }}"
+              min="0"
+              max="{{ character.max_hp }}"
+              aria-label="Current HP"
+            >
+            <span>/ {{ character.max_hp }}</span>
+          </div>
+        </label>
+        <button class="visually-hidden" type="submit">Save current HP</button>
+      </form>
+    </article>
+
+    <article class="glance-card glance-card--vitals">
+      <form
+        class="session-vitals-form session-vitals-form--inline session-vitals-form--inline-temp"
+        data-character-sheet-edit-form="vitals"
+        method="post"
+        action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+      >
+        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
+        <input type="hidden" name="page" value="{{ session_character_bar_page }}">
+        {% if session_return_view %}
+          <input type="hidden" name="return_view" value="{{ session_return_view }}">
+        {% endif %}
+        <label class="session-field session-vitals-form__row">
+          <span>Temp HP</span>
+          <input
+            type="number"
+            name="temp_hp"
+            value="{{ character.temp_hp }}"
+            min="0"
+            aria-label="Temp HP"
+          >
+        </label>
+        <button class="visually-hidden" type="submit">Save temp HP</button>
+      </form>
+    </article>
+  </div>
+
+  {% if session_character_show_rest_actions %}
+    <div class="session-bar__actions session-bar__actions--glance" id="session-rest">
+      <a class="ghost-button" href="{% if session_return_view == 'session-character' %}{{ url_for('campaign_session_character_view', campaign_slug=campaign.slug, character=character.slug, page=session_character_bar_page, confirm_rest='short') }}{% else %}{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', confirm_rest='short', page=session_character_bar_page) }}{% endif %}">
+        Short rest
+      </a>
+      <a class="ghost-button" href="{% if session_return_view == 'session-character' %}{{ url_for('campaign_session_character_view', campaign_slug=campaign.slug, character=character.slug, page=session_character_bar_page, confirm_rest='long') }}{% else %}{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', confirm_rest='long', page=session_character_bar_page) }}{% endif %}">
+        Long rest
+      </a>
+    </div>
+  {% endif %}
+  {% else %}
   <div class="session-bar__summary">
     <p class="eyebrow">{{ session_character_bar_eyebrow }}</p>
     <h2{% if session_character_compact_controls %} class="session-bar__title--compact"{% endif %}>{{ character.name }}</h2>
@@ -61,5 +134,6 @@
         Long rest
       </a>
     </div>
+  {% endif %}
   {% endif %}
 </section>

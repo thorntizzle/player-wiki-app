@@ -54,7 +54,8 @@
 {% if session_character_editing_enabled %}
   {% with
     session_character_form_page = character_subpage,
-    session_character_compact_controls = true
+    session_character_compact_controls = true,
+    session_character_use_glance_vitals = true
   %}
     {% include "_character_session_bar.html" %}
   {% endwith %}

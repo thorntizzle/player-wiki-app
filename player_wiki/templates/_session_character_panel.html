@@ -7,7 +7,7 @@
     <section class="session-column">
       {% if character %}
         {% set is_xianxia_sheet = character.xianxia_read %}
-        <article class="article card character-sheet" {% if not is_xianxia_sheet %}data-combat-workspace-root{% endif %}>
+        <article class="article card character-sheet session-character-sheet" {% if not is_xianxia_sheet %}data-combat-workspace-root{% endif %}>
           <header class="character-header">
             <p class="eyebrow">Session character</p>
             <h2>{{ character.name }}</h2>
@@ -55,35 +55,24 @@
             {% endif %}
           </header>
 
+          {% if is_xianxia_sheet %}
           <section class="card combat-workspace-card">
             <div class="section-heading">
               <div>
-                <h2>{% if is_xianxia_sheet %}Character subpages{% else %}Character sections{% endif %}</h2>
+                <h2>Character subpages</h2>
                 <p class="meta">
-                  {% if is_xianxia_sheet %}
-                    Use the same Xianxia sheet subpages here as the full character page, with in-play controls kept to the currently supported lanes.
-                  {% else %}
-                    Keep Session trimmed to an overview plus the non-combat sections players are most likely to open in play, without turning this route into a second full character hub.
-                  {% endif %}
+                  Use the same Xianxia sheet subpages here as the full character page, with in-play controls kept to the currently supported lanes.
                 </p>
               </div>
             </div>
             <nav
-              class="{% if is_xianxia_sheet %}character-subpage-nav{% else %}combat-workspace-nav{% endif %}"
-              aria-label="{% if is_xianxia_sheet %}Character subpages{% else %}Session character sections{% endif %}"
-              {% if not is_xianxia_sheet %}
-                data-combat-section-group
-                data-combat-default-section="{{ character_subpage }}"
-              {% endif %}
+              class="character-subpage-nav"
+              aria-label="Character subpages"
             >
               {% for subpage in character_subpages %}
                 <a
-                  class="{% if is_xianxia_sheet %}{% if subpage.is_active %}button-link{% else %}ghost-button{% endif %}{% else %}ghost-button combat-workspace-button{% if subpage.is_active %} combat-workspace-button--active{% endif %}{% endif %}"
+                  class="{% if subpage.is_active %}button-link{% else %}ghost-button{% endif %}"
                   href="{{ subpage.href }}"
-                  {% if not is_xianxia_sheet %}
-                    data-combat-section-toggle="{{ subpage.slug }}"
-                    aria-pressed="{{ 'true' if subpage.is_active else 'false' }}"
-                  {% endif %}
                   {% if subpage.is_active %}aria-current="page"{% endif %}
                 >
                   <span>{{ subpage.label }}</span>
@@ -94,6 +83,29 @@
               {% endfor %}
             </nav>
           </section>
+          {% else %}
+            <nav
+              class="combat-workspace-nav session-character-section-nav"
+              aria-label="Session character sections"
+              data-combat-section-group
+              data-combat-default-section="{{ character_subpage }}"
+            >
+              {% for subpage in character_subpages %}
+                <a
+                  class="ghost-button combat-workspace-button{% if subpage.is_active %} combat-workspace-button--active{% endif %}"
+                  href="{{ subpage.href }}"
+                  data-combat-section-toggle="{{ subpage.slug }}"
+                  aria-pressed="{{ 'true' if subpage.is_active else 'false' }}"
+                  {% if subpage.is_active %}aria-current="page"{% endif %}
+                >
+                  <span>{{ subpage.label }}</span>
+                  {% if subpage.count %}
+                    <span class="meta-badge">{{ subpage.count }}</span>
+                  {% endif %}
+                </a>
+              {% endfor %}
+            </nav>
+          {% endif %}
 
           {% if not is_xianxia_sheet %}
             {% include "_session_character_dnd_workspace.html" %}

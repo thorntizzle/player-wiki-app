@@ -385,6 +385,8 @@ def test_session_page_with_character_access_exposes_shell_switch_data_hooks(clie
     )
     assert "history.pushState" in html
     assert "showShellView" in html
+    assert "playerWiki:session-state-changed" in html
+    assert "sessionShellPaneStale" in html
 
 
 def test_session_page_without_character_access_does_not_expose_shell_fragment_hooks(
@@ -415,8 +417,8 @@ def test_session_character_page_defaults_to_viewer_assigned_character(client, si
     html = response.get_data(as_text=True)
     assert "Choose a character" not in html
     assert "Arden March" in html
-    assert "Character sections" in html
-    assert "combat-workspace-card" in html
+    assert "Character sections" not in html
+    assert "session-character-section-nav" in html
     assert "combat-workspace-nav" in html
     assert 'data-combat-section-group' in html
     assert 'data-combat-default-section="overview"' in html
@@ -482,7 +484,8 @@ def test_owner_can_open_session_character_subpage_without_leaving_session_featur
     assert "Session Character" in html
     assert "Live session tools" in html
     assert "Character chooser" not in html
-    assert "Character sections" in html
+    assert "Character sections" not in html
+    assert "session-character-section-nav" in html
     assert "Arden March" in html
     assert "Features and traits" in html
     assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=spells" in html
@@ -661,7 +664,10 @@ def test_session_character_page_shows_edit_controls_only_while_session_is_active
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Save vitals" in html
+    assert "Current HP" in html
+    assert "Save current HP" in html
+    assert "Save temp HP" in html
+    assert "Active session" not in html
     assert 'name="return_view" value="session-character"' in html
     assert (
         f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}"
@@ -693,7 +699,8 @@ def test_session_character_page_omits_active_session_edit_scope_note(
         "portrait management, Advanced Editor reference text, spell-list changes, inventory add/remove work, "
         "and advanced maintenance."
     ) not in html
-    assert "Character sections" in html
+    assert "Character sections" not in html
+    assert "session-character-section-nav" in html
     assert "Session character" in html
 
 
@@ -754,6 +761,84 @@ def test_session_character_spells_page_combines_single_row_stats_into_slot_works
     assert "4 available / 4" in html
     assert "2nd level" in html
     assert "3 available / 3" in html
+
+
+def test_session_character_spells_summary_counts_always_prepared_current_spells(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["spellcasting"] = {
+            "spellcasting_class": "Artificer",
+            "spellcasting_ability": "Intelligence",
+            "spell_save_dc": 14,
+            "spell_attack_bonus": 6,
+            "slot_lanes": [
+                {
+                    "id": "class-row-1-slots",
+                    "title": "Spell slots",
+                    "shared": False,
+                    "row_ids": ["class-row-1"],
+                    "slot_progression": [
+                        {"level": 1, "max_slots": 2},
+                    ],
+                },
+            ],
+            "class_rows": [
+                {
+                    "class_row_id": "class-row-1",
+                    "class_name": "Artificer",
+                    "level": 5,
+                    "caster_progression": "half",
+                    "spell_mode": "prepared",
+                    "spellcasting_ability": "Intelligence",
+                    "spell_save_dc": 14,
+                    "spell_attack_bonus": 6,
+                    "slot_lane_id": "class-row-1-slots",
+                },
+            ],
+            "spells": [
+                {
+                    "name": "Mending",
+                    "spell_level": 0,
+                    "mark": "Cantrip",
+                    "class_row_id": "class-row-1",
+                },
+                {
+                    "name": "Cure Wounds",
+                    "spell_level": 1,
+                    "mark": "Prepared",
+                    "class_row_id": "class-row-1",
+                },
+                {
+                    "name": "Magic Missile",
+                    "spell_level": 1,
+                    "mark": "",
+                    "class_row_id": "class-row-1",
+                    "is_always_prepared": True,
+                    "grant_source_label": "Armorer",
+                },
+            ],
+        }
+
+    _write_character_definition(app, ASSIGNED_CHARACTER_SLUG, _mutate)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=spells"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    spells_panel = _html_segment_between(
+        html,
+        'data-combat-section-panel="spells"',
+        'data-combat-section-panel="resources"',
+    )
+    assert "Cantrips" in spells_panel
+    assert "Prepared spells" in spells_panel
+    assert ">1</strong>" in _html_segment_after(spells_panel, "Cantrips", length=220)
+    assert ">2</strong>" in _html_segment_after(spells_panel, "Prepared spells", length=220)
+    assert "Always prepared" in spells_panel
 
 
 def test_session_character_spells_page_keeps_multiclass_slot_pools_legible(
@@ -1021,7 +1106,7 @@ def test_session_character_page_uses_combat_style_non_combat_section_nav(client,
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "combat-workspace-card" in html
+    assert "session-character-section-nav" in html
     assert "combat-workspace-nav" in html
     assert "Overview" in html
     assert "Spells" in html

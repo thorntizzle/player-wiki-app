@@ -667,6 +667,15 @@
         managerStateToken = nextManagerStateToken;
         liveRoot.dataset.activeSessionId = activeSessionId;
         liveRoot.dataset.sessionManagerStateToken = managerStateToken;
+        if (sessionChanged) {
+          liveRoot.dispatchEvent(new CustomEvent("playerWiki:session-state-changed", {
+            bubbles: true,
+            detail: {
+              activeSessionId,
+              managerStateToken,
+            },
+          }));
+        }
         if (uiStateTools) {
           uiStateTools.restoreFocus(liveRoot, focusState);
           uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);

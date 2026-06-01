@@ -61,6 +61,7 @@
       }
       pane.innerHTML = html;
       pane.dataset.sessionShellPaneLoaded = "1";
+      delete pane.dataset.sessionShellPaneStale;
       initPane(pane);
     };
 
@@ -94,6 +95,9 @@
     const isPaneLoaded = (target) => {
       const pane = panes.get(target);
       if (!pane) {
+        return false;
+      }
+      if (pane.dataset.sessionShellPaneStale === "1") {
         return false;
       }
       if (pane.dataset.sessionShellPaneLoaded === "1") {
@@ -275,5 +279,14 @@
         });
       });
     }
+
+    shellRoot.addEventListener("playerWiki:session-state-changed", (event) => {
+      const characterPane = panes.get("character");
+      if (!characterPane || characterPane.contains(event.target)) {
+        return;
+      }
+      characterPane.dataset.sessionShellPaneLoaded = "0";
+      characterPane.dataset.sessionShellPaneStale = "1";
+    });
   })();
 </script>

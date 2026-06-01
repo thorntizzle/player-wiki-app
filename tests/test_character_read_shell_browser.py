@@ -290,7 +290,7 @@ def test_session_character_panel_switch_and_resource_submit_stay_no_reload(
             expect(page.locator("[data-session-shell-active='character']")).to_be_visible(timeout=5000)
             expect(page.locator("[data-combat-section-panel='overview']")).to_be_visible(timeout=5000)
             expect(page.locator(".glance-grid--quick-row-1")).to_be_visible(timeout=5000)
-            expect(page.locator("form[data-character-sheet-edit-form='vitals']")).to_have_count(1)
+            expect(page.locator("form[data-character-sheet-edit-form='vitals']")).to_have_count(2)
             page.evaluate("window.__sessionCharacterNoReloadMarker = 'alive'")
 
             page.locator("[data-combat-section-toggle='resources']").click()
@@ -310,6 +310,65 @@ def test_session_character_panel_switch_and_resource_submit_stay_no_reload(
                 ),
                 timeout=5000,
             )
+        finally:
+            browser.close()
+
+
+def test_session_character_reloads_after_session_started_from_another_session_pane(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            page.goto(f"{base_url}/sign-in")
+            page.locator("input[name='email']").fill(users["owner"]["email"])
+            page.locator("input[name='password']").fill(users["owner"]["password"])
+            page.locator("button[type='submit']").click()
+            page.wait_for_url(
+                re.compile(rf"^{re.escape(base_url)}/.*"),
+                timeout=5000,
+            )
+
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/session/character"
+                "?character=arden-march&page=overview"
+            )
+            expect(page.locator("[data-session-shell-active='character']")).to_be_visible(timeout=5000)
+            expect(page.locator("form[data-character-sheet-edit-form='vitals']")).to_have_count(0)
+
+            page.locator("[data-session-switch-target='session']").click()
+            expect(page.locator("[data-session-shell-active='session']")).to_be_visible(timeout=5000)
+
+            sign_in(users["dm"]["email"], users["dm"]["password"])
+            client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+            expect(page.locator("[data-session-status-card]")).to_contain_text(
+                "The session is live for players and the DM.",
+                timeout=6000,
+            )
+
+            page.locator("[data-session-switch-target='character']").click()
+            expect(page.locator("[data-session-shell-active='character']")).to_be_visible(timeout=5000)
+            expect(page.locator("form[data-character-sheet-edit-form='vitals']")).to_have_count(2)
+            expect(page.locator("text=Save current HP")).to_have_count(1)
+            expect(page.locator("text=Save temp HP")).to_have_count(1)
         finally:
             browser.close()
 
