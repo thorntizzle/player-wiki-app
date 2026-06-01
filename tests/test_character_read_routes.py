@@ -6437,6 +6437,354 @@ def test_spellcasting_subpage_can_search_add_and_remove_known_spells(app, client
     assert "Shield" not in final_spell_names
 
 
+def test_spellcasting_cantrip_search_targets_sorcerer_row_by_list_name(
+    app, client, sign_in, users
+):
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["class"],
+            entries=[
+                {
+                    "entry_key": "dnd-5e|class|phb|phb-class-sorcerer",
+                    "entry_type": "class",
+                    "slug": "phb-class-sorcerer",
+                    "title": "Sorcerer",
+                    "source_page": "100",
+                    "source_path": "data/class/class-phb.json",
+                    "search_text": "sorcerer class",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {
+                        "hit_die": {"faces": 6},
+                        "spellcasting_ability": "cha",
+                        "caster_progression": "full",
+                        "cantrip_progression": [4, 4, 5, 5, 5],
+                    },
+                    "body": {},
+                    "rendered_html": "<p>Sorcerer.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|class|phb|phb-class-wizard",
+                    "entry_type": "class",
+                    "slug": "phb-class-wizard",
+                    "title": "Wizard",
+                    "source_page": "101",
+                    "source_path": "data/class/class-phb.json",
+                    "search_text": "wizard class",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {
+                        "hit_die": {"faces": 6},
+                        "spellcasting_ability": "int",
+                        "caster_progression": "full",
+                        "cantrip_progression": [3, 3, 3, 3, 4],
+                    },
+                    "body": {},
+                    "rendered_html": "<p>Wizard.</p>",
+                },
+            ],
+        )
+
+    _seed_systems_spell_entries(
+        app,
+        [
+            {"slug": "phb-spell-mage-hand", "title": "Mage Hand", "level": 0, "class_lists": {"PHB": ["Sorcerer"]}},
+            {"slug": "phb-spell-fire-bolt", "title": "Fire Bolt", "level": 0, "class_lists": {"PHB": ["Wizard"]}},
+            {"slug": "phb-spell-magic-missile", "title": "Magic Missile", "level": 1, "class_lists": {"PHB": ["Sorcerer"]}},
+        ],
+    )
+
+    def _mutate(payload: dict) -> None:
+        payload["profile"] = {
+            "class_level_text": "Sorcerer 5 / Wizard 3",
+            "classes": [
+                {
+                    "row_id": "class-row-1",
+                    "class_name": "Sorcerer",
+                    "level": 5,
+                    "systems_ref": {
+                        "entry_key": "dnd-5e|class|phb|phb-class-sorcerer",
+                        "entry_type": "class",
+                        "title": "Sorcerer",
+                        "slug": "phb-class-sorcerer",
+                        "source_id": "PHB",
+                    },
+                },
+                {
+                    "row_id": "class-row-2",
+                    "class_name": "Wizard",
+                    "level": 3,
+                    "systems_ref": {
+                        "entry_key": "dnd-5e|class|phb|phb-class-wizard",
+                        "entry_type": "class",
+                        "title": "Wizard",
+                        "slug": "phb-class-wizard",
+                        "source_id": "PHB",
+                    },
+                },
+            ],
+            "species": "Human",
+            "background": "Courier",
+            "alignment": "Neutral Good",
+            "size": "Medium",
+            "experience_model": "Milestone",
+        }
+        payload["source"] = {
+            "source_path": "builder://native-multiclass",
+            "source_type": "native_character_builder",
+            "imported_from": "In-app Native Builder",
+            "imported_at": "2026-04-10T00:00:00Z",
+            "parse_warnings": [],
+        }
+        payload["spellcasting"] = {
+            "spellcasting_class": "",
+            "spellcasting_ability": "",
+            "spell_save_dc": None,
+            "spell_attack_bonus": None,
+            "slot_progression": [],
+            "class_rows": [
+                {
+                    "class_row_id": "class-row-1",
+                    "class_name": "Sorcerer (Wild Magic)",
+                    "class_ref": {
+                        "entry_key": "dnd-5e|class|phb|phb-class-sorcerer",
+                        "entry_type": "class",
+                        "title": "Sorcerer",
+                        "slug": "phb-class-sorcerer",
+                        "source_id": "PHB",
+                    },
+                    "spell_list_class_name": "Sorcerer (PHB)",
+                    "level": 5,
+                    "caster_progression": "full",
+                    "spell_mode": "known",
+                    "spellcasting_ability": "Charisma",
+                    "spell_save_dc": 15,
+                    "spell_attack_bonus": 7,
+                },
+                {
+                    "class_row_id": "class-row-2",
+                    "class_name": "Wizard",
+                    "class_ref": {
+                        "entry_key": "dnd-5e|class|phb|phb-class-wizard",
+                        "entry_type": "class",
+                        "title": "Wizard",
+                        "slug": "phb-class-wizard",
+                        "source_id": "PHB",
+                    },
+                    "level": 3,
+                    "caster_progression": "full",
+                    "spell_mode": "known",
+                    "spellcasting_ability": "Intelligence",
+                    "spell_save_dc": 15,
+                    "spell_attack_bonus": 5,
+                },
+            ],
+            "spells": [],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    search_response = client.get(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/spells/search?kind=cantrip&q=mage&target_class_row_id=class-row-1"
+    )
+    assert search_response.status_code == 200
+    search_payload = search_response.get_json()
+    assert search_payload == {
+        "results": [
+            {
+                "entry_slug": "phb-spell-mage-hand",
+                "title": "Mage Hand",
+                "level_label": "Cantrip",
+                "source_id": "PHB",
+                "select_label": "Mage Hand - Cantrip - PHB",
+            }
+        ],
+        "message": "Found 1 matching cantrips.",
+    }
+
+    wizard_cantrip_response = client.get(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/spells/search?kind=cantrip&q=fire&target_class_row_id=class-row-1"
+    )
+    assert wizard_cantrip_response.status_code == 200
+    assert wizard_cantrip_response.get_json() == {
+        "results": [],
+        "message": "No eligible class spells matched that search.",
+    }
+
+    invalid_add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/add",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "kind": "cantrip",
+            "selected_value": "phb-spell-fire-bolt",
+            "target_class_row_id": "class-row-1",
+        },
+        follow_redirects=False,
+    )
+    assert invalid_add_response.status_code == 302
+    after_invalid = _read_character_definition(app, "arden-march")
+    assert list((after_invalid.get("spellcasting") or {}).get("spells") or []) == []
+
+    valid_add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/add",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "kind": "cantrip",
+            "selected_value": "phb-spell-mage-hand",
+            "target_class_row_id": "class-row-1",
+        },
+        follow_redirects=False,
+    )
+    assert valid_add_response.status_code == 302
+    updated_definition = _read_character_definition(app, "arden-march")
+    sorcerer_rows = [
+        spell for spell in list((updated_definition.get("spellcasting") or {}).get("spells") or [])
+        if str(spell.get("name") or "").strip() == "Mage Hand"
+    ]
+    assert len(sorcerer_rows) == 1
+    assert sorcerer_rows[0]["class_row_id"] == "class-row-1"
+
+
+def test_spellcasting_cantrip_search_falls_back_to_phb_class_list_for_sparse_spell_metadata(
+    app, client, sign_in, users
+):
+    _seed_systems_spell_entries(
+        app,
+        [
+            {"slug": "phb-spell-firebolt", "title": "Fire Bolt", "level": 0},
+            {"slug": "phb-spell-sacredflame", "title": "Sacred Flame", "level": 0},
+            {"slug": "phb-spell-magicmissile", "title": "Magic Missile", "level": 1},
+        ],
+    )
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Sorcerer 5"
+        profile["classes"] = [{"row_id": "class-row-1", "class_name": "Sorcerer", "level": 5}]
+        payload["profile"] = profile
+        payload["spellcasting"] = {
+            "spellcasting_class": "Sorcerer",
+            "spellcasting_ability": "Charisma",
+            "spell_save_dc": 15,
+            "spell_attack_bonus": 7,
+            "slot_progression": [
+                {"level": 1, "max_slots": 4},
+                {"level": 2, "max_slots": 3},
+                {"level": 3, "max_slots": 2},
+            ],
+            "class_rows": [
+                {
+                    "class_row_id": "class-row-1",
+                    "class_name": "Sorcerer",
+                    "spell_list_class_name": "Sorcerer (PHB)",
+                    "level": 5,
+                    "caster_progression": "full",
+                    "spell_mode": "known",
+                    "spellcasting_ability": "Charisma",
+                    "spell_save_dc": 15,
+                    "spell_attack_bonus": 7,
+                },
+            ],
+            "spells": [],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    valid_search = client.get(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/spells/search"
+        "?kind=cantrip&q=fire&target_class_row_id=class-row-1"
+    )
+    assert valid_search.status_code == 200
+    assert valid_search.get_json() == {
+        "results": [
+            {
+                "entry_slug": "phb-spell-firebolt",
+                "title": "Fire Bolt",
+                "level_label": "Cantrip",
+                "source_id": "PHB",
+                "select_label": "Fire Bolt - Cantrip - PHB",
+            }
+        ],
+        "message": "Found 1 matching cantrips.",
+    }
+
+    wrong_class_search = client.get(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/spells/search"
+        "?kind=cantrip&q=sacred&target_class_row_id=class-row-1"
+    )
+    assert wrong_class_search.status_code == 200
+    assert wrong_class_search.get_json() == {
+        "results": [],
+        "message": "No eligible class spells matched that search.",
+    }
+
+    leveled_spell_search = client.get(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/spells/search"
+        "?kind=cantrip&q=magic&target_class_row_id=class-row-1"
+    )
+    assert leveled_spell_search.status_code == 200
+    assert leveled_spell_search.get_json() == {
+        "results": [],
+        "message": "No eligible class spells matched that search.",
+    }
+
+    invalid_add = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/add",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "kind": "cantrip",
+            "selected_value": "phb-spell-sacredflame",
+            "target_class_row_id": "class-row-1",
+        },
+        follow_redirects=False,
+    )
+    assert invalid_add.status_code == 302
+    after_invalid = _read_character_definition(app, "arden-march")
+    assert list((after_invalid.get("spellcasting") or {}).get("spells") or []) == []
+
+    valid_add = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/add",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "kind": "cantrip",
+            "selected_value": "phb-spell-firebolt",
+            "target_class_row_id": "class-row-1",
+        },
+        follow_redirects=False,
+    )
+    assert valid_add.status_code == 302
+    updated_definition = _read_character_definition(app, "arden-march")
+    added_spell = next(
+        spell
+        for spell in list((updated_definition.get("spellcasting") or {}).get("spells") or [])
+        if str(spell.get("name") or "").strip() == "Fire Bolt"
+    )
+    assert added_spell["mark"] == "Cantrip"
+    assert added_spell["class_row_id"] == "class-row-1"
+
+
 def test_spellcasting_search_uses_enabled_systems_sources_only(app, client, sign_in, users):
     def _disable_tce(payload: dict) -> None:
         systems_sources = list(payload.get("systems_sources") or [])

@@ -56,6 +56,8 @@ from .character_builder import (
     _spell_access_badge_label,
     _spell_entry_level,
     _spell_list_class_name_for_class,
+    _spell_entry_matches_class_list,
+    _load_phb_level_one_spell_lists,
     _spell_payload_management_row_id,
     _spell_payload_is_always_prepared,
     _spell_lookup_key,
@@ -613,6 +615,8 @@ def _build_spell_management_section(
             else ("ritual_book" if mode == "ritual_book" else "spell")
         ),
         "spell_add_label": spell_add_label,
+        "selected_class": selected_class,
+        "selected_subclass": selected_subclass,
         "spellcasting_ability": str(row_payload.get("spellcasting_ability") or "").strip(),
         "spellcasting_ability_key": str(row_payload.get("spellcasting_ability_key") or "").strip(),
         "spell_save_dc": row_payload.get("spell_save_dc"),
@@ -658,6 +662,7 @@ def search_character_spell_management_options(
         return [], "Type at least 2 letters to search eligible spells."
 
     class_name = str(section.get("spell_list_class_name") or section.get("class_name") or "").strip()
+    selected_class = section.get("selected_class")
     max_spell_level = int(section.get("max_spell_level") or 0)
     existing_keys = {
         str(row.get("catalog_key") or row.get("spell_key") or "").strip()
@@ -670,7 +675,13 @@ def search_character_spell_management_options(
         key=lambda entry: (int(_spell_entry_level(entry)), str(entry.title or "").lower()),
     )
     for entry in catalog_entries:
-        if not _spell_entry_matches_management_class_list(entry, class_name):
+        if not _spell_entry_matches_management_class_list(
+            entry,
+            class_name,
+            selected_class=selected_class,
+            spell_list_class_name=str(section.get("spell_list_class_name") or "").strip(),
+            spell_catalog=spell_catalog,
+        ):
             continue
         level = _spell_entry_level(entry)
         if clean_kind == "cantrip":
@@ -779,7 +790,12 @@ def apply_character_spell_management_edit(
         )
         if resolved_key in catalog_keys:
             raise CharacterEditValidationError("That spell is already on this sheet.")
-        _validate_spell_management_addition(resolved_entry, section=section, clean_kind=clean_kind)
+        _validate_spell_management_addition(
+            resolved_entry,
+            section=section,
+            clean_kind=clean_kind,
+            spell_catalog=dict(spell_catalog or {}),
+        )
         if clean_kind == "cantrip":
             if not bool(section.get("can_add_cantrip")):
                 raise CharacterEditValidationError("This sheet is already at its current cantrip count.")
@@ -905,12 +921,19 @@ def _validate_spell_management_addition(
     *,
     section: dict[str, Any],
     clean_kind: str,
+    spell_catalog: dict[str, Any] | None = None,
 ) -> None:
     if spell_entry is None:
         raise CharacterEditValidationError("Choose an enabled Systems spell to add.")
 
     class_name = str(section.get("spell_list_class_name") or section.get("class_name") or "").strip()
-    if not _spell_entry_matches_management_class_list(spell_entry, class_name):
+    if not _spell_entry_matches_management_class_list(
+        spell_entry,
+        class_name,
+        selected_class=section.get("selected_class"),
+        spell_list_class_name=str(section.get("spell_list_class_name") or "").strip(),
+        spell_catalog=spell_catalog,
+    ):
         raise CharacterEditValidationError("That spell is not eligible for this class row.")
 
     spell_level = int(_spell_entry_level(spell_entry) or 0)
@@ -1249,14 +1272,78 @@ def _spell_management_is_feature_grant_source(
     return True
 
 
-def _spell_entry_matches_management_class_list(entry, class_name: str) -> bool:
+def _spell_entry_matches_management_class_list(
+    entry,
+    class_name: str,
+    *,
+    selected_class: Any | None = None,
+    spell_list_class_name: str = "",
+    spell_catalog: dict[str, Any] | None = None,
+) -> bool:
     metadata = dict((getattr(entry, "metadata", {}) or {}))
     class_lists = dict(metadata.get("class_lists") or {})
-    clean_class_name = normalize_lookup(class_name)
-    for class_names in class_lists.values():
-        for candidate in list(class_names or []):
-            if normalize_lookup(candidate) == clean_class_name:
+    normalized_candidates: list[str] = []
+
+    def _add_candidate(raw_candidate: str) -> None:
+        candidate_text = str(raw_candidate or "").strip()
+        candidate_values = [candidate_text]
+        if "(" in candidate_text:
+            candidate_values.append(candidate_text.split("(", 1)[0].strip())
+        for candidate_value in candidate_values:
+            clean_candidate = normalize_lookup(candidate_value)
+            if clean_candidate and clean_candidate not in normalized_candidates:
+                normalized_candidates.append(clean_candidate)
+
+    for candidate in (
+        spell_list_class_name,
+        class_name,
+        str(getattr(selected_class, "title", "") or "").strip(),
+    ):
+        if candidate:
+            _add_candidate(candidate)
+
+    for candidate in list(normalized_candidates):
+        try:
+            if isinstance(selected_class, SystemsEntryRecord) and _spell_entry_matches_class_list(
+                entry,
+                selected_class,
+                class_list_name=candidate,
+            ):
                 return True
+        except Exception:
+            continue
+
+    has_class_list_values = False
+    for class_names in class_lists.values():
+        class_name_candidates = [class_names] if isinstance(class_names, str) else list(class_names or [])
+        for candidate in class_name_candidates:
+            normalized_candidate = normalize_lookup(candidate)
+            if not normalized_candidate:
+                continue
+            has_class_list_values = True
+            if normalized_candidate and normalized_candidate in normalized_candidates:
+                return True
+    if has_class_list_values:
+        return False
+
+    source_id = str(getattr(entry, "source_id", "") or "").strip().upper()
+    if source_id not in {"", "PHB"}:
+        return False
+    fallback_lists = dict((spell_catalog or {}).get("phb_level_one_lists") or _load_phb_level_one_spell_lists())
+    spell_level = str(_spell_entry_level(entry))
+    entry_title = normalize_lookup(str(getattr(entry, "title", "") or "").strip())
+    if not entry_title:
+        return False
+    for fallback_class_name, levels in fallback_lists.items():
+        if normalize_lookup(fallback_class_name) not in normalized_candidates:
+            continue
+        allowed_titles = {
+            normalize_lookup(title)
+            for title in list(dict(levels or {}).get(spell_level) or [])
+            if str(title).strip()
+        }
+        if entry_title in allowed_titles:
+            return True
     return False
 
 
