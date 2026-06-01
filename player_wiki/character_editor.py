@@ -979,11 +979,7 @@ def _spell_management_class_name(
 
 
 def _spell_management_ability_scores(definition: CharacterDefinition) -> dict[str, int]:
-    ability_scores_payload = dict((definition.stats or {}).get("ability_scores") or {})
-    return {
-        ability_key: int(dict(ability_scores_payload.get(ability_key) or {}).get("score") or 10)
-        for ability_key in ("str", "dex", "con", "int", "wis", "cha")
-    }
+    return _ability_scores_from_definition(definition)
 
 
 def _build_spell_management_rows(

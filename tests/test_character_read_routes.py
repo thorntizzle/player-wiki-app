@@ -5991,7 +5991,7 @@ def test_spellcasting_subpage_groups_compact_cards_by_level_and_local_source_pac
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "spellcasting-count-grid" in html
+    assert "spellcasting-count-grid" not in html
     assert "spell-card-grid" in html
     assert html.count('class="spell-card"') == 3
     assert "data-character-spell-modal-trigger" in html
@@ -6559,6 +6559,11 @@ def test_spellcasting_subpage_can_manage_wizard_spellbooks_and_prepare_spells(
         profile["class_level_text"] = "Wizard 5"
         profile["classes"] = [{"class_name": "Wizard", "level": 5}]
         payload["profile"] = profile
+        stats = dict(payload.get("stats") or {})
+        stats["ability_scores"] = {
+            "intelligence": {"score": 16, "modifier": 3},
+        }
+        payload["stats"] = stats
         payload["spellcasting"] = {
             "spellcasting_class": "Wizard",
             "spellcasting_ability": "Intelligence",
@@ -6584,6 +6589,8 @@ def test_spellcasting_subpage_can_manage_wizard_spellbooks_and_prepare_spells(
     page_html = page_response.get_data(as_text=True)
     assert "Wizard spellbook" in page_html
     assert "Add spellbook spell" in page_html
+    assert "1 / 8" in page_html
+    assert "1 / 5" not in page_html
 
     add_response = client.post(
         "/campaigns/linden-pass/characters/arden-march/spellcasting/add",

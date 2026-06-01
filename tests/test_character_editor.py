@@ -184,6 +184,32 @@ def test_prepared_spell_management_context_excludes_unmarked_imported_rows_from_
     assert "Always prepared" in rows_by_name["Thunderwave"]["badges"]
 
 
+def test_prepared_spell_management_context_uses_full_ability_score_keys_for_limit():
+    definition = _minimal_artificer_definition(
+        [
+            {
+                "name": "Cure Wounds",
+                "level": 1,
+                "mark": "Prepared",
+                "source": "Artificer",
+                "class_row_id": "class-row-1",
+            },
+        ]
+    )
+    definition.stats["ability_scores"] = {
+        "intelligence": {"score": 16, "modifier": 3},
+    }
+
+    manager = character_editor.build_character_spell_management_context(definition, spell_catalog={})
+    section = dict((manager or {}).get("sections", [])[0])
+
+    assert section["current_prepared_count"] == 1
+    assert section["target_prepared_count"] == 5
+    assert ("Prepared spells", "1 / 5") in {
+        (count["label"], count["value"]) for count in list(section.get("counts") or [])
+    }
+
+
 def test_prepared_spell_management_context_allows_existing_class_list_row_toggles():
     definition = _minimal_artificer_definition(
         [

@@ -154,7 +154,6 @@
       {% if character.spellcasting.row_sections %}
         {% for spell_section in character.spellcasting.row_sections %}
           {% set manager_section = ((spell_manager.sections | selectattr('class_row_id', 'equalto', spell_section.class_row_id) | list | first) if spell_manager else none) %}
-          {% set summary_counts = manager_section.counts if manager_section else spell_section.counts %}
           {% if spell_section.row_kind == "class" or spell_section.spell_mode == "ritual_book" %}
             <article class="detail-card spellcasting-class-card">
               <h3>{{ spell_section.title }}</h3>
@@ -170,16 +169,6 @@
               {% endif %}
               {% if manager_section and manager_section.rules_note %}
                 <p>{{ manager_section.rules_note }}</p>
-              {% endif %}
-              {% if summary_counts %}
-                <dl class="spellcasting-count-grid">
-                  {% for count in summary_counts %}
-                    <div class="spellcasting-count-grid__item">
-                      <dt>{{ count.label }}</dt>
-                      <dd>{{ count.value }}</dd>
-                    </div>
-                  {% endfor %}
-                </dl>
               {% endif %}
               {% if manager_section and manager_section.unavailable_message %}
                 <p class="meta">{{ manager_section.unavailable_message }}</p>
