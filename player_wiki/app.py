@@ -6120,10 +6120,6 @@ def create_app() -> Flask:
         session_personal_edit_block_action_label = ""
         session_character_empty_state_title = ""
         session_character_empty_state_message = ""
-        session_combat_relationship_available = False
-        session_combat_relationship_surface_label = ""
-        session_combat_relationship_action_label = ""
-        session_combat_relationship_href = ""
 
         if selected_character_slug:
             record = accessible_records_by_slug[selected_character_slug]
@@ -6272,31 +6268,6 @@ def create_app() -> Flask:
                         else ""
                     )
                     session_personal_edit_block_action_label = "Open full character page"
-                if can_access_campaign_scope(campaign_slug, "combat"):
-                    tracked_combatant = find_tracked_player_combatant_for_character(
-                        campaign_slug,
-                        selected_character_slug,
-                        campaign=campaign,
-                    )
-                    if tracked_combatant is not None:
-                        if can_manage_combat:
-                            session_combat_relationship_available = True
-                            session_combat_relationship_surface_label = "Encounter status"
-                            session_combat_relationship_action_label = "Open encounter status"
-                            session_combat_relationship_href = url_for(
-                                "campaign_combat_status_view",
-                                campaign_slug=campaign.slug,
-                                combatant=tracked_combatant.id,
-                            )
-                        elif selected_character_slug in get_owned_character_slugs(campaign_slug):
-                            session_combat_relationship_available = True
-                            session_combat_relationship_surface_label = "Combat"
-                            session_combat_relationship_action_label = "Open Combat"
-                            session_combat_relationship_href = url_for(
-                                "campaign_combat_view",
-                                campaign_slug=campaign.slug,
-                                combatant=tracked_combatant.id,
-                            )
         else:
             (
                 session_character_empty_state_title,
@@ -6359,33 +6330,9 @@ def create_app() -> Flask:
             "is_session_mode": session_character_editing_enabled,
             "rest_preview": rest_preview,
             "session_character_editing_enabled": session_character_editing_enabled,
-            "session_character_active_edit_scope": (
-                SESSION_CHARACTER_ACTIVE_EDIT_SCOPE if session_character_editing_enabled else ()
-            ),
-            "session_character_active_edit_summary": (
-                SESSION_CHARACTER_ACTIVE_EDIT_SUMMARY if session_character_editing_enabled else ""
-            ),
-            "session_character_outside_edit_scope": (
-                SESSION_CHARACTER_FULL_PAGE_ONLY_SCOPE if session_character_editing_enabled else ()
-            ),
-            "session_character_full_page_only_summary": (
-                SESSION_CHARACTER_FULL_PAGE_ONLY_SUMMARY if session_character_editing_enabled else ""
-            ),
             "session_personal_edit_block_message": session_personal_edit_block_message,
             "session_personal_edit_block_href": session_personal_edit_block_href,
             "session_personal_edit_block_action_label": session_personal_edit_block_action_label,
-            "session_combat_relationship_available": session_combat_relationship_available,
-            "session_combat_relationship_surface_label": session_combat_relationship_surface_label,
-            "session_combat_relationship_action_label": session_combat_relationship_action_label,
-            "session_combat_relationship_href": session_combat_relationship_href,
-            "combat_and_session_combat_scope": COMBAT_AND_SESSION_COMBAT_SCOPE,
-            "combat_and_session_combat_scope_summary": (
-                COMBAT_AND_SESSION_COMBAT_SUMMARY if session_combat_relationship_available else ""
-            ),
-            "combat_and_session_session_scope": COMBAT_AND_SESSION_SESSION_SCOPE,
-            "combat_and_session_session_scope_summary": (
-                COMBAT_AND_SESSION_SESSION_SUMMARY if session_combat_relationship_available else ""
-            ),
             "session_return_view": "session-character",
             "session_surface_return_url": session_surface_return_url,
             "session_surface_short_rest_url": session_surface_short_rest_url,

@@ -93,31 +93,6 @@
                 </a>
               {% endfor %}
             </nav>
-            {% if (session_character_active_edit_summary and not is_xianxia_sheet) or session_combat_relationship_available %}
-              <div class="session-character-lane-note">
-                {% if session_character_active_edit_summary and not is_xianxia_sheet %}
-                  <p class="meta">
-                    <strong>Session edits:</strong> {{ session_character_active_edit_summary }}.
-                  </p>
-                  <p class="meta">
-                    <strong>Full character page:</strong> {{ session_character_full_page_only_summary }}.
-                  </p>
-                {% endif %}
-                {% if session_combat_relationship_available %}
-                  <p class="meta">
-                    <strong>Prefer {{ session_combat_relationship_surface_label }}:</strong>
-                    {{ combat_and_session_combat_scope_summary }}.
-                  </p>
-                  <p class="meta">Keep Session for {{ combat_and_session_session_scope_summary }}.</p>
-                  <div class="hero-actions session-character-lane-note__actions">
-                    <a class="button-link" href="{{ session_combat_relationship_href }}">{{ session_combat_relationship_action_label }}</a>
-                  </div>
-                  <p class="meta">
-                    The combat link keeps this character selected through the matching combatant deep link.
-                  </p>
-                {% endif %}
-              </div>
-            {% endif %}
           </section>
 
           {% if not is_xianxia_sheet %}

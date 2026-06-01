@@ -669,7 +669,7 @@ def test_session_character_page_shows_edit_controls_only_while_session_is_active
     ) in html
 
 
-def test_session_character_page_explains_active_session_edit_scope(
+def test_session_character_page_omits_active_session_edit_scope_note(
     client, sign_in, users, set_campaign_visibility
 ):
     set_campaign_visibility("linden-pass", characters="players")
@@ -686,19 +686,18 @@ def test_session_character_page_explains_active_session_edit_scope(
     html = response.get_data(as_text=True)
     assert "Session editing scope" not in html
     assert "Edit here during an active session" not in html
-    assert "Session edits:" in html
-    assert (
-        "Vitals, rests, tracked resources, spell slots, equipment state, inventory quantities, "
-        "currency, and player notes."
-    ) in html
-    assert "Full character page:" in html
+    assert "Session edits:" not in html
+    assert "Full character page:" not in html
+    assert "Vitals, rests, tracked resources, spell slots, equipment state, inventory quantities, " not in html
     assert (
         "portrait management, Advanced Editor reference text, spell-list changes, inventory add/remove work, "
         "and advanced maintenance."
-    ) in html
+    ) not in html
+    assert "Character sections" in html
+    assert "Session character" in html
 
 
-def test_session_character_page_links_tracked_character_to_combat_workspace_when_both_are_live(
+def test_session_character_page_omits_tracked_character_combat_shortcut_when_both_are_live(
     app, client, sign_in, users, set_campaign_visibility
 ):
     set_campaign_visibility("linden-pass", characters="players")
@@ -713,9 +712,6 @@ def test_session_character_page_links_tracked_character_to_combat_workspace_when
     combatant = _find_combatant(app, character_slug=ASSIGNED_CHARACTER_SLUG)
     assert combatant is not None
 
-    client.post("/sign-out", follow_redirects=False)
-    sign_in(users["owner"]["email"], users["owner"]["password"])
-
     response = client.get(
         f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=overview"
     )
@@ -723,17 +719,21 @@ def test_session_character_page_links_tracked_character_to_combat_workspace_when
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Combat relationship" not in html
-    assert "Prefer Combat:" in html
+    assert "Prefer Combat:" not in html
+    assert "Prefer Encounter status:" not in html
+    assert "Combat relationship:" not in html
+    assert "Open Combat" not in html
+    assert "Open encounter status" not in html
+    assert "The combat link keeps this character selected through the matching combatant deep link." not in html
     assert (
         "turn-by-turn movement, action economy, conditions, and turn order while the combat encounter is active."
-    ) in html
+    ) not in html
     assert (
         "Keep Session for the broader live-session workflow, rests, inventory quantities, "
         "currency, and player notes, plus HP/temp HP, tracked resources, and spell slot usage."
-    ) in html
-    assert f'/campaigns/linden-pass/combat?combatant={combatant.id}' in html
-    assert ">Open Combat<" in html
-    assert "The combat link keeps this character selected through the matching combatant deep link." in html
+    ) not in html
+    assert f"combatant={combatant.id}" not in html
+    assert "At a glance" in html
 
 
 def test_session_character_spells_page_combines_single_row_stats_into_slot_workspace(client, sign_in, users):
@@ -1074,8 +1074,8 @@ def test_session_character_spells_direct_load_selects_spells_panel(client, sign_
         'data-combat-section-panel="overview"',
         'data-combat-section-panel="spells"',
     )
-    assert "hidden" not in spells_panel
-    assert "hidden" in overview_panel
+    assert "hidden" not in {line.strip() for line in spells_panel.splitlines()}
+    assert "hidden" in {line.strip() for line in overview_panel.splitlines()}
     assert 'data-combat-section-toggle="spells"' in html
     assert 'aria-current="page"' in _html_segment_after(html, 'data-combat-section-toggle="spells"', length=250)
 
