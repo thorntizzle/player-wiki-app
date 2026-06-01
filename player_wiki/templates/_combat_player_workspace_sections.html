@@ -722,45 +722,14 @@
         {% endif %}
       {% elif section.slug == 'abilities_skills' %}
         {% if section.abilities or section.skills or section.proficiency_groups %}
-          <div class="ability-grid">
-            {% for ability in section.abilities %}
-              <article class="ability-card">
-                <p class="card-kicker">{{ ability.abbr }}</p>
-                <h3>{{ ability.score }}</h3>
-                <p>{{ ability.name }}</p>
-                <p class="meta">Modifier {{ ability.modifier }} | Save {{ ability.save_bonus }}</p>
-              </article>
-            {% endfor %}
-          </div>
-          <div class="detail-cluster">
-            <div>
-              <h3>Skills</h3>
-              <div class="skill-grid">
-                {% for skill in section.skills %}
-                  <div class="skill-pill {% if skill.is_proficient %}skill-pill--proficient{% endif %}">
-                    <span>{{ skill.name }}</span>
-                    <strong>{{ skill.bonus }}</strong>
-                    {% if skill.proficiency_label and skill.proficiency_label != 'None' %}
-                      <span class="meta">{{ skill.proficiency_label }}</span>
-                    {% endif %}
-                  </div>
-                {% endfor %}
-              </div>
-            </div>
-            {% if section.proficiency_groups %}
-              <div>
-                <h3>Proficiencies</h3>
-                <div class="detail-grid">
-                  {% for group in section.proficiency_groups %}
-                    <article class="detail-card">
-                      <h4>{{ group.title }}</h4>
-                      <p>{{ group.values_list | join(", ") }}</p>
-                    </article>
-                  {% endfor %}
-                </div>
-              </div>
-            {% endif %}
-          </div>
+          {% with
+            ability_skill_abilities = section.abilities,
+            ability_skill_skills = section.skills,
+            ability_skill_proficiency_groups = section.proficiency_groups,
+            ability_skill_empty_message = section.empty_message
+          %}
+            {% include "_character_abilities_skills.html" %}
+          {% endwith %}
         {% else %}
           <article class="detail-card">
             <p class="meta">{{ section.empty_message }}</p>

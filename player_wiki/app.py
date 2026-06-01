@@ -6776,6 +6776,9 @@ def create_app() -> Flask:
         resources = [dict(item or {}) for item in list(character_detail.get("resources") or [])]
         feature_groups = [dict(group or {}) for group in list(character_detail.get("feature_groups") or [])]
         overview_stats = [dict(item or {}) for item in list(character_detail.get("overview_stats") or [])]
+        overview_stat_rows = [
+            list(row or []) for row in list(character_detail.get("overview_stat_rows") or [])
+        ]
         defensive_rules = [dict(item or {}) for item in list(character_detail.get("defensive_rules") or [])]
         equipment_rows = [
             dict(item or {})
@@ -6864,7 +6867,12 @@ def create_app() -> Flask:
             {
                 "slug": "overview",
                 "label": SESSION_CHARACTER_SECTION_LABELS["overview"],
-                "count": len(overview_stats) + len(defensive_rules),
+                "count": (
+                    sum(len(row) for row in overview_stat_rows)
+                    if overview_stat_rows
+                    else len(overview_stats)
+                )
+                + len(defensive_rules),
             },
         ]
         if include_spellcasting:

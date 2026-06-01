@@ -2328,6 +2328,9 @@ def test_owner_player_combat_page_uses_character_workspace_layout(app, client, s
     assert 'data-combat-section-toggle="spells"' in body
     assert 'data-combat-section-toggle="resources"' in body
     assert "Abilities and Skills" in body
+    assert 'class="ability-grid ability-grid--skills"' in body
+    assert "ability-skill-list" in body
+    assert "<h3>Skills</h3>" not in body
     assert "Selected / inspected" in body
     assert "combat-spellcasting-panel" in body
     assert "combat-spell-slot-row" in body
@@ -4276,6 +4279,9 @@ def test_dm_status_page_in_default_status_mode_includes_player_workspace_section
     assert 'data-combat-section-group' in body
     assert 'data-combat-section-toggle="actions"' not in body
     assert 'data-combat-section-toggle="resources"' in body
+    assert 'class="ability-grid ability-grid--skills"' in body
+    assert "ability-skill-list" in body
+    assert "<h3>Skills</h3>" not in body
     assert f'data-combatant-id="{arden.id}"' in body
 
 

@@ -186,76 +186,14 @@
 
       {% if show_quick_sections %}
         <section class="read-section" id="character-quick-overview">
-          <h2>At a glance</h2>
-          {% if character.overview_stat_rows %}
-            {% for row in character.overview_stat_rows %}
-              {% set row_index = loop.index %}
-              <div
-                class="glance-grid glance-grid--row glance-grid--quick-row-{{ row_index }}"
-                {% if row_index == 1 and character_inline_state_controls_enabled %}id="session-vitals"{% endif %}
-              >
-                {% for stat in row %}
-                  {% if row_index == 1 and not is_xianxia_sheet and character_inline_state_controls_enabled and stat.label in ["Current HP", "Temp HP"] %}
-                    <article class="glance-card glance-card--vitals">
-                      <form
-                        class="session-vitals-form session-vitals-form--inline {% if loop.index == 1 %}session-vitals-form--inline-current{% else %}session-vitals-form--inline-temp{% endif %}"
-                        data-character-sheet-edit-form="vitals"
-                        method="post"
-                        action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
-                      >
-                        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-                        <input type="hidden" name="mode" value="read">
-                        <input type="hidden" name="page" value="{{ character_subpage }}">
-                        {% if loop.index == 1 %}
-                          <label class="session-field session-vitals-form__row">
-                            <span>{{ stat.label }}</span>
-                            <div class="session-number-inline">
-                              <input
-                                type="number"
-                                name="current_hp"
-                                value="{{ character.current_hp }}"
-                                min="0"
-                                max="{{ character.max_hp }}"
-                                aria-label="Current HP"
-                              >
-                              <span>/ {{ character.max_hp }}</span>
-                            </div>
-                          </label>
-                          <button class="visually-hidden" type="submit">Save current HP</button>
-                        {% else %}
-                          <label class="session-field session-vitals-form__row">
-                            <span>{{ stat.label }}</span>
-                            <input
-                              type="number"
-                              name="temp_hp"
-                              value="{{ character.temp_hp }}"
-                              min="0"
-                              aria-label="Temp HP"
-                            >
-                          </label>
-                          <button class="visually-hidden" type="submit">Save temp HP</button>
-                        {% endif %}
-                      </form>
-                    </article>
-                  {% else %}
-                    <div class="glance-card">
-                      <span class="meta">{{ stat.label }}</span>
-                      <strong>{{ stat.value }}</strong>
-                    </div>
-                  {% endif %}
-                {% endfor %}
-              </div>
-            {% endfor %}
-          {% else %}
-            <div class="glance-grid">
-              {% for stat in character.overview_stats %}
-                <div class="glance-card">
-                  <span class="meta">{{ stat.label }}</span>
-                  <strong>{{ stat.value }}</strong>
-                </div>
-              {% endfor %}
-            </div>
-          {% endif %}
+          {% with
+            character_glance_inline_vitals_enabled = character_inline_state_controls_enabled,
+            character_glance_inline_vitals_mode = "read",
+            character_glance_inline_vitals_page = character_subpage,
+            character_glance_is_xianxia = is_xianxia_sheet
+          %}
+            {% include "_character_glance_rows.html" %}
+          {% endwith %}
         </section>
       {% endif %}
 
@@ -556,49 +494,13 @@
           <div class="section-heading">
             <h2>Abilities and skills</h2>
           </div>
-          <div class="ability-grid ability-grid--skills">
-            {% for ability in character.abilities %}
-              <article class="ability-card ability-card--skills">
-                <div>
-                  <p class="card-kicker">{{ ability.abbr }}</p>
-                  <h3>{{ ability.score }}</h3>
-                  <p>{{ ability.name }}</p>
-                  <p class="meta">Modifier {{ ability.modifier }} | Save {{ ability.save_bonus }}</p>
-                </div>
-                {% if ability.skills %}
-                  <ul class="plain-list ability-skill-list">
-                    {% for skill in ability.skills %}
-                      <li class="ability-skill-list__item {% if skill.is_proficient %}ability-skill-list__item--proficient{% endif %}">
-                        <span>{{ skill.name }}</span>
-                        <strong>{{ skill.bonus }}</strong>
-                        {% if skill.proficiency_label and skill.proficiency_label != 'None' %}
-                          <span class="meta">{{ skill.proficiency_label }}</span>
-                        {% endif %}
-                      </li>
-                    {% endfor %}
-                  </ul>
-                {% else %}
-                  <p class="meta">No linked skills</p>
-                {% endif %}
-              </article>
-            {% endfor %}
-          </div>
-
-          <div class="detail-cluster">
-            {% if character.proficiency_groups %}
-              <div>
-                <h3>Proficiencies</h3>
-                <div class="detail-grid">
-                  {% for group in character.proficiency_groups %}
-                    <article class="detail-card">
-                      <h4>{{ group.title }}</h4>
-                      <p>{{ group.values_list | join(", ") }}</p>
-                    </article>
-                  {% endfor %}
-                </div>
-              </div>
-            {% endif %}
-          </div>
+          {% with
+            ability_skill_abilities = character.abilities,
+            ability_skill_skills = character.skills,
+            ability_skill_proficiency_groups = character.proficiency_groups
+          %}
+            {% include "_character_abilities_skills.html" %}
+          {% endwith %}
         </section>
       {% endif %}
 

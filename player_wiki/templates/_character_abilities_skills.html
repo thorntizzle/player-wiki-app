@@ -1,0 +1,53 @@
+{% set ability_skill_abilities = ability_skill_abilities | default([], true) %}
+{% set ability_skill_skills = ability_skill_skills | default([], true) %}
+{% set ability_skill_proficiency_groups = ability_skill_proficiency_groups | default([], true) %}
+{% set ability_skill_empty_message = ability_skill_empty_message | default("No ability or skill details are recorded on this sheet yet.", true) %}
+{% if ability_skill_abilities or ability_skill_skills or ability_skill_proficiency_groups %}
+  <div class="ability-grid ability-grid--skills">
+    {% for ability in ability_skill_abilities %}
+      <article class="ability-card ability-card--skills">
+        <div>
+          <p class="card-kicker">{{ ability.abbr }}</p>
+          <h3>{{ ability.score }}</h3>
+          <p>{{ ability.name }}</p>
+          <p class="meta">Modifier {{ ability.modifier }} | Save {{ ability.save_bonus }}</p>
+        </div>
+        {% if ability.skills %}
+          <ul class="plain-list ability-skill-list">
+            {% for skill in ability.skills %}
+              <li class="ability-skill-list__item {% if skill.is_proficient %}ability-skill-list__item--proficient{% endif %}">
+                <span>{{ skill.name }}</span>
+                <strong>{{ skill.bonus }}</strong>
+                {% if skill.proficiency_label and skill.proficiency_label != 'None' %}
+                  <span class="meta">{{ skill.proficiency_label }}</span>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="meta">No linked skills</p>
+        {% endif %}
+      </article>
+    {% endfor %}
+  </div>
+
+  {% if ability_skill_proficiency_groups %}
+    <div class="detail-cluster">
+      <div>
+        <h3>Proficiencies</h3>
+        <div class="detail-grid">
+          {% for group in ability_skill_proficiency_groups %}
+            <article class="detail-card">
+              <h4>{{ group.title }}</h4>
+              <p>{{ group.values_list | join(", ") }}</p>
+            </article>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  {% endif %}
+{% else %}
+  <article class="detail-card">
+    <p class="meta">{{ ability_skill_empty_message }}</p>
+  </article>
+{% endif %}

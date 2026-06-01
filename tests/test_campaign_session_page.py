@@ -1118,8 +1118,18 @@ def test_session_character_active_controls_live_in_matching_dnd_panels(
         'data-combat-section-panel="inventory"',
         'data-combat-section-panel="abilities_skills"',
     )
+    abilities_panel = _html_segment_between(
+        html,
+        'data-combat-section-panel="abilities_skills"',
+        'data-combat-section-panel="notes"',
+    )
     assert 'id="session-vitals"' in html
     assert f'name="page" value="overview"' in html
+    assert 'data-character-sheet-edit-form="vitals"' not in overview_panel
+    assert "glance-grid--quick-row-1" in overview_panel
+    assert "glance-grid--quick-row-2" in overview_panel
+    assert "glance-grid--quick-row-3" in overview_panel
+    assert "glance-grid--quick-row-4" in overview_panel
     assert (
         f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}"
         "&amp;page=overview&amp;confirm_rest=short"
@@ -1136,6 +1146,9 @@ def test_session_character_active_controls_live_in_matching_dnd_panels(
     assert 'class="meta-badge">lb.' not in inventory_panel
     assert "<strong>x" not in inventory_panel
     assert "Tracked item" not in inventory_panel
+    assert 'class="ability-grid ability-grid--skills"' in abilities_panel
+    assert "ability-skill-list" in abilities_panel
+    assert "<h3>Skills</h3>" not in abilities_panel
 
 
 @pytest.mark.parametrize(
