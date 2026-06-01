@@ -11,6 +11,7 @@
       <form
         class="session-vitals-form session-vitals-form--inline session-vitals-form--inline-current"
         data-character-sheet-edit-form="vitals"
+        data-character-autosubmit
         method="post"
         action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
@@ -34,7 +35,6 @@
             <span>/ {{ character.max_hp }}</span>
           </div>
         </label>
-        <button class="visually-hidden" type="submit">Save current HP</button>
       </form>
     </article>
 
@@ -42,6 +42,7 @@
       <form
         class="session-vitals-form session-vitals-form--inline session-vitals-form--inline-temp"
         data-character-sheet-edit-form="vitals"
+        data-character-autosubmit
         method="post"
         action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
@@ -61,7 +62,6 @@
             aria-label="Temp HP"
           >
         </label>
-        <button class="visually-hidden" type="submit">Save temp HP</button>
       </form>
     </article>
   </div>
@@ -86,6 +86,7 @@
   <form
     class="session-vitals-form{% if session_character_compact_controls %} session-vitals-form--compact{% endif %}"
     data-character-sheet-edit-form="vitals"
+    data-character-autosubmit
     method="post"
     action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
   >
@@ -100,12 +101,6 @@
         <span>Current HP</span>
         <input type="number" name="current_hp" value="{{ character.current_hp }}" min="0" max="{{ character.max_hp }}">
       </label>
-      <div class="session-stepper{% if session_character_compact_controls %} session-stepper--compact{% endif %}">
-        <button type="submit" name="hp_delta" value="-5">-5</button>
-        <button type="submit" name="hp_delta" value="-1">-1</button>
-        <button type="submit" name="hp_delta" value="1">+1</button>
-        <button type="submit" name="hp_delta" value="5">+5</button>
-      </div>
     </div>
 
     <div class="session-vitals-form__group">
@@ -113,16 +108,7 @@
         <span>Temp HP</span>
         <input type="number" name="temp_hp" value="{{ character.temp_hp }}" min="0">
       </label>
-      <div class="session-stepper{% if session_character_compact_controls %} session-stepper--compact{% endif %}">
-        <button type="submit" name="temp_hp_delta" value="-5">-5</button>
-        <button type="submit" name="temp_hp_delta" value="-1">-1</button>
-        <button type="submit" name="temp_hp_delta" value="1">+1</button>
-        <button type="submit" name="temp_hp_delta" value="5">+5</button>
-        <button type="submit" name="clear_temp_hp" value="1">Clear</button>
-      </div>
     </div>
-
-    <button class="button-link session-vitals-form__save" type="submit">Save vitals</button>
   </form>
 
   {% if session_character_show_rest_actions %}

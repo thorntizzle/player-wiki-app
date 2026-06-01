@@ -10,6 +10,7 @@
     {% if arcane_armor_state_can_edit and arcane_armor_state_action %}
       <form
         class="stack-form"
+        data-character-autosubmit
         method="post"
         action="{{ arcane_armor_state_action }}"
         {% if arcane_armor_state_async %}data-combat-async{% endif %}
@@ -41,9 +42,6 @@
           <input type="checkbox" name="enabled" value="1" {% if arcane_armor_state.enabled %}checked{% endif %}>
           Arcane Armor enabled
         </label>
-        <div class="hero-actions">
-          <button type="submit">Save Arcane Armor</button>
-        </div>
       </form>
     {% endif %}
   </article>

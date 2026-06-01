@@ -328,9 +328,11 @@ def test_player_session_page_includes_lazy_wiki_lookup_widget(client, sign_in, u
     assert 'data-session-wiki-lookup-preview' in session_html
     assert 'data-loading="0"' in session_html
     assert 'aria-busy="false"' in session_html
-    assert "Search player-visible wiki articles and read them here without leaving the live session page." in session_html
-    assert "Type at least 2 letters to search player-visible wiki articles." in session_html
-    assert "Search and choose a player-visible wiki article to read it here." in session_html
+    assert (
+        "Search player-visible wiki articles and read them here without leaving the live session page. "
+        "Type at least 2 letters to search."
+    ) in session_html
+    assert "Search and choose a player-visible wiki article to read it here." not in session_html
 
 
 def test_player_cannot_open_dm_session_workspace(client, sign_in, users):
@@ -482,7 +484,7 @@ def test_owner_can_open_session_character_subpage_without_leaving_session_featur
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Session Character" in html
-    assert "Live session tools" in html
+    assert "Live session tools" not in html
     assert "Character chooser" not in html
     assert "Character sections" not in html
     assert "session-character-section-nav" in html
@@ -493,7 +495,7 @@ def test_owner_can_open_session_character_subpage_without_leaving_session_featur
     assert "Enter session mode" not in html
     assert "Save personal details" not in html
     assert "/campaigns/linden-pass/session" in html
-    assert 'href="/campaigns/linden-pass/help#session"' in html
+    assert 'href="/campaigns/linden-pass/help#session"' not in html
 
 
 def test_session_character_equipment_page_filters_inventory_only_rows(client, sign_in, users):
@@ -536,10 +538,10 @@ def test_session_character_page_keeps_single_sheet_players_out_of_a_redundant_ro
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Live session tools" in html
+    assert "Live session tools" not in html
     assert "Character chooser" not in html
-    assert ">Open Session<" in html
-    assert 'href="/campaigns/linden-pass/help#session"' in html
+    assert ">Open Session<" not in html
+    assert 'href="/campaigns/linden-pass/help#session"' not in html
 
 
 def test_dm_session_character_page_keeps_character_chooser_for_cross_character_access(client, sign_in, users):
@@ -549,7 +551,7 @@ def test_dm_session_character_page_keeps_character_chooser_for_cross_character_a
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Live session tools" in html
+    assert "Live session tools" not in html
     assert "Character chooser" in html
     assert "Open any session-enabled character sheet from the current campaign." in html
 
@@ -588,7 +590,7 @@ def test_session_character_page_omits_permission_module_for_assigned_player(clie
     assert "Permission behavior" not in html
     assert "Current access: assigned-player access" not in html
     assert "Editing controls appear only during an active DM-started session" not in html
-    assert "/campaigns/linden-pass/help#session" in html
+    assert "/campaigns/linden-pass/help#session" not in html
     assert "Open only their own session-enabled character here." not in html
 
 
@@ -665,8 +667,9 @@ def test_session_character_page_shows_edit_controls_only_while_session_is_active
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Current HP" in html
-    assert "Save current HP" in html
-    assert "Save temp HP" in html
+    assert "Save current HP" not in html
+    assert "Save temp HP" not in html
+    assert 'data-character-autosubmit' in html
     assert "Active session" not in html
     assert 'name="return_view" value="session-character"' in html
     assert (
@@ -1220,9 +1223,13 @@ def test_session_character_active_controls_live_in_matching_dnd_panels(
         "&amp;page=overview&amp;confirm_rest=short"
     ) in html
     assert 'data-character-sheet-edit-form="spell-slot"' in spells_panel
-    assert "Use 1" in spells_panel
+    assert "Use 1" not in spells_panel
+    assert "Restore 1" not in spells_panel
+    assert ">Save<" not in spells_panel
+    assert "data-character-autosubmit" in spells_panel
     assert 'name="page" value="spells"' in spells_panel
     assert 'data-character-sheet-edit-form="resource"' in resources_panel
+    assert "data-character-autosubmit" in resources_panel
     assert 'name="page" value="resources"' in resources_panel
     assert inventory_panel.count('data-character-sheet-edit-form="currency"') == 5
     assert inventory_panel.count('class="currency-grid"') == 1
@@ -1305,7 +1312,8 @@ def test_session_character_equipment_panel_exposes_state_controls_during_active_
     assert 'name="return_view" value="session-character"' in equipment_panel
     assert 'name="page" value="equipment"' in equipment_panel
     assert 'name="weapon_wield_mode"' in equipment_panel
-    assert "Save equipment state" in equipment_panel
+    assert 'data-character-autosubmit' in equipment_panel
+    assert "Save equipment state" not in equipment_panel
 
 
 def test_session_character_equipment_state_update_redirects_back_to_session_surface(
@@ -1387,7 +1395,8 @@ def test_session_character_equipment_state_async_fragment_refreshes_character_pa
     assert 'data-session-character-flash-stack' in html
     assert "Equipment state updated." in html
     assert 'data-combat-section-panel="equipment"' in html
-    assert "Save equipment state" in html
+    assert 'data-character-autosubmit' in html
+    assert "Save equipment state" not in html
 
     updated = get_character(ASSIGNED_CHARACTER_SLUG)
     assert updated is not None

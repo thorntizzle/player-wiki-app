@@ -16,6 +16,7 @@
             <form
               class="session-vitals-form session-vitals-form--inline {% if loop.index == 1 %}session-vitals-form--inline-current{% else %}session-vitals-form--inline-temp{% endif %}"
               data-character-sheet-edit-form="vitals"
+              data-character-autosubmit
               method="post"
               action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
             >
@@ -37,7 +38,6 @@
                     <span>/ {{ character.max_hp }}</span>
                   </div>
                 </label>
-                <button class="visually-hidden" type="submit">Save current HP</button>
               {% else %}
                 <label class="session-field session-vitals-form__row">
                   <span>{{ stat.label }}</span>
@@ -49,7 +49,6 @@
                     aria-label="Temp HP"
                   >
                 </label>
-                <button class="visually-hidden" type="submit">Save temp HP</button>
               {% endif %}
             </form>
           </article>

@@ -11,6 +11,7 @@
     );
     const initializedSpellModalTriggers = new WeakSet();
     const initializedSpellModalDialogs = new WeakSet();
+    const initializedAutosubmitForms = new WeakSet();
 
     const closeSpellDialog = (dialog) => {
       if (!isDialogElement(dialog)) {
@@ -87,6 +88,88 @@
         }
       }
     };
+    const buildAutosubmitFormState = (form) => {
+      if (!(form instanceof HTMLFormElement)) {
+        return "";
+      }
+      const params = new URLSearchParams();
+      for (const [name, value] of new FormData(form).entries()) {
+        params.append(name, typeof value === "string" ? value : "");
+      }
+      return params.toString();
+    };
+    const fieldAllowsAutosubmit = (field) => {
+      if (field instanceof HTMLInputElement && field.type === "number" && field.value.trim() === "") {
+        return false;
+      }
+      return true;
+    };
+    const queueAutosubmit = (form, field, delayMs = 350) => {
+      if (!(form instanceof HTMLFormElement) || !fieldAllowsAutosubmit(field)) {
+        return;
+      }
+      window.clearTimeout(Number(form.dataset.characterAutosubmitTimer || "0"));
+      const submit = () => {
+        form.dataset.characterAutosubmitTimer = "0";
+        if (buildAutosubmitFormState(form) === String(form.dataset.characterAutosubmitState || "")) {
+          return;
+        }
+        if (typeof form.requestSubmit === "function") {
+          form.requestSubmit();
+          return;
+        }
+        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      };
+      form.dataset.characterAutosubmitTimer = String(window.setTimeout(submit, delayMs));
+    };
+    const initAutosubmitForms = (scope) => {
+      if (!(scope instanceof Element) && !(scope instanceof Document)) {
+        return;
+      }
+      const forms = Array.from(scope.querySelectorAll("[data-character-autosubmit]"));
+      for (const form of forms) {
+        if (!(form instanceof HTMLFormElement)) {
+          continue;
+        }
+        form.dataset.characterAutosubmitState = buildAutosubmitFormState(form);
+        if (initializedAutosubmitForms.has(form)) {
+          continue;
+        }
+        initializedAutosubmitForms.add(form);
+        form.addEventListener("input", (event) => {
+          const field = event.target;
+          if (!(field instanceof HTMLInputElement) || field.type !== "number") {
+            return;
+          }
+          queueAutosubmit(form, field, 450);
+        });
+        form.addEventListener("change", (event) => {
+          const field = event.target;
+          if (
+            !(field instanceof HTMLInputElement)
+            && !(field instanceof HTMLSelectElement)
+            && !(field instanceof HTMLTextAreaElement)
+          ) {
+            return;
+          }
+          queueAutosubmit(form, field, 0);
+        });
+        form.addEventListener("keydown", (event) => {
+          const field = event.target;
+          if (event.key !== "Enter" || !fieldAllowsAutosubmit(field)) {
+            return;
+          }
+          if (
+            !(field instanceof HTMLInputElement)
+            && !(field instanceof HTMLSelectElement)
+          ) {
+            return;
+          }
+          event.preventDefault();
+          queueAutosubmit(form, field, 0);
+        });
+      }
+    };
 
     const activateSection = (group, requestedSlug = "") => {
       if (!(group instanceof HTMLElement)) {
@@ -153,6 +236,7 @@
         return;
       }
       initSpellModals(root);
+      initAutosubmitForms(root);
       root.querySelectorAll("[data-combat-section-group]").forEach((group) => {
         initGroup(group);
         activateSection(group);
@@ -175,6 +259,7 @@
         return "";
       }
       initSpellModals(root);
+      initAutosubmitForms(root);
       let restored = "";
       root.querySelectorAll("[data-combat-section-group]").forEach((group) => {
         if (!(group instanceof HTMLElement)) {

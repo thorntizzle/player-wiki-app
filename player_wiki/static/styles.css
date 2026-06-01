@@ -229,6 +229,10 @@ a:hover {
   gap: 1rem;
 }
 
+.site-header__main--campaign {
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
+}
+
 .site-header__primary,
 .site-header__actions {
   display: flex;
@@ -238,6 +242,16 @@ a:hover {
 
 .site-header__primary {
   min-width: 0;
+}
+
+.site-header__campaign {
+  justify-self: center;
+  min-width: 0;
+  max-width: min(34rem, 100%);
+  color: var(--accent-deep);
+  font-weight: 700;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .site-header__actions {
@@ -1439,7 +1453,8 @@ button {
 
 .character-sheet .resource-grid--compact,
 .character-sheet .resource-grid--editable,
-.character-sheet .spell-slot-editor-list--compact {
+.character-sheet .spell-slot-editor-list--compact,
+.combat-spellcasting-panel .spell-slot-editor-list--compact {
   grid-template-columns: repeat(3, minmax(0, min(24rem, 100%)));
   justify-content: center;
 }
@@ -1812,9 +1827,8 @@ button {
 
 .combat-spell-slot-row {
   display: grid;
-  grid-template-columns: minmax(9rem, 1fr) minmax(8rem, 0.65fr) auto;
-  gap: 0.65rem;
-  align-items: end;
+  gap: 0.75rem;
+  align-content: start;
   padding: 0.75rem 0.85rem;
   border-radius: 14px;
   border: 1px solid var(--border);
@@ -3789,6 +3803,11 @@ button {
 
   .site-header__main {
     grid-template-columns: 1fr;
+  }
+
+  .site-header__campaign {
+    justify-self: start;
+    text-align: left;
   }
 
   .site-header__actions,

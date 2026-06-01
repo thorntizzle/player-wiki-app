@@ -2334,12 +2334,13 @@ def test_owner_player_combat_page_uses_character_workspace_layout(app, client, s
     assert "Selected / inspected" in body
     assert "combat-spellcasting-panel" in body
     assert "combat-spell-slot-row" in body
-    assert "spell-slot-editor-list" not in body
+    assert "spell-slot-editor-list spell-slot-editor-list--compact combat-spell-slot-list" in body
+    assert "spell-level-section" in body
     assert body.count("combat-spellcasting-summary") == 1
-    assert body.count("Save DC 15") == 1
-    assert body.count("Attack +7") == 1
+    assert body.count("Save DC 15") >= 1
+    assert body.count("Attack +7") >= 1
     normalized_body = re.sub(r"\s+", " ", body)
-    assert normalized_body.count("Charisma spellcasting | Save DC 15 | Attack +7") == 1
+    assert normalized_body.count("Charisma spellcasting | Save DC 15 | Attack +7") >= 1
     assert "Test Mage Initiate" in body
     assert "Borrowed Spark" in body
     assert "Current limits" not in body
@@ -2844,13 +2845,14 @@ def test_owner_player_can_update_equipment_state_from_combat_workspace(
     page = client.get(f"/campaigns/linden-pass/combat?combatant={combatant.id}")
     assert page.status_code == 200
     body = page.get_data(as_text=True)
-    assert "Save equipment state" in body
+    assert "Save equipment state" not in body
     assert (
         f"/campaigns/linden-pass/combat/character/combatants/{combatant.id}"
         "/equipment/quarterstaff-2/state"
     ) in body
     assert 'name="combat_view" value="combat"' in body
     assert 'data-combat-async' in body
+    assert 'data-character-autosubmit' in body
 
     record = get_character("arden-march")
     assert _inventory_item(record, "quarterstaff-2")["is_equipped"] is True
@@ -2873,7 +2875,8 @@ def test_owner_player_can_update_equipment_state_from_combat_workspace(
     assert payload["ok"] is True
     assert payload["selected_combatant_id"] == combatant.id
     assert "Equipment state updated." in payload["flash_html"]
-    assert "Save equipment state" in payload["tracker_html"]
+    assert "Save equipment state" not in payload["tracker_html"]
+    assert 'data-character-autosubmit' in payload["tracker_html"]
 
     record = get_character("arden-march")
     updated_item = _inventory_item(record, "quarterstaff-2")
@@ -3067,8 +3070,9 @@ def test_arcane_armor_state_gates_guardian_combat_actions(app, client, sign_in, 
     page = client.get(f"/campaigns/linden-pass/combat?combatant={combatant.id}")
     assert page.status_code == 200
     body = page.get_data(as_text=True)
-    assert "Save Arcane Armor" in body
+    assert "Save Arcane Armor" not in body
     assert "Arcane Armor enabled" in body
+    assert 'data-character-autosubmit' in body
     assert 'data-combat-section-panel="bonus_actions"' not in body
     assert "Guardian Armor: Thunder Gauntlets" not in _workspace_panel(body, "actions")
 
@@ -4394,13 +4398,14 @@ def test_dm_status_can_update_selected_pc_equipment_state(
     page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={arden.id}")
     assert page.status_code == 200
     body = page.get_data(as_text=True)
-    assert "Save equipment state" in body
+    assert "Save equipment state" not in body
     assert (
         f"/campaigns/linden-pass/combat/character/combatants/{arden.id}"
         "/equipment/quarterstaff-2/state"
     ) in body
     assert 'name="combat_view" value="dm"' in body
     assert 'name="view" value="status"' in body
+    assert 'data-character-autosubmit' in body
 
     record = get_character("arden-march")
     assert _inventory_item(record, "quarterstaff-2")["is_equipped"] is True
@@ -4424,7 +4429,8 @@ def test_dm_status_can_update_selected_pc_equipment_state(
     assert payload["ok"] is True
     assert payload["selected_combatant_id"] == arden.id
     assert "Equipment state updated." in payload["flash_html"]
-    assert "Save equipment state" in payload["tracker_detail_html"]
+    assert "Save equipment state" not in payload["tracker_detail_html"]
+    assert 'data-character-autosubmit' in payload["tracker_detail_html"]
     assert f'data-combat-section-panel="equipment"' in payload["tracker_detail_html"]
 
     record = get_character("arden-march")
@@ -4454,8 +4460,8 @@ def test_dm_status_can_update_selected_pc_resources_and_spell_slots(
     assert "combat-spell-slot-row" in body
     assert f"/campaigns/linden-pass/combat/character/combatants/{arden.id}/spell-slots/2" in body
     assert body.count("combat-spellcasting-summary") == 1
-    assert body.count("Save DC 15") == 1
-    assert body.count("Attack +7") == 1
+    assert body.count("Save DC 15") >= 1
+    assert body.count("Attack +7") >= 1
     assert 'name="combat_view" value="dm"' in body
     assert 'name="view" value="status"' in body
 

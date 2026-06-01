@@ -346,13 +346,16 @@
             </div>
             {% for slot_pool in section.spellcasting.slot_pools %}
               {% if slot_pool.slots %}
+                {% set slot_pool_title = slot_pool.title or section.spellcasting.slots_title or "Spell slots" %}
+                {% set slot_pool_title_is_generic = (slot_pool_title | lower) == "spell slots" %}
                 {% if can_edit_combat_character_state and selected_combatant_id %}
                   <section class="combat-spell-slot-group" {% if loop.first %}id="combat-character-spell-slots"{% endif %}>
-                    <h3>{{ slot_pool.title or section.spellcasting.slots_title or "Spell slots" }}</h3>
-                    <div class="combat-spell-slot-list">
+                    <h3 class="{% if slot_pool_title_is_generic %}visually-hidden {% endif %}spell-slot-pool-title">{{ slot_pool_title }}</h3>
+                    <div class="spell-slot-editor-list spell-slot-editor-list--compact combat-spell-slot-list">
                       {% for slot in slot_pool.slots %}
                         <form
-                          class="combat-spell-slot-row"
+                          class="detail-card combat-spell-slot-row"
+                          data-character-autosubmit
                           method="post"
                           action="{{ url_for('campaign_combat_character_spell_slots', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, level=slot.level) }}"
                           {% if combat_workspace_return_view != "character" %}
@@ -371,18 +374,13 @@
                             <span>Used</span>
                             <input type="number" name="used" value="{{ slot.used }}" min="0" max="{{ slot.max }}">
                           </label>
-                          <div class="session-stepper combat-spell-slot-row__actions">
-                            <button type="submit" name="delta_used" value="-1">Restore 1</button>
-                            <button type="submit" name="delta_used" value="1">Use 1</button>
-                            <button type="submit">Save</button>
-                          </div>
                         </form>
                       {% endfor %}
                     </div>
                   </section>
                 {% else %}
                   <section class="combat-spell-slot-group" {% if loop.first %}id="combat-character-spell-slots"{% endif %}>
-                    <h3>{{ slot_pool.title or section.spellcasting.slots_title or "Spell slots" }}</h3>
+                    <h3 class="{% if slot_pool_title_is_generic %}visually-hidden {% endif %}spell-slot-pool-title">{{ slot_pool_title }}</h3>
                     <ul class="plain-list slot-list combat-spell-slot-list combat-spell-slot-list--readonly">
                       {% for slot in slot_pool.slots %}
                         <li>
@@ -413,20 +411,42 @@
               {% endif %}
               {% set spell_section_loop_index = loop.index %}
               {% if spell_section.counts %}
-                <ul class="plain-list slot-list">
+                <dl class="spellcasting-count-grid combat-spellcasting-count-grid" aria-label="{{ spell_section.title }} spell counts">
                   {% for count in spell_section.counts %}
-                    <li>
-                      <span>{{ count.label }}</span>
-                      <strong>{{ count.value }}</strong>
-                    </li>
+                    <div class="spellcasting-count-grid__item">
+                      <dt>{{ count.label }}</dt>
+                      <dd>{{ count.value }}</dd>
+                    </div>
                   {% endfor %}
-                </ul>
+                </dl>
               {% endif %}
-              {% if spell_section.spells %}
-                <div class="spell-card-grid">
-                  {% for spell in spell_section.spells %}
-                    {% set spell_dialog_id = "combat-spell-detail-dialog-" ~ spell_section_loop_index ~ "-" ~ loop.index %}
-                    {{ combat_spell_card_dialog(spell, spell_dialog_id) }}
+              {% if spell_section.spell_level_sections %}
+                <div class="spell-level-stack">
+                  {% for level_section in spell_section.spell_level_sections %}
+                    {% set spell_level_loop_index = loop.index %}
+                    <section class="spell-level-section">
+                      <h4>{{ level_section.title }}</h4>
+                      {% for spell_group in level_section.groups %}
+                        {% set spell_group_loop_index = loop.index %}
+                        {% if spell_group.title %}
+                          <aside class="spell-source-package">
+                            <h5>{{ spell_group.title }}</h5>
+                            {% if spell_group.meta %}
+                              <p class="meta">{{ spell_group.meta }}</p>
+                            {% endif %}
+                            {% if spell_group.note %}
+                              <p>{{ spell_group.note }}</p>
+                            {% endif %}
+                          </aside>
+                        {% endif %}
+                        <div class="spell-card-grid">
+                          {% for spell in spell_group.spells %}
+                            {% set spell_dialog_id = "combat-spell-detail-dialog-" ~ spell_section_loop_index ~ "-" ~ spell_level_loop_index ~ "-" ~ spell_group_loop_index ~ "-" ~ loop.index %}
+                            {{ combat_spell_card_dialog(spell, spell_dialog_id) }}
+                          {% endfor %}
+                        </div>
+                      {% endfor %}
+                    </section>
                   {% endfor %}
                 </div>
               {% else %}
@@ -447,6 +467,7 @@
                 {% if can_edit_combat_character_state and selected_combatant_id %}
                   <form
                     class="session-inline-form combat-resource-state-form"
+                    data-character-autosubmit
                     method="post"
                     action="{{ url_for('campaign_combat_character_resource', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, resource_id=resource.id) }}"
                     {% if combat_workspace_return_view != "character" %}
@@ -471,11 +492,6 @@
                       >
                     </label>
                     <p class="resource-card__value">{{ resource.value }}</p>
-                    <div class="session-stepper">
-                      <button type="submit" name="delta" value="-1">-1</button>
-                      <button type="submit" name="delta" value="1">+1</button>
-                      <button type="submit">Save</button>
-                    </div>
                     {% if resource.notes %}
                       <p class="meta">{{ resource.notes }}</p>
                     {% endif %}
@@ -615,6 +631,7 @@
                   {% if can_edit_combat_equipment_state and selected_combatant_id %}
                     <form
                       class="stack-form"
+                      data-character-autosubmit
                       method="post"
                       action="{{ url_for('campaign_combat_character_equipment_state', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, item_id=item.id) }}"
                       {% if combat_workspace_return_view != "character" %}
@@ -653,9 +670,6 @@
                       {% if item.attunement_hint and item.attunement_hint != "Requires attunement" %}
                         <p class="meta">{{ item.attunement_hint }}</p>
                       {% endif %}
-                      <div class="hero-actions">
-                        <button type="submit">Save equipment state</button>
-                      </div>
                     </form>
                   {% endif %}
                 </article>

@@ -53,6 +53,7 @@
               class="session-inline-form{% if session_character_compact_controls %} session-inline-form--compact-resource{% endif %}"
               data-character-sheet-edit-form="resource"
               data-character-sheet-edit-row-id="{{ resource.id }}"
+              data-character-autosubmit
               method="post"
               action="{{ url_for('character_session_resource', campaign_slug=campaign.slug, character_slug=character.slug, resource_id=resource.id) }}"
             >
@@ -80,11 +81,6 @@
                     {% if resource.max is not none %}max="{{ resource.max }}"{% endif %}
                   >
                 </label>
-                <div class="session-stepper{% if session_character_compact_controls %} session-stepper--compact{% endif %}">
-                  <button type="submit" name="delta" value="-1">-1</button>
-                  <button type="submit" name="delta" value="1">+1</button>
-                  <button type="submit">Save</button>
-                </div>
               </div>
               {% if resource.notes %}
                 <p class="meta">{{ resource.notes }}</p>
@@ -120,6 +116,7 @@
                   data-character-sheet-edit-form="spell-slot"
                   data-character-sheet-edit-level="{{ slot.level }}"
                   data-character-sheet-edit-slot-lane-id="{{ slot.slot_lane_id }}"
+                  data-character-autosubmit
                   method="post"
                   action="{{ url_for('character_session_spell_slots', campaign_slug=campaign.slug, character_slug=character.slug, level=slot.level) }}"
                 >
@@ -138,11 +135,6 @@
                     <span>Used</span>
                     <input type="number" name="used" value="{{ slot.used }}" min="0" max="{{ slot.max }}">
                   </label>
-                  <div class="session-stepper">
-                    <button type="submit" name="delta_used" value="-1">Restore 1</button>
-                    <button type="submit" name="delta_used" value="1">Use 1</button>
-                    <button type="submit">Save</button>
-                  </div>
                 </form>
               </article>
             {% endfor %}
@@ -164,6 +156,7 @@
               class="session-inline-form"
               data-character-sheet-edit-form="inventory"
               data-character-sheet-edit-row-id="{{ item.id }}"
+              data-character-autosubmit
               method="post"
               action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
             >
@@ -180,11 +173,6 @@
                 <span>Quantity</span>
                 <input type="number" name="quantity" value="{{ item.quantity }}" min="0">
               </label>
-              <div class="session-stepper">
-                <button type="submit" name="delta" value="-1">-1</button>
-                <button type="submit" name="delta" value="1">+1</button>
-                <button type="submit">Save</button>
-              </div>
               {% if item.notes %}
                 <p class="meta">{{ item.notes }}</p>
               {% endif %}
@@ -206,6 +194,7 @@
           <form
             class="currency-form currency-box"
             data-character-sheet-edit-form="currency"
+            data-character-autosubmit
             method="post"
             action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
           >
@@ -224,12 +213,7 @@
               name="{{ coin }}"
               value="{{ character.currency_values[coin] }}"
               min="0"
-              onchange="this.form.requestSubmit()"
             >
-            <div class="session-stepper session-stepper--compact">
-              <button type="submit" name="delta" value="{{ coin }}:-1">-1</button>
-              <button type="submit" name="delta" value="{{ coin }}:1">+1</button>
-            </div>
             <button type="submit" class="visually-hidden">Update {{ coin.upper() }}</button>
           </form>
         {% endfor %}

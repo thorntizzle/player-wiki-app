@@ -284,6 +284,7 @@
             <form
               class="stack-form"
               data-character-sheet-edit-form="equipment-state"
+              data-character-autosubmit
               method="post"
               action="{{ url_for('character_equipment_state_update', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
             >
@@ -320,9 +321,6 @@
               {% if item.attunement_hint and item.attunement_hint != "Requires attunement" %}
                 <p class="meta">{{ item.attunement_hint }}</p>
               {% endif %}
-              <div class="hero-actions">
-                <button type="submit">Save equipment state</button>
-              </div>
             </form>
           {% endif %}
         </article>
@@ -381,6 +379,7 @@
             <form
               class="currency-form currency-box"
               data-character-sheet-edit-form="currency"
+              data-character-autosubmit
               method="post"
               action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
             >
@@ -399,12 +398,7 @@
                 name="{{ coin }}"
                 value="{{ character.currency_values[coin] }}"
                 min="0"
-                onchange="this.form.requestSubmit()"
               >
-              <div class="session-stepper session-stepper--compact">
-                <button type="submit" name="delta" value="{{ coin }}:-1">-1</button>
-                <button type="submit" name="delta" value="{{ coin }}:1">+1</button>
-              </div>
               <button type="submit" class="visually-hidden">Update {{ coin.upper() }}</button>
             </form>
           {% endfor %}

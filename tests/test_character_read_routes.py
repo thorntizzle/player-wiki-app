@@ -353,7 +353,8 @@ def test_dm_can_open_character_roster_and_read_sheet(client, sign_in, users):
     assert "Enter session mode" not in sheet_html
     assert "Alignment:" in sheet_html
     assert "Chaotic Good" in sheet_html
-    assert "Campaign:" in sheet_html
+    assert "Campaign:" not in sheet_html
+    assert 'class="site-header__campaign"' in sheet_html
     assert "Context" not in sheet_html
     assert "Back to character roster" not in sheet_html
     assert "Open campaign wiki" not in sheet_html
@@ -7590,7 +7591,8 @@ def test_equipment_subpage_is_separate_from_inventory_manager(
     html = response.get_data(as_text=True)
     assert "Attuned items" in html
     assert "Equipped items" in html
-    assert "Save equipment state" in html
+    assert "Save equipment state" not in html
+    assert 'data-character-autosubmit' in html
     assert "Add Systems item" not in html
     assert "Supplemental equipment" not in html
     assert "Inventory and currency" not in html
@@ -7668,7 +7670,9 @@ def test_equipment_subpage_filters_inventory_only_rows_and_only_shows_attunement
     assert "Courier Satchel" not in html
     assert "Crossbow Bolts" not in html
     assert "Chalk" not in html
-    assert html.count("Save equipment state") == 4
+    assert html.count("Save equipment state") == 0
+    assert html.count('data-character-sheet-edit-form="equipment-state"') == 4
+    assert html.count('data-character-autosubmit') >= 4
     assert html.count('name="weapon_wield_mode"') == 2
     assert html.count('name="is_equipped"') == 2
     assert html.count('name="is_attuned"') == 1
@@ -8725,8 +8729,9 @@ def test_dnd_character_normal_page_shows_inline_state_controls_for_assigned_play
     assert 'class="spell-slot-editor-list spell-slot-editor-list--compact"' in spell_html
     assert "<h3>Spell slots</h3>" not in spell_html
     assert '<h3 class="visually-hidden spell-slot-pool-title">Spell slots</h3>' in spell_html
-    assert "Restore 1" in spell_html
-    assert "Use 1" in spell_html
+    assert "Restore 1" not in spell_html
+    assert "Use 1" not in spell_html
+    assert 'data-character-autosubmit' in spell_html
     assert "Save pending changes" not in spell_html
     assert 'name="mode" value="read"' in spell_html
 
@@ -8737,8 +8742,9 @@ def test_dnd_character_normal_page_shows_inline_state_controls_for_assigned_play
     assert 'name="cp"' in inventory_html
     assert 'class="currency-grid"' in inventory_html
     assert inventory_html.count('class="currency-grid"') == 1
-    assert 'name="delta" value="cp:-1"' in inventory_html
-    assert 'name="delta" value="gp:1"' in inventory_html
+    assert 'name="delta" value="cp:-1"' not in inventory_html
+    assert 'name="delta" value="gp:1"' not in inventory_html
+    assert 'data-character-autosubmit' in inventory_html
     assert "Save currency" not in inventory_html
     assert "Inventory and currency" in inventory_html
     assert "Save pending changes" not in inventory_html
@@ -9845,6 +9851,10 @@ def test_character_sheet_recovers_missing_equipment_links_for_inventory_and_equi
 
     assert '/campaigns/linden-pass/systems/entries/phb-item-stormglass-compass' in inventory_html
     assert '/campaigns/linden-pass/systems/entries/phb-item-chain-mail' in equipment_html
+    assert "Item properties" in equipment_html
+    assert "<span>Armor Category</span><strong>Heavy armor</strong>" in equipment_html
+    assert "<span>Armor Class</span><strong>16</strong>" in equipment_html
+    assert "<span>Dexterity</span><strong>No Dex modifier</strong>" in equipment_html
 
 
 def test_character_sheet_shows_systems_feature_text_inline_and_hides_source_metadata(
@@ -10177,7 +10187,8 @@ def test_arcane_armor_state_gates_guardian_attacks_on_character_sheet(app, clien
     assert equipment_page.status_code == 200
     equipment_html = equipment_page.get_data(as_text=True)
     assert "Arcane Armor enabled" in equipment_html
-    assert "Save Arcane Armor" in equipment_html
+    assert "Save Arcane Armor" not in equipment_html
+    assert 'data-character-autosubmit' in equipment_html
 
     enable_response = client.post(
         "/campaigns/linden-pass/characters/arden-march/feature-states/arcane_armor",
@@ -10368,7 +10379,8 @@ def test_legacy_session_mode_inventory_renders_normal_character_view_without_bat
     assert 'name="pp"' in html
     assert 'class="currency-grid"' in html
     assert html.count('class="currency-grid"') == 1
-    assert 'name="delta" value="cp:-1"' in html
+    assert 'name="delta" value="cp:-1"' not in html
+    assert 'data-character-autosubmit' in html
     assert "Save pending changes" not in html
     assert "Save currency" not in html
     assert 'class="meta-badge">x' not in html
@@ -10451,7 +10463,7 @@ def test_character_sheet_renders_recalculated_structured_save_bonus_values(app, 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "<p>Wisdom</p>" in html
-    assert "Modifier +1 | Save +4" in html
+    assert re.search(r"Modifier\s+\+1\s*\|\s*Save\s+\+7", html)
     assert "<p>Charisma</p>" in html
-    assert "Modifier +4 | Save +10" in html
+    assert re.search(r"Modifier\s+\+4\s*\|\s*Save\s+\+10", html)
 

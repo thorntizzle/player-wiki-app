@@ -5,7 +5,9 @@
   data-session-wiki-lookup-preview-url="{{ url_for('campaign_session_wiki_lookup_preview', campaign_slug=campaign.slug) }}"
 >
   <h2>Wiki article lookup</h2>
-  <p class="meta">Search player-visible wiki articles and read them here without leaving the live session page.</p>
+  <p class="meta">
+    Search player-visible wiki articles and read them here without leaving the live session page. Type at least 2 letters to search.
+  </p>
   <label class="field">
     <span>Search</span>
     <input
@@ -21,9 +23,7 @@
       <option value="">Search to load matching articles</option>
     </select>
   </label>
-  <p class="meta" data-session-wiki-lookup-status>
-    Type at least 2 letters to search player-visible wiki articles.
-  </p>
+  <p class="meta" data-session-wiki-lookup-status></p>
   <div class="session-wiki-lookup-preview" data-session-wiki-lookup-preview data-loading="0" aria-busy="false">
     {% include "_session_wiki_lookup_preview.html" %}
   </div>

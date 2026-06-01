@@ -127,7 +127,7 @@
             {% if character.background %} | {{ character.background }}{% endif %}
           {% endif %}
         </p>
-        {% if character.alignment or character.identity_details or campaign.title %}
+        {% if character.alignment or character.identity_details %}
           <div class="character-meta-line">
             {% if character.alignment %}
               <span class="character-meta-item"><span class="meta">Alignment:</span> {{ character.alignment }}</span>
@@ -135,9 +135,6 @@
             {% for detail in character.identity_details if detail.value %}
               <span class="character-meta-item"><span class="meta">{{ detail.label }}:</span> {{ detail.value }}</span>
             {% endfor %}
-            {% if campaign.title %}
-              <span class="character-meta-item"><span class="meta">Campaign:</span> {{ campaign.title }}</span>
-            {% endif %}
           </div>
         {% endif %}
         {% if character.death_save_summary %}
@@ -660,12 +657,14 @@
                   {% if item.tags %}
                     <p class="meta">{{ item.tags | join(", ") }}</p>
                   {% endif %}
-                  {% if item.notes %}
-                    <p>{{ item.notes }}</p>
-                  {% endif %}
+                  {% set item_dialog_id = "equipment-item-detail-dialog-" ~ loop.index %}
+                  {{ character_item_description_details(item, item_dialog_id) }}
+                  {{ character_item_fallback_details(item) }}
                   {% if can_use_session_mode and not is_session_mode %}
                     <form
                       class="stack-form"
+                      data-character-sheet-edit-form="equipment-state"
+                      data-character-autosubmit
                       method="post"
                       action="{{ url_for('character_equipment_state_update', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
                     >
@@ -701,9 +700,6 @@
                       {% if item.attunement_hint and item.attunement_hint != "Requires attunement" %}
                         <p class="meta">{{ item.attunement_hint }}</p>
                       {% endif %}
-                      <div class="hero-actions">
-                        <button type="submit">Save equipment state</button>
-                      </div>
                     </form>
                   {% endif %}
                 </article>
@@ -764,6 +760,7 @@
                         class="session-inline-form inventory-row__quantity-form"
                         data-character-sheet-edit-form="inventory"
                         data-character-sheet-edit-row-id="{{ item.id }}"
+                        data-character-autosubmit
                         method="post"
                         action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
                       >
@@ -774,11 +771,6 @@
                           <span>Quantity</span>
                           <input type="number" name="quantity" value="{{ item.quantity }}" min="0">
                         </label>
-                        <div class="session-stepper">
-                          <button type="submit" name="delta" value="-1">-1</button>
-                          <button type="submit" name="delta" value="1">+1</button>
-                          <button type="submit">Save</button>
-                        </div>
                       </form>
                       {% if inventory_manager and item.item_ref in inventory_manager.removable_item_refs %}
                         <form
@@ -807,6 +799,7 @@
                     <form
                       class="currency-form currency-box"
                       data-character-sheet-edit-form="currency"
+                      data-character-autosubmit
                       method="post"
                       action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
                     >
@@ -822,12 +815,7 @@
                         name="{{ coin.key }}"
                         value="{{ coin.amount }}"
                         min="0"
-                        onchange="this.form.requestSubmit()"
                       >
-                      <div class="session-stepper session-stepper--compact">
-                        <button type="submit" name="delta" value="{{ coin.key }}:-1">-1</button>
-                        <button type="submit" name="delta" value="{{ coin.key }}:1">+1</button>
-                      </div>
                       <button type="submit" class="visually-hidden">Update {{ coin.label }}</button>
                     </form>
                   {% else %}

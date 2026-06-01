@@ -25,8 +25,8 @@
     {% endif %}
     <div class="article-body article-body--compact">{{ lookup_body_html | safe }}</div>
   </section>
-{% else %}
+{% elif lookup_unavailable_message %}
   <div class="session-wiki-lookup-empty">
-    <p class="meta">{{ lookup_unavailable_message or "Search and choose a player-visible wiki article to read it here." }}</p>
+    <p class="meta">{{ lookup_unavailable_message }}</p>
   </div>
 {% endif %}

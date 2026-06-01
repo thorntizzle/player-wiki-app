@@ -20,6 +20,7 @@ from .character_builder import (
     CharacterBuildError,
     _format_weight_value,
     _infer_attack_mode_key_from_payload,
+    _load_phb_armor_profiles,
     _load_phb_weapon_profiles,
     _spell_access_badge_label,
     _spell_payload_is_always_prepared,
@@ -110,6 +111,12 @@ ARCANE_ARMOR_FEATURE_NAME = "arcane armor"
 GUARDIAN_ARMOR_THUNDER_GAUNTLETS_NAME = "guardian armor: thunder gauntlets"
 GUARDIAN_ARMOR_DEFENSIVE_FIELD_NAME = "guardian armor: defensive field"
 ARMORER_EMPTY_MODE_SUFFIX_RE = re.compile(r"\s+\((?:STR|DEX|CON|INT|WIS|CHA)\)$", re.IGNORECASE)
+ARMOR_TYPE_LABELS = {
+    "light": "Light armor",
+    "medium": "Medium armor",
+    "heavy": "Heavy armor",
+    "shield": "Shield",
+}
 XIANXIA_STANCE_RULE_ENTRY_KEY = f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|stance"
 XIANXIA_STANCE_ACTIVATION_RULE_ENTRY_KEY = (
     f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|stance-activation-rules"
@@ -3734,6 +3741,7 @@ def build_item_properties_html(entry: Any) -> str:
 def item_property_rows(entry: Any) -> list[tuple[str, str]]:
     metadata = dict(getattr(entry, "metadata", {}) or {})
     profile = item_weapon_profile(entry, metadata)
+    armor_profile = item_armor_profile(entry, metadata)
     rows: list[tuple[str, str]] = []
 
     weapon_category = str(metadata.get("weapon_category") or profile.get("weapon_category") or "").strip()
@@ -3756,19 +3764,123 @@ def item_property_rows(entry: Any) -> list[tuple[str, str]]:
     if properties:
         rows.append(("Weapon Properties", properties))
 
-    armor_class = str(metadata.get("ac") or "").strip()
-    if armor_class:
-        rows.append(("Armor Class", armor_class))
-    strength = str(metadata.get("strength") or "").strip()
-    if strength:
-        rows.append(("Strength", strength))
-    if metadata.get("stealth_disadvantage"):
-        rows.append(("Stealth", "Disadvantage"))
+    if armor_profile:
+        armor_category = str(armor_profile.get("armor_category") or "").strip().lower()
+        armor_category_label = ARMOR_TYPE_LABELS.get(armor_category, armor_category.title())
+        if armor_category_label:
+            rows.append(("Armor Category", armor_category_label))
+        armor_class_label = item_armor_class_label(armor_profile)
+        if armor_class_label:
+            rows.append(("Armor Class", armor_class_label))
+        dex_label = item_armor_dex_label(armor_profile)
+        if dex_label:
+            rows.append(("Dexterity", dex_label))
+        minimum_strength = armor_profile.get("minimum_strength")
+        if minimum_strength not in (None, "", False):
+            rows.append(("Strength", f"Requires STR {minimum_strength}"))
+        if armor_profile.get("stealth_disadvantage"):
+            rows.append(("Stealth", "Disadvantage"))
+    else:
+        armor_class = str(metadata.get("ac") or "").strip()
+        if armor_class:
+            rows.append(("Armor Class", armor_class))
+        strength = str(metadata.get("strength") or "").strip()
+        if strength:
+            rows.append(("Strength", strength))
+        if metadata.get("stealth_disadvantage"):
+            rows.append(("Stealth", "Disadvantage"))
     attunement = str(metadata.get("attunement") or "").strip()
     if attunement and attunement.lower() not in {"false", "none", "no"}:
         rows.append(("Attunement", attunement))
 
     return rows
+
+
+def item_armor_profile(entry: Any, metadata: dict[str, Any]) -> dict[str, Any]:
+    raw_profile = metadata.get("armor_profile")
+    if isinstance(raw_profile, dict):
+        return dict(raw_profile)
+
+    title = str(getattr(entry, "title", "") or "").strip()
+    title_key = normalize_lookup(title)
+    profiles = _load_phb_armor_profiles()
+    if title_key in profiles:
+        return dict(profiles[title_key])
+
+    base_item = str(metadata.get("base_item") or "").split("|", 1)[0].strip()
+    base_item_key = normalize_lookup(base_item)
+    if base_item_key in profiles:
+        profile = dict(profiles[base_item_key])
+        bonus_ac = _item_optional_int(metadata.get("bonus_ac"))
+        if bonus_ac is not None:
+            profile["bonus_ac"] = bonus_ac
+        return profile
+
+    type_code = str(metadata.get("type") or "").split("|", 1)[0].strip().upper()
+    base_ac = _item_optional_int(metadata.get("ac"))
+    if type_code not in {"LA", "MA", "HA", "S"} or base_ac is None:
+        return {}
+    armor_category = {
+        "LA": "light",
+        "MA": "medium",
+        "HA": "heavy",
+        "S": "shield",
+    }[type_code]
+    return {
+        "title": title,
+        "type": type_code,
+        "armor_category": armor_category,
+        "base_ac": base_ac,
+        "uses_dex": type_code in {"LA", "MA"},
+        "dex_cap": 2 if type_code == "MA" else None,
+        "is_shield": type_code == "S",
+        "bonus_ac": _item_optional_int(metadata.get("bonus_ac")) or 0,
+        "minimum_strength": _item_optional_int(metadata.get("strength")),
+        "stealth_disadvantage": bool(metadata.get("stealth_disadvantage")),
+    }
+
+
+def item_armor_class_label(profile: dict[str, Any]) -> str:
+    base_ac = _item_optional_int(profile.get("base_ac"))
+    bonus_ac = _item_optional_int(profile.get("bonus_ac")) or 0
+    if base_ac is None:
+        return ""
+    if bool(profile.get("is_shield")):
+        shield_bonus = base_ac + bonus_ac
+        return f"+{shield_bonus} AC"
+    final_base = base_ac + bonus_ac
+    if bonus_ac:
+        return f"{final_base} while worn ({base_ac} base + {bonus_ac} bonus)"
+    if bool(profile.get("uses_dex")):
+        dex_cap = profile.get("dex_cap")
+        if dex_cap not in (None, "", False):
+            return f"{base_ac} + Dex modifier (max {dex_cap})"
+        return f"{base_ac} + Dex modifier"
+    return str(base_ac)
+
+
+def item_armor_dex_label(profile: dict[str, Any]) -> str:
+    if bool(profile.get("is_shield")):
+        return ""
+    if not bool(profile.get("uses_dex")):
+        return "No Dex modifier"
+    dex_cap = profile.get("dex_cap")
+    if dex_cap not in (None, "", False):
+        return f"Dex modifier applies, max {dex_cap}"
+    return "Dex modifier applies"
+
+
+def _item_optional_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    match = re.search(r"[-+]?\d+", str(value))
+    if match is None:
+        return None
+    return int(match.group(0))
 
 
 def item_weapon_profile(entry: Any, metadata: dict[str, Any]) -> dict[str, Any]:

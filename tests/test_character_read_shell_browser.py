@@ -300,7 +300,12 @@ def test_session_character_panel_switch_and_resource_submit_stay_no_reload(
                 "[data-character-sheet-edit-row-id='sorcery-points']"
             )
             expect(resource_form).to_be_visible(timeout=5000)
-            resource_form.locator("button[name='delta'][value='-1']").click()
+            resource_current = resource_form.locator("input[name='current']")
+            resource_current.fill("4")
+            expect(page.locator("[data-session-character-flash-stack] .flash-success")).to_contain_text(
+                "Resource updated.",
+                timeout=5000,
+            )
             expect(resource_form.locator("input[name='current']")).to_have_value("4", timeout=5000)
             assert page.evaluate("window.__sessionCharacterNoReloadMarker") == "alive"
             expect(page).to_have_url(
@@ -367,8 +372,128 @@ def test_session_character_reloads_after_session_started_from_another_session_pa
             page.locator("[data-session-switch-target='character']").click()
             expect(page.locator("[data-session-shell-active='character']")).to_be_visible(timeout=5000)
             expect(page.locator("form[data-character-sheet-edit-form='vitals']")).to_have_count(2)
-            expect(page.locator("text=Save current HP")).to_have_count(1)
-            expect(page.locator("text=Save temp HP")).to_have_count(1)
+            expect(page.locator("text=Save current HP")).to_have_count(0)
+            expect(page.locator("text=Save temp HP")).to_have_count(0)
+            expect(page.locator("form[data-character-sheet-edit-form='vitals'][data-character-autosubmit]")).to_have_count(2)
+        finally:
+            browser.close()
+
+
+def test_feedback_item44_browser_header_combat_spells_and_session_chrome(
+    app,
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Sorcerer 5"
+        profile["classes"] = [{"class_name": "Sorcerer", "level": 5}]
+        payload["profile"] = profile
+        payload["spellcasting"] = {
+            "spellcasting_class": "Sorcerer",
+            "spellcasting_ability": "Charisma",
+            "spell_save_dc": 15,
+            "spell_attack_bonus": 7,
+            "slot_progression": [
+                {"level": 1, "max_slots": 4},
+                {"level": 2, "max_slots": 3},
+                {"level": 3, "max_slots": 2},
+            ],
+            "spells": [
+                {
+                    "name": "Message",
+                    "level": 0,
+                    "school": "Transmutation",
+                    "casting_time": "1 action",
+                    "range": "120 feet",
+                    "source": "Sorcerer",
+                },
+                {
+                    "name": "Magic Missile",
+                    "level": 1,
+                    "school": "Evocation",
+                    "casting_time": "1 action",
+                    "range": "120 feet",
+                    "mark": "Known",
+                    "source": "Sorcerer",
+                },
+                {
+                    "name": "Misty Step",
+                    "level": 2,
+                    "school": "Conjuration",
+                    "casting_time": "1 bonus action",
+                    "range": "Self",
+                    "mark": "Known",
+                    "source": "Sorcerer",
+                },
+            ],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            page.goto(f"{base_url}/sign-in")
+            page.locator("input[name='email']").fill(users["owner"]["email"])
+            page.locator("input[name='password']").fill(users["owner"]["password"])
+            page.locator("button[type='submit']").click()
+            page.wait_for_url(re.compile(rf"^{re.escape(base_url)}/.*"), timeout=5000)
+
+            page.goto(f"{base_url}/campaigns/linden-pass/combat")
+            _wait_for_app_loading_cover(page)
+            expect(page.locator(".site-header__campaign")).to_have_text(
+                "Echoes of the Alloy Coast",
+                timeout=5000,
+            )
+            expect(page.locator("h1")).to_have_text("Combat", timeout=5000)
+
+            page.locator("[data-combat-section-toggle='spells']").click()
+            spells_panel = page.locator("[data-combat-section-panel='spells']")
+            expect(spells_panel).to_be_visible(timeout=5000)
+            expect(spells_panel.locator(".combat-spell-slot-row")).to_have_count(3)
+            expect(spells_panel.locator("text=Use 1")).to_have_count(0)
+            expect(spells_panel.locator("text=Restore 1")).to_have_count(0)
+            expect(spells_panel.get_by_role("heading", name="Cantrips")).to_be_visible()
+            expect(spells_panel.get_by_role("heading", name="1st level")).to_be_visible()
+            expect(spells_panel.get_by_role("heading", name="2nd level")).to_be_visible()
+            column_count = spells_panel.locator(".combat-spell-slot-list").evaluate(
+                """(element) => getComputedStyle(element).gridTemplateColumns.split(" ").length"""
+            )
+            assert column_count == 3
+
+            page.goto(f"{base_url}/campaigns/linden-pass/session")
+            _wait_for_app_loading_cover(page)
+            expect(page.locator(".site-header__campaign")).to_have_text(
+                "Echoes of the Alloy Coast",
+                timeout=5000,
+            )
+            expect(page.locator("h1")).to_have_text("Session", timeout=5000)
+            expect(page.locator("text=Type at least 2 letters to search.")).to_be_visible()
+            expect(page.locator("text=Search and choose a player-visible wiki article")).to_have_count(0)
+            expect(page.locator("text=Live session tools")).to_have_count(0)
         finally:
             browser.close()
 
@@ -465,10 +590,9 @@ def test_character_read_shell_browser_state_and_save_flow(
             page.evaluate("window.__characterReadShellMarker = 'alive'")
             hp_field = page.locator("form[data-character-sheet-edit-form='vitals'] input[name='current_hp']")
             hp_field.fill("12")
-            hp_field.press("Enter")
             expect(page.locator("[data-flash-stack-root] .flash-success")).to_have_text(
                 "Vitals updated.",
-                timeout=3000,
+                timeout=5000,
             )
             expect(hp_field).to_have_value("12", timeout=5000)
             assert page.evaluate("window.__characterReadShellMarker") == "alive"
@@ -485,10 +609,9 @@ def test_character_read_shell_browser_state_and_save_flow(
                 ),
             )
             hp_field.fill("4")
-            hp_field.press("Enter")
             expect(page.locator("[data-flash-stack-root] .flash-error")).to_have_text(
                 "This sheet changed in another session. Refresh the page and try again.",
-                timeout=3000,
+                timeout=5000,
             )
             expect(hp_field).to_have_value("4", timeout=5000)
             assert page.evaluate("window.__characterReadShellMarker") == "alive"

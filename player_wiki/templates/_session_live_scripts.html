@@ -376,7 +376,7 @@
         const previewRoot = root.querySelector("[data-session-wiki-lookup-preview]");
         const searchUrl = root.dataset.sessionWikiLookupSearchUrl || "";
         const previewUrl = root.dataset.sessionWikiLookupPreviewUrl || "";
-        const defaultStatus = "Type at least 2 letters to search player-visible wiki articles.";
+        const defaultStatus = "";
 
         if (
           !(searchInput instanceof HTMLInputElement)
@@ -423,6 +423,9 @@
         const setPreviewMessage = (message) => {
           setPreviewBusyState(false);
           previewRoot.innerHTML = "";
+          if (!message) {
+            return;
+          }
           const paragraph = document.createElement("p");
           paragraph.className = "meta";
           paragraph.textContent = message;
@@ -434,7 +437,7 @@
             previewAbortController.abort();
           }
           if (!pageRef) {
-            setPreviewMessage("Search and choose a player-visible wiki article to read it here.");
+            setPreviewMessage("");
             return;
           }
 
@@ -497,7 +500,7 @@
           resultsSelect.append(option);
           resultsSelect.disabled = true;
           setStatus(message);
-          setPreviewMessage("Search and choose a player-visible wiki article to read it here.");
+          setPreviewMessage("");
         };
 
         const renderResults = (results, message) => {

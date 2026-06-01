@@ -468,6 +468,7 @@
         <form
           class="session-vitals-form"
           data-character-sheet-edit-form="vitals"
+          data-character-autosubmit
           method="post"
           action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
         >
@@ -509,7 +510,6 @@
             <span>Current Dao</span>
             <input type="number" name="current_dao" value="{{ xianxia_sheet.resources.dao.current }}" min="0" max="{{ xianxia_sheet.resources.dao.max }}">
           </label>
-          <button class="button-link" type="submit">Save HP, Stance, Energy, Yin/Yang, and Dao</button>
         </form>
       </article>
       <article class="detail-card" id="session-active-state">
@@ -720,6 +720,7 @@
               <form
                 class="currency-form currency-box"
                 data-character-sheet-edit-form="currency"
+                data-character-autosubmit
                 method="post"
                 action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
               >
@@ -738,12 +739,7 @@
                   name="{{ currency.key }}"
                   value="{{ currency.amount }}"
                   min="0"
-                  onchange="this.form.requestSubmit()"
                 >
-                <div class="session-stepper session-stepper--compact">
-                  <button type="submit" name="delta" value="{{ currency.key }}:-1">-1</button>
-                  <button type="submit" name="delta" value="{{ currency.key }}:1">+1</button>
-                </div>
                 {% if currency.description %}
                   <p class="meta">{{ currency.description }}</p>
                 {% endif %}
@@ -869,6 +865,7 @@
                 <form
                   class="session-vitals-form"
                   data-character-sheet-edit-form="xianxia-inventory-quantity"
+                  data-character-autosubmit
                   method="post"
                   action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
                 >
@@ -882,7 +879,6 @@
                     <span>Quantity</span>
                     <input type="number" name="quantity" value="{{ item.quantity }}" min="0">
                   </label>
-                  <button class="button-link subtle" type="submit">Save quantity</button>
                 </form>
                 {% if item.equippable %}
                   <form

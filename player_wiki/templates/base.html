@@ -718,10 +718,15 @@
     {% set header_secondary_content %}{% block header_secondary %}{% endblock %}{% endset %}
     <div class="page-shell">
       <header class="site-header">
-        <div class="site-header__main">
+        <div class="site-header__main{% if campaign is defined %} site-header__main--campaign{% endif %}">
           <div class="site-header__primary">
             <a class="brand" href="{{ url_for('campaign_picker') }}">Campaign Player Wiki</a>
           </div>
+          {% if campaign is defined %}
+            <div class="site-header__campaign" aria-label="Current campaign">
+              {{ campaign.title }}
+            </div>
+          {% endif %}
           <div class="site-header__actions">
             {% if current_user %}
               {% if current_user.is_admin %}
