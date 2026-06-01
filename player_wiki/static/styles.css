@@ -2317,6 +2317,31 @@ button {
   max-width: max-content;
 }
 
+.spellcasting-view-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.7rem;
+}
+
+.spellcasting-view-toolbar .character-subpage-nav {
+  flex: 0 0 auto;
+  width: auto;
+  align-items: center;
+}
+
+.spellcasting-view-count-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.spellcasting-view-count-grid .spellcasting-count-grid__item {
+  min-width: 7.5rem;
+}
+
 .spellcasting-view-panel {
   display: grid;
   gap: 1rem;
@@ -2332,6 +2357,8 @@ button {
 }
 
 .spell-preparation-section-card {
+  display: grid;
+  gap: 0.85rem;
   grid-column: 1 / -1;
 }
 
@@ -2349,6 +2376,10 @@ button {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-soft);
+}
+
+.spell-preparation-card .hero-actions {
+  margin: 0;
 }
 
 .spell-preparation-card h4,

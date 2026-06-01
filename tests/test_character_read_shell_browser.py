@@ -231,7 +231,16 @@ def test_spellcasting_subview_buttons_hide_and_show_panels(
             page.get_by_role("tab", name="Preparation").click()
             expect(current_panel).to_be_hidden(timeout=5000)
             expect(preparation_panel).to_be_visible(timeout=5000)
-            expect(preparation_panel.locator(".spell-preparation-card h4", has_text="Cure Wounds")).to_be_visible()
+            prep_spell_button = preparation_panel.locator(
+                "[data-character-spell-modal-trigger]",
+                has_text="Cure Wounds",
+            )
+            expect(prep_spell_button).to_be_visible()
+            prep_spell_button.click()
+            prep_dialog = page.locator("dialog[open]", has_text="Cure Wounds")
+            expect(prep_dialog).to_be_visible()
+            prep_dialog.get_by_role("button", name="Close").click()
+            expect(prep_dialog).to_be_hidden()
 
             page.get_by_role("tab", name="Current spells").click()
             expect(current_panel).to_be_visible(timeout=5000)

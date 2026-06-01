@@ -6450,13 +6450,22 @@ def test_spellcasting_subpage_can_prepare_spells_and_protect_always_prepared_ent
     assert 'data-character-spellcasting-view-button="preparation"' in page_html
     assert 'data-character-spellcasting-view-panel="current"' in page_html
     assert 'data-character-spellcasting-view-panel="preparation"' in page_html
+    assert 'class="spellcasting-count-grid spellcasting-view-count-grid"' in page_html
+    assert page_html.index("spellcasting-view-count-grid") < page_html.index('id="character-spell-preparation-view"')
     assert re.search(r'id="character-spell-preparation-view"[^>]+hidden', page_html)
     styles_path = Path(app.root_path) / "static" / "styles.css"
     assert ".spellcasting-view-panel[hidden]" in styles_path.read_text(encoding="utf-8")
     assert "Always prepared" in page_html
     assert 'class="spell-source-package"' not in page_html
     assert page_html.count("Wisdom spellcasting") == 1
-    assert page_html.count("Cure Wounds") == 1
+    preparation_panel_html = page_html.split('id="character-spell-preparation-view"', 1)[1].split(
+        'id="character-spell-manager"',
+        1,
+    )[0]
+    assert "<h3>Cleric 5</h3>" not in preparation_panel_html
+    assert "Cure Wounds" in preparation_panel_html
+    assert 'data-character-spell-modal-trigger' in preparation_panel_html
+    assert "spell-preparation-detail-dialog" in preparation_panel_html
 
     session_response = client.get("/campaigns/linden-pass/session/character?character=arden-march&page=spells")
     assert session_response.status_code == 200

@@ -223,31 +223,61 @@
       {% endif %}
     >
       {% if has_preparation_spellcasting_view %}
+        {% set preparation_count_items = namespace(value=0) %}
+        {% for prep_count_section in character_preparation_row_sections %}
+          {% set prep_count_manager = ((spell_manager.sections | selectattr('class_row_id', 'equalto', prep_count_section.class_row_id) | list | first) if spell_manager else none) %}
+          {% if prep_count_manager and prep_count_manager.counts %}
+            {% for count in prep_count_manager.counts %}
+              {% if count.label != "Cantrips" %}
+                {% set preparation_count_items.value = preparation_count_items.value + 1 %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        {% endfor %}
         <div class="character-subpage-nav-card spellcasting-view-nav-card">
-          <nav class="character-subpage-nav" role="tablist" aria-label="Spellcasting views">
-            <button
-              type="button"
-              class="button-link"
-              role="tab"
-              aria-controls="character-spell-current-view"
-              aria-selected="true"
-              id="character-spell-current-tab"
-              data-character-spellcasting-view-button="current"
-            >
-              Current spells
-            </button>
-            <button
-              type="button"
-              class="ghost-button"
-              role="tab"
-              aria-controls="character-spell-preparation-view"
-              aria-selected="false"
-              id="character-spell-preparation-tab"
-              data-character-spellcasting-view-button="preparation"
-            >
-              Preparation
-            </button>
-          </nav>
+          <div class="spellcasting-view-toolbar">
+            <nav class="character-subpage-nav" role="tablist" aria-label="Spellcasting views">
+              <button
+                type="button"
+                class="button-link"
+                role="tab"
+                aria-controls="character-spell-current-view"
+                aria-selected="true"
+                id="character-spell-current-tab"
+                data-character-spellcasting-view-button="current"
+              >
+                Current spells
+              </button>
+              <button
+                type="button"
+                class="ghost-button"
+                role="tab"
+                aria-controls="character-spell-preparation-view"
+                aria-selected="false"
+                id="character-spell-preparation-tab"
+                data-character-spellcasting-view-button="preparation"
+              >
+                Preparation
+              </button>
+            </nav>
+            {% if preparation_count_items.value %}
+              <dl class="spellcasting-count-grid spellcasting-view-count-grid" aria-label="Preparation spell counts">
+                {% for prep_count_section in character_preparation_row_sections %}
+                  {% set prep_count_manager = ((spell_manager.sections | selectattr('class_row_id', 'equalto', prep_count_section.class_row_id) | list | first) if spell_manager else none) %}
+                  {% if prep_count_manager and prep_count_manager.counts %}
+                    {% for count in prep_count_manager.counts %}
+                      {% if count.label != "Cantrips" %}
+                        <div class="spellcasting-count-grid__item">
+                          <dt>{{ count.label }}</dt>
+                          <dd>{{ count.value }}</dd>
+                        </div>
+                      {% endif %}
+                    {% endfor %}
+                  {% endif %}
+                {% endfor %}
+              </dl>
+            {% endif %}
+          </div>
         </div>
       {% endif %}
 
@@ -269,6 +299,7 @@
           </div>
           {% if character_preparation_row_sections %}
             {% for prep_section in character_preparation_row_sections %}
+              {% set prep_section_loop_index = loop.index %}
               {% set manager_section = ((spell_manager.sections | selectattr('class_row_id', 'equalto', prep_section.class_row_id) | list | first) if spell_manager else none) %}
               {% set leveled_spell_count = namespace(value=0) %}
               {% for prep_spell in prep_section.spells %}
@@ -277,31 +308,23 @@
                 {% endif %}
               {% endfor %}
               {% if leveled_spell_count.value %}
-                <article class="detail-card session-card spell-preparation-section-card">
-                  <div class="section-heading">
-                    <div>
-                      <h3>{{ prep_section.title }}</h3>
-                      {% if manager_section and manager_section.counts %}
-                        <dl class="spellcasting-count-grid">
-                          {% for count in manager_section.counts %}
-                            {% if count.label != "Cantrips" %}
-                              <div class="spellcasting-count-grid__item">
-                                <dt>{{ count.label }}</dt>
-                                <dd>{{ count.value }}</dd>
-                              </div>
-                            {% endif %}
-                          {% endfor %}
-                        </dl>
-                      {% endif %}
-                    </div>
-                  </div>
+                <div class="spell-preparation-section-card">
                   <div class="spell-preparation-grid">
                     {% for prep_spell in prep_section.spells %}
                       {% if not prep_spell.is_cantrip %}
-                        <article class="spell-preparation-card">
-                          <div>
-                            <p class="meta">{{ prep_spell.level_label }}{% if prep_spell.school %} | {{ prep_spell.school }}{% endif %}</p>
-                            <h4>{{ prep_spell.name }}</h4>
+                        {% set prep_spell_dialog_id = "spell-preparation-detail-dialog-" ~ prep_section_loop_index ~ "-" ~ loop.index %}
+                        <article class="spell-card spell-preparation-card">
+                          <button
+                            type="button"
+                            class="spell-card__main"
+                            data-character-spell-modal-trigger
+                            aria-haspopup="dialog"
+                            aria-controls="{{ prep_spell_dialog_id }}"
+                          >
+                            <span class="spell-card__eyebrow">
+                              {{ prep_spell.level_label }}{% if prep_spell.school %} | {{ prep_spell.school }}{% endif %}
+                            </span>
+                            <span class="spell-card__name">{{ prep_spell.name }}</span>
                             {% if prep_spell.badges %}
                               <span class="badge-list spell-card__badges">
                                 {% for badge in prep_spell.badges %}
@@ -309,10 +332,31 @@
                                 {% endfor %}
                               </span>
                             {% endif %}
-                            {% if prep_spell.management_note %}
-                              <p class="meta">{{ prep_spell.management_note }}</p>
-                            {% endif %}
-                          </div>
+                            <span class="spell-card__meta">
+                              {% if prep_spell.casting_time and prep_spell.casting_time != '--' %}{{ prep_spell.casting_time }}{% endif %}
+                              {% if prep_spell.range and prep_spell.range != '--' %}{% if prep_spell.casting_time and prep_spell.casting_time != '--' %} | {% endif %}{{ prep_spell.range }}{% endif %}
+                            </span>
+                          </button>
+                          {{ character_spell_fallback_details(prep_spell) }}
+                          <dialog id="{{ prep_spell_dialog_id }}" class="spell-detail-dialog" data-character-spell-modal>
+                            <div class="spell-detail-dialog__panel">
+                              <div class="spell-detail-dialog__header">
+                                <div>
+                                  <p class="meta">{{ prep_spell.level_label }}{% if prep_spell.school %} | {{ prep_spell.school }}{% endif %}</p>
+                                  <h3>{{ prep_spell.name }}</h3>
+                                </div>
+                                <button type="button" class="ghost-button" data-character-spell-modal-close>Close</button>
+                              </div>
+                              {% if prep_spell.badges %}
+                                <div class="badge-list">
+                                  {% for badge in prep_spell.badges %}
+                                    <span class="meta-badge">{{ badge }}</span>
+                                  {% endfor %}
+                                </div>
+                              {% endif %}
+                              {{ character_spell_detail_content(prep_spell) }}
+                            </div>
+                          </dialog>
                           {% if prep_spell.is_fixed %}
                             <span class="meta-badge">Locked</span>
                           {% elif manager_section and manager_section.can_manage and prep_spell.can_toggle_prepared %}
@@ -330,7 +374,7 @@
                       {% endif %}
                     {% endfor %}
                   </div>
-                </article>
+                </div>
               {% endif %}
             {% endfor %}
           {% endif %}
