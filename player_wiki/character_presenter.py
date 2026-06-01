@@ -824,7 +824,7 @@ def present_character_detail(
                         "but stay read-only in this slice."
                     )
                 source_package_key = f"{target_row_id}:{source_package_label}"
-            elif source_label and (always_prepared or bool(spell.get("is_bonus_known"))):
+            elif source_label and bool(spell.get("is_bonus_known")):
                 source_package_label = source_label
                 source_package_note = management_note
                 source_package_key = f"{target_row_id}:{source_label}"

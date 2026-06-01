@@ -6454,6 +6454,8 @@ def test_spellcasting_subpage_can_prepare_spells_and_protect_always_prepared_ent
     styles_path = Path(app.root_path) / "static" / "styles.css"
     assert ".spellcasting-view-panel[hidden]" in styles_path.read_text(encoding="utf-8")
     assert "Always prepared" in page_html
+    assert 'class="spell-source-package"' not in page_html
+    assert page_html.count("Wisdom spellcasting") == 1
     assert page_html.count("Cure Wounds") == 1
 
     session_response = client.get("/campaigns/linden-pass/session/character?character=arden-march&page=spells")
