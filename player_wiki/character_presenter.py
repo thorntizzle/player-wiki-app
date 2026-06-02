@@ -111,6 +111,9 @@ FEATURE_PARENT_ID_KEYS = (
     "parent_feature_id",
 )
 ARTIFICER_INFUSIONS_PARENT_NAME = "artificer infusions"
+ARTIFICER_INFUSIONS_SYSTEMS_TITLE = "Infuse Item"
+REPLICATE_MAGIC_ITEM_FEATURE_NAME = "replicate magic item"
+REPLICATE_MAGIC_ITEM_SYSTEMS_TITLE = "Replicate Magic Item"
 ARTIFICER_INFUSION_CHILD_NAMES = {
     "enhanced defense",
     "homunculus servant",
@@ -120,6 +123,10 @@ ARTIFICER_INFUSION_CHILD_NAMES = {
     "boots of the winding path",
     "armor of magical strength",
 }
+ARTIFICER_INFUSIONS_SUMMARY_REMOVAL_MARKERS = (
+    "known infusions at artificer level",
+    "replicate magic item selection:",
+)
 ARCANE_ARMOR_STATE_KEY = "arcane_armor"
 ARCANE_ARMOR_FEATURE_NAME = "arcane armor"
 GUARDIAN_ARMOR_THUNDER_GAUNTLETS_NAME = "guardian armor: thunder gauntlets"
@@ -1100,19 +1107,41 @@ def present_character_detail(
             humanize_value(feature.get("activation_type")),
             summarize_linked_resource(linked_resource),
         ]
+        feature_systems_ref = dict(feature.get("systems_ref") or {})
+        feature_has_page_ref = bool(normalize_page_ref_slug(feature.get("page_ref")))
+        feature_presentation_systems_ref = feature_systems_ref
+        if not feature_presentation_systems_ref and not feature_has_page_ref:
+            feature_presentation_systems_ref = resolve_feature_presentation_systems_ref(
+                campaign,
+                feature,
+                systems_service=systems_service,
+            )
+        feature_payload = dict(feature)
+        if feature_presentation_systems_ref:
+            feature_payload["systems_ref"] = feature_presentation_systems_ref
+        description_html = resolve_feature_description_html(
+            campaign,
+            feature,
+            systems_service=systems_service,
+            campaign_page_records=campaign_page_records,
+        )
+        description_html = cleanup_feature_description_html(
+            feature_payload,
+            description_html,
+        )
         feature_groups_ordered[group_title].append(
             {
                 "id": str(feature.get("id") or "").strip(),
                 "name": str(feature.get("name") or "Feature"),
                 "href": build_character_entry_href(
                     campaign.slug,
-                    systems_ref=feature.get("systems_ref"),
+                    systems_ref=feature_presentation_systems_ref,
                     page_ref=feature.get("page_ref"),
                 ),
                 "category": str(feature.get("category") or "").strip(),
                 "class_row_id": str(feature.get("class_row_id") or "").strip(),
                 "source_kind": str(feature.get("source_kind") or "").strip(),
-                "systems_ref": dict(feature.get("systems_ref") or {}),
+                "systems_ref": feature_presentation_systems_ref,
                 "native_edit_parent_feature_id": str(feature.get("native_edit_parent_feature_id") or "").strip(),
                 "parent_feature_id": str(feature.get("parent_feature_id") or "").strip(),
                 "activation_type": str(feature.get("activation_type") or "").strip().lower(),
@@ -1121,17 +1150,12 @@ def present_character_detail(
                     feature.get("name"),
                     arcane_armor_state,
                 ),
-                "description_html": resolve_feature_description_html(
-                    campaign,
-                    feature,
-                    systems_service=systems_service,
-                    campaign_page_records=campaign_page_records,
-                ),
+                "description_html": description_html,
             }
         )
 
     for group_entries in feature_groups_ordered.values():
-        nest_feature_components(group_entries)
+        nest_feature_components(group_entries, campaign=campaign, systems_service=systems_service)
 
     attacks = []
     hidden_attacks: list[dict[str, str]] = []
@@ -4260,9 +4284,50 @@ def should_hide_redundant_choice_feature(
     return False
 
 
-def nest_feature_components(entries: list[dict[str, Any]]) -> None:
+def nest_feature_components(
+    entries: list[dict[str, Any]],
+    *,
+    campaign: Campaign | None = None,
+    systems_service: Any | None = None,
+) -> None:
     if not entries:
         return
+
+    def extract_selected_replicate_magic_item_name(entry: dict[str, Any]) -> str:
+        if not _is_replicate_magic_item_feature(entry):
+            return ""
+        return _replicate_magic_item_selection_name(entry.get("name"))
+
+    def attach_replicate_magic_item_child(entry: dict[str, Any]) -> None:
+        if not _is_replicate_magic_item_feature(entry):
+            return
+        item_name = extract_selected_replicate_magic_item_name(entry)
+        if not item_name:
+            return
+        item_systems_ref = resolve_systems_ref_by_exact_title(
+            campaign,
+            systems_service,
+            item_name,
+            entry_type="item",
+        )
+        entry.setdefault("children", [])
+        if any(
+            normalize_feature_name(child.get("name")) == normalize_feature_name(item_name)
+            for child in entry["children"]
+        ):
+            return
+        entry["children"].append(
+            {
+                "id": "",
+                "name": item_name,
+                "category": str(entry.get("category") or "class_feature").strip(),
+                "href": build_systems_entry_href(campaign.slug, item_systems_ref) if campaign is not None else "",
+                "systems_ref": item_systems_ref,
+                "metadata": [],
+                "description_html": "",
+                "children": [],
+            }
+        )
 
     entries_by_name: dict[str, list[dict[str, Any]]] = {}
     entries_by_id: dict[str, dict[str, Any]] = {}
@@ -4326,6 +4391,9 @@ def nest_feature_components(entries: list[dict[str, Any]]) -> None:
                 if parent is not None:
                     attach_child(ARTIFICER_INFUSIONS_PARENT_NAME, entry)
 
+    for entry in entries:
+        attach_replicate_magic_item_child(entry)
+
     if not moved_ids and not hidden_ids:
         return
     entries[:] = [entry for entry in entries if id(entry) not in moved_ids and id(entry) not in hidden_ids]
@@ -4362,6 +4430,125 @@ def should_hide_empty_armorer_mode_component(
 
 def normalize_feature_name(value: Any) -> str:
     return str(value or "").strip().lower()
+
+
+def _is_artificer_infusions_parent(feature: dict[str, Any]) -> bool:
+    return normalize_feature_name(feature.get("name")) == ARTIFICER_INFUSIONS_PARENT_NAME
+
+
+def _is_replicate_magic_item_feature(feature: dict[str, Any]) -> bool:
+    return normalize_feature_name(feature.get("name")).startswith(
+        REPLICATE_MAGIC_ITEM_FEATURE_NAME
+    )
+
+
+def _replicate_magic_item_selection_name(feature_name: Any) -> str:
+    match = re.search(r"\(\s*([^)]+?)\s*\)\s*$", str(feature_name or "").strip())
+    if match is None:
+        return ""
+    return match.group(1).strip()
+
+
+def resolve_feature_presentation_systems_ref(
+    campaign: Campaign,
+    feature: dict[str, Any],
+    *,
+    systems_service: Any | None = None,
+) -> dict[str, str]:
+    if _is_artificer_infusions_parent(feature):
+        return resolve_systems_ref_by_exact_title(
+            campaign,
+            systems_service,
+            ARTIFICER_INFUSIONS_SYSTEMS_TITLE,
+            entry_type="classfeature",
+            preferred_source_ids=("TCE",),
+        )
+
+    if _is_replicate_magic_item_feature(feature):
+        return resolve_systems_ref_by_exact_title(
+            campaign,
+            systems_service,
+            REPLICATE_MAGIC_ITEM_SYSTEMS_TITLE,
+            entry_type="optionalfeature",
+            preferred_source_ids=("TCE",),
+        )
+
+    feature_name = str(feature.get("name") or "").strip()
+    if normalize_feature_name(feature_name) in ARTIFICER_INFUSION_CHILD_NAMES:
+        return resolve_systems_ref_by_exact_title(
+            campaign,
+            systems_service,
+            feature_name,
+            entry_type="optionalfeature",
+            preferred_source_ids=("TCE",),
+        )
+
+    return {}
+
+
+def resolve_systems_ref_by_exact_title(
+    campaign: Campaign | None,
+    systems_service: Any | None,
+    title: str,
+    *,
+    entry_type: str,
+    preferred_source_ids: tuple[str, ...] = (),
+) -> dict[str, str]:
+    normalized_title = normalize_lookup(title)
+    if (
+        campaign is None
+        or systems_service is None
+        or not hasattr(systems_service, "search_entries_for_campaign")
+        or not normalized_title
+    ):
+        return {}
+    entries = list(
+        systems_service.search_entries_for_campaign(
+            campaign.slug,
+            query=title,
+            entry_type=entry_type,
+            limit=20,
+        )
+        or []
+    )
+    exact_entries = [
+        entry
+        for entry in entries
+        if normalize_lookup(str(getattr(entry, "title", "") or "")) == normalized_title
+    ]
+    if not exact_entries:
+        return {}
+    preferred_source_keys = [source_id.strip().upper() for source_id in preferred_source_ids if source_id.strip()]
+    for source_id in preferred_source_keys:
+        for entry in exact_entries:
+            if str(getattr(entry, "source_id", "") or "").strip().upper() == source_id:
+                return _systems_ref_for_entry(entry)
+    return _systems_ref_for_entry(exact_entries[0])
+
+
+def _suppress_artificer_infusions_summary_lines(description_html: str) -> str:
+    if not description_html:
+        return ""
+    cleaned = str(description_html)
+    for marker in ARTIFICER_INFUSIONS_SUMMARY_REMOVAL_MARKERS:
+        escaped = re.escape(marker)
+        cleaned = re.sub(
+            rf"<(?:p|li)[^>]*>(?:(?!</(?:p|li)>).)*{escaped}.*?</(?:p|li)>",
+            "",
+            cleaned,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+    return cleaned.strip()
+
+
+def cleanup_feature_description_html(feature: dict[str, Any], description_html: str) -> str:
+    if _is_artificer_infusions_parent(feature):
+        description_html = _suppress_artificer_infusions_summary_lines(description_html)
+
+    if _is_replicate_magic_item_feature(feature):
+        return ""
+
+    return description_html
 
 
 def render_campaign_markdown(campaign: Campaign, markdown_text: str) -> str:

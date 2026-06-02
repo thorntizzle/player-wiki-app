@@ -137,6 +137,83 @@ def _read_shell_target_subpages(html: str) -> list[str]:
     ]
 
 
+def _seed_systems_entry(
+    app,
+    *,
+    source_id: str,
+    entry_type: str,
+    slug: str,
+    title: str,
+    rendered_html: str = "",
+    metadata: dict[str, object] | None = None,
+) -> SystemsEntryRecord:
+    normalized_source_id = source_id.strip().upper()
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        source_titles = {
+            "DMG": "Dungeon Master's Guide",
+            "PHB": "Player's Handbook",
+            "TCE": "Tasha's Cauldron of Everything",
+            "XGE": "Xanathar's Guide to Everything",
+        }
+        systems_store.upsert_source(
+            "DND-5E",
+            normalized_source_id,
+            title=source_titles.get(normalized_source_id, normalized_source_id),
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        existing_entries = [
+            {
+                "entry_key": record.entry_key,
+                "entry_type": record.entry_type,
+                "slug": record.slug,
+                "title": record.title,
+                "source_page": record.source_page,
+                "source_path": record.source_path,
+                "search_text": record.search_text,
+                "player_safe_default": record.player_safe_default,
+                "dm_heavy": record.dm_heavy,
+                "metadata": dict(record.metadata or {}),
+                "body": dict(record.body or {}),
+                "rendered_html": record.rendered_html,
+            }
+            for record in systems_store.list_entries_for_source(
+                "DND-5E",
+                normalized_source_id,
+                entry_type=entry_type,
+            )
+            if str(record.slug or "").strip() != slug
+        ]
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            normalized_source_id,
+            entry_types=[entry_type],
+            entries=existing_entries
+            + [
+                {
+                    "entry_key": f"dnd-5e|{entry_type}|{normalized_source_id.lower()}|{slug}",
+                    "entry_type": entry_type,
+                    "slug": slug,
+                    "title": title,
+                    "source_page": "1",
+                    "source_path": f"test/{entry_type}.json",
+                    "search_text": f"{title} {entry_type}",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": dict(metadata or {}),
+                    "body": {},
+                    "rendered_html": rendered_html or f"<p>{title}.</p>",
+                }
+            ],
+        )
+        entry = app.extensions["systems_service"].get_entry_by_slug_for_campaign("linden-pass", slug)
+        assert entry is not None
+        return entry
+
+
 def _seed_systems_item_entry(
     app,
     *,
@@ -10449,6 +10526,31 @@ def test_character_sheet_nests_armorer_armor_model_components(app, client, sign_
 
 
 def test_character_sheet_nests_artificer_infusion_rows_under_artificer_infusions(app, client, sign_in, users):
+    _seed_systems_entry(
+        app,
+        source_id="TCE",
+        entry_type="classfeature",
+        slug="tce-classfeature-infuseitem-artificer-tce-2",
+        title="Infuse Item",
+        rendered_html="<p>Infuse Item source text should stay in Systems.</p>",
+    )
+    _seed_systems_entry(
+        app,
+        source_id="TCE",
+        entry_type="optionalfeature",
+        slug="tce-optionalfeature-replicatemagicitem",
+        title="Replicate Magic Item",
+        rendered_html="<p>Replicate Magic Item source text should stay in Systems.</p>",
+    )
+    _seed_systems_entry(
+        app,
+        source_id="DMG",
+        entry_type="item",
+        slug="dmg-item-gogglesofnight",
+        title="Goggles of Night",
+        rendered_html="<p>Goggles of Night source text should stay in Systems.</p>",
+    )
+
     def _mutate_definition(payload: dict) -> None:
         payload["features"] = [
             {
@@ -10482,7 +10584,10 @@ def test_character_sheet_nests_artificer_infusion_rows_under_artificer_infusions
                 "name": "Replicate Magic Item (Goggles of Night)",
                 "category": "class_feature",
                 "source": "TCoE 12",
-                "description_markdown": "Turn two objects into magic goggles.",
+                "description_markdown": (
+                    "Turn two objects into magic goggles. "
+                    "This is the long body text you want to hide in the nested card."
+                ),
                 "activation_type": "bonus_action",
             },
             {
@@ -10534,8 +10639,18 @@ def test_character_sheet_nests_artificer_infusion_rows_under_artificer_infusions
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
     def _assert_artificer_infusion_components(html: str) -> None:
-        assert re.search(r"<h4>\s*Artificer Infusions\s*</h4>", html)
+        assert re.search(
+            r'<h4>\s*<a href="/campaigns/linden-pass/systems/entries/tce-classfeature-infuseitem-artificer-tce-2">\s*Artificer Infusions\s*</a>\s*</h4>',
+            html,
+        )
         assert re.search(r"<h4>\s*Other Feature\s*</h4>", html)
+
+        def assert_component_heading(label: str) -> None:
+            assert re.search(
+                rf"<h5>\s*(?:<a [^>]+>)?\s*{re.escape(label)}\s*(?:</a>)?\s*</h5>",
+                html,
+            )
+
         for child_name in (
             "Enhanced Defense",
             "Homunculus Servant",
@@ -10546,8 +10661,16 @@ def test_character_sheet_nests_artificer_infusion_rows_under_artificer_infusions
             "Custom Infusion Choice",
         ):
             assert not re.search(rf"<h4>\s*{re.escape(child_name)}\s*</h4>", html)
-            assert re.search(rf"<h5>\s*{re.escape(child_name)}\s*</h5>", html)
+            assert_component_heading(child_name)
         assert html.count("Replicate Magic Item (Goggles of Night)") == 1
+        assert re.search(
+            r'<h5>\s*<a href="/campaigns/linden-pass/systems/entries/dmg-item-gogglesofnight">\s*Goggles of Night\s*</a>\s*</h5>',
+            html,
+        )
+        assert "/campaigns/linden-pass/systems/entries/tce-optionalfeature-replicatemagicitem" in html
+        assert "This is the long body text you want to hide in the nested card." not in html
+        assert "Replicate Magic Item source text should stay in Systems." not in html
+        assert "Goggles of Night source text should stay in Systems." not in html
         assert "feature-row__components" in html
 
     read_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=features")
@@ -10557,6 +10680,48 @@ def test_character_sheet_nests_artificer_infusion_rows_under_artificer_infusions
     assert session_response.status_code == 200
     _assert_artificer_infusion_components(read_response.get_data(as_text=True))
     _assert_artificer_infusion_components(session_response.get_data(as_text=True))
+
+
+def test_character_sheet_hides_generated_artificer_infusion_summary_lines(app, client, sign_in, users):
+    _seed_systems_entry(
+        app,
+        source_id="TCE",
+        entry_type="classfeature",
+        slug="tce-classfeature-infuseitem-artificer-tce-2",
+        title="Infuse Item",
+        rendered_html="<p>Infuse Item source text should stay in Systems.</p>",
+    )
+
+    def _mutate_definition(payload: dict) -> None:
+        payload["features"] = [
+            {
+                "id": "artificer-infusions-8",
+                "name": "Artificer Infusions",
+                "category": "class_feature",
+                "source": "TCoE 12",
+                "description_markdown": (
+                    "Known infusions at artificer level 6: Enhanced Defense - Homunculus Servant - "
+                    "Replicate Magic Item (Goggles of Night) - Repeating Shot.\n\n"
+                    "Replicate Magic Item selection: Goggles of Night.\n\n"
+                    "This remaining note is not generated summary prose."
+                ),
+                "activation_type": "passive",
+            }
+        ]
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=features")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    assert "/campaigns/linden-pass/systems/entries/tce-classfeature-infuseitem-artificer-tce-2" in html
+    assert "Known infusions at artificer level 6" not in html
+    assert "Replicate Magic Item selection: Goggles of Night" not in html
+    assert "This remaining note is not generated summary prose." in html
+    assert "Infuse Item source text should stay in Systems." not in html
 
 
 def test_arcane_armor_state_gates_guardian_attacks_on_character_sheet(app, client, sign_in, users):
