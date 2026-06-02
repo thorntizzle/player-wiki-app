@@ -4348,6 +4348,180 @@ def test_imported_progression_repair_restores_armorer_always_prepared_spells():
     assert spells_by_name["Cure Wounds"]["mark"] == "Known"
 
 
+def test_imported_progression_repair_prepared_artificer_with_resolved_class_rows_is_ready():
+    artificer = _systems_entry(
+        "class",
+        "tce-class-artificer",
+        "Artificer",
+        source_id="TCE",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["con", "int"],
+            "subclass_title": "Artificer Specialist",
+        },
+    )
+    armorer = _systems_entry(
+        "subclass",
+        "tce-subclass-armorer-artificer-tce",
+        "Armorer",
+        source_id="TCE",
+        metadata={
+            "class_name": "Artificer",
+            "class_source": "TCE",
+        },
+    )
+    armorer_spells = _systems_entry(
+        "subclassfeature",
+        "tce-subclassfeature-armorer-spells",
+        "Armorer Spells",
+        source_id="TCE",
+        metadata={
+            "level": 3,
+            "class_name": "Artificer",
+            "class_source": "TCE",
+            "subclass_name": "Armorer",
+        },
+        body={
+            "entries": [
+                "You always have certain spells prepared after you reach particular levels in this class, as shown in the Armorer Spells table.",
+                "These spells count as artificer spells for you, but they don't count against the number of artificer spells you prepare.",
+                {
+                    "type": "table",
+                    "caption": "Armorer Spells",
+                    "colLabels": ["Artificer Level", "Spells"],
+                    "rows": [["5th", "{@spell mirror image}"]],
+                },
+            ]
+        },
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    sage = _systems_entry("background", "phb-background-sage", "Sage")
+    message = _systems_entry("spell", "phb-spell-message", "Message", metadata={"level": 0, "class_lists": {"TCE": ["Artificer"]}})
+    fire_bolt = _systems_entry("spell", "phb-spell-fire-bolt", "Fire Bolt", metadata={"level": 0, "class_lists": {"TCE": ["Artificer"]}})
+    disguise_self = _systems_entry("spell", "phb-spell-disguise-self", "Disguise Self", metadata={"level": 1, "class_lists": {"TCE": ["Artificer"]}})
+    cure_wounds = _systems_entry("spell", "phb-spell-cure-wounds", "Cure Wounds", metadata={"level": 1, "class_lists": {"TCE": ["Artificer"]}})
+    magic_missile = _systems_entry("spell", "phb-spell-magic-missile", "Magic Missile", metadata={"level": 1})
+    systems_service = _FakeSystemsService(
+        {
+            "class": [artificer],
+            "subclass": [armorer],
+            "race": [human],
+            "background": [sage],
+            "spell": [message, fire_bolt, disguise_self, cure_wounds, magic_missile],
+        },
+        class_progression=[{"level": 5, "feature_rows": [{"label": "Artificer Specialist"}]}],
+        subclass_progression=[
+            {"level": 3, "feature_rows": [{"label": "Armorer Spells", "entry": armorer_spells}]},
+            {"level": 5, "feature_rows": [{"label": "Armorer Spells", "entry": armorer_spells}]},
+        ],
+    )
+    definition = _minimal_imported_character_definition("artificer-import", "Armorer Import")
+    definition.profile["class_level_text"] = "Artificer 5"
+    definition.profile["classes"][0] = {
+        "row_id": "class-row-1",
+        "class_name": "Artificer",
+        "subclass_name": "Armorer",
+        "level": 5,
+        "systems_ref": _systems_ref(artificer),
+        "subclass_ref": _systems_ref(armorer),
+    }
+    definition.profile["class_ref"] = _systems_ref(artificer)
+    definition.profile["subclass_ref"] = _systems_ref(armorer)
+    definition.profile["species"] = "Human"
+    definition.profile["species_ref"] = _systems_ref(human)
+    definition.profile["background"] = "Sage"
+    definition.profile["background_ref"] = _systems_ref(sage)
+    definition.stats["ability_scores"]["int"] = {"score": 16, "modifier": 3, "save_bonus": 3}
+    definition.spellcasting = {
+        "spellcasting_class": "Artificer",
+        "spellcasting_ability": "Intelligence",
+        "spells": [
+            {"name": "Message", "mark": "Cantrip", "class_row_id": "class-row-1", "systems_ref": _systems_ref(message)},
+            {"name": "Fire Bolt", "mark": "Cantrip", "class_row_id": "class-row-1", "systems_ref": _systems_ref(fire_bolt)},
+            {"name": "Disguise Self", "mark": "Prepared", "class_row_id": "class-row-1", "systems_ref": _systems_ref(disguise_self)},
+            {"name": "Cure Wounds", "mark": "", "class_row_id": "class-row-1", "systems_ref": _systems_ref(cure_wounds)},
+            {"name": "Magic Missile", "mark": "", "class_row_id": "class-row-1", "is_always_prepared": True, "systems_ref": _systems_ref(magic_missile)},
+        ],
+    }
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+    repair_context = build_imported_progression_repair_context(
+        systems_service,
+        "linden-pass",
+        definition,
+    )
+
+    assert readiness["status"] == "ready"
+    assert repair_context["spell_rows"] == []
+
+
+def test_imported_progression_repair_still_flags_blank_cantrips_on_prepared_casters():
+    artificer = _systems_entry(
+        "class",
+        "tce-class-artificer",
+        "Artificer",
+        source_id="TCE",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["con", "int"],
+            "subclass_title": "Artificer Specialist",
+        },
+    )
+    armorer = _systems_entry(
+        "subclass",
+        "tce-subclass-armorer-artificer-tce",
+        "Armorer",
+        source_id="TCE",
+        metadata={"class_name": "Artificer", "class_source": "TCE"},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    sage = _systems_entry("background", "phb-background-sage", "Sage")
+    fire_bolt = _systems_entry(
+        "spell",
+        "phb-spell-fire-bolt",
+        "Fire Bolt",
+        metadata={"level": 0, "class_lists": {"TCE": ["Artificer"]}},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [artificer],
+            "subclass": [armorer],
+            "race": [human],
+            "background": [sage],
+            "spell": [fire_bolt],
+        },
+        class_progression=[],
+    )
+    definition = _minimal_imported_character_definition("artificer-import", "Armorer Import")
+    definition.profile["class_level_text"] = "Artificer 5"
+    definition.profile["classes"][0] = {
+        "row_id": "class-row-1",
+        "class_name": "Artificer",
+        "subclass_name": "Armorer",
+        "level": 5,
+        "systems_ref": _systems_ref(artificer),
+        "subclass_ref": _systems_ref(armorer),
+    }
+    definition.profile["class_ref"] = _systems_ref(artificer)
+    definition.profile["subclass_ref"] = _systems_ref(armorer)
+    definition.profile["species"] = "Human"
+    definition.profile["species_ref"] = _systems_ref(human)
+    definition.profile["background"] = "Sage"
+    definition.profile["background_ref"] = _systems_ref(sage)
+    definition.spellcasting = {
+        "spellcasting_class": "Artificer",
+        "spellcasting_ability": "Intelligence",
+        "spells": [
+            {"name": "Fire Bolt", "mark": "", "class_row_id": "class-row-1", "systems_ref": _systems_ref(fire_bolt)},
+        ],
+    }
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+
+    assert readiness["status"] == "repairable"
+    assert [row["name"] for row in readiness["spell_repair_rows"]] == ["Fire Bolt"]
+
+
 def test_imported_progression_repair_restores_grave_domain_always_prepared_spells():
     cleric = _systems_entry(
         "class",

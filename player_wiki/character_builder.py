@@ -1698,6 +1698,8 @@ def _build_imported_spell_repair_rows(
         if len(automatic_prepared_row_ids) == 1:
             continue
         selected_row_id = str(payload.get("class_row_id") or "").strip()
+        candidate_row_id_set = set(candidate_row_ids)
+        has_resolved_class_row = selected_row_id in candidate_row_id_set
         if selected_row_id not in candidate_row_ids:
             selected_row_id = candidate_row_ids[0] if len(candidate_row_ids) == 1 else ""
         option_rows = [
@@ -1717,6 +1719,12 @@ def _build_imported_spell_repair_rows(
         if (
             bool(payload.get("is_always_prepared"))
             or (mark and _spell_mark_is_valid_for_mode(mark, selected_row_mode or ""))
+            or (
+                not mark
+                and has_resolved_class_row
+                and selected_row_mode == "prepared"
+                and (_spell_payload_spell_level(payload, spell_catalog=spell_catalog) or 0) > 0
+            )
         ) and (selected_row_id or len(option_rows) <= 1):
             continue
         rows.append(
