@@ -2,7 +2,7 @@
   {% if components %}
     <div class="feature-row__components">
       {% for component in components %}
-        <div class="feature-row__component">
+        <article class="feature-row__component">
           <div class="feature-row__component-header">
             <h5>
               {% if component.href %}
@@ -19,7 +19,7 @@
             <div class="article-body article-body--compact">{{ component.description_html | safe }}</div>
           {% endif %}
           {{ render_feature_components(component.children) }}
-        </div>
+        </article>
       {% endfor %}
     </div>
   {% endif %}

@@ -2615,8 +2615,22 @@ button {
 .feature-row__component {
   display: grid;
   gap: 0.35rem;
-  padding-left: 0.8rem;
-  border-left: 2px solid var(--border);
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-soft-muted);
+}
+
+.feature-row__components .feature-row__component + .feature-row__component {
+  margin-top: 0.15rem;
+}
+
+.feature-row__component .feature-row__components {
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  margin-left: 0.5rem;
+  padding-left: 0.5rem;
+  border-top: 1px solid var(--border);
 }
 
 .feature-row__component-header {

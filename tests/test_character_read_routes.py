@@ -10448,6 +10448,117 @@ def test_character_sheet_nests_armorer_armor_model_components(app, client, sign_
     _assert_armorer_components(session_response.get_data(as_text=True))
 
 
+def test_character_sheet_nests_artificer_infusion_rows_under_artificer_infusions(app, client, sign_in, users):
+    def _mutate_definition(payload: dict) -> None:
+        payload["features"] = [
+            {
+                "id": "artificer-infusions-8",
+                "name": "Artificer Infusions",
+                "category": "class_feature",
+                "source": "TCoE 12",
+                "description_markdown": "You have invented numerous magical  infusions.",
+                "activation_type": "passive",
+            },
+            {
+                "id": "artificer-enhanced-defense-9",
+                "name": "Enhanced Defense",
+                "category": "class_feature",
+                "source": "TCoE 12",
+                "description_markdown": "Grant +1 to AC to one item.",
+                "activation_type": "passive",
+                "native_edit_parent_feature_id": "artificer-infusions-8",
+            },
+            {
+                "id": "artificer-homunculus-servant-10",
+                "name": "Homunculus Servant",
+                "category": "class_feature",
+                "source": "TCoE 13",
+                "description_markdown": "You can summon a tiny guardian construct.",
+                "activation_type": "action",
+                "native_edit_parent_feature_id": "artificer-infusions-8",
+            },
+            {
+                "id": "artificer-replicate-magic-item-goggles-11",
+                "name": "Replicate Magic Item (Goggles of Night)",
+                "category": "class_feature",
+                "source": "TCoE 12",
+                "description_markdown": "Turn two objects into magic goggles.",
+                "activation_type": "bonus_action",
+            },
+            {
+                "id": "artificer-repeating-shot-12",
+                "name": "Repeating Shot",
+                "category": "class_feature",
+                "source": "TCoE 13",
+                "description_markdown": "Your firearm shots can be repeated after short rests.",
+                "activation_type": "special",
+            },
+            {
+                "id": "artificer-boots-winding-path-13",
+                "name": "Boots of the Winding Path",
+                "category": "class_feature",
+                "source": "TCoE 13",
+                "description_markdown": "You can move more quickly while infused.",
+                "activation_type": "passive",
+            },
+            {
+                "id": "artificer-armor-magical-strength-14",
+                "name": "Armor of Magical Strength",
+                "category": "class_feature",
+                "source": "TCoE 13",
+                "description_markdown": "Choose a melee weapon and gain strength bonus.",
+                "activation_type": "passive",
+                "native_edit_parent_feature_id": "artificer-infusions-8",
+            },
+            {
+                "id": "artificer-custom-choice-15",
+                "name": "Custom Infusion Choice",
+                "category": "class_feature",
+                "source": "Campaign",
+                "description_markdown": "A non-catalog child choice should still nest by parent id.",
+                "activation_type": "passive",
+                "native_edit_parent_feature_id": "artificer-infusions-8",
+            },
+            {
+                "id": "artificer-feature-16",
+                "name": "Other Feature",
+                "category": "class_feature",
+                "source": "TCoE 12",
+                "description_markdown": "Should stay top level.",
+                "activation_type": "passive",
+            },
+        ]
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    def _assert_artificer_infusion_components(html: str) -> None:
+        assert re.search(r"<h4>\s*Artificer Infusions\s*</h4>", html)
+        assert re.search(r"<h4>\s*Other Feature\s*</h4>", html)
+        for child_name in (
+            "Enhanced Defense",
+            "Homunculus Servant",
+            "Replicate Magic Item (Goggles of Night)",
+            "Repeating Shot",
+            "Boots of the Winding Path",
+            "Armor of Magical Strength",
+            "Custom Infusion Choice",
+        ):
+            assert not re.search(rf"<h4>\s*{re.escape(child_name)}\s*</h4>", html)
+            assert re.search(rf"<h5>\s*{re.escape(child_name)}\s*</h5>", html)
+        assert html.count("Replicate Magic Item (Goggles of Night)") == 1
+        assert "feature-row__components" in html
+
+    read_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=features")
+    session_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=features")
+
+    assert read_response.status_code == 200
+    assert session_response.status_code == 200
+    _assert_artificer_infusion_components(read_response.get_data(as_text=True))
+    _assert_artificer_infusion_components(session_response.get_data(as_text=True))
+
+
 def test_arcane_armor_state_gates_guardian_attacks_on_character_sheet(app, client, sign_in, users):
     def _mutate_definition(payload: dict) -> None:
         payload["attacks"] = [

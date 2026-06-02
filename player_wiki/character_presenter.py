@@ -106,6 +106,20 @@ ARMORER_ARMOR_MODEL_PARENT_NAMES = {
     "guardian armor:": "guardian",
     "infiltrator armor:": "infiltrator",
 }
+FEATURE_PARENT_ID_KEYS = (
+    "native_edit_parent_feature_id",
+    "parent_feature_id",
+)
+ARTIFICER_INFUSIONS_PARENT_NAME = "artificer infusions"
+ARTIFICER_INFUSION_CHILD_NAMES = {
+    "enhanced defense",
+    "homunculus servant",
+    "replicate magic item",
+    "replicate magic item (goggles of night)",
+    "repeating shot",
+    "boots of the winding path",
+    "armor of magical strength",
+}
 ARCANE_ARMOR_STATE_KEY = "arcane_armor"
 ARCANE_ARMOR_FEATURE_NAME = "arcane armor"
 GUARDIAN_ARMOR_THUNDER_GAUNTLETS_NAME = "guardian armor: thunder gauntlets"
@@ -1088,12 +1102,19 @@ def present_character_detail(
         ]
         feature_groups_ordered[group_title].append(
             {
+                "id": str(feature.get("id") or "").strip(),
                 "name": str(feature.get("name") or "Feature"),
                 "href": build_character_entry_href(
                     campaign.slug,
                     systems_ref=feature.get("systems_ref"),
                     page_ref=feature.get("page_ref"),
                 ),
+                "category": str(feature.get("category") or "").strip(),
+                "class_row_id": str(feature.get("class_row_id") or "").strip(),
+                "source_kind": str(feature.get("source_kind") or "").strip(),
+                "systems_ref": dict(feature.get("systems_ref") or {}),
+                "native_edit_parent_feature_id": str(feature.get("native_edit_parent_feature_id") or "").strip(),
+                "parent_feature_id": str(feature.get("parent_feature_id") or "").strip(),
                 "activation_type": str(feature.get("activation_type") or "").strip().lower(),
                 "metadata": [part for part in metadata if part],
                 "combat_availability": build_armorer_combat_availability(
@@ -1110,7 +1131,7 @@ def present_character_detail(
         )
 
     for group_entries in feature_groups_ordered.values():
-        nest_armorer_feature_components(group_entries)
+        nest_feature_components(group_entries)
 
     attacks = []
     hidden_attacks: list[dict[str, str]] = []
@@ -4239,15 +4260,17 @@ def should_hide_redundant_choice_feature(
     return False
 
 
-def nest_armorer_feature_components(entries: list[dict[str, Any]]) -> None:
+def nest_feature_components(entries: list[dict[str, Any]]) -> None:
     if not entries:
         return
 
     entries_by_name: dict[str, list[dict[str, Any]]] = {}
+    entries_by_id: dict[str, dict[str, Any]] = {}
     for entry in entries:
         entries_by_name.setdefault(normalize_feature_name(entry.get("name")), []).append(entry)
-    if "arcane armor" not in entries_by_name or "armor model" not in entries_by_name:
-        return
+        entry_id = str(entry.get("id") or "").strip()
+        if entry_id:
+            entries_by_id.setdefault(entry_id, entry)
 
     moved_ids: set[int] = set()
     hidden_ids = {
@@ -4262,13 +4285,15 @@ def nest_armorer_feature_components(entries: list[dict[str, Any]]) -> None:
                 return candidate
         return None
 
-    def attach_child(parent_name: str, child: dict[str, Any]) -> bool:
-        parent = first_entry(parent_name)
-        if parent is None or parent is child or id(child) in hidden_ids:
+    def attach_child_to_parent(parent: dict[str, Any] | None, child: dict[str, Any]) -> bool:
+        if parent is None or parent is child or id(parent) in hidden_ids or id(child) in hidden_ids:
             return False
         parent.setdefault("children", []).append(child)
         moved_ids.add(id(child))
         return True
+
+    def attach_child(parent_name: str, child: dict[str, Any]) -> bool:
+        return attach_child_to_parent(first_entry(parent_name), child)
 
     for child_name, parent_name in ARMORER_COMPONENT_PARENT_NAMES.items():
         child = first_entry(child_name)
@@ -4276,15 +4301,38 @@ def nest_armorer_feature_components(entries: list[dict[str, Any]]) -> None:
             attach_child(parent_name, child)
 
     for entry in entries:
+        if id(entry) in hidden_ids or id(entry) in moved_ids:
+            continue
+
         entry_name = normalize_feature_name(entry.get("name"))
+        parent_feature_id = ""
+        for candidate_key in FEATURE_PARENT_ID_KEYS:
+            candidate_value = str(entry.get(candidate_key) or "").strip()
+            if candidate_value:
+                parent_feature_id = candidate_value
+                break
+        if parent_feature_id:
+            parent_entry = entries_by_id.get(parent_feature_id)
+            if attach_child_to_parent(parent_entry, entry):
+                continue
+
         for prefix, parent_name in ARMORER_ARMOR_MODEL_PARENT_NAMES.items():
             if entry_name.startswith(prefix):
                 attach_child(parent_name, entry)
                 break
+        else:
+            if entry_name in ARTIFICER_INFUSION_CHILD_NAMES:
+                parent = first_entry(ARTIFICER_INFUSIONS_PARENT_NAME)
+                if parent is not None:
+                    attach_child(ARTIFICER_INFUSIONS_PARENT_NAME, entry)
 
     if not moved_ids and not hidden_ids:
         return
     entries[:] = [entry for entry in entries if id(entry) not in moved_ids and id(entry) not in hidden_ids]
+
+
+def nest_armorer_feature_components(entries: list[dict[str, Any]]) -> None:
+    nest_feature_components(entries)
 
 
 def should_hide_empty_armorer_mode_component(
