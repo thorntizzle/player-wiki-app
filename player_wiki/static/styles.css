@@ -1651,7 +1651,7 @@ button {
 }
 
 .glance-grid--quick-row-1 {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .glance-grid--quick-row-2 {
@@ -1674,7 +1674,7 @@ button {
 }
 
 .character-sheet .glance-grid--quick-row-1 {
-  grid-template-columns: repeat(2, minmax(0, 13.5rem));
+  grid-template-columns: repeat(3, minmax(0, 13.5rem));
 }
 
 .character-sheet .glance-grid--quick-row-2 {
@@ -1977,7 +1977,7 @@ button {
 .hit-dice-pool {
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.45rem;
   min-width: 0;
   color: var(--muted);
   font-size: 0.86rem;
@@ -1985,8 +1985,8 @@ button {
 }
 
 .hit-dice-pool input {
-  width: 3.4rem;
-  min-width: 3.4rem;
+  width: 4.2rem;
+  min-width: 4.2rem;
 }
 
 .session-number-inline {
@@ -2067,6 +2067,7 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .character-sheet .glance-grid--quick-row-1,
   .character-sheet .glance-grid--quick-row-2,
   .character-sheet .glance-grid--quick-row-3,
   .character-sheet .glance-grid--quick-row-4,
