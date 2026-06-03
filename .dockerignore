@@ -48,6 +48,9 @@ tempcombat*
 campaign_player_wiki
 tmp*
 **/tmp*
+frontend/.vite
+frontend/dist
+frontend/node_modules
 campaigns
 docs
 tests
