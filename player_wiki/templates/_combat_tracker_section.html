@@ -155,6 +155,35 @@
                     aria-label="Temp HP for {{ combatant.name }}"
                   >
                 </form>
+                {% if combatant.hit_dice and combatant.hit_dice.pools %}
+                  <form
+                    method="post"
+                    action="{{ url_for('campaign_combat_update_vitals', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+                    class="combat-stat combat-stat--editable combat-stat--hit-dice"
+                    data-combat-async
+                    data-combat-inline-autosubmit
+                  >
+                    {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id, combatant.state_revision, combatant.combatant_revision) }}
+                    <span class="meta">Hit Dice</span>
+                    <div class="hit-dice-pool-list" aria-label="Hit Dice for {{ combatant.name }}">
+                      {% for pool in combatant.hit_dice.pools %}
+                        <label class="hit-dice-pool">
+                          <span>{{ pool.label }}</span>
+                          <input
+                            class="combat-stat-input combat-stat-input--number"
+                            type="number"
+                            name="{{ pool.input_name }}"
+                            value="{{ pool.current }}"
+                            min="0"
+                            max="{{ pool.max }}"
+                            aria-label="{{ pool.label }} Hit Dice for {{ combatant.name }}"
+                          >
+                          <span>/ {{ pool.max }}</span>
+                        </label>
+                      {% endfor %}
+                    </div>
+                  </form>
+                {% endif %}
               {% else %}
                 <div class="combat-stat">
                   <span class="meta">HP</span>
@@ -164,6 +193,12 @@
                   <span class="meta">Temp HP</span>
                   <strong>{{ combatant.temp_hp }}</strong>
                 </div>
+                {% if combatant.hit_dice and combatant.hit_dice.pools %}
+                  <div class="combat-stat combat-stat--hit-dice">
+                    <span class="meta">Hit Dice</span>
+                    <strong>{{ combatant.hit_dice.value }}</strong>
+                  </div>
+                {% endif %}
               {% endif %}
 
               {% if combatant.can_edit_resources %}

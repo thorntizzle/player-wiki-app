@@ -3607,6 +3607,21 @@ def create_app() -> Flask:
             return None
         return int(raw_value)
 
+    def parse_hit_dice_current_values() -> dict[int, str] | None:
+        values: dict[int, str] = {}
+        for key, value in request.form.items():
+            if not key.startswith("hit_dice_d"):
+                continue
+            raw_faces = key.removeprefix("hit_dice_d").strip()
+            if not raw_faces:
+                continue
+            try:
+                faces = int(raw_faces)
+            except ValueError:
+                continue
+            values[faces] = value
+        return values or None
+
     def get_owned_character_slugs(campaign_slug: str) -> set[str]:
         user = get_current_user()
         if user is None:
@@ -4847,7 +4862,11 @@ def create_app() -> Flask:
         is_session_mode = False
         character_read_mode_param = "session" if (requested_session_mode and can_use_session_mode) else None
 
-        confirm_rest = request.values.get("confirm_rest", "").strip().lower() if is_session_mode else ""
+        confirm_rest = (
+            request.values.get("confirm_rest", "").strip().lower()
+            if requested_session_mode and can_use_session_mode
+            else ""
+        )
         rest_preview = None
         if confirm_rest in {"short", "long"}:
             rest_preview = get_character_state_service().preview_rest(record, confirm_rest)
@@ -11975,6 +11994,7 @@ def create_app() -> Flask:
                     expected_revision=expected_revision,
                     current_hp=request.form.get("current_hp"),
                     temp_hp=request.form.get("temp_hp"),
+                    hit_dice_current=parse_hit_dice_current_values(),
                     updated_by_user_id=user.id,
                 )
             except CharacterStateConflictError:
@@ -14807,6 +14827,7 @@ def create_app() -> Flask:
                 current_yin=request.form.get("current_yin"),
                 current_yang=request.form.get("current_yang"),
                 current_dao=request.form.get("current_dao"),
+                hit_dice_current=parse_hit_dice_current_values(),
                 hp_delta=request.form.get("hp_delta"),
                 temp_hp_delta=request.form.get("temp_hp_delta"),
                 clear_temp_hp=request.form.get("clear_temp_hp") == "1",

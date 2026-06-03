@@ -4,6 +4,10 @@ from copy import deepcopy
 from typing import Any
 
 from .character_builder import _normalize_weapon_wield_mode_value
+from .character_hit_dice import (
+    normalize_hit_dice_state,
+    normalize_hit_dice_state_payload,
+)
 from .character_models import CharacterDefinition
 from .character_spell_slots import (
     normalize_spell_slot_lane_id,
@@ -115,6 +119,7 @@ def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
             "temp_hp": 0,
             "death_saves": {"successes": 0, "failures": 0},
         },
+        "hit_dice": normalize_hit_dice_state(definition, None),
         "resources": resources,
         "inventory": inventory,
         "currency": currency,
@@ -180,6 +185,7 @@ def merge_state_with_definition(
         )
 
     payload = deepcopy(state)
+    payload = normalize_hit_dice_state_payload(definition, payload)
     existing_resources = list(payload.get("resources") or [])
     removed_managed_resources = {
         str(resource_id).strip()
@@ -434,6 +440,10 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
             "failures": int((vitals.get("death_saves") or {}).get("failures") or 0),
         }
     payload["vitals"] = normalized_vitals
+    if is_xianxia:
+        payload.pop("hit_dice", None)
+    else:
+        payload = normalize_hit_dice_state_payload(definition, payload)
     if is_xianxia:
         payload["resources"] = []
         payload["spell_slots"] = []

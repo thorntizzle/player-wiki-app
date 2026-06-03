@@ -361,6 +361,7 @@ class CampaignCombatService:
         expected_revision: int,
         current_hp: Any | None,
         temp_hp: Any | None,
+        hit_dice_current: dict[int, Any] | None = None,
         updated_by_user_id: int | None = None,
     ) -> CampaignCombatantRecord:
         combatant = self._require_combatant(campaign_slug, combatant_id)
@@ -376,6 +377,7 @@ class CampaignCombatService:
             expected_revision=expected_revision,
             current_hp=current_hp,
             temp_hp=temp_hp,
+            hit_dice_current=hit_dice_current,
             updated_by_user_id=updated_by_user_id,
         )
 

@@ -181,6 +181,17 @@
       {% set show_control_sections = character_subpage == 'controls' %}
       {% set character_inline_state_controls_enabled = can_use_session_mode and native_character_tools_supported and not is_session_mode and not is_xianxia_sheet %}
 
+      {% if rest_preview %}
+        {% with
+          session_character_controls_scope = "overview",
+          session_character_form_mode = "session",
+          session_character_form_page = character_subpage,
+          session_character_hide_currency_controls = true
+        %}
+          {% include "_character_session_panels.html" %}
+        {% endwith %}
+      {% endif %}
+
       {% if show_quick_sections %}
         <section class="read-section" id="character-quick-overview">
           {% with

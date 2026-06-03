@@ -32,6 +32,7 @@ from .character_builder import (
     resolve_item_equipped_state,
 )
 from .character_models import CharacterRecord
+from .character_hit_dice import hit_dice_summary_from_state
 from .character_profile import (
     profile_class_level_text,
     profile_primary_class_ref,
@@ -307,7 +308,9 @@ def present_character_roster(records: list[CharacterRecord]) -> list[dict[str, A
     for record in records:
         definition = record.definition
         profile = definition.profile
-        vitals = dict(record.state_record.state.get("vitals") or {})
+        state = dict(record.state_record.state or {})
+        vitals = dict(state.get("vitals") or {})
+        hit_dice = hit_dice_summary_from_state(definition, state)
         resources = sorted(
             list(record.state_record.state.get("resources") or []),
             key=lambda item: (int(item.get("display_order") or 0), str(item.get("label") or "").lower()),
@@ -337,6 +340,7 @@ def present_character_roster(records: list[CharacterRecord]) -> list[dict[str, A
                 "current_hp": int(vitals.get("current_hp") or 0),
                 "max_hp": int(definition.stats.get("max_hp") or 0),
                 "temp_hp": int(vitals.get("temp_hp") or 0),
+                "hit_dice": hit_dice,
                 "resource_preview": resource_preview,
                 "search_text": " ".join(part for part in search_parts if part).lower(),
             }
@@ -369,6 +373,11 @@ def present_character_detail(
     stats = dict(definition.stats or {})
     profile = dict(definition.profile or {})
     is_xianxia_character = is_xianxia_system(definition.system)
+    hit_dice = (
+        {"pools": [], "value": "--", "full_value": "--", "regain_on_long_rest": 0}
+        if is_xianxia_character
+        else hit_dice_summary_from_state(definition, state)
+    )
     xianxia_defense = (
         present_xianxia_defense_derivation(definition.xianxia)
         if is_xianxia_character
@@ -509,6 +518,7 @@ def present_character_detail(
         quick_row_1 = [
             {"label": "Current HP", "value": f"{int(vitals.get('current_hp') or 0)} / {int(stats.get('max_hp') or 0)}"},
             {"label": "Temp HP", "value": str(int(vitals.get("temp_hp") or 0))},
+            {"label": "Hit Dice", "value": str(hit_dice.get("value") or "--")},
         ]
         quick_row_2 = [
             {"label": "Armor Class", "value": str(int(stats.get("armor_class") or 0))},
@@ -1330,6 +1340,7 @@ def present_character_detail(
             else int(stats.get("max_hp") or 0)
         ),
         "temp_hp": int(vitals.get("temp_hp") or 0),
+        "hit_dice": hit_dice,
         "player_notes_markdown": player_notes_markdown,
         "player_notes_html": render_campaign_markdown(campaign, player_notes_markdown)
         if player_notes_markdown.strip()

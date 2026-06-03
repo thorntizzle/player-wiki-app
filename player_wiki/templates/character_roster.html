@@ -77,6 +77,12 @@
               <span class="meta">Temp HP</span>
               <strong>{{ character.temp_hp }}</strong>
             </div>
+            {% if character.hit_dice and character.hit_dice.pools %}
+              <div>
+                <span class="meta">Hit Dice</span>
+                <strong>{{ character.hit_dice.value }}</strong>
+              </div>
+            {% endif %}
           </div>
           {% if character.resource_preview %}
             <ul class="plain-list resource-preview-list">

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .character_hit_dice import hit_dice_summary_from_state
 from .character_models import CharacterRecord
 from .character_profile import profile_class_level_text
 from .combat_models import (
@@ -73,6 +74,11 @@ def present_combat_tracker(
         )
         profile = dict(character_record.definition.profile or {}) if character_record is not None else {}
         stats = dict(character_record.definition.stats or {}) if character_record is not None else {}
+        hit_dice = (
+            hit_dice_summary_from_state(character_record.definition, character_record.state_record.state)
+            if character_record is not None
+            else {"pools": [], "value": "", "full_value": "", "regain_on_long_rest": 0}
+        )
         conditions = conditions_by_combatant.get(combatant.id, [])
         source_kind = combatant.source_kind or (
             COMBAT_SOURCE_KIND_CHARACTER if combatant.character_slug else COMBAT_SOURCE_KIND_MANUAL_NPC
@@ -108,6 +114,7 @@ def present_combat_tracker(
                 "current_hp": combatant.current_hp if show_detail else None,
                 "max_hp": combatant.max_hp if show_detail else None,
                 "temp_hp": combatant.temp_hp if show_detail else None,
+                "hit_dice": hit_dice if show_detail and character_record is not None else None,
                 "movement_total": combatant.movement_total if show_detail else None,
                 "movement_remaining": combatant.movement_remaining if show_detail else None,
                 "speed_label": (

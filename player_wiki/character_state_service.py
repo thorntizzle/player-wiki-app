@@ -4,6 +4,12 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from .character_hit_dice import (
+    apply_long_rest_hit_dice_recovery,
+    hit_dice_rest_changes,
+    normalize_hit_dice_state_payload,
+    set_hit_dice_current_values,
+)
 from .character_models import CharacterRecord, CharacterStateRecord
 from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lane_title_map
 from .character_store import CharacterStateStore
@@ -61,6 +67,7 @@ class CharacterStateService:
         current_yin: Any | None = None,
         current_yang: Any | None = None,
         current_dao: Any | None = None,
+        hit_dice_current: dict[int, Any] | None = None,
         hp_delta: Any | None = None,
         temp_hp_delta: Any | None = None,
         clear_temp_hp: bool = False,
@@ -75,6 +82,8 @@ class CharacterStateService:
             temp_hp_delta=temp_hp_delta,
             clear_temp_hp=clear_temp_hp,
         )
+        if hit_dice_current is not None and not is_xianxia_system(record.definition.system):
+            state = set_hit_dice_current_values(record.definition, state, hit_dice_current)
         if is_xianxia_system(record.definition.system):
             self._apply_xianxia_stance_update(
                 state,
@@ -1193,6 +1202,10 @@ class CharacterStateService:
                 slot["used"] = 0
             if is_xianxia_system(record.definition.system):
                 self._apply_xianxia_one_day_rest(state, record.definition)
+            else:
+                state = apply_long_rest_hit_dice_recovery(record.definition, state)
+        elif not is_xianxia_system(record.definition.system):
+            state = normalize_hit_dice_state_payload(record.definition, state)
 
         return self._replace_state(
             record,
@@ -1243,6 +1256,16 @@ class CharacterStateService:
         if rest_type == "long":
             if is_xianxia_system(getattr(definition, "system", None)):
                 changes.extend(self._collect_xianxia_one_day_rest_changes(state, definition))
+            else:
+                rested_state = apply_long_rest_hit_dice_recovery(definition, state)
+                for change in hit_dice_rest_changes(definition, state, rested_state):
+                    changes.append(
+                        CharacterRestChange(
+                            label=change["label"],
+                            from_value=change["from_value"],
+                            to_value=change["to_value"],
+                        )
+                    )
 
             lane_titles = spell_slot_lane_title_map(spellcasting)
             total_lanes = len(lane_titles)

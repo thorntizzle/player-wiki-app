@@ -52,6 +52,39 @@
               {% endif %}
             </form>
           </article>
+        {% elif row_index == 1 and not character_glance_is_xianxia and character_glance_inline_vitals_enabled and stat.label == "Hit Dice" and character.hit_dice and character.hit_dice.pools %}
+          <article class="glance-card glance-card--vitals">
+            <form
+              class="session-vitals-form session-vitals-form--inline session-vitals-form--inline-hit-dice"
+              data-character-sheet-edit-form="vitals"
+              data-character-autosubmit
+              method="post"
+              action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+            >
+              <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+              <input type="hidden" name="mode" value="{{ character_glance_inline_vitals_mode }}">
+              <input type="hidden" name="page" value="{{ character_glance_inline_vitals_page }}">
+              <div class="session-field session-vitals-form__row session-vitals-form__row--hit-dice">
+                <span>{{ stat.label }}</span>
+                <div class="hit-dice-pool-list" aria-label="Hit Dice">
+                  {% for pool in character.hit_dice.pools %}
+                    <label class="hit-dice-pool">
+                      <span>{{ pool.label }}</span>
+                      <input
+                        type="number"
+                        name="{{ pool.input_name }}"
+                        value="{{ pool.current }}"
+                        min="0"
+                        max="{{ pool.max }}"
+                        aria-label="{{ pool.label }} Hit Dice"
+                      >
+                      <span>/ {{ pool.max }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              </div>
+            </form>
+          </article>
         {% else %}
           <div class="glance-card">
             <span class="meta">{{ stat.label }}</span>

@@ -139,6 +139,40 @@
             aria-label="Temp HP for {{ selected_combatant.name }}"
           >
         </form>
+        {% if selected_combatant.hit_dice and selected_combatant.hit_dice.pools %}
+          <form
+            method="post"
+            action="{{ url_for('campaign_combat_update_vitals', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
+            class="combat-stat combat-stat--editable combat-stat--hit-dice"
+            data-combat-async
+            data-combat-inline-autosubmit
+          >
+            {{ combat_status_return_fields() }}
+            <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
+            {% if selected_combatant.state_revision is not none %}
+              <input type="hidden" name="expected_revision" value="{{ selected_combatant.state_revision }}">
+            {% endif %}
+            <input type="hidden" name="expected_combatant_revision" value="{{ selected_combatant.combatant_revision }}">
+            <span class="meta">Hit Dice</span>
+            <div class="hit-dice-pool-list" aria-label="Hit Dice for {{ selected_combatant.name }}">
+              {% for pool in selected_combatant.hit_dice.pools %}
+                <label class="hit-dice-pool">
+                  <span>{{ pool.label }}</span>
+                  <input
+                    class="combat-stat-input combat-stat-input--number"
+                    type="number"
+                    name="{{ pool.input_name }}"
+                    value="{{ pool.current }}"
+                    min="0"
+                    max="{{ pool.max }}"
+                    aria-label="{{ pool.label }} Hit Dice for {{ selected_combatant.name }}"
+                  >
+                  <span>/ {{ pool.max }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </form>
+        {% endif %}
       {% else %}
         <div class="combat-stat">
           <span class="meta">HP</span>
@@ -148,6 +182,12 @@
           <span class="meta">Temp HP</span>
           <strong>{{ selected_combatant.temp_hp }}</strong>
         </div>
+        {% if selected_combatant.hit_dice and selected_combatant.hit_dice.pools %}
+          <div class="combat-stat combat-stat--hit-dice">
+            <span class="meta">Hit Dice</span>
+            <strong>{{ selected_combatant.hit_dice.value }}</strong>
+          </div>
+        {% endif %}
       {% endif %}
 
       {% if show_status_editing and selected_combatant.can_edit_resources %}
