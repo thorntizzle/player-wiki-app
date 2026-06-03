@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import mimetypes
 from functools import wraps
 from io import BytesIO
 from pathlib import Path
@@ -43,6 +42,7 @@ from .campaign_content_service import (
     get_campaign_character_file,
     get_campaign_config_file,
     get_campaign_page_file,
+    guess_campaign_asset_media_type,
     list_campaign_asset_files,
     list_campaign_character_files,
     list_campaign_page_files,
@@ -2033,12 +2033,11 @@ def register_api(app) -> None:
                     if page_record.page.image_path:
                         image_path = get_campaign_asset_file(campaign, page_record.page.image_path)
                         if image_path is not None:
-                            media_type, _ = mimetypes.guess_type(image_path.name)
                             session_service.attach_article_image(
                                 campaign_slug,
                                 article.id,
                                 filename=image_path.name,
-                                media_type=media_type,
+                                media_type=guess_campaign_asset_media_type(image_path),
                                 data_blob=image_path.read_bytes(),
                                 alt_text=page_record.page.image_alt,
                                 caption=page_record.page.image_caption,

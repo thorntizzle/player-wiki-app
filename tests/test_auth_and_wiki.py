@@ -6,6 +6,17 @@ from player_wiki.auth_store import AuthStore
 from player_wiki.db import get_db
 from tests.sample_data import TEST_CAMPAIGN_TITLE
 
+TEST_WEBP_BYTES = (
+    b"RIFF"
+    b"\x1a\x00\x00\x00"
+    b"WEBP"
+    b"VP8 "
+    b"\x08\x00\x00\x00"
+    b"\x00\x00\x00\x00"
+    b"\x2a\x00\x00\x00"
+    b"\x00\x00\x00\x00"
+)
+
 
 def test_anonymous_user_can_browse_public_campaign_content(client):
     response = client.get("/campaigns/linden-pass")
@@ -586,6 +597,26 @@ def test_article_image_renders_for_configured_page_and_asset_route_is_public(cli
     client.post("/sign-in", data={"email": users["outsider"]["email"], "password": users["outsider"]["password"]})
     outsider_asset = client.get("/campaigns/linden-pass/assets/npcs/captain-lyra-vale.png")
     assert outsider_asset.status_code == 200
+
+
+def test_webp_assets_are_served_with_image_webp_mime_type(client, app, monkeypatch):
+    webp_asset_path = (
+        Path(app.config["TEST_CAMPAIGNS_DIR"])
+        / "linden-pass"
+        / "assets"
+        / "lore"
+        / "trade-coast-map.webp"
+    )
+    webp_asset_path.write_bytes(TEST_WEBP_BYTES)
+    monkeypatch.setattr(
+        "player_wiki.campaign_content_service.mimetypes.guess_type",
+        lambda _: (None, None),
+    )
+
+    response = client.get("/campaigns/linden-pass/assets/lore/trade-coast-map.webp")
+
+    assert response.status_code == 200
+    assert response.mimetype == "image/webp"
 
 
 def test_lore_map_page_renders_configured_image_and_asset_is_public(client):

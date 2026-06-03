@@ -6,7 +6,6 @@ import hashlib
 from io import BytesIO
 import json
 import logging
-import mimetypes
 from pathlib import Path
 import re
 import secrets
@@ -159,6 +158,7 @@ from .campaign_content_service import (
     delete_campaign_character_file,
     delete_campaign_page_file,
     get_campaign_page_file,
+    guess_campaign_asset_media_type,
     list_campaign_page_files,
     write_campaign_asset_file,
     write_campaign_page_file,
@@ -5951,12 +5951,11 @@ def create_app() -> Flask:
                     if page_record.page.image_path:
                         image_path = get_campaign_asset_file(campaign, page_record.page.image_path)
                         if image_path is not None:
-                            media_type, _ = mimetypes.guess_type(image_path.name)
                             session_service.attach_article_image(
                                 campaign_slug,
                                 article.id,
                                 filename=image_path.name,
-                                media_type=media_type,
+                                media_type=guess_campaign_asset_media_type(image_path),
                                 data_blob=image_path.read_bytes(),
                                 alt_text=page_record.page.image_alt,
                                 caption=page_record.page.image_caption,
@@ -9526,7 +9525,11 @@ def create_app() -> Flask:
         if asset_file is None:
             abort(404)
 
-        return send_from_directory(asset_file.parent, asset_file.name)
+        return send_from_directory(
+            asset_file.parent,
+            asset_file.name,
+            mimetype=guess_campaign_asset_media_type(asset_file),
+        )
 
     @app.get("/campaigns/<campaign_slug>/sections/<section_slug>")
     @campaign_scope_access_required("wiki")
@@ -14658,10 +14661,9 @@ def create_app() -> Flask:
         asset_file = get_campaign_asset_file(campaign, portrait["asset_ref"])
         if asset_file is None:
             abort(404)
-        media_type, _ = mimetypes.guess_type(asset_file.name)
         return send_file(
             BytesIO(asset_file.read_bytes()),
-            mimetype=media_type,
+            mimetype=guess_campaign_asset_media_type(asset_file),
             download_name=asset_file.name,
         )
 

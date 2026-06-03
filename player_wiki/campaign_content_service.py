@@ -83,6 +83,11 @@ class DeletedCharacterContent:
     deleted_assets: bool
 
 
+CAMPAIGN_ASSET_MEDIA_TYPE_BY_EXTENSION = {
+    ".webp": "image/webp",
+}
+
+
 def _timestamp_from_path(path: Path) -> str:
     return isoformat(datetime.fromtimestamp(path.stat().st_mtime, timezone.utc))
 
@@ -339,8 +344,10 @@ def delete_campaign_page_file(
     return existing
 
 
-def _guess_media_type(file_path: Path) -> str:
+def guess_campaign_asset_media_type(file_path: Path) -> str:
     media_type, _ = mimetypes.guess_type(file_path.name)
+    if media_type is None:
+        media_type = CAMPAIGN_ASSET_MEDIA_TYPE_BY_EXTENSION.get(file_path.suffix.lower())
     return media_type or "application/octet-stream"
 
 
@@ -351,7 +358,7 @@ def _load_asset_file_record(assets_dir: Path, file_path: Path) -> CampaignAssetF
         relative_path=relative_path,
         file_path=file_path,
         size_bytes=file_path.stat().st_size,
-        media_type=_guess_media_type(file_path),
+        media_type=guess_campaign_asset_media_type(file_path),
         updated_at=_timestamp_from_path(file_path),
     )
 
