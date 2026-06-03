@@ -236,6 +236,7 @@ from .systems_labels import (
 )
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError, SystemsService
 from .systems_store import SystemsStore
+from .image_publish import prepare_published_article_image
 from .system_policy import (
     CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION,
     CHARACTER_ROUTE_LANE_DND5E,
@@ -761,7 +762,7 @@ def normalize_dm_player_wiki_image_upload(upload) -> tuple[str, bytes] | None:
     if len(data_blob) > 8 * 1024 * 1024:
         raise ValueError("Wiki page images must stay under 8 MB.")
 
-    return extension, data_blob
+    return filename, data_blob
 
 
 def build_dm_player_wiki_image_asset_ref(page_ref: str, extension: str) -> str:
@@ -778,8 +779,9 @@ def apply_dm_player_wiki_image_upload(campaign, page_ref: str, metadata: dict[st
     if normalized_upload is None:
         return ""
 
-    extension, data_blob = normalized_upload
-    asset_ref = build_dm_player_wiki_image_asset_ref(page_ref, extension)
+    filename, data_blob = normalized_upload
+    converted_filename, data_blob = prepare_published_article_image(filename, data_blob)
+    asset_ref = build_dm_player_wiki_image_asset_ref(page_ref, Path(converted_filename).suffix)
     write_campaign_asset_file(campaign, asset_ref, data_blob=data_blob)
     metadata["image"] = asset_ref
     return asset_ref
@@ -824,9 +826,9 @@ def apply_dm_player_wiki_session_article_image(campaign, page_ref: str, metadata
     if article_image is None or metadata.get("image"):
         return ""
 
-    extension = Path(article_image.filename).suffix.lower() or ".bin"
-    asset_ref = build_dm_player_wiki_image_asset_ref(page_ref, extension)
-    write_campaign_asset_file(campaign, asset_ref, data_blob=article_image.data_blob)
+    converted_filename, data_blob = prepare_published_article_image(article_image.filename, article_image.data_blob)
+    asset_ref = build_dm_player_wiki_image_asset_ref(page_ref, Path(converted_filename).suffix)
+    write_campaign_asset_file(campaign, asset_ref, data_blob=data_blob)
     metadata["image"] = asset_ref
     return asset_ref
 

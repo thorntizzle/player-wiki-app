@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .campaign_content_service import write_campaign_page_file
 from .campaign_page_store import CampaignPageStore
+from .image_publish import prepare_published_article_image
 from .models import Campaign, Page, SECTION_ORDER
 from .publisher import summarize_body
 from .repository import slugify
@@ -213,11 +214,16 @@ def publish_session_article(
     asset_path: Path | None = None
     try:
         if article_image is not None:
-            suffix = Path(article_image.filename).suffix.lower() or ".bin"
-            asset_relative_path = f"session-articles/article-{article.id}-{options.slug_leaf}{suffix}"
+            image_filename, image_data = prepare_published_article_image(
+                filename=article_image.filename,
+                data_blob=article_image.data_blob,
+            )
+            asset_relative_path = (
+                f"session-articles/article-{article.id}-{options.slug_leaf}{Path(image_filename).suffix.lower()}"
+            )
             asset_path = Path(campaign.assets_dir) / asset_relative_path
             asset_path.parent.mkdir(parents=True, exist_ok=True)
-            asset_path.write_bytes(article_image.data_blob)
+            asset_path.write_bytes(image_data)
 
             metadata["image"] = asset_relative_path.replace("\\", "/")
             if article_image.alt_text:

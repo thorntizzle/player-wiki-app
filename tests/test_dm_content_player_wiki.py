@@ -18,6 +18,11 @@ TEST_PNG_BYTES = (
 )
 
 
+def assert_webp_bytes(data_blob: bytes) -> None:
+    assert data_blob[:4] == b"RIFF"
+    assert data_blob[8:12] == b"WEBP"
+
+
 def _page_form(**overrides):
     payload = {
         "title": "Field Report",
@@ -228,9 +233,9 @@ def test_dm_can_upload_player_wiki_page_image_from_dm_content(app, client, sign_
     )
 
     assert create_response.status_code == 302
-    asset_ref = "wiki-pages/notes/field-report.png"
+    asset_ref = "wiki-pages/notes/field-report.webp"
     asset_path = _campaign_asset_path(app, asset_ref)
-    assert asset_path.read_bytes() == TEST_PNG_BYTES
+    assert_webp_bytes(asset_path.read_bytes())
 
     page_path = _campaign_page_path(app, "notes/field-report")
     raw_text = page_path.read_text(encoding="utf-8")
@@ -242,13 +247,13 @@ def test_dm_can_upload_player_wiki_page_image_from_dm_content(app, client, sign_
     published_page = client.get("/campaigns/linden-pass/pages/notes/field-report")
     published_html = published_page.get_data(as_text=True)
     assert published_page.status_code == 200
-    assert "/campaigns/linden-pass/assets/wiki-pages/notes/field-report.png" in published_html
+    assert "/campaigns/linden-pass/assets/wiki-pages/notes/field-report.webp" in published_html
     assert "Uploaded field report image." in published_html
     assert "A browser-uploaded image attached to the field report." in published_html
 
-    asset_response = client.get("/campaigns/linden-pass/assets/wiki-pages/notes/field-report.png")
+    asset_response = client.get("/campaigns/linden-pass/assets/wiki-pages/notes/field-report.webp")
     assert asset_response.status_code == 200
-    assert asset_response.data == TEST_PNG_BYTES
+    assert_webp_bytes(asset_response.data)
 
 
 def test_dm_can_promote_session_article_through_player_wiki_editor(app, client, sign_in, users):
@@ -317,9 +322,9 @@ def test_dm_can_promote_session_article_through_player_wiki_editor(app, client, 
     assert create_page.status_code == 302
     assert "/dm-content/player-wiki/pages/notes/courier-seal-editor/edit" in create_page.headers["Location"]
 
-    asset_ref = "wiki-pages/notes/courier-seal-editor.png"
+    asset_ref = "wiki-pages/notes/courier-seal-editor.webp"
     asset_path = _campaign_asset_path(app, asset_ref)
-    assert asset_path.read_bytes() == TEST_PNG_BYTES
+    assert_webp_bytes(asset_path.read_bytes())
 
     page_path = _campaign_page_path(app, "notes/courier-seal-editor")
     raw_text = page_path.read_text(encoding="utf-8")
@@ -334,7 +339,7 @@ def test_dm_can_promote_session_article_through_player_wiki_editor(app, client, 
     published_page = client.get("/campaigns/linden-pass/pages/notes/courier-seal-editor")
     assert published_page.status_code == 200
     published_html = published_page.get_data(as_text=True)
-    assert "/campaigns/linden-pass/assets/wiki-pages/notes/courier-seal-editor.png" in published_html
+    assert "/campaigns/linden-pass/assets/wiki-pages/notes/courier-seal-editor.webp" in published_html
     assert "Reviewed copy for the durable player reference." in published_html
 
     already_converted = client.get(editor_path, follow_redirects=False)

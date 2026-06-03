@@ -27,6 +27,13 @@ TEST_PNG_BYTES = (
     b"\x00\x00\x00\x0cIDAT\x08\xd7c\xf8\xff\xff?\x00\x05\xfe\x02\xfeA\xd9\x8f\x9b"
     b"\x00\x00\x00\x00IEND\xaeB`\x82"
 )
+
+
+def assert_webp_bytes(data_blob: bytes) -> None:
+    assert data_blob[:4] == b"RIFF"
+    assert data_blob[8:12] == b"WEBP"
+
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -2888,7 +2895,7 @@ def test_dm_can_convert_session_article_into_published_wiki_page(
     page_html = page_response.get_data(as_text=True)
     assert "Courier Seal" in page_html
     assert "This note should become a published wiki document." in page_html
-    assert '/campaigns/linden-pass/assets/session-articles/article-1-courier-seal.png' in page_html
+    assert '/campaigns/linden-pass/assets/session-articles/article-1-courier-seal.webp' in page_html
     assert "Shown to the party after the reveal." in page_html
 
     campaigns_dir = isolated_campaign_app.config["TEST_CAMPAIGNS_DIR"]
@@ -2897,10 +2904,10 @@ def test_dm_can_convert_session_article_into_published_wiki_page(
     assert "source_ref: session-article:linden-pass:1" in published_text
     assert "section: Notes" in published_text
     assert "type: note" in published_text
-    assert "image: session-articles/article-1-courier-seal.png" in published_text
+    assert "image: session-articles/article-1-courier-seal.webp" in published_text
 
-    published_asset = campaigns_dir / "linden-pass" / "assets" / "session-articles" / "article-1-courier-seal.png"
-    assert published_asset.read_bytes() == TEST_PNG_BYTES
+    published_asset = campaigns_dir / "linden-pass" / "assets" / "session-articles" / "article-1-courier-seal.webp"
+    assert_webp_bytes(published_asset.read_bytes())
 
     session_page = isolated_campaign_client.get("/campaigns/linden-pass/session/dm")
     session_html = session_page.get_data(as_text=True)
