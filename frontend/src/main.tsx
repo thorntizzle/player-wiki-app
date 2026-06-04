@@ -47,14 +47,18 @@ import type {
   SessionArticleCreatePayloadUpload,
   SessionArticleCreatePayloadWiki,
   SessionArticleSourceResult,
-  SessionLiveStatePayload,
   SessionLogSummary,
   SessionMessage,
   SessionPayload,
-  SessionUnchangedPayload,
   SessionWikiLookupPreviewResponse,
   SessionWikiLookupSearchResult,
 } from "./api/types";
+import {
+  coerceSessionPane,
+  isAuthRequiredFromError as isAuthError,
+  resolveSessionLivePayload,
+  type SessionRoutePane,
+} from "./sessionRouteState";
 
 interface ApiMessageEnvelope {
   status: number;
@@ -149,7 +153,7 @@ type CharacterSection =
   | "skills"
   | "personal"
   | "notes";
-type PaneName = "session" | "character" | "dm";
+type PaneName = SessionRoutePane;
 type ArticleMode = "manual" | "upload" | "wiki";
 
 interface ApiClientContextValue {
@@ -177,10 +181,6 @@ function useApiClient(): ApiClientContextValue {
     throw new Error("CampaignApiClient context is missing.");
   }
   return context;
-}
-
-function isAuthError(error: unknown): boolean {
-  return isApiError(error) && error.status === 401;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -382,10 +382,6 @@ function resolveArticleImage(slug: string, article: SessionArticle): string {
     return article.image.url;
   }
   return `/api/v1/campaigns/${encodeURIComponent(slug)}/session/articles/${article.id}/image`;
-}
-
-function isSessionUnchangedPayload(payload: SessionLiveStatePayload): payload is SessionUnchangedPayload {
-  return payload.changed === false;
 }
 
 function renderArticleBody(article: SessionArticle): JSX.Element {
@@ -4113,10 +4109,11 @@ function SessionPage() {
             }
           : undefined,
       );
-      if (isSessionUnchangedPayload(response)) {
-        return previous ?? apiClient.getSession(resolvedCampaignSlug);
+      const resolution = resolveSessionLivePayload(previous, response);
+      if (resolution.state === "needs-refresh") {
+        return apiClient.getSession(resolvedCampaignSlug);
       }
-      return response;
+      return resolution.payload;
     },
     enabled: Boolean(resolvedCampaignSlug),
     refetchInterval: (query) => {
@@ -4135,10 +4132,8 @@ function SessionPage() {
   const canManage = payload?.permissions.can_manage_session ?? false;
 
   useEffect(() => {
-    if (!canManage && activePane === "dm") {
-      setActivePane("session");
-    }
-  }, [activePane, canManage]);
+    setActivePane((previousActivePane) => coerceSessionPane(previousActivePane, canManage));
+  }, [canManage]);
 
   const paneError = getApiErrorMessage(sessionQuery.error);
 
