@@ -46,6 +46,9 @@ import type {
   CombatLiveStatePayload,
   CombatPayload,
   CombatantSummary,
+  DmContentStatblock,
+  DmContentStatblockCreatePayload,
+  DmContentStatblockUpdatePayload,
   SessionArticle,
   SessionArticleCreatePayload,
   SessionArticleCreatePayloadManual,
@@ -1572,6 +1575,20 @@ function readBinaryAsBase64(file: File, callback: (payload: EmbeddedImageInput |
   });
   reader.addEventListener("error", () => callback(null));
   reader.readAsDataURL(file);
+}
+
+function readTextFile(file: File, callback: (payload: { filename: string; text: string } | null) => void): void {
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    const data = reader.result;
+    if (typeof data !== "string") {
+      callback(null);
+      return;
+    }
+    callback({ filename: file.name, text: data });
+  });
+  reader.addEventListener("error", () => callback(null));
+  reader.readAsText(file);
 }
 
 function DmArticleCreator({
@@ -4223,6 +4240,26 @@ interface StagedArticleDraftState {
   image?: EmbeddedImageInput | null;
 }
 
+type DmContentLane = "statblocks" | "staged-articles";
+
+interface DmContentStatblockDraftState {
+  filename: string;
+  subsection: string;
+  markdown: string;
+}
+
+function buildInitialStatblockDraft(statblock: DmContentStatblock): DmContentStatblockDraftState {
+  return {
+    filename: statblock.source_filename || `${statblock.title || "statblock"}.md`,
+    subsection: statblock.subsection || "",
+    markdown: statblock.body_markdown || "",
+  };
+}
+
+function formatInitiativeBonus(value: number): string {
+  return value > 0 ? `+${value}` : String(value);
+}
+
 function DmPane({
   campaignSlug,
   payload,
@@ -4791,7 +4828,18 @@ function DmContentPage() {
   });
   const resolvedCampaignSlug = campaignSlug ?? "";
   const encodedCampaignSlug = encodeURIComponent(resolvedCampaignSlug);
+  const location = useLocation();
+  const activeLane: DmContentLane = new URLSearchParams(location.search).get("lane") === "staged-articles"
+    ? "staged-articles"
+    : "statblocks";
   const { apiClient, setAuthRequired } = useApiClient();
+  const [statblockCreateDraft, setStatblockCreateDraft] = useState<DmContentStatblockDraftState>({
+    filename: "gen2-statblock.md",
+    subsection: "",
+    markdown: "",
+  });
+  const [statblockQuery, setStatblockQuery] = useState("");
+  const [statblockDrafts, setStatblockDrafts] = useState<Record<number, DmContentStatblockDraftState>>({});
   const [mode, setMode] = useState<ArticleMode>("manual");
   const [manualDraft, setManualDraft] = useState({ title: "", body: "" });
   const [uploadDraft, setUploadDraft] = useState({
@@ -4807,6 +4855,13 @@ function DmContentPage() {
   const [uiMessage, setUiMessage] = useState<string | null>(null);
   const [paneError, setPaneError] = useState<string | null>(null);
 
+  const dmContentQuery = useQuery({
+    queryKey: ["dm-content", resolvedCampaignSlug],
+    queryFn: () => apiClient.getDmContent(resolvedCampaignSlug),
+    enabled: Boolean(resolvedCampaignSlug) && activeLane === "statblocks",
+    retry: false,
+  });
+
   const sessionQuery = useQuery({
     queryKey: ["dm-content-staged-articles", resolvedCampaignSlug],
     queryFn: async () => {
@@ -4817,18 +4872,31 @@ function DmContentPage() {
       }
       throw new Error("Unable to load staged articles.");
     },
-    enabled: Boolean(resolvedCampaignSlug),
+    enabled: Boolean(resolvedCampaignSlug) && activeLane === "staged-articles",
     retry: false,
   });
 
   useEffect(() => {
-    if (isAuthError(sessionQuery.error)) {
+    if (isAuthError(dmContentQuery.error) || isAuthError(sessionQuery.error)) {
       setAuthRequired(true);
     }
-  }, [sessionQuery.error, setAuthRequired]);
+  }, [dmContentQuery.error, sessionQuery.error, setAuthRequired]);
+
+  const statblocks: DmContentStatblock[] = dmContentQuery.data?.statblocks ?? [];
+  const canManageDmContent = dmContentQuery.data?.permissions.can_manage_dm_content ?? false;
 
   const stagedArticles: SessionArticle[] = sessionQuery.data?.staged_articles ?? [];
   const canManageSession = sessionQuery.data?.permissions.can_manage_session ?? false;
+
+  useEffect(() => {
+    setStatblockDrafts((current) => {
+      const next: Record<number, DmContentStatblockDraftState> = {};
+      for (const statblock of statblocks) {
+        next[statblock.id] = current[statblock.id] ?? buildInitialStatblockDraft(statblock);
+      }
+      return next;
+    });
+  }, [statblocks]);
 
   useEffect(() => {
     setStagedDrafts((current) => {
@@ -4846,6 +4914,86 @@ function DmContentPage() {
       return next;
     });
   }, [stagedArticles]);
+
+  const filteredStatblocks = useMemo(() => {
+    const query = statblockQuery.trim().toLowerCase();
+    if (!query) {
+      return statblocks;
+    }
+    return statblocks.filter((statblock) => (
+      statblock.title.toLowerCase().includes(query)
+      || statblock.subsection.toLowerCase().includes(query)
+      || statblock.source_filename.toLowerCase().includes(query)
+      || statblock.body_markdown.toLowerCase().includes(query)
+    ));
+  }, [statblocks, statblockQuery]);
+
+  const topLevelStatblocks = filteredStatblocks.filter((statblock) => !statblock.subsection);
+  const statblockSubsectionGroups = useMemo(() => {
+    const groups = new Map<string, DmContentStatblock[]>();
+    for (const statblock of filteredStatblocks) {
+      if (!statblock.subsection) {
+        continue;
+      }
+      const current = groups.get(statblock.subsection) ?? [];
+      current.push(statblock);
+      groups.set(statblock.subsection, current);
+    }
+    return Array.from(groups.entries()).map(([name, groupedStatblocks]) => ({
+      name,
+      statblocks: groupedStatblocks,
+    }));
+  }, [filteredStatblocks]);
+
+  const createStatblockMutation = useMutation({
+    mutationFn: (payload: DmContentStatblockCreatePayload) => apiClient.createDmContentStatblock(resolvedCampaignSlug, payload),
+    onSuccess: (response) => {
+      setUiMessage(`Statblock saved: ${response.statblock.title}. ${response.statblock.parser_feedback.summary}`);
+      setPaneError(null);
+      setStatblockCreateDraft({ filename: "gen2-statblock.md", subsection: "", markdown: "" });
+      void dmContentQuery.refetch();
+    },
+    onError: (error) => {
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+      setPaneError(apiErrorMessage(error));
+      setUiMessage(null);
+    },
+  });
+
+  const updateStatblockMutation = useMutation({
+    mutationFn: (args: { id: number; payload: DmContentStatblockUpdatePayload }) =>
+      apiClient.updateDmContentStatblock(resolvedCampaignSlug, args.id, args.payload),
+    onSuccess: (response) => {
+      setUiMessage(`Statblock updated: ${response.statblock.title}. ${response.statblock.parser_feedback.summary}`);
+      setPaneError(null);
+      void dmContentQuery.refetch();
+    },
+    onError: (error) => {
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+      setPaneError(apiErrorMessage(error));
+      setUiMessage(null);
+    },
+  });
+
+  const deleteStatblockMutation = useMutation({
+    mutationFn: (statblockId: number) => apiClient.deleteDmContentStatblock(resolvedCampaignSlug, statblockId),
+    onSuccess: (response) => {
+      setUiMessage(`Statblock deleted: ${response.statblock.title}.`);
+      setPaneError(null);
+      void dmContentQuery.refetch();
+    },
+    onError: (error) => {
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+      setPaneError(apiErrorMessage(error));
+      setUiMessage(null);
+    },
+  });
 
   const createArticleMutation = useMutation({
     mutationFn: (payload: SessionArticleCreatePayload) => apiClient.createSessionArticle(resolvedCampaignSlug, payload),
@@ -4953,7 +5101,106 @@ function DmContentPage() {
     setPaneError(null);
     setUiMessage(null);
   };
-  const pageError = getApiErrorMessage(sessionQuery.error);
+  const pageError = activeLane === "statblocks"
+    ? getApiErrorMessage(dmContentQuery.error)
+    : getApiErrorMessage(sessionQuery.error);
+
+  const renderStatblockCard = (statblock: DmContentStatblock) => {
+    const draft = statblockDrafts[statblock.id] ?? buildInitialStatblockDraft(statblock);
+    return (
+      <details className="article-card dm-statblock-card" key={statblock.id}>
+        <summary className="dm-statblock-summary">
+          <strong>{statblock.title}</strong>
+          <span className="article-kind">{statblock.subsection || "top level"}</span>
+        </summary>
+        <div className="badge-list dm-statblock-badges">
+          {statblock.armor_class !== null ? <span className="meta-badge">AC {statblock.armor_class}</span> : null}
+          <span className="meta-badge">HP {statblock.max_hp}</span>
+          <span className="meta-badge">Speed {statblock.speed_text}</span>
+          <span className="meta-badge">Init {formatInitiativeBonus(statblock.initiative_bonus)}</span>
+          <span className="meta-badge">Move {statblock.movement_total} ft.</span>
+        </div>
+        <p className="status status-neutral">{statblock.parser_feedback.summary}</p>
+        <p className="meta">
+          Source file: {statblock.source_filename}. Combat seed source: dm_statblock:{statblock.id}.
+        </p>
+        <details className="feature-detail">
+          <summary>View source markdown</summary>
+          <pre className="dm-content-preview">{statblock.body_markdown}</pre>
+        </details>
+        {canManageDmContent ? (
+          <form
+            className="session-form"
+            onSubmit={(event: FormEvent<HTMLFormElement>) => {
+              event.preventDefault();
+              const formData = new FormData(event.currentTarget);
+              updateStatblockMutation.mutate({
+                id: statblock.id,
+                payload: {
+                  subsection: String(formData.get("subsection") || ""),
+                  markdown_text: String(formData.get("markdown_text") || ""),
+                },
+              });
+            }}
+          >
+            <label htmlFor={`dm-statblock-subsection-${statblock.id}`} className="chat-label">
+              Subsection
+            </label>
+            <input
+              id={`dm-statblock-subsection-${statblock.id}`}
+              name="subsection"
+              value={draft.subsection}
+              disabled={!canManageDmContent}
+              maxLength={80}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                const subsection = event.currentTarget.value;
+                setStatblockDrafts((current) => ({
+                  ...current,
+                  [statblock.id]: {
+                    ...(current[statblock.id] ?? draft),
+                    subsection,
+                  },
+                }));
+              }}
+            />
+            <label htmlFor={`dm-statblock-markdown-${statblock.id}`} className="chat-label">
+              Source markdown body
+            </label>
+            <textarea
+              id={`dm-statblock-markdown-${statblock.id}`}
+              name="markdown_text"
+              rows={12}
+              value={draft.markdown}
+              disabled={!canManageDmContent}
+              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+                const markdown = event.currentTarget.value;
+                setStatblockDrafts((current) => ({
+                  ...current,
+                  [statblock.id]: {
+                    ...(current[statblock.id] ?? draft),
+                    markdown,
+                  },
+                }));
+              }}
+            />
+            <div className="article-actions">
+              <button type="submit" disabled={!canManageDmContent || updateStatblockMutation.isPending}>
+                {updateStatblockMutation.isPending ? "Saving..." : "Save statblock"}
+              </button>
+              <button
+                type="button"
+                className="button-danger"
+                disabled={!canManageDmContent || deleteStatblockMutation.isPending}
+                onClick={() => deleteStatblockMutation.mutate(statblock.id)}
+              >
+                {deleteStatblockMutation.isPending ? "Deleting..." : "Delete statblock"}
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </details>
+    );
+  };
 
   return (
     <section className="panel dm-content-gen2-page">
@@ -4961,18 +5208,30 @@ function DmContentPage() {
         <Link to="/" className="button button-secondary">
           Back to list
         </Link>
-        <h2>DM Content: Staged Articles</h2>
-        {canManageSession ? <span className="pill">DM+</span> : null}
+        <h2>{activeLane === "statblocks" ? "DM Content: Statblocks" : "DM Content: Staged Articles"}</h2>
+        {activeLane === "statblocks" && canManageDmContent ? <span className="pill">DM+</span> : null}
+        {activeLane === "staged-articles" && canManageSession ? <span className="pill">DM+</span> : null}
       </div>
 
       <ApiErrorNotice
-        isLoading={sessionQuery.isLoading}
+        isLoading={activeLane === "statblocks" ? dmContentQuery.isLoading : sessionQuery.isLoading}
         message={pageError}
         onAuth={() => setAuthRequired(true)}
       />
 
       <div className="dm-content-gen2-links">
-        <a href={`/campaigns/${encodedCampaignSlug}/dm-content`}>Statblocks</a>
+        <a
+          className={activeLane === "statblocks" ? "is-active" : ""}
+          href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content`}
+        >
+          Statblocks
+        </a>
+        <a
+          className={activeLane === "staged-articles" ? "is-active" : ""}
+          href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=staged-articles`}
+        >
+          Staged Articles
+        </a>
         <a href={`/campaigns/${encodedCampaignSlug}/dm-content/conditions`}>Conditions</a>
         <a href={`/campaigns/${encodedCampaignSlug}/dm-content/player-wiki`}>Player Wiki</a>
         <a href={`/campaigns/${encodedCampaignSlug}/dm-content/systems`}>Systems</a>
@@ -4981,10 +5240,165 @@ function DmContentPage() {
 
       {paneError ? <p className="status status-error">{paneError}</p> : null}
       {uiMessage ? <p className="status status-neutral">{uiMessage}</p> : null}
-      {!canManageSession && !sessionQuery.isLoading ? (
+      {activeLane === "statblocks" && !canManageDmContent && !dmContentQuery.isLoading ? (
+        <p className="status status-error">You do not have permission to manage DM Content statblocks.</p>
+      ) : null}
+      {activeLane === "staged-articles" && !canManageSession && !sessionQuery.isLoading ? (
         <p className="status status-error">You do not have permission to manage staged articles.</p>
       ) : null}
 
+      {activeLane === "statblocks" ? (
+        <div className="split-grid dm-content-staged-grid">
+          <section className="panel panel-nested dm-statblock-create">
+            <div className="panel-header">
+              <h3>Create statblock</h3>
+              <span className="pill">Markdown</span>
+            </div>
+            <form
+              className="session-form"
+              onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                event.preventDefault();
+                const formData = new FormData(event.currentTarget);
+                createStatblockMutation.mutate({
+                  filename: String(formData.get("filename") || "gen2-statblock.md").trim() || "gen2-statblock.md",
+                  subsection: String(formData.get("subsection") || ""),
+                  markdown_text: String(formData.get("markdown_text") || ""),
+                });
+              }}
+            >
+              <label htmlFor="dm-statblock-create-file-import" className="chat-label">
+                Import markdown file
+              </label>
+              <input
+                id="dm-statblock-create-file-import"
+                type="file"
+                accept=".md,.markdown,text/markdown,text/plain"
+                disabled={!canManageDmContent}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const file = event.currentTarget.files?.item(0);
+                  if (!file) {
+                    return;
+                  }
+                  readTextFile(file, (payload) => {
+                    if (!payload) {
+                      setPaneError("Unable to read that markdown file.");
+                      setUiMessage(null);
+                      return;
+                    }
+                    setPaneError(null);
+                    setUiMessage(null);
+                    setStatblockCreateDraft((current) => ({
+                      ...current,
+                      filename: payload.filename,
+                      markdown: payload.text,
+                    }));
+                  });
+                }}
+              />
+              <label htmlFor="dm-statblock-create-filename" className="chat-label">
+                Source filename
+              </label>
+              <input
+                id="dm-statblock-create-filename"
+                name="filename"
+                value={statblockCreateDraft.filename}
+                disabled={!canManageDmContent}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const filename = event.currentTarget.value;
+                  setStatblockCreateDraft((current) => ({
+                    ...current,
+                    filename,
+                  }));
+                }}
+              />
+              <label htmlFor="dm-statblock-create-subsection" className="chat-label">
+                Subsection
+              </label>
+              <input
+                id="dm-statblock-create-subsection"
+                name="subsection"
+                maxLength={80}
+                value={statblockCreateDraft.subsection}
+                disabled={!canManageDmContent}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const subsection = event.currentTarget.value;
+                  setStatblockCreateDraft((current) => ({
+                    ...current,
+                    subsection,
+                  }));
+                }}
+              />
+              <label htmlFor="dm-statblock-create-markdown" className="chat-label">
+                Source markdown body
+              </label>
+              <textarea
+                id="dm-statblock-create-markdown"
+                name="markdown_text"
+                rows={16}
+                value={statblockCreateDraft.markdown}
+                disabled={!canManageDmContent}
+                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+                  const markdown = event.currentTarget.value;
+                  setStatblockCreateDraft((current) => ({
+                    ...current,
+                    markdown,
+                  }));
+                }}
+              />
+              <button type="submit" disabled={!canManageDmContent || createStatblockMutation.isPending}>
+                {createStatblockMutation.isPending ? "Saving..." : "Save statblock"}
+              </button>
+            </form>
+          </section>
+
+          <section className="panel panel-nested dm-statblock-library">
+            <div className="panel-header">
+              <h3>Statblock library</h3>
+              <span className="pill">{statblocks.length}</span>
+            </div>
+            <form
+              className="search-form dm-statblock-search"
+              onSubmit={(event: FormEvent<HTMLFormElement>) => event.preventDefault()}
+            >
+              <label htmlFor="dm-statblock-search">Search statblocks</label>
+              <input
+                id="dm-statblock-search"
+                type="search"
+                value={statblockQuery}
+                placeholder="Title, subsection, source, text"
+                onChange={(event: ChangeEvent<HTMLInputElement>) => setStatblockQuery(event.currentTarget.value)}
+              />
+            </form>
+            {dmContentQuery.isLoading ? <p className="status status-neutral">Loading statblocks ...</p> : null}
+            {!dmContentQuery.isLoading && filteredStatblocks.length ? (
+              <div className="article-stack dm-statblock-groups">
+                {topLevelStatblocks.map(renderStatblockCard)}
+                {statblockSubsectionGroups.map((group) => (
+                  <details className="section-block section-block--collapsible" key={group.name} open>
+                    <summary className="section-toggle-summary">
+                      <span className="section-toggle-summary__content">
+                        <span className="section-title">{group.name}</span>
+                        <span className="meta">{group.statblocks.length} statblock{group.statblocks.length === 1 ? "" : "s"}</span>
+                      </span>
+                      <span className="section-toggle-chevron" aria-hidden="true" />
+                    </summary>
+                    <div className="section-block__body">
+                      <div className="article-stack">
+                        {group.statblocks.map(renderStatblockCard)}
+                      </div>
+                    </div>
+                  </details>
+                ))}
+              </div>
+            ) : null}
+            {!dmContentQuery.isLoading && !filteredStatblocks.length ? (
+              <p className="status status-neutral">
+                {statblockQuery ? "No statblocks matched that search." : "No DM statblocks have been uploaded yet."}
+              </p>
+            ) : null}
+          </section>
+        </div>
+      ) : (
       <div className="split-grid dm-content-staged-grid">
         <DmArticleCreator
           mode={mode}
@@ -5206,6 +5620,7 @@ function DmContentPage() {
           )}
         </section>
       </div>
+      )}
     </section>
   );
 }

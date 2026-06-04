@@ -450,6 +450,108 @@ def test_gen2_session_preserves_local_state_across_live_polling(
             browser.close()
 
 
+def test_gen2_dm_content_browser_statblock_workflow(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+    statblock_title = "Gen2 Harbor Guard"
+    statblock_updated_title = "Gen2 Harbor Sergeant"
+    statblock_markdown = (
+        f"# {statblock_title}\n\n"
+        "Armor Class 14\n"
+        "Hit Points 28\n"
+        "Speed 30 ft.\n\n"
+        "DEX 14 (+2)\n\n"
+        "### Actions\n"
+        "Harbor Hook. Melee Weapon Attack."
+    )
+    statblock_updated_markdown = (
+        f"# {statblock_updated_title}\n\n"
+        "Armor Class 16\n"
+        "Hit Points 44\n"
+        "Speed 35 ft.\n\n"
+        "DEX 16 (+3)\n\n"
+        "### Actions\n"
+        "Commanding Hook. Melee Weapon Attack."
+    )
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/dm-content")
+            expect(page.get_by_role("heading", name="DM Content: Statblocks")).to_be_visible(timeout=10000)
+            fallback_links = page.locator(".dm-content-gen2-links")
+            expect(fallback_links.get_by_role("link", name="Statblocks")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Staged Articles")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Conditions")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Player Wiki", exact=True)).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Systems")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Session DM")).to_be_visible()
+
+            create_panel = page.locator("section.dm-statblock-create")
+            expect(create_panel.get_by_role("heading", name="Create statblock")).to_be_visible()
+            page.locator("#dm-statblock-create-filename").fill("gen2-harbor-guard.md")
+            page.locator("#dm-statblock-create-subsection").fill("Gen2 Harbor Crew")
+            page.locator("#dm-statblock-create-markdown").fill(statblock_markdown)
+            create_panel.get_by_role("button", name="Save statblock").click()
+            expect(page.get_by_text("Statblock saved: Gen2 Harbor Guard.")).to_be_visible(timeout=10000)
+
+            library = page.locator("section.dm-statblock-library")
+            group = library.locator("details.section-block", has_text="Gen2 Harbor Crew")
+            expect(group).to_be_visible(timeout=10000)
+            statblock_card = library.locator("details.dm-statblock-card", has_text=statblock_title)
+            expect(statblock_card).to_be_visible(timeout=10000)
+            statblock_card.locator("summary.dm-statblock-summary").click()
+            expect(statblock_card.locator(".meta-badge", has_text="AC 14")).to_be_visible()
+            expect(statblock_card.locator(".meta-badge", has_text="HP 28")).to_be_visible()
+            expect(statblock_card.locator(".meta-badge", has_text="Init +2")).to_be_visible()
+            expect(statblock_card.get_by_text(re.compile(r"Combat seed source: dm_statblock:\d+"))).to_be_visible()
+            expect(statblock_card.get_by_text("Parsed combat fields: AC 14")).to_be_visible()
+
+            library.get_by_label("Search statblocks").fill("not-here")
+            expect(library.get_by_text("No statblocks matched that search.")).to_be_visible()
+            library.get_by_label("Search statblocks").fill("")
+            expect(statblock_card).to_be_visible()
+            if not statblock_card.evaluate("element => element.open"):
+                statblock_card.locator("summary.dm-statblock-summary").click()
+
+            statblock_card.locator("input[name='subsection']").fill("Gen2 Officers")
+            statblock_card.locator("textarea[name='markdown_text']").fill(statblock_updated_markdown)
+            statblock_card.get_by_role("button", name="Save statblock").click()
+            expect(page.get_by_text("Statblock updated: Gen2 Harbor Sergeant.")).to_be_visible(timeout=10000)
+
+            updated_group = library.locator("details.section-block", has_text="Gen2 Officers")
+            expect(updated_group).to_be_visible(timeout=10000)
+            updated_card = library.locator("details.dm-statblock-card", has_text=statblock_updated_title)
+            expect(updated_card).to_be_visible(timeout=10000)
+            if not updated_card.evaluate("element => element.open"):
+                updated_card.locator("summary.dm-statblock-summary").click()
+            expect(updated_card.locator(".meta-badge", has_text="HP 44")).to_be_visible()
+            expect(updated_card.locator(".meta-badge", has_text="Init +3")).to_be_visible()
+
+            library.get_by_label("Search statblocks").fill("Gen2 Officers")
+            expect(updated_card).to_be_visible()
+            updated_card.get_by_role("button", name="Delete statblock").click()
+            expect(page.get_by_text("Statblock deleted: Gen2 Harbor Sergeant.")).to_be_visible(timeout=10000)
+            expect(library.locator("details.dm-statblock-card", has_text=statblock_updated_title)).to_have_count(0, timeout=10000)
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_gen2_dm_content_browser_staged_article_workflow(
     frontend_gen2_session_live_server,
     users,
@@ -474,10 +576,11 @@ def test_gen2_dm_content_browser_staged_article_workflow(
         try:
             _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
 
-            page.goto(f"{base_url}/app-next/campaigns/linden-pass/dm-content")
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/dm-content?lane=staged-articles")
             expect(page.get_by_role("heading", name="DM Content: Staged Articles")).to_be_visible(timeout=10000)
             fallback_links = page.locator(".dm-content-gen2-links")
             expect(fallback_links.get_by_role("link", name="Statblocks")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Staged Articles")).to_be_visible()
             expect(fallback_links.get_by_role("link", name="Conditions")).to_be_visible()
             expect(fallback_links.get_by_role("link", name="Player Wiki", exact=True)).to_be_visible()
             expect(fallback_links.get_by_role("link", name="Systems")).to_be_visible()

@@ -28,6 +28,10 @@ import type {
   CharacterXianxiaInventoryUpdatePayload,
   CombatLiveStatePayload,
   CombatPayload,
+  DmContentResponse,
+  DmContentStatblockCreatePayload,
+  DmContentStatblockResponse,
+  DmContentStatblockUpdatePayload,
   MessagePostResponse,
   SessionArticleCreatePayload,
   SessionArticleCreateResponse,
@@ -251,6 +255,46 @@ export class CampaignApiClient {
     return this.requestJson<CombatLiveStatePayload>(
       `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/live-state${suffix}`,
       { headers },
+    );
+  }
+
+  async getDmContent(slug: string): Promise<DmContentResponse> {
+    return this.requestJson<DmContentResponse>(`/api/v1/campaigns/${encodeURIComponent(slug)}/dm-content`);
+  }
+
+  async createDmContentStatblock(
+    slug: string,
+    payload: DmContentStatblockCreatePayload,
+  ): Promise<DmContentStatblockResponse> {
+    return this.requestJson<DmContentStatblockResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/dm-content/statblocks`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async updateDmContentStatblock(
+    slug: string,
+    statblockId: number,
+    payload: DmContentStatblockUpdatePayload,
+  ): Promise<DmContentStatblockResponse> {
+    return this.requestJson<DmContentStatblockResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/dm-content/statblocks/${statblockId}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async deleteDmContentStatblock(slug: string, statblockId: number): Promise<DmContentStatblockResponse> {
+    return this.requestJson<DmContentStatblockResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/dm-content/statblocks/${statblockId}`,
+      {
+        method: "DELETE",
+      },
     );
   }
 

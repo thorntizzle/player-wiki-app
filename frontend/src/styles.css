@@ -125,6 +125,12 @@ body {
   background: #edf4ff;
 }
 
+.dm-content-gen2-links a.is-active {
+  background: #1f4f63;
+  border-color: #1f4f63;
+  color: #ffffff;
+}
+
 .campaign-search-form {
   display: flex;
   align-items: end;
@@ -556,6 +562,33 @@ body {
 
 .dm-content-staged-grid {
   align-items: start;
+}
+
+.dm-statblock-create textarea,
+.dm-statblock-card textarea {
+  font-family: "Consolas", "Liberation Mono", monospace;
+}
+
+.dm-statblock-library {
+  min-width: 0;
+}
+
+.dm-statblock-search {
+  align-items: end;
+  margin-bottom: 0.75rem;
+}
+
+.dm-statblock-summary {
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dm-statblock-badges {
+  margin: 0.75rem 0;
+}
+
+.dm-statblock-groups .section-block {
+  background: #f8fbff;
 }
 
 .dm-content-image-edit-row {

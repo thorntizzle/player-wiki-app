@@ -449,6 +449,68 @@ export interface SessionClearRevealedResponse extends ApiResponseBase {
   deleted_articles: SessionArticle[];
 }
 
+export interface DmContentParserFeedback {
+  armor_class: number | null;
+  max_hp: number;
+  speed_text: string;
+  movement_total: number;
+  initiative_bonus: number;
+  summary: string;
+}
+
+export interface DmContentStatblock {
+  id: number;
+  campaign_slug: string;
+  title: string;
+  body_markdown: string;
+  source_filename: string;
+  subsection: string;
+  armor_class: number | null;
+  max_hp: number;
+  speed_text: string;
+  movement_total: number;
+  initiative_bonus: number;
+  parser_feedback: DmContentParserFeedback;
+  created_at: string;
+  updated_at: string;
+  created_by_user_id: number | null;
+  updated_by_user_id: number | null;
+}
+
+export interface DmContentConditionDefinition {
+  id: number;
+  campaign_slug: string;
+  name: string;
+  description_markdown: string;
+  created_at: string;
+  updated_at: string;
+  created_by_user_id: number | null;
+  updated_by_user_id: number | null;
+}
+
+export interface DmContentResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  permissions: CampaignPermissions;
+  statblocks: DmContentStatblock[];
+  conditions: DmContentConditionDefinition[];
+}
+
+export interface DmContentStatblockCreatePayload {
+  filename: string;
+  subsection?: string;
+  markdown_text: string;
+}
+
+export interface DmContentStatblockUpdatePayload {
+  subsection?: string;
+  markdown_text?: string;
+  body_markdown?: string;
+}
+
+export interface DmContentStatblockResponse extends ApiResponseBase {
+  statblock: DmContentStatblock;
+}
+
 export interface SessionWikiLookupSearchResult {
   page_ref: string;
   source_ref?: string;
