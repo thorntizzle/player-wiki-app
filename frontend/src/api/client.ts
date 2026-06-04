@@ -47,6 +47,7 @@ import type {
   DmContentConditionCreatePayload,
   DmContentConditionResponse,
   DmContentConditionUpdatePayload,
+  DmContentSystemsResponse,
   DmContentStatblockCreatePayload,
   DmContentStatblockResponse,
   DmContentStatblockUpdatePayload,
@@ -65,6 +66,12 @@ import type {
   SessionStartCloseResponse,
   SessionWikiLookupPreviewResponse,
   SessionWikiLookupSearchResponse,
+  CustomSystemsEntryPayload,
+  CustomSystemsEntryResponse,
+  SystemsEntryOverridePayload,
+  SystemsEntryOverrideResponse,
+  SystemsSourceUpdatePayload,
+  SystemsSourceUpdateResponse,
   WikiHomeResponse,
   WikiPageResponse,
   WikiSectionResponse,
@@ -446,6 +453,84 @@ export class CampaignApiClient {
 
   async getDmContent(slug: string): Promise<DmContentResponse> {
     return this.requestJson<DmContentResponse>(`/api/v1/campaigns/${encodeURIComponent(slug)}/dm-content`);
+  }
+
+  async getDmContentSystems(slug: string): Promise<DmContentSystemsResponse> {
+    return this.requestJson<DmContentSystemsResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/dm-content/systems`,
+    );
+  }
+
+  async updateSystemsSources(
+    slug: string,
+    payload: SystemsSourceUpdatePayload,
+  ): Promise<SystemsSourceUpdateResponse> {
+    return this.requestJson<SystemsSourceUpdateResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/systems/sources`,
+      {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async updateSystemsEntryOverride(
+    slug: string,
+    entryKey: string,
+    payload: SystemsEntryOverridePayload,
+  ): Promise<SystemsEntryOverrideResponse> {
+    return this.requestJson<SystemsEntryOverrideResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/systems/overrides/${encodePathSegments(entryKey)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async createSystemsCustomEntry(
+    slug: string,
+    payload: CustomSystemsEntryPayload,
+  ): Promise<CustomSystemsEntryResponse> {
+    return this.requestJson<CustomSystemsEntryResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/systems/custom-entries`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async updateSystemsCustomEntry(
+    slug: string,
+    entrySlug: string,
+    payload: CustomSystemsEntryPayload,
+  ): Promise<CustomSystemsEntryResponse> {
+    return this.requestJson<CustomSystemsEntryResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/systems/custom-entries/${encodeURIComponent(entrySlug)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async archiveSystemsCustomEntry(slug: string, entrySlug: string): Promise<CustomSystemsEntryResponse> {
+    return this.requestJson<CustomSystemsEntryResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/systems/custom-entries/${encodeURIComponent(entrySlug)}/archive`,
+      {
+        method: "POST",
+      },
+    );
+  }
+
+  async restoreSystemsCustomEntry(slug: string, entrySlug: string): Promise<CustomSystemsEntryResponse> {
+    return this.requestJson<CustomSystemsEntryResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/systems/custom-entries/${encodeURIComponent(entrySlug)}/restore`,
+      {
+        method: "POST",
+      },
+    );
   }
 
   async createDmContentStatblock(

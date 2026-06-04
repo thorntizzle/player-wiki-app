@@ -787,6 +787,98 @@ def test_gen2_dm_content_browser_player_wiki_workflow(
             browser.close()
 
 
+def test_gen2_dm_content_browser_systems_custom_entry_workflow(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+    entry_title = "Gen2 Focus Rule"
+    updated_entry_title = "Gen2 Focus Rule Revised"
+    entry_body = "A custom Systems rule authored through the Gen2 management lane."
+    updated_entry_body = "The Gen2 Systems lane can edit and restore custom campaign rules."
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/dm-content?lane=systems")
+            expect(page.get_by_role("heading", name="DM Content: Systems")).to_be_visible(timeout=10000)
+            fallback_links = page.locator(".dm-content-gen2-links")
+            expect(fallback_links.get_by_role("link", name="Statblocks")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Staged Articles")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Conditions")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Player Wiki", exact=True)).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Systems")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Systems")).to_have_attribute(
+                "href",
+                "/app-next/campaigns/linden-pass/dm-content?lane=systems",
+            )
+            expect(fallback_links.get_by_role("link", name="Session DM")).to_be_visible()
+
+            expect(page.get_by_role("heading", name="Source Enablement")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("heading", name="Entry Overrides")).to_be_visible()
+            expect(page.get_by_role("heading", name="Custom Entries")).to_be_visible()
+            expect(page.get_by_role("heading", name="Shared Source Imports")).to_be_visible()
+            expect(page.get_by_role("heading", name="Import-Run History")).to_be_visible()
+
+            custom_panel = page.locator("#systems-custom-entries")
+            custom_panel.locator("#systems-custom-create-title").fill(entry_title)
+            custom_panel.locator("#systems-custom-create-slug").fill("gen2-focus-rule")
+            custom_panel.locator("#systems-custom-create-type").select_option("rule")
+            custom_panel.locator("#systems-custom-create-provenance").fill("Gen2 browser test")
+            custom_panel.locator("#systems-custom-create-search").fill("focus, gen2, systems")
+            custom_panel.locator("#systems-custom-create-body").fill(entry_body)
+            custom_panel.get_by_role("button", name="Create custom entry").click()
+            expect(page.get_by_text(f"Custom Systems entry created: {entry_title}.")).to_be_visible(timeout=10000)
+
+            custom_panel.get_by_label("Search custom entries").fill("Gen2 Focus")
+            entry_card = custom_panel.locator("details.article-card", has_text=entry_title)
+            expect(entry_card).to_be_visible(timeout=10000)
+            entry_card.locator("summary").click()
+            expect(entry_card.locator("pre.dm-content-preview", has_text=entry_body)).to_be_visible()
+
+            entry_card.get_by_label("Title").fill(updated_entry_title)
+            entry_card.get_by_label("Rendered body markdown").fill(updated_entry_body)
+            entry_card.get_by_role("button", name="Update custom entry").click()
+            expect(page.get_by_text(f"Custom Systems entry updated: {updated_entry_title}.")).to_be_visible(timeout=10000)
+
+            updated_card = custom_panel.locator("details.article-card", has_text=updated_entry_title)
+            expect(updated_card).to_be_visible(timeout=10000)
+            if not updated_card.evaluate("element => element.open"):
+                updated_card.locator("summary").click()
+            expect(updated_card.locator("pre.dm-content-preview", has_text=updated_entry_body)).to_be_visible()
+
+            updated_card.get_by_role("button", name="Archive").click()
+            expect(page.get_by_text(f"Custom Systems entry archived: {updated_entry_title}.")).to_be_visible(timeout=10000)
+            archived_card = custom_panel.locator("details.article-card", has_text=updated_entry_title)
+            expect(archived_card).to_be_visible(timeout=10000)
+            if not archived_card.evaluate("element => element.open"):
+                archived_card.locator("summary").click()
+            expect(archived_card.get_by_text("Archived")).to_be_visible()
+
+            archived_card.get_by_role("button", name="Restore").click()
+            expect(page.get_by_text(f"Custom Systems entry restored: {updated_entry_title}.")).to_be_visible(timeout=10000)
+            restored_card = custom_panel.locator("details.article-card", has_text=updated_entry_title)
+            expect(restored_card).to_be_visible(timeout=10000)
+            if not restored_card.evaluate("element => element.open"):
+                restored_card.locator("summary").click()
+            expect(restored_card.get_by_text("Active")).to_be_visible()
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_gen2_dm_content_browser_staged_article_workflow(
     frontend_gen2_session_live_server,
     users,

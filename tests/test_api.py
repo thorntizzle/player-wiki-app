@@ -2749,6 +2749,160 @@ def test_api_systems_endpoints_follow_source_visibility_and_allow_dm_policy_upda
         assert any(event.metadata.get("source_id") == "XGE" for event in events)
 
 
+def test_api_dm_content_systems_endpoint_returns_management_payload_and_denies_unauthorized_users(
+    client,
+    app,
+    users,
+    tmp_path,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-systems-content-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="player-systems-content-api")
+    admin_token = issue_api_token(app, users["admin"]["email"], label="admin-systems-content-api")
+
+    # Seed one import run so import history appears in the management payload.
+    archive_bytes = _build_systems_import_archive(tmp_path)
+    import_response = client.post(
+        "/api/v1/systems/imports/dnd5e",
+        headers=api_headers(admin_token),
+        json={
+            "source_ids": ["MM"],
+            "entry_types": ["monster"],
+            "archive": {
+                "filename": "mm-import.zip",
+                "data_base64": base64.b64encode(archive_bytes).decode("ascii"),
+            },
+        },
+    )
+    assert import_response.status_code == 200
+    import_payload = import_response.get_json()
+    assert import_payload["ok"] is True
+    import_run_ids = [entry["id"] for entry in import_payload["import_runs"]]
+
+    systems_response = client.get(
+        "/api/v1/campaigns/linden-pass/dm-content/systems",
+        headers=api_headers(dm_token),
+    )
+    assert systems_response.status_code == 200
+    systems_payload = systems_response.get_json()
+
+    assert isinstance(systems_payload["source_rows"], list)
+    assert systems_payload["source_rows"]
+    assert any(row["source_id"] == "MM" for row in systems_payload["source_rows"])
+    assert systems_payload["custom_entry_type_choices"]
+    assert len(systems_payload["custom_entry_visibility_choices"]) == 3
+    visibility_values = {item["value"] for item in systems_payload["custom_entry_visibility_choices"]}
+    assert {"public", "players", "dm"} <= visibility_values
+    assert systems_payload["links"]["flask_systems_lane_url"]
+    assert systems_payload["links"]["flask_systems_control_url"]
+
+    import_rows = systems_payload["import_run_rows"]
+    assert import_rows
+    assert set(import_run_ids).issubset({run["id"] for run in import_rows})
+    assert all("source_path" not in run for run in import_rows)
+    assert any(item["value"] == "spell" for item in systems_payload["custom_entry_type_choices"])
+
+    blocked_response = client.get(
+        "/api/v1/campaigns/linden-pass/dm-content/systems",
+        headers=api_headers(player_token),
+    )
+    assert blocked_response.status_code == 403
+    assert blocked_response.get_json()["error"]["code"] == "forbidden"
+
+
+def test_api_dm_content_systems_custom_entry_lifecycle_returns_refreshed_system_payload(
+    client,
+    app,
+    users,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-systems-custom-entries-api")
+
+    create_response = client.post(
+        "/api/v1/campaigns/linden-pass/systems/custom-entries",
+        headers=api_headers(dm_token),
+        json={
+            "title": "API Spark",
+            "entry_type": "spell",
+            "slug_leaf": "api-systems-spark",
+            "provenance": "API test",
+            "visibility": "players",
+            "search_metadata": "api systems spark",
+            "body_markdown": "## Effect\nA small burst of controlled lightning.",
+        },
+    )
+    assert create_response.status_code == 200
+    create_payload = create_response.get_json()
+    created_entry = create_payload["entry"]
+    assert created_entry["title"] == "API Spark"
+    assert created_entry["entry_type"] == "spell"
+    assert not created_entry["is_archived"]
+    assert "systems" in create_payload
+    create_systems_payload = create_payload["systems"]
+    create_rows = create_systems_payload["custom_entry_source_rows"]
+    assert create_rows
+    create_source_row = next(
+        row for row in create_rows if row["source_id"] == created_entry["source_id"]
+    )
+    assert any(entry["slug"] == created_entry["slug"] for entry in create_source_row["entries"])
+
+    update_payload = {
+        "title": "API Spark Revised",
+        "entry_type": "feat",
+        "provenance": "API test revised",
+        "visibility": "dm",
+        "search_metadata": "api systems spark revised",
+        "body_markdown": "## Effect\nA revised burst of controlled lightning.",
+    }
+    update_response = client.put(
+        f"/api/v1/campaigns/linden-pass/systems/custom-entries/{created_entry['slug']}",
+        headers=api_headers(dm_token),
+        json=update_payload,
+    )
+    assert update_response.status_code == 200
+    updated_entry = update_response.get_json()["entry"]
+    assert updated_entry["title"] == update_payload["title"]
+    assert updated_entry["entry_type"] == update_payload["entry_type"]
+    assert "systems" in update_response.get_json()
+    updated_systems_payload = update_response.get_json()["systems"]
+    updated_source_row = next(
+        row for row in updated_systems_payload["custom_entry_source_rows"] if row["source_id"] == created_entry["source_id"]
+    )
+    assert any(entry["slug"] == created_entry["slug"] for entry in updated_source_row["entries"])
+
+    archive_response = client.post(
+        f"/api/v1/campaigns/linden-pass/systems/custom-entries/{created_entry['slug']}/archive",
+        headers=api_headers(dm_token),
+    )
+    assert archive_response.status_code == 200
+    archived_entry = archive_response.get_json()["entry"]
+    assert archived_entry["is_archived"] is True
+    assert "systems" in archive_response.get_json()
+    archived_systems_payload = archive_response.get_json()["systems"]
+    archived_source_row = next(
+        row for row in archived_systems_payload["custom_entry_source_rows"] if row["source_id"] == created_entry["source_id"]
+    )
+    archived_row_entry = next(
+        entry for entry in archived_source_row["entries"] if entry["slug"] == created_entry["slug"]
+    )
+    assert archived_row_entry["is_archived"] is True
+
+    restore_response = client.post(
+        f"/api/v1/campaigns/linden-pass/systems/custom-entries/{created_entry['slug']}/restore",
+        headers=api_headers(dm_token),
+    )
+    assert restore_response.status_code == 200
+    restored_entry = restore_response.get_json()["entry"]
+    assert restored_entry["is_archived"] is False
+    assert "systems" in restore_response.get_json()
+    restored_systems_payload = restore_response.get_json()["systems"]
+    restored_source_row = next(
+        row for row in restored_systems_payload["custom_entry_source_rows"] if row["source_id"] == created_entry["source_id"]
+    )
+    restored_row_entry = next(
+        entry for entry in restored_source_row["entries"] if entry["slug"] == created_entry["slug"]
+    )
+    assert restored_row_entry["is_archived"] is False
+
+
 def test_api_systems_import_endpoints_require_admin_and_record_runs(client, app, users, tmp_path):
     admin_token = issue_api_token(app, users["admin"]["email"], label="admin-systems-import-api")
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-systems-import-api")

@@ -688,6 +688,205 @@ export interface DmContentResponse extends ApiResponseBase {
   conditions: DmContentConditionDefinition[];
 }
 
+export interface SystemsLibraryRecord {
+  library_slug: string;
+  title: string;
+  system_code: string;
+  status: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface SystemsVisibilityChoice {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}
+
+export interface SystemsSourceRow {
+  source_id: string;
+  title: string;
+  library_slug: string;
+  license_class: string;
+  license_class_label: string;
+  public_visibility_allowed: boolean;
+  requires_unofficial_notice: boolean;
+  status: string;
+  is_enabled: boolean;
+  default_visibility: string;
+  selected_visibility?: string;
+  is_configured: boolean;
+  entry_count: number;
+  choices?: SystemsVisibilityChoice[];
+  permissions: {
+    can_access: boolean;
+    can_manage: boolean;
+  };
+}
+
+export interface SystemsEntryOverride {
+  entry_key: string;
+  visibility_override: string | null;
+  is_enabled_override: boolean | null;
+  updated_at: string | null;
+  updated_by_user_id: number | null;
+}
+
+export interface SystemsEntryOverrideRow extends SystemsEntryOverride {
+  entry_title: string;
+  entry_type: string;
+  entry_type_label: string;
+  entry_slug: string;
+  entry_href: string;
+  source_id: string;
+  source_label: string;
+  visibility_label: string;
+  enablement_label: string;
+}
+
+export interface SystemsEntryTypeChoice {
+  value: string;
+  label: string;
+}
+
+export interface CustomSystemsEntry {
+  id: number;
+  library_slug: string;
+  source_id: string;
+  entry_key: string;
+  entry_type: string;
+  entry_type_label: string;
+  slug: string;
+  title: string;
+  source_page: string;
+  source_path: string;
+  player_safe_default: boolean;
+  dm_heavy: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+  visibility: string;
+  visibility_label: string;
+  status_label: string;
+  is_archived: boolean;
+  provenance: string;
+  search_metadata: string;
+  body_markdown: string;
+  rendered_html: string;
+  href: string;
+  override: SystemsEntryOverride | null;
+}
+
+export interface CustomSystemsSourceRow {
+  source_id: string;
+  title: string;
+  is_enabled: boolean;
+  default_visibility: string;
+  default_visibility_label: string;
+  entry_count: number;
+  active_entry_count: number;
+  archived_entry_count: number;
+  entries: CustomSystemsEntry[];
+}
+
+export interface SystemsImportRunReview {
+  id: number;
+  library_slug: string;
+  source_id: string;
+  status: string;
+  import_version: string;
+  imported_count: number | null;
+  type_summary: Array<{
+    entry_type: string;
+    entry_type_label: string;
+    count: number;
+  }>;
+  source_files: string[];
+  source_file_count: number | null;
+  error: string;
+  started_at: string | null;
+  completed_at: string | null;
+  started_by_user_id: number | null;
+}
+
+export interface DmContentSystemsResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  library: SystemsLibraryRecord | null;
+  systems_library: string;
+  systems_scope_visibility_label: string;
+  policy: {
+    allow_dm_shared_core_entry_edits: boolean;
+    proprietary_acknowledged: boolean;
+  };
+  source_rows: SystemsSourceRow[];
+  source_count: number;
+  has_proprietary_sources: boolean;
+  entry_override_rows: SystemsEntryOverrideRow[];
+  entry_override_count: number;
+  custom_entry_source_rows: CustomSystemsSourceRow[];
+  custom_entry_count: number;
+  custom_entry_default_visibility: string;
+  custom_entry_type_choices: SystemsEntryTypeChoice[];
+  custom_entry_visibility_choices: SystemsVisibilityChoice[];
+  import_source_choices: Array<{
+    source_id: string;
+    title: string;
+    license_class_label: string;
+    entry_count: number;
+  }>;
+  import_entry_type_choices: SystemsEntryTypeChoice[];
+  import_run_rows: SystemsImportRunReview[];
+  import_run_count: number;
+  supports_dnd5e_import: boolean;
+  permissions: {
+    can_manage_systems: boolean;
+    can_import_shared_systems: boolean;
+    can_set_private_visibility: boolean;
+    can_manage_shared_core_entry_edit_permission: boolean;
+  };
+  links: {
+    flask_systems_lane_url: string;
+    flask_systems_control_url: string;
+  };
+}
+
+export interface SystemsSourceUpdatePayload {
+  updates: Array<{
+    source_id: string;
+    is_enabled: boolean;
+    default_visibility: string;
+  }>;
+  acknowledge_proprietary?: boolean;
+}
+
+export interface SystemsSourceUpdateResponse extends ApiResponseBase {
+  sources: SystemsSourceRow[];
+}
+
+export interface SystemsEntryOverridePayload {
+  visibility_override?: string | null;
+  is_enabled_override?: boolean | null;
+}
+
+export interface SystemsEntryOverrideResponse extends ApiResponseBase {
+  override: SystemsEntryOverride;
+  entry: unknown;
+}
+
+export interface CustomSystemsEntryPayload {
+  title: string;
+  slug_leaf?: string;
+  entry_type: string;
+  visibility: string;
+  provenance: string;
+  search_metadata: string;
+  body_markdown: string;
+}
+
+export interface CustomSystemsEntryResponse extends ApiResponseBase {
+  entry: CustomSystemsEntry;
+  systems: DmContentSystemsResponse;
+}
+
 export interface DmContentStatblockCreatePayload {
   filename: string;
   subsection?: string;

@@ -61,7 +61,7 @@ from .campaign_dm_content_service import (
 )
 from .campaign_wiki_safety import build_dm_player_wiki_removal_safety_index
 from .campaign_session_service import CampaignSessionValidationError
-from .campaign_visibility import CAMPAIGN_VISIBILITY_SCOPES, VISIBILITY_LABELS
+from .campaign_visibility import CAMPAIGN_VISIBILITY_SCOPES, VISIBILITY_LABELS, list_visibility_choices
 from .character_builder import (
     CAMPAIGN_ITEMS_SECTION,
     _attach_campaign_item_page_support,
@@ -107,8 +107,10 @@ from .session_article_publisher import list_published_pages_for_session_articles
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
 from .systems_ingest import SystemsIngestError, extracted_systems_archive
 from .systems_labels import (
+    SYSTEMS_ENTRY_TYPE_LABELS,
     SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES,
     systems_entry_type_label,
+    systems_entry_type_choice_labels,
     systems_entry_type_sort_key,
 )
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError
@@ -118,6 +120,7 @@ from .system_policy import (
     character_advancement_lane,
     native_character_create_lane,
     supports_combat_tracker,
+    supports_dnd5e_systems_import,
     supports_native_character_create,
     supports_native_character_tools,
     is_xianxia_system,
@@ -1262,6 +1265,281 @@ def register_api(app) -> None:
             "imported_count": result.imported_count,
             "imported_by_type": result.imported_by_type,
             "source_files": result.source_files,
+        }
+
+    def serialize_systems_override(override) -> dict[str, Any]:
+        return {
+            "entry_key": override.entry_key,
+            "visibility_override": override.visibility_override,
+            "is_enabled_override": override.is_enabled_override,
+            "updated_at": serialize_datetime(override.updated_at),
+            "updated_by_user_id": override.updated_by_user_id,
+        }
+
+    def serialize_systems_override_row(campaign_slug: str, library_slug: str, override) -> dict[str, Any]:
+        systems_service = current_app.extensions["systems_service"]
+        entry = systems_service.store.get_entry(library_slug, override.entry_key)
+        source_state = (
+            systems_service.get_campaign_source_state(campaign_slug, entry.source_id)
+            if entry is not None
+            else None
+        )
+        if override.visibility_override:
+            visibility_label = VISIBILITY_LABELS.get(override.visibility_override, override.visibility_override)
+        else:
+            visibility_label = "Inherit source default"
+        if override.is_enabled_override is None:
+            enablement_label = "Inherit source enablement"
+        elif override.is_enabled_override:
+            enablement_label = "Enabled"
+        else:
+            enablement_label = "Disabled"
+        return {
+            **serialize_systems_override(override),
+            "entry_title": entry.title if entry is not None else "Unknown entry",
+            "entry_type": entry.entry_type if entry is not None else "",
+            "entry_type_label": (
+                systems_entry_type_label(entry.entry_type)
+                if entry is not None
+                else ""
+            ),
+            "entry_slug": entry.slug if entry is not None else "",
+            "entry_href": (
+                url_for(
+                    "campaign_systems_entry_detail",
+                    campaign_slug=campaign_slug,
+                    entry_slug=entry.slug,
+                )
+                if entry is not None and can_access_campaign_systems_entry(campaign_slug, entry.slug)
+                else ""
+            ),
+            "source_id": entry.source_id if entry is not None else "",
+            "source_label": (
+                f"{source_state.source.title} ({source_state.source.source_id})"
+                if source_state is not None
+                else (entry.source_id if entry is not None else "")
+            ),
+            "visibility_label": visibility_label,
+            "enablement_label": enablement_label,
+        }
+
+    def serialize_custom_systems_entry(campaign_slug: str, entry) -> dict[str, Any]:
+        systems_service = current_app.extensions["systems_service"]
+        override = systems_service.store.get_campaign_entry_override(campaign_slug, entry.entry_key)
+        is_archived = bool(override is not None and override.is_enabled_override is False)
+        visibility = (
+            override.visibility_override
+            if override is not None and override.visibility_override
+            else systems_service.get_default_entry_visibility_for_campaign(campaign_slug, entry)
+        )
+        metadata = dict(entry.metadata or {})
+        body = dict(entry.body or {})
+        return {
+            **serialize_systems_entry_summary(entry),
+            "visibility": visibility,
+            "visibility_label": VISIBILITY_LABELS.get(visibility, visibility),
+            "status_label": "Archived" if is_archived else "Active",
+            "is_archived": is_archived,
+            "provenance": str(metadata.get("provenance") or entry.source_path or ""),
+            "search_metadata": str(metadata.get("search_metadata") or ""),
+            "body_markdown": str(body.get("markdown") or metadata.get("body_markdown") or ""),
+            "rendered_html": entry.rendered_html,
+            "href": (
+                url_for(
+                    "campaign_systems_entry_detail",
+                    campaign_slug=campaign_slug,
+                    entry_slug=entry.slug,
+                )
+                if can_access_campaign_systems_entry(campaign_slug, entry.slug)
+                else ""
+            ),
+            "override": serialize_systems_override(override) if override is not None else None,
+        }
+
+    def serialize_systems_import_run_review(import_run) -> dict[str, Any]:
+        summary = dict(import_run.summary or {})
+        imported_by_type = summary.get("imported_by_type")
+        type_summary = []
+        if isinstance(imported_by_type, dict):
+            for entry_type, count in sorted(imported_by_type.items()):
+                type_summary.append(
+                    {
+                        "entry_type": str(entry_type),
+                        "entry_type_label": SYSTEMS_ENTRY_TYPE_LABELS.get(
+                            str(entry_type),
+                            str(entry_type).replace("_", " ").title(),
+                        ),
+                        "count": count,
+                    }
+                )
+        source_files = summary.get("source_files")
+        return {
+            "id": import_run.id,
+            "library_slug": import_run.library_slug,
+            "source_id": import_run.source_id,
+            "status": import_run.status,
+            "import_version": import_run.import_version,
+            "imported_count": summary.get("imported_count"),
+            "type_summary": type_summary,
+            "source_files": source_files if isinstance(source_files, list) else [],
+            "source_file_count": len(source_files) if isinstance(source_files, list) else None,
+            "error": str(summary.get("error") or ""),
+            "started_at": serialize_datetime(import_run.started_at),
+            "completed_at": serialize_datetime(import_run.completed_at),
+            "started_by_user_id": import_run.started_by_user_id,
+        }
+
+    def build_dm_content_systems_payload(campaign_slug: str) -> dict[str, Any]:
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+        if not can_manage_campaign_systems(campaign_slug):
+            if get_current_user() is None:
+                raise PermissionError("Authentication required.")
+            raise RuntimeError("You do not have permission to manage systems.")
+
+        user = get_current_user()
+        include_private = bool(user and user.is_admin)
+        systems_service = current_app.extensions["systems_service"]
+        policy = systems_service.get_campaign_policy(campaign_slug)
+        library = systems_service.get_campaign_library(campaign_slug)
+        library_slug = policy.library_slug if policy is not None else systems_service.get_campaign_library_slug(campaign_slug)
+        source_states = systems_service.list_campaign_source_states(campaign_slug)
+        systems_scope_visibility = get_effective_campaign_visibility(campaign_slug, "systems")
+
+        visibility_choices = list_visibility_choices(include_private=include_private)
+        source_rows = []
+        for state in source_states:
+            source_rows.append(
+                {
+                    **serialize_systems_source_state(campaign_slug, state),
+                    "selected_visibility": state.default_visibility,
+                    "entry_count": systems_service.count_entries_for_source(campaign_slug, state.source.source_id),
+                    "choices": [
+                        {
+                            **choice,
+                            "disabled": choice["value"] == "public" and not state.source.public_visibility_allowed,
+                        }
+                        for choice in visibility_choices
+                    ],
+                }
+            )
+
+        entry_override_rows = []
+        if library_slug:
+            entry_override_rows = [
+                serialize_systems_override_row(campaign_slug, library_slug, override)
+                for override in systems_service.store.list_campaign_entry_overrides(campaign_slug, library_slug)
+            ]
+
+        custom_entry_source_rows = []
+        custom_entry_count = 0
+        for state in source_states:
+            if state.source.license_class != "custom_campaign":
+                continue
+            entries = systems_service.store.list_entries_for_source(
+                state.source.library_slug,
+                state.source.source_id,
+                limit=None,
+            )
+            custom_entries = [serialize_custom_systems_entry(campaign_slug, entry) for entry in entries]
+            active_entry_count = sum(1 for entry in custom_entries if not entry["is_archived"])
+            custom_entry_count += len(custom_entries)
+            custom_entry_source_rows.append(
+                {
+                    "source_id": state.source.source_id,
+                    "title": state.source.title,
+                    "is_enabled": state.is_enabled,
+                    "default_visibility": state.default_visibility,
+                    "default_visibility_label": VISIBILITY_LABELS.get(
+                        state.default_visibility,
+                        state.default_visibility,
+                    ),
+                    "entry_count": len(custom_entries),
+                    "active_entry_count": active_entry_count,
+                    "archived_entry_count": len(custom_entries) - active_entry_count,
+                    "entries": custom_entries,
+                }
+            )
+
+        import_run_rows = []
+        if library_slug:
+            import_run_rows = [
+                serialize_systems_import_run_review(import_run)
+                for import_run in systems_service.store.list_import_runs(library_slug=library_slug, limit=10)
+            ]
+
+        entry_type_labels = systems_entry_type_choice_labels(library_slug)
+        import_source_choices = [
+            {
+                "source_id": state.source.source_id,
+                "title": state.source.title,
+                "license_class_label": LICENSE_CLASS_LABELS.get(
+                    state.source.license_class,
+                    state.source.license_class.replace("_", " ").title(),
+                ),
+                "entry_count": systems_service.count_entries_for_source(campaign_slug, state.source.source_id),
+            }
+            for state in source_states
+            if state.source.source_id != "RULES" and state.source.license_class != "custom_campaign"
+        ]
+
+        return {
+            "campaign": serialize_campaign(campaign),
+            "library": serialize_systems_library(library),
+            "systems_library": library_slug or "",
+            "systems_scope_visibility_label": VISIBILITY_LABELS.get(
+                systems_scope_visibility,
+                systems_scope_visibility,
+            ),
+            "policy": {
+                "allow_dm_shared_core_entry_edits": bool(policy and policy.allow_dm_shared_core_entry_edits),
+                "proprietary_acknowledged": bool(policy and policy.proprietary_acknowledged_at is not None),
+            },
+            "source_rows": source_rows,
+            "source_count": len(source_rows),
+            "has_proprietary_sources": any(row["license_class"] == "proprietary_private" for row in source_rows),
+            "entry_override_rows": entry_override_rows,
+            "entry_override_count": len(entry_override_rows),
+            "custom_entry_source_rows": custom_entry_source_rows,
+            "custom_entry_count": custom_entry_count,
+            "custom_entry_default_visibility": systems_service.get_custom_campaign_entry_default_visibility(campaign_slug),
+            "custom_entry_type_choices": [
+                {
+                    "value": entry_type,
+                    "label": entry_type_labels.get(entry_type, systems_entry_type_label(entry_type)),
+                }
+                for entry_type in sorted(entry_type_labels, key=systems_entry_type_sort_key)
+            ],
+            "custom_entry_visibility_choices": visibility_choices,
+            "import_source_choices": import_source_choices,
+            "import_entry_type_choices": [
+                {
+                    "value": entry_type,
+                    "label": SYSTEMS_ENTRY_TYPE_LABELS.get(entry_type, entry_type.replace("_", " ").title()),
+                }
+                for entry_type in sorted(SUPPORTED_ENTRY_TYPES, key=systems_entry_type_sort_key)
+            ],
+            "import_run_rows": import_run_rows,
+            "import_run_count": len(import_run_rows),
+            "supports_dnd5e_import": supports_dnd5e_systems_import(library_slug),
+            "permissions": {
+                "can_manage_systems": can_manage_campaign_systems(campaign_slug),
+                "can_import_shared_systems": bool(user and user.is_admin),
+                "can_set_private_visibility": include_private,
+                "can_manage_shared_core_entry_edit_permission": bool(user and user.is_admin),
+            },
+            "links": {
+                "flask_systems_lane_url": url_for(
+                    "campaign_dm_content_subpage_view",
+                    campaign_slug=campaign_slug,
+                    dm_content_subpage="systems",
+                ),
+                "flask_systems_control_url": url_for(
+                    "campaign_systems_control_panel_view",
+                    campaign_slug=campaign_slug,
+                ),
+            },
         }
 
     def normalize_source_ids(value: object) -> list[str]:
@@ -3332,6 +3610,18 @@ def register_api(app) -> None:
     def dm_content_state(campaign_slug: str):
         return jsonify({"ok": True, **build_dm_content_payload(campaign_slug)})
 
+    @api.get("/campaigns/<campaign_slug>/dm-content/systems")
+    @api_campaign_scope_access_required("dm_content")
+    @api_login_required
+    def dm_content_systems_state(campaign_slug: str):
+        try:
+            payload = build_dm_content_systems_payload(campaign_slug)
+        except PermissionError:
+            return json_error("Authentication required.", 401, code="auth_required")
+        except RuntimeError as exc:
+            return json_error(str(exc), 403, code="forbidden")
+        return jsonify({"ok": True, **payload})
+
     @api.post("/campaigns/<campaign_slug>/dm-content/statblocks")
     @api_campaign_scope_access_required("dm_content")
     @api_login_required
@@ -3509,6 +3799,176 @@ def register_api(app) -> None:
             return json_error(str(exc), 400, code="validation_error")
 
         return jsonify({"ok": True, "condition": serialize_condition_definition(definition)})
+
+    @api.post("/campaigns/<campaign_slug>/systems/custom-entries")
+    @api_campaign_systems_management_required
+    @api_login_required
+    def systems_custom_entry_create(campaign_slug: str):
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        try:
+            payload = load_json_object()
+            entry = current_app.extensions["systems_service"].create_custom_campaign_entry(
+                campaign_slug,
+                title=str(payload.get("title") or ""),
+                entry_type=str(payload.get("entry_type") or ""),
+                slug_leaf=str(payload.get("slug_leaf") or ""),
+                provenance=str(payload.get("provenance") or ""),
+                visibility=str(payload.get("visibility") or ""),
+                search_metadata=str(payload.get("search_metadata") or ""),
+                body_markdown=str(payload.get("body_markdown") or ""),
+                actor_user_id=user.id,
+                can_set_private=bool(user.is_admin),
+            )
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="invalid_json")
+        except SystemsPolicyValidationError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        get_auth_store().write_audit_event(
+            event_type="campaign_systems_custom_entry_created",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "entry_key": entry.entry_key,
+                "entry_slug": entry.slug,
+                "entry_type": entry.entry_type,
+                "source": "api",
+            },
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "entry": serialize_custom_systems_entry(campaign_slug, entry),
+                "systems": build_dm_content_systems_payload(campaign_slug),
+            }
+        )
+
+    @api.put("/campaigns/<campaign_slug>/systems/custom-entries/<entry_slug>")
+    @api_campaign_systems_management_required
+    @api_login_required
+    def systems_custom_entry_update(campaign_slug: str, entry_slug: str):
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        try:
+            payload = load_json_object()
+            entry = current_app.extensions["systems_service"].update_custom_campaign_entry(
+                campaign_slug,
+                entry_slug,
+                title=str(payload.get("title") or ""),
+                entry_type=str(payload.get("entry_type") or ""),
+                provenance=str(payload.get("provenance") or ""),
+                visibility=str(payload.get("visibility") or ""),
+                search_metadata=str(payload.get("search_metadata") or ""),
+                body_markdown=str(payload.get("body_markdown") or ""),
+                actor_user_id=user.id,
+                can_set_private=bool(user.is_admin),
+            )
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="invalid_json")
+        except SystemsPolicyValidationError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        get_auth_store().write_audit_event(
+            event_type="campaign_systems_custom_entry_updated",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "entry_key": entry.entry_key,
+                "entry_slug": entry.slug,
+                "entry_type": entry.entry_type,
+                "source": "api",
+            },
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "entry": serialize_custom_systems_entry(campaign_slug, entry),
+                "systems": build_dm_content_systems_payload(campaign_slug),
+            }
+        )
+
+    @api.post("/campaigns/<campaign_slug>/systems/custom-entries/<entry_slug>/archive")
+    @api_campaign_systems_management_required
+    @api_login_required
+    def systems_custom_entry_archive(campaign_slug: str, entry_slug: str):
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        try:
+            entry = current_app.extensions["systems_service"].archive_custom_campaign_entry(
+                campaign_slug,
+                entry_slug,
+                actor_user_id=user.id,
+            )
+        except SystemsPolicyValidationError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        get_auth_store().write_audit_event(
+            event_type="campaign_systems_custom_entry_archived",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "entry_key": entry.entry_key,
+                "entry_slug": entry.slug,
+                "source": "api",
+            },
+        )
+        refreshed = current_app.extensions["systems_service"].get_custom_campaign_entry_by_slug(
+            campaign_slug,
+            entry_slug,
+        ) or entry
+        return jsonify(
+            {
+                "ok": True,
+                "entry": serialize_custom_systems_entry(campaign_slug, refreshed),
+                "systems": build_dm_content_systems_payload(campaign_slug),
+            }
+        )
+
+    @api.post("/campaigns/<campaign_slug>/systems/custom-entries/<entry_slug>/restore")
+    @api_campaign_systems_management_required
+    @api_login_required
+    def systems_custom_entry_restore(campaign_slug: str, entry_slug: str):
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        try:
+            entry = current_app.extensions["systems_service"].restore_custom_campaign_entry(
+                campaign_slug,
+                entry_slug,
+                actor_user_id=user.id,
+            )
+        except SystemsPolicyValidationError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        get_auth_store().write_audit_event(
+            event_type="campaign_systems_custom_entry_restored",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "entry_key": entry.entry_key,
+                "entry_slug": entry.slug,
+                "source": "api",
+            },
+        )
+        refreshed = current_app.extensions["systems_service"].get_custom_campaign_entry_by_slug(
+            campaign_slug,
+            entry_slug,
+        ) or entry
+        return jsonify(
+            {
+                "ok": True,
+                "entry": serialize_custom_systems_entry(campaign_slug, refreshed),
+                "systems": build_dm_content_systems_payload(campaign_slug),
+            }
+        )
 
     @api.get("/campaigns/<campaign_slug>/combat")
     @api_campaign_scope_access_required("combat")
