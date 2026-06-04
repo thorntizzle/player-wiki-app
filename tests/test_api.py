@@ -2054,8 +2054,15 @@ def test_api_content_page_management_requires_dm_and_refreshes_repository(client
     )
 
     assert list_response.status_code == 200
-    page_refs = [item["page_ref"] for item in list_response.get_json()["pages"]]
-    assert "notes/api-field-report" in page_refs
+    listed_pages = list_response.get_json()["pages"]
+    assert any(item["page_ref"] == "notes/api-field-report" for item in listed_pages)
+    listed_field_report = next(
+        item for item in listed_pages if item["page_ref"] == "notes/api-field-report"
+    )
+    assert listed_field_report["can_hard_delete"] is True
+    assert listed_field_report["hard_delete_blockers"] == []
+    assert listed_field_report["removal_status_label"] == "Hard delete available"
+    assert listed_field_report["removal_safety"]["can_hard_delete"] is True
 
     detail_response = client.get(
         "/api/v1/campaigns/linden-pass/content/pages/notes/api-field-report",
@@ -2063,7 +2070,10 @@ def test_api_content_page_management_requires_dm_and_refreshes_repository(client
     )
 
     assert detail_response.status_code == 200
-    assert "east pier wards" in detail_response.get_json()["page_file"]["body_markdown"]
+    detail_payload = detail_response.get_json()["page_file"]
+    assert "east pier wards" in detail_payload["body_markdown"]
+    assert detail_payload["can_hard_delete"] is True
+    assert detail_payload["removal_safety"]["can_hard_delete"] is True
 
     with app.app_context():
         campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
@@ -2080,6 +2090,84 @@ def test_api_content_page_management_requires_dm_and_refreshes_repository(client
     assert delete_response.status_code == 200
     assert delete_response.get_json()["deleted"]["page_ref"] == "notes/api-field-report"
     assert not page_path.exists()
+
+
+def test_api_content_page_management_blocks_deletion_when_page_is_referenced(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-content-pages-referenced-api")
+    target_page_ref = "notes/api-reference-target"
+    referencing_page_ref = "notes/api-reference-hub"
+
+    create_target = client.put(
+        f"/api/v1/campaigns/linden-pass/content/pages/{target_page_ref}",
+        headers=api_headers(dm_token),
+        json={
+            "metadata": {
+                "title": "API Reference Target",
+                "section": "Notes",
+                "type": "note",
+                "summary": "A page intended to be linked.",
+                "published": True,
+                "reveal_after_session": 0,
+            },
+            "body_markdown": "This target page should be blocked from hard delete when linked.",
+        },
+    )
+    assert create_target.status_code == 200
+
+    create_referrer = client.put(
+        f"/api/v1/campaigns/linden-pass/content/pages/{referencing_page_ref}",
+        headers=api_headers(dm_token),
+        json={
+            "metadata": {
+                "title": "API Reference Hub",
+                "section": "Notes",
+                "type": "note",
+                "summary": "This page links to the reference target.",
+                "published": True,
+                "reveal_after_session": 0,
+            },
+            "body_markdown": "Cross-check with [[API Reference Target]].",
+        },
+    )
+    assert create_referrer.status_code == 200
+
+    list_response = client.get(
+        "/api/v1/campaigns/linden-pass/content/pages",
+        headers=api_headers(dm_token),
+    )
+
+    assert list_response.status_code == 200
+    listed_pages = list_response.get_json()["pages"]
+    target_listing = next(item for item in listed_pages if item["page_ref"] == target_page_ref)
+    assert target_listing["can_hard_delete"] is False
+    assert any("Backlinked from API Reference Hub." in blocker for blocker in target_listing["hard_delete_blockers"])
+
+    blocked_delete = client.delete(
+        f"/api/v1/campaigns/linden-pass/content/pages/{target_page_ref}",
+        headers=api_headers(dm_token),
+    )
+
+    assert blocked_delete.status_code == 409
+    blocked_payload = blocked_delete.get_json()
+    assert blocked_payload["error"]["code"] == "hard_delete_blocked"
+    assert blocked_payload["error"]["details"]["removal_safety"]["can_hard_delete"] is False
+    assert any(
+        "Backlinked from API Reference Hub." in blocker
+        for blocker in blocked_payload["error"]["details"]["removal_safety"]["hard_delete_blockers"]
+    )
+
+    campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    target_page_path = campaigns_dir / "linden-pass" / "content" / "notes" / "api-reference-target.md"
+    assert target_page_path.exists()
+
+    forced_delete = client.delete(
+        f"/api/v1/campaigns/linden-pass/content/pages/{target_page_ref}",
+        headers=api_headers(dm_token),
+        json={"force": True},
+    )
+    assert forced_delete.status_code == 200
+    assert forced_delete.get_json()["deleted"]["page_ref"] == target_page_ref
+    assert not target_page_path.exists()
 
 
 def test_api_content_character_management_can_upsert_and_delete_files(client, app, users):

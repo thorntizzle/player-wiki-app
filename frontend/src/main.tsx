@@ -43,6 +43,11 @@ import type {
   CharacterSpellSlotsPatchPayload,
   CharacterSummary,
   CharacterVitalsPatchPayload,
+  ContentPageFileRecord,
+  ContentPageFileSummary,
+  ContentPageMetadata,
+  ContentPageRemovalSafety,
+  ContentPageUpsertPayload,
   CombatLiveStatePayload,
   CombatPayload,
   CombatantSummary,
@@ -4248,12 +4253,238 @@ interface DmContentConditionDraftState {
   description: string;
 }
 
-type DmContentLane = "statblocks" | "staged-articles" | "conditions";
+interface DmPlayerWikiDraftState {
+  title: string;
+  slugLeaf: string;
+  section: string;
+  pageType: string;
+  subsection: string;
+  summary: string;
+  aliases: string;
+  revealAfterSession: string;
+  displayOrder: string;
+  published: boolean;
+  sourceRef: string;
+  image: string;
+  imageAlt: string;
+  imageCaption: string;
+  bodyMarkdown: string;
+  imageUpload: EmbeddedImageInput | null;
+}
+
+type DmContentLane = "statblocks" | "staged-articles" | "conditions" | "player-wiki";
 
 interface DmContentStatblockDraftState {
   filename: string;
   subsection: string;
   markdown: string;
+}
+
+const PLAYER_WIKI_SECTION_CHOICES = [
+  { label: "Overview", targetSubdir: "overview", defaultType: "overview" },
+  { label: "NPCs", targetSubdir: "npcs", defaultType: "npc" },
+  { label: "Locations", targetSubdir: "locations", defaultType: "location" },
+  { label: "Factions", targetSubdir: "factions", defaultType: "faction" },
+  { label: "Items", targetSubdir: "items", defaultType: "item" },
+  { label: "Gods", targetSubdir: "gods", defaultType: "god" },
+  { label: "Lore", targetSubdir: "lore", defaultType: "lore" },
+  { label: "Mechanics", targetSubdir: "mechanics", defaultType: "rule" },
+  { label: "Notes", targetSubdir: "notes", defaultType: "note" },
+  { label: "Races", targetSubdir: "races", defaultType: "race" },
+  { label: "Sessions", targetSubdir: "sessions", defaultType: "session" },
+  { label: "Spells", targetSubdir: "spells", defaultType: "spell" },
+];
+
+function simpleSlug(value: string, fallback = "page"): string {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || fallback;
+}
+
+function sectionChoiceForLabel(section: string) {
+  const normalized = section.trim().toLowerCase();
+  return PLAYER_WIKI_SECTION_CHOICES.find((choice) => choice.label.toLowerCase() === normalized) ?? PLAYER_WIKI_SECTION_CHOICES[8];
+}
+
+function buildInitialPlayerWikiDraft(): DmPlayerWikiDraftState {
+  return {
+    title: "",
+    slugLeaf: "",
+    section: "Notes",
+    pageType: "note",
+    subsection: "",
+    summary: "",
+    aliases: "",
+    revealAfterSession: "0",
+    displayOrder: "10000",
+    published: true,
+    sourceRef: "",
+    image: "",
+    imageAlt: "",
+    imageCaption: "",
+    bodyMarkdown: "",
+    imageUpload: null,
+  };
+}
+
+function metadataString(metadata: ContentPageMetadata, key: string): string {
+  const value = metadata[key];
+  if (value === undefined || value === null) {
+    return "";
+  }
+  return String(value);
+}
+
+function metadataNumberText(metadata: ContentPageMetadata, key: string, fallback: number): string {
+  const value = Number(metadata[key]);
+  return Number.isFinite(value) ? String(value) : String(fallback);
+}
+
+function metadataBoolean(metadata: ContentPageMetadata, key: string, fallback: boolean): boolean {
+  const value = metadata[key];
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no", "off"].includes(normalized)) {
+      return false;
+    }
+  }
+  return fallback;
+}
+
+function aliasTextFromMetadata(metadata: ContentPageMetadata, page: ContentPageFileSummary["page"]): string {
+  const metadataAliases = metadata.aliases;
+  if (Array.isArray(metadataAliases)) {
+    return metadataAliases.map((value) => String(value || "").trim()).filter(Boolean).join("\n");
+  }
+  if (typeof metadataAliases === "string") {
+    return metadataAliases;
+  }
+  return page.aliases.join("\n");
+}
+
+function buildPlayerWikiDraftFromRecord(record: ContentPageFileRecord): DmPlayerWikiDraftState {
+  const metadata = record.metadata ?? {};
+  const page = record.page;
+  return {
+    title: page.title || metadataString(metadata, "title"),
+    slugLeaf: record.page_ref.split("/").pop() || "",
+    section: page.section || metadataString(metadata, "section") || "Notes",
+    pageType: page.page_type || metadataString(metadata, "type") || "note",
+    subsection: page.subsection || metadataString(metadata, "subsection"),
+    summary: page.summary || metadataString(metadata, "summary"),
+    aliases: aliasTextFromMetadata(metadata, page),
+    revealAfterSession: String(page.reveal_after_session ?? metadataNumberText(metadata, "reveal_after_session", 0)),
+    displayOrder: String(page.display_order ?? metadataNumberText(metadata, "display_order", 10000)),
+    published: metadataBoolean(metadata, "published", page.published),
+    sourceRef: page.source_ref || metadataString(metadata, "source_ref"),
+    image: page.image_path || metadataString(metadata, "image"),
+    imageAlt: page.image_alt || metadataString(metadata, "image_alt"),
+    imageCaption: page.image_caption || metadataString(metadata, "image_caption"),
+    bodyMarkdown: record.body_markdown || "",
+    imageUpload: null,
+  };
+}
+
+function buildPageRefFromDraft(draft: DmPlayerWikiDraftState): string {
+  const choice = sectionChoiceForLabel(draft.section);
+  const slugLeaf = simpleSlug(draft.slugLeaf || draft.title, "page");
+  return `${choice.targetSubdir}/${slugLeaf}`;
+}
+
+function parseNonNegativeInteger(value: string, fallback: number): number {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function buildPlayerWikiMetadata(
+  draft: DmPlayerWikiDraftState,
+  pageRef: string,
+  imageRef: string,
+): ContentPageMetadata {
+  return {
+    slug: pageRef,
+    title: draft.title.trim(),
+    section: draft.section.trim() || "Notes",
+    type: draft.pageType.trim() || sectionChoiceForLabel(draft.section).defaultType,
+    subsection: draft.subsection.trim(),
+    summary: draft.summary.trim(),
+    aliases: draft.aliases
+      .split(/\r?\n|,/)
+      .map((value) => value.trim())
+      .filter(Boolean),
+    reveal_after_session: parseNonNegativeInteger(draft.revealAfterSession, 0),
+    display_order: parseNonNegativeInteger(draft.displayOrder, 10000),
+    published: draft.published,
+    source_ref: draft.sourceRef.trim(),
+    image: imageRef.trim(),
+    image_alt: draft.imageAlt.trim(),
+    image_caption: draft.imageCaption.trim(),
+  };
+}
+
+function imageExtension(image: EmbeddedImageInput): string {
+  const filenameExtension = image.filename.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  if (filenameExtension) {
+    return `.${filenameExtension}`;
+  }
+  if (image.media_type === "image/jpeg") {
+    return ".jpg";
+  }
+  if (image.media_type === "image/png") {
+    return ".png";
+  }
+  if (image.media_type === "image/gif") {
+    return ".gif";
+  }
+  if (image.media_type === "image/webp") {
+    return ".webp";
+  }
+  return ".bin";
+}
+
+function buildPlayerWikiAssetRef(pageRef: string, image: EmbeddedImageInput): string {
+  return `wiki-pages/${simpleSlug(pageRef, "wiki-page")}${imageExtension(image)}`;
+}
+
+function playerWikiStatusLabel(pageFile: ContentPageFileSummary): string {
+  if (pageFile.page.is_visible) {
+    return "Visible";
+  }
+  if (!pageFile.page.published) {
+    return "Unpublished";
+  }
+  return `Reveals after session ${pageFile.page.reveal_after_session}`;
+}
+
+function playerWikiRemovalSafety(pageFile: ContentPageFileSummary): ContentPageRemovalSafety {
+  const nested = pageFile.removal_safety;
+  const blockers = pageFile.hard_delete_blockers ?? nested?.hard_delete_blockers ?? [];
+  const canHardDelete = pageFile.can_hard_delete ?? nested?.can_hard_delete ?? blockers.length === 0;
+  return {
+    can_hard_delete: canHardDelete,
+    hard_delete_blockers: blockers,
+    removal_status_label:
+      pageFile.removal_status_label ?? nested?.removal_status_label ?? (canHardDelete ? "Hard delete available" : "Hard delete blocked"),
+    removal_guidance:
+      pageFile.removal_guidance ??
+      nested?.removal_guidance ??
+      (canHardDelete
+        ? "Hard delete is available after confirmation."
+        : "Unpublish/archive this page or clear the references before deleting its file."),
+    page_title: nested?.page_title,
+  };
 }
 
 function buildInitialStatblockDraft(statblock: DmContentStatblock): DmContentStatblockDraftState {
@@ -4844,11 +5075,14 @@ function DmContentPage() {
   const resolvedCampaignSlug = campaignSlug ?? "";
   const encodedCampaignSlug = encodeURIComponent(resolvedCampaignSlug);
   const location = useLocation();
-  const activeLane: DmContentLane = new URLSearchParams(location.search).get("lane") === "staged-articles"
+  const requestedLane = new URLSearchParams(location.search).get("lane");
+  const activeLane: DmContentLane = requestedLane === "staged-articles"
     ? "staged-articles"
-    : new URLSearchParams(location.search).get("lane") === "conditions"
+    : requestedLane === "conditions"
       ? "conditions"
-      : "statblocks";
+      : requestedLane === "player-wiki"
+        ? "player-wiki"
+        : "statblocks";
   const { apiClient, setAuthRequired } = useApiClient();
   const [statblockCreateDraft, setStatblockCreateDraft] = useState<DmContentStatblockDraftState>({
     filename: "gen2-statblock.md",
@@ -4875,13 +5109,17 @@ function DmContentPage() {
   });
   const [conditionQuery, setConditionQuery] = useState("");
   const [conditionDrafts, setConditionDrafts] = useState<Record<number, DmContentConditionDraftState>>({});
+  const [playerWikiCreateDraft, setPlayerWikiCreateDraft] = useState<DmPlayerWikiDraftState>(() => buildInitialPlayerWikiDraft());
+  const [playerWikiQuery, setPlayerWikiQuery] = useState("");
+  const [playerWikiEditDrafts, setPlayerWikiEditDrafts] = useState<Record<string, DmPlayerWikiDraftState>>({});
+  const [playerWikiDeleteConfirm, setPlayerWikiDeleteConfirm] = useState<Record<string, boolean>>({});
   const [uiMessage, setUiMessage] = useState<string | null>(null);
   const [paneError, setPaneError] = useState<string | null>(null);
 
   const dmContentQuery = useQuery({
     queryKey: ["dm-content", resolvedCampaignSlug],
     queryFn: () => apiClient.getDmContent(resolvedCampaignSlug),
-    enabled: Boolean(resolvedCampaignSlug) && activeLane !== "staged-articles",
+    enabled: Boolean(resolvedCampaignSlug) && (activeLane === "statblocks" || activeLane === "conditions"),
     retry: false,
   });
 
@@ -4899,11 +5137,18 @@ function DmContentPage() {
     retry: false,
   });
 
+  const contentPagesQuery = useQuery({
+    queryKey: ["dm-content-player-wiki-pages", resolvedCampaignSlug],
+    queryFn: () => apiClient.getContentPages(resolvedCampaignSlug),
+    enabled: Boolean(resolvedCampaignSlug) && activeLane === "player-wiki",
+    retry: false,
+  });
+
   useEffect(() => {
-    if (isAuthError(dmContentQuery.error) || isAuthError(sessionQuery.error)) {
+    if (isAuthError(dmContentQuery.error) || isAuthError(sessionQuery.error) || isAuthError(contentPagesQuery.error)) {
       setAuthRequired(true);
     }
-  }, [dmContentQuery.error, sessionQuery.error, setAuthRequired]);
+  }, [contentPagesQuery.error, dmContentQuery.error, sessionQuery.error, setAuthRequired]);
 
   const statblocks: DmContentStatblock[] = dmContentQuery.data?.statblocks ?? [];
   const conditions: DmContentConditionDefinition[] = dmContentQuery.data?.conditions ?? [];
@@ -4911,6 +5156,8 @@ function DmContentPage() {
 
   const stagedArticles: SessionArticle[] = sessionQuery.data?.staged_articles ?? [];
   const canManageSession = sessionQuery.data?.permissions.can_manage_session ?? false;
+  const playerWikiPages: ContentPageFileSummary[] = contentPagesQuery.data?.pages ?? [];
+  const canManagePlayerWiki = Boolean(contentPagesQuery.data?.ok);
 
   useEffect(() => {
     setStatblockDrafts((current) => {
@@ -4990,6 +5237,26 @@ function DmContentPage() {
         || condition.description_markdown.toLowerCase().includes(query),
     );
   }, [conditions, conditionQuery]);
+
+  const filteredPlayerWikiPages = useMemo(() => {
+    const query = playerWikiQuery.trim().toLowerCase();
+    if (!query) {
+      return playerWikiPages;
+    }
+    return playerWikiPages.filter((pageFile) => {
+      const searchText = [
+        pageFile.page_ref,
+        pageFile.page.title,
+        pageFile.page.section,
+        pageFile.page.subsection,
+        pageFile.page.page_type,
+        pageFile.page.summary,
+        pageFile.page.source_ref,
+        pageFile.page.image_path,
+      ].join(" ").toLowerCase();
+      return searchText.includes(query);
+    });
+  }, [playerWikiPages, playerWikiQuery]);
 
   const createStatblockMutation = useMutation({
     mutationFn: (payload: DmContentStatblockCreatePayload) => apiClient.createDmContentStatblock(resolvedCampaignSlug, payload),
@@ -5090,6 +5357,124 @@ function DmContentPage() {
       setUiMessage(null);
     },
   });
+
+  const savePlayerWikiPageMutation = useMutation({
+    mutationFn: async (args: { mode: "create" | "edit"; pageRef: string; draft: DmPlayerWikiDraftState }) => {
+      let imageRef = args.draft.image.trim();
+      if (args.draft.imageUpload) {
+        imageRef = buildPlayerWikiAssetRef(args.pageRef, args.draft.imageUpload);
+        await apiClient.upsertContentAsset(resolvedCampaignSlug, imageRef, {
+          asset_file: {
+            filename: args.draft.imageUpload.filename,
+            data_base64: args.draft.imageUpload.data_base64,
+            media_type: args.draft.imageUpload.media_type,
+          },
+        });
+      }
+      const payload: ContentPageUpsertPayload = {
+        metadata: buildPlayerWikiMetadata(args.draft, args.pageRef, imageRef),
+        body_markdown: args.draft.bodyMarkdown,
+      };
+      return apiClient.upsertContentPage(resolvedCampaignSlug, args.pageRef, payload);
+    },
+    onSuccess: (response, args) => {
+      const title = response.page_file.page.title || args.pageRef;
+      setUiMessage(args.mode === "create" ? `Player Wiki page created: ${title}.` : `Player Wiki page updated: ${title}.`);
+      setPaneError(null);
+      if (args.mode === "create") {
+        setPlayerWikiCreateDraft(buildInitialPlayerWikiDraft());
+      }
+      setPlayerWikiEditDrafts((current) => ({
+        ...current,
+        [response.page_file.page_ref]: buildPlayerWikiDraftFromRecord(response.page_file),
+      }));
+      void contentPagesQuery.refetch();
+    },
+    onError: (error) => {
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+      setPaneError(apiErrorMessage(error));
+      setUiMessage(null);
+    },
+  });
+
+  const archivePlayerWikiPageMutation = useMutation({
+    mutationFn: async (pageRef: string) => {
+      const detail = await apiClient.getContentPage(resolvedCampaignSlug, pageRef);
+      const draft = {
+        ...buildPlayerWikiDraftFromRecord(detail.page_file),
+        published: false,
+        imageUpload: null,
+      };
+      const payload: ContentPageUpsertPayload = {
+        metadata: buildPlayerWikiMetadata(draft, detail.page_file.page_ref, draft.image),
+        body_markdown: draft.bodyMarkdown,
+      };
+      return apiClient.upsertContentPage(resolvedCampaignSlug, detail.page_file.page_ref, payload);
+    },
+    onSuccess: (response) => {
+      setUiMessage(`Player Wiki page archived: ${response.page_file.page.title}.`);
+      setPaneError(null);
+      setPlayerWikiEditDrafts((current) => ({
+        ...current,
+        [response.page_file.page_ref]: buildPlayerWikiDraftFromRecord(response.page_file),
+      }));
+      void contentPagesQuery.refetch();
+    },
+    onError: (error) => {
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+      setPaneError(apiErrorMessage(error));
+      setUiMessage(null);
+    },
+  });
+
+  const deletePlayerWikiPageMutation = useMutation({
+    mutationFn: (pageRef: string) => apiClient.deleteContentPage(resolvedCampaignSlug, pageRef),
+    onSuccess: (response) => {
+      const pageRef = response.deleted.page_ref;
+      setUiMessage(`Player Wiki page deleted: ${pageRef}.`);
+      setPaneError(null);
+      setPlayerWikiDeleteConfirm((current) => ({
+        ...current,
+        [pageRef]: false,
+      }));
+      setPlayerWikiEditDrafts((current) => {
+        const next = { ...current };
+        delete next[pageRef];
+        return next;
+      });
+      void contentPagesQuery.refetch();
+    },
+    onError: (error) => {
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+      setPaneError(apiErrorMessage(error));
+      setUiMessage(null);
+    },
+  });
+
+  const loadPlayerWikiEditDraft = async (pageRef: string) => {
+    setPaneError(null);
+    setUiMessage("Loading Player Wiki editor...");
+    try {
+      const response = await apiClient.getContentPage(resolvedCampaignSlug, pageRef);
+      setPlayerWikiEditDrafts((current) => ({
+        ...current,
+        [response.page_file.page_ref]: buildPlayerWikiDraftFromRecord(response.page_file),
+      }));
+      setUiMessage(`Editor loaded: ${response.page_file.page.title}.`);
+    } catch (error) {
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+      setPaneError(apiErrorMessage(error));
+      setUiMessage(null);
+    }
+  };
 
   const createArticleMutation = useMutation({
     mutationFn: (payload: SessionArticleCreatePayload) => apiClient.createSessionArticle(resolvedCampaignSlug, payload),
@@ -5199,12 +5584,257 @@ function DmContentPage() {
   };
   const pageError = activeLane === "staged-articles"
     ? getApiErrorMessage(sessionQuery.error)
-    : getApiErrorMessage(dmContentQuery.error);
+    : activeLane === "player-wiki"
+      ? getApiErrorMessage(contentPagesQuery.error)
+      : getApiErrorMessage(dmContentQuery.error);
   const pageTitle = activeLane === "statblocks"
     ? "DM Content: Statblocks"
     : activeLane === "conditions"
       ? "DM Content: Conditions"
-      : "DM Content: Staged Articles";
+      : activeLane === "player-wiki"
+        ? "DM Content: Player Wiki"
+        : "DM Content: Staged Articles";
+  const pageIsLoading = activeLane === "staged-articles"
+    ? sessionQuery.isLoading
+    : activeLane === "player-wiki"
+      ? contentPagesQuery.isLoading
+      : dmContentQuery.isLoading;
+
+  const renderPlayerWikiDraftFields = ({
+    idPrefix,
+    draft,
+    setDraft,
+    includeSlug,
+    disabled,
+  }: {
+    idPrefix: string;
+    draft: DmPlayerWikiDraftState;
+    setDraft: (next: DmPlayerWikiDraftState) => void;
+    includeSlug: boolean;
+    disabled: boolean;
+  }) => {
+    const updateDraft = (updates: Partial<DmPlayerWikiDraftState>) => setDraft({ ...draft, ...updates });
+    const targetPageRef = buildPageRefFromDraft(draft);
+    return (
+      <>
+        <label htmlFor={`${idPrefix}-title`} className="chat-label">
+          Title
+        </label>
+        <input
+          id={`${idPrefix}-title`}
+          name="title"
+          maxLength={200}
+          value={draft.title}
+          disabled={disabled}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ title: event.currentTarget.value })}
+        />
+        {includeSlug ? (
+          <>
+            <label htmlFor={`${idPrefix}-slug`} className="chat-label">
+              Slug
+            </label>
+            <input
+              id={`${idPrefix}-slug`}
+              name="slug_leaf"
+              maxLength={120}
+              value={draft.slugLeaf}
+              placeholder="field-report"
+              disabled={disabled}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ slugLeaf: event.currentTarget.value })}
+            />
+            <p className="meta">Page file: {targetPageRef}.md</p>
+          </>
+        ) : null}
+        <div className="dm-content-image-edit-row">
+          <label htmlFor={`${idPrefix}-section`} className="chat-label">
+            Section
+            <select
+              id={`${idPrefix}-section`}
+              name="section"
+              value={draft.section}
+              disabled={disabled}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                const section = event.currentTarget.value;
+                const currentDefaultType = sectionChoiceForLabel(draft.section).defaultType;
+                const nextDefaultType = sectionChoiceForLabel(section).defaultType;
+                updateDraft({
+                  section,
+                  pageType: draft.pageType && draft.pageType !== currentDefaultType ? draft.pageType : nextDefaultType,
+                });
+              }}
+            >
+              {PLAYER_WIKI_SECTION_CHOICES.map((choice) => (
+                <option key={choice.label} value={choice.label}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label htmlFor={`${idPrefix}-type`} className="chat-label">
+            Page type
+            <input
+              id={`${idPrefix}-type`}
+              name="page_type"
+              maxLength={80}
+              value={draft.pageType}
+              disabled={disabled}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ pageType: event.currentTarget.value })}
+            />
+          </label>
+        </div>
+        <label htmlFor={`${idPrefix}-subsection`} className="chat-label">
+          Subsection
+        </label>
+        <input
+          id={`${idPrefix}-subsection`}
+          name="subsection"
+          maxLength={120}
+          value={draft.subsection}
+          disabled={disabled}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ subsection: event.currentTarget.value })}
+        />
+        <label htmlFor={`${idPrefix}-summary`} className="chat-label">
+          Summary
+        </label>
+        <textarea
+          id={`${idPrefix}-summary`}
+          name="summary"
+          rows={3}
+          maxLength={400}
+          value={draft.summary}
+          disabled={disabled}
+          onChange={(event: ChangeEvent<HTMLTextAreaElement>) => updateDraft({ summary: event.currentTarget.value })}
+        />
+        <label htmlFor={`${idPrefix}-aliases`} className="chat-label">
+          Aliases
+        </label>
+        <textarea
+          id={`${idPrefix}-aliases`}
+          name="aliases"
+          rows={3}
+          value={draft.aliases}
+          disabled={disabled}
+          onChange={(event: ChangeEvent<HTMLTextAreaElement>) => updateDraft({ aliases: event.currentTarget.value })}
+        />
+        <div className="dm-content-image-edit-row">
+          <label htmlFor={`${idPrefix}-reveal-after-session`} className="chat-label">
+            Reveal after session
+            <input
+              id={`${idPrefix}-reveal-after-session`}
+              name="reveal_after_session"
+              type="number"
+              min={0}
+              value={draft.revealAfterSession}
+              disabled={disabled}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ revealAfterSession: event.currentTarget.value })}
+            />
+          </label>
+          <label htmlFor={`${idPrefix}-display-order`} className="chat-label">
+            Display order
+            <input
+              id={`${idPrefix}-display-order`}
+              name="display_order"
+              type="number"
+              min={0}
+              value={draft.displayOrder}
+              disabled={disabled}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ displayOrder: event.currentTarget.value })}
+            />
+          </label>
+        </div>
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            name="published"
+            checked={draft.published}
+            disabled={disabled}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ published: event.currentTarget.checked })}
+          />
+          Published
+        </label>
+        <label htmlFor={`${idPrefix}-source-ref`} className="chat-label">
+          Source reference
+        </label>
+        <input
+          id={`${idPrefix}-source-ref`}
+          name="source_ref"
+          value={draft.sourceRef}
+          disabled={disabled}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ sourceRef: event.currentTarget.value })}
+        />
+        <label htmlFor={`${idPrefix}-image`} className="chat-label">
+          Image path
+        </label>
+        <input
+          id={`${idPrefix}-image`}
+          name="image"
+          value={draft.image}
+          placeholder="npcs/example.webp"
+          disabled={disabled}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ image: event.currentTarget.value })}
+        />
+        <label htmlFor={`${idPrefix}-image-upload`} className="chat-label">
+          Upload image
+        </label>
+        <input
+          id={`${idPrefix}-image-upload`}
+          type="file"
+          accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp"
+          disabled={disabled}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => {
+            const file = event.currentTarget.files?.item(0);
+            if (!file) {
+              updateDraft({ imageUpload: null });
+              return;
+            }
+            readBinaryAsBase64(file, (payload) => {
+              if (!payload) {
+                setPaneError("Unable to read that image file.");
+                setUiMessage(null);
+                return;
+              }
+              setPaneError(null);
+              updateDraft({ imageUpload: payload });
+            });
+          }}
+        />
+        {draft.imageUpload ? <p className="status status-neutral">Selected image: {draft.imageUpload.filename}</p> : null}
+        <div className="dm-content-image-edit-row">
+          <label htmlFor={`${idPrefix}-image-alt`} className="chat-label">
+            Image alt text
+            <input
+              id={`${idPrefix}-image-alt`}
+              name="image_alt"
+              value={draft.imageAlt}
+              disabled={disabled}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ imageAlt: event.currentTarget.value })}
+            />
+          </label>
+          <label htmlFor={`${idPrefix}-image-caption`} className="chat-label">
+            Image caption
+            <input
+              id={`${idPrefix}-image-caption`}
+              name="image_caption"
+              value={draft.imageCaption}
+              disabled={disabled}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ imageCaption: event.currentTarget.value })}
+            />
+          </label>
+        </div>
+        <label htmlFor={`${idPrefix}-body`} className="chat-label">
+          Markdown body
+        </label>
+        <textarea
+          id={`${idPrefix}-body`}
+          name="body_markdown"
+          rows={18}
+          value={draft.bodyMarkdown}
+          disabled={disabled}
+          onChange={(event: ChangeEvent<HTMLTextAreaElement>) => updateDraft({ bodyMarkdown: event.currentTarget.value })}
+        />
+      </>
+    );
+  };
 
   const renderStatblockCard = (statblock: DmContentStatblock) => {
     const draft = statblockDrafts[statblock.id] ?? buildInitialStatblockDraft(statblock);
@@ -5387,6 +6017,140 @@ function DmContentPage() {
     );
   };
 
+  const renderPlayerWikiPageCard = (pageFile: ContentPageFileSummary) => {
+    const safety = playerWikiRemovalSafety(pageFile);
+    const editDraft = playerWikiEditDrafts[pageFile.page_ref];
+    const deleteConfirmed = Boolean(playerWikiDeleteConfirm[pageFile.page_ref]);
+    const encodedPageRef = pageFile.page_ref
+      .split("/")
+      .map((part) => encodeURIComponent(part))
+      .join("/");
+    const isDeleting = deletePlayerWikiPageMutation.isPending;
+    return (
+      <details
+        className="article-card dm-player-wiki-card"
+        key={pageFile.page_ref}
+        onToggle={(event) => {
+          const target = event.currentTarget;
+          if (target.open && !playerWikiEditDrafts[pageFile.page_ref]) {
+            void loadPlayerWikiEditDraft(pageFile.page_ref);
+          }
+        }}
+      >
+        <summary>
+          <strong>{pageFile.page.title || pageFile.page_ref}</strong>
+          <span className="article-kind">{pageFile.page_ref}.md</span>
+        </summary>
+        <div className="badge-list">
+          <span className="meta-badge">{playerWikiStatusLabel(pageFile)}</span>
+          <span className="meta-badge">{pageFile.page.section || "Unsectioned"}</span>
+          {pageFile.page.subsection ? <span className="meta-badge">{pageFile.page.subsection}</span> : null}
+          {pageFile.page.image_path ? <span className="meta-badge">Image</span> : null}
+          <span className="meta-badge">{safety.removal_status_label}</span>
+        </div>
+        {pageFile.page.summary ? <p className="meta">{pageFile.page.summary}</p> : null}
+        {pageFile.page.source_ref ? <p className="meta">Source: {pageFile.page.source_ref}</p> : null}
+        <div className="dm-content-removal-safety">
+          <p className="meta">
+            <strong>Removal safety:</strong> {safety.removal_guidance}
+          </p>
+          {safety.hard_delete_blockers.length ? (
+            <ul className="plain-list">
+              {safety.hard_delete_blockers.map((blocker) => (
+                <li className="meta" key={blocker}>
+                  {blocker}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+        <div className="article-actions">
+          {pageFile.page.is_visible ? (
+            <a className="button button-secondary" href={`/app-next/campaigns/${encodedCampaignSlug}/pages/${encodedPageRef}`}>
+              Open
+            </a>
+          ) : null}
+          <a className="button button-secondary" href={`/campaigns/${encodedCampaignSlug}/dm-content/player-wiki/pages/${encodedPageRef}/edit`}>
+            Flask editor
+          </a>
+          <button
+            type="button"
+            disabled={!canManagePlayerWiki || archivePlayerWikiPageMutation.isPending || !pageFile.page.published}
+            onClick={() => archivePlayerWikiPageMutation.mutate(pageFile.page_ref)}
+          >
+            {archivePlayerWikiPageMutation.isPending ? "Archiving..." : "Unpublish/archive"}
+          </button>
+        </div>
+        {editDraft ? (
+          <form
+            className="session-form dm-player-wiki-edit-form"
+            onSubmit={(event: FormEvent<HTMLFormElement>) => {
+              event.preventDefault();
+              if (!editDraft.title.trim()) {
+                setPaneError("Player Wiki page title is required.");
+                setUiMessage(null);
+                return;
+              }
+              savePlayerWikiPageMutation.mutate({
+                mode: "edit",
+                pageRef: pageFile.page_ref,
+                draft: editDraft,
+              });
+            }}
+          >
+            <p className="meta">Page file: {pageFile.page_ref}.md</p>
+            {renderPlayerWikiDraftFields({
+              idPrefix: `dm-player-wiki-edit-${simpleSlug(pageFile.page_ref)}`,
+              draft: editDraft,
+              setDraft: (next) => {
+                setPlayerWikiEditDrafts((current) => ({
+                  ...current,
+                  [pageFile.page_ref]: next,
+                }));
+              },
+              includeSlug: false,
+              disabled: !canManagePlayerWiki,
+            })}
+            <div className="article-actions">
+              <button type="submit" disabled={!canManagePlayerWiki || savePlayerWikiPageMutation.isPending}>
+                {savePlayerWikiPageMutation.isPending ? "Saving..." : "Save wiki page"}
+              </button>
+            </div>
+          </form>
+        ) : (
+          <button type="button" disabled={!canManagePlayerWiki} onClick={() => void loadPlayerWikiEditDraft(pageFile.page_ref)}>
+            Load editor
+          </button>
+        )}
+        <div className="dm-content-delete-form">
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={deleteConfirmed}
+              disabled={!canManagePlayerWiki || !safety.can_hard_delete}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                const checked = event.currentTarget.checked;
+                setPlayerWikiDeleteConfirm((current) => ({
+                  ...current,
+                  [pageFile.page_ref]: checked,
+                }));
+              }}
+            />
+            Confirm hard delete
+          </label>
+          <button
+            type="button"
+            className="button-danger"
+            disabled={!canManagePlayerWiki || !safety.can_hard_delete || !deleteConfirmed || isDeleting}
+            onClick={() => deletePlayerWikiPageMutation.mutate(pageFile.page_ref)}
+          >
+            {isDeleting ? "Deleting..." : "Delete file"}
+          </button>
+        </div>
+      </details>
+    );
+  };
+
   return (
     <section className="panel dm-content-gen2-page">
       <div className="panel-header">
@@ -5396,10 +6160,11 @@ function DmContentPage() {
         <h2>{pageTitle}</h2>
         {(activeLane === "statblocks" || activeLane === "conditions") && canManageDmContent ? <span className="pill">DM+</span> : null}
         {activeLane === "staged-articles" && canManageSession ? <span className="pill">DM+</span> : null}
+        {activeLane === "player-wiki" && canManagePlayerWiki ? <span className="pill">DM+</span> : null}
       </div>
 
       <ApiErrorNotice
-        isLoading={activeLane === "staged-articles" ? sessionQuery.isLoading : dmContentQuery.isLoading}
+        isLoading={pageIsLoading}
         message={pageError}
         onAuth={() => setAuthRequired(true)}
       />
@@ -5423,7 +6188,12 @@ function DmContentPage() {
         >
           Conditions
         </a>
-        <a href={`/campaigns/${encodedCampaignSlug}/dm-content/player-wiki`}>Player Wiki</a>
+        <a
+          className={activeLane === "player-wiki" ? "is-active" : ""}
+          href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=player-wiki`}
+        >
+          Player Wiki
+        </a>
         <a href={`/campaigns/${encodedCampaignSlug}/dm-content/systems`}>Systems</a>
         <a href={`/campaigns/${encodedCampaignSlug}/session/dm`}>Session DM</a>
       </div>
@@ -5438,6 +6208,9 @@ function DmContentPage() {
       ) : null}
       {activeLane === "staged-articles" && !canManageSession && !sessionQuery.isLoading ? (
         <p className="status status-error">You do not have permission to manage staged articles.</p>
+      ) : null}
+      {activeLane === "player-wiki" && !canManagePlayerWiki && !contentPagesQuery.isLoading ? (
+        <p className="status status-error">You do not have permission to manage Player Wiki pages.</p>
       ) : null}
 
       {activeLane === "statblocks" ? (
@@ -5685,6 +6458,73 @@ function DmContentPage() {
             {!dmContentQuery.isLoading && !filteredConditions.length ? (
               <p className="status status-neutral">
                 {conditionQuery ? "No conditions matched that search." : "No custom conditions have been created yet."}
+              </p>
+            ) : null}
+          </section>
+        </div>
+      ) : activeLane === "player-wiki" ? (
+        <div className="split-grid dm-content-staged-grid">
+          <section className="panel panel-nested dm-player-wiki-create">
+            <div className="panel-header">
+              <h3>Create player wiki page</h3>
+              <span className="pill">Markdown</span>
+            </div>
+            <form
+              className="session-form"
+              onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                event.preventDefault();
+                if (!playerWikiCreateDraft.title.trim()) {
+                  setPaneError("Player Wiki page title is required.");
+                  setUiMessage(null);
+                  return;
+                }
+                savePlayerWikiPageMutation.mutate({
+                  mode: "create",
+                  pageRef: buildPageRefFromDraft(playerWikiCreateDraft),
+                  draft: playerWikiCreateDraft,
+                });
+              }}
+            >
+              {renderPlayerWikiDraftFields({
+                idPrefix: "dm-player-wiki-create",
+                draft: playerWikiCreateDraft,
+                setDraft: setPlayerWikiCreateDraft,
+                includeSlug: true,
+                disabled: !canManagePlayerWiki,
+              })}
+              <button type="submit" disabled={!canManagePlayerWiki || savePlayerWikiPageMutation.isPending}>
+                {savePlayerWikiPageMutation.isPending ? "Saving..." : "Create wiki page"}
+              </button>
+            </form>
+          </section>
+
+          <section className="panel panel-nested dm-player-wiki-library">
+            <div className="panel-header">
+              <h3>Player wiki pages</h3>
+              <span className="pill">{playerWikiPages.length}</span>
+            </div>
+            <form
+              className="search-form dm-player-wiki-search"
+              onSubmit={(event: FormEvent<HTMLFormElement>) => event.preventDefault()}
+            >
+              <label htmlFor="dm-player-wiki-search">Search pages</label>
+              <input
+                id="dm-player-wiki-search"
+                type="search"
+                value={playerWikiQuery}
+                placeholder="Title, section, path, summary"
+                onChange={(event: ChangeEvent<HTMLInputElement>) => setPlayerWikiQuery(event.currentTarget.value)}
+              />
+            </form>
+            {contentPagesQuery.isLoading ? <p className="status status-neutral">Loading Player Wiki pages ...</p> : null}
+            {!contentPagesQuery.isLoading && filteredPlayerWikiPages.length ? (
+              <div className="article-stack dm-player-wiki-list">
+                {filteredPlayerWikiPages.map(renderPlayerWikiPageCard)}
+              </div>
+            ) : null}
+            {!contentPagesQuery.isLoading && !filteredPlayerWikiPages.length ? (
+              <p className="status status-neutral">
+                {playerWikiQuery ? "No Player Wiki pages matched that search." : "No Player Wiki pages have been published yet."}
               </p>
             ) : null}
           </section>

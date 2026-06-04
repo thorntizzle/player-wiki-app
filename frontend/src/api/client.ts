@@ -26,6 +26,12 @@ import type {
   CharacterXianxiaInventoryEquippedPatchPayload,
   CharacterXianxiaInventoryRemovePayload,
   CharacterXianxiaInventoryUpdatePayload,
+  ContentAssetResponse,
+  ContentAssetUpsertPayload,
+  ContentPageDeleteResponse,
+  ContentPageDetailResponse,
+  ContentPageListResponse,
+  ContentPageUpsertPayload,
   CombatLiveStatePayload,
   CombatPayload,
   DmContentResponse,
@@ -56,6 +62,13 @@ import type {
 } from "./types";
 
 const DEFAULT_BASE_PATH = "";
+
+function encodePathSegments(value: string): string {
+  return value
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+}
 
 export interface CampaignApiClientOptions {
   baseUrl?: string;
@@ -333,6 +346,53 @@ export class CampaignApiClient {
       `/api/v1/campaigns/${encodeURIComponent(slug)}/dm-content/conditions/${conditionId}`,
       {
         method: "DELETE",
+      },
+    );
+  }
+
+  async getContentPages(slug: string): Promise<ContentPageListResponse> {
+    return this.requestJson<ContentPageListResponse>(`/api/v1/campaigns/${encodeURIComponent(slug)}/content/pages`);
+  }
+
+  async getContentPage(slug: string, pageRef: string): Promise<ContentPageDetailResponse> {
+    return this.requestJson<ContentPageDetailResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/content/pages/${encodePathSegments(pageRef)}`,
+    );
+  }
+
+  async upsertContentPage(
+    slug: string,
+    pageRef: string,
+    payload: ContentPageUpsertPayload,
+  ): Promise<ContentPageDetailResponse> {
+    return this.requestJson<ContentPageDetailResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/content/pages/${encodePathSegments(pageRef)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async deleteContentPage(slug: string, pageRef: string): Promise<ContentPageDeleteResponse> {
+    return this.requestJson<ContentPageDeleteResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/content/pages/${encodePathSegments(pageRef)}`,
+      {
+        method: "DELETE",
+      },
+    );
+  }
+
+  async upsertContentAsset(
+    slug: string,
+    assetRef: string,
+    payload: ContentAssetUpsertPayload,
+  ): Promise<ContentAssetResponse> {
+    return this.requestJson<ContentAssetResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/content/assets/${encodePathSegments(assetRef)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(payload),
       },
     );
   }

@@ -59,6 +59,7 @@ from .campaign_dm_content_service import (
     CampaignDMContentValidationError,
     build_statblock_parser_feedback,
 )
+from .campaign_wiki_safety import build_dm_player_wiki_removal_safety_index
 from .campaign_session_service import CampaignSessionValidationError
 from .campaign_visibility import CAMPAIGN_VISIBILITY_SCOPES, VISIBILITY_LABELS
 from .character_builder import (
@@ -480,6 +481,78 @@ def register_api(app) -> None:
         payload = serialize_page_file_record(campaign_slug, record)
         payload.pop("body_markdown", None)
         return payload
+
+    def _campaign_session_service():
+        return current_app.extensions.get("campaign_session_service")
+
+    def _character_repository():
+        return current_app.extensions.get("character_repository")
+
+    def _build_content_page_removal_safety(
+        campaign_slug: str,
+        campaign,
+        page_records: list[object],
+    ) -> dict[str, dict[str, object]]:
+        session_service = _campaign_session_service()
+        character_repository = _character_repository()
+        session_articles = (
+            list(session_service.list_articles(campaign_slug))
+            if session_service is not None
+            else []
+        )
+        character_records = (
+            list(character_repository.list_characters(campaign_slug))
+            if character_repository is not None
+            else []
+        )
+        return build_dm_player_wiki_removal_safety_index(
+            campaign_slug,
+            campaign,
+            page_records,
+            session_articles=session_articles,
+            character_records=character_records,
+        )
+
+    def _build_content_page_file_payload(
+        campaign_slug: str,
+        record,
+        *,
+        removal_safety: dict[str, object] | None = None,
+        include_body: bool = False,
+    ) -> dict[str, Any]:
+        payload = (
+            serialize_page_file_record(campaign_slug, record)
+            if include_body
+            else serialize_page_file_summary(campaign_slug, record)
+        )
+        normalized_safety = dict(removal_safety or {})
+        payload["removal_safety"] = normalized_safety
+        payload["can_hard_delete"] = bool(normalized_safety.get("can_hard_delete", True))
+        payload["hard_delete_blockers"] = list(normalized_safety.get("hard_delete_blockers", []) or [])
+        payload["removal_status_label"] = str(
+            normalized_safety.get("removal_status_label") or "Hard delete available"
+        )
+        payload["removal_guidance"] = str(
+            normalized_safety.get("removal_guidance")
+            or "Hard delete is available after confirmation."
+        )
+        return payload
+
+    def _parse_force_delete_flag() -> bool:
+        raw_force = request.args.get("force")
+        if raw_force is not None:
+            return str(raw_force).strip().lower() in {"1", "true", "yes", "on"}
+        return False
+
+    def _parse_force_delete_payload(payload: dict[str, Any]) -> bool:
+        if not payload:
+            return False
+        raw_force = payload.get("force")
+        if isinstance(raw_force, bool):
+            return raw_force
+        if raw_force is None:
+            return False
+        return str(raw_force).strip().lower() in {"1", "true", "yes", "on"}
 
     def serialize_visibility_map(campaign_slug: str) -> dict[str, Any]:
         visibility = {
@@ -2263,10 +2336,22 @@ def register_api(app) -> None:
             campaign,
             page_store=get_campaign_page_store(),
         )
+        removal_safety = _build_content_page_removal_safety(
+            campaign_slug,
+            campaign,
+            page_records,
+        )
         return jsonify(
             {
                 "ok": True,
-                "pages": [serialize_page_file_summary(campaign_slug, record) for record in page_records],
+                "pages": [
+                    _build_content_page_file_payload(
+                        campaign_slug,
+                        record,
+                        removal_safety=removal_safety.get(record.page_ref),
+                    )
+                    for record in page_records
+                ],
             }
         )
 
@@ -2288,7 +2373,26 @@ def register_api(app) -> None:
         if record is None:
             abort(404)
 
-        return jsonify({"ok": True, "page_file": serialize_page_file_record(campaign_slug, record)})
+        page_records = list_campaign_page_files(
+            campaign,
+            page_store=get_campaign_page_store(),
+        )
+        removal_safety = _build_content_page_removal_safety(
+            campaign_slug,
+            campaign,
+            page_records,
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "page_file": _build_content_page_file_payload(
+                    campaign_slug,
+                    record,
+                    removal_safety=removal_safety.get(record.page_ref),
+                    include_body=True,
+                ),
+            }
+        )
 
     @api.put("/campaigns/<campaign_slug>/content/pages/<path:page_ref>")
     @api_campaign_content_management_required
@@ -2317,7 +2421,26 @@ def register_api(app) -> None:
         )
         if refreshed_record is None:
             refreshed_record = record
-        return jsonify({"ok": True, "page_file": serialize_page_file_record(campaign_slug, refreshed_record)})
+        page_records = list_campaign_page_files(
+            campaign,
+            page_store=get_campaign_page_store(),
+        )
+        removal_safety = _build_content_page_removal_safety(
+            campaign_slug,
+            campaign,
+            page_records,
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "page_file": _build_content_page_file_payload(
+                    campaign_slug,
+                    refreshed_record,
+                    removal_safety=removal_safety.get(refreshed_record.page_ref),
+                    include_body=True,
+                ),
+            }
+        )
 
     @api.delete("/campaigns/<campaign_slug>/content/pages/<path:page_ref>")
     @api_campaign_content_management_required
@@ -2327,9 +2450,50 @@ def register_api(app) -> None:
             abort(404)
 
         try:
-            deleted = delete_campaign_page_file(
+            existing_record = get_campaign_page_file(
                 campaign,
                 page_ref,
+                page_store=get_campaign_page_store(),
+            )
+        except CampaignContentError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+        if existing_record is None:
+            abort(404)
+
+        page_records = list_campaign_page_files(
+            campaign,
+            page_store=get_campaign_page_store(),
+        )
+        removal_safety = _build_content_page_removal_safety(
+            campaign_slug,
+            campaign,
+            page_records,
+        )
+        page_safety = removal_safety.get(existing_record.page_ref, {})
+
+        try:
+            request_payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+        force = _parse_force_delete_flag() or _parse_force_delete_payload(request_payload)
+
+        if page_safety and not force and not page_safety.get("can_hard_delete", True):
+            return json_error(
+                "Hard delete blocked for this content page.",
+                409,
+                code="hard_delete_blocked",
+                details={
+                    "page_ref": existing_record.page_ref,
+                    "removal_safety": page_safety,
+                    "force_query_param": "force",
+                    "force_required": True,
+                },
+            )
+
+        try:
+            deleted = delete_campaign_page_file(
+                campaign,
+                existing_record.page_ref,
                 page_store=get_campaign_page_store(),
             )
         except CampaignContentError as exc:

@@ -502,6 +502,93 @@ export interface DmContentConditionResponse extends ApiResponseBase {
   condition: DmContentConditionDefinition;
 }
 
+export interface ContentPageRemovalSafety {
+  can_hard_delete: boolean;
+  hard_delete_blockers: string[];
+  removal_status_label: string;
+  removal_guidance: string;
+  page_title?: string;
+}
+
+export interface ContentPageRecord {
+  title: string;
+  route_slug: string;
+  section: string;
+  subsection: string;
+  page_type: string;
+  display_order: number;
+  published: boolean;
+  aliases: string[];
+  summary: string;
+  image_path: string;
+  image_alt: string;
+  image_caption: string;
+  reveal_after_session: number;
+  source_ref: string;
+  is_pinned: boolean;
+  is_visible?: boolean;
+}
+
+export type ContentPageMetadata = Record<string, unknown>;
+
+export interface ContentPageFileSummary {
+  page_ref: string;
+  relative_path: string;
+  updated_at: string | null;
+  metadata: ContentPageMetadata;
+  page: ContentPageRecord;
+  removal_safety?: ContentPageRemovalSafety;
+  can_hard_delete?: boolean;
+  hard_delete_blockers?: string[];
+  removal_status_label?: string;
+  removal_guidance?: string;
+}
+
+export interface ContentPageFileRecord extends ContentPageFileSummary {
+  body_markdown: string;
+}
+
+export interface ContentPageListResponse extends ApiResponseBase {
+  pages: ContentPageFileSummary[];
+}
+
+export interface ContentPageDetailResponse extends ApiResponseBase {
+  page_file: ContentPageFileRecord;
+}
+
+export interface ContentPageUpsertPayload {
+  metadata: ContentPageMetadata;
+  body_markdown: string;
+}
+
+export interface ContentPageDeleteResponse extends ApiResponseBase {
+  deleted: {
+    page_ref: string;
+    relative_path: string;
+  };
+}
+
+export interface ContentAssetFileSummary {
+  asset_ref: string;
+  relative_path: string;
+  size_bytes: number;
+  media_type: string;
+  updated_at: string | null;
+  url: string;
+}
+
+export interface ContentAssetUpsertPayload {
+  asset_file: {
+    filename: string;
+    data_base64: string;
+    media_type?: string;
+  };
+}
+
+export interface ContentAssetResponse extends ApiResponseBase {
+  asset_file: ContentAssetFileSummary;
+}
+
 export interface DmContentResponse extends ApiResponseBase {
   campaign: CampaignRecord;
   permissions: CampaignPermissions;

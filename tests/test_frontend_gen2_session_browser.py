@@ -630,6 +630,98 @@ def test_gen2_dm_content_browser_condition_workflow(
             browser.close()
 
 
+def test_gen2_dm_content_browser_player_wiki_workflow(
+    frontend_gen2_session_live_server,
+    tmp_path,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+    page_title = "Gen2 Field Note"
+    updated_title = "Gen2 Field Note Revised"
+    body_markdown = "The Gen2 Player Wiki lane can create durable page files."
+    updated_body_markdown = "The Gen2 Player Wiki lane can edit and archive durable page files."
+    tiny_png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+    )
+    image_path = tmp_path / "gen2-player-wiki.png"
+    image_path.write_bytes(tiny_png)
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/dm-content?lane=player-wiki")
+            expect(page.get_by_role("heading", name="DM Content: Player Wiki")).to_be_visible(timeout=10000)
+            fallback_links = page.locator(".dm-content-gen2-links")
+            expect(fallback_links.get_by_role("link", name="Statblocks")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Staged Articles")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Conditions")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Player Wiki", exact=True)).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Systems")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Session DM")).to_be_visible()
+
+            create_panel = page.locator("section.dm-player-wiki-create")
+            expect(create_panel.get_by_role("heading", name="Create player wiki page")).to_be_visible()
+            page.locator("#dm-player-wiki-create-title").fill(page_title)
+            page.locator("#dm-player-wiki-create-slug").fill("gen2-field-note")
+            page.locator("#dm-player-wiki-create-summary").fill("Created through the Gen2 Player Wiki lane.")
+            page.locator("#dm-player-wiki-create-aliases").fill("Gen2 Note\nField Lane")
+            page.locator("#dm-player-wiki-create-source-ref").fill("gen2-browser-test")
+            page.locator("#dm-player-wiki-create-image-upload").set_input_files(str(image_path))
+            expect(create_panel.get_by_text("Selected image: gen2-player-wiki.png")).to_be_visible()
+            page.locator("#dm-player-wiki-create-image-alt").fill("A one pixel Gen2 upload test image")
+            page.locator("#dm-player-wiki-create-image-caption").fill("Uploaded through Gen2.")
+            page.locator("#dm-player-wiki-create-body").fill(body_markdown)
+            create_panel.get_by_role("button", name="Create wiki page").click()
+            expect(page.get_by_text(f"Player Wiki page created: {page_title}.")).to_be_visible(timeout=10000)
+
+            library = page.locator("section.dm-player-wiki-library")
+            library.get_by_label("Search pages").fill("Gen2 Field")
+            page_card = library.locator("details.dm-player-wiki-card", has_text=page_title)
+            expect(page_card).to_be_visible(timeout=10000)
+            page_card.locator("summary").click()
+            expect(page_card.locator(".meta-badge", has_text="Image")).to_be_visible()
+            expect(page_card.locator(".meta-badge", has_text="Hard delete available")).to_be_visible()
+
+            expect(page_card.get_by_role("link", name="Open")).to_be_visible(timeout=10000)
+            expect(page_card.get_by_role("link", name="Flask editor")).to_be_visible()
+            expect(page_card.locator("#dm-player-wiki-edit-notes-gen2-field-note-title")).to_be_visible(timeout=10000)
+            page_card.locator("#dm-player-wiki-edit-notes-gen2-field-note-title").fill(updated_title)
+            page_card.locator("#dm-player-wiki-edit-notes-gen2-field-note-summary").fill("Edited through the Gen2 Player Wiki lane.")
+            page_card.locator("#dm-player-wiki-edit-notes-gen2-field-note-body").fill(updated_body_markdown)
+            page_card.get_by_role("button", name="Save wiki page").click()
+            expect(page.get_by_text(f"Player Wiki page updated: {updated_title}.")).to_be_visible(timeout=10000)
+
+            updated_card = library.locator("details.dm-player-wiki-card", has_text=updated_title)
+            expect(updated_card).to_be_visible(timeout=10000)
+            if not updated_card.evaluate("element => element.open"):
+                updated_card.locator("summary").click()
+            updated_card.get_by_role("button", name="Unpublish/archive").click()
+            expect(page.get_by_text(f"Player Wiki page archived: {updated_title}.")).to_be_visible(timeout=10000)
+            archived_card = library.locator("details.dm-player-wiki-card", has_text=updated_title)
+            expect(archived_card.locator(".meta-badge", has_text="Unpublished")).to_be_visible(timeout=10000)
+            if not archived_card.evaluate("element => element.open"):
+                archived_card.locator("summary").click()
+            archived_card.locator(".dm-content-delete-form input[type='checkbox']").check()
+            archived_card.get_by_role("button", name="Delete file").click()
+            expect(page.get_by_text("Player Wiki page deleted: notes/gen2-field-note.")).to_be_visible(timeout=10000)
+            expect(library.locator("details.dm-player-wiki-card", has_text=updated_title)).to_have_count(0, timeout=10000)
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_gen2_dm_content_browser_staged_article_workflow(
     frontend_gen2_session_live_server,
     users,
