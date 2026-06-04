@@ -565,20 +565,25 @@ body {
 }
 
 .dm-statblock-create textarea,
-.dm-statblock-card textarea {
+.dm-statblock-card textarea,
+.dm-condition-create textarea,
+.dm-condition-card textarea {
   font-family: "Consolas", "Liberation Mono", monospace;
 }
 
-.dm-statblock-library {
+.dm-statblock-library,
+.dm-condition-library {
   min-width: 0;
 }
 
-.dm-statblock-search {
+.dm-statblock-search,
+.dm-condition-search {
   align-items: end;
   margin-bottom: 0.75rem;
 }
 
-.dm-statblock-summary {
+.dm-statblock-summary,
+.dm-condition-card summary {
   align-items: center;
   gap: 0.5rem;
 }

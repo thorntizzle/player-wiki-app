@@ -29,6 +29,9 @@ import type {
   CombatLiveStatePayload,
   CombatPayload,
   DmContentResponse,
+  DmContentConditionCreatePayload,
+  DmContentConditionResponse,
+  DmContentConditionUpdatePayload,
   DmContentStatblockCreatePayload,
   DmContentStatblockResponse,
   DmContentStatblockUpdatePayload,
@@ -292,6 +295,42 @@ export class CampaignApiClient {
   async deleteDmContentStatblock(slug: string, statblockId: number): Promise<DmContentStatblockResponse> {
     return this.requestJson<DmContentStatblockResponse>(
       `/api/v1/campaigns/${encodeURIComponent(slug)}/dm-content/statblocks/${statblockId}`,
+      {
+        method: "DELETE",
+      },
+    );
+  }
+
+  async createDmContentCondition(
+    slug: string,
+    payload: DmContentConditionCreatePayload,
+  ): Promise<DmContentConditionResponse> {
+    return this.requestJson<DmContentConditionResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/dm-content/conditions`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async updateDmContentCondition(
+    slug: string,
+    conditionId: number,
+    payload: DmContentConditionUpdatePayload,
+  ): Promise<DmContentConditionResponse> {
+    return this.requestJson<DmContentConditionResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/dm-content/conditions/${conditionId}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async deleteDmContentCondition(slug: string, conditionId: number): Promise<DmContentConditionResponse> {
+    return this.requestJson<DmContentConditionResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/dm-content/conditions/${conditionId}`,
       {
         method: "DELETE",
       },

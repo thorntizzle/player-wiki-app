@@ -488,6 +488,20 @@ export interface DmContentConditionDefinition {
   updated_by_user_id: number | null;
 }
 
+export interface DmContentConditionCreatePayload {
+  name: string;
+  description_markdown: string;
+}
+
+export interface DmContentConditionUpdatePayload {
+  name?: string;
+  description_markdown?: string;
+}
+
+export interface DmContentConditionResponse extends ApiResponseBase {
+  condition: DmContentConditionDefinition;
+}
+
 export interface DmContentResponse extends ApiResponseBase {
   campaign: CampaignRecord;
   permissions: CampaignPermissions;

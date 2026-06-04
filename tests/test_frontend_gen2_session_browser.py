@@ -552,6 +552,84 @@ def test_gen2_dm_content_browser_statblock_workflow(
             browser.close()
 
 
+def test_gen2_dm_content_browser_condition_workflow(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+    condition_name = "Gen2 Dazed"
+    updated_condition_name = "Gen2 Staggered"
+    condition_description = "The target cannot take reactions until the start of its next turn."
+    updated_condition_description = "The target has disadvantage on Dexterity checks until the condition ends."
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/dm-content?lane=conditions")
+            expect(page.get_by_role("heading", name="DM Content: Conditions")).to_be_visible(timeout=10000)
+            fallback_links = page.locator(".dm-content-gen2-links")
+            expect(fallback_links.get_by_role("link", name="Statblocks")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Staged Articles")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Conditions")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Player Wiki", exact=True)).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Systems")).to_be_visible()
+            expect(fallback_links.get_by_role("link", name="Session DM")).to_be_visible()
+
+            create_panel = page.locator("section.dm-condition-create")
+            expect(create_panel.get_by_role("heading", name="Create condition")).to_be_visible()
+            page.locator("#dm-condition-create-name").fill(condition_name)
+            page.locator("#dm-condition-create-description").fill(condition_description)
+            create_panel.get_by_role("button", name="Save condition").click()
+            expect(page.get_by_text(f"Condition saved: {condition_name}.")).to_be_visible(timeout=10000)
+
+            library = page.locator("section.dm-condition-library")
+            expect(library.get_by_text("Custom conditions merge into the Combat condition picker")).to_be_visible()
+            condition_card = library.locator("details.dm-condition-card", has_text=condition_name)
+            expect(condition_card).to_be_visible(timeout=10000)
+            condition_card.locator("summary").click()
+            expect(condition_card.locator("pre.dm-content-preview", has_text=condition_description)).to_be_visible()
+
+            library.get_by_label("Search conditions").fill("not-here")
+            expect(library.get_by_text("No conditions matched that search.")).to_be_visible()
+            library.get_by_label("Search conditions").fill("")
+            condition_card = library.locator("details.dm-condition-card", has_text=condition_name)
+            expect(condition_card).to_be_visible()
+            if not condition_card.evaluate("element => element.open"):
+                condition_card.locator("summary").click()
+
+            condition_card.locator("input[name='name']").fill(updated_condition_name)
+            condition_card.locator("textarea[name='description_markdown']").fill(updated_condition_description)
+            condition_card.get_by_role("button", name="Save condition").click()
+            expect(page.get_by_text(f"Condition updated: {updated_condition_name}.")).to_be_visible(timeout=10000)
+
+            updated_card = library.locator("details.dm-condition-card", has_text=updated_condition_name)
+            expect(updated_card).to_be_visible(timeout=10000)
+            if not updated_card.evaluate("element => element.open"):
+                updated_card.locator("summary").click()
+            expect(updated_card.locator("pre.dm-content-preview", has_text=updated_condition_description)).to_be_visible()
+
+            library.get_by_label("Search conditions").fill("Gen2 Staggered")
+            expect(updated_card).to_be_visible()
+            updated_card.get_by_role("button", name="Delete condition").click()
+            expect(page.get_by_text(f"Condition deleted: {updated_condition_name}.")).to_be_visible(timeout=10000)
+            expect(library.locator("details.dm-condition-card", has_text=updated_condition_name)).to_have_count(0, timeout=10000)
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_gen2_dm_content_browser_staged_article_workflow(
     frontend_gen2_session_live_server,
     users,

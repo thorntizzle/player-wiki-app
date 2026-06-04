@@ -49,6 +49,9 @@ import type {
   DmContentStatblock,
   DmContentStatblockCreatePayload,
   DmContentStatblockUpdatePayload,
+  DmContentConditionCreatePayload,
+  DmContentConditionDefinition,
+  DmContentConditionUpdatePayload,
   SessionArticle,
   SessionArticleCreatePayload,
   SessionArticleCreatePayloadManual,
@@ -4240,7 +4243,12 @@ interface StagedArticleDraftState {
   image?: EmbeddedImageInput | null;
 }
 
-type DmContentLane = "statblocks" | "staged-articles";
+interface DmContentConditionDraftState {
+  name: string;
+  description: string;
+}
+
+type DmContentLane = "statblocks" | "staged-articles" | "conditions";
 
 interface DmContentStatblockDraftState {
   filename: string;
@@ -4253,6 +4261,13 @@ function buildInitialStatblockDraft(statblock: DmContentStatblock): DmContentSta
     filename: statblock.source_filename || `${statblock.title || "statblock"}.md`,
     subsection: statblock.subsection || "",
     markdown: statblock.body_markdown || "",
+  };
+}
+
+function buildInitialConditionDraft(condition: DmContentConditionDefinition): DmContentConditionDraftState {
+  return {
+    name: condition.name || "",
+    description: condition.description_markdown || "",
   };
 }
 
@@ -4831,7 +4846,9 @@ function DmContentPage() {
   const location = useLocation();
   const activeLane: DmContentLane = new URLSearchParams(location.search).get("lane") === "staged-articles"
     ? "staged-articles"
-    : "statblocks";
+    : new URLSearchParams(location.search).get("lane") === "conditions"
+      ? "conditions"
+      : "statblocks";
   const { apiClient, setAuthRequired } = useApiClient();
   const [statblockCreateDraft, setStatblockCreateDraft] = useState<DmContentStatblockDraftState>({
     filename: "gen2-statblock.md",
@@ -4852,13 +4869,19 @@ function DmContentPage() {
   const [sourceStatus, setSourceStatus] = useState<string | null>(null);
   const [selectedSourceRef, setSelectedSourceRef] = useState("");
   const [stagedDrafts, setStagedDrafts] = useState<Record<number, StagedArticleDraftState>>({});
+  const [conditionCreateDraft, setConditionCreateDraft] = useState<DmContentConditionDraftState>({
+    name: "",
+    description: "",
+  });
+  const [conditionQuery, setConditionQuery] = useState("");
+  const [conditionDrafts, setConditionDrafts] = useState<Record<number, DmContentConditionDraftState>>({});
   const [uiMessage, setUiMessage] = useState<string | null>(null);
   const [paneError, setPaneError] = useState<string | null>(null);
 
   const dmContentQuery = useQuery({
     queryKey: ["dm-content", resolvedCampaignSlug],
     queryFn: () => apiClient.getDmContent(resolvedCampaignSlug),
-    enabled: Boolean(resolvedCampaignSlug) && activeLane === "statblocks",
+    enabled: Boolean(resolvedCampaignSlug) && activeLane !== "staged-articles",
     retry: false,
   });
 
@@ -4883,6 +4906,7 @@ function DmContentPage() {
   }, [dmContentQuery.error, sessionQuery.error, setAuthRequired]);
 
   const statblocks: DmContentStatblock[] = dmContentQuery.data?.statblocks ?? [];
+  const conditions: DmContentConditionDefinition[] = dmContentQuery.data?.conditions ?? [];
   const canManageDmContent = dmContentQuery.data?.permissions.can_manage_dm_content ?? false;
 
   const stagedArticles: SessionArticle[] = sessionQuery.data?.staged_articles ?? [];
@@ -4897,6 +4921,16 @@ function DmContentPage() {
       return next;
     });
   }, [statblocks]);
+
+  useEffect(() => {
+    setConditionDrafts((current) => {
+      const next: Record<number, DmContentConditionDraftState> = {};
+      for (const condition of conditions) {
+        next[condition.id] = current[condition.id] ?? buildInitialConditionDraft(condition);
+      }
+      return next;
+    });
+  }, [conditions]);
 
   useEffect(() => {
     setStagedDrafts((current) => {
@@ -4945,6 +4979,18 @@ function DmContentPage() {
     }));
   }, [filteredStatblocks]);
 
+  const filteredConditions = useMemo(() => {
+    const query = conditionQuery.trim().toLowerCase();
+    if (!query) {
+      return conditions;
+    }
+    return conditions.filter(
+      (condition) =>
+        condition.name.toLowerCase().includes(query)
+        || condition.description_markdown.toLowerCase().includes(query),
+    );
+  }, [conditions, conditionQuery]);
+
   const createStatblockMutation = useMutation({
     mutationFn: (payload: DmContentStatblockCreatePayload) => apiClient.createDmContentStatblock(resolvedCampaignSlug, payload),
     onSuccess: (response) => {
@@ -4983,6 +5029,56 @@ function DmContentPage() {
     mutationFn: (statblockId: number) => apiClient.deleteDmContentStatblock(resolvedCampaignSlug, statblockId),
     onSuccess: (response) => {
       setUiMessage(`Statblock deleted: ${response.statblock.title}.`);
+      setPaneError(null);
+      void dmContentQuery.refetch();
+    },
+    onError: (error) => {
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+      setPaneError(apiErrorMessage(error));
+      setUiMessage(null);
+    },
+  });
+
+  const createConditionMutation = useMutation({
+    mutationFn: (payload: DmContentConditionCreatePayload) => apiClient.createDmContentCondition(resolvedCampaignSlug, payload),
+    onSuccess: (response) => {
+      setUiMessage(`Condition saved: ${response.condition.name}.`);
+      setPaneError(null);
+      setConditionCreateDraft({ name: "", description: "" });
+      void dmContentQuery.refetch();
+    },
+    onError: (error) => {
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+      setPaneError(apiErrorMessage(error));
+      setUiMessage(null);
+    },
+  });
+
+  const updateConditionMutation = useMutation({
+    mutationFn: (args: { id: number; payload: DmContentConditionUpdatePayload }) =>
+      apiClient.updateDmContentCondition(resolvedCampaignSlug, args.id, args.payload),
+    onSuccess: (response) => {
+      setUiMessage(`Condition updated: ${response.condition.name}.`);
+      setPaneError(null);
+      void dmContentQuery.refetch();
+    },
+    onError: (error) => {
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+      setPaneError(apiErrorMessage(error));
+      setUiMessage(null);
+    },
+  });
+
+  const deleteConditionMutation = useMutation({
+    mutationFn: (conditionId: number) => apiClient.deleteDmContentCondition(resolvedCampaignSlug, conditionId),
+    onSuccess: (response) => {
+      setUiMessage(`Condition deleted: ${response.condition.name}.`);
       setPaneError(null);
       void dmContentQuery.refetch();
     },
@@ -5101,9 +5197,14 @@ function DmContentPage() {
     setPaneError(null);
     setUiMessage(null);
   };
-  const pageError = activeLane === "statblocks"
-    ? getApiErrorMessage(dmContentQuery.error)
-    : getApiErrorMessage(sessionQuery.error);
+  const pageError = activeLane === "staged-articles"
+    ? getApiErrorMessage(sessionQuery.error)
+    : getApiErrorMessage(dmContentQuery.error);
+  const pageTitle = activeLane === "statblocks"
+    ? "DM Content: Statblocks"
+    : activeLane === "conditions"
+      ? "DM Content: Conditions"
+      : "DM Content: Staged Articles";
 
   const renderStatblockCard = (statblock: DmContentStatblock) => {
     const draft = statblockDrafts[statblock.id] ?? buildInitialStatblockDraft(statblock);
@@ -5202,19 +5303,103 @@ function DmContentPage() {
     );
   };
 
+  const renderConditionCard = (condition: DmContentConditionDefinition) => {
+    const draft = conditionDrafts[condition.id] ?? buildInitialConditionDraft(condition);
+    return (
+      <details className="article-card dm-condition-card" key={condition.id}>
+        <summary>
+          <strong>{condition.name}</strong>
+          <span className="article-kind">condition</span>
+        </summary>
+        <pre className="dm-content-preview">{condition.description_markdown}</pre>
+        {canManageDmContent ? (
+          <form
+            className="session-form"
+            onSubmit={(event: FormEvent<HTMLFormElement>) => {
+              event.preventDefault();
+              const formData = new FormData(event.currentTarget);
+              const updatedName = String(formData.get("name") || "").trim();
+              const description = String(formData.get("description_markdown") || "");
+              updateConditionMutation.mutate({
+                id: condition.id,
+                payload: {
+                  name: updatedName || condition.name,
+                  description_markdown: description,
+                },
+              });
+            }}
+          >
+            <label htmlFor={`dm-condition-name-${condition.id}`} className="chat-label">
+              Name
+            </label>
+            <input
+              id={`dm-condition-name-${condition.id}`}
+              name="name"
+              value={draft.name}
+              disabled={!canManageDmContent}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                const name = event.currentTarget.value;
+                setConditionDrafts((current) => ({
+                  ...current,
+                  [condition.id]: {
+                    ...(current[condition.id] ?? draft),
+                    name,
+                  },
+                }));
+              }}
+            />
+            <label htmlFor={`dm-condition-description-${condition.id}`} className="chat-label">
+              Description (markdown)
+            </label>
+            <textarea
+              id={`dm-condition-description-${condition.id}`}
+              name="description_markdown"
+              rows={8}
+              value={draft.description}
+              disabled={!canManageDmContent}
+              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+                const description = event.currentTarget.value;
+                setConditionDrafts((current) => ({
+                  ...current,
+                  [condition.id]: {
+                    ...(current[condition.id] ?? draft),
+                    description,
+                  },
+                }));
+              }}
+            />
+            <div className="article-actions">
+              <button type="submit" disabled={!canManageDmContent || updateConditionMutation.isPending}>
+                {updateConditionMutation.isPending ? "Saving..." : "Save condition"}
+              </button>
+              <button
+                type="button"
+                className="button-danger"
+                disabled={!canManageDmContent || deleteConditionMutation.isPending}
+                onClick={() => deleteConditionMutation.mutate(condition.id)}
+              >
+                {deleteConditionMutation.isPending ? "Deleting..." : "Delete condition"}
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </details>
+    );
+  };
+
   return (
     <section className="panel dm-content-gen2-page">
       <div className="panel-header">
         <Link to="/" className="button button-secondary">
           Back to list
         </Link>
-        <h2>{activeLane === "statblocks" ? "DM Content: Statblocks" : "DM Content: Staged Articles"}</h2>
-        {activeLane === "statblocks" && canManageDmContent ? <span className="pill">DM+</span> : null}
+        <h2>{pageTitle}</h2>
+        {(activeLane === "statblocks" || activeLane === "conditions") && canManageDmContent ? <span className="pill">DM+</span> : null}
         {activeLane === "staged-articles" && canManageSession ? <span className="pill">DM+</span> : null}
       </div>
 
       <ApiErrorNotice
-        isLoading={activeLane === "statblocks" ? dmContentQuery.isLoading : sessionQuery.isLoading}
+        isLoading={activeLane === "staged-articles" ? sessionQuery.isLoading : dmContentQuery.isLoading}
         message={pageError}
         onAuth={() => setAuthRequired(true)}
       />
@@ -5232,7 +5417,12 @@ function DmContentPage() {
         >
           Staged Articles
         </a>
-        <a href={`/campaigns/${encodedCampaignSlug}/dm-content/conditions`}>Conditions</a>
+        <a
+          className={activeLane === "conditions" ? "is-active" : ""}
+          href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=conditions`}
+        >
+          Conditions
+        </a>
         <a href={`/campaigns/${encodedCampaignSlug}/dm-content/player-wiki`}>Player Wiki</a>
         <a href={`/campaigns/${encodedCampaignSlug}/dm-content/systems`}>Systems</a>
         <a href={`/campaigns/${encodedCampaignSlug}/session/dm`}>Session DM</a>
@@ -5242,6 +5432,9 @@ function DmContentPage() {
       {uiMessage ? <p className="status status-neutral">{uiMessage}</p> : null}
       {activeLane === "statblocks" && !canManageDmContent && !dmContentQuery.isLoading ? (
         <p className="status status-error">You do not have permission to manage DM Content statblocks.</p>
+      ) : null}
+      {activeLane === "conditions" && !canManageDmContent && !dmContentQuery.isLoading ? (
+        <p className="status status-error">You do not have permission to manage DM Content conditions.</p>
       ) : null}
       {activeLane === "staged-articles" && !canManageSession && !sessionQuery.isLoading ? (
         <p className="status status-error">You do not have permission to manage staged articles.</p>
@@ -5394,6 +5587,104 @@ function DmContentPage() {
             {!dmContentQuery.isLoading && !filteredStatblocks.length ? (
               <p className="status status-neutral">
                 {statblockQuery ? "No statblocks matched that search." : "No DM statblocks have been uploaded yet."}
+              </p>
+            ) : null}
+          </section>
+        </div>
+      ) : activeLane === "conditions" ? (
+        <div className="split-grid dm-content-staged-grid">
+          <section className="panel panel-nested dm-condition-create">
+            <div className="panel-header">
+              <h3>Create condition</h3>
+              <span className="pill">Custom</span>
+            </div>
+            <form
+              className="session-form"
+              onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                event.preventDefault();
+                const formData = new FormData(event.currentTarget);
+                const name = String(formData.get("name") || "").trim();
+                const description = String(formData.get("description_markdown") || "");
+                if (!name) {
+                  setPaneError("Condition name is required.");
+                  setUiMessage(null);
+                  return;
+                }
+                createConditionMutation.mutate({
+                  name,
+                  description_markdown: description,
+                });
+              }}
+            >
+              <label htmlFor="dm-condition-create-name" className="chat-label">
+                Name
+              </label>
+              <input
+                id="dm-condition-create-name"
+                name="name"
+                value={conditionCreateDraft.name}
+                disabled={!canManageDmContent}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const name = event.currentTarget.value;
+                  setConditionCreateDraft((current) => ({
+                    ...current,
+                    name,
+                  }));
+                }}
+              />
+              <label htmlFor="dm-condition-create-description" className="chat-label">
+                Description (markdown)
+              </label>
+              <textarea
+                id="dm-condition-create-description"
+                name="description_markdown"
+                rows={10}
+                value={conditionCreateDraft.description}
+                disabled={!canManageDmContent}
+                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+                  const description = event.currentTarget.value;
+                  setConditionCreateDraft((current) => ({
+                    ...current,
+                    description,
+                  }));
+                }}
+              />
+              <button type="submit" disabled={!canManageDmContent || createConditionMutation.isPending}>
+                {createConditionMutation.isPending ? "Saving..." : "Save condition"}
+              </button>
+            </form>
+          </section>
+
+          <section className="panel panel-nested dm-condition-library">
+            <div className="panel-header">
+              <h3>Condition library</h3>
+              <span className="pill">{conditions.length}</span>
+            </div>
+            <p className="status status-neutral">
+              Custom conditions merge into the Combat condition picker alongside built-in DND-5E conditions.
+            </p>
+            <form
+              className="search-form dm-condition-search"
+              onSubmit={(event: FormEvent<HTMLFormElement>) => event.preventDefault()}
+            >
+              <label htmlFor="dm-condition-search">Search conditions</label>
+              <input
+                id="dm-condition-search"
+                type="search"
+                value={conditionQuery}
+                placeholder="Name or description"
+                onChange={(event: ChangeEvent<HTMLInputElement>) => setConditionQuery(event.currentTarget.value)}
+              />
+            </form>
+            {dmContentQuery.isLoading ? <p className="status status-neutral">Loading conditions ...</p> : null}
+            {!dmContentQuery.isLoading && filteredConditions.length ? (
+              <div className="article-stack dm-condition-list">
+                {filteredConditions.map(renderConditionCard)}
+              </div>
+            ) : null}
+            {!dmContentQuery.isLoading && !filteredConditions.length ? (
+              <p className="status status-neutral">
+                {conditionQuery ? "No conditions matched that search." : "No custom conditions have been created yet."}
               </p>
             ) : null}
           </section>
