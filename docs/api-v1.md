@@ -47,6 +47,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 - `GET /api/v1/systems/import-runs/<import_run_id>`
 - `POST /api/v1/systems/imports/dnd5e`
 - `GET /api/v1/me`
+- `GET /api/v1/me/settings`
+- `PATCH /api/v1/me/settings`
 - `GET /api/v1/campaigns`
 - `GET /api/v1/campaigns/<campaign_slug>`
 - `GET /api/v1/campaigns/<campaign_slug>/wiki`
@@ -166,6 +168,7 @@ Use the browser Player Wiki lane when you want the built-in removal guidance, ar
 - `GET /api/v1/systems/import-runs` and `GET /api/v1/systems/import-runs/<import_run_id>` expose the recorded shared-library ingest history, including import summaries and source file lists.
 - Custom campaign Systems entry create/edit/archive/restore is exposed through DM/admin JSON endpoints under `/api/v1/campaigns/<campaign_slug>/systems/custom-entries`. Each mutation returns both the saved `entry` and a refreshed `systems` management payload for Gen2. Imported shared-library Systems entries remain read-only at the content level; use campaign source policy or entry overrides for campaign-specific changes unless a shared-library edit model is deliberately added later.
 - `GET /api/v1/me` now includes the same app metadata block alongside the authenticated user payload, memberships, and user preferences such as `theme_key` and `session_chat_order`.
+- `GET /api/v1/me/settings` returns the authenticated user's account-settings payload for Gen2, including theme presets with preview colors, live-session chat-order choices, and current preferences. `PATCH /api/v1/me/settings` accepts `theme_key` and/or `session_chat_order`, validates them with the same account helpers as Flask, persists the preferences, and returns the refreshed preference values used by `/api/v1/me` theme hydration.
 - `GET /api/v1/campaigns/<campaign_slug>` includes visibility-aware campaign permissions such as `can_manage_visibility`, which the Gen2 shell uses to decide whether to show the Control link.
 - The `/wiki` endpoints are player-facing published-wiki reads for Gen2 and other clients. `GET .../wiki` follows campaign-scope access and returns a restricted-wiki message when the campaign is visible but the wiki scope is not; section and page detail reads require wiki-scope access. These endpoints return only visible published pages, rendered body HTML through the same repository renderer as Flask, Gen2 hrefs for wiki links, and page image URLs only when the referenced protected campaign asset exists.
 - `PATCH /api/v1/campaigns/<campaign_slug>/content/config` currently supports the live editable campaign fields `title`, `summary`, `system`, `current_session`, `source_wiki_root`, and `systems_library`. Supported `system` and `systems_library` aliases are canonicalized through the app system-policy layer, including `DND-5E` and `Xianxia`.

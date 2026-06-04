@@ -152,6 +152,57 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             browser.close()
 
 
+def test_gen2_account_settings_saves_preferences_and_updates_theme(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["party"]["email"], password=users["party"]["password"])
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
+            account_link = page.get_by_role("link", name="Account")
+            expect(account_link).to_be_visible(timeout=10000)
+            expect(account_link).to_have_attribute("href", re.compile(r"/app-next/account$"))
+
+            page.goto(f"{base_url}/app-next/account")
+            expect(page.get_by_role("heading", name="Party Player")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("heading", name="Color theme")).to_be_visible()
+            expect(page.get_by_role("heading", name="Live session chat order")).to_be_visible()
+            expect(page.get_by_role("link", name="Flask account")).to_be_visible()
+
+            page.locator("input[name='theme_key'][value='moonlit']").check()
+            page.locator("input[name='session_chat_order'][value='oldest_first']").check()
+            page.get_by_role("button", name="Save account settings").click()
+
+            expect(page.get_by_text("Account settings saved.")).to_be_visible(timeout=10000)
+            expect(page.locator("html")).to_have_attribute("data-theme", "moonlit")
+
+            me_response = page.request.get(f"{base_url}/api/v1/me")
+            assert me_response.ok
+            preferences = me_response.json()["preferences"]
+            assert preferences == {
+                "theme_key": "moonlit",
+                "session_chat_order": "oldest_first",
+            }
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_gen2_combat_browser_opens_player_workspace_and_preserves_focused_draft(
     app,
     frontend_gen2_session_live_server,

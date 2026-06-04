@@ -35,7 +35,12 @@ from .auth import (
     get_repository,
     has_session_mode_access,
 )
-from .auth_store import isoformat
+from .auth_store import (
+    SESSION_CHAT_ORDER_CHOICES,
+    is_valid_session_chat_order,
+    normalize_session_chat_order,
+    isoformat,
+)
 from .campaign_combat_service import CampaignCombatRevisionConflictError, CampaignCombatValidationError
 from .campaign_content_service import (
     CampaignContentError,
@@ -90,6 +95,7 @@ from .character_presenter import (
     present_character_roster,
     resolve_item_description_html,
 )
+from .themes import get_theme_preset, is_valid_theme_key, list_theme_presets
 from .character_service import CharacterStateValidationError, merge_state_with_definition
 from .character_store import CharacterStateConflictError
 from .character_repository import load_campaign_character_config
@@ -2338,6 +2344,14 @@ def register_api(app) -> None:
             }
         )
 
+    def serialize_theme_preset(preset) -> dict[str, Any]:
+        return {
+            "key": preset.key,
+            "label": preset.label,
+            "description": preset.description,
+            "preview_colors": list(preset.preview_colors),
+        }
+
     @api.get("/me")
     @api_login_required
     def me():
@@ -2354,6 +2368,83 @@ def register_api(app) -> None:
                 "preferences": {
                     "theme_key": get_current_user_preferences().theme_key,
                     "session_chat_order": get_current_user_preferences().session_chat_order,
+                },
+            }
+        )
+
+    @api.get("/me/settings")
+    @api_login_required
+    def me_settings():
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        preferences = get_current_user_preferences()
+        return jsonify(
+            {
+                "ok": True,
+                "theme_presets": [serialize_theme_preset(preset) for preset in list_theme_presets()],
+                "session_chat_order_choices": SESSION_CHAT_ORDER_CHOICES,
+                "preferences": {
+                    "theme_key": preferences.theme_key,
+                    "session_chat_order": preferences.session_chat_order,
+                },
+                "user": serialize_user(user),
+            }
+        )
+
+    @api.patch("/me/settings")
+    @api_login_required
+    def me_settings_update():
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        try:
+            payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        requested_theme_key = payload.get("theme_key", "")
+        requested_chat_order = payload.get("session_chat_order", "")
+        has_theme_update = bool(str(requested_theme_key).strip())
+        has_chat_order_update = bool(str(requested_chat_order).strip())
+
+        if not has_theme_update and not has_chat_order_update:
+            return json_error("No account settings were provided.", 400, code="validation_error")
+
+        if has_theme_update:
+            if not is_valid_theme_key(str(requested_theme_key)):
+                return json_error("Choose a valid theme preset.", 400, code="validation_error")
+
+        if has_chat_order_update:
+            if not is_valid_session_chat_order(requested_chat_order):
+                return json_error("Choose a valid live session chat order.", 400, code="validation_error")
+
+        store = get_auth_store()
+        current_preferences = store.get_user_preferences(user.id)
+        normalized_theme_key = current_preferences.theme_key
+        normalized_chat_order = current_preferences.session_chat_order
+
+        if has_theme_update:
+            normalized_theme_key = get_theme_preset(requested_theme_key).key
+            if normalized_theme_key != current_preferences.theme_key:
+                store.set_user_theme_key(user.id, normalized_theme_key)
+
+        if has_chat_order_update:
+            normalized_chat_order = normalize_session_chat_order(requested_chat_order)
+            if normalized_chat_order != current_preferences.session_chat_order:
+                store.set_user_session_chat_order(user.id, normalized_chat_order)
+
+        updated_preferences = store.get_user_preferences(user.id)
+
+        return jsonify(
+            {
+                "ok": True,
+                "user": serialize_user(user),
+                "preferences": {
+                    "theme_key": updated_preferences.theme_key,
+                    "session_chat_order": updated_preferences.session_chat_order,
                 },
             }
         )

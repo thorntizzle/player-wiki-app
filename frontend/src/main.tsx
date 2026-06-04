@@ -20,6 +20,7 @@ import {
 } from "./api/client";
 import type {
   CampaignEntry,
+  AccountSettingsUpdatePayload,
   CharacterCurrencyPatchPayload,
   CharacterDetailResponse,
   CharacterEquipmentRow,
@@ -946,7 +947,7 @@ function AppShell() {
                       Admin
                     </a>
                   ) : null}
-                  <a className="button button-secondary" href="/account">
+                  <a className="button button-secondary" href="/app-next/account">
                     Account
                   </a>
                   <span className="user-badge">
@@ -1087,6 +1088,200 @@ function CampaignListPage() {
           <p className="status status-neutral">No campaigns are visible to this account.</p>
         ) : null}
       </div>
+    </section>
+  );
+}
+
+function AccountSettingsPage() {
+  const { apiClient, setAuthRequired } = useApiClient();
+  const [draftThemeKey, setDraftThemeKey] = useState("");
+  const [draftChatOrder, setDraftChatOrder] = useState("");
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  const settingsQuery = useQuery({
+    queryKey: ["account-settings"],
+    queryFn: () => apiClient.getAccountSettings(),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (isAuthError(settingsQuery.error)) {
+      setAuthRequired(true);
+    }
+  }, [settingsQuery.error, setAuthRequired]);
+
+  useEffect(() => {
+    const preferences = settingsQuery.data?.preferences;
+    if (!preferences) {
+      return;
+    }
+    setDraftThemeKey(preferences.theme_key || "");
+    setDraftChatOrder(preferences.session_chat_order || "");
+  }, [settingsQuery.data?.preferences?.theme_key, settingsQuery.data?.preferences?.session_chat_order]);
+
+  const saveSettings = useMutation({
+    mutationFn: (payload: AccountSettingsUpdatePayload) => apiClient.patchAccountSettings(payload),
+    onSuccess: (response) => {
+      setStatusMessage("Account settings saved.");
+      setDraftThemeKey(response.preferences.theme_key || "");
+      setDraftChatOrder(response.preferences.session_chat_order || "");
+      if (response.preferences.theme_key) {
+        document.documentElement.dataset.theme = response.preferences.theme_key;
+      }
+      void queryClient.invalidateQueries({ queryKey: ["me"] });
+      void queryClient.invalidateQueries({ queryKey: ["account-settings"] });
+    },
+    onError: (error) => {
+      setStatusMessage(null);
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+    },
+  });
+
+  const error = getApiErrorMessage(settingsQuery.error);
+  const saveError = saveSettings.error ? apiErrorMessage(saveSettings.error) : null;
+  const preferences = settingsQuery.data?.preferences;
+  const themePresets = settingsQuery.data?.theme_presets ?? [];
+  const chatOrderChoices = settingsQuery.data?.session_chat_order_choices ?? [];
+  const user = settingsQuery.data?.user;
+  const selectedTheme = themePresets.find((theme) => theme.key === (preferences?.theme_key || draftThemeKey));
+  const hasDraft = Boolean(draftThemeKey || draftChatOrder);
+  const isUnchanged =
+    draftThemeKey === (preferences?.theme_key || "") && draftChatOrder === (preferences?.session_chat_order || "");
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!hasDraft) {
+      return;
+    }
+    setStatusMessage(null);
+    saveSettings.mutate({
+      theme_key: draftThemeKey,
+      session_chat_order: draftChatOrder,
+    });
+  };
+
+  return (
+    <section className="account-settings-page">
+      <div className="panel account-hero">
+        <p className="eyebrow">Account settings</p>
+        <h1>{user?.display_name ?? "Account"}</h1>
+        <p className="lede">Save interface preferences to your account and use them everywhere you are signed in.</p>
+        <p className="meta">
+          Current theme: {selectedTheme?.label ?? preferences?.theme_key ?? "Loading"}
+          {user?.is_admin ? " | App admin" : ""}
+        </p>
+      </div>
+
+      <ApiErrorNotice isLoading={settingsQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
+
+      {settingsQuery.data ? (
+        <div className="account-settings-layout">
+          <form className="panel account-settings-form" onSubmit={handleSubmit}>
+            <section className="account-settings-group">
+              <div className="panel-header">
+                <div>
+                  <h2>Color theme</h2>
+                  <p className="meta">These presets restyle the shared app chrome, cards, forms, and reading surfaces.</p>
+                </div>
+              </div>
+              <div className="settings-option-grid">
+                {themePresets.map((theme) => {
+                  const inputId = `account-theme-${theme.key}`;
+                  const checked = draftThemeKey === theme.key;
+                  return (
+                    <label className={checked ? "settings-option is-selected" : "settings-option"} htmlFor={inputId} key={theme.key}>
+                      <input
+                        id={inputId}
+                        type="radio"
+                        name="theme_key"
+                        value={theme.key}
+                        checked={checked}
+                        onChange={() => setDraftThemeKey(theme.key)}
+                      />
+                      <span className="settings-option__header">
+                        <span>
+                          <strong>{theme.label}</strong>
+                          {preferences?.theme_key === theme.key ? <span className="meta settings-option__status">Current</span> : null}
+                        </span>
+                        <span className="settings-option__swatches" aria-hidden="true">
+                          {theme.preview_colors.map((color) => (
+                            <span className="settings-option__swatch" style={{ background: color }} key={color} />
+                          ))}
+                        </span>
+                      </span>
+                      <span className="meta">{theme.description}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="account-settings-group">
+              <div className="panel-header">
+                <div>
+                  <h2>Live session chat order</h2>
+                  <p className="meta">
+                    This changes the order of the live Session chat window for your account only. Stored session logs stay chronological.
+                  </p>
+                </div>
+              </div>
+              <div className="settings-option-grid">
+                {chatOrderChoices.map((choice) => {
+                  const inputId = `account-chat-order-${choice.value}`;
+                  const checked = draftChatOrder === choice.value;
+                  return (
+                    <label className={checked ? "settings-option is-selected" : "settings-option"} htmlFor={inputId} key={choice.value}>
+                      <input
+                        id={inputId}
+                        type="radio"
+                        name="session_chat_order"
+                        value={choice.value}
+                        checked={checked}
+                        onChange={() => setDraftChatOrder(choice.value)}
+                      />
+                      <span className="settings-option__header">
+                        <span>
+                          <strong>{choice.label}</strong>
+                          {preferences?.session_chat_order === choice.value ? (
+                            <span className="meta settings-option__status">Current</span>
+                          ) : null}
+                        </span>
+                      </span>
+                      <span className="meta">{choice.description}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+
+            <div className="account-settings-actions">
+              <button type="submit" className="button" disabled={saveSettings.isPending || !hasDraft || isUnchanged}>
+                {saveSettings.isPending ? "Saving..." : "Save account settings"}
+              </button>
+              <a className="button button-secondary" href="/account">
+                Flask account
+              </a>
+              {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
+              {saveError ? <p className="status status-error">{saveError}</p> : null}
+            </div>
+          </form>
+
+          <aside className="panel account-settings-sidebar">
+            <h2>Account</h2>
+            <p>
+              <strong>{user?.display_name}</strong>
+            </p>
+            <p className="meta">{user?.email}</p>
+            {user?.is_admin ? <p className="meta-badge">App admin</p> : null}
+            <p className="meta">Theme and live-session chat preferences are stored in the auth database and applied on every signed-in request.</p>
+            <a className="ghost-button" href="/app-next/">
+              Back to campaigns
+            </a>
+          </aside>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -9687,6 +9882,12 @@ const campaignsRoute = createRoute({
   component: CampaignListPage,
 });
 
+const accountSettingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/account",
+  component: AccountSettingsPage,
+});
+
 const campaignHomeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/campaigns/$campaignSlug",
@@ -9761,6 +9962,7 @@ const campaignDmContentRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   campaignsRoute,
+  accountSettingsRoute,
   campaignHomeRoute,
   campaignWikiSectionRoute,
   campaignWikiPageRoute,

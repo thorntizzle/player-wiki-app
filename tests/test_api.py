@@ -402,6 +402,84 @@ def test_api_me_and_campaigns_use_bearer_token_auth(client, app, users):
     assert revoked_response.get_json()["error"]["code"] == "auth_required"
 
 
+def test_api_account_settings_reads_and_updates_user_preferences(client, app, users):
+    token = issue_api_token(app, users["party"]["email"], label="account-settings-api")
+
+    settings_response = client.get("/api/v1/me/settings", headers=api_headers(token))
+
+    assert settings_response.status_code == 200
+    settings_payload = settings_response.get_json()
+    assert settings_payload["ok"] is True
+    assert settings_payload["user"]["email"] == users["party"]["email"]
+    assert settings_payload["preferences"] == {
+        "theme_key": "parchment",
+        "session_chat_order": "newest_first",
+    }
+    assert [theme["key"] for theme in settings_payload["theme_presets"]] == [
+        "parchment",
+        "moonlit",
+        "verdant",
+        "ember",
+    ]
+    assert [choice["value"] for choice in settings_payload["session_chat_order_choices"]] == [
+        "newest_first",
+        "oldest_first",
+    ]
+
+    update_response = client.patch(
+        "/api/v1/me/settings",
+        headers=api_headers(token),
+        json={"theme_key": "moonlit", "session_chat_order": "oldest_first"},
+    )
+
+    assert update_response.status_code == 200
+    update_payload = update_response.get_json()
+    assert update_payload["preferences"] == {
+        "theme_key": "moonlit",
+        "session_chat_order": "oldest_first",
+    }
+
+    me_response = client.get("/api/v1/me", headers=api_headers(token))
+    assert me_response.status_code == 200
+    assert me_response.get_json()["preferences"] == update_payload["preferences"]
+
+    with app.app_context():
+        preferences = AuthStore().get_user_preferences(users["party"]["id"])
+        assert preferences.theme_key == "moonlit"
+        assert preferences.session_chat_order == "oldest_first"
+
+
+def test_api_account_settings_rejects_invalid_preferences(client, app, users):
+    token = issue_api_token(app, users["party"]["email"], label="account-settings-invalid-api")
+
+    invalid_theme_response = client.patch(
+        "/api/v1/me/settings",
+        headers=api_headers(token),
+        json={"theme_key": "bad-theme", "session_chat_order": "oldest_first"},
+    )
+    assert invalid_theme_response.status_code == 400
+    assert invalid_theme_response.get_json()["error"]["code"] == "validation_error"
+    assert invalid_theme_response.get_json()["error"]["message"] == "Choose a valid theme preset."
+
+    invalid_order_response = client.patch(
+        "/api/v1/me/settings",
+        headers=api_headers(token),
+        json={"theme_key": "moonlit", "session_chat_order": "sideways"},
+    )
+    assert invalid_order_response.status_code == 400
+    assert invalid_order_response.get_json()["error"]["code"] == "validation_error"
+    assert invalid_order_response.get_json()["error"]["message"] == "Choose a valid live session chat order."
+
+    empty_response = client.patch("/api/v1/me/settings", headers=api_headers(token), json={})
+    assert empty_response.status_code == 400
+    assert empty_response.get_json()["error"]["message"] == "No account settings were provided."
+
+    with app.app_context():
+        preferences = AuthStore().get_user_preferences(users["party"]["id"])
+        assert preferences.theme_key == "parchment"
+        assert preferences.session_chat_order == "newest_first"
+
+
 def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, app, users):
     player_token = issue_api_token(app, users["party"]["email"], label="player-wiki-api")
 

@@ -1,4 +1,7 @@
 import type {
+  AccountSettingsResponse,
+  AccountSettingsUpdatePayload,
+  AccountSettingsUpdateResponse,
   ApiAppResponse,
   ApiErrorPayload,
   CampaignDetailResponse,
@@ -223,6 +226,19 @@ export class CampaignApiClient {
 
   async getMe(): Promise<MeResponse> {
     return this.requestJson<MeResponse>("/api/v1/me");
+  }
+
+  async getAccountSettings(): Promise<AccountSettingsResponse> {
+    return this.requestJson<AccountSettingsResponse>("/api/v1/me/settings");
+  }
+
+  async patchAccountSettings(
+    payload: AccountSettingsUpdatePayload,
+  ): Promise<AccountSettingsUpdateResponse> {
+    return this.requestJson<AccountSettingsUpdateResponse>("/api/v1/me/settings", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
   }
 
   async getCampaign(slug: string): Promise<CampaignDetailResponse> {

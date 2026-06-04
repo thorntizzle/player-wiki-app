@@ -252,6 +252,96 @@ body {
   margin-top: 0;
 }
 
+.account-settings-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.account-hero h1 {
+  margin: 0.1rem 0 0.4rem;
+}
+
+.account-settings-layout {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 2fr) minmax(16rem, 0.75fr);
+}
+
+.account-settings-form,
+.account-settings-sidebar,
+.account-settings-group {
+  display: grid;
+  gap: 1rem;
+}
+
+.account-settings-group + .account-settings-group {
+  border-top: 1px solid #e5eaf3;
+  padding-top: 1rem;
+}
+
+.settings-option-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.settings-option {
+  align-content: start;
+  background: #f9fbff;
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  cursor: pointer;
+  display: grid;
+  gap: 0.55rem;
+  min-height: 8.5rem;
+  padding: 0.75rem;
+}
+
+.settings-option.is-selected {
+  background: #eef6ff;
+  border-color: #2f7db3;
+}
+
+.settings-option input {
+  inline-size: 1rem;
+  margin: 0;
+}
+
+.settings-option__header {
+  align-items: start;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.settings-option__status {
+  display: block;
+  margin-top: 0.15rem;
+}
+
+.settings-option__swatches {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 0.2rem;
+}
+
+.settings-option__swatch {
+  border: 1px solid rgba(15, 23, 42, 0.25);
+  border-radius: 999px;
+  display: inline-block;
+  height: 1.1rem;
+  width: 1.1rem;
+}
+
+.account-settings-actions {
+  align-items: center;
+  border-top: 1px solid #e5eaf3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding-top: 1rem;
+}
+
 .lede {
   color: #334155;
   font-size: 1rem;
@@ -1460,7 +1550,8 @@ textarea {
     padding: 0.85rem;
   }
 
-  .page-layout {
+  .page-layout,
+  .account-settings-layout {
     grid-template-columns: 1fr;
   }
 

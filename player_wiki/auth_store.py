@@ -14,6 +14,22 @@ from .themes import DEFAULT_THEME_KEY, normalize_theme_key
 SESSION_CHAT_ORDER_NEWEST_FIRST = "newest_first"
 SESSION_CHAT_ORDER_OLDEST_FIRST = "oldest_first"
 DEFAULT_SESSION_CHAT_ORDER = SESSION_CHAT_ORDER_NEWEST_FIRST
+SESSION_CHAT_ORDER_LABELS = {
+    SESSION_CHAT_ORDER_NEWEST_FIRST: "Newest first",
+    SESSION_CHAT_ORDER_OLDEST_FIRST: "Oldest first",
+}
+SESSION_CHAT_ORDER_CHOICES = [
+    {
+        "value": SESSION_CHAT_ORDER_NEWEST_FIRST,
+        "label": SESSION_CHAT_ORDER_LABELS[SESSION_CHAT_ORDER_NEWEST_FIRST],
+        "description": "Show new messages and revealed articles above older entries in the live Session chat window.",
+    },
+    {
+        "value": SESSION_CHAT_ORDER_OLDEST_FIRST,
+        "label": SESSION_CHAT_ORDER_LABELS[SESSION_CHAT_ORDER_OLDEST_FIRST],
+        "description": "Keep the live Session chat window in chronological order from top to bottom.",
+    },
+]
 VALID_SESSION_CHAT_ORDERS = frozenset(
     {
         SESSION_CHAT_ORDER_NEWEST_FIRST,

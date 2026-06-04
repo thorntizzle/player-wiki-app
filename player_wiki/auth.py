@@ -13,6 +13,8 @@ from .auth_store import (
     AuthStore,
     CampaignMembership,
     DEFAULT_SESSION_CHAT_ORDER,
+    SESSION_CHAT_ORDER_CHOICES,
+    SESSION_CHAT_ORDER_LABELS,
     UserAccount,
     UserPreferences,
     is_valid_session_chat_order,
@@ -38,22 +40,6 @@ from .repository_store import RepositoryStore
 from .themes import ThemePreset, get_theme_preset, is_valid_theme_key, list_theme_presets, normalize_theme_key
 
 AUTH_SESSION_KEY = "auth_session_token"
-SESSION_CHAT_ORDER_LABELS = {
-    "newest_first": "Newest first",
-    "oldest_first": "Oldest first",
-}
-SESSION_CHAT_ORDER_CHOICES = [
-    {
-        "value": "newest_first",
-        "label": "Newest first",
-        "description": "Show new messages and revealed articles above older entries in the live Session chat window.",
-    },
-    {
-        "value": "oldest_first",
-        "label": "Oldest first",
-        "description": "Keep the live Session chat window in chronological order from top to bottom.",
-    },
-]
 
 
 @dataclass(slots=True)

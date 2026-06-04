@@ -40,8 +40,9 @@ The current Gen2 build covers:
 - Combat player view, DM status, and DM controls
 - DM Content statblocks, conditions, staged articles, Player Wiki, and Systems management lanes
 - Systems browsing landing/search, source pages, source categories, and entry detail pages
+- Account settings for theme and live-session chat-order preferences
 
-Flask remains the source of truth for workflows that are still Flask-first, including broader character authoring, Control, Help, Account, Admin, shared/core Systems entry editing, and Systems imports.
+Flask remains the source of truth for workflows that are still Flask-first, including broader character authoring, Control, Help, Admin, shared/core Systems entry editing, and Systems imports.
 
 ## Build & Preview
 
@@ -67,6 +68,9 @@ The current Gen2 build is local-only: `frontend/dist` is intentionally ignored b
 The full API reference is maintained in `docs/api-v1.md`. The list below is a quick orientation for the original Session pilot path and should not be treated as exhaustive for the current Gen2 app.
 
 - `GET /api/v1/app`
+- `GET /api/v1/me`
+- `GET /api/v1/me/settings`
+- `PATCH /api/v1/me/settings`
 - `GET /api/v1/campaigns`
 - `GET /api/v1/campaigns/<campaign_slug>/session`
 - `POST /api/v1/campaigns/<campaign_slug>/session/start`

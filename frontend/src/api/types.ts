@@ -81,12 +81,42 @@ export interface UserPreferences {
   session_chat_order?: string | null;
 }
 
+export interface ThemePreset {
+  key: string;
+  label: string;
+  description: string;
+  preview_colors: string[];
+}
+
+export interface SessionChatOrderChoice {
+  value: string;
+  label: string;
+  description: string;
+}
+
 export interface MeResponse extends ApiResponseBase {
   app: AppMeta;
   auth_source: string;
   user: UserProfile;
   memberships: UserMembership[];
   preferences?: UserPreferences;
+}
+
+export interface AccountSettingsResponse extends ApiResponseBase {
+  user: UserProfile;
+  preferences: UserPreferences;
+  theme_presets: ThemePreset[];
+  session_chat_order_choices: SessionChatOrderChoice[];
+}
+
+export interface AccountSettingsUpdatePayload {
+  theme_key?: string;
+  session_chat_order?: string;
+}
+
+export interface AccountSettingsUpdateResponse extends ApiResponseBase {
+  user: UserProfile;
+  preferences: UserPreferences;
 }
 
 export interface CampaignsResponse extends ApiResponseBase {
