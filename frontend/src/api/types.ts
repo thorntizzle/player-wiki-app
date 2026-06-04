@@ -370,10 +370,31 @@ export interface CharacterSummary {
   class_level_text: string;
   species: string;
   background: string;
+  system?: string;
+  href?: string;
+  flask_href?: string;
+  search_text?: string;
   current_hp: number;
   max_hp: number;
   temp_hp: number;
+  hit_dice?: {
+    value?: string;
+    pools?: Array<Record<string, unknown>>;
+  };
+  resource_preview?: Array<{
+    label: string;
+    value: string;
+  }>;
+  portrait?: CharacterPortrait | null;
   revision: number;
+}
+
+export interface CharacterPortrait {
+  asset_ref: string;
+  url: string;
+  media_type?: string;
+  alt_text: string;
+  caption?: string;
 }
 
 export interface CharacterPermissions {
@@ -610,16 +631,37 @@ export interface CharacterRecord {
   presented_spellcasting?: CharacterPresentedSpellcasting;
   presented_inventory?: CharacterPresentedInventoryItem[];
   presented_xianxia?: CharacterPresentedXianxia;
+  portrait?: CharacterPortrait | null;
   permissions: CharacterPermissions;
 }
 
 export interface CharacterListResponse extends ApiResponseBase {
   campaign: CampaignRecord;
   characters: CharacterSummary[];
+  query?: string;
+  result_count?: number;
+  tools?: {
+    can_create_characters?: boolean;
+    can_import_xianxia_characters?: boolean;
+    native_character_tools_supported?: boolean;
+    native_character_create_supported?: boolean;
+    character_create_lane?: string;
+  };
+  links?: {
+    flask_roster_url?: string;
+    create_character_url?: string;
+    import_xianxia_url?: string;
+  };
 }
 
 export interface CharacterDetailResponse extends ApiResponseBase {
   character: CharacterRecord;
+  links?: {
+    flask_roster_url?: string;
+    flask_character_url?: string;
+    advanced_editor_url?: string;
+    cultivation_url?: string;
+  };
 }
 
 export interface CharacterVitalsPatchPayload {

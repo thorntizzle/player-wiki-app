@@ -749,7 +749,7 @@ function AppShell() {
       {
         href: `/campaigns/${encodedCampaignSlug}/characters`,
         label: "Characters",
-        isGen2: false,
+        isGen2: true,
         show: campaignVisibilityCanAccess(campaignVisibility, "characters"),
       },
       {
@@ -1929,9 +1929,19 @@ function SessionPane({
   );
 }
 
-function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
+function CharacterPane({
+  campaignSlug,
+  initialCharacterSlug = null,
+  surface = "session",
+  onSelectedCharacterChange,
+}: {
+  campaignSlug: string;
+  initialCharacterSlug?: string | null;
+  surface?: "session" | "read";
+  onSelectedCharacterChange?: (characterSlug: string) => void;
+}) {
   const { apiClient, setAuthRequired } = useApiClient();
-  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(initialCharacterSlug);
   const [activeCharacterSection, setActiveCharacterSection] = useState<CharacterSection>("overview");
   const [vitalsDraft, setVitalsDraft] = useState<CharacterVitalsDraft>({
     expectedRevision: 0,
@@ -1979,7 +1989,7 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
   const [detailDialog, setDetailDialog] = useState<CharacterDetailDialogState | null>(null);
 
   const listQuery = useQuery({
-    queryKey: ["characters", campaignSlug],
+    queryKey: ["characters", campaignSlug, ""],
     queryFn: () => apiClient.getCharacters(campaignSlug),
     enabled: Boolean(campaignSlug),
     retry: false,
@@ -1988,10 +1998,16 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
   const characterList: CharacterSummary[] = listQuery.data?.characters ?? [];
 
   useEffect(() => {
-    if (!selectedSlug && characterList.length > 0) {
+    if (initialCharacterSlug !== selectedSlug) {
+      setSelectedSlug(initialCharacterSlug || null);
+    }
+  }, [initialCharacterSlug]);
+
+  useEffect(() => {
+    if (!initialCharacterSlug && !selectedSlug && characterList.length > 0) {
       setSelectedSlug(characterList[0].slug);
     }
-  }, [characterList, selectedSlug]);
+  }, [characterList, initialCharacterSlug, selectedSlug]);
 
   const detailQuery = useQuery({
     queryKey: ["character-detail", campaignSlug, selectedSlug],
@@ -2137,7 +2153,9 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
 
   const detail = detailQuery.data as CharacterDetailResponse | undefined;
   const detailRecord = detail?.character;
+  const detailLinks = detail?.links ?? {};
   const selected = characterList.find((item) => item.slug === selectedSlug);
+  const selectedPortrait = selected?.portrait ?? detailRecord?.portrait ?? null;
   const permissions = detailRecord?.permissions;
   const canEdit = Boolean(permissions?.can_edit_session);
   const canRecordXianxiaDaoUse = Boolean(
@@ -2832,14 +2850,44 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
     </div>
   );
 
+  const selectCharacter = (nextSlug: string | null) => {
+    setSelectedSlug(nextSlug);
+    setActiveCharacterSection("overview");
+    setRestPreview(null);
+    setStatusMessage(null);
+    setErrorMessage(null);
+    setDetailDialog(null);
+    if (nextSlug) {
+      onSelectedCharacterChange?.(nextSlug);
+    }
+  };
+
   return (
-    <div className="session-pane-content">
+    <div className={surface === "read" ? "session-pane-content character-read-content" : "session-pane-content"}>
       <section className="panel">
         <div className="panel-header">
-          <h2>Session Character</h2>
-          <a href={`/campaigns/${campaignSlug}/characters`} className="button button-secondary">
-            Character route
-          </a>
+          <div>
+            <p className="meta">{surface === "read" ? "Character sheet" : "Session Character"}</p>
+            <h2>{surface === "read" ? "Character Sheet" : "Session Character"}</h2>
+          </div>
+          <div className="article-actions">
+            {surface === "read" ? (
+              <a href={`/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters`} className="button button-secondary">
+                Roster
+              </a>
+            ) : (
+              <a
+                href={
+                  selectedSlug
+                    ? `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters/${encodeURIComponent(selectedSlug)}`
+                    : `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters`
+                }
+                className="button button-secondary"
+              >
+                Character route
+              </a>
+            )}
+          </div>
         </div>
 
         <label className="chat-label" htmlFor="character-selector">
@@ -2849,12 +2897,7 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
           id="character-selector"
           value={selectedSlug || ""}
           onChange={(event) => {
-            setSelectedSlug(event.currentTarget.value || null);
-            setActiveCharacterSection("overview");
-            setRestPreview(null);
-            setStatusMessage(null);
-            setErrorMessage(null);
-            setDetailDialog(null);
+            selectCharacter(event.currentTarget.value || null);
           }}
         >
           {characterList.map((item) => (
@@ -2869,17 +2912,58 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
 
         {selected ? (
           <article className="character-summary">
-            <h3>
-              {selected.name} ({selected.slug})
-            </h3>
-            <p>
-              HP: {readNumber(vitals.current_hp, selected.current_hp)} / {readNumber(stats.max_hp, selected.max_hp)}
-            </p>
-            <p>Temp HP: {readNumber(vitals.temp_hp, selected.temp_hp)}</p>
-            <p>Class: {selected.class_level_text || "Unknown"}</p>
-            <p>System: {characterSystem(detailRecord)}</p>
-            <p>Status: {selected.status}</p>
-            <p>Revision: {revision || selected.revision}</p>
+            <div className="character-summary__main">
+              {selectedPortrait ? (
+                <figure className="character-portrait">
+                  <img src={selectedPortrait.url} alt={selectedPortrait.alt_text || selected.name} />
+                  {selectedPortrait.caption ? <figcaption className="meta">{selectedPortrait.caption}</figcaption> : null}
+                </figure>
+              ) : null}
+              <div>
+                <h3>
+                  {selected.name} ({selected.slug})
+                </h3>
+                <p>
+                  HP: {readNumber(vitals.current_hp, selected.current_hp)} / {readNumber(stats.max_hp, selected.max_hp)}
+                </p>
+                <p>Temp HP: {readNumber(vitals.temp_hp, selected.temp_hp)}</p>
+                {selected.hit_dice?.value ? <p>Hit Dice: {selected.hit_dice.value}</p> : null}
+                <p>Class: {selected.class_level_text || "Unknown"}</p>
+                <p>System: {characterSystem(detailRecord)}</p>
+                <p>Status: {selected.status}</p>
+                <p>Revision: {revision || selected.revision}</p>
+              </div>
+            </div>
+            {selected.resource_preview?.length ? (
+              <ul className="plain-list resource-preview-list">
+                {selected.resource_preview.map((resource) => (
+                  <li key={`${resource.label}-${resource.value}`}>
+                    <span>{resource.label}</span>
+                    <strong>{resource.value}</strong>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {surface === "read" && detailRecord ? (
+              <div className="button-row character-action-row">
+                {detailLinks.flask_character_url ? (
+                  <a className="button button-secondary" href={detailLinks.flask_character_url}>
+                    Flask sheet
+                  </a>
+                ) : null}
+                {detailLinks.advanced_editor_url ? (
+                  <a className="button button-secondary" href={detailLinks.advanced_editor_url}>
+                    Advanced Editor
+                  </a>
+                ) : null}
+                {detailLinks.cultivation_url ? (
+                  <a className="button button-secondary" href={detailLinks.cultivation_url}>
+                    Cultivation
+                  </a>
+                ) : null}
+                <span className="meta">Create, import, portrait upload, controls, and broader authoring stay in Flask for now.</span>
+              </div>
+            ) : null}
           </article>
         ) : null}
 
@@ -4670,6 +4754,173 @@ function DmPane({
   );
 }
 
+function CharacterRosterPage() {
+  const { campaignSlug } = useParams({
+    from: "/campaigns/$campaignSlug/characters",
+  });
+  const resolvedCampaignSlug = campaignSlug ?? "";
+  const { apiClient, setAuthRequired } = useApiClient();
+  const initialQuery = new URLSearchParams(window.location.search).get("q") || "";
+  const [searchDraft, setSearchDraft] = useState(initialQuery);
+  const [submittedQuery, setSubmittedQuery] = useState(initialQuery);
+
+  const rosterQuery = useQuery({
+    queryKey: ["characters", resolvedCampaignSlug, submittedQuery],
+    queryFn: () => apiClient.getCharacters(resolvedCampaignSlug, submittedQuery),
+    enabled: Boolean(resolvedCampaignSlug),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (isAuthError(rosterQuery.error)) {
+      setAuthRequired(true);
+    }
+  }, [rosterQuery.error, setAuthRequired]);
+
+  const data = rosterQuery.data;
+  const characters = data?.characters ?? [];
+  const error = getApiErrorMessage(rosterQuery.error);
+  const submitSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const nextQuery = searchDraft.trim();
+    const nextUrl = nextQuery
+      ? `/app-next/campaigns/${encodeURIComponent(resolvedCampaignSlug)}/characters?q=${encodeURIComponent(nextQuery)}`
+      : `/app-next/campaigns/${encodeURIComponent(resolvedCampaignSlug)}/characters`;
+    window.history.pushState(null, "", nextUrl);
+    setSubmittedQuery(nextQuery);
+  };
+
+  return (
+    <section className="panel character-roster-page">
+      <div className="panel-header">
+        <div>
+          <p className="meta">Character roster</p>
+          <h1>Characters</h1>
+          <p className="lede">Open player sheets, use the shared inline state controls, and keep larger authoring workflows in Flask while Gen2 parity grows.</p>
+        </div>
+        <div className="article-actions">
+          {data?.links?.flask_roster_url ? (
+            <a className="button button-secondary" href={data.links.flask_roster_url}>
+              Flask roster
+            </a>
+          ) : null}
+          {data?.links?.create_character_url ? (
+            <a className="button button-secondary" href={data.links.create_character_url}>
+              Create character
+            </a>
+          ) : null}
+          {data?.links?.import_xianxia_url ? (
+            <a className="button button-secondary" href={data.links.import_xianxia_url}>
+              Import existing
+            </a>
+          ) : null}
+        </div>
+      </div>
+      <ApiErrorNotice isLoading={rosterQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
+      <form className="search-form character-roster-search" onSubmit={submitSearch}>
+        <input
+          type="search"
+          value={searchDraft}
+          onChange={(event) => setSearchDraft(event.currentTarget.value)}
+          placeholder="Search characters by name, class, species, or background"
+          aria-label="Search characters"
+        />
+        <button type="submit">Search</button>
+      </form>
+      {data ? (
+        <>
+          <p className="meta">
+            {data.result_count ?? characters.length} character{(data.result_count ?? characters.length) === 1 ? "" : "s"} visible
+          </p>
+          {characters.length ? (
+            <div className="character-roster-grid">
+              {characters.map((character) => (
+                <article className="card character-card" key={character.slug}>
+                  <div className="character-card__top">
+                    {character.portrait ? (
+                      <img className="character-card__portrait" src={character.portrait.url} alt={character.portrait.alt_text || character.name} />
+                    ) : null}
+                    <div>
+                      <p className="card-kicker">{character.class_level_text || character.system || "Character"}</p>
+                      <h2>
+                        <a href={character.href || `/app-next/campaigns/${encodeURIComponent(resolvedCampaignSlug)}/characters/${encodeURIComponent(character.slug)}`}>
+                          {character.name}
+                        </a>
+                      </h2>
+                      <p className="meta">
+                        {[character.species, character.background].filter(Boolean).join(" | ") || character.status}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="character-card__stats">
+                    <article>
+                      <span className="meta">HP</span>
+                      <strong>
+                        {character.current_hp} / {character.max_hp}
+                      </strong>
+                    </article>
+                    <article>
+                      <span className="meta">Temp HP</span>
+                      <strong>{character.temp_hp}</strong>
+                    </article>
+                    {character.hit_dice?.value ? (
+                      <article>
+                        <span className="meta">Hit Dice</span>
+                        <strong>{character.hit_dice.value}</strong>
+                      </article>
+                    ) : null}
+                  </div>
+                  {character.resource_preview?.length ? (
+                    <ul className="plain-list resource-preview-list">
+                      {character.resource_preview.map((resource) => (
+                        <li key={`${character.slug}-${resource.label}`}>
+                          <span>{resource.label}</span>
+                          <strong>{resource.value}</strong>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <a className="button button-secondary" href={character.href || `/app-next/campaigns/${encodeURIComponent(resolvedCampaignSlug)}/characters/${encodeURIComponent(character.slug)}`}>
+                    Open sheet
+                  </a>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <section className="card">
+              <h2>{submittedQuery ? "No matching characters" : "No visible characters yet"}</h2>
+              <p>{submittedQuery ? "Try a broader search term or clear the current filter." : "This campaign does not currently have active player sheets available in the app."}</p>
+            </section>
+          )}
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function CharacterDetailPage() {
+  const params = useParams({
+    from: "/campaigns/$campaignSlug/characters/$characterSlug",
+  });
+  const campaignSlug = params.campaignSlug ?? "";
+  const characterSlug = params.characterSlug ?? "";
+
+  return (
+    <CharacterPane
+      campaignSlug={campaignSlug}
+      initialCharacterSlug={characterSlug}
+      surface="read"
+      onSelectedCharacterChange={(nextSlug) => {
+        window.history.pushState(
+          null,
+          "",
+          `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters/${encodeURIComponent(nextSlug)}`,
+        );
+      }}
+    />
+  );
+}
+
 function SessionPage() {
   const { campaignSlug } = useParams({
     from: "/campaigns/$campaignSlug/session",
@@ -4817,6 +5068,18 @@ const campaignWikiPageRoute = createRoute({
   component: WikiArticlePage,
 });
 
+const campaignCharacterRosterRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/campaigns/$campaignSlug/characters",
+  component: CharacterRosterPage,
+});
+
+const campaignCharacterDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/campaigns/$campaignSlug/characters/$characterSlug",
+  component: CharacterDetailPage,
+});
+
 const campaignSessionRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/campaigns/$campaignSlug/session",
@@ -4828,6 +5091,8 @@ const routeTree = rootRoute.addChildren([
   campaignHomeRoute,
   campaignWikiSectionRoute,
   campaignWikiPageRoute,
+  campaignCharacterRosterRoute,
+  campaignCharacterDetailRoute,
   campaignSessionRoute,
 ]);
 const router = createRouter({

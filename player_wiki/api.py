@@ -86,6 +86,7 @@ from .character_presenter import (
     build_character_inventory_item_ref,
     present_arcane_armor_state,
     present_character_detail,
+    present_character_roster,
     resolve_item_description_html,
 )
 from .character_service import CharacterStateValidationError, merge_state_with_definition
@@ -110,7 +111,16 @@ from .systems_labels import (
     systems_entry_type_sort_key,
 )
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError
-from .system_policy import is_xianxia_system, supports_combat_tracker, supports_native_character_tools
+from .system_policy import (
+    CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION,
+    CHARACTER_ROUTE_LANE_XIANXIA,
+    character_advancement_lane,
+    native_character_create_lane,
+    supports_combat_tracker,
+    supports_native_character_create,
+    supports_native_character_tools,
+    is_xianxia_system,
+)
 from .version import build_app_metadata
 from .xianxia_advancement import (
     record_xianxia_dao_immolating_use_definition,
@@ -1331,19 +1341,97 @@ def register_api(app) -> None:
             "updated_by_user_id": state_record.updated_by_user_id,
         }
 
-    def serialize_character_summary(record: CharacterRecord) -> dict[str, Any]:
+    def build_character_portrait_payload(campaign, record: CharacterRecord) -> dict[str, Any] | None:
         profile = dict(record.definition.profile or {})
-        vitals = dict((record.state_record.state or {}).get("vitals") or {})
+        asset_ref = str(profile.get("portrait_asset_ref") or "").strip()
+        if not asset_ref:
+            return None
+        try:
+            asset_record = get_campaign_asset_file_record(campaign, asset_ref)
+        except CampaignContentError:
+            return None
+        if asset_record is None:
+            return None
         return {
-            "slug": record.definition.character_slug,
-            "name": record.definition.name,
-            "status": record.definition.status,
-            "class_level_text": profile_class_level_text(profile, default=""),
-            "species": str(profile.get("species") or ""),
-            "background": str(profile.get("background") or ""),
-            "current_hp": int(vitals.get("current_hp") or 0),
-            "max_hp": int((record.definition.stats or {}).get("max_hp") or 0),
-            "temp_hp": int(vitals.get("temp_hp") or 0),
+            "asset_ref": asset_record.asset_ref,
+            "url": url_for(
+                "character_portrait_asset",
+                campaign_slug=campaign.slug,
+                character_slug=record.definition.character_slug,
+            ),
+            "media_type": asset_record.media_type,
+            "alt_text": str(profile.get("portrait_alt") or record.definition.name).strip()
+            or record.definition.name,
+            "caption": str(profile.get("portrait_caption") or "").strip(),
+        }
+
+    def serialize_character_roster_tools(campaign_slug: str, campaign) -> dict[str, Any]:
+        campaign_system = getattr(campaign, "system", "")
+        can_manage = can_manage_campaign_session(campaign_slug)
+        create_lane = native_character_create_lane(campaign_system)
+        can_create = can_manage and supports_native_character_create(campaign_system)
+        return {
+            "can_create_characters": can_create,
+            "can_import_xianxia_characters": can_create and create_lane == CHARACTER_ROUTE_LANE_XIANXIA,
+            "native_character_tools_supported": supports_native_character_tools(campaign_system),
+            "native_character_create_supported": supports_native_character_create(campaign_system),
+            "character_create_lane": create_lane,
+        }
+
+    def serialize_character_roster_links(campaign_slug: str, campaign) -> dict[str, str]:
+        tools = serialize_character_roster_tools(campaign_slug, campaign)
+        links = {
+            "flask_roster_url": url_for("character_roster_view", campaign_slug=campaign_slug),
+        }
+        if tools["can_create_characters"]:
+            links["create_character_url"] = url_for("character_create_view", campaign_slug=campaign_slug)
+        if tools["can_import_xianxia_characters"]:
+            links["import_xianxia_url"] = url_for(
+                "character_import_xianxia_manual_view",
+                campaign_slug=campaign_slug,
+            )
+        return links
+
+    def serialize_character_links(campaign_slug: str, campaign, record: CharacterRecord) -> dict[str, str]:
+        character_slug = record.definition.character_slug
+        campaign_system = getattr(campaign, "system", "")
+        links = {
+            "flask_roster_url": url_for("character_roster_view", campaign_slug=campaign_slug),
+            "flask_character_url": url_for(
+                "character_read_view",
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+            ),
+        }
+        if has_session_mode_access(campaign_slug, character_slug) and supports_native_character_tools(campaign_system):
+            links["advanced_editor_url"] = url_for(
+                "character_edit_view",
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+            )
+        if (
+            has_session_mode_access(campaign_slug, character_slug)
+            and character_advancement_lane(campaign_system) == CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION
+        ):
+            links["cultivation_url"] = url_for(
+                "character_xianxia_cultivation_view",
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+            )
+        return links
+
+    def serialize_character_summary(campaign, record: CharacterRecord) -> dict[str, Any]:
+        presented = present_character_roster([record])[0]
+        return {
+            **presented,
+            "system": record.definition.system,
+            "href": gen2_campaign_href(campaign.slug, f"characters/{record.definition.character_slug}"),
+            "flask_href": url_for(
+                "character_read_view",
+                campaign_slug=campaign.slug,
+                character_slug=record.definition.character_slug,
+            ),
+            "portrait": build_character_portrait_payload(campaign, record),
             "revision": record.state_record.revision,
         }
 
@@ -1571,6 +1659,7 @@ def register_api(app) -> None:
             "presented_spellcasting": dict(presented_character.get("spellcasting") or {}),
             "presented_inventory": list(presented_character.get("inventory") or []),
             "presented_xianxia": dict(presented_character.get("xianxia_read") or {}),
+            "portrait": build_character_portrait_payload(campaign, record) if campaign is not None else None,
             "permissions": {
                 "can_edit_session": has_session_mode_access(campaign_slug, record.definition.character_slug),
                 "can_manage_session": can_manage_campaign_session(campaign_slug),
@@ -3611,11 +3700,22 @@ def register_api(app) -> None:
             abort(404)
 
         records = get_character_repository().list_visible_characters(campaign_slug)
+        query = request.args.get("q", "").strip()
+        character_cards = [serialize_character_summary(campaign, record) for record in records]
+        if query:
+            normalized_query = query.lower()
+            character_cards = [
+                card for card in character_cards if normalized_query in str(card.get("search_text") or "")
+            ]
         return jsonify(
             {
                 "ok": True,
                 "campaign": serialize_campaign(campaign),
-                "characters": [serialize_character_summary(record) for record in records],
+                "characters": character_cards,
+                "query": query,
+                "result_count": len(character_cards),
+                "tools": serialize_character_roster_tools(campaign_slug, campaign),
+                "links": serialize_character_roster_links(campaign_slug, campaign),
             }
         )
 
@@ -3623,7 +3723,16 @@ def register_api(app) -> None:
     @api_campaign_scope_access_required("characters")
     def character_detail(campaign_slug: str, character_slug: str):
         record = load_character_record(campaign_slug, character_slug)
-        return jsonify({"ok": True, "character": serialize_character_record(campaign_slug, record)})
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+        return jsonify(
+            {
+                "ok": True,
+                "character": serialize_character_record(campaign_slug, record),
+                "links": serialize_character_links(campaign_slug, campaign, record),
+            }
+        )
 
     @api.get("/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>")
     @api_campaign_scope_access_required("characters")

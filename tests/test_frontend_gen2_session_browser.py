@@ -1,7 +1,9 @@
+import base64
 import re
 import threading
 
 import pytest
+import yaml
 
 
 @pytest.fixture
@@ -26,6 +28,28 @@ def _sign_in(page, base_url: str, *, email: str, password: str) -> None:
     page.locator("input[name='password']").fill(password)
     page.locator("button[type='submit']").click()
     page.wait_for_url(re.compile(rf"^{re.escape(base_url)}/.*"), timeout=5000)
+
+
+def _seed_arden_portrait(app) -> None:
+    tiny_png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+    )
+    campaigns_dir = app.config["TEST_CAMPAIGNS_DIR"]
+    portrait_path = campaigns_dir / "linden-pass" / "assets" / "characters" / "arden-march" / "portrait.png"
+    portrait_path.parent.mkdir(parents=True, exist_ok=True)
+    portrait_path.write_bytes(tiny_png)
+    definition_path = campaigns_dir / "linden-pass" / "characters" / "arden-march" / "definition.yaml"
+    payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    profile = dict(payload.get("profile") or {})
+    profile.update(
+        {
+            "portrait_asset_ref": "characters/arden-march/portrait.png",
+            "portrait_alt": "Arden portrait",
+            "portrait_caption": "Shown on the Gen2 sheet.",
+        }
+    )
+    payload["profile"] = profile
+    definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
 def test_gen2_session_browser_exposes_flask_session_capabilities(
@@ -163,6 +187,88 @@ def test_gen2_wiki_browser_exposes_home_section_page_and_assets(
             page.get_by_role("button", name="Expand all").click()
             assert civic_details.evaluate("(element) => element.open") is True
             expect(page.get_by_role("link", name="Tidewatch Hall")).to_be_visible()
+        finally:
+            page.close()
+            browser.close()
+
+
+def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
+    frontend_gen2_session_live_server,
+    app,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    _seed_arden_portrait(app)
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters")
+            expect(page.get_by_role("heading", name="Characters")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("link", name="Flask roster")).to_be_visible()
+            expect(page.get_by_role("link", name="Create character")).to_be_visible()
+
+            roster_search = page.locator("form.character-roster-search")
+            roster_search.get_by_label("Search characters").fill("arden")
+            roster_search.get_by_role("button", name="Search").click()
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/characters\?q=arden$"), timeout=5000)
+            expect(page.get_by_role("link", name="Arden March").first).to_be_visible(timeout=10000)
+            portrait = page.locator(".character-card__portrait")
+            expect(portrait).to_be_visible()
+            portrait_src = portrait.get_attribute("src")
+            assert portrait_src is not None
+            portrait_response = page.request.get(
+                portrait_src if portrait_src.startswith("http") else f"{base_url}{portrait_src}"
+            )
+            assert portrait_response.status == 200
+            assert portrait_response.headers.get("content-type", "").startswith("image/")
+
+            page.get_by_role("link", name="Open sheet").click()
+            expect(page).to_have_url(
+                re.compile(r"/app-next/campaigns/linden-pass/characters/arden-march$"),
+                timeout=5000,
+            )
+            expect(page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)
+            expect(page.get_by_text("Shown on the Gen2 sheet.")).to_be_visible()
+            expect(page.get_by_role("link", name="Flask sheet")).to_be_visible()
+            expect(page.get_by_role("link", name="Advanced Editor")).to_be_visible()
+            expect(page.get_by_text("Create, import, portrait upload, controls, and broader authoring stay in Flask")).to_be_visible()
+
+            page.reload()
+            expect(page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("heading", name="Arden March (arden-march)")).to_be_visible()
+
+            detail_response = page.request.get(f"{base_url}/api/v1/campaigns/linden-pass/characters/arden-march")
+            assert detail_response.status == 200
+            detail_payload = detail_response.json()
+            revision = detail_payload["character"]["state_record"]["revision"]
+            external_update_response = page.request.patch(
+                f"{base_url}/api/v1/campaigns/linden-pass/characters/arden-march/session/notes",
+                data={
+                    "expected_revision": revision,
+                    "player_notes_markdown": "External Gen2 conflict update.",
+                },
+            )
+            assert external_update_response.status == 200
+
+            page.locator(".section-tabs").get_by_role("button", name="Notes").click()
+            page.get_by_label("Player notes").fill("This stale browser draft should conflict.")
+            page.get_by_role("button", name="Save notes").click()
+            expect(page.get_by_text(re.compile(r"changed in another session|Refresh and try again", re.I))).to_be_visible(
+                timeout=5000
+            )
         finally:
             page.close()
             browser.close()

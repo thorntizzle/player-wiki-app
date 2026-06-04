@@ -1941,6 +1941,75 @@ def test_api_character_list_derives_multiclass_summary_from_class_rows(client, a
     assert tobin["class_level_text"] == "Fighter 3 / Wizard 2"
 
 
+def test_api_character_roster_exposes_gen2_links_search_and_portraits(client, app, users, set_campaign_visibility):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    tiny_png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+    )
+    portrait_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "assets"
+        / "characters"
+        / "arden-march"
+        / "portrait.png"
+    )
+    portrait_path.parent.mkdir(parents=True, exist_ok=True)
+    portrait_path.write_bytes(tiny_png)
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile.update(
+            {
+                "portrait_asset_ref": "characters/arden-march/portrait.png",
+                "portrait_alt": "Arden portrait",
+                "portrait_caption": "Shown on the Gen2 sheet.",
+            }
+        )
+        payload["profile"] = profile
+
+    _write_character_definition(app, "arden-march", _mutate)
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-gen2-api")
+
+    response = client.get(
+        "/api/v1/campaigns/linden-pass/characters?q=arden",
+        headers=api_headers(dm_token),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["query"] == "arden"
+    assert payload["result_count"] == 1
+    assert payload["tools"]["can_create_characters"] is True
+    assert payload["links"]["flask_roster_url"] == "/campaigns/linden-pass/characters"
+    assert payload["links"]["create_character_url"] == "/campaigns/linden-pass/characters/new"
+    arden = payload["characters"][0]
+    assert arden["slug"] == "arden-march"
+    assert arden["href"] == "/app-next/campaigns/linden-pass/characters/arden-march"
+    assert arden["flask_href"] == "/campaigns/linden-pass/characters/arden-march"
+    assert arden["portrait"]["url"] == "/campaigns/linden-pass/characters/arden-march/portrait"
+    assert arden["portrait"]["alt_text"] == "Arden portrait"
+    assert arden["portrait"]["caption"] == "Shown on the Gen2 sheet."
+    assert arden["hit_dice"]["value"]
+    assert isinstance(arden["resource_preview"], list)
+
+    portrait_response = client.get(arden["portrait"]["url"], headers=api_headers(dm_token))
+    assert portrait_response.status_code == 200
+    assert portrait_response.mimetype == "image/png"
+
+    detail_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(dm_token),
+    )
+
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.get_json()
+    assert detail_payload["character"]["portrait"]["url"] == arden["portrait"]["url"]
+    assert detail_payload["links"]["flask_character_url"] == "/campaigns/linden-pass/characters/arden-march"
+    assert detail_payload["links"]["advanced_editor_url"] == "/campaigns/linden-pass/characters/arden-march/edit"
+
+
 def test_api_content_page_management_requires_dm_and_refreshes_repository(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-content-pages-api")
     player_token = issue_api_token(app, users["party"]["email"], label="player-content-pages-api")

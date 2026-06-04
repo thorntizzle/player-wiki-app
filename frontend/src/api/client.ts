@@ -333,8 +333,9 @@ export class CampaignApiClient {
     );
   }
 
-  async getCharacters(slug: string): Promise<CharacterListResponse> {
-    return this.requestJson<CharacterListResponse>(`/api/v1/campaigns/${encodeURIComponent(slug)}/characters`);
+  async getCharacters(slug: string, query = ""): Promise<CharacterListResponse> {
+    const search = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
+    return this.requestJson<CharacterListResponse>(`/api/v1/campaigns/${encodeURIComponent(slug)}/characters${search}`);
   }
 
   async getCharacter(slug: string, characterSlug: string): Promise<CharacterDetailResponse> {
