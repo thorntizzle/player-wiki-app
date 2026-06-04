@@ -24,6 +24,10 @@ def test_frontend_pilot_routes_and_spa_fallback(client, app, tmp_path):
     assert account_route_response.status_code == 200
     assert account_route_response.data == response.data
 
+    help_route_response = client.get("/app-next/campaigns/linden-pass/help")
+    assert help_route_response.status_code == 200
+    assert help_route_response.data == response.data
+
     character_route_response = client.get("/app-next/campaigns/linden-pass/characters/arden-march")
     assert character_route_response.status_code == 200
     assert character_route_response.data == response.data

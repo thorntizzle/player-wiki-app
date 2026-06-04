@@ -342,6 +342,56 @@ body {
   padding-top: 1rem;
 }
 
+.campaign-help-page,
+.campaign-help-main,
+.campaign-help-sidebar,
+.campaign-help-surface,
+.campaign-help-current {
+  display: grid;
+  gap: 1rem;
+}
+
+.campaign-help-hero h1 {
+  margin: 0.1rem 0 0.4rem;
+}
+
+.help-anchor-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.help-detail-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.help-detail-card {
+  background: #f9fbff;
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.75rem;
+}
+
+.help-detail-card h3,
+.help-detail-card p,
+.help-list {
+  margin: 0;
+}
+
+.help-list {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.reference-stack {
+  display: grid;
+  gap: 0.65rem;
+}
+
 .lede {
   color: #334155;
   font-size: 1rem;

@@ -152,6 +152,63 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             browser.close()
 
 
+def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            player_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            dm_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            player_page = player_context.new_page()
+            dm_page = dm_context.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(player_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
+
+            player_page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
+            help_link = player_page.locator(".campaign-nav-link", has_text="Help")
+            expect(help_link).to_be_visible(timeout=10000)
+            expect(help_link).to_have_attribute("href", re.compile(r"/app-next/campaigns/linden-pass/help$"))
+            help_link.click()
+            expect(player_page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/help$"))
+            expect(player_page.get_by_role("heading", name="Help")).to_be_visible(timeout=10000)
+            expect(player_page.get_by_role("heading", name="Current access")).to_be_visible()
+            expect(player_page.locator("#campaign-home").get_by_role("heading", name="Campaign Home")).to_be_visible()
+            expect(player_page.locator("#systems").get_by_role("heading", name="Systems")).to_be_visible()
+            expect(player_page.locator("#session").get_by_role("heading", name="Session")).to_be_visible()
+            expect(player_page.locator("#combat").get_by_role("heading", name="Combat")).to_be_visible()
+            expect(player_page.get_by_role("heading", name="Cross-cutting limits")).to_be_visible()
+            expect(player_page.get_by_role("heading", name="Visibility by scope")).to_be_visible()
+            expect(player_page.get_by_role("link", name="Flask Help")).to_be_visible()
+            assert player_page.locator("#dm-content").count() == 0
+            assert player_page.locator("#control").count() == 0
+
+            _sign_in(dm_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            dm_page.goto(f"{base_url}/app-next/campaigns/linden-pass/help")
+            expect(dm_page.get_by_role("heading", name="Help")).to_be_visible(timeout=10000)
+            expect(dm_page.locator("#dm-content").get_by_role("heading", name="DM Content")).to_be_visible()
+            expect(dm_page.locator("#characters").get_by_role("heading", name="Characters")).to_be_visible()
+            expect(dm_page.locator("#control").get_by_role("heading", name="Control")).to_be_visible()
+            expect(dm_page.get_by_text("Browser and API boundary")).to_be_visible()
+        finally:
+            player_page.close()
+            dm_page.close()
+            player_context.close()
+            dm_context.close()
+            browser.close()
+
+
 def test_gen2_account_settings_saves_preferences_and_updates_theme(
     frontend_gen2_session_live_server,
     users,

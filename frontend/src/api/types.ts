@@ -176,6 +176,56 @@ export interface WikiHomeLinks {
   gen2_campaign_url: string;
 }
 
+export interface CampaignHelpLink {
+  label: string;
+  href: string;
+}
+
+export interface CampaignHelpGuidanceCard {
+  title: string;
+  body: string;
+  items: string[];
+  meta: string;
+}
+
+export interface CampaignHelpSurface {
+  anchor: string;
+  label: string;
+  summary: string;
+  status_label: string;
+  access_note: string;
+  capabilities: string[];
+  limits: string[];
+  links: CampaignHelpLink[];
+  guidance_cards: CampaignHelpGuidanceCard[];
+}
+
+export interface CampaignHelpVisibilityRow {
+  label: string;
+  visibility_label: string;
+  viewer_can_open: boolean;
+}
+
+export interface CampaignHelpResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  viewer_role_label: string;
+  viewer_role_summary: string;
+  campaign_system_label: string;
+  is_authenticated: boolean;
+  available_surface_labels: string[];
+  cross_cutting_limits: string[];
+  visibility_rows: CampaignHelpVisibilityRow[];
+  surfaces: CampaignHelpSurface[];
+  account_note: string;
+  links: {
+    flask_help_url: string;
+    gen2_help_url: string;
+    account_url: string;
+    flask_account_url: string;
+    sign_in_url: string;
+  };
+}
+
 export interface WikiHomeResponse extends ApiResponseBase {
   campaign: CampaignRecord;
   can_view_wiki: boolean;

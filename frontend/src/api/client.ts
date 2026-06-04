@@ -4,6 +4,7 @@ import type {
   AccountSettingsUpdateResponse,
   ApiAppResponse,
   ApiErrorPayload,
+  CampaignHelpResponse,
   CampaignDetailResponse,
   MeResponse,
   CampaignsResponse,
@@ -243,6 +244,10 @@ export class CampaignApiClient {
 
   async getCampaign(slug: string): Promise<CampaignDetailResponse> {
     return this.requestJson<CampaignDetailResponse>(`/api/v1/campaigns/${encodeURIComponent(slug)}`);
+  }
+
+  async getCampaignHelp(slug: string): Promise<CampaignHelpResponse> {
+    return this.requestJson<CampaignHelpResponse>(`/api/v1/campaigns/${encodeURIComponent(slug)}/help`);
   }
 
   async getCampaigns(): Promise<CampaignsResponse> {

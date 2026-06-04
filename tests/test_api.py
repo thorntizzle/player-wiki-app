@@ -480,6 +480,41 @@ def test_api_account_settings_rejects_invalid_preferences(client, app, users):
         assert preferences.session_chat_order == "newest_first"
 
 
+def test_api_campaign_help_returns_surface_guidance_for_viewer_access(client, app, users):
+    player_token = issue_api_token(app, users["party"]["email"], label="campaign-help-player-api")
+
+    response = client.get("/api/v1/campaigns/linden-pass/help", headers=api_headers(player_token))
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["campaign"]["slug"] == "linden-pass"
+    assert payload["viewer_role_label"] == "Player"
+    assert payload["campaign_system_label"] == "DND-5E"
+    assert payload["links"]["flask_help_url"] == "/campaigns/linden-pass/help"
+    assert payload["links"]["gen2_help_url"] == "/app-next/campaigns/linden-pass/help"
+
+    surface_labels = [surface["label"] for surface in payload["surfaces"]]
+    assert "Campaign Home" in surface_labels
+    assert "Systems" in surface_labels
+    assert "Session" in surface_labels
+    assert "Combat" in surface_labels
+    assert "DM Content" not in surface_labels
+    assert "Control" not in surface_labels
+    assert payload["available_surface_labels"] == surface_labels
+    assert any("polling instead of websockets" in item for item in payload["cross_cutting_limits"])
+
+    dm_token = issue_api_token(app, users["dm"]["email"], label="campaign-help-dm-api")
+    dm_response = client.get("/api/v1/campaigns/linden-pass/help", headers=api_headers(dm_token))
+    assert dm_response.status_code == 200
+    dm_payload = dm_response.get_json()
+    dm_surface_labels = [surface["label"] for surface in dm_payload["surfaces"]]
+    assert "DM Content" in dm_surface_labels
+    assert "Characters" in dm_surface_labels
+    assert "Control" in dm_surface_labels
+    dm_content = next(surface for surface in dm_payload["surfaces"] if surface["label"] == "DM Content")
+    assert "Browser and API boundary" in [card["title"] for card in dm_content["guidance_cards"]]
+
+
 def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, app, users):
     player_token = issue_api_token(app, users["party"]["email"], label="player-wiki-api")
 

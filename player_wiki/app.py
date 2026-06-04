@@ -4540,6 +4540,8 @@ def create_app() -> Flask:
             "active_nav": "help",
         }
 
+    app.extensions["campaign_help_context_builder"] = build_campaign_help_context
+
     def merge_condition_options(*option_sets: list[str] | tuple[str, ...]) -> list[str]:
         merged: list[str] = []
         seen: set[str] = set()

@@ -360,6 +360,58 @@ def register_api(app) -> None:
             "role": entry.role,
         }
 
+    def serialize_campaign_help_link(link: object) -> dict[str, str]:
+        source = link if isinstance(link, dict) else {}
+        return {
+            "label": str(source.get("label") or "").strip(),
+            "href": str(source.get("href") or "").strip(),
+        }
+
+    def serialize_campaign_help_guidance_card(card: object) -> dict[str, Any]:
+        source = card if isinstance(card, dict) else {}
+        items = source.get("items")
+        return {
+            "title": str(source.get("title") or "").strip(),
+            "body": str(source.get("body") or "").strip(),
+            "items": [str(item).strip() for item in items if str(item).strip()] if isinstance(items, list) else [],
+            "meta": str(source.get("meta") or "").strip(),
+        }
+
+    def serialize_campaign_help_surface(surface: object) -> dict[str, Any]:
+        source = surface if isinstance(surface, dict) else {}
+        capabilities = source.get("capabilities")
+        limits = source.get("limits")
+        links = source.get("links")
+        guidance_cards = source.get("guidance_cards")
+        return {
+            "anchor": str(source.get("anchor") or "").strip(),
+            "label": str(source.get("label") or "").strip(),
+            "summary": str(source.get("summary") or "").strip(),
+            "status_label": str(source.get("status_label") or "").strip(),
+            "access_note": str(source.get("access_note") or "").strip(),
+            "capabilities": [str(item).strip() for item in capabilities if str(item).strip()]
+            if isinstance(capabilities, list)
+            else [],
+            "limits": [str(item).strip() for item in limits if str(item).strip()]
+            if isinstance(limits, list)
+            else [],
+            "links": [serialize_campaign_help_link(link) for link in links] if isinstance(links, list) else [],
+            "guidance_cards": [
+                serialize_campaign_help_guidance_card(card)
+                for card in guidance_cards
+            ]
+            if isinstance(guidance_cards, list)
+            else [],
+        }
+
+    def serialize_campaign_help_visibility_row(row: object) -> dict[str, Any]:
+        source = row if isinstance(row, dict) else {}
+        return {
+            "label": str(source.get("label") or "").strip(),
+            "visibility_label": str(source.get("visibility_label") or "").strip(),
+            "viewer_can_open": bool(source.get("viewer_can_open")),
+        }
+
     def serialize_page(page) -> dict[str, Any]:
         return {
             "title": page.title,
@@ -2586,6 +2638,66 @@ def register_api(app) -> None:
                     "can_manage_dm_content": can_manage_campaign_dm_content(campaign_slug),
                     "can_manage_visibility": can_manage_campaign_visibility(campaign_slug),
                     "can_post_session_messages": can_post_campaign_session_messages(campaign_slug),
+                },
+            }
+        )
+
+    @api.get("/campaigns/<campaign_slug>/help")
+    @api_campaign_scope_access_required("campaign")
+    def campaign_help(campaign_slug: str):
+        builder = current_app.extensions.get("campaign_help_context_builder")
+        if not callable(builder):
+            return json_error("Campaign Help is not available.", 500, code="server_error")
+
+        context = builder(campaign_slug)
+        campaign = context.get("campaign")
+        if campaign is None:
+            abort(404)
+        available_labels = context.get("help_available_surface_labels")
+        cross_cutting_limits = context.get("help_cross_cutting_limits")
+        visibility_rows = context.get("help_visibility_rows")
+        help_surfaces = context.get("help_surfaces")
+        return jsonify(
+            {
+                "ok": True,
+                "campaign": serialize_campaign(campaign),
+                "viewer_role_label": str(context.get("help_viewer_role_label") or ""),
+                "viewer_role_summary": str(context.get("help_viewer_role_summary") or ""),
+                "campaign_system_label": str(context.get("help_campaign_system_label") or ""),
+                "is_authenticated": get_current_user() is not None,
+                "available_surface_labels": [
+                    str(label).strip()
+                    for label in available_labels
+                    if str(label).strip()
+                ]
+                if isinstance(available_labels, list)
+                else [],
+                "cross_cutting_limits": [
+                    str(item).strip()
+                    for item in cross_cutting_limits
+                    if str(item).strip()
+                ]
+                if isinstance(cross_cutting_limits, list)
+                else [],
+                "visibility_rows": [
+                    serialize_campaign_help_visibility_row(row)
+                    for row in visibility_rows
+                ]
+                if isinstance(visibility_rows, list)
+                else [],
+                "surfaces": [
+                    serialize_campaign_help_surface(surface)
+                    for surface in help_surfaces
+                ]
+                if isinstance(help_surfaces, list)
+                else [],
+                "account_note": str(context.get("help_account_note") or ""),
+                "links": {
+                    "flask_help_url": url_for("campaign_help_view", campaign_slug=campaign_slug),
+                    "gen2_help_url": gen2_campaign_href(campaign_slug, "help"),
+                    "account_url": "/app-next/account",
+                    "flask_account_url": url_for("account_settings_view"),
+                    "sign_in_url": url_for("sign_in", next=url_for("campaign_help_view", campaign_slug=campaign_slug)),
                 },
             }
         )

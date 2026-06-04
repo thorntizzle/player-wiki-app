@@ -41,8 +41,9 @@ The current Gen2 build covers:
 - DM Content statblocks, conditions, staged articles, Player Wiki, and Systems management lanes
 - Systems browsing landing/search, source pages, source categories, and entry detail pages
 - Account settings for theme and live-session chat-order preferences
+- Campaign Help guidance, effective access, visibility notes, and Flask fallback links
 
-Flask remains the source of truth for workflows that are still Flask-first, including broader character authoring, Control, Help, Admin, shared/core Systems entry editing, and Systems imports.
+Flask remains the source of truth for workflows that are still Flask-first, including broader character authoring, Control, Admin, shared/core Systems entry editing, and Systems imports.
 
 ## Build & Preview
 
@@ -72,6 +73,7 @@ The full API reference is maintained in `docs/api-v1.md`. The list below is a qu
 - `GET /api/v1/me/settings`
 - `PATCH /api/v1/me/settings`
 - `GET /api/v1/campaigns`
+- `GET /api/v1/campaigns/<campaign_slug>/help`
 - `GET /api/v1/campaigns/<campaign_slug>/session`
 - `POST /api/v1/campaigns/<campaign_slug>/session/start`
 - `POST /api/v1/campaigns/<campaign_slug>/session/close`
