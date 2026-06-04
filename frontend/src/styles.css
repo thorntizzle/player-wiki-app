@@ -567,6 +567,133 @@ textarea {
   gap: 0.45rem;
 }
 
+.compact-header {
+  margin-bottom: 0;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.section-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 1rem;
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  background: #eef6f8;
+  padding: 0.45rem;
+}
+
+.section-tabs button {
+  border: 1px solid #c5d4e3;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2937;
+  padding: 0.4rem 0.65rem;
+  font-weight: 700;
+}
+
+.section-tabs button.active {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #f8fffe;
+}
+
+.stat-grid,
+.character-card-grid,
+.ability-grid,
+.spell-card-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.stat-grid {
+  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+}
+
+.character-card-grid,
+.spell-card-list {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.ability-grid {
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+}
+
+.stat-grid article,
+.character-state-card {
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.65rem;
+  min-width: 0;
+}
+
+.stat-grid article {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.stat-grid span,
+.character-state-card p,
+.character-state-card h4 {
+  overflow-wrap: anywhere;
+}
+
+.character-state-card h4 {
+  margin: 0 0 0.35rem;
+}
+
+.character-state-card p {
+  margin: 0.25rem 0;
+}
+
+.compact-state-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem;
+  align-items: end;
+  margin-top: 0.5rem;
+}
+
+.compact-state-form label {
+  grid-column: 1 / -1;
+}
+
+.currency-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  gap: 0.5rem;
+  align-items: end;
+  margin-top: 0.6rem;
+}
+
+.currency-grid label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.currency-grid button {
+  min-height: 2.5rem;
+}
+
+.rest-preview {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.6rem;
+}
+
+.compact-list {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.35rem 0 0;
+}
+
 .inline-two-col {
   display: grid;
   gap: 0.45rem;

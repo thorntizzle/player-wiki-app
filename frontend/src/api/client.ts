@@ -3,9 +3,16 @@ import type {
   ApiErrorPayload,
   CampaignsResponse,
   CharacterDetailResponse,
+  CharacterCurrencyPatchPayload,
   CharacterListResponse,
+  CharacterInventoryPatchPayload,
   CharacterNotesPatchPayload,
   CharacterNotesPatchResponse,
+  CharacterResourcePatchPayload,
+  CharacterRestApplyPayload,
+  CharacterRestApplyResponse,
+  CharacterRestPreviewResponse,
+  CharacterSpellSlotsPatchPayload,
   CharacterVitalsPatchPayload,
   CharacterVitalsPatchResponse,
   MessagePostResponse,
@@ -288,6 +295,71 @@ export class CampaignApiClient {
     );
   }
 
+  async patchCharacterResource(
+    slug: string,
+    characterSlug: string,
+    resourceId: string,
+    payload: CharacterResourcePatchPayload,
+  ): Promise<CharacterVitalsPatchResponse> {
+    return this.requestJson<CharacterVitalsPatchResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
+        characterSlug,
+      )}/session/resources/${encodeURIComponent(resourceId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async patchCharacterSpellSlots(
+    slug: string,
+    characterSlug: string,
+    level: number,
+    payload: CharacterSpellSlotsPatchPayload,
+  ): Promise<CharacterVitalsPatchResponse> {
+    return this.requestJson<CharacterVitalsPatchResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
+        characterSlug,
+      )}/session/spell-slots/${level}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async patchCharacterInventory(
+    slug: string,
+    characterSlug: string,
+    itemId: string,
+    payload: CharacterInventoryPatchPayload,
+  ): Promise<CharacterVitalsPatchResponse> {
+    return this.requestJson<CharacterVitalsPatchResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
+        characterSlug,
+      )}/session/inventory/${encodeURIComponent(itemId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async patchCharacterCurrency(
+    slug: string,
+    characterSlug: string,
+    payload: CharacterCurrencyPatchPayload,
+  ): Promise<CharacterVitalsPatchResponse> {
+    return this.requestJson<CharacterVitalsPatchResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/session/currency`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
   async patchCharacterNotes(
     slug: string,
     characterSlug: string,
@@ -297,6 +369,35 @@ export class CampaignApiClient {
       `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/session/notes`,
       {
         method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async getCharacterRestPreview(
+    slug: string,
+    characterSlug: string,
+    restType: "short" | "long",
+  ): Promise<CharacterRestPreviewResponse> {
+    return this.requestJson<CharacterRestPreviewResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
+        characterSlug,
+      )}/rest-preview/${encodeURIComponent(restType)}`,
+    );
+  }
+
+  async applyCharacterRest(
+    slug: string,
+    characterSlug: string,
+    restType: "short" | "long",
+    payload: CharacterRestApplyPayload,
+  ): Promise<CharacterRestApplyResponse> {
+    return this.requestJson<CharacterRestApplyResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
+        characterSlug,
+      )}/session/rest/${encodeURIComponent(restType)}`,
+      {
+        method: "POST",
         body: JSON.stringify(payload),
       },
     );

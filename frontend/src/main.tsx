@@ -19,10 +19,16 @@ import {
 } from "./api/client";
 import type {
   CampaignEntry,
+  CharacterCurrencyPatchPayload,
   CharacterDetailResponse,
+  CharacterInventoryPatchPayload,
   CharacterRecord,
-  CharacterSummary,
   CharacterNotesPatchPayload,
+  CharacterResourcePatchPayload,
+  CharacterRestApplyResponse,
+  CharacterRestPreviewResponse,
+  CharacterSpellSlotsPatchPayload,
+  CharacterSummary,
   CharacterVitalsPatchPayload,
   SessionArticle,
   SessionArticleCreatePayload,
@@ -59,6 +65,7 @@ interface CharacterNotesDraft {
   notes: string;
 }
 
+type CharacterSection = "overview" | "resources" | "spells" | "equipment" | "inventory" | "abilities" | "notes";
 type PaneName = "session" | "character" | "dm";
 type ArticleMode = "manual" | "upload" | "wiki";
 
@@ -92,6 +99,51 @@ function useApiClient(): ApiClientContextValue {
 function isAuthError(error: unknown): boolean {
   return isApiError(error) && error.status === 401;
 }
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+function asRecordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.map(asRecord) : [];
+}
+
+function readString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function readNumber(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function draftKey(...parts: Array<string | number | null | undefined>): string {
+  return parts.map((part) => String(part ?? "")).join("::");
+}
+
+function characterSystem(character: CharacterRecord | undefined): string {
+  return readString(character?.definition?.system, "DND-5E");
+}
+
+function isDndCharacter(character: CharacterRecord | undefined): boolean {
+  return characterSystem(character).toLowerCase() === "dnd-5e";
+}
+
+const dndCharacterSections: Array<{ id: CharacterSection; label: string }> = [
+  { id: "overview", label: "Overview" },
+  { id: "resources", label: "Resources" },
+  { id: "spells", label: "Spells" },
+  { id: "equipment", label: "Equipment" },
+  { id: "inventory", label: "Inventory" },
+  { id: "abilities", label: "Abilities and Skills" },
+  { id: "notes", label: "Notes" },
+];
 
 function getApiErrorMessage(error: unknown): ApiMessageEnvelope | null {
   if (isApiError(error)) {
@@ -157,7 +209,7 @@ function ApiErrorNotice({
 }
 
 function AuthNotice() {
-  const { authRequired, setAuthRequired } = useApiClient();
+  const { authRequired, setApiToken } = useApiClient();
   const signInHref = `/sign-in?next=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
 
   if (!authRequired) {
@@ -173,7 +225,7 @@ function AuthNotice() {
       <a className="button button-secondary" href={signInHref}>
         Sign in
       </a>
-      <button type="button" className="button" onClick={() => setAuthRequired(false)}>
+      <button type="button" className="button" onClick={() => setApiToken("")}>
         Continue without token
       </button>
     </section>
@@ -905,12 +957,18 @@ function SessionPane({
 function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
   const { apiClient, setAuthRequired } = useApiClient();
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [activeCharacterSection, setActiveCharacterSection] = useState<CharacterSection>("overview");
   const [vitalsDraft, setVitalsDraft] = useState<CharacterVitalsDraft>({
     expectedRevision: 0,
     currentHp: "",
     tempHp: "",
   });
   const [notesDraft, setNotesDraft] = useState<CharacterNotesDraft>({ expectedRevision: 0, notes: "" });
+  const [resourceDrafts, setResourceDrafts] = useState<Record<string, string>>({});
+  const [spellSlotDrafts, setSpellSlotDrafts] = useState<Record<string, string>>({});
+  const [inventoryDrafts, setInventoryDrafts] = useState<Record<string, string>>({});
+  const [currencyDraft, setCurrencyDraft] = useState<Record<string, string>>({});
+  const [restPreview, setRestPreview] = useState<CharacterRestPreviewResponse["preview"] | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -957,96 +1015,267 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
     if (!detailQuery.data) {
       return;
     }
-    const state = detailQuery.data.character.state_record.state as Record<string, unknown>;
-    const vitals = (state?.vitals as Record<string, unknown>) || {};
-    const notes = (state?.notes as Record<string, unknown>) || {};
+    const state = asRecord(detailQuery.data.character.state_record.state);
+    const vitals = asRecord(state.vitals);
+    const notes = asRecord(state.notes);
+    const nextResourceDrafts: Record<string, string> = {};
+    for (const resource of asRecordArray(state.resources)) {
+      const id = readString(resource.id);
+      if (id) {
+        nextResourceDrafts[id] = String(readNumber(resource.current));
+      }
+    }
+    const nextSpellSlotDrafts: Record<string, string> = {};
+    for (const slot of asRecordArray(state.spell_slots)) {
+      const key = draftKey(readNumber(slot.level), readString(slot.slot_lane_id));
+      nextSpellSlotDrafts[key] = String(readNumber(slot.used));
+    }
+    const nextInventoryDrafts: Record<string, string> = {};
+    for (const item of asRecordArray(state.inventory)) {
+      const id = readString(item.id);
+      if (id) {
+        nextInventoryDrafts[id] = String(readNumber(item.quantity, 1));
+      }
+    }
+    const currency = asRecord(state.currency);
+    const nextCurrencyDraft: Record<string, string> = {};
+    for (const key of ["cp", "sp", "ep", "gp", "pp", "coin", "supply", "spirit_stones"]) {
+      if (currency[key] !== undefined) {
+        nextCurrencyDraft[key] = String(readNumber(currency[key]));
+      }
+    }
     setVitalsDraft({
       expectedRevision: detailQuery.data.character.state_record.revision,
-      currentHp: String((vitals.current_hp as number | null) ?? ""),
-      tempHp: String((vitals.temp_hp as number | null) ?? ""),
+      currentHp: String(readNumber(vitals.current_hp, 0)),
+      tempHp: String(readNumber(vitals.temp_hp, 0)),
     });
     setNotesDraft({
       expectedRevision: detailQuery.data.character.state_record.revision,
-      notes: String((notes.player_notes_markdown as string | undefined) ?? ""),
+      notes: readString(notes.player_notes_markdown),
     });
-  }, [detailQuery.data?.character.state_record.revision]);
+    setResourceDrafts(nextResourceDrafts);
+    setSpellSlotDrafts(nextSpellSlotDrafts);
+    setInventoryDrafts(nextInventoryDrafts);
+    setCurrencyDraft(nextCurrencyDraft);
+  }, [detailQuery.data?.character.state_record.revision, selectedSlug]);
 
   const detail = detailQuery.data as CharacterDetailResponse | undefined;
+  const detailRecord = detail?.character;
   const selected = characterList.find((item) => item.slug === selectedSlug);
-  const permissions = detail?.character.permissions;
+  const permissions = detailRecord?.permissions;
+  const canEdit = Boolean(permissions?.can_edit_session);
+  const isDnd = isDndCharacter(detailRecord);
+  const definition = asRecord(detailRecord?.definition);
+  const profile = asRecord(definition.profile);
+  const stats = asRecord(definition.stats);
+  const spellcasting = asRecord(definition.spellcasting);
+  const state = asRecord(detailRecord?.state_record.state);
+  const vitals = asRecord(state.vitals);
+  const resources = asRecordArray(state.resources);
+  const spellSlots = asRecordArray(state.spell_slots);
+  const inventory = asRecordArray(state.inventory);
+  const currency = asRecord(state.currency);
+  const notes = asRecord(state.notes);
+  const abilityScores = asRecord(stats.ability_scores);
+  const spells = asRecordArray(spellcasting.spells);
+  const equipmentRows = inventory.filter(
+    (item) => "is_equipped" in item || "is_attuned" in item || Boolean(item.weapon_wield_mode),
+  );
+  const revision = detailRecord?.state_record.revision ?? 0;
+
+  const handleMutationSuccess = (response: { character: CharacterRecord }, message: string) => {
+    if (selectedSlug) {
+      queryClient.setQueryData<CharacterDetailResponse>(["character-detail", campaignSlug, selectedSlug], {
+        ok: true,
+        character: response.character,
+      });
+    }
+    void listQuery.refetch();
+    setStatusMessage(message);
+    setErrorMessage(null);
+  };
+
+  const handleMutationError = (error: unknown) => {
+    if (isAuthError(error)) {
+      setAuthRequired(true);
+    }
+    setStatusMessage(null);
+    setErrorMessage(apiErrorMessage(error));
+  };
 
   const patchVitals = useMutation({
     mutationFn: (payload: CharacterVitalsPatchPayload) =>
       apiClient.patchCharacterVitals(campaignSlug, selectedSlug || "", payload),
-    onSuccess: () => {
-      void detailQuery.refetch();
-      void listQuery.refetch();
-      setStatusMessage("Vitals saved.");
-      setErrorMessage(null);
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setStatusMessage(null);
-      setErrorMessage(apiErrorMessage(error));
-    },
+    onSuccess: (response) => handleMutationSuccess(response, "Vitals saved."),
+    onError: handleMutationError,
+  });
+
+  const patchResource = useMutation({
+    mutationFn: ({ resourceId, payload }: { resourceId: string; payload: CharacterResourcePatchPayload }) =>
+      apiClient.patchCharacterResource(campaignSlug, selectedSlug || "", resourceId, payload),
+    onSuccess: (response) => handleMutationSuccess(response, "Resource saved."),
+    onError: handleMutationError,
+  });
+
+  const patchSpellSlot = useMutation({
+    mutationFn: ({ level, payload }: { level: number; payload: CharacterSpellSlotsPatchPayload }) =>
+      apiClient.patchCharacterSpellSlots(campaignSlug, selectedSlug || "", level, payload),
+    onSuccess: (response) => handleMutationSuccess(response, "Spell slots saved."),
+    onError: handleMutationError,
+  });
+
+  const patchInventory = useMutation({
+    mutationFn: ({ itemId, payload }: { itemId: string; payload: CharacterInventoryPatchPayload }) =>
+      apiClient.patchCharacterInventory(campaignSlug, selectedSlug || "", itemId, payload),
+    onSuccess: (response) => handleMutationSuccess(response, "Inventory saved."),
+    onError: handleMutationError,
+  });
+
+  const patchCurrency = useMutation({
+    mutationFn: (payload: CharacterCurrencyPatchPayload) =>
+      apiClient.patchCharacterCurrency(campaignSlug, selectedSlug || "", payload),
+    onSuccess: (response) => handleMutationSuccess(response, "Currency saved."),
+    onError: handleMutationError,
   });
 
   const patchNotes = useMutation({
     mutationFn: (payload: CharacterNotesPatchPayload) =>
       apiClient.patchCharacterNotes(campaignSlug, selectedSlug || "", payload),
-    onSuccess: () => {
-      void detailQuery.refetch();
-      setStatusMessage("Notes saved.");
+    onSuccess: (response) => handleMutationSuccess(response, "Notes saved."),
+    onError: handleMutationError,
+  });
+
+  const previewRest = useMutation({
+    mutationFn: (restType: "short" | "long") => apiClient.getCharacterRestPreview(campaignSlug, selectedSlug || "", restType),
+    onSuccess: (response) => {
+      setRestPreview(response.preview);
+      setStatusMessage(`${response.preview.label} preview loaded.`);
       setErrorMessage(null);
     },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setStatusMessage(null);
-      setErrorMessage(apiErrorMessage(error));
-    },
+    onError: handleMutationError,
   });
+
+  const applyRest = useMutation({
+    mutationFn: ({ restType, payload }: { restType: "short" | "long"; payload: { expected_revision: number } }) =>
+      apiClient.applyCharacterRest(campaignSlug, selectedSlug || "", restType, payload),
+    onSuccess: (response: CharacterRestApplyResponse) => {
+      setRestPreview(null);
+      handleMutationSuccess(response, "Rest applied.");
+    },
+    onError: handleMutationError,
+  });
+
+  const parseNumberInput = (value: string, label: string): number | null => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      setErrorMessage(`Enter a valid ${label}.`);
+      setStatusMessage(null);
+      return null;
+    }
+    return parsed;
+  };
 
   const submitVitals = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const currentHp = Number(vitalsDraft.currentHp);
-    const tempHp = Number(vitalsDraft.tempHp);
+    const currentHp = parseNumberInput(vitalsDraft.currentHp, "current HP");
+    const tempHp = parseNumberInput(vitalsDraft.tempHp, "temp HP");
 
-    if (!selected || !permissions?.can_edit_session) {
+    if (!selected || !canEdit) {
       setErrorMessage("No character selected or permission denied.");
       return;
     }
-    if (!Number.isFinite(currentHp) || !Number.isFinite(tempHp)) {
-      setErrorMessage("Enter valid HP numbers.");
+    if (currentHp === null || tempHp === null) {
       return;
     }
 
     setStatusMessage("Saving...");
     patchVitals.mutate({
-      expected_revision: vitalsDraft.expectedRevision,
+      expected_revision: revision,
       current_hp: currentHp,
       temp_hp: tempHp,
     });
   };
 
+  const submitResource = (event: FormEvent<HTMLFormElement>, resourceId: string) => {
+    event.preventDefault();
+    const current = parseNumberInput(resourceDrafts[resourceId] ?? "", "resource value");
+    if (!selected || !canEdit) {
+      setErrorMessage("No character selected or permission denied.");
+      return;
+    }
+    if (current === null) {
+      return;
+    }
+    setStatusMessage("Saving...");
+    patchResource.mutate({ resourceId, payload: { expected_revision: revision, current } });
+  };
+
+  const submitSpellSlot = (event: FormEvent<HTMLFormElement>, slot: Record<string, unknown>) => {
+    event.preventDefault();
+    const level = readNumber(slot.level);
+    const slotLaneId = readString(slot.slot_lane_id);
+    const key = draftKey(level, slotLaneId);
+    const used = parseNumberInput(spellSlotDrafts[key] ?? "", "used slot count");
+    if (!selected || !canEdit) {
+      setErrorMessage("No character selected or permission denied.");
+      return;
+    }
+    if (used === null) {
+      return;
+    }
+    setStatusMessage("Saving...");
+    patchSpellSlot.mutate({
+      level,
+      payload: { expected_revision: revision, slot_lane_id: slotLaneId, used },
+    });
+  };
+
+  const submitInventory = (event: FormEvent<HTMLFormElement>, itemId: string) => {
+    event.preventDefault();
+    const quantity = parseNumberInput(inventoryDrafts[itemId] ?? "", "quantity");
+    if (!selected || !canEdit) {
+      setErrorMessage("No character selected or permission denied.");
+      return;
+    }
+    if (quantity === null) {
+      return;
+    }
+    setStatusMessage("Saving...");
+    patchInventory.mutate({ itemId, payload: { expected_revision: revision, quantity } });
+  };
+
+  const submitCurrency = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selected || !canEdit) {
+      setErrorMessage("No character selected or permission denied.");
+      return;
+    }
+    const payload: CharacterCurrencyPatchPayload = { expected_revision: revision };
+    for (const key of ["cp", "sp", "ep", "gp", "pp"]) {
+      if (currencyDraft[key] !== undefined) {
+        const value = parseNumberInput(currencyDraft[key], key.toUpperCase());
+        if (value === null) {
+          return;
+        }
+        payload[key as "cp" | "sp" | "ep" | "gp" | "pp"] = value;
+      }
+    }
+    setStatusMessage("Saving...");
+    patchCurrency.mutate(payload);
+  };
+
   const submitNotes = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selected || !permissions?.can_edit_session) {
+    if (!selected || !canEdit) {
       setErrorMessage("No character selected or permission denied.");
       return;
     }
     setStatusMessage("Saving...");
     patchNotes.mutate({
-      expected_revision: notesDraft.expectedRevision,
+      expected_revision: revision,
       player_notes_markdown: notesDraft.notes,
     });
   };
-
-  const state = detail ? (detail.character.state_record.state as Record<string, unknown>) : {};
-  const vitals = (state?.vitals as Record<string, unknown>) || {};
 
   return (
     <div className="session-pane-content">
@@ -1064,7 +1293,13 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
         <select
           id="character-selector"
           value={selectedSlug || ""}
-          onChange={(event) => setSelectedSlug(event.currentTarget.value || null)}
+          onChange={(event) => {
+            setSelectedSlug(event.currentTarget.value || null);
+            setActiveCharacterSection("overview");
+            setRestPreview(null);
+            setStatusMessage(null);
+            setErrorMessage(null);
+          }}
         >
           {characterList.map((item) => (
             <option key={item.slug} value={item.slug}>
@@ -1073,25 +1308,49 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
           ))}
         </select>
 
+        {listQuery.isLoading ? <p className="status status-neutral">Loading characters...</p> : null}
+        {detailQuery.isLoading ? <p className="status status-neutral">Loading character...</p> : null}
+
         {selected ? (
           <article className="character-summary">
             <h3>
               {selected.name} ({selected.slug})
             </h3>
             <p>
-              HP: {(vitals.current_hp as number | null) ?? selected.current_hp} / {(vitals.max_hp as number | null) ?? selected.max_hp}
+              HP: {readNumber(vitals.current_hp, selected.current_hp)} / {readNumber(stats.max_hp, selected.max_hp)}
             </p>
-            <p>Temp HP: {(vitals.temp_hp as number | null) ?? selected.temp_hp}</p>
+            <p>Temp HP: {readNumber(vitals.temp_hp, selected.temp_hp)}</p>
             <p>Class: {selected.class_level_text || "Unknown"}</p>
+            <p>System: {characterSystem(detailRecord)}</p>
             <p>Status: {selected.status}</p>
-            <p>Revision: {selected.revision}</p>
+            <p>Revision: {revision || selected.revision}</p>
           </article>
         ) : null}
 
-        {selected ? (
+        {selected && detailRecord ? (
           <>
             <section className="session-character-form">
-              <h3>Vitals</h3>
+              <div className="panel-header compact-header">
+                <h3>Vitals</h3>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={previewRest.isPending || !canEdit}
+                    onClick={() => previewRest.mutate("short")}
+                  >
+                    Short rest
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={previewRest.isPending || !canEdit}
+                    onClick={() => previewRest.mutate("long")}
+                  >
+                    Long rest
+                  </button>
+                </div>
+              </div>
               <form onSubmit={submitVitals} className="inline-two-col">
                 <label htmlFor="character-current-hp" className="chat-label">
                   Current HP
@@ -1100,6 +1359,7 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
                   id="character-current-hp"
                   type="number"
                   value={vitalsDraft.currentHp}
+                  disabled={!canEdit}
                   onChange={(event: ChangeEvent<HTMLInputElement>) =>
                     setVitalsDraft({ ...vitalsDraft, currentHp: event.currentTarget.value })
                   }
@@ -1111,35 +1371,359 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
                   id="character-temp-hp"
                   type="number"
                   value={vitalsDraft.tempHp}
+                  disabled={!canEdit}
                   onChange={(event: ChangeEvent<HTMLInputElement>) =>
                     setVitalsDraft({ ...vitalsDraft, tempHp: event.currentTarget.value })
                   }
                 />
                 <div />
-                <button type="submit" disabled={patchVitals.isPending || !permissions?.can_edit_session}>
+                <button type="submit" disabled={patchVitals.isPending || !canEdit}>
                   {patchVitals.isPending ? "Saving..." : "Save vitals"}
                 </button>
               </form>
+              {restPreview ? (
+                <div className="rest-preview">
+                  <div className="panel-header compact-header">
+                    <h4>{restPreview.label}</h4>
+                    <button
+                      type="button"
+                      disabled={applyRest.isPending || !canEdit}
+                      onClick={() =>
+                        applyRest.mutate({
+                          restType: restPreview.rest_type === "short" ? "short" : "long",
+                          payload: { expected_revision: revision },
+                        })
+                      }
+                    >
+                      {applyRest.isPending ? "Applying..." : "Apply"}
+                    </button>
+                  </div>
+                  <ul className="plain-list compact-list">
+                    {restPreview.changes.map((change) => (
+                      <li key={`${change.label}-${change.from_value}-${change.to_value}`}>
+                        <strong>{change.label}</strong>: {change.from_value} {"->"} {change.to_value}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </section>
-            <section className="session-character-form">
-              <h3>Player notes</h3>
-              <form onSubmit={submitNotes}>
-                <label htmlFor="character-player-notes" className="chat-label">
-                  Player notes
-                </label>
-                <textarea
-                  id="character-player-notes"
-                  rows={8}
-                  value={notesDraft.notes}
-                  onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
-                    setNotesDraft({ ...notesDraft, notes: event.currentTarget.value })
-                  }
-                />
-                <button type="submit" disabled={patchNotes.isPending || !permissions?.can_edit_session}>
-                  {patchNotes.isPending ? "Saving..." : "Save notes"}
-                </button>
-              </form>
-            </section>
+
+            {isDnd ? (
+              <div className="section-tabs" role="tablist" aria-label="Session character sections">
+                {dndCharacterSections.map((section) => (
+                  <button
+                    key={section.id}
+                    type="button"
+                    className={activeCharacterSection === section.id ? "active" : ""}
+                    onClick={() => setActiveCharacterSection(section.id)}
+                  >
+                    {section.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {isDnd && activeCharacterSection === "overview" ? (
+              <section className="session-character-form">
+                <h3>Overview</h3>
+                <div className="stat-grid">
+                  <article>
+                    <strong>Armor Class</strong>
+                    <span>{String(stats.armor_class ?? "--")}</span>
+                  </article>
+                  <article>
+                    <strong>Initiative</strong>
+                    <span>{String(stats.initiative_bonus ?? "--")}</span>
+                  </article>
+                  <article>
+                    <strong>Speed</strong>
+                    <span>{String(stats.speed ?? "--")}</span>
+                  </article>
+                  <article>
+                    <strong>Proficiency</strong>
+                    <span>{String(stats.proficiency_bonus ?? "--")}</span>
+                  </article>
+                  <article>
+                    <strong>Species</strong>
+                    <span>{readString(profile.species, selected.species || "--")}</span>
+                  </article>
+                  <article>
+                    <strong>Background</strong>
+                    <span>{readString(profile.background, selected.background || "--")}</span>
+                  </article>
+                </div>
+              </section>
+            ) : null}
+
+            {isDnd && activeCharacterSection === "resources" ? (
+              <section className="session-character-form">
+                <h3>Resources</h3>
+                {resources.length ? (
+                  <div className="character-card-grid">
+                    {resources.map((resource) => {
+                      const id = readString(resource.id);
+                      return (
+                        <article className="character-state-card" key={id || readString(resource.label)}>
+                          <h4>{readString(resource.label, id || "Resource")}</h4>
+                          <p>
+                            {readNumber(resource.current)} / {readNumber(resource.max)}
+                          </p>
+                          {resource.notes ? <p className="meta">{readString(resource.notes)}</p> : null}
+                          {canEdit && id ? (
+                            <form onSubmit={(event) => submitResource(event, id)} className="compact-state-form">
+                              <label className="chat-label" htmlFor={`resource-${id}`}>
+                                Current
+                              </label>
+                              <input
+                                id={`resource-${id}`}
+                                type="number"
+                                min="0"
+                                value={resourceDrafts[id] ?? ""}
+                                onChange={(event) =>
+                                  setResourceDrafts({ ...resourceDrafts, [id]: event.currentTarget.value })
+                                }
+                              />
+                              <button type="submit" disabled={patchResource.isPending}>
+                                Save
+                              </button>
+                            </form>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="status status-neutral">No tracked resources.</p>
+                )}
+              </section>
+            ) : null}
+
+            {isDnd && activeCharacterSection === "spells" ? (
+              <section className="session-character-form">
+                <h3>Spells</h3>
+                <div className="stat-grid">
+                  <article>
+                    <strong>Ability</strong>
+                    <span>{String(spellcasting.spellcasting_ability ?? "--")}</span>
+                  </article>
+                  <article>
+                    <strong>Save DC</strong>
+                    <span>{String(spellcasting.spell_save_dc ?? "--")}</span>
+                  </article>
+                  <article>
+                    <strong>Attack</strong>
+                    <span>{String(spellcasting.spell_attack_bonus ?? "--")}</span>
+                  </article>
+                </div>
+                {spellSlots.length ? (
+                  <div className="character-card-grid">
+                    {spellSlots.map((slot) => {
+                      const level = readNumber(slot.level);
+                      const slotLaneId = readString(slot.slot_lane_id);
+                      const key = draftKey(level, slotLaneId);
+                      return (
+                        <article className="character-state-card" key={key}>
+                          <h4>Level {level}</h4>
+                          <p>
+                            Used {readNumber(slot.used)} / {readNumber(slot.max)}
+                          </p>
+                          {canEdit ? (
+                            <form onSubmit={(event) => submitSpellSlot(event, slot)} className="compact-state-form">
+                              <label className="chat-label" htmlFor={`spell-slot-${key}`}>
+                                Used
+                              </label>
+                              <input
+                                id={`spell-slot-${key}`}
+                                type="number"
+                                min="0"
+                                max={readNumber(slot.max)}
+                                value={spellSlotDrafts[key] ?? ""}
+                                onChange={(event) =>
+                                  setSpellSlotDrafts({ ...spellSlotDrafts, [key]: event.currentTarget.value })
+                                }
+                              />
+                              <button type="submit" disabled={patchSpellSlot.isPending}>
+                                Save
+                              </button>
+                            </form>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                {spells.length ? (
+                  <div className="spell-card-list">
+                    {spells.map((spell) => (
+                      <article className="character-state-card" key={readString(spell.id, readString(spell.name))}>
+                        <h4>{readString(spell.name, "Spell")}</h4>
+                        <p className="meta">
+                          {[spell.mark, spell.casting_time, spell.range].map((value) => readString(value)).filter(Boolean).join(" | ")}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+
+            {isDnd && activeCharacterSection === "equipment" ? (
+              <section className="session-character-form">
+                <h3>Equipment</h3>
+                {equipmentRows.length ? (
+                  <div className="character-card-grid">
+                    {equipmentRows.map((item) => (
+                      <article className="character-state-card" key={readString(item.id, readString(item.name))}>
+                        <h4>{readString(item.name, "Item")}</h4>
+                        <p className="meta">
+                          {[
+                            item.is_equipped ? "Equipped" : "Not equipped",
+                            item.is_attuned ? "Attuned" : "Not attuned",
+                            readString(item.weapon_wield_mode),
+                          ]
+                            .filter(Boolean)
+                            .join(" | ")}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="status status-neutral">No equipment state rows.</p>
+                )}
+              </section>
+            ) : null}
+
+            {isDnd && activeCharacterSection === "inventory" ? (
+              <section className="session-character-form">
+                <h3>Inventory</h3>
+                {inventory.length ? (
+                  <div className="character-card-grid">
+                    {inventory.map((item) => {
+                      const id = readString(item.id);
+                      return (
+                        <article className="character-state-card" key={id || readString(item.name)}>
+                          <h4>{readString(item.name, "Item")}</h4>
+                          <p className="meta">
+                            Qty {readNumber(item.quantity, 1)}
+                            {item.weight ? ` | ${readString(item.weight)}` : ""}
+                          </p>
+                          {canEdit && id ? (
+                            <form onSubmit={(event) => submitInventory(event, id)} className="compact-state-form">
+                              <label className="chat-label" htmlFor={`inventory-${id}`}>
+                                Quantity
+                              </label>
+                              <input
+                                id={`inventory-${id}`}
+                                type="number"
+                                min="0"
+                                value={inventoryDrafts[id] ?? ""}
+                                onChange={(event) =>
+                                  setInventoryDrafts({ ...inventoryDrafts, [id]: event.currentTarget.value })
+                                }
+                              />
+                              <button type="submit" disabled={patchInventory.isPending}>
+                                Save
+                              </button>
+                            </form>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                <form onSubmit={submitCurrency} className="currency-grid">
+                  {["cp", "sp", "ep", "gp", "pp"].map((key) => (
+                    <label key={key} className="chat-label" htmlFor={`currency-${key}`}>
+                      {key.toUpperCase()}
+                      <input
+                        id={`currency-${key}`}
+                        type="number"
+                        min="0"
+                        value={currencyDraft[key] ?? "0"}
+                        disabled={!canEdit}
+                        onChange={(event) => setCurrencyDraft({ ...currencyDraft, [key]: event.currentTarget.value })}
+                      />
+                    </label>
+                  ))}
+                  <button type="submit" disabled={patchCurrency.isPending || !canEdit}>
+                    {patchCurrency.isPending ? "Saving..." : "Save currency"}
+                  </button>
+                </form>
+              </section>
+            ) : null}
+
+            {isDnd && activeCharacterSection === "abilities" ? (
+              <section className="session-character-form">
+                <h3>Abilities and Skills</h3>
+                <div className="ability-grid">
+                  {Object.entries(abilityScores).map(([key, value]) => {
+                    const ability = asRecord(value);
+                    return (
+                      <article className="character-state-card" key={key}>
+                        <h4>{key}</h4>
+                        <p>Score {String(ability.score ?? "--")}</p>
+                        <p>Modifier {String(ability.modifier ?? "--")}</p>
+                        <p>Save {String(ability.save_bonus ?? "--")}</p>
+                      </article>
+                    );
+                  })}
+                </div>
+                <div className="stat-grid">
+                  <article>
+                    <strong>Passive Perception</strong>
+                    <span>{String(stats.passive_perception ?? "--")}</span>
+                  </article>
+                  <article>
+                    <strong>Passive Insight</strong>
+                    <span>{String(stats.passive_insight ?? "--")}</span>
+                  </article>
+                  <article>
+                    <strong>Passive Investigation</strong>
+                    <span>{String(stats.passive_investigation ?? "--")}</span>
+                  </article>
+                </div>
+              </section>
+            ) : null}
+
+            {(!isDnd || activeCharacterSection === "notes") ? (
+              <section className="session-character-form">
+                <h3>Player notes</h3>
+                <form onSubmit={submitNotes}>
+                  <label htmlFor="character-player-notes" className="chat-label">
+                    Player notes
+                  </label>
+                  <textarea
+                    id="character-player-notes"
+                    rows={8}
+                    value={notesDraft.notes}
+                    disabled={!canEdit}
+                    onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+                      setNotesDraft({ ...notesDraft, notes: event.currentTarget.value })
+                    }
+                  />
+                  <button type="submit" disabled={patchNotes.isPending || !canEdit}>
+                    {patchNotes.isPending ? "Saving..." : "Save notes"}
+                  </button>
+                </form>
+              </section>
+            ) : null}
+
+            {!isDnd ? (
+              <section className="session-character-form">
+                <h3>{characterSystem(detailRecord)}</h3>
+                <div className="stat-grid">
+                  <article>
+                    <strong>Current HP</strong>
+                    <span>{String(vitals.current_hp ?? "--")}</span>
+                  </article>
+                  <article>
+                    <strong>Temp HP</strong>
+                    <span>{String(vitals.temp_hp ?? "--")}</span>
+                  </article>
+                </div>
+              </section>
+            ) : null}
           </>
         ) : null}
 

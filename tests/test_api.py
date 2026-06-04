@@ -762,6 +762,134 @@ def test_api_character_sheet_edit_batch_rejects_delta_actions(
     )
 
 
+def test_api_character_session_endpoints_cover_dnd_state_controls(client, app, users, set_campaign_visibility):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-session-state-api")
+
+    character_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(owner_token),
+    )
+
+    assert character_response.status_code == 200
+    character_payload = character_response.get_json()["character"]
+    starting_revision = character_payload["state_record"]["revision"]
+    second_level_slot = next(
+        item
+        for item in character_payload["state_record"]["state"]["spell_slots"]
+        if int(item.get("level") or 0) == 2
+    )
+
+    resource_response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/session/resources/sorcery-points",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": starting_revision,
+            "current": 1,
+        },
+    )
+
+    assert resource_response.status_code == 200
+    resource_character = resource_response.get_json()["character"]
+    assert resource_character["state_record"]["revision"] == starting_revision + 1
+    resource_state = resource_character["state_record"]["state"]
+    assert {item["id"]: item for item in resource_state["resources"]}["sorcery-points"]["current"] == 1
+
+    stale_resource_response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/session/resources/sorcery-points",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": starting_revision,
+            "current": 2,
+        },
+    )
+
+    assert stale_resource_response.status_code == 409
+    assert stale_resource_response.get_json()["error"]["code"] == "state_conflict"
+
+    spell_response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/session/spell-slots/2",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": resource_character["state_record"]["revision"],
+            "slot_lane_id": second_level_slot.get("slot_lane_id", ""),
+            "used": 1,
+        },
+    )
+
+    assert spell_response.status_code == 200
+    spell_character = spell_response.get_json()["character"]
+    spell_state = spell_character["state_record"]["state"]
+    assert next(
+        item
+        for item in spell_state["spell_slots"]
+        if int(item.get("level") or 0) == 2
+        and str(item.get("slot_lane_id") or "") == str(second_level_slot.get("slot_lane_id") or "")
+    )["used"] == 1
+
+    inventory_response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/session/inventory/crossbow-bolts-4",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": spell_character["state_record"]["revision"],
+            "quantity": 17,
+        },
+    )
+
+    assert inventory_response.status_code == 200
+    inventory_character = inventory_response.get_json()["character"]
+    inventory_state = inventory_character["state_record"]["state"]
+    assert {item["id"]: item for item in inventory_state["inventory"]}["crossbow-bolts-4"]["quantity"] == 17
+
+    currency_response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/session/currency",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": inventory_character["state_record"]["revision"],
+            "sp": 8,
+            "gp": 12,
+        },
+    )
+
+    assert currency_response.status_code == 200
+    currency_character = currency_response.get_json()["character"]
+    currency_state = currency_character["state_record"]["state"]
+    assert currency_state["currency"]["sp"] == 8
+    assert currency_state["currency"]["gp"] == 12
+
+    preview_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/rest-preview/long",
+        headers=api_headers(owner_token),
+    )
+
+    assert preview_response.status_code == 200
+    preview_payload = preview_response.get_json()["preview"]
+    assert preview_payload["rest_type"] == "long"
+    assert preview_payload["label"] == "Long Rest"
+    assert preview_payload["changes"]
+
+    rest_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/session/rest/long",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": currency_character["state_record"]["revision"],
+        },
+    )
+
+    assert rest_response.status_code == 200
+    rested_character = rest_response.get_json()["character"]
+    rested_state = rested_character["state_record"]["state"]
+    rested_sorcery = {item["id"]: item for item in rested_state["resources"]}["sorcery-points"]
+    assert rested_sorcery["current"] == rested_sorcery["max"]
+    assert next(
+        item
+        for item in rested_state["spell_slots"]
+        if int(item.get("level") or 0) == 2
+        and str(item.get("slot_lane_id") or "") == str(second_level_slot.get("slot_lane_id") or "")
+    )["used"] == 0
+
+
 def test_api_character_list_derives_multiclass_summary_from_class_rows(client, app, users):
     def _mutate(payload: dict) -> None:
         profile = dict(payload.get("profile") or {})

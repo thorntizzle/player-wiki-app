@@ -229,6 +229,34 @@ export interface CharacterVitalsPatchPayload {
   temp_hp?: number | null;
 }
 
+export interface CharacterResourcePatchPayload {
+  expected_revision: number;
+  current?: number | null;
+}
+
+export interface CharacterSpellSlotsPatchPayload {
+  expected_revision: number;
+  slot_lane_id?: string;
+  used?: number | null;
+}
+
+export interface CharacterInventoryPatchPayload {
+  expected_revision: number;
+  quantity?: number | null;
+}
+
+export interface CharacterCurrencyPatchPayload {
+  expected_revision: number;
+  cp?: number | null;
+  sp?: number | null;
+  ep?: number | null;
+  gp?: number | null;
+  pp?: number | null;
+  coin?: number | null;
+  supply?: number | null;
+  spirit_stones?: number | null;
+}
+
 export interface CharacterNotesPatchPayload {
   expected_revision: number;
   player_notes_markdown: string;
@@ -239,6 +267,28 @@ export interface CharacterVitalsPatchResponse extends ApiResponseBase {
 }
 
 export interface CharacterNotesPatchResponse extends ApiResponseBase {
+  character: CharacterRecord;
+}
+
+export interface CharacterRestPreviewChange {
+  label: string;
+  from_value: string;
+  to_value: string;
+}
+
+export interface CharacterRestPreviewResponse extends ApiResponseBase {
+  preview: {
+    rest_type: "short" | "long" | string;
+    label: string;
+    changes: CharacterRestPreviewChange[];
+  };
+}
+
+export interface CharacterRestApplyPayload {
+  expected_revision: number;
+}
+
+export interface CharacterRestApplyResponse extends ApiResponseBase {
   character: CharacterRecord;
 }
 
