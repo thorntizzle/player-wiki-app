@@ -69,8 +69,10 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 - `POST /api/v1/campaigns/<campaign_slug>/session/close`
 - `POST /api/v1/campaigns/<campaign_slug>/session/messages`
 - `POST /api/v1/campaigns/<campaign_slug>/session/articles`
+- `PUT /api/v1/campaigns/<campaign_slug>/session/articles/<article_id>`
 - `POST /api/v1/campaigns/<campaign_slug>/session/articles/<article_id>/reveal`
 - `DELETE /api/v1/campaigns/<campaign_slug>/session/articles/<article_id>`
+- `DELETE /api/v1/campaigns/<campaign_slug>/session/articles/revealed`
 - `GET /api/v1/campaigns/<campaign_slug>/session/logs/<session_id>`
 - `DELETE /api/v1/campaigns/<campaign_slug>/session/logs/<session_id>`
 - `GET /api/v1/campaigns/<campaign_slug>/session/articles/<article_id>/image`
@@ -123,7 +125,7 @@ The browser `DM Content` hub now covers the main DM-managed content lanes while 
 
 - `DM Content -> Player Wiki` creates and edits published wiki pages through the content service, uploads page images into campaign assets under `wiki-pages/`, converts PNG/JPG browser uploads and session-article image copies into WebP quality 82 app-owned assets for published page frontmatter, can prefill a new page from a staged or revealed session article, can unpublish/archive pages by updating page metadata, and only hard-deletes through the browser after usage checks pass.
 - `DM Content -> Systems` manages campaign source enablement and entry overrides through the same Systems policy service as `PUT /api/v1/campaigns/<campaign_slug>/systems/sources` and `PUT /api/v1/campaigns/<campaign_slug>/systems/overrides/<entry_key>`. It also owns the browser surface for custom campaign Systems entries, shared-source import review, and admin-only DND-5E ZIP uploads.
-- `DM Content -> Staged Articles` writes into the existing session article store for manual, upload, and wiki-backed prep articles. The JSON API can create, reveal, and delete session articles; the browser is currently the update surface for revising unrevealed staged article title, body, image alt/caption, or replacement image before reveal or wiki conversion.
+- `DM Content -> Staged Articles` writes into the existing session article store for manual, upload, and wiki-backed prep articles. The JSON API can create, revise unrevealed staged article title/body/image metadata or replacement image, reveal, delete, and bulk-clear revealed session articles. Browser Player Wiki promotion/conversion still owns the richer publication safety review.
 - `DM Content -> Statblocks` and `DM Content -> Conditions` have both browser and JSON API create/update/delete coverage through the `/dm-content/statblocks` and `/dm-content/conditions` endpoints.
 
 Use the browser Player Wiki lane when you want the built-in removal guidance, archive/unpublish affordance, session-article promotion flow, and usage blockers for backlinks, character hooks or sheet references, and session provenance. The low-level content API remains automation-oriented: `DELETE /api/v1/campaigns/<campaign_slug>/content/pages/<page_ref>` deletes the page file after DM/admin authorization and does not display the browser safety review, so API clients should either unpublish through a metadata update or reproduce the relevant dependency checks before hard deletion.
@@ -154,6 +156,8 @@ Use the browser Player Wiki lane when you want the built-in removal guidance, ar
 - Wiki mode accepts `source_ref`. For published wiki pages, `source_ref` is the page ref such as `npcs/captain-lyra-vale`. For Systems entries, use `systems:<entry-slug>`. Legacy `page_ref` still works for published wiki pages.
 - Pulling a published wiki page creates a staged markdown snapshot from the current visible page. If that page has a published frontmatter image, the API copies it into the session article image store so reveal behavior matches a native staged article.
 - Pulling a Systems entry creates a staged HTML snapshot from the current rendered Systems article. Session article payloads now include `source_page_ref`, `source_kind`, `source_ref`, and `body_format` so API clients can tell whether the staged body is markdown or rendered HTML.
+- Staged session articles can be revised with `PUT /api/v1/campaigns/<campaign_slug>/session/articles/<article_id>` using `title`, `body_markdown`, optional replacement `image`, or optional existing-image `image_alt_text` / `image_caption`. Revealed articles remain immutable in the prep queue.
+- `DELETE /api/v1/campaigns/<campaign_slug>/session/articles/revealed` removes all currently revealed session articles for DM/admin cleanup and returns the deleted article IDs.
 - Embedded image payloads use JSON objects with `filename`, optional `media_type`, and `data_base64`.
 - Systems read endpoints follow the same source-level and entry-level visibility rules as the browser UI. Systems source updates and entry-override writes are DM/admin only.
 - Combat reads return a structured tracker payload. Combat mutations are DM/admin only except for player-character vitals, which can also be updated by the assigned owner player when they provide the current sheet revision.

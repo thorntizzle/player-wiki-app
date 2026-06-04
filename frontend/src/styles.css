@@ -19,7 +19,8 @@ body {
   color: #121926;
 }
 
-.session-pilot {
+.session-pilot,
+.session-shell {
   min-height: 100vh;
   display: grid;
   grid-template-rows: auto 1fr;
@@ -58,9 +59,20 @@ body {
 }
 
 .token-row span,
-.chat-label {
+.chat-label,
+.subtitle {
   font-size: 0.875rem;
   color: #d8e2ff;
+}
+
+.subtitle {
+  color: #4b5563;
+  margin-top: 0.1rem;
+}
+
+.topbar .subtitle {
+  color: #cbd5e1;
+  margin: 0;
 }
 
 .token-row input {
@@ -117,11 +129,6 @@ body {
   margin-top: 0;
 }
 
-.subtitle {
-  color: #4b5563;
-  font-size: 0.85rem;
-}
-
 .status {
   margin: 0.35rem 0;
   border-radius: 8px;
@@ -148,6 +155,7 @@ body {
   background: #1d4ed8;
   color: #eff6ff;
   font-weight: 600;
+  cursor: pointer;
 }
 
 .button:hover {
@@ -159,11 +167,156 @@ body {
   border-color: #4b5563;
 }
 
-.status-row {
+.button-danger {
+  background: #991b1b;
+  border-color: #7f1d1d;
+  color: #fff;
+  border-radius: 8px;
+  padding: 0.45rem 0.75rem;
+  border-style: solid;
+  border-width: 1px;
+}
+
+.button-danger:hover {
+  background: #7f1d1d;
+}
+
+.link-like-button {
+  display: inline-flex;
+  border: none;
+  background: transparent;
+  color: #1d4ed8;
+  padding: 0;
+  margin-left: 0.4rem;
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+}
+
+.link-like-button:hover {
+  color: #082d5f;
+}
+
+.sign-in-link {
+  white-space: nowrap;
+}
+
+.auth-notice {
+  margin-top: 0.5rem;
   display: grid;
-  gap: 0.75rem;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  margin-bottom: 1rem;
+  gap: 0.45rem;
+}
+
+.status-row,
+.session-tab-strip,
+.search-row,
+.segmented,
+.chat-actions,
+.article-actions,
+.session-actions-row,
+.session-log-detail-head {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.session-tab-strip {
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  padding: 0.35rem;
+  background: #f8fbff;
+}
+
+.tab-button {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #f8fbff;
+  color: #1e3a8a;
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.tab-button.active {
+  background: #1d4ed8;
+  color: #eff6ff;
+}
+
+.pane-stack {
+  position: relative;
+}
+
+.pane-hidden {
+  display: none;
+}
+
+.session-pane-content,
+.split-grid,
+.session-log-row {
+  display: grid;
+  gap: 1rem;
+}
+
+.split-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.session-log-row {
+  grid-template-columns: minmax(15rem, 1fr) minmax(16rem, 2fr);
+}
+
+.session-log-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.session-log-list-row {
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  background: #f8fbff;
+  padding: 0.6rem;
+  text-align: left;
+  color: inherit;
+}
+
+.session-log-list-row.active {
+  border-color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.session-log-list-row small {
+  display: block;
+  color: #475569;
+  font-size: 0.8rem;
+}
+
+.session-log-detail {
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  background: #f9fbff;
+  padding: 0.7rem;
+  max-height: 30rem;
+  overflow: auto;
+}
+
+.log-messages {
+  margin: 0.5rem 0 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.log-messages p {
+  margin: 0.2rem 0 0;
+}
+
+.pill {
+  font-size: 0.78rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: #e0ecff;
+  color: #1f3e72;
 }
 
 .stat-card {
@@ -171,19 +324,6 @@ body {
   background: #f8fbff;
   border-radius: 8px;
   padding: 0.75rem;
-}
-
-.split-grid {
-  display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  margin-bottom: 1rem;
-}
-
-.chat-panel ul,
-.panel li {
-  margin: 0;
-  padding-left: 1.05rem;
 }
 
 .chat-list {
@@ -213,34 +353,237 @@ body {
   gap: 0.6rem;
 }
 
-.chat-composer textarea {
-  min-height: 5.5rem;
-  width: 100%;
-  padding: 0.6rem;
+.chat-composer textarea,
+input,
+select,
+textarea {
   border-radius: 8px;
   border: 1px solid #cbd3df;
+  padding: 0.55rem 0.65rem;
+  min-width: 0;
+  font: inherit;
 }
 
-.chat-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+.chat-composer textarea,
+.session-form textarea {
+  min-height: 5.5rem;
+  width: 100%;
 }
 
-.chat-actions button {
-  border: 0;
+.chat-actions button,
+.session-actions-row button,
+.article-actions button,
+.inline-two-col button,
+.session-character-form button,
+.session-log-detail-head button,
+.wiki-selection button,
+.session-tab-strip button,
+.segmented-button {
+  border: 1px solid #111827;
   border-radius: 8px;
-  background: #0f172a;
+  background: #111827;
   color: #e2e8f0;
-  padding: 0.55rem 0.85rem;
+  padding: 0.45rem 0.8rem;
 }
 
-.chat-actions button:disabled {
-  background: #94a3b8;
+.chat-actions button:disabled,
+.article-actions button:disabled,
+.session-actions-row button:disabled,
+.inline-two-col button:disabled,
+.session-character-form button:disabled,
+.session-log-detail-head button:disabled,
+.wiki-selection button:disabled,
+.segmented-button:disabled {
+  opacity: 0.55;
+}
+
+.session-surface-subhead {
+  margin-bottom: 0.55rem;
+}
+
+.article-stack {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.article-card {
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  padding: 0.5rem;
+  background: #fcfdff;
+}
+
+.article-card > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.45rem;
+  cursor: pointer;
+  padding-bottom: 0.25rem;
+}
+
+.article-kind {
+  color: #475569;
+  font-size: 0.78rem;
+}
+
+.article-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: #475569;
+  margin-bottom: 0.4rem;
+}
+
+.article-image {
+  max-width: 20rem;
+  max-height: 10rem;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.article-body {
+  margin: 0;
+}
+
+.markdown-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.html-body {
+  overflow: auto;
+  max-height: 14rem;
+  background: #fafbfe;
+  border: 1px dashed #d0d9eb;
+  border-radius: 8px;
+  padding: 0.5rem;
+}
+
+.wiki-search {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.wiki-search .search-row {
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.search-row input {
+  min-width: min(100%, 18rem);
+}
+
+.wiki-result-stack {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+  max-height: 14rem;
+}
+
+.wiki-result-row {
+  width: 100%;
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  background: #f8fbff;
+  text-align: left;
+  padding: 0.45rem 0.6rem;
+}
+
+.wiki-result-row strong {
+  display: block;
+}
+
+.wiki-result-row p {
+  margin: 0.15rem 0 0;
+  color: #4b5563;
+}
+
+.wiki-preview {
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  background: #f8fbff;
+  padding: 0.55rem;
+  margin-top: 0.55rem;
+}
+
+.preview-title {
+  font-weight: 700;
+  margin-bottom: 0.45rem;
+}
+
+.wiki-preview-html {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.6rem;
+  max-height: 13rem;
+  overflow: auto;
+}
+
+.wiki-selection {
+  margin-top: 0.45rem;
+}
+
+.segmented {
+  gap: 0.5rem;
+}
+
+.segmented-button {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #f8fbff;
+  color: #1e40af;
+  padding: 0.35rem 0.8rem;
+}
+
+.segmented-button.active {
+  background: #1e40af;
+  color: #eff6ff;
+}
+
+.session-form {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.character-summary {
+  border: 1px solid #d8e1ee;
+  background: #f8fbff;
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.character-summary p {
+  margin: 0.35rem 0;
+}
+
+.session-character-form {
+  margin-top: 1rem;
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  background: #f8fbff;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.inline-two-col {
+  display: grid;
+  gap: 0.45rem;
+  grid-template-columns: 1fr 1fr;
+}
+
+.inline-two-col button {
+  grid-column: 1 / -1;
+}
+
+.inline-two-col input {
+  width: 100%;
 }
 
 @media (max-width: 740px) {
-  .session-pilot {
+  .session-pilot,
+  .session-shell {
     padding: 0.55rem;
   }
 
@@ -248,8 +591,11 @@ body {
     padding: 0.85rem;
   }
 
-  .chat-actions {
+  .chat-actions,
+  .split-grid,
+  .session-log-row,
+  .session-tab-strip,
+  .inline-two-col {
     flex-direction: column;
-    align-items: flex-start;
   }
 }

@@ -332,6 +332,95 @@ def test_api_can_pull_visible_systems_entry_into_session_store(client, app, user
     assert article_payload["image"] is None
 
 
+def test_api_can_update_and_clear_session_articles(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-article-update-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="player-session-article-update-api")
+
+    create_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={
+            "mode": "manual",
+            "title": "Initial Orders",
+            "body_markdown": "Meet at the north gate.",
+        },
+    )
+
+    assert create_response.status_code == 200
+    article_id = create_response.get_json()["article"]["id"]
+
+    forbidden_update = client.put(
+        f"/api/v1/campaigns/linden-pass/session/articles/{article_id}",
+        headers=api_headers(player_token),
+        json={
+            "title": "Player Rewrite",
+            "body_markdown": "This should not save.",
+        },
+    )
+
+    assert forbidden_update.status_code == 403
+
+    update_response = client.put(
+        f"/api/v1/campaigns/linden-pass/session/articles/{article_id}",
+        headers=api_headers(dm_token),
+        json={
+            "title": "Updated Orders",
+            "body_markdown": "Meet at the south gate.",
+        },
+    )
+
+    assert update_response.status_code == 200
+    updated_payload = update_response.get_json()["article"]
+    assert updated_payload["title"] == "Updated Orders"
+    assert updated_payload["body_markdown"] == "Meet at the south gate."
+
+    start_response = client.post("/api/v1/campaigns/linden-pass/session/start", headers=api_headers(dm_token))
+
+    assert start_response.status_code == 200
+
+    reveal_response = client.post(
+        f"/api/v1/campaigns/linden-pass/session/articles/{article_id}/reveal",
+        headers=api_headers(dm_token),
+    )
+
+    assert reveal_response.status_code == 200
+    assert reveal_response.get_json()["article"]["is_revealed"] is True
+
+    revealed_update = client.put(
+        f"/api/v1/campaigns/linden-pass/session/articles/{article_id}",
+        headers=api_headers(dm_token),
+        json={
+            "title": "Late Rewrite",
+            "body_markdown": "This should not save either.",
+        },
+    )
+
+    assert revealed_update.status_code == 400
+    assert revealed_update.get_json()["error"]["code"] == "validation_error"
+
+    forbidden_clear = client.delete(
+        "/api/v1/campaigns/linden-pass/session/articles/revealed",
+        headers=api_headers(player_token),
+    )
+
+    assert forbidden_clear.status_code == 403
+
+    clear_response = client.delete(
+        "/api/v1/campaigns/linden-pass/session/articles/revealed",
+        headers=api_headers(dm_token),
+    )
+
+    assert clear_response.status_code == 200
+    clear_payload = clear_response.get_json()
+    assert clear_payload["deleted_article_ids"] == [article_id]
+    assert clear_payload["deleted_articles"][0]["title"] == "Updated Orders"
+
+    dm_session_response = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
+
+    assert dm_session_response.status_code == 200
+    assert dm_session_response.get_json()["revealed_articles"] == []
+
+
 def test_api_dm_content_endpoints_require_dm_permissions(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-content-api")
     player_token = issue_api_token(app, users["party"]["email"], label="player-dm-content-api")

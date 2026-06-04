@@ -2077,6 +2077,63 @@ def register_api(app) -> None:
             }
         )
 
+    @api.put("/campaigns/<campaign_slug>/session/articles/<int:article_id>")
+    @api_campaign_scope_access_required("session")
+    @api_login_required
+    def session_article_update(campaign_slug: str, article_id: int):
+        if not can_manage_campaign_session(campaign_slug):
+            return json_error("You do not have permission to manage this session.", 403, code="forbidden")
+
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        try:
+            payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="invalid_json")
+
+        session_service = current_app.extensions["campaign_session_service"]
+        try:
+            article = session_service.update_article(
+                campaign_slug,
+                article_id,
+                title=str(payload.get("title") or ""),
+                body_markdown=str(payload.get("body_markdown") or ""),
+                updated_by_user_id=user.id,
+            )
+            image_payload = payload.get("image")
+            if image_payload is not None:
+                image_file = decode_embedded_file(image_payload, label="image")
+                session_service.attach_article_image(
+                    campaign_slug,
+                    article.id,
+                    filename=image_file["filename"],
+                    media_type=image_file["media_type"],
+                    data_blob=image_file["data_blob"],
+                    alt_text=str(image_payload.get("alt_text") or "").strip(),
+                    caption=str(image_payload.get("caption") or "").strip(),
+                    updated_by_user_id=user.id,
+                )
+            elif payload.get("image_alt_text") is not None or payload.get("image_caption") is not None:
+                session_service.update_article_image_metadata(
+                    campaign_slug,
+                    article.id,
+                    alt_text=str(payload.get("image_alt_text") or ""),
+                    caption=str(payload.get("image_caption") or ""),
+                    updated_by_user_id=user.id,
+                )
+        except (CampaignSessionValidationError, ValueError) as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        article_image = session_service.get_article_image(campaign_slug, article.id)
+        return jsonify(
+            {
+                "ok": True,
+                "article": serialize_session_article(campaign_slug, article, article_image),
+            }
+        )
+
     @api.post("/campaigns/<campaign_slug>/session/articles/<int:article_id>/reveal")
     @api_campaign_scope_access_required("session")
     @api_login_required
@@ -2130,6 +2187,33 @@ def register_api(app) -> None:
             return json_error(str(exc), 400, code="validation_error")
 
         return jsonify({"ok": True, "article": serialize_session_article(campaign_slug, article)})
+
+    @api.delete("/campaigns/<campaign_slug>/session/articles/revealed")
+    @api_campaign_scope_access_required("session")
+    @api_login_required
+    def session_revealed_articles_clear(campaign_slug: str):
+        if not can_manage_campaign_session(campaign_slug):
+            return json_error("You do not have permission to manage this session.", 403, code="forbidden")
+
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        try:
+            articles = current_app.extensions["campaign_session_service"].delete_revealed_articles(
+                campaign_slug,
+                updated_by_user_id=user.id,
+            )
+        except CampaignSessionValidationError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        return jsonify(
+            {
+                "ok": True,
+                "deleted_articles": [serialize_session_article(campaign_slug, article) for article in articles],
+                "deleted_article_ids": [article.id for article in articles],
+            }
+        )
 
     @api.get("/campaigns/<campaign_slug>/dm-content")
     @api_campaign_scope_access_required("dm_content")

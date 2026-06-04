@@ -50,4 +50,27 @@ The current pilot build is local-only: `frontend/dist` is intentionally ignored 
 - `GET /api/v1/app`
 - `GET /api/v1/campaigns`
 - `GET /api/v1/campaigns/<campaign_slug>/session`
+- `POST /api/v1/campaigns/<campaign_slug>/session/start`
+- `POST /api/v1/campaigns/<campaign_slug>/session/close`
 - `POST /api/v1/campaigns/<campaign_slug>/session/messages`
+- `GET /api/v1/campaigns/<campaign_slug>/session/article-sources/search?q=...`
+- `POST /api/v1/campaigns/<campaign_slug>/session/articles`
+- `PUT /api/v1/campaigns/<campaign_slug>/session/articles/<article_id>`
+- `POST /api/v1/campaigns/<campaign_slug>/session/articles/<article_id>/reveal`
+- `DELETE /api/v1/campaigns/<campaign_slug>/session/articles/<article_id>`
+- `DELETE /api/v1/campaigns/<campaign_slug>/session/articles/revealed`
+- `GET /api/v1/campaigns/<campaign_slug>/session/articles/<article_id>/image`
+- `GET /api/v1/campaigns/<campaign_slug>/session/logs/<session_id>`
+- `DELETE /api/v1/campaigns/<campaign_slug>/session/logs/<session_id>`
+- `GET /campaigns/<campaign_slug>/session/wiki-lookup/search?q=...` (same-origin, browser route)
+- `GET /campaigns/<campaign_slug>/session/wiki-lookup/preview?page_ref=...` (same-origin, browser route)
+- `GET /api/v1/campaigns/<campaign_slug>/characters`
+- `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>`
+- `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals`
+- `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/notes`
+
+Authentication notes:
+
+- Session polling and writes default to browser cookies using `same-origin` requests.
+- Optional API token is supported in a local test field and sent as `Authorization: Bearer ...` when present.
+- When an auth-gated call returns 401, the shell shows a clear recovery prompt to sign in and continue.
