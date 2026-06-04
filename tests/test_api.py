@@ -1369,6 +1369,132 @@ def test_api_character_session_endpoints_cover_xianxia_state_controls(
     )
 
 
+def test_api_character_session_endpoints_cover_xianxia_dao_immolating_actions(
+    client,
+    app,
+    users,
+    sign_in,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("API Dao Crane"),
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+
+    def _prepare_definition(payload: dict) -> None:
+        xianxia = payload.setdefault("xianxia", {})
+        xianxia["insight"] = {"available": 12, "spent": 0}
+        dao_immolating = xianxia.setdefault("dao_immolating_techniques", {})
+        dao_immolating["prepared"] = [
+            {
+                "name": "Ashen Bell",
+                "notes": "Stored for a prepared request.",
+            }
+        ]
+        dao_immolating["use_history"] = [
+            {
+                "name": "River-Cleaving Spark",
+                "approval_status": "approved",
+                "approval_notes": "Approved for this duel.",
+            }
+        ]
+
+    _write_character_definition(app, "api-dao-crane", _prepare_definition)
+
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-xianxia-dao-api")
+    character_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/api-dao-crane",
+        headers=api_headers(dm_token),
+    )
+
+    assert character_response.status_code == 200
+    character = character_response.get_json()["character"]
+    assert character["permissions"]["can_record_xianxia_dao_immolating_use"] is True
+    approval_group = next(
+        group
+        for group in character["presented_xianxia"]["approval"]["status_groups"]
+        if group["key"] == "dao_immolating_use_records"
+    )
+    assert approval_group["records"][0]["use_record_index"] == 0
+    assert approval_group["records"][0]["status_label"] == "Approved"
+    assert approval_group["records"][0]["insight_cost"] == 10
+
+    player_token = issue_api_token(app, users["party"]["email"], label="player-xianxia-dao-api")
+    forbidden_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/api-dao-crane/session/xianxia-dao-immolating-use-records",
+        headers=api_headers(player_token),
+        json={
+            "expected_revision": character["state_record"]["revision"],
+            "use_record_index": 0,
+        },
+    )
+
+    assert forbidden_response.status_code == 403
+
+    request_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/api-dao-crane/session/xianxia-dao-immolating-use-requests",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": character["state_record"]["revision"],
+            "prepared_record_index": 0,
+            "notes": "Player called on the prepared bell.",
+        },
+    )
+
+    assert request_response.status_code == 200
+    request_character = request_response.get_json()["character"]
+    request_history = request_character["definition"]["xianxia"]["dao_immolating_techniques"][
+        "use_history"
+    ]
+    assert request_history[-1]["name"] == "Ashen Bell"
+    assert request_history[-1]["request_type"] == "dao_immolating_use"
+    assert request_history[-1]["request_source"] == "prepared_record"
+    assert request_history[-1]["approval_status"] == "pending"
+    assert request_history[-1]["prepared_record_index"] == 0
+    request_group = next(
+        group
+        for group in request_character["presented_xianxia"]["approval"]["status_groups"]
+        if group["key"] == "dao_immolating_use_records"
+    )
+    assert [record["status_label"] for record in request_group["records"]] == [
+        "Approved",
+        "Pending",
+    ]
+
+    record_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/api-dao-crane/session/xianxia-dao-immolating-use-records",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": request_character["state_record"]["revision"],
+            "use_record_index": 0,
+            "notes": "Spent during the bridge duel.",
+        },
+    )
+
+    assert record_response.status_code == 200
+    record_character = record_response.get_json()["character"]
+    xianxia_definition = record_character["definition"]["xianxia"]
+    recorded_use = xianxia_definition["dao_immolating_techniques"]["use_history"][0]
+    assert recorded_use["used"] is True
+    assert recorded_use["one_use_status"] == "used"
+    assert recorded_use["insight_spent"] == 10
+    assert recorded_use["use_notes"] == "Spent during the bridge duel."
+    assert xianxia_definition["insight"] == {"available": 2, "spent": 10}
+    assert xianxia_definition["advancement_history"][-1]["action"] == "dao_immolating_technique_used"
+    record_group = next(
+        group
+        for group in record_character["presented_xianxia"]["approval"]["status_groups"]
+        if group["key"] == "dao_immolating_use_records"
+    )
+    assert record_group["records"][0]["used"] is True
+    assert record_group["records"][0]["use_notes"] == "Spent during the bridge duel."
+
+
 def test_api_character_session_equipment_state_endpoint_updates_wield_mode_and_rejects_invalid_rows(
     client,
     app,

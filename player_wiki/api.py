@@ -69,7 +69,11 @@ from .character_builder import (
     resolve_weapon_wield_mode,
     weapon_wield_mode_label,
 )
-from .character_editor import CharacterEditValidationError, apply_equipment_state_edit
+from .character_editor import (
+    CharacterEditValidationError,
+    apply_equipment_state_edit,
+    build_managed_character_import_metadata,
+)
 from .character_importer import write_yaml
 from .character_models import CharacterRecord, CharacterStateRecord
 from .character_profile import profile_class_level_text
@@ -102,6 +106,10 @@ from .systems_labels import (
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError
 from .system_policy import is_xianxia_system, supports_combat_tracker, supports_native_character_tools
 from .version import build_app_metadata
+from .xianxia_advancement import (
+    record_xianxia_dao_immolating_use_definition,
+    request_xianxia_dao_immolating_use_definition,
+)
 
 def register_api(app) -> None:
     api = Blueprint("api", __name__, url_prefix="/api/v1")
@@ -1431,6 +1439,8 @@ def register_api(app) -> None:
             "presented_xianxia": dict(presented_character.get("xianxia_read") or {}),
             "permissions": {
                 "can_edit_session": has_session_mode_access(campaign_slug, record.definition.character_slug),
+                "can_manage_session": can_manage_campaign_session(campaign_slug),
+                "can_record_xianxia_dao_immolating_use": can_manage_campaign_session(campaign_slug),
             },
         }
 
@@ -3689,6 +3699,41 @@ def register_api(app) -> None:
         }
         return {key: value for key, value in item_payload.items() if value not in ("", None)}
 
+    def json_payload_value(payload: dict[str, Any], *keys: str) -> Any:
+        for key in keys:
+            if key in payload:
+                return payload.get(key)
+        return None
+
+    def optional_json_int(payload: dict[str, Any], *keys: str, field_label: str) -> int | None:
+        raw_value = json_payload_value(payload, *keys)
+        if raw_value is None or str(raw_value).strip() == "":
+            return None
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field_label} must be an integer.") from exc
+        if value < 0:
+            raise ValueError(f"{field_label} must be 0 or greater.")
+        return value
+
+    def required_json_int(payload: dict[str, Any], *keys: str, field_label: str) -> int:
+        value = optional_json_int(payload, *keys, field_label=field_label)
+        if value is None:
+            raise ValueError(f"{field_label} is required.")
+        return value
+
+    def ensure_xianxia_character_definition(record: CharacterRecord, message: str) -> None:
+        if not is_xianxia_system(getattr(record.definition, "system", "")):
+            raise ValueError(message)
+
+    def managed_character_import_metadata(campaign_slug: str, record: CharacterRecord):
+        return build_managed_character_import_metadata(
+            campaign_slug,
+            record.definition.character_slug,
+            record.import_metadata,
+        )
+
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-active-state")
     @api_campaign_scope_access_required("characters")
     @api_login_required
@@ -3703,6 +3748,72 @@ def register_api(app) -> None:
                 active_aura_name=payload.get("active_aura_name"),
                 updated_by_user_id=user_id,
             ),
+        )
+
+    @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-requests")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_xianxia_dao_immolating_use_request(campaign_slug: str, character_slug: str):
+        def request_dao_use(record: CharacterRecord, payload: dict[str, Any], user_id: int):
+            ensure_xianxia_character_definition(
+                record,
+                "Dao Immolating use requests are only available for Xianxia character sheets.",
+            )
+            request_result = request_xianxia_dao_immolating_use_definition(
+                record.definition,
+                request_name=str(
+                    json_payload_value(payload, "request_name", "dao_immolating_request_name") or ""
+                ),
+                notes=str(json_payload_value(payload, "notes", "dao_immolating_request_notes") or ""),
+                prepared_record_index=optional_json_int(
+                    payload,
+                    "prepared_record_index",
+                    "dao_immolating_prepared_index",
+                    field_label="Prepared Dao Immolating Technique note",
+                ),
+            )
+            return request_result.definition, managed_character_import_metadata(campaign_slug, record), {}
+
+        return run_character_definition_mutation(
+            campaign_slug,
+            character_slug,
+            request_dao_use,
+            forbidden_message="You do not have permission to request Dao Immolating use for this character.",
+        )
+
+    @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-records")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_xianxia_dao_immolating_use_record(campaign_slug: str, character_slug: str):
+        if not can_manage_campaign_session(campaign_slug):
+            return json_error(
+                "You do not have permission to record Dao Immolating use for this character.",
+                403,
+                code="forbidden",
+            )
+
+        def record_dao_use(record: CharacterRecord, payload: dict[str, Any], user_id: int):
+            ensure_xianxia_character_definition(
+                record,
+                "Dao Immolating use records are only available for Xianxia character sheets.",
+            )
+            use_result = record_xianxia_dao_immolating_use_definition(
+                record.definition,
+                use_record_index=required_json_int(
+                    payload,
+                    "use_record_index",
+                    "dao_immolating_use_index",
+                    field_label="Dao Immolating Technique use",
+                ),
+                notes=str(json_payload_value(payload, "notes", "dao_immolating_use_notes") or ""),
+            )
+            return use_result.definition, managed_character_import_metadata(campaign_slug, record), {}
+
+        return run_character_definition_mutation(
+            campaign_slug,
+            character_slug,
+            record_dao_use,
+            forbidden_message="You do not have permission to record Dao Immolating use for this character.",
         )
 
     @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory")

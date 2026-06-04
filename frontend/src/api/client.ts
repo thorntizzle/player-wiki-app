@@ -18,6 +18,8 @@ import type {
   CharacterVitalsPatchPayload,
   CharacterVitalsPatchResponse,
   CharacterXianxiaActiveStatePatchPayload,
+  CharacterXianxiaDaoUseRecordPayload,
+  CharacterXianxiaDaoUseRequestPayload,
   CharacterXianxiaInventoryAddPayload,
   CharacterXianxiaInventoryEquippedPatchPayload,
   CharacterXianxiaInventoryRemovePayload,
@@ -398,6 +400,38 @@ export class CampaignApiClient {
       )}/session/xianxia-active-state`,
       {
         method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async postCharacterXianxiaDaoUseRequest(
+    slug: string,
+    characterSlug: string,
+    payload: CharacterXianxiaDaoUseRequestPayload,
+  ): Promise<CharacterVitalsPatchResponse> {
+    return this.requestJson<CharacterVitalsPatchResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
+        characterSlug,
+      )}/session/xianxia-dao-immolating-use-requests`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async postCharacterXianxiaDaoUseRecord(
+    slug: string,
+    characterSlug: string,
+    payload: CharacterXianxiaDaoUseRecordPayload,
+  ): Promise<CharacterVitalsPatchResponse> {
+    return this.requestJson<CharacterVitalsPatchResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
+        characterSlug,
+      )}/session/xianxia-dao-immolating-use-records`,
+      {
+        method: "POST",
         body: JSON.stringify(payload),
       },
     );

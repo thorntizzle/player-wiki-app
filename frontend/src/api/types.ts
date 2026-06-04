@@ -219,6 +219,8 @@ export interface CharacterSummary {
 
 export interface CharacterPermissions {
   can_edit_session: boolean;
+  can_manage_session?: boolean;
+  can_record_xianxia_dao_immolating_use?: boolean;
 }
 
 export interface CharacterEquipmentWieldOption {
@@ -333,8 +335,27 @@ export interface CharacterXianxiaNamedRecord {
   rank_progress_label?: string;
   notes?: string;
   status?: string;
+  status_key?: string;
+  status_label?: string;
   type?: string;
+  type_label?: string;
   reason?: string;
+  approval_timestamp?: string;
+  insight_cost?: number;
+  insight_spent?: number;
+  one_use?: boolean;
+  one_use_status?: string;
+  one_use_status_label?: string;
+  used?: boolean;
+  use_notes?: string;
+  prepared_record_name?: string;
+  prepared_record_notes?: string;
+  prepared_record_index?: number;
+  use_record_index?: number;
+  base_ability_ref?: string;
+  base_ability_kind?: string;
+  technique_anchor_label?: string;
+  technique_anchor_warning?: string;
 }
 
 export interface CharacterXianxiaPool {
@@ -533,6 +554,19 @@ export interface CharacterXianxiaInventoryEquippedPatchPayload {
 
 export interface CharacterXianxiaInventoryRemovePayload {
   expected_revision: number;
+}
+
+export interface CharacterXianxiaDaoUseRequestPayload {
+  expected_revision: number;
+  request_name?: string;
+  notes?: string;
+  prepared_record_index?: number | null;
+}
+
+export interface CharacterXianxiaDaoUseRecordPayload {
+  expected_revision: number;
+  use_record_index: number;
+  notes?: string;
 }
 
 export interface CharacterNotesPatchPayload {

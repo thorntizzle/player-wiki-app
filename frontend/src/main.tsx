@@ -29,6 +29,8 @@ import type {
   CharacterPresentedSpell,
   CharacterPresentedXianxia,
   CharacterRecord,
+  CharacterXianxiaDaoUseRecordPayload,
+  CharacterXianxiaDaoUseRequestPayload,
   CharacterXianxiaInventoryItem,
   CharacterXianxiaInventoryItemPayload,
   CharacterXianxiaNamedRecord,
@@ -98,6 +100,12 @@ interface CharacterXianxiaInventoryDraft {
   catalogRef: string;
   equippable: boolean;
   isEquipped: boolean;
+}
+
+interface CharacterXianxiaDaoUseRequestDraft {
+  requestName: string;
+  notes: string;
+  preparedRecordIndex: string;
 }
 
 interface CharacterNotesDraft {
@@ -301,6 +309,13 @@ const xianxiaVitalsFields: Array<{ key: CharacterXianxiaVitalsField; label: stri
 
 function joinDisplay(values: Array<string | number | null | undefined>): string {
   return values.map((value) => String(value ?? "").trim()).filter(Boolean).join(" | ");
+}
+
+function xianxiaDaoUseRecordDraftKey(record: CharacterXianxiaNamedRecord): string {
+  if (record.use_record_index !== undefined) {
+    return String(record.use_record_index);
+  }
+  return draftKey(record.name, record.status, record.approval_timestamp);
 }
 
 function normalizeTagsInput(value: string): string[] {
@@ -1365,6 +1380,12 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
   const [newXianxiaInventoryDraft, setNewXianxiaInventoryDraft] = useState<CharacterXianxiaInventoryDraft>(
     xianxiaInventoryDraftFromItem(),
   );
+  const [xianxiaDaoRequestDraft, setXianxiaDaoRequestDraft] = useState<CharacterXianxiaDaoUseRequestDraft>({
+    requestName: "",
+    notes: "",
+    preparedRecordIndex: "",
+  });
+  const [xianxiaDaoUseNotesDrafts, setXianxiaDaoUseNotesDrafts] = useState<Record<string, string>>({});
   const [arcaneArmorDraft, setArcaneArmorDraft] = useState(false);
   const [currencyDraft, setCurrencyDraft] = useState<Record<string, string>>({});
   const [restPreview, setRestPreview] = useState<CharacterRestPreviewResponse["preview"] | null>(null);
@@ -1464,6 +1485,15 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
         nextInventoryDrafts[item.id] = String(readNumber(item.quantity, 1));
       }
     }
+    const nextXianxiaDaoUseNotesDrafts: Record<string, string> = {};
+    for (const group of presentedXianxia?.approval?.status_groups ?? []) {
+      if (group.key !== "dao_immolating_use_records") {
+        continue;
+      }
+      for (const record of group.records) {
+        nextXianxiaDaoUseNotesDrafts[xianxiaDaoUseRecordDraftKey(record)] = readString(record.use_notes);
+      }
+    }
     const equipmentState = detailQuery.data.character.equipment_state;
     const nextEquipmentDrafts: Record<string, CharacterEquipmentDraft> = {};
     for (const item of equipmentState?.rows ?? []) {
@@ -1477,6 +1507,8 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
     }
     setEquipmentDrafts(nextEquipmentDrafts);
     setXianxiaInventoryDrafts(nextXianxiaInventoryDrafts);
+    setXianxiaDaoUseNotesDrafts(nextXianxiaDaoUseNotesDrafts);
+    setXianxiaDaoRequestDraft({ requestName: "", notes: "", preparedRecordIndex: "" });
     setArcaneArmorDraft(Boolean((detailQuery.data.character.arcane_armor_state ?? equipmentState?.arcane_armor_state)?.enabled));
     const currency = isXianxiaCharacter(character) ? asRecord(xianxiaState.currency) : asRecord(state.currency);
     const nextCurrencyDraft: Record<string, string> = {};
@@ -1523,6 +1555,9 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
   const selected = characterList.find((item) => item.slug === selectedSlug);
   const permissions = detailRecord?.permissions;
   const canEdit = Boolean(permissions?.can_edit_session);
+  const canRecordXianxiaDaoUse = Boolean(
+    permissions?.can_record_xianxia_dao_immolating_use ?? permissions?.can_manage_session,
+  );
   const isDnd = isDndCharacter(detailRecord);
   const isXianxia = isXianxiaCharacter(detailRecord);
   const definition = asRecord(detailRecord?.definition);
@@ -1640,6 +1675,23 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
     mutationFn: (payload: { expected_revision: number; active_stance_name?: string; active_aura_name?: string }) =>
       apiClient.patchCharacterXianxiaActiveState(campaignSlug, selectedSlug || "", payload),
     onSuccess: (response) => handleMutationSuccess(response, "Active Stance and Aura saved."),
+    onError: handleMutationError,
+  });
+
+  const postXianxiaDaoUseRequest = useMutation({
+    mutationFn: (payload: CharacterXianxiaDaoUseRequestPayload) =>
+      apiClient.postCharacterXianxiaDaoUseRequest(campaignSlug, selectedSlug || "", payload),
+    onSuccess: (response) => {
+      setXianxiaDaoRequestDraft({ requestName: "", notes: "", preparedRecordIndex: "" });
+      handleMutationSuccess(response, "Dao Immolating use request recorded.");
+    },
+    onError: handleMutationError,
+  });
+
+  const postXianxiaDaoUseRecord = useMutation({
+    mutationFn: (payload: CharacterXianxiaDaoUseRecordPayload) =>
+      apiClient.postCharacterXianxiaDaoUseRecord(campaignSlug, selectedSlug || "", payload),
+    onSuccess: (response) => handleMutationSuccess(response, "Dao Immolating one-use spend recorded."),
     onError: handleMutationError,
   });
 
@@ -1816,6 +1868,59 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
       expected_revision: revision,
       active_stance_name: xianxiaActiveDraft.activeStanceName,
       active_aura_name: xianxiaActiveDraft.activeAuraName,
+    });
+  };
+
+  const submitXianxiaDaoUseRequest = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selected || !canEdit) {
+      setErrorMessage("No character selected or permission denied.");
+      return;
+    }
+    const requestName = xianxiaDaoRequestDraft.requestName.trim();
+    const preparedRecordIndexText = xianxiaDaoRequestDraft.preparedRecordIndex.trim();
+    let preparedRecordIndex: number | null = null;
+    if (preparedRecordIndexText) {
+      const parsedIndex = parseNumberInput(preparedRecordIndexText, "prepared Dao Immolating note");
+      if (parsedIndex === null) {
+        return;
+      }
+      preparedRecordIndex = parsedIndex;
+    }
+    if (!requestName && preparedRecordIndex === null) {
+      setErrorMessage("Enter a request name or choose a prepared Dao Immolating note.");
+      setStatusMessage(null);
+      return;
+    }
+    setStatusMessage("Saving...");
+    postXianxiaDaoUseRequest.mutate({
+      expected_revision: revision,
+      request_name: requestName,
+      notes: xianxiaDaoRequestDraft.notes.trim(),
+      prepared_record_index: preparedRecordIndex,
+    });
+  };
+
+  const submitXianxiaDaoUseRecord = (
+    event: FormEvent<HTMLFormElement>,
+    record: CharacterXianxiaNamedRecord,
+  ) => {
+    event.preventDefault();
+    if (!selected || !canRecordXianxiaDaoUse) {
+      setErrorMessage("Only session managers can record Dao Immolating one-use spends.");
+      setStatusMessage(null);
+      return;
+    }
+    if (record.use_record_index === undefined) {
+      setErrorMessage("Choose a valid Dao Immolating use record.");
+      setStatusMessage(null);
+      return;
+    }
+    setStatusMessage("Saving...");
+    postXianxiaDaoUseRecord.mutate({
+      expected_revision: revision,
+      use_record_index: record.use_record_index,
+      notes: (xianxiaDaoUseNotesDrafts[xianxiaDaoUseRecordDraftKey(record)] ?? "").trim(),
     });
   };
 
@@ -2016,30 +2121,117 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
       eyebrow,
       title: record.name || "Xianxia record",
       html: readString(record.body_html, readString(record.description_html)),
-      notes: readString(record.notes),
+      notes: joinDisplay([record.notes, record.prepared_record_notes, record.use_notes]),
       href: readString(record.href),
       facts: [
         { label: "Rank", value: readString(record.current_rank_label) },
-        { label: "Status", value: readString(record.status) },
-        { label: "Type", value: readString(record.type) },
+        { label: "Status", value: readString(record.status_label, readString(record.status)) },
+        { label: "Type", value: readString(record.type_label, readString(record.type)) },
         { label: "Source", value: readString(record.source_label) },
+        { label: "Prepared", value: readString(record.prepared_record_name) },
+        { label: "Approval timestamp", value: readString(record.approval_timestamp) },
+        { label: "Insight cost", value: record.insight_cost ? String(record.insight_cost) : "" },
+        { label: "Insight spent", value: record.insight_spent ? String(record.insight_spent) : "" },
+        { label: "One-use status", value: readString(record.one_use_status_label, readString(record.one_use_status)) },
+        { label: "Base ability ref", value: readString(record.base_ability_ref) },
+        { label: "Base ability kind", value: readString(record.base_ability_kind) },
+        { label: "Technique anchor", value: readString(record.technique_anchor_label) },
       ].filter((fact) => fact.value),
     });
   };
 
   const renderXianxiaRecordCard = (record: CharacterXianxiaNamedRecord, eyebrow: string) => (
     <article className="character-state-card" key={draftKey(eyebrow, record.name, record.href)}>
-      <p className="meta">{joinDisplay([record.current_rank_label, record.status, record.type, record.source_label]) || eyebrow}</p>
+      <p className="meta">
+        {joinDisplay([
+          record.current_rank_label,
+          record.status_label || record.status,
+          record.type_label || record.type,
+          record.source_label,
+        ]) || eyebrow}
+      </p>
       <h4>{record.name || "Unnamed record"}</h4>
       {record.reason ? <p className="meta">{record.reason}</p> : null}
       {record.rank_progress_label ? <p className="meta">{record.rank_progress_label}</p> : null}
-      {record.body_html || record.description_html || record.notes || record.href ? (
+      {record.body_html || record.description_html || record.notes || record.href || record.prepared_record_notes || record.use_notes ? (
         <button type="button" className="button button-secondary detail-button" onClick={() => openXianxiaRecordDetail(record, eyebrow)}>
           Details
         </button>
       ) : null}
     </article>
   );
+
+  const renderXianxiaApprovalRecordCard = (
+    record: CharacterXianxiaNamedRecord,
+    groupTitle: string,
+    groupKey: string,
+  ) => {
+    const isDaoUseRecord = groupKey === "dao_immolating_use_records";
+    const useRecordDraftKey = xianxiaDaoUseRecordDraftKey(record);
+    const insightCost = record.insight_cost ?? (isDaoUseRecord ? 10 : 0);
+    const insightAvailable = xianxiaInsight?.available ?? 0;
+    const canRecordThisDaoUse =
+      isDaoUseRecord &&
+      canRecordXianxiaDaoUse &&
+      record.status_key === "approved" &&
+      !record.used &&
+      record.use_record_index !== undefined;
+    const spendDisabled = insightCost > 0 && insightAvailable < insightCost;
+
+    return (
+      <article className="character-state-card" key={draftKey(groupKey, record.name, record.use_record_index, record.approval_timestamp)}>
+        <p className="meta">
+          {joinDisplay([
+            record.status_label || record.status,
+            record.type_label || record.type,
+            record.source_label,
+            insightCost ? `${insightCost} Insight` : "",
+            record.used ? "Used" : record.one_use_status_label,
+          ]) || groupTitle}
+        </p>
+        <h4>{record.name || "Unnamed record"}</h4>
+        {record.notes ? <p>{record.notes}</p> : null}
+        {record.prepared_record_name ? <p className="meta">Prepared note: {record.prepared_record_name}</p> : null}
+        {record.approval_timestamp ? <p className="meta">Approval timestamp: {record.approval_timestamp}</p> : null}
+        {record.use_notes ? <p className="meta">Use notes: {record.use_notes}</p> : null}
+        {record.technique_anchor_warning ? <p className="status status-error">{record.technique_anchor_warning}</p> : null}
+        {record.body_html ||
+        record.description_html ||
+        record.notes ||
+        record.href ||
+        record.prepared_record_notes ||
+        record.use_notes ||
+        record.technique_anchor_warning ? (
+          <button type="button" className="button button-secondary detail-button" onClick={() => openXianxiaRecordDetail(record, groupTitle)}>
+            Details
+          </button>
+        ) : null}
+        {canRecordThisDaoUse ? (
+          <form onSubmit={(event) => submitXianxiaDaoUseRecord(event, record)} className="inline-two-col">
+            <label htmlFor={`xianxia-dao-use-notes-${useRecordDraftKey}`} className="chat-label">
+              Use notes
+            </label>
+            <textarea
+              id={`xianxia-dao-use-notes-${useRecordDraftKey}`}
+              rows={2}
+              value={xianxiaDaoUseNotesDrafts[useRecordDraftKey] ?? ""}
+              onChange={(event) =>
+                setXianxiaDaoUseNotesDrafts({
+                  ...xianxiaDaoUseNotesDrafts,
+                  [useRecordDraftKey]: event.currentTarget.value,
+                })
+              }
+            />
+            <div />
+            <button type="submit" disabled={postXianxiaDaoUseRecord.isPending || spendDisabled}>
+              {postXianxiaDaoUseRecord.isPending ? "Saving..." : "Record one-use spend"}
+            </button>
+            {spendDisabled ? <p className="status status-error">Needs {insightCost} Insight.</p> : null}
+          </form>
+        ) : null}
+      </article>
+    );
+  };
 
   const renderXianxiaPoolCards = (pools: Array<{ key: string; label: string; current: number; max: number; temp?: number }>) => (
     <div className="character-card-grid">
@@ -2361,18 +2553,95 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
                   <>
                     <h4>Approvals</h4>
                     {presentedXianxia.approval.status_groups.map((group) => (
-                      <article className="character-state-card" key={group.key}>
-                        <h4>{group.title}</h4>
+                      <section className="xianxia-approval-group" key={group.key}>
+                        <h5>{group.title}</h5>
                         {group.records.length ? (
-                          <div className="spell-card-list">
-                            {group.records.map((record) => renderXianxiaRecordCard(record, group.title))}
+                          <div className="character-card-grid">
+                            {group.records.map((record) =>
+                              renderXianxiaApprovalRecordCard(record, group.title, group.key),
+                            )}
                           </div>
                         ) : (
                           <p className="meta">{group.empty_message}</p>
                         )}
-                      </article>
+                      </section>
                     ))}
                   </>
+                ) : null}
+                {presentedXianxia.approval?.dao_immolating_prepared?.length ? (
+                  <>
+                    <h4>Prepared Dao Immolating Techniques</h4>
+                    <div className="character-card-grid">
+                      {presentedXianxia.approval.dao_immolating_prepared.map((record, index) =>
+                        renderXianxiaRecordCard(
+                          { ...record, source_label: joinDisplay([record.source_label, `Note ${index + 1}`]) },
+                          "Prepared Dao Immolating Technique",
+                        ),
+                      )}
+                    </div>
+                  </>
+                ) : null}
+                {canEdit ? (
+                  <form onSubmit={submitXianxiaDaoUseRequest} className="inline-two-col">
+                    <label htmlFor="xianxia-dao-request-name" className="chat-label">
+                      Dao Immolating request
+                    </label>
+                    <input
+                      id="xianxia-dao-request-name"
+                      value={xianxiaDaoRequestDraft.requestName}
+                      disabled={postXianxiaDaoUseRequest.isPending}
+                      onChange={(event) =>
+                        setXianxiaDaoRequestDraft({
+                          ...xianxiaDaoRequestDraft,
+                          requestName: event.currentTarget.value,
+                        })
+                      }
+                    />
+                    {presentedXianxia.approval?.dao_immolating_prepared?.length ? (
+                      <>
+                        <label htmlFor="xianxia-dao-prepared-record" className="chat-label">
+                          Prepared note
+                        </label>
+                        <select
+                          id="xianxia-dao-prepared-record"
+                          value={xianxiaDaoRequestDraft.preparedRecordIndex}
+                          disabled={postXianxiaDaoUseRequest.isPending}
+                          onChange={(event) =>
+                            setXianxiaDaoRequestDraft({
+                              ...xianxiaDaoRequestDraft,
+                              preparedRecordIndex: event.currentTarget.value,
+                            })
+                          }
+                        >
+                          <option value="">None</option>
+                          {presentedXianxia.approval.dao_immolating_prepared.map((record, index) => (
+                            <option key={draftKey(record.name, index)} value={String(index)}>
+                              {record.name || `Prepared note ${index + 1}`}
+                            </option>
+                          ))}
+                        </select>
+                      </>
+                    ) : null}
+                    <label htmlFor="xianxia-dao-request-notes" className="chat-label">
+                      Request notes
+                    </label>
+                    <textarea
+                      id="xianxia-dao-request-notes"
+                      rows={3}
+                      value={xianxiaDaoRequestDraft.notes}
+                      disabled={postXianxiaDaoUseRequest.isPending}
+                      onChange={(event) =>
+                        setXianxiaDaoRequestDraft({
+                          ...xianxiaDaoRequestDraft,
+                          notes: event.currentTarget.value,
+                        })
+                      }
+                    />
+                    <div />
+                    <button type="submit" disabled={postXianxiaDaoUseRequest.isPending}>
+                      {postXianxiaDaoUseRequest.isPending ? "Saving..." : "Record use request"}
+                    </button>
+                  </form>
                 ) : null}
               </section>
             ) : null}
