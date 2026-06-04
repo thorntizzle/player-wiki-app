@@ -39,8 +39,9 @@ The current Gen2 build covers:
 - Characters roster and character read/edit shell
 - Combat player view, DM status, and DM controls
 - DM Content statblocks, conditions, staged articles, Player Wiki, and Systems management lanes
+- Systems browsing landing/search, source pages, source categories, and entry detail pages
 
-Flask remains the source of truth for workflows that are still Flask-first, including broader character authoring, Systems browsing, Control, Help, Account, and Admin.
+Flask remains the source of truth for workflows that are still Flask-first, including broader character authoring, Control, Help, Account, Admin, shared/core Systems entry editing, and Systems imports.
 
 ## Build & Preview
 

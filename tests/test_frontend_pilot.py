@@ -32,6 +32,22 @@ def test_frontend_pilot_routes_and_spa_fallback(client, app, tmp_path):
     assert dm_content_route_response.status_code == 200
     assert dm_content_route_response.data == response.data
 
+    systems_route_response = client.get("/app-next/campaigns/linden-pass/systems")
+    assert systems_route_response.status_code == 200
+    assert systems_route_response.data == response.data
+
+    systems_source_route_response = client.get("/app-next/campaigns/linden-pass/systems/sources/MM")
+    assert systems_source_route_response.status_code == 200
+    assert systems_source_route_response.data == response.data
+
+    systems_category_route_response = client.get("/app-next/campaigns/linden-pass/systems/sources/MM/types/monster")
+    assert systems_category_route_response.status_code == 200
+    assert systems_category_route_response.data == response.data
+
+    systems_entry_route_response = client.get("/app-next/campaigns/linden-pass/systems/entries/goblin")
+    assert systems_entry_route_response.status_code == 200
+    assert systems_entry_route_response.data == response.data
+
     missing_asset_response = client.get("/app-next/assets/missing.js")
     assert missing_asset_response.status_code == 404
 

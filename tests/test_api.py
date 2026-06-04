@@ -2677,8 +2677,22 @@ def test_api_systems_endpoints_follow_source_visibility_and_allow_dm_policy_upda
 
     dm_index = client.get("/api/v1/campaigns/linden-pass/systems", headers=api_headers(dm_token))
     assert dm_index.status_code == 200
-    dm_sources = {item["source_id"] for item in dm_index.get_json()["sources"]}
+    dm_index_payload = dm_index.get_json()
+    dm_sources = {item["source_id"] for item in dm_index_payload["sources"]}
     assert "MM" in dm_sources
+    assert "has_rules_reference_search" in dm_index_payload
+    assert "source_scoped_rules_reference_sources" in dm_index_payload
+
+    dm_search = client.get(
+        "/api/v1/campaigns/linden-pass/systems?q=goblin",
+        headers=api_headers(dm_token),
+    )
+    assert dm_search.status_code == 200
+    dm_search_payload = dm_search.get_json()
+    assert dm_search_payload["query"] == "goblin"
+    assert dm_search_payload["search_results"]
+    assert dm_search_payload["search_results"][0]["entry_key"] == goblin_entry_key
+    assert dm_search_payload["reference_query"] == ""
 
     player_index = client.get("/api/v1/campaigns/linden-pass/systems", headers=api_headers(player_token))
     assert player_index.status_code == 200
@@ -2699,6 +2713,11 @@ def test_api_systems_endpoints_follow_source_visibility_and_allow_dm_policy_upda
     source_payload = source_detail.get_json()
     assert source_payload["source"]["source_id"] == "MM"
     assert source_payload["entry_count"] == 1
+    assert source_payload["browsable_entry_count"] == 1
+    assert source_payload["entry_groups"][0]["entry_type"] == "monster"
+    assert source_payload["book_entries"] == []
+    assert source_payload["reference_query"] == ""
+    assert "has_rules_reference_search" in source_payload
 
     source_category = client.get(
         "/api/v1/campaigns/linden-pass/systems/sources/MM/types/monster",
@@ -2715,8 +2734,12 @@ def test_api_systems_endpoints_follow_source_visibility_and_allow_dm_policy_upda
         headers=api_headers(dm_token),
     )
     assert entry_detail.status_code == 200
-    assert entry_detail.get_json()["entry"]["title"] == "Goblin"
-    assert entry_detail.get_json()["entry"]["entry_type"] == "monster"
+    entry_payload = entry_detail.get_json()
+    assert entry_payload["entry"]["title"] == "Goblin"
+    assert entry_payload["entry"]["entry_type"] == "monster"
+    assert "rendered_html" in entry_payload["entry"]
+    assert entry_payload["links"]["flask_entry_url"].endswith(f"/systems/entries/{goblin_slug}")
+    assert "dm-content/systems" in entry_payload["links"]["dm_content_systems_url"]
 
     update_sources = client.put(
         "/api/v1/campaigns/linden-pass/systems/sources",

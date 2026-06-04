@@ -30,7 +30,7 @@ This document tracks the current Flask-to-Gen2 frontend migration state. Flask r
 | DM Content staged articles | `/campaigns/<slug>/dm-content/staged-articles` | `/app-next/campaigns/<slug>/dm-content?lane=staged-articles` | Feel-test ready | Manual/upload/wiki source modes, create/update/delete, and source search are covered. Reveal/log workflows remain on Session DM. |
 | DM Content Player Wiki | `/campaigns/<slug>/dm-content/player-wiki` | `/app-next/campaigns/<slug>/dm-content?lane=player-wiki` | Feel-test ready | Create/search/load/edit/archive/checked-delete, removal safety, image upload, and fallback advanced-editor links are covered. |
 | DM Content Systems | `/campaigns/<slug>/dm-content/systems` | `/app-next/campaigns/<slug>/dm-content?lane=systems` | Feel-test ready | Source policy, entry overrides, custom entries, sanitized import history, and admin import handoff are covered. |
-| Systems browsing | `/campaigns/<slug>/systems` and nested source/type/entry routes | Flask route via Gen2 nav/fallback | Needs Gen2 pass | Gen2 currently manages Systems through DM Content, but player/DM Systems browsing remains Flask-rendered. |
+| Systems browsing | `/campaigns/<slug>/systems` and nested source/type/entry routes | `/app-next/campaigns/<slug>/systems` and nested source/type/entry routes | Feel-test ready | Gen2 handles landing/search, source detail, source category, entry detail, source-scoped rules reference search, rendered Systems entry HTML, and management fallbacks. Shared/core entry editing and imports remain Flask/DM Content handoffs. |
 | Campaign Control | `/campaigns/<slug>/control` | Flask route via Gen2 nav | Needs Gen2 pass | Visibility/config controls remain Flask-rendered. |
 | Campaign Help | `/campaigns/<slug>/help` | Flask route via Gen2 nav | Needs Gen2 pass | Help remains Flask-rendered. |
 | Account settings | `/account` | Flask route via Gen2 chrome | Needs Gen2 pass | Account preferences and theme selection remain Flask-rendered. |
@@ -42,13 +42,25 @@ This document tracks the current Flask-to-Gen2 frontend migration state. Flask r
 These surfaces should not be considered for default-route promotion until they receive their own Gen2 parity pass:
 
 - Character authoring and management: native create, imports, Advanced Editor, Cultivation, portrait upload/remove, controls, level-up, retraining, progression repair, and deletion.
-- Systems browsing: Systems landing/search, source detail, source category, entry detail, and related shared-entry editor handoffs.
 - Campaign Control: visibility, configuration, and campaign-management controls.
 - Campaign Help: campaign-scoped guidance and support pages.
 - Account settings: theme selection, live-session preference controls, and account-level forms.
 - Admin: app administration, bootstrap/support operations, and admin-only maintenance pages.
 
 These pages can continue to be linked from Gen2 chrome as Flask fallbacks, but each needs a dedicated parity slice before the route can move under `/app-next/` or become a redirect candidate.
+
+## Next Gen2 Route Priority
+
+The remaining Flask-first pages are not equally risky. Use this order unless a specific play-session need changes the priority:
+
+| Priority | Surface | Why next | Acceptance target |
+| --- | --- | --- | --- |
+| Done | Systems browsing | It is heavily linked from Session, Combat, Characters, and DM Content, and the Flask presenters already separate browse context from browser routes. | Gen2 landing/search, source, category, and entry detail can be used without losing visibility rules or rendered Systems prose. |
+| 1 | Account settings | It is small, shared, and directly tied to theme and live-session preferences used by the Gen2 shell. | Users can change theme and live-session preference from Gen2 with the same persistence as Flask. |
+| 2 | Campaign Help | It is mostly static campaign guidance and is a good low-risk test of Gen2 matching Flask's explanatory page layout. | Help content is readable in Gen2 and linked from the shared campaign chrome. |
+| 3 | Campaign Control | It is permission-sensitive but smaller than character authoring, and it controls visibility assumptions used by Gen2 navigation. | Visibility/config saves behave like Flask and preserve audit/history expectations. |
+| 4 | Character authoring and management | It is the largest remaining workflow family and should be split into native create/import, portrait, Advanced Editor, Cultivation, level-up, retraining, repair, controls, and deletion slices. | Each authoring lane has JSON or browser-backed parity, stale-state handling where needed, and fallback links until the whole family is accepted. |
+| 5 | Admin | It is sensitive, low-frequency, and does not block player-facing Gen2 promotion. | Admin support/maintenance operations keep their existing permission and safety behavior. |
 
 ## Visual Parity Gate
 
@@ -61,6 +73,37 @@ Promotion review should compare:
 - mobile behavior and overflow handling
 - form/control affordances, feedback states, and destructive-action confirmation patterns
 - campaign content presentation, including images, captions, sidebar context, and rendered article/system text
+
+## Visual/Layout Parity Checklist
+
+Functional parity and visual parity are tracked separately. A surface can be feel-test ready for interaction while still blocked from default-route promotion by layout gaps.
+
+| Surface | Flask reference | Gen2 route | Visual checks before promotion |
+| --- | --- | --- | --- |
+| Shared shell | `base.html`, `player_wiki/static/styles.css` | `/app-next/` and all Gen2 campaign routes | Global header height/density, centered campaign title treatment, campaign nav row wrapping, theme variables, account/admin affordances, loading cover/status behavior, and mobile header overflow. |
+| Campaign home and search | `campaign.html` | `/app-next/campaigns/<slug>` | Hero scale, search placement, overview card density, section card hierarchy, pinned/featured content treatment, and empty/restricted-state copy rhythm. |
+| Published wiki sections | `section.html` | `/app-next/campaigns/<slug>/sections/<section>` | Grouped subsection cards, collapse controls, featured/top-level page treatment, list density, mobile stacking, and long-title wrapping. |
+| Published wiki pages | `page.html` | `/app-next/campaigns/<slug>/pages/<page>` | Article width, sidebar context, image/caption placement, rendered body typography, backlink/sidebar card density, and protected image sizing. |
+| Session | `session.html`, `session_character.html`, `session_dm.html` and partials | `/app-next/campaigns/<slug>/session` | Pane switch density, player feed/composer proportions, revealed/staged article cards, Character section workspace, DM lifecycle/log panels, live update feedback, and desktop/mobile pane layout. |
+| Characters | `character_roster.html`, `character_read.html` and character partials | `/app-next/campaigns/<slug>/characters...` | Roster card layout, portrait sizing, read-shell hierarchy, section navigation, resource/control density, fallback authoring links, and assigned-player restricted views. |
+| Combat | `combat.html`, `combat_status.html`, `combat_dm.html` and partials | `/app-next/campaigns/<slug>/combat...` | Encounter summary, combatant carousel/list, selected-PC workspace, selected-combatant tactical card, setup forms, condition controls, deep-link focus, and mobile combat controls. |
+| DM Content | `dm_content.html` and DM Content partials | `/app-next/campaigns/<slug>/dm-content...` | Lane tabs, editor forms, statblock/source cards, condition list/edit density, staged article store layout, Player Wiki image/upload controls, Systems management tables, and destructive confirmation affordances. |
+| Systems browsing | `systems_*.html` | `/app-next/campaigns/<slug>/systems...` | Systems search, source cards, source/category lists, entry article typography, source/sidebar context, related-entry links, book/chapter navigation, and shared-entry management fallback links. |
+| Account, Help, Control, Admin | Matching Flask templates | Planned Gen2 routes | Each route needs its own first visual comparison when its Gen2 pass lands. |
+
+## Manual Acceptance Tracker
+
+Manual acceptance is recorded after the user has tried the Gen2 surface in the local app. Acceptance should mention both functionality and visual/layout fit.
+
+| Surface | Functional manual status | Visual/layout status | Notes |
+| --- | --- | --- | --- |
+| Session | Accepted for current functionality feel test | Needs visual parity pass | User noted the framework feels more responsive and Session appears functionally at parity, but layout still needs to match Flask. |
+| Campaign home/wiki browsing | Pending explicit user acceptance | Needs visual parity pass | Browser coverage exists; user manual acceptance has not been recorded. |
+| Characters read shell | Pending explicit user acceptance | Needs visual parity pass | Broader authoring remains Flask-first. |
+| Combat | Pending explicit user acceptance | Needs visual parity pass | Live pressure remeasurement remains open before transport changes. |
+| DM Content lanes | Pending explicit user acceptance | Needs visual parity pass | Functional browser coverage exists for statblocks, conditions, staged articles, Player Wiki, and Systems management. |
+| Systems browsing | Pending explicit user acceptance | Needs visual parity pass | Functional API/browser coverage exists for landing/search, source, category, and entry detail. |
+| Remaining Flask-first surfaces | Not ready | Not ready | Needs Gen2 pass before manual acceptance. |
 
 ## Promotion Rules
 
@@ -114,7 +157,8 @@ Until then, local testing should rebuild `frontend/dist/` before hosting, and pr
 ## Next Readiness Work
 
 - Add a manual acceptance column once the user has feel-tested each Gen2 surface.
-- Add a visual/layout parity checklist for each feel-test-ready Gen2 surface before any redirect decision.
-- Prioritize Gen2 parity passes for the remaining Flask-first app pages listed above.
+- Keep the manual acceptance tracker current as the user tests each Gen2 surface.
+- Turn the visual/layout parity checklist into screenshot-backed before/after review notes before any redirect decision.
+- Continue the remaining Flask-first app page parity passes in the priority order above.
 - Re-measure live pressure before changing transport strategy for Session or Combat.
 - Decide the first route eligible for a Flask-to-Gen2 redirect only after functionality and layout are accepted.

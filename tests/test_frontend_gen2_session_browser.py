@@ -1,4 +1,5 @@
 import base64
+import json
 import re
 import threading
 
@@ -404,6 +405,66 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             expect(page.get_by_text(re.compile(r"changed in another session|Refresh and try again", re.I))).to_be_visible(
                 timeout=5000
             )
+        finally:
+            page.close()
+            browser.close()
+
+
+def test_gen2_systems_browser_exposes_search_and_entry_detail(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+    entry_title = "Gen2 Browse Focus Rule"
+    entry_body = "The Gen2 systems browser renders this rule."
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+
+            create_response = page.request.post(
+                f"{base_url}/api/v1/campaigns/linden-pass/systems/custom-entries",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(
+                    {
+                        "title": entry_title,
+                        "slug_leaf": "gen2-browse-focus-rule",
+                        "entry_type": "rule",
+                        "visibility": "dm",
+                        "provenance": "Gen2 browser test",
+                        "search_metadata": "focus gen2 systems browse",
+                        "body_markdown": f"## Browser Body\n\n{entry_body}",
+                    }
+                ),
+            )
+            assert create_response.ok
+            entry_slug = create_response.json()["entry"]["slug"]
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/systems?q=focus")
+            expect(page.get_by_role("heading", name="Systems")).to_be_visible(timeout=10000)
+            expect(page.locator(".campaign-nav-link").get_by_text("Systems")).to_be_visible()
+            expect(page.get_by_role("heading", name="Search Results")).to_be_visible()
+            page.get_by_role("link", name=entry_title).click()
+            expect(page).to_have_url(
+                re.compile(rf"/app-next/campaigns/linden-pass/systems/entries/{re.escape(entry_slug)}$"),
+                timeout=5000,
+            )
+            expect(page.get_by_role("heading", name=entry_title)).to_be_visible(timeout=10000)
+            expect(page.get_by_text(entry_body)).to_be_visible()
+            expect(page.get_by_role("heading", name="Entry Metadata")).to_be_visible()
+            expect(page.get_by_role("link", name="Source category")).to_be_visible()
+            expect(page.get_by_role("link", name="Manage campaign override")).to_be_visible()
         finally:
             page.close()
             browser.close()

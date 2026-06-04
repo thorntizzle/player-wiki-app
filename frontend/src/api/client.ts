@@ -66,8 +66,12 @@ import type {
   SessionStartCloseResponse,
   SessionWikiLookupPreviewResponse,
   SessionWikiLookupSearchResponse,
+  SystemsEntryResponse,
   CustomSystemsEntryPayload,
   CustomSystemsEntryResponse,
+  SystemsIndexResponse,
+  SystemsSourceCategoryResponse,
+  SystemsSourceResponse,
   SystemsEntryOverridePayload,
   SystemsEntryOverrideResponse,
   SystemsSourceUpdatePayload,
@@ -458,6 +462,45 @@ export class CampaignApiClient {
   async getDmContentSystems(slug: string): Promise<DmContentSystemsResponse> {
     return this.requestJson<DmContentSystemsResponse>(
       `/api/v1/campaigns/${encodeURIComponent(slug)}/dm-content/systems`,
+    );
+  }
+
+  async getSystemsIndex(slug: string, q = "", referenceQ = ""): Promise<SystemsIndexResponse> {
+    const params = new URLSearchParams();
+    if (q.trim()) {
+      params.set("q", q.trim());
+    }
+    if (referenceQ.trim()) {
+      params.set("reference_q", referenceQ.trim());
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return this.requestJson<SystemsIndexResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/systems${suffix}`,
+    );
+  }
+
+  async getSystemsSource(slug: string, sourceId: string, referenceQ = ""): Promise<SystemsSourceResponse> {
+    const suffix = referenceQ.trim() ? `?reference_q=${encodeURIComponent(referenceQ.trim())}` : "";
+    return this.requestJson<SystemsSourceResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/systems/sources/${encodeURIComponent(sourceId)}${suffix}`,
+    );
+  }
+
+  async getSystemsSourceCategory(
+    slug: string,
+    sourceId: string,
+    entryType: string,
+    q = "",
+  ): Promise<SystemsSourceCategoryResponse> {
+    const suffix = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : "";
+    return this.requestJson<SystemsSourceCategoryResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/systems/sources/${encodeURIComponent(sourceId)}/types/${encodeURIComponent(entryType)}${suffix}`,
+    );
+  }
+
+  async getSystemsEntry(slug: string, entrySlug: string): Promise<SystemsEntryResponse> {
+    return this.requestJson<SystemsEntryResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/systems/entries/${encodeURIComponent(entrySlug)}`,
     );
   }
 

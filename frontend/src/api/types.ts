@@ -749,6 +749,113 @@ export interface SystemsEntryTypeChoice {
   label: string;
 }
 
+export interface SystemsEntrySummary {
+  id: number;
+  library_slug: string;
+  source_id: string;
+  entry_key: string;
+  entry_type: string;
+  entry_type_label: string;
+  slug: string;
+  title: string;
+  source_page: string | number | null;
+  source_path: string;
+  player_safe_default: boolean;
+  dm_heavy: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface SystemsRulesReferenceResult {
+  title: string;
+  entry_type: string;
+  entry_type_label: string;
+  source_id: string;
+  slug: string;
+  reference_scope: string;
+}
+
+export interface SystemsSourceBrowseGroup {
+  entry_type: string;
+  entry_type_label: string;
+  count: number;
+}
+
+export interface SystemsBrowseSourceRow extends SystemsSourceRow {
+  has_rules_reference_entries?: boolean;
+  rules_reference_search_scope?: string;
+}
+
+export interface SystemsIndexResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  library: SystemsLibraryRecord | null;
+  query: string;
+  reference_query: string;
+  sources: SystemsBrowseSourceRow[];
+  search_results: SystemsEntrySummary[];
+  has_rules_reference_search: boolean;
+  rules_reference_results: SystemsRulesReferenceResult[];
+  source_scoped_rules_reference_sources: SystemsBrowseSourceRow[];
+  permissions: {
+    can_manage_systems: boolean;
+  };
+}
+
+export interface SystemsSourceResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  source: SystemsSourceRow;
+  entry_groups: SystemsSourceBrowseGroup[];
+  book_entries: SystemsEntrySummary[];
+  entry_count: number;
+  browsable_entry_count: number;
+  hidden_entry_types: string[];
+  has_rules_reference_search: boolean;
+  rules_reference_search_meta: string;
+  rules_reference_scope_note: string;
+  reference_query: string;
+  rules_reference_results: SystemsRulesReferenceResult[];
+  book_visibility_policy_note: string;
+  permissions: {
+    can_manage_systems: boolean;
+  };
+}
+
+export interface SystemsSourceCategoryResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  source: SystemsSourceRow;
+  entry_type: string;
+  entry_type_label: string;
+  query: string;
+  entry_count: number;
+  filtered_entry_count: number;
+  entries: SystemsEntrySummary[];
+  permissions: {
+    can_manage_systems: boolean;
+  };
+}
+
+export interface SystemsEntryRecord extends SystemsEntrySummary {
+  metadata: Record<string, unknown>;
+  body: Record<string, unknown>;
+  rendered_html: string;
+  source_state: SystemsSourceRow | null;
+  override: SystemsEntryOverride | null;
+}
+
+export interface SystemsEntryResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  entry: SystemsEntryRecord;
+  permissions: {
+    can_manage_systems: boolean;
+  };
+  links: {
+    flask_entry_url: string;
+    flask_source_url: string;
+    flask_source_category_url: string;
+    dm_content_systems_url?: string;
+  };
+}
+
 export interface CustomSystemsEntry {
   id: number;
   library_slug: string;

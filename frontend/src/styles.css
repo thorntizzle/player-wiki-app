@@ -391,9 +391,21 @@ body {
 }
 
 .wiki-article-shell .article-body,
-.wiki-overview-card .article-body {
+.wiki-overview-card .article-body,
+.systems-entry-shell .article-body {
   max-height: none;
   line-height: 1.6;
+}
+
+.systems-entry-shell .article-body table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.systems-entry-list .meta {
+  display: block;
+  margin-top: 0.12rem;
 }
 
 .article-figure {

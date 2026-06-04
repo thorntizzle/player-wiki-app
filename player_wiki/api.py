@@ -1243,6 +1243,75 @@ def register_api(app) -> None:
             ),
         }
 
+    def serialize_systems_rules_reference_result(entry) -> dict[str, Any]:
+        metadata = dict(entry.metadata or {})
+        reference_scope = ""
+        if entry.entry_type == "book":
+            scope_parts = [str(metadata.get("section_label") or "").strip()]
+            chapter_title = str(metadata.get("chapter_title") or "").strip()
+            if chapter_title and chapter_title != entry.title:
+                scope_parts.append(chapter_title)
+            reference_scope = " | ".join(part for part in scope_parts if part)
+        elif entry.entry_type == "rule":
+            facets = [
+                str(value).strip()
+                for value in list(metadata.get("rule_facets") or [])
+                if str(value).strip()
+            ]
+            aliases = [
+                str(value).strip()
+                for value in list(metadata.get("aliases") or [])
+                if str(value).strip()
+            ]
+            summary_values = facets or aliases
+            if summary_values:
+                reference_scope = ", ".join(summary_values[:3])
+
+        return {
+            "title": entry.title,
+            "entry_type": entry.entry_type,
+            "entry_type_label": SYSTEMS_ENTRY_TYPE_LABELS.get(
+                entry.entry_type,
+                entry.entry_type.replace("_", " ").title(),
+            ),
+            "source_id": entry.source_id,
+            "slug": entry.slug,
+            "reference_scope": reference_scope,
+        }
+
+    def filter_accessible_systems_entries(
+        campaign_slug: str,
+        entries: list[object],
+        *,
+        limit: int | None = None,
+    ) -> list[object]:
+        accessible_entries = [
+            entry
+            for entry in entries
+            if can_access_campaign_systems_entry(campaign_slug, str(getattr(entry, "slug", "") or ""))
+        ]
+        if limit is not None:
+            return accessible_entries[:limit]
+        return accessible_entries
+
+    def list_accessible_campaign_source_entries(
+        campaign_slug: str,
+        source_id: str,
+        *,
+        entry_type: str | None = None,
+        query: str = "",
+        limit: int | None = None,
+    ) -> list[object]:
+        systems_service = current_app.extensions["systems_service"]
+        entries = systems_service.list_entries_for_campaign_source(
+            campaign_slug,
+            source_id,
+            entry_type=entry_type,
+            query=query,
+            limit=None,
+        )
+        return filter_accessible_systems_entries(campaign_slug, entries, limit=limit)
+
     def serialize_systems_import_run(import_run) -> dict[str, Any]:
         return {
             "id": import_run.id,
@@ -1551,7 +1620,12 @@ def register_api(app) -> None:
             raise ValueError("At least one source ID is required.")
         return source_ids
 
-    def build_systems_index_payload(campaign_slug: str, *, query: str = "") -> dict[str, Any]:
+    def build_systems_index_payload(
+        campaign_slug: str,
+        *,
+        query: str = "",
+        reference_query: str = "",
+    ) -> dict[str, Any]:
         campaign = get_repository().get_campaign(campaign_slug)
         if campaign is None:
             abort(404)
@@ -1567,14 +1641,65 @@ def register_api(app) -> None:
         search_results = (
             [
                 serialize_systems_entry_summary(entry)
-                for entry in systems_service.search_entries_for_campaign(
+                for entry in filter_accessible_systems_entries(
                     campaign_slug,
-                    query=search_query,
-                    include_source_ids=include_source_ids,
+                    systems_service.search_entries_for_campaign(
+                        campaign_slug,
+                        query=search_query,
+                        include_source_ids=include_source_ids,
+                        limit=None,
+                    ),
                     limit=250,
                 )
             ]
             if search_query
+            else []
+        )
+        source_cards = []
+        for state in source_states:
+            rules_reference_entries = filter_accessible_systems_entries(
+                campaign_slug,
+                systems_service.list_rules_reference_entries_for_campaign(
+                    campaign_slug,
+                    include_source_ids=[state.source.source_id],
+                    limit=None,
+                ),
+            )
+            source_cards.append(
+                {
+                    **serialize_systems_source_state(campaign_slug, state),
+                    "has_rules_reference_entries": bool(rules_reference_entries),
+                    "rules_reference_search_scope": systems_service.get_rules_reference_search_scope_for_source(
+                        state.source
+                    ),
+                }
+            )
+        global_rules_reference_source_ids = [
+            row["source_id"]
+            for row in source_cards
+            if row["has_rules_reference_entries"] and row["rules_reference_search_scope"] == "global"
+        ]
+        source_scoped_rules_reference_sources = [
+            row
+            for row in source_cards
+            if row["has_rules_reference_entries"] and row["rules_reference_search_scope"] == "source_only"
+        ]
+        rules_reference_query = reference_query.strip()
+        rules_reference_results = (
+            [
+                serialize_systems_rules_reference_result(entry)
+                for entry in filter_accessible_systems_entries(
+                    campaign_slug,
+                    systems_service.search_rules_reference_entries_for_campaign(
+                        campaign_slug,
+                        query=rules_reference_query,
+                        include_source_ids=global_rules_reference_source_ids,
+                        limit=None,
+                    ),
+                    limit=100,
+                )
+            ]
+            if rules_reference_query
             else []
         )
 
@@ -1582,8 +1707,12 @@ def register_api(app) -> None:
             "campaign": serialize_campaign(campaign),
             "library": serialize_systems_library(systems_service.get_campaign_library(campaign_slug)),
             "query": search_query,
-            "sources": [serialize_systems_source_state(campaign_slug, state) for state in source_states],
+            "reference_query": rules_reference_query,
+            "sources": source_cards,
             "search_results": search_results,
+            "has_rules_reference_search": bool(global_rules_reference_source_ids),
+            "rules_reference_results": rules_reference_results,
+            "source_scoped_rules_reference_sources": source_scoped_rules_reference_sources,
             "permissions": {
                 "can_manage_systems": can_manage_campaign_systems(campaign_slug),
             },
@@ -2869,7 +2998,17 @@ def register_api(app) -> None:
     @api_campaign_scope_access_required("systems")
     def systems_index(campaign_slug: str):
         query = request.args.get("q", "").strip()
-        return jsonify({"ok": True, **build_systems_index_payload(campaign_slug, query=query)})
+        reference_query = request.args.get("reference_q", "").strip()
+        return jsonify(
+            {
+                "ok": True,
+                **build_systems_index_payload(
+                    campaign_slug,
+                    query=query,
+                    reference_query=reference_query,
+                ),
+            }
+        )
 
     @api.get("/campaigns/<campaign_slug>/systems/sources")
     @api_campaign_scope_access_required("systems")
@@ -2952,20 +3091,29 @@ def register_api(app) -> None:
         if state is None or not state.is_enabled:
             abort(404)
 
-        book_entries = systems_service.list_entries_for_campaign_source(
+        book_entries = list_accessible_campaign_source_entries(
             campaign_slug,
             source_id,
             entry_type="book",
             limit=None,
         )
-        all_entry_groups = [
-            {
-                "entry_type": entry_type,
-                "entry_type_label": systems_entry_type_label(entry_type),
-                "count": count,
-            }
-            for entry_type, count in systems_service.list_entry_type_counts_for_campaign_source(campaign_slug, source_id)
-        ]
+        all_entry_groups = []
+        for entry_type, _ in systems_service.list_entry_type_counts_for_campaign_source(campaign_slug, source_id):
+            accessible_entries = list_accessible_campaign_source_entries(
+                campaign_slug,
+                source_id,
+                entry_type=entry_type,
+                limit=None,
+            )
+            if not accessible_entries:
+                continue
+            all_entry_groups.append(
+                {
+                    "entry_type": entry_type,
+                    "entry_type_label": systems_entry_type_label(entry_type),
+                    "count": len(accessible_entries),
+                }
+            )
         all_entry_groups.sort(
             key=lambda item: (
                 item["entry_type"] in SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES,
@@ -2975,6 +3123,59 @@ def register_api(app) -> None:
         entry_groups = [
             item for item in all_entry_groups if item["entry_type"] not in SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES
         ]
+        raw_rules_reference_entries = systems_service.list_rules_reference_entries_for_campaign(
+            campaign_slug,
+            include_source_ids=[source_id],
+            limit=None,
+        )
+        rules_reference_entries = filter_accessible_systems_entries(
+            campaign_slug,
+            raw_rules_reference_entries,
+        )
+        has_book_rules_reference_entries = any(entry.entry_type == "book" for entry in rules_reference_entries)
+        has_rule_rules_reference_entries = any(entry.entry_type == "rule" for entry in rules_reference_entries)
+        if has_book_rules_reference_entries and has_rule_rules_reference_entries:
+            rules_reference_search_meta = (
+                "Searches only this source's book chapters and rules entries using curated metadata like chapter "
+                "labels, section headings, aliases, formulas, and rule facets. It does not search full entry body text."
+            )
+        elif has_book_rules_reference_entries:
+            rules_reference_search_meta = (
+                "Searches only this source's book chapters using curated metadata like chapter labels and section "
+                "headings. It does not search full entry body text."
+            )
+        elif has_rule_rules_reference_entries:
+            rules_reference_search_meta = (
+                "Searches only this source's rules entries using curated metadata like aliases, formulas, and rule "
+                "facets. It does not search full entry body text."
+            )
+        else:
+            rules_reference_search_meta = ""
+        rules_reference_scope = systems_service.get_rules_reference_search_scope_for_source(state.source)
+        rules_reference_scope_note = (
+            "This DM-heavy source keeps chapter browse and rules-reference metadata search on this source page instead "
+            "of surfacing those chapter matches in the landing-page Rules Reference Search."
+            if rules_reference_entries and rules_reference_scope == "source_only"
+            else ""
+        )
+        reference_query = request.args.get("reference_q", "").strip()
+        rules_reference_results = (
+            [
+                serialize_systems_rules_reference_result(entry)
+                for entry in filter_accessible_systems_entries(
+                    campaign_slug,
+                    systems_service.search_rules_reference_entries_for_campaign(
+                        campaign_slug,
+                        query=reference_query,
+                        include_source_ids=[source_id],
+                        limit=None,
+                    ),
+                    limit=100,
+                )
+            ]
+            if reference_query
+            else []
+        )
 
         return jsonify(
             {
@@ -2988,6 +3189,16 @@ def register_api(app) -> None:
                 "hidden_entry_types": [
                     item["entry_type"] for item in all_entry_groups if item["entry_type"] in SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES
                 ],
+                "has_rules_reference_search": bool(rules_reference_entries),
+                "rules_reference_search_meta": rules_reference_search_meta,
+                "rules_reference_scope_note": rules_reference_scope_note,
+                "reference_query": reference_query,
+                "rules_reference_results": rules_reference_results,
+                "book_visibility_policy_note": (
+                    systems_service.get_book_entry_policy_note_for_source(state.source)
+                    if book_entries
+                    else ""
+                ),
                 "permissions": {
                     "can_manage_systems": can_manage_campaign_systems(campaign_slug),
                 },
@@ -3006,16 +3217,18 @@ def register_api(app) -> None:
         if not normalized_entry_type:
             abort(404)
 
-        entry_count = systems_service.count_entries_for_source(
+        all_entries = list_accessible_campaign_source_entries(
             campaign_slug,
             source_id,
             entry_type=normalized_entry_type,
+            limit=None,
         )
+        entry_count = len(all_entries)
         if entry_count <= 0:
             abort(404)
 
         query = request.args.get("q", "").strip()
-        entries = systems_service.list_entries_for_campaign_source(
+        entries = list_accessible_campaign_source_entries(
             campaign_slug,
             source_id,
             entry_type=normalized_entry_type,
@@ -3054,6 +3267,35 @@ def register_api(app) -> None:
                 "entry": serialize_systems_entry_record(campaign_slug, entry),
                 "permissions": {
                     "can_manage_systems": can_manage_campaign_systems(campaign_slug),
+                },
+                "links": {
+                    "flask_entry_url": url_for(
+                        "campaign_systems_entry_detail",
+                        campaign_slug=campaign_slug,
+                        entry_slug=entry.slug,
+                    ),
+                    "flask_source_url": url_for(
+                        "campaign_systems_source_detail",
+                        campaign_slug=campaign_slug,
+                        source_id=entry.source_id,
+                    ),
+                    "flask_source_category_url": url_for(
+                        "campaign_systems_source_type_detail",
+                        campaign_slug=campaign_slug,
+                        source_id=entry.source_id,
+                        entry_type=entry.entry_type,
+                    ),
+                    "dm_content_systems_url": (
+                        url_for(
+                            "campaign_dm_content_subpage_view",
+                            campaign_slug=campaign_slug,
+                            dm_content_subpage="systems",
+                            entry_key=entry.entry_key,
+                            _anchor="systems-entry-overrides",
+                        )
+                        if can_manage_campaign_systems(campaign_slug)
+                        else ""
+                    ),
                 },
             }
         )
