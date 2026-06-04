@@ -1,6 +1,10 @@
-# Session Companion Pilot
+# Gen2 Frontend
 
-This is a small React + TypeScript pilot surface served alongside the existing Flask/Jinja UI.
+This React + TypeScript frontend is served alongside the existing Flask/Jinja UI under `/app-next/`.
+
+It is a parity migration surface, not a full replacement yet. Route readiness and the current Flask-vs-Gen2 matrix live in:
+
+- `docs/gen2-migration-readiness.md`
 
 ## Prerequisites
 
@@ -26,7 +30,19 @@ npm run dev
 - Open `http://127.0.0.1:5173/app-next/` for hot-reload development, or `http://127.0.0.1:5000/app-next/` after building.
 - The Vite dev server proxies `/api/*` requests to `http://127.0.0.1:5000`.
 
-## Build & preview
+## Current Coverage
+
+The current Gen2 build covers:
+
+- campaign list, campaign home, published wiki sections, and published wiki pages
+- Session player/character/DM panes
+- Characters roster and character read/edit shell
+- Combat player view, DM status, and DM controls
+- DM Content statblocks, conditions, staged articles, Player Wiki, and Systems management lanes
+
+Flask remains the source of truth for workflows that are still Flask-first, including broader character authoring, Systems browsing, Control, Help, Account, and Admin.
+
+## Build & Preview
 
 ```powershell
 npm run typecheck
@@ -35,17 +51,19 @@ npm run build
 
 The build outputs to `frontend/dist`.
 
-The current pilot build is local-only: `frontend/dist` is intentionally ignored by Git and Docker context hygiene, and the Fly image does not yet run the frontend build stage. The Flask `/app-next/` route returns 404 until `frontend/dist` exists in the running app environment.
+The current Gen2 build is local-only: `frontend/dist` is intentionally ignored by Git and Docker context hygiene, and the Fly image does not yet run the frontend build stage. The Flask `/app-next/` route returns 404 until `frontend/dist` exists in the running app environment.
 
 ## Flask integration
 
-- Flask serves the built pilot at:
+- Flask serves the built Gen2 app at:
   - `GET /app-next/` -> `index.html`
   - `GET /app-next/<path>` -> static asset if present, otherwise SPA fallback to `index.html`.
 - The build directory can be changed with `APP_NEXT_DIST_DIR` in Flask config.
 - No legacy routes or templates are changed; this is intentionally side-by-side with the existing browser app.
 
-## API used by the pilot
+## API Used By Gen2
+
+The full API reference is maintained in `docs/api-v1.md`. The list below is a quick orientation for the original Session pilot path and should not be treated as exhaustive for the current Gen2 app.
 
 - `GET /api/v1/app`
 - `GET /api/v1/campaigns`
