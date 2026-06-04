@@ -342,6 +342,42 @@ body {
   padding-top: 1rem;
 }
 
+.campaign-control-page,
+.campaign-control-form,
+.campaign-control-sidebar {
+  display: grid;
+  gap: 1rem;
+}
+
+.campaign-control-hero h1 {
+  margin: 0.1rem 0 0.4rem;
+}
+
+.campaign-control-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.campaign-control-row {
+  background: #f9fbff;
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.8rem;
+}
+
+.campaign-control-row select {
+  min-width: 10rem;
+}
+
+.campaign-control-row__meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .campaign-help-page,
 .campaign-help-main,
 .campaign-help-sidebar,

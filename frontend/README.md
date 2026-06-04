@@ -42,8 +42,9 @@ The current Gen2 build covers:
 - Systems browsing landing/search, source pages, source categories, and entry detail pages
 - Account settings for theme and live-session chat-order preferences
 - Campaign Help guidance, effective access, visibility notes, and Flask fallback links
+- Campaign Control visibility editing for campaign and scope access floors
 
-Flask remains the source of truth for workflows that are still Flask-first, including broader character authoring, Control, Admin, shared/core Systems entry editing, and Systems imports.
+Flask remains the source of truth for workflows that are still Flask-first, including broader character authoring, Admin, shared/core Systems entry editing, and Systems imports.
 
 ## Build & Preview
 
@@ -73,6 +74,8 @@ The full API reference is maintained in `docs/api-v1.md`. The list below is a qu
 - `GET /api/v1/me/settings`
 - `PATCH /api/v1/me/settings`
 - `GET /api/v1/campaigns`
+- `GET /api/v1/campaigns/<campaign_slug>/control`
+- `PATCH /api/v1/campaigns/<campaign_slug>/control/visibility`
 - `GET /api/v1/campaigns/<campaign_slug>/help`
 - `GET /api/v1/campaigns/<campaign_slug>/session`
 - `POST /api/v1/campaigns/<campaign_slug>/session/start`

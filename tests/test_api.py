@@ -515,6 +515,58 @@ def test_api_campaign_help_returns_surface_guidance_for_viewer_access(client, ap
     assert "Browser and API boundary" in [card["title"] for card in dm_content["guidance_cards"]]
 
 
+def test_api_campaign_control_visibility_requires_manager_and_updates_scopes(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="campaign-control-dm-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="campaign-control-player-api")
+
+    blocked_response = client.get("/api/v1/campaigns/linden-pass/control", headers=api_headers(player_token))
+    assert blocked_response.status_code == 403
+    assert blocked_response.get_json()["error"]["code"] == "forbidden"
+
+    control_response = client.get("/api/v1/campaigns/linden-pass/control", headers=api_headers(dm_token))
+    assert control_response.status_code == 200
+    payload = control_response.get_json()
+    assert payload["ok"] is True
+    assert payload["campaign"]["slug"] == "linden-pass"
+    assert payload["links"]["flask_control_url"] == "/campaigns/linden-pass/control-panel"
+    assert payload["links"]["gen2_control_url"] == "/app-next/campaigns/linden-pass/control"
+    rows_by_scope = {row["scope"]: row for row in payload["visibility_rows"]}
+    assert rows_by_scope["campaign"]["selected_visibility"] == "public"
+    assert rows_by_scope["characters"]["effective_visibility"] == "dm"
+    assert payload["can_set_private_visibility"] is False
+
+    private_response = client.patch(
+        "/api/v1/campaigns/linden-pass/control/visibility",
+        headers=api_headers(dm_token),
+        json={"visibility": {"campaign": "private"}},
+    )
+    assert private_response.status_code == 400
+    assert private_response.get_json()["error"]["message"] == "Private visibility is reserved for app admins."
+
+    update_response = client.patch(
+        "/api/v1/campaigns/linden-pass/control/visibility",
+        headers=api_headers(dm_token),
+        json={"visibility": {"campaign": "players", "wiki": "dm", "session": "players"}},
+    )
+    assert update_response.status_code == 200
+    updated = update_response.get_json()
+    assert set(updated["changed_scopes"]) == {"Campaign", "Player Wiki"}
+    updated_rows = {row["scope"]: row for row in updated["visibility_rows"]}
+    assert updated_rows["campaign"]["selected_visibility"] == "players"
+    assert updated_rows["wiki"]["selected_visibility"] == "dm"
+    assert updated_rows["session"]["effective_visibility"] == "players"
+    assert "Updated visibility for" in updated["message"]
+
+    with app.app_context():
+        store = AuthStore()
+        campaign_setting = store.get_campaign_visibility_setting("linden-pass", "campaign")
+        wiki_setting = store.get_campaign_visibility_setting("linden-pass", "wiki")
+        assert campaign_setting is not None
+        assert campaign_setting.visibility == "players"
+        assert wiki_setting is not None
+        assert wiki_setting.visibility == "dm"
+
+
 def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, app, users):
     player_token = issue_api_token(app, users["party"]["email"], label="player-wiki-api")
 

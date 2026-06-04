@@ -21,6 +21,8 @@ import {
 import type {
   CampaignEntry,
   AccountSettingsUpdatePayload,
+  CampaignControlResponse,
+  CampaignControlVisibilityRow,
   CharacterCurrencyPatchPayload,
   CampaignHelpResponse,
   CharacterDetailResponse,
@@ -889,9 +891,9 @@ function AppShell() {
           || campaignPermissions?.can_manage_content === true,
       },
       {
-        href: `/campaigns/${encodedCampaignSlug}/control-panel`,
+        href: `/app-next/campaigns/${encodedCampaignSlug}/control`,
         label: "Control",
-        isGen2: false,
+        isGen2: true,
         show: campaignPermissions?.can_manage_visibility === true,
       },
       {
@@ -1280,6 +1282,191 @@ function AccountSettingsPage() {
             <a className="ghost-button" href="/app-next/">
               Back to campaigns
             </a>
+          </aside>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function buildControlVisibilityDraft(rows: CampaignControlVisibilityRow[]): Record<string, string> {
+  return rows.reduce<Record<string, string>>((accumulator, row) => {
+    accumulator[row.scope] = row.selected_visibility;
+    return accumulator;
+  }, {});
+}
+
+function isControlDraftUnchanged(rows: CampaignControlVisibilityRow[], draft: Record<string, string>): boolean {
+  if (!rows.length) {
+    return true;
+  }
+  return rows.every((row) => (draft[row.scope] || "") === row.selected_visibility);
+}
+
+function CampaignControlPage() {
+  const { campaignSlug } = useParams({
+    from: "/campaigns/$campaignSlug/control",
+  });
+  const resolvedCampaignSlug = campaignSlug ?? "";
+  const { apiClient, setAuthRequired } = useApiClient();
+  const [draftVisibility, setDraftVisibility] = useState<Record<string, string>>({});
+  const [statusMessage, setStatusMessage] = useState("");
+
+  const controlQuery = useQuery({
+    queryKey: ["campaign-control", resolvedCampaignSlug],
+    queryFn: () => apiClient.getCampaignControl(resolvedCampaignSlug),
+    enabled: Boolean(resolvedCampaignSlug),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (isAuthError(controlQuery.error)) {
+      setAuthRequired(true);
+    }
+  }, [controlQuery.error, setAuthRequired]);
+
+  useEffect(() => {
+    const rows = controlQuery.data?.visibility_rows;
+    if (!rows) {
+      return;
+    }
+    setDraftVisibility(buildControlVisibilityDraft(rows));
+  }, [controlQuery.data?.visibility_rows]);
+
+  const saveVisibility = useMutation({
+    mutationFn: () => apiClient.patchCampaignControlVisibility(resolvedCampaignSlug, { visibility: draftVisibility }),
+    onSuccess: (response) => {
+      setStatusMessage(response.message);
+      setDraftVisibility(buildControlVisibilityDraft(response.visibility_rows));
+      void queryClient.invalidateQueries({ queryKey: ["campaign-control", resolvedCampaignSlug] });
+      void queryClient.invalidateQueries({ queryKey: ["campaign", resolvedCampaignSlug] });
+    },
+    onError: (error) => {
+      setStatusMessage("");
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+    },
+  });
+
+  const data: CampaignControlResponse | undefined = controlQuery.data;
+  const error = getApiErrorMessage(controlQuery.error);
+  const saveError = saveVisibility.error ? apiErrorMessage(saveVisibility.error) : null;
+  const isUnchanged = data ? isControlDraftUnchanged(data.visibility_rows, draftVisibility) : true;
+
+  const handleVisibilityChange = (scope: string, value: string) => {
+    setDraftVisibility((previous) => ({
+      ...previous,
+      [scope]: value,
+    }));
+    setStatusMessage("");
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!data) {
+      return;
+    }
+    setStatusMessage("");
+    saveVisibility.mutate();
+  };
+
+  return (
+    <section className="campaign-control-page">
+      <div className="panel campaign-control-hero">
+        <p className="eyebrow">Control panel</p>
+        <h1>Visibility</h1>
+        <p className="lede">
+          Control who can see the campaign, wiki, systems reference, session tools, combat tracker, DM content, and character section.
+        </p>
+      </div>
+
+      <ApiErrorNotice isLoading={controlQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
+
+      {data ? (
+        <div className="page-layout campaign-control-layout">
+          <form className="card campaign-control-form" onSubmit={handleSubmit}>
+            <div className="section-heading">
+              <div>
+                <h2>Visibility settings</h2>
+                <p className="meta">The campaign setting acts as the floor; each section can only become as open as that floor allows.</p>
+              </div>
+            </div>
+
+            <div className="campaign-control-grid">
+              {data.visibility_rows.map((row) => {
+                const fieldId = `campaign-control-${row.scope}`;
+                return (
+                  <article className="campaign-control-row" key={row.scope}>
+                    <label className="chat-label" htmlFor={fieldId}>
+                      {row.label}
+                      <select
+                        id={fieldId}
+                        value={draftVisibility[row.scope] || row.selected_visibility}
+                        onChange={(event: ChangeEvent<HTMLSelectElement>) => handleVisibilityChange(row.scope, event.currentTarget.value)}
+                      >
+                        {row.choices.map((choice) => (
+                          <option value={choice.value} key={`${row.scope}-${choice.value}`}>
+                            {choice.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="campaign-control-row__meta">
+                      <span className="meta-badge">Effective: {row.effective_visibility_label}</span>
+                      {row.configured_visibility_label ? (
+                        <span className="meta">Configured: {row.configured_visibility_label}</span>
+                      ) : (
+                        <span className="meta">Using default: {row.default_visibility_label}</span>
+                      )}
+                    </div>
+                    {row.is_overridden_by_campaign ? (
+                      <p className="meta">The campaign-level visibility is currently more private than this section setting.</p>
+                    ) : null}
+                  </article>
+                );
+              })}
+            </div>
+
+            <div className="article-actions">
+              <button type="submit" className="button" disabled={saveVisibility.isPending || isUnchanged}>
+                {saveVisibility.isPending ? "Saving..." : "Save visibility"}
+              </button>
+              <a className="button button-secondary" href={data.links.flask_control_url}>
+                Flask Control
+              </a>
+              {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
+              {saveError ? <p className="status status-error">{saveError}</p> : null}
+            </div>
+          </form>
+
+          <aside className="sidebar campaign-control-sidebar">
+            <article className="card sidebar-card">
+              <div className="section-heading">
+                <div>
+                  <h2>Visibility rules</h2>
+                  <p className="meta">These labels match the Flask Control panel and campaign access checks.</p>
+                </div>
+              </div>
+              <div className="reference-stack">
+                {data.rules.map((rule) => (
+                  <article className="help-detail-card" key={rule.label}>
+                    <h3>{rule.label}</h3>
+                    <p className="meta">{rule.description}</p>
+                  </article>
+                ))}
+              </div>
+            </article>
+
+            <article className="card sidebar-card">
+              <div className="section-heading">
+                <div>
+                  <h2>Notes</h2>
+                  <p className="meta">Changing visibility does not rewrite content; it only changes who can see routes.</p>
+                </div>
+              </div>
+              <HelpList items={data.notes} emptyText="No additional visibility notes are available." />
+            </article>
           </aside>
         </div>
       ) : null}
@@ -10104,6 +10291,12 @@ const campaignHelpRoute = createRoute({
   component: CampaignHelpPage,
 });
 
+const campaignControlRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/campaigns/$campaignSlug/control",
+  component: CampaignControlPage,
+});
+
 const campaignWikiSectionRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/campaigns/$campaignSlug/sections/$sectionSlug",
@@ -10175,6 +10368,7 @@ const routeTree = rootRoute.addChildren([
   accountSettingsRoute,
   campaignHomeRoute,
   campaignHelpRoute,
+  campaignControlRoute,
   campaignWikiSectionRoute,
   campaignWikiPageRoute,
   campaignSystemsRoute,

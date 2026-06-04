@@ -209,6 +209,59 @@ def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
             browser.close()
 
 
+def test_gen2_campaign_control_updates_visibility_and_blocks_players(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            dm_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            player_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            dm_page = dm_context.new_page()
+            player_page = player_context.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(dm_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+
+            dm_page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
+            control_link = dm_page.locator(".campaign-nav-link", has_text="Control")
+            expect(control_link).to_be_visible(timeout=10000)
+            expect(control_link).to_have_attribute("href", re.compile(r"/app-next/campaigns/linden-pass/control$"))
+            control_link.click()
+            expect(dm_page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/control$"))
+            expect(dm_page.get_by_role("heading", name="Visibility", exact=True)).to_be_visible(timeout=10000)
+            expect(dm_page.get_by_role("heading", name="Visibility settings")).to_be_visible()
+            expect(dm_page.get_by_role("heading", name="Visibility rules")).to_be_visible()
+            expect(dm_page.get_by_role("link", name="Flask Control")).to_be_visible()
+
+            dm_page.locator("#campaign-control-campaign").select_option("players")
+            dm_page.locator("#campaign-control-wiki").select_option("dm")
+            dm_page.get_by_role("button", name="Save visibility").click()
+            expect(dm_page.get_by_text(re.compile(r"Updated visibility for .*Campaign", re.I))).to_be_visible(timeout=5000)
+            expect(dm_page.locator("#campaign-control-campaign")).to_have_value("players")
+            expect(dm_page.locator("#campaign-control-wiki")).to_have_value("dm")
+
+            _sign_in(player_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
+            player_page.goto(f"{base_url}/app-next/campaigns/linden-pass/control")
+            expect(player_page.get_by_text("You do not have permission to manage campaign visibility.")).to_be_visible(timeout=10000)
+        finally:
+            dm_page.close()
+            player_page.close()
+            dm_context.close()
+            player_context.close()
+            browser.close()
+
+
 def test_gen2_account_settings_saves_preferences_and_updates_theme(
     frontend_gen2_session_live_server,
     users,

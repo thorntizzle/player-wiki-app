@@ -176,6 +176,54 @@ export interface WikiHomeLinks {
   gen2_campaign_url: string;
 }
 
+export interface CampaignControlVisibilityChoice {
+  value: string;
+  label: string;
+}
+
+export interface CampaignControlVisibilityRow {
+  scope: string;
+  label: string;
+  selected_visibility: string;
+  selected_visibility_label: string;
+  configured_visibility: string;
+  configured_visibility_label: string;
+  default_visibility: string;
+  default_visibility_label: string;
+  effective_visibility: string;
+  effective_visibility_label: string;
+  choices: CampaignControlVisibilityChoice[];
+  is_overridden_by_campaign: boolean;
+}
+
+export interface CampaignControlRule {
+  label: string;
+  description: string;
+}
+
+export interface CampaignControlResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  visibility_rows: CampaignControlVisibilityRow[];
+  can_set_private_visibility: boolean;
+  rules: CampaignControlRule[];
+  notes: string[];
+  links: {
+    flask_control_url: string;
+    gen2_control_url: string;
+  };
+}
+
+export interface CampaignControlVisibilityUpdatePayload {
+  visibility: Record<string, string>;
+}
+
+export interface CampaignControlVisibilityUpdateResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  visibility_rows: CampaignControlVisibilityRow[];
+  changed_scopes: string[];
+  message: string;
+}
+
 export interface CampaignHelpLink {
   label: string;
   href: string;

@@ -22,8 +22,10 @@ from .auth import (
     can_manage_campaign_session,
     can_manage_campaign_systems,
     can_post_campaign_session_messages,
+    clear_campaign_visibility_cache,
     get_accessible_campaign_entries,
     get_auth_store,
+    get_campaign_default_scope_visibility,
     get_campaign_role,
     get_campaign_scope_visibility,
     get_current_auth_source,
@@ -66,7 +68,15 @@ from .campaign_dm_content_service import (
 )
 from .campaign_wiki_safety import build_dm_player_wiki_removal_safety_index
 from .campaign_session_service import CampaignSessionValidationError
-from .campaign_visibility import CAMPAIGN_VISIBILITY_SCOPES, VISIBILITY_LABELS, list_visibility_choices
+from .campaign_visibility import (
+    CAMPAIGN_VISIBILITY_SCOPES,
+    CAMPAIGN_VISIBILITY_SCOPE_LABELS,
+    VISIBILITY_LABELS,
+    VISIBILITY_PRIVATE,
+    is_valid_visibility,
+    list_visibility_choices,
+    normalize_visibility_choice,
+)
 from .character_builder import (
     CAMPAIGN_ITEMS_SECTION,
     _attach_campaign_item_page_support,
@@ -270,6 +280,22 @@ def register_api(app) -> None:
             if get_current_user() is None:
                 return json_error("Authentication required.", 401, code="auth_required")
             return json_error("You do not have permission to manage systems.", 403, code="forbidden")
+
+        return wrapped
+
+    def api_campaign_visibility_management_required(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            campaign_slug = kwargs.get("campaign_slug")
+            if not isinstance(campaign_slug, str) or get_repository().get_campaign(campaign_slug) is None:
+                abort(404)
+
+            if can_manage_campaign_visibility(campaign_slug):
+                return view(*args, **kwargs)
+
+            if get_current_user() is None:
+                return json_error("Authentication required.", 401, code="auth_required")
+            return json_error("You do not have permission to manage campaign visibility.", 403, code="forbidden")
 
         return wrapped
 
@@ -628,6 +654,31 @@ def register_api(app) -> None:
             for scope in CAMPAIGN_VISIBILITY_SCOPES:
                 visibility[scope]["configured"] = get_campaign_scope_visibility(campaign_slug, scope)
         return visibility
+
+    def serialize_campaign_control_visibility_row(campaign_slug: str, scope: str) -> dict[str, Any]:
+        user = get_current_user()
+        include_private = bool(user and user.is_admin)
+        configured_visibility = get_auth_store().get_campaign_visibility_setting(campaign_slug, scope)
+        current_visibility = configured_visibility.visibility if configured_visibility is not None else ""
+        effective_visibility = get_effective_campaign_visibility(campaign_slug, scope)
+        default_visibility = get_campaign_default_scope_visibility(campaign_slug, scope)
+        selected_visibility = current_visibility or default_visibility
+        return {
+            "scope": scope,
+            "label": CAMPAIGN_VISIBILITY_SCOPE_LABELS[scope],
+            "selected_visibility": selected_visibility,
+            "selected_visibility_label": VISIBILITY_LABELS.get(selected_visibility, selected_visibility),
+            "configured_visibility": current_visibility,
+            "configured_visibility_label": VISIBILITY_LABELS.get(current_visibility, "") if current_visibility else "",
+            "default_visibility": default_visibility,
+            "default_visibility_label": VISIBILITY_LABELS.get(default_visibility, default_visibility),
+            "effective_visibility": effective_visibility,
+            "effective_visibility_label": VISIBILITY_LABELS[effective_visibility],
+            "choices": list_visibility_choices(include_private=include_private),
+            "is_overridden_by_campaign": scope != "campaign"
+            and effective_visibility != current_visibility
+            and effective_visibility == get_effective_campaign_visibility(campaign_slug, "campaign"),
+        }
 
     def serialize_session_record(record) -> dict[str, Any]:
         return {
@@ -2639,6 +2690,128 @@ def register_api(app) -> None:
                     "can_manage_visibility": can_manage_campaign_visibility(campaign_slug),
                     "can_post_session_messages": can_post_campaign_session_messages(campaign_slug),
                 },
+            }
+        )
+
+    @api.get("/campaigns/<campaign_slug>/control")
+    @api_campaign_visibility_management_required
+    def campaign_control(campaign_slug: str):
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+        user = get_current_user()
+        include_private = bool(user and user.is_admin)
+        return jsonify(
+            {
+                "ok": True,
+                "campaign": serialize_campaign(campaign),
+                "visibility_rows": [
+                    serialize_campaign_control_visibility_row(campaign_slug, scope)
+                    for scope in CAMPAIGN_VISIBILITY_SCOPES
+                ],
+                "can_set_private_visibility": include_private,
+                "rules": [
+                    {"label": "Public", "description": "Anyone can see it."},
+                    {"label": "Players", "description": "Only the DM and players in the campaign can see it."},
+                    {"label": "DM", "description": "Only the campaign DM can see it."},
+                    {"label": "Private", "description": "Only an app admin can see it."},
+                ],
+                "notes": [
+                    "Campaign-level visibility acts as a floor for every campaign section.",
+                    "Systems also apply source-level and article-level access rules on top of the Systems scope.",
+                ]
+                + (
+                    []
+                    if include_private
+                    else ["Private visibility is reserved for admins even though admins can still access everything."]
+                ),
+                "links": {
+                    "flask_control_url": url_for("campaign_control_panel_view", campaign_slug=campaign_slug),
+                    "gen2_control_url": gen2_campaign_href(campaign_slug, "control"),
+                },
+            }
+        )
+
+    @api.patch("/campaigns/<campaign_slug>/control/visibility")
+    @api_campaign_visibility_management_required
+    def campaign_control_update_visibility(campaign_slug: str):
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        try:
+            payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        raw_visibility = payload.get("visibility")
+        if not isinstance(raw_visibility, dict):
+            return json_error("Visibility settings must be provided as an object.", 400, code="validation_error")
+
+        auth_store_instance = get_auth_store()
+        changed_scopes: list[str] = []
+        for scope in CAMPAIGN_VISIBILITY_SCOPES:
+            current_visibility = auth_store_instance.get_campaign_visibility_setting(campaign_slug, scope)
+            default_visibility = get_campaign_default_scope_visibility(campaign_slug, scope)
+            selected_visibility = normalize_visibility_choice(
+                str(
+                    raw_visibility.get(
+                        scope,
+                        current_visibility.visibility if current_visibility is not None else default_visibility,
+                    )
+                    or ""
+                )
+            )
+            if not is_valid_visibility(selected_visibility):
+                return json_error(
+                    f"Choose a valid visibility for {CAMPAIGN_VISIBILITY_SCOPE_LABELS[scope]}.",
+                    400,
+                    code="validation_error",
+                )
+            if selected_visibility == VISIBILITY_PRIVATE and not user.is_admin:
+                return json_error("Private visibility is reserved for app admins.", 400, code="validation_error")
+
+            if current_visibility is not None and current_visibility.visibility == selected_visibility:
+                continue
+            if current_visibility is None and default_visibility == selected_visibility:
+                continue
+
+            auth_store_instance.upsert_campaign_visibility_setting(
+                campaign_slug,
+                scope,
+                visibility=selected_visibility,
+                updated_by_user_id=user.id,
+            )
+            auth_store_instance.write_audit_event(
+                event_type="campaign_visibility_updated",
+                actor_user_id=user.id,
+                campaign_slug=campaign_slug,
+                metadata={
+                    "scope": scope,
+                    "visibility": selected_visibility,
+                    "source": "campaign_control_api",
+                },
+            )
+            changed_scopes.append(CAMPAIGN_VISIBILITY_SCOPE_LABELS[scope])
+
+        clear_campaign_visibility_cache(campaign_slug)
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+        return jsonify(
+            {
+                "ok": True,
+                "campaign": serialize_campaign(campaign),
+                "visibility_rows": [
+                    serialize_campaign_control_visibility_row(campaign_slug, scope)
+                    for scope in CAMPAIGN_VISIBILITY_SCOPES
+                ],
+                "changed_scopes": changed_scopes,
+                "message": (
+                    f"Updated visibility for {', '.join(changed_scopes)}."
+                    if changed_scopes
+                    else "Visibility settings already matched those values."
+                ),
             }
         )
 

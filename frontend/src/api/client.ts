@@ -4,6 +4,9 @@ import type {
   AccountSettingsUpdateResponse,
   ApiAppResponse,
   ApiErrorPayload,
+  CampaignControlResponse,
+  CampaignControlVisibilityUpdatePayload,
+  CampaignControlVisibilityUpdateResponse,
   CampaignHelpResponse,
   CampaignDetailResponse,
   MeResponse,
@@ -248,6 +251,23 @@ export class CampaignApiClient {
 
   async getCampaignHelp(slug: string): Promise<CampaignHelpResponse> {
     return this.requestJson<CampaignHelpResponse>(`/api/v1/campaigns/${encodeURIComponent(slug)}/help`);
+  }
+
+  async getCampaignControl(slug: string): Promise<CampaignControlResponse> {
+    return this.requestJson<CampaignControlResponse>(`/api/v1/campaigns/${encodeURIComponent(slug)}/control`);
+  }
+
+  async patchCampaignControlVisibility(
+    slug: string,
+    payload: CampaignControlVisibilityUpdatePayload,
+  ): Promise<CampaignControlVisibilityUpdateResponse> {
+    return this.requestJson<CampaignControlVisibilityUpdateResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/control/visibility`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
   }
 
   async getCampaigns(): Promise<CampaignsResponse> {
