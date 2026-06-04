@@ -115,6 +115,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<level>`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>`
+- `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/equipment/<item_id>`
+- `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/feature-states/<feature_key>`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/currency`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/notes`
 - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>`

@@ -70,6 +70,8 @@ The current pilot build is local-only: `frontend/dist` is intentionally ignored 
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<level>`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>`
+- `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/equipment/<item_id>`
+- `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/feature-states/<feature_key>`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/currency`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/notes`
 - `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>`

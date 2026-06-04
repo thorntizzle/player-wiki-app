@@ -664,6 +664,27 @@ textarea {
   grid-column: 1 / -1;
 }
 
+.equipment-state-form {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+.equipment-state-form select {
+  margin-top: 0.25rem;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 700;
+}
+
+.toggle-row input {
+  width: auto;
+}
+
 .currency-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));

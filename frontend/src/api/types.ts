@@ -198,6 +198,54 @@ export interface CharacterPermissions {
   can_edit_session: boolean;
 }
 
+export interface CharacterEquipmentWieldOption {
+  value: string;
+  label: string;
+}
+
+export interface CharacterEquipmentRow {
+  id: string;
+  name: string;
+  quantity: number;
+  weight: string;
+  notes: string;
+  tags: string[];
+  source_label: string;
+  is_equipped: boolean;
+  equipped_label: string;
+  is_attuned: boolean;
+  requires_attunement: boolean;
+  supports_attunement: boolean;
+  supports_weapon_wield_mode: boolean;
+  weapon_wield_mode: string;
+  weapon_wield_options: CharacterEquipmentWieldOption[];
+  attunement_hint: string;
+}
+
+export interface CharacterArcaneArmorState {
+  available: boolean;
+  feature_key?: string;
+  label?: string;
+  enabled?: boolean;
+  status_label?: string;
+  hands_free?: boolean;
+  hands_label?: string;
+  thunder_gauntlets_available?: boolean;
+  defensive_field_available?: boolean;
+}
+
+export interface CharacterEquipmentState {
+  rows: CharacterEquipmentRow[];
+  attuned_count: number;
+  equipped_count: number;
+  max_attuned_items: number;
+  equipment_item_refs: string[];
+  attunable_item_refs: string[];
+  at_attunement_limit: boolean;
+  over_attunement_limit: boolean;
+  arcane_armor_state: CharacterArcaneArmorState;
+}
+
 export interface CharacterStateRecord {
   campaign_slug: string;
   character_slug: string;
@@ -211,6 +259,8 @@ export interface CharacterRecord {
   definition: Record<string, unknown>;
   import_metadata: Record<string, unknown>;
   state_record: CharacterStateRecord;
+  equipment_state?: CharacterEquipmentState;
+  arcane_armor_state?: CharacterArcaneArmorState;
   permissions: CharacterPermissions;
 }
 
@@ -243,6 +293,18 @@ export interface CharacterSpellSlotsPatchPayload {
 export interface CharacterInventoryPatchPayload {
   expected_revision: number;
   quantity?: number | null;
+}
+
+export interface CharacterEquipmentStatePatchPayload {
+  expected_revision: number;
+  is_equipped?: boolean;
+  is_attuned?: boolean;
+  weapon_wield_mode?: string;
+}
+
+export interface CharacterFeatureStatePatchPayload {
+  expected_revision: number;
+  enabled: boolean;
 }
 
 export interface CharacterCurrencyPatchPayload {

@@ -55,6 +55,94 @@ def _write_character_definition(app, character_slug: str, mutator) -> None:
     definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
+def _write_character_state(app, character_slug: str, mutator) -> None:
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        store = app.extensions["character_state_store"]
+        record = repository.get_character("linden-pass", character_slug)
+        assert record is not None
+        payload = deepcopy(record.state_record.state)
+        mutator(payload)
+        store.replace_state(
+            record.definition,
+            payload,
+            expected_revision=record.state_record.revision,
+        )
+
+
+def _seed_systems_item_entry(
+    app,
+    *,
+    slug: str = "phb-item-rope",
+    title: str = "Rope",
+    metadata: dict[str, object] | None = None,
+):
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        existing_entries = [
+            {
+                "entry_key": record.entry_key,
+                "entry_type": record.entry_type,
+                "slug": record.slug,
+                "title": record.title,
+                "source_page": record.source_page,
+                "source_path": record.source_path,
+                "search_text": record.search_text,
+                "player_safe_default": record.player_safe_default,
+                "dm_heavy": record.dm_heavy,
+                "metadata": dict(record.metadata or {}),
+                "body": dict(record.body or {}),
+                "rendered_html": record.rendered_html,
+            }
+            for record in systems_store.list_entries_for_source("DND-5E", "PHB", entry_type="item")
+            if str(record.slug or "").strip() != slug
+        ]
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["item"],
+            entries=existing_entries
+            + [
+                {
+                    "entry_key": f"dnd-5e|item|phb|{slug}",
+                    "entry_type": "item",
+                    "slug": slug,
+                    "title": title,
+                    "source_page": "150",
+                    "source_path": "data/items-base.json",
+                    "search_text": title.lower(),
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"weight": 1, **dict(metadata or {})},
+                    "body": {},
+                    "rendered_html": f"<p>{title}.</p>",
+                }
+            ],
+        )
+        entry = app.extensions["systems_service"].get_entry_by_slug_for_campaign("linden-pass", slug)
+        assert entry is not None
+        return entry
+
+
+def _systems_ref(entry) -> dict[str, str]:
+    return {
+        "entry_key": str(entry.entry_key or "").strip(),
+        "entry_type": str(entry.entry_type or "").strip(),
+        "title": str(entry.title or "").strip(),
+        "slug": str(entry.slug or "").strip(),
+        "source_id": str(entry.source_id or "").strip(),
+    }
+
+
 def _import_systems_goblin(app, tmp_path) -> tuple[str, str]:
     data_root = tmp_path / "api-systems-dnd5e-source"
     _write_json(
@@ -888,6 +976,192 @@ def test_api_character_session_endpoints_cover_dnd_state_controls(client, app, u
         if int(item.get("level") or 0) == 2
         and str(item.get("slot_lane_id") or "") == str(second_level_slot.get("slot_lane_id") or "")
     )["used"] == 0
+
+
+def test_api_character_session_equipment_state_endpoint_updates_wield_mode_and_rejects_invalid_rows(
+    client,
+    app,
+    users,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-session-equipment-api")
+
+    character_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(owner_token),
+    )
+
+    assert character_response.status_code == 200
+    character = character_response.get_json()["character"]
+    equipment_state = character["equipment_state"]
+    assert equipment_state["rows"]
+    quarterstaff = {item["id"]: item for item in equipment_state["rows"]}["quarterstaff-2"]
+    assert quarterstaff["supports_weapon_wield_mode"] is True
+    assert {"value": "two-handed", "label": "Two-Handed"} in quarterstaff["weapon_wield_options"]
+
+    wield_response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/session/equipment/quarterstaff-2",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": character["state_record"]["revision"],
+            "weapon_wield_mode": "two-handed",
+        },
+    )
+
+    assert wield_response.status_code == 200
+    wielded_character = wield_response.get_json()["character"]
+    wielded_inventory = {
+        item["catalog_ref"] if item.get("catalog_ref") else item["id"]: item
+        for item in wielded_character["state_record"]["state"]["inventory"]
+    }
+    assert wielded_inventory["quarterstaff-2"]["is_equipped"] is True
+    assert wielded_inventory["quarterstaff-2"]["weapon_wield_mode"] == "two-handed"
+    wielded_equipment = {item["id"]: item for item in wielded_character["equipment_state"]["rows"]}
+    assert wielded_equipment["quarterstaff-2"]["weapon_wield_mode"] == "two-handed"
+    assert wielded_equipment["quarterstaff-2"]["equipped_label"] == "Two-Handed"
+
+    stale_response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/session/equipment/quarterstaff-2",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": character["state_record"]["revision"],
+            "weapon_wield_mode": "",
+        },
+    )
+
+    assert stale_response.status_code == 409
+    assert stale_response.get_json()["error"]["code"] == "state_conflict"
+
+    invalid_response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/session/equipment/backpack-5",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": wielded_character["state_record"]["revision"],
+            "is_equipped": True,
+        },
+    )
+
+    assert invalid_response.status_code == 400
+    assert invalid_response.get_json()["error"]["code"] == "validation_error"
+    assert "does not support equipment state" in invalid_response.get_json()["error"]["message"]
+
+
+def test_api_character_session_equipment_state_endpoint_preserves_attunement_limit(
+    client,
+    app,
+    users,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    item_ids = ["light-crossbow-1", "quarterstaff-2", "satchel-3", "crossbow-bolts-4"]
+    entries = [
+        _seed_systems_item_entry(
+            app,
+            slug=f"phb-item-api-attuned-relic-{index}",
+            title=f"Attuned Relic {index}",
+            metadata={"rarity": "rare", "attunement": "requires attunement"},
+        )
+        for index in range(1, 5)
+    ]
+
+    def _mutate_definition(payload: dict) -> None:
+        equipment_catalog = list(payload.get("equipment_catalog") or [])
+        for index, item_id in enumerate(item_ids):
+            equipment_catalog[index] = {
+                **dict(equipment_catalog[index]),
+                "id": item_id,
+                "name": f"Attuned Relic {index + 1}",
+                "systems_ref": _systems_ref(entries[index]),
+                "is_equipped": index < 3,
+                "is_attuned": index < 3,
+            }
+        payload["equipment_catalog"] = equipment_catalog
+
+    def _mutate_state(payload: dict) -> None:
+        inventory = list(payload.get("inventory") or [])
+        for index, item_id in enumerate(item_ids):
+            inventory[index] = {
+                **dict(inventory[index]),
+                "id": item_id,
+                "catalog_ref": item_id,
+                "name": f"Attuned Relic {index + 1}",
+                "is_equipped": index < 3,
+                "is_attuned": index < 3,
+            }
+        payload["inventory"] = inventory
+        payload["attunement"] = {"max_attuned_items": 3, "attuned_item_refs": item_ids[:3]}
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-equipment-attunement-api")
+    character_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(owner_token),
+    )
+
+    assert character_response.status_code == 200
+    character = character_response.get_json()["character"]
+
+    response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/session/equipment/crossbow-bolts-4",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": character["state_record"]["revision"],
+            "is_equipped": True,
+            "is_attuned": True,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+    assert "already has 3 attuned items" in response.get_json()["error"]["message"]
+
+
+def test_api_character_session_feature_state_endpoint_updates_arcane_armor(
+    client,
+    app,
+    users,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    def _mutate_definition(payload: dict) -> None:
+        features = list(payload.get("features") or [])
+        features.append({"name": "Arcane Armor", "description_markdown": "Armor model controls."})
+        payload["features"] = features
+
+    def _mutate_state(payload: dict) -> None:
+        payload["feature_states"] = {"arcane_armor": {"enabled": False}}
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-feature-state-api")
+    character_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(owner_token),
+    )
+
+    assert character_response.status_code == 200
+    character = character_response.get_json()["character"]
+    assert character["arcane_armor_state"]["available"] is True
+    assert character["arcane_armor_state"]["enabled"] is False
+
+    response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/session/feature-states/arcane_armor",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": character["state_record"]["revision"],
+            "enabled": True,
+        },
+    )
+
+    assert response.status_code == 200
+    updated_character = response.get_json()["character"]
+    assert updated_character["state_record"]["state"]["feature_states"]["arcane_armor"]["enabled"] is True
+    assert updated_character["arcane_armor_state"]["enabled"] is True
 
 
 def test_api_character_list_derives_multiclass_summary_from_class_rows(client, app, users):

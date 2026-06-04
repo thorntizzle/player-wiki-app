@@ -4,6 +4,8 @@ import type {
   CampaignsResponse,
   CharacterDetailResponse,
   CharacterCurrencyPatchPayload,
+  CharacterEquipmentStatePatchPayload,
+  CharacterFeatureStatePatchPayload,
   CharacterListResponse,
   CharacterInventoryPatchPayload,
   CharacterNotesPatchPayload,
@@ -339,6 +341,40 @@ export class CampaignApiClient {
       `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
         characterSlug,
       )}/session/inventory/${encodeURIComponent(itemId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async patchCharacterEquipmentState(
+    slug: string,
+    characterSlug: string,
+    itemId: string,
+    payload: CharacterEquipmentStatePatchPayload,
+  ): Promise<CharacterVitalsPatchResponse> {
+    return this.requestJson<CharacterVitalsPatchResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
+        characterSlug,
+      )}/session/equipment/${encodeURIComponent(itemId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async patchCharacterFeatureState(
+    slug: string,
+    characterSlug: string,
+    featureKey: string,
+    payload: CharacterFeatureStatePatchPayload,
+  ): Promise<CharacterVitalsPatchResponse> {
+    return this.requestJson<CharacterVitalsPatchResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
+        characterSlug,
+      )}/session/feature-states/${encodeURIComponent(featureKey)}`,
       {
         method: "PATCH",
         body: JSON.stringify(payload),

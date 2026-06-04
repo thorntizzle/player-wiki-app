@@ -57,10 +57,26 @@ from .campaign_dm_content_service import (
 )
 from .campaign_session_service import CampaignSessionValidationError
 from .campaign_visibility import CAMPAIGN_VISIBILITY_SCOPES
+from .character_builder import (
+    CAMPAIGN_ITEMS_SECTION,
+    _attach_campaign_item_page_support,
+    _build_item_catalog,
+    _list_campaign_enabled_entries,
+    _normalize_equipment_payloads,
+    _normalize_weapon_wield_mode_value,
+    describe_equipment_state_support,
+    normalize_definition_to_native_model,
+    resolve_weapon_wield_mode,
+    weapon_wield_mode_label,
+)
+from .character_editor import CharacterEditValidationError, apply_equipment_state_edit
+from .character_importer import write_yaml
 from .character_models import CharacterRecord, CharacterStateRecord
 from .character_profile import profile_class_level_text
-from .character_service import CharacterStateValidationError
+from .character_presenter import build_character_inventory_item_ref, present_arcane_armor_state
+from .character_service import CharacterStateValidationError, merge_state_with_definition
 from .character_store import CharacterStateConflictError
+from .character_repository import load_campaign_character_config
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
 from .session_models import (
     SESSION_ARTICLE_SOURCE_KIND_PAGE,
@@ -77,7 +93,7 @@ from .systems_labels import (
     systems_entry_type_sort_key,
 )
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError
-from .system_policy import supports_combat_tracker
+from .system_policy import supports_combat_tracker, supports_native_character_tools
 from .version import build_app_metadata
 
 def register_api(app) -> None:
@@ -1006,11 +1022,169 @@ def register_api(app) -> None:
             "revision": record.state_record.revision,
         }
 
+    def build_character_item_catalog(campaign_slug: str) -> dict[str, object]:
+        systems_service = current_app.extensions["systems_service"]
+        item_catalog = _build_item_catalog(
+            _list_campaign_enabled_entries(
+                systems_service,
+                campaign_slug,
+                "item",
+            )
+        )
+        campaign_item_pages = [
+            page_record
+            for page_record in get_campaign_page_store().list_page_records(campaign_slug, include_body=True)
+            if str(getattr(getattr(page_record, "page", None), "section", "") or "").strip() == CAMPAIGN_ITEMS_SECTION
+        ]
+        return _attach_campaign_item_page_support(item_catalog, campaign_item_pages)
+
+    def build_record_equipment_support_lookup(
+        record: CharacterRecord,
+        *,
+        item_catalog: dict[str, object],
+    ) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:
+        normalized_definition_equipment = _normalize_equipment_payloads(
+            list(record.definition.equipment_catalog or []),
+            item_catalog=item_catalog,
+        )
+        definition_item_lookup = {
+            str(item.get("id") or "").strip(): dict(item)
+            for item in normalized_definition_equipment
+            if str(item.get("id") or "").strip()
+        }
+        support_lookup: dict[str, dict[str, object]] = {}
+        for inventory_item in list((record.state_record.state or {}).get("inventory") or []):
+            item_ref = build_character_inventory_item_ref(inventory_item)
+            if not item_ref:
+                continue
+            definition_item = dict(definition_item_lookup.get(item_ref) or {})
+            support_item = dict(definition_item or inventory_item or {})
+            if not str(support_item.get("name") or "").strip():
+                support_item["name"] = str(dict(inventory_item or {}).get("name") or "").strip()
+            support_lookup[item_ref] = describe_equipment_state_support(
+                support_item,
+                item_catalog=item_catalog,
+            )
+        return definition_item_lookup, support_lookup
+
+    def build_character_equipment_state_payload(campaign_slug: str, record: CharacterRecord) -> dict[str, Any]:
+        item_catalog = build_character_item_catalog(campaign_slug)
+        definition_item_lookup, support_lookup = build_record_equipment_support_lookup(
+            record,
+            item_catalog=item_catalog,
+        )
+        equipment_items: list[dict[str, Any]] = []
+        state = dict(record.state_record.state or {})
+        inventory_lookup = {
+            build_character_inventory_item_ref(item): dict(item)
+            for item in list(state.get("inventory") or [])
+            if build_character_inventory_item_ref(item)
+        }
+        for item_ref, inventory_item in inventory_lookup.items():
+            definition_item = dict(definition_item_lookup.get(item_ref) or {})
+            support = dict(support_lookup.get(item_ref) or {})
+            if not bool(support.get("supports_equipped_state")):
+                continue
+            support_item = {
+                **definition_item,
+                **inventory_item,
+            }
+            requires_attunement = bool(support.get("requires_attunement"))
+            supports_weapon_wield_mode = bool(support.get("supports_weapon_wield_mode"))
+            resolved_weapon_wield_mode = resolve_weapon_wield_mode(
+                support_item,
+                item_catalog=item_catalog,
+                support=support,
+            )
+            is_equipped = (
+                bool(resolved_weapon_wield_mode)
+                if supports_weapon_wield_mode
+                else bool(inventory_item.get("is_equipped", False))
+            )
+            equipped_label = (
+                weapon_wield_mode_label(resolved_weapon_wield_mode)
+                if supports_weapon_wield_mode and is_equipped
+                else "Equipped"
+                if is_equipped
+                else "Not equipped"
+            )
+            equipment_items.append(
+                {
+                    "id": item_ref,
+                    "name": str(inventory_item.get("name") or definition_item.get("name") or "Item").strip(),
+                    "quantity": int(inventory_item.get("quantity") or definition_item.get("default_quantity") or 0),
+                    "weight": str(inventory_item.get("weight") or definition_item.get("weight") or "").strip(),
+                    "notes": str(inventory_item.get("notes") or definition_item.get("notes") or "").strip(),
+                    "tags": [
+                        str(tag).strip()
+                        for tag in list(inventory_item.get("tags") or definition_item.get("tags") or [])
+                        if str(tag).strip()
+                    ],
+                    "is_equipped": is_equipped,
+                    "equipped_label": equipped_label,
+                    "is_attuned": bool(inventory_item.get("is_attuned", False)) if requires_attunement else False,
+                    "requires_attunement": requires_attunement,
+                    "supports_attunement": requires_attunement,
+                    "supports_weapon_wield_mode": supports_weapon_wield_mode,
+                    "weapon_wield_mode": resolved_weapon_wield_mode,
+                    "weapon_wield_options": [
+                        {
+                            "value": value,
+                            "label": weapon_wield_mode_label(value),
+                        }
+                        for value in list(support.get("weapon_wield_modes") or [])
+                        if weapon_wield_mode_label(value)
+                    ],
+                    "attunement_hint": "Requires attunement" if requires_attunement else "",
+                    "source_label": (
+                        f"Systems item ({dict(definition_item.get('systems_ref') or {}).get('source_id') or 'Unknown source'})"
+                        if dict(definition_item.get("systems_ref") or {})
+                        else "Campaign item"
+                        if str(definition_item.get("page_ref") or "").strip()
+                        else "Custom item"
+                        if str(definition_item.get("source_kind") or "").strip() == "manual_edit"
+                        else "Sheet item"
+                    ),
+                }
+            )
+
+        max_attuned_items = int((state.get("attunement") or {}).get("max_attuned_items") or 3)
+        attuned_count = sum(1 for item in equipment_items if bool(item.get("is_attuned")))
+        equipped_count = sum(1 for item in equipment_items if bool(item.get("is_equipped")))
+        arcane_armor_state = present_arcane_armor_state(
+            record.definition,
+            state,
+            inventory_lookup=inventory_lookup,
+            equipment_catalog_lookup=definition_item_lookup,
+        )
+        return {
+            "rows": equipment_items,
+            "attuned_count": attuned_count,
+            "equipped_count": equipped_count,
+            "max_attuned_items": max_attuned_items,
+            "equipment_item_refs": [
+                str(item.get("id") or "").strip()
+                for item in equipment_items
+                if str(item.get("id") or "").strip()
+            ],
+            "attunable_item_refs": [
+                str(item.get("id") or "").strip()
+                for item in equipment_items
+                if bool(item.get("requires_attunement")) and str(item.get("id") or "").strip()
+            ],
+            "at_attunement_limit": attuned_count >= max_attuned_items if max_attuned_items > 0 else True,
+            "over_attunement_limit": attuned_count > max_attuned_items,
+            "arcane_armor_state": arcane_armor_state,
+        }
+
     def serialize_character_record(campaign_slug: str, record: CharacterRecord) -> dict[str, Any]:
+        equipment_state = build_character_equipment_state_payload(campaign_slug, record)
         return {
             "definition": record.definition.to_dict(),
             "import_metadata": record.import_metadata.to_dict(),
             "state_record": serialize_character_state(record.state_record),
+            "equipment_state": equipment_state,
+            "arcane_armor_state": equipment_state.get("arcane_armor_state"),
             "permissions": {
                 "can_edit_session": has_session_mode_access(campaign_slug, record.definition.character_slug),
             },
@@ -2977,6 +3151,161 @@ def register_api(app) -> None:
 
         return serialize_updated_character(campaign_slug, character_slug)
 
+    def finalize_character_definition_for_write(campaign_slug: str, definition):
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+        if not supports_native_character_tools(getattr(campaign, "system", "")):
+            return definition
+        return normalize_definition_to_native_model(
+            definition,
+            item_catalog=build_character_item_catalog(campaign_slug),
+            systems_service=current_app.extensions["systems_service"],
+        )
+
+    def run_character_definition_mutation(
+        campaign_slug: str,
+        character_slug: str,
+        action,
+        *,
+        forbidden_message: str = "You do not have permission to update this character from this view.",
+        conflict_message: str = "This sheet changed in another session. Refresh and try again.",
+    ):
+        record = load_character_record(campaign_slug, character_slug)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            return json_error(forbidden_message, 403, code="forbidden")
+
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        try:
+            payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="invalid_json")
+
+        try:
+            expected_revision = int(payload.get("expected_revision"))
+            result = action(record, payload, user.id)
+            inventory_state_overrides = None
+            if isinstance(result, tuple) and len(result) == 4:
+                definition, import_metadata, inventory_quantity_overrides, inventory_state_overrides = result
+            else:
+                definition, import_metadata, inventory_quantity_overrides = result
+            definition = finalize_character_definition_for_write(campaign_slug, definition)
+            merged_state = merge_state_with_definition(
+                definition,
+                record.state_record.state,
+                inventory_quantity_overrides=inventory_quantity_overrides,
+                inventory_state_overrides=inventory_state_overrides,
+            )
+            current_app.extensions["character_state_store"].replace_state(
+                definition,
+                merged_state,
+                expected_revision=expected_revision,
+                updated_by_user_id=user.id,
+            )
+            config = load_campaign_character_config(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
+            character_dir = config.characters_dir / character_slug
+            write_yaml(character_dir / "definition.yaml", definition.to_dict())
+            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
+        except CharacterStateConflictError:
+            return json_error(conflict_message, 409, code="state_conflict")
+        except (CharacterEditValidationError, CharacterStateValidationError, TypeError, ValueError) as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        return serialize_updated_character(campaign_slug, character_slug)
+
+    def build_equipment_state_update_result(
+        campaign_slug: str,
+        record: CharacterRecord,
+        item_id: str,
+        payload: dict[str, Any],
+        *,
+        item_catalog: dict[str, object],
+    ):
+        inventory_by_ref = {
+            build_character_inventory_item_ref(item): dict(item)
+            for item in list((record.state_record.state or {}).get("inventory") or [])
+            if build_character_inventory_item_ref(item)
+        }
+        if item_id not in inventory_by_ref:
+            raise CharacterEditValidationError("Choose a valid equipment entry to update.")
+        _, support_lookup = build_record_equipment_support_lookup(
+            record,
+            item_catalog=item_catalog,
+        )
+        target_support = dict(support_lookup.get(item_id) or {})
+        if not bool(target_support.get("supports_equipped_state")):
+            raise CharacterEditValidationError(
+                "That inventory row stays on Inventory because it does not support equipment state."
+            )
+
+        weapon_wield_mode = ""
+        if bool(target_support.get("supports_weapon_wield_mode")):
+            weapon_wield_mode = _normalize_weapon_wield_mode_value(payload.get("weapon_wield_mode"))
+            allowed_modes = [
+                _normalize_weapon_wield_mode_value(value)
+                for value in list(target_support.get("weapon_wield_modes") or [])
+                if _normalize_weapon_wield_mode_value(value)
+            ]
+            allowed_mode_set = set(allowed_modes)
+            if weapon_wield_mode and weapon_wield_mode not in allowed_mode_set:
+                raise CharacterEditValidationError("Choose a valid wielding mode for that weapon.")
+            if not weapon_wield_mode and bool(payload.get("is_equipped")) and allowed_modes:
+                weapon_wield_mode = allowed_modes[0]
+            is_equipped = bool(weapon_wield_mode)
+        else:
+            is_equipped = bool(payload.get("is_equipped"))
+
+        requested_attunement = bool(payload.get("is_attuned"))
+        if requested_attunement and not bool(target_support.get("supports_attunement")):
+            raise CharacterEditValidationError(
+                "Only items whose durable metadata explicitly requires attunement can be attuned."
+            )
+        is_attuned = bool(requested_attunement and target_support.get("supports_attunement"))
+        attunement_payload = dict((record.state_record.state or {}).get("attunement") or {})
+        max_attuned_items = int(attunement_payload.get("max_attuned_items") or 3)
+        currently_attuned_refs = {
+            item_ref
+            for item_ref, item in inventory_by_ref.items()
+            if (
+                item_ref != item_id
+                and bool(item.get("is_attuned", False))
+                and bool(dict(support_lookup.get(item_ref) or {}).get("supports_attunement"))
+            )
+        }
+        next_attuned_count = len(currently_attuned_refs) + (1 if is_attuned else 0)
+        if max_attuned_items >= 0 and next_attuned_count > max_attuned_items:
+            raise CharacterEditValidationError(
+                f"This character already has {max_attuned_items} attuned item"
+                f"{'' if max_attuned_items == 1 else 's'}. Clear one first."
+            )
+
+        definition, import_metadata = apply_equipment_state_edit(
+            campaign_slug,
+            record.definition,
+            record.import_metadata,
+            item_catalog=item_catalog,
+            systems_service=current_app.extensions["systems_service"],
+            target_item_id=item_id,
+            is_equipped=is_equipped,
+            is_attuned=is_attuned,
+            weapon_wield_mode=weapon_wield_mode,
+        )
+        return (
+            definition,
+            import_metadata,
+            {},
+            {
+                item_id: {
+                    "is_equipped": is_equipped,
+                    "is_attuned": is_attuned,
+                    "weapon_wield_mode": weapon_wield_mode,
+                }
+            },
+        )
+
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/sheet-edit")
     @api_campaign_scope_access_required("characters")
     @api_login_required
@@ -3071,6 +3400,39 @@ def register_api(app) -> None:
                 expected_revision=int(payload.get("expected_revision")),
                 quantity=payload.get("quantity"),
                 delta=payload.get("delta"),
+                updated_by_user_id=user_id,
+            ),
+        )
+
+    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/equipment/<item_id>")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_equipment_state_update(campaign_slug: str, character_slug: str, item_id: str):
+        item_catalog = build_character_item_catalog(campaign_slug)
+        return run_character_definition_mutation(
+            campaign_slug,
+            character_slug,
+            lambda record, payload, user_id: build_equipment_state_update_result(
+                campaign_slug,
+                record,
+                item_id,
+                payload,
+                item_catalog=item_catalog,
+            ),
+        )
+
+    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/feature-states/<feature_key>")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_feature_state_update(campaign_slug: str, character_slug: str, feature_key: str):
+        return run_character_mutation(
+            campaign_slug,
+            character_slug,
+            lambda record, payload, user_id: get_character_state_service().update_feature_state(
+                record,
+                feature_key,
+                expected_revision=int(payload.get("expected_revision")),
+                enabled=bool(payload.get("enabled")),
                 updated_by_user_id=user_id,
             ),
         )

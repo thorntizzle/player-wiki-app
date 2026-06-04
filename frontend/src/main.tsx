@@ -21,6 +21,9 @@ import type {
   CampaignEntry,
   CharacterCurrencyPatchPayload,
   CharacterDetailResponse,
+  CharacterEquipmentRow,
+  CharacterEquipmentStatePatchPayload,
+  CharacterFeatureStatePatchPayload,
   CharacterInventoryPatchPayload,
   CharacterRecord,
   CharacterNotesPatchPayload,
@@ -63,6 +66,12 @@ interface CharacterVitalsDraft {
 interface CharacterNotesDraft {
   expectedRevision: number;
   notes: string;
+}
+
+interface CharacterEquipmentDraft {
+  isEquipped: boolean;
+  isAttuned: boolean;
+  weaponWieldMode: string;
 }
 
 type CharacterSection = "overview" | "resources" | "spells" | "equipment" | "inventory" | "abilities" | "notes";
@@ -967,6 +976,8 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
   const [resourceDrafts, setResourceDrafts] = useState<Record<string, string>>({});
   const [spellSlotDrafts, setSpellSlotDrafts] = useState<Record<string, string>>({});
   const [inventoryDrafts, setInventoryDrafts] = useState<Record<string, string>>({});
+  const [equipmentDrafts, setEquipmentDrafts] = useState<Record<string, CharacterEquipmentDraft>>({});
+  const [arcaneArmorDraft, setArcaneArmorDraft] = useState(false);
   const [currencyDraft, setCurrencyDraft] = useState<Record<string, string>>({});
   const [restPreview, setRestPreview] = useState<CharacterRestPreviewResponse["preview"] | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -1037,6 +1048,19 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
         nextInventoryDrafts[id] = String(readNumber(item.quantity, 1));
       }
     }
+    const equipmentState = detailQuery.data.character.equipment_state;
+    const nextEquipmentDrafts: Record<string, CharacterEquipmentDraft> = {};
+    for (const item of equipmentState?.rows ?? []) {
+      if (item.id) {
+        nextEquipmentDrafts[item.id] = {
+          isEquipped: Boolean(item.is_equipped),
+          isAttuned: Boolean(item.is_attuned),
+          weaponWieldMode: item.weapon_wield_mode || "",
+        };
+      }
+    }
+    setEquipmentDrafts(nextEquipmentDrafts);
+    setArcaneArmorDraft(Boolean((detailQuery.data.character.arcane_armor_state ?? equipmentState?.arcane_armor_state)?.enabled));
     const currency = asRecord(state.currency);
     const nextCurrencyDraft: Record<string, string> = {};
     for (const key of ["cp", "sp", "ep", "gp", "pp", "coin", "supply", "spirit_stones"]) {
@@ -1078,9 +1102,9 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
   const notes = asRecord(state.notes);
   const abilityScores = asRecord(stats.ability_scores);
   const spells = asRecordArray(spellcasting.spells);
-  const equipmentRows = inventory.filter(
-    (item) => "is_equipped" in item || "is_attuned" in item || Boolean(item.weapon_wield_mode),
-  );
+  const equipmentState = detailRecord?.equipment_state;
+  const equipmentRows = equipmentState?.rows ?? [];
+  const arcaneArmorState = detailRecord?.arcane_armor_state ?? equipmentState?.arcane_armor_state;
   const revision = detailRecord?.state_record.revision ?? 0;
 
   const handleMutationSuccess = (response: { character: CharacterRecord }, message: string) => {
@@ -1128,6 +1152,20 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
     mutationFn: ({ itemId, payload }: { itemId: string; payload: CharacterInventoryPatchPayload }) =>
       apiClient.patchCharacterInventory(campaignSlug, selectedSlug || "", itemId, payload),
     onSuccess: (response) => handleMutationSuccess(response, "Inventory saved."),
+    onError: handleMutationError,
+  });
+
+  const patchEquipmentState = useMutation({
+    mutationFn: ({ itemId, payload }: { itemId: string; payload: CharacterEquipmentStatePatchPayload }) =>
+      apiClient.patchCharacterEquipmentState(campaignSlug, selectedSlug || "", itemId, payload),
+    onSuccess: (response) => handleMutationSuccess(response, "Equipment state saved."),
+    onError: handleMutationError,
+  });
+
+  const patchFeatureState = useMutation({
+    mutationFn: ({ featureKey, payload }: { featureKey: string; payload: CharacterFeatureStatePatchPayload }) =>
+      apiClient.patchCharacterFeatureState(campaignSlug, selectedSlug || "", featureKey, payload),
+    onSuccess: (response) => handleMutationSuccess(response, "Feature state saved."),
     onError: handleMutationError,
   });
 
@@ -1242,6 +1280,46 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
     }
     setStatusMessage("Saving...");
     patchInventory.mutate({ itemId, payload: { expected_revision: revision, quantity } });
+  };
+
+  const submitEquipmentState = (event: FormEvent<HTMLFormElement>, item: CharacterEquipmentRow) => {
+    event.preventDefault();
+    const draft = equipmentDrafts[item.id] ?? {
+      isEquipped: Boolean(item.is_equipped),
+      isAttuned: Boolean(item.is_attuned),
+      weaponWieldMode: item.weapon_wield_mode || "",
+    };
+    if (!selected || !canEdit) {
+      setErrorMessage("No character selected or permission denied.");
+      return;
+    }
+    setStatusMessage("Saving...");
+    patchEquipmentState.mutate({
+      itemId: item.id,
+      payload: {
+        expected_revision: revision,
+        is_equipped: draft.isEquipped,
+        is_attuned: draft.isAttuned,
+        weapon_wield_mode: item.supports_weapon_wield_mode ? draft.weaponWieldMode : "",
+      },
+    });
+  };
+
+  const submitArcaneArmorState = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const featureKey = readString(arcaneArmorState?.feature_key, "arcane_armor");
+    if (!selected || !canEdit) {
+      setErrorMessage("No character selected or permission denied.");
+      return;
+    }
+    setStatusMessage("Saving...");
+    patchFeatureState.mutate({
+      featureKey,
+      payload: {
+        expected_revision: revision,
+        enabled: arcaneArmorDraft,
+      },
+    });
   };
 
   const submitCurrency = (event: FormEvent<HTMLFormElement>) => {
@@ -1571,22 +1649,127 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
             {isDnd && activeCharacterSection === "equipment" ? (
               <section className="session-character-form">
                 <h3>Equipment</h3>
+                {equipmentState ? (
+                  <div className="stat-grid">
+                    <article>
+                      <strong>Attuned items</strong>
+                      <span>
+                        {equipmentState.attuned_count} / {equipmentState.max_attuned_items}
+                      </span>
+                      {equipmentState.over_attunement_limit ? (
+                        <p className="meta">This sheet is currently over the normal attunement limit.</p>
+                      ) : null}
+                    </article>
+                    <article>
+                      <strong>Equipped items</strong>
+                      <span>{equipmentState.equipped_count}</span>
+                    </article>
+                  </div>
+                ) : null}
+                {arcaneArmorState?.available ? (
+                  <article className="character-state-card">
+                    <h4>{readString(arcaneArmorState.label, "Arcane Armor")}</h4>
+                    <p className="meta">
+                      {[arcaneArmorState.status_label, arcaneArmorState.hands_label].map((value) => readString(value)).filter(Boolean).join(" | ")}
+                    </p>
+                    {canEdit ? (
+                      <form onSubmit={submitArcaneArmorState} className="equipment-state-form">
+                        <label className="toggle-row">
+                          <input
+                            type="checkbox"
+                            checked={arcaneArmorDraft}
+                            onChange={(event) => setArcaneArmorDraft(event.currentTarget.checked)}
+                          />
+                          Enabled
+                        </label>
+                        <button type="submit" disabled={patchFeatureState.isPending}>
+                          {patchFeatureState.isPending ? "Saving..." : "Save feature state"}
+                        </button>
+                      </form>
+                    ) : null}
+                  </article>
+                ) : null}
                 {equipmentRows.length ? (
                   <div className="character-card-grid">
-                    {equipmentRows.map((item) => (
-                      <article className="character-state-card" key={readString(item.id, readString(item.name))}>
-                        <h4>{readString(item.name, "Item")}</h4>
-                        <p className="meta">
-                          {[
-                            item.is_equipped ? "Equipped" : "Not equipped",
-                            item.is_attuned ? "Attuned" : "Not attuned",
-                            readString(item.weapon_wield_mode),
-                          ]
-                            .filter(Boolean)
-                            .join(" | ")}
-                        </p>
-                      </article>
-                    ))}
+                    {equipmentRows.map((item) => {
+                      const draft = equipmentDrafts[item.id] ?? {
+                        isEquipped: Boolean(item.is_equipped),
+                        isAttuned: Boolean(item.is_attuned),
+                        weaponWieldMode: item.weapon_wield_mode || "",
+                      };
+                      return (
+                        <article className="character-state-card" key={item.id || item.name}>
+                          <h4>{item.name || "Item"}</h4>
+                          <p className="meta">
+                            {[item.equipped_label, item.is_attuned ? "Attuned" : item.requires_attunement ? "Not attuned" : "", item.source_label]
+                              .filter(Boolean)
+                              .join(" | ")}
+                          </p>
+                          {item.tags.length ? <p className="meta">{item.tags.join(", ")}</p> : null}
+                          {canEdit ? (
+                            <form onSubmit={(event) => submitEquipmentState(event, item)} className="equipment-state-form">
+                              {item.supports_weapon_wield_mode ? (
+                                <label className="chat-label" htmlFor={`equipment-wield-${item.id}`}>
+                                  Wielding
+                                  <select
+                                    id={`equipment-wield-${item.id}`}
+                                    value={draft.weaponWieldMode}
+                                    onChange={(event) =>
+                                      setEquipmentDrafts({
+                                        ...equipmentDrafts,
+                                        [item.id]: { ...draft, weaponWieldMode: event.currentTarget.value },
+                                      })
+                                    }
+                                  >
+                                    <option value="">Not equipped</option>
+                                    {item.weapon_wield_options.map((option) => (
+                                      <option value={option.value} key={option.value}>
+                                        {option.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              ) : (
+                                <label className="toggle-row">
+                                  <input
+                                    type="checkbox"
+                                    checked={draft.isEquipped}
+                                    onChange={(event) =>
+                                      setEquipmentDrafts({
+                                        ...equipmentDrafts,
+                                        [item.id]: { ...draft, isEquipped: event.currentTarget.checked },
+                                      })
+                                    }
+                                  />
+                                  Equipped
+                                </label>
+                              )}
+                              {item.requires_attunement ? (
+                                <label className="toggle-row">
+                                  <input
+                                    type="checkbox"
+                                    checked={draft.isAttuned}
+                                    onChange={(event) =>
+                                      setEquipmentDrafts({
+                                        ...equipmentDrafts,
+                                        [item.id]: { ...draft, isAttuned: event.currentTarget.checked },
+                                      })
+                                    }
+                                  />
+                                  Attuned
+                                </label>
+                              ) : null}
+                              {item.attunement_hint && item.attunement_hint !== "Requires attunement" ? (
+                                <p className="meta">{item.attunement_hint}</p>
+                              ) : null}
+                              <button type="submit" disabled={patchEquipmentState.isPending}>
+                                {patchEquipmentState.isPending ? "Saving..." : "Save equipment state"}
+                              </button>
+                            </form>
+                          ) : null}
+                        </article>
+                      );
+                    })}
                   </div>
                 ) : (
                   <p className="status status-neutral">No equipment state rows.</p>
