@@ -91,6 +91,7 @@ from .session_models import (
     build_session_article_systems_source_ref,
     parse_session_article_source_ref,
 )
+from .session_article_publisher import list_published_pages_for_session_articles
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
 from .systems_ingest import SystemsIngestError, extracted_systems_archive
 from .systems_labels import (
@@ -412,8 +413,133 @@ def register_api(app) -> None:
             "url": url_for(".session_article_image", campaign_slug=campaign_slug, article_id=article_id),
         }
 
-    def serialize_session_article(campaign_slug: str, article, article_image=None) -> dict[str, Any]:
+    def build_session_article_source_metadata(
+        campaign,
+        source_kind: str,
+        source_ref: str,
+    ) -> dict[str, str]:
+        metadata: dict[str, str] = {
+            "title": "",
+            "label": "",
+            "action_label": "",
+            "missing_message": "",
+            "url": "",
+        }
+        if campaign is None or not source_kind or not source_ref:
+            return metadata
+
+        if source_kind == SESSION_ARTICLE_SOURCE_KIND_PAGE:
+            try:
+                record = get_campaign_page_store().get_page_record(
+                    campaign.slug,
+                    source_ref,
+                    include_body=False,
+                )
+            except ValueError:
+                record = None
+
+            metadata["label"] = "published wiki page"
+            metadata["action_label"] = "View published page"
+            metadata["missing_message"] = (
+                "The original published wiki page is not currently visible in the player wiki."
+            )
+            if record is not None and campaign.is_page_visible(record.page):
+                metadata["title"] = record.page.title
+                metadata["url"] = url_for(
+                    "page_view",
+                    campaign_slug=campaign.slug,
+                    page_slug=record.page.route_slug,
+                )
+            elif record is not None:
+                metadata["title"] = record.page.title
+            return metadata
+
+        if source_kind == SESSION_ARTICLE_SOURCE_KIND_SYSTEMS:
+            systems_service = current_app.extensions["systems_service"]
+            entry = systems_service.get_entry_by_slug_for_campaign(campaign.slug, source_ref)
+            metadata["label"] = "Systems entry"
+            metadata["action_label"] = "View Systems entry"
+            metadata["missing_message"] = (
+                "The original Systems entry is not currently visible in this campaign."
+            )
+            if entry is not None and can_access_campaign_systems_entry(campaign.slug, entry.slug):
+                metadata["title"] = entry.title
+                metadata["url"] = url_for(
+                    "campaign_systems_entry_detail",
+                    campaign_slug=campaign.slug,
+                    entry_slug=entry.slug,
+                )
+            return metadata
+
+        return metadata
+
+    def build_session_article_links(
+        campaign,
+        campaign_slug: str | None,
+        article,
+        source: dict[str, str],
+        converted_page=None,
+    ) -> dict[str, str]:
+        source_kind, _ = parse_session_article_source_ref(article.source_page_ref)
+        links = {
+            "source_url": source.get("url", ""),
+            "published_page_url": "",
+            "player_wiki_editor_url": "",
+            "convert_url": "",
+        }
+        converted_page_is_visible = (
+            converted_page is not None
+            and campaign is not None
+            and campaign.is_page_visible(converted_page)
+        )
+
+        if converted_page is not None and converted_page_is_visible and campaign_slug:
+            links["published_page_url"] = url_for(
+                "page_view",
+                campaign_slug=campaign_slug,
+                page_slug=converted_page.route_slug,
+            )
+
+        if source_kind == "" and converted_page is None and campaign_slug:
+            links["player_wiki_editor_url"] = url_for(
+                "campaign_dm_content_new_player_wiki_page_from_session_article",
+                campaign_slug=campaign_slug,
+                article_id=article.id,
+            )
+            links["convert_url"] = url_for(
+                "campaign_session_convert_article_view",
+                campaign_slug=campaign_slug,
+                article_id=article.id,
+            )
+
+        return links
+
+    def serialize_session_article(
+        campaign_slug: str,
+        article,
+        article_image=None,
+        *,
+        campaign=None,
+        converted_pages: dict[int, Any] | None = None,
+    ) -> dict[str, Any]:
+        if campaign is None:
+            campaign = get_repository().get_campaign(campaign_slug)
         source_kind, source_ref = parse_session_article_source_ref(article.source_page_ref)
+        converted_pages = converted_pages or {}
+        converted_page = converted_pages.get(article.id)
+        if converted_page is None and campaign is not None:
+            converted_page = list_published_pages_for_session_articles(campaign, [article.id]).get(article.id)
+
+        source = build_session_article_source_metadata(
+            campaign,
+            source_kind,
+            source_ref,
+        )
+        converted_page_is_visible = (
+            converted_page is not None
+            and campaign is not None
+            and campaign.is_page_visible(converted_page)
+        )
         return {
             "id": article.id,
             "campaign_slug": article.campaign_slug,
@@ -430,6 +556,28 @@ def register_api(app) -> None:
             "revealed_by_user_id": article.revealed_by_user_id,
             "revealed_in_session_id": article.revealed_in_session_id,
             "is_revealed": article.is_revealed,
+            "links": build_session_article_links(
+                campaign,
+                campaign.slug if campaign is not None else None,
+                article,
+                source,
+                converted_page=converted_page,
+            ),
+            "source": {
+                "title": str(source.get("title") or ""),
+                "label": str(source.get("label") or ""),
+                "action_label": str(source.get("action_label") or ""),
+                "missing_message": str(source.get("missing_message") or ""),
+            },
+            "converted_page": (
+                {
+                    "title": converted_page.title,
+                    "is_visible": converted_page_is_visible,
+                    "reveal_after_session": converted_page.reveal_after_session,
+                }
+                if converted_page is not None
+                else None
+            ),
             "image": (
                 serialize_session_article_image(campaign_slug, article.id, article_image)
                 if article_image is not None
@@ -442,6 +590,9 @@ def register_api(app) -> None:
         message,
         article_lookup: dict[int, Any],
         article_images: dict[int, Any],
+        *,
+        campaign=None,
+        converted_pages: dict[int, Any] | None = None,
     ) -> dict[str, Any]:
         article = article_lookup.get(message.article_id) if message.article_id is not None else None
         return {
@@ -455,7 +606,13 @@ def register_api(app) -> None:
             "article_id": message.article_id,
             "created_at": serialize_datetime(message.created_at),
             "article": (
-                serialize_session_article(campaign_slug, article, article_images.get(article.id))
+                serialize_session_article(
+                    campaign_slug,
+                    article,
+                    article_images.get(article.id),
+                    campaign=campaign,
+                    converted_pages=converted_pages,
+                )
                 if article is not None
                 else None
             ),
@@ -607,6 +764,12 @@ def register_api(app) -> None:
             if article_lookup:
                 article_images = session_service.list_article_images(list(article_lookup))
 
+        converted_pages = (
+            list_published_pages_for_session_articles(campaign, list(article_lookup))
+            if article_lookup
+            else {}
+        )
+
         messages = []
         if active_session is not None:
             messages = [
@@ -615,6 +778,8 @@ def register_api(app) -> None:
                     message,
                     article_lookup,
                     article_images,
+                    campaign=campaign,
+                    converted_pages=converted_pages,
                 )
                 for message in session_service.list_messages(active_session.id)
             ]
@@ -631,12 +796,24 @@ def register_api(app) -> None:
 
         if can_manage_session:
             payload["staged_articles"] = [
-                serialize_session_article(campaign_slug, article, article_images.get(article.id))
+                serialize_session_article(
+                    campaign_slug,
+                    article,
+                    article_images.get(article.id),
+                    campaign=campaign,
+                    converted_pages=converted_pages,
+                )
                 for article in article_lookup.values()
                 if not article.is_revealed
             ]
             payload["revealed_articles"] = [
-                serialize_session_article(campaign_slug, article, article_images.get(article.id))
+                serialize_session_article(
+                    campaign_slug,
+                    article,
+                    article_images.get(article.id),
+                    campaign=campaign,
+                    converted_pages=converted_pages,
+                )
                 for article in article_lookup.values()
                 if article.is_revealed
             ]

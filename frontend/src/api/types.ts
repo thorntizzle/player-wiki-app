@@ -43,6 +43,26 @@ export interface SessionArticleImage {
   url: string;
 }
 
+export interface SessionArticleLinks {
+  source_url?: string | null;
+  published_page_url?: string | null;
+  player_wiki_editor_url?: string | null;
+  convert_url?: string | null;
+}
+
+export interface SessionArticleSourceMetadata {
+  title?: string | null;
+  label?: string | null;
+  action_label?: string | null;
+  missing_message?: string | null;
+}
+
+export interface SessionArticleConvertedPage {
+  title?: string | null;
+  is_visible?: boolean;
+  reveal_after_session?: number | null;
+}
+
 export interface SessionArticle {
   id: number;
   title: string;
@@ -59,6 +79,9 @@ export interface SessionArticle {
   revealed_in_session_id: number | null;
   is_revealed: boolean;
   image: SessionArticleImage | null;
+  links?: SessionArticleLinks;
+  source?: SessionArticleSourceMetadata;
+  converted_page?: SessionArticleConvertedPage | null;
 }
 
 export interface SessionMessage {

@@ -422,6 +422,19 @@ def test_api_session_endpoints_follow_permissions(client, app, users):
     assert create_article_response.status_code == 200
     article_payload = create_article_response.get_json()["article"]
     assert article_payload["title"] == "Sealed Orders"
+    assert article_payload["links"] == {
+        "source_url": "",
+        "published_page_url": "",
+        "player_wiki_editor_url": "/campaigns/linden-pass/dm-content/player-wiki/session-articles/1/new",
+        "convert_url": "/campaigns/linden-pass/session/articles/1/convert",
+    }
+    assert article_payload["source"] == {
+        "title": "",
+        "label": "",
+        "action_label": "",
+        "missing_message": "",
+    }
+    assert article_payload["converted_page"] is None
 
     dm_session_response = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
 
@@ -482,10 +495,69 @@ def test_api_can_pull_visible_wiki_page_into_session_store(client, app, users):
     assert article_payload["source_kind"] == "page"
     assert article_payload["source_ref"] == "npcs/captain-lyra-vale"
     assert article_payload["source_page_ref"] == "npcs/captain-lyra-vale"
+    assert article_payload["links"]["source_url"] == "/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
+    assert article_payload["links"]["player_wiki_editor_url"] == ""
+    assert article_payload["links"]["convert_url"] == ""
+    assert article_payload["source"] == {
+        "title": "Captain Lyra Vale",
+        "label": "published wiki page",
+        "action_label": "View published page",
+        "missing_message": "The original published wiki page is not currently visible in the player wiki.",
+    }
     assert article_payload["image"] is not None
     assert article_payload["image"]["filename"] == "captain-lyra-vale.png"
     assert article_payload["image"]["alt_text"] == "Portrait of Captain Lyra Vale."
     assert article_payload["image"]["caption"] == "Harbor watch captain and trusted ally of the crew."
+
+
+def test_api_session_article_payload_reports_converted_page_links(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-converted-links-api")
+
+    create_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={
+            "mode": "manual",
+            "title": "Courier Seal",
+            "body_markdown": "A seal shown during the session.",
+        },
+    )
+
+    assert create_response.status_code == 200
+    article_id = create_response.get_json()["article"]["id"]
+
+    create_page_response = client.put(
+        "/api/v1/campaigns/linden-pass/content/pages/notes/api-courier-seal",
+        headers=api_headers(dm_token),
+        json={
+            "metadata": {
+                "title": "API Courier Seal",
+                "section": "Notes",
+                "type": "note",
+                "summary": "A session article converted into a durable player wiki page.",
+                "published": True,
+                "reveal_after_session": 0,
+                "source_ref": f"session-article:linden-pass:{article_id}",
+            },
+            "body_markdown": "The courier seal is now a published reference.",
+        },
+    )
+
+    assert create_page_response.status_code == 200
+
+    session_response = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
+
+    assert session_response.status_code == 200
+    staged_articles = session_response.get_json()["staged_articles"]
+    article_payload = next(article for article in staged_articles if article["id"] == article_id)
+    assert article_payload["converted_page"] == {
+        "title": "API Courier Seal",
+        "is_visible": True,
+        "reveal_after_session": 0,
+    }
+    assert article_payload["links"]["published_page_url"] == "/campaigns/linden-pass/pages/notes/api-courier-seal"
+    assert article_payload["links"]["player_wiki_editor_url"] == ""
+    assert article_payload["links"]["convert_url"] == ""
 
 
 def test_api_session_article_source_search_returns_wiki_pages_and_systems_entries(client, app, users, tmp_path):

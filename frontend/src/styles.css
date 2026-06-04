@@ -426,6 +426,24 @@ textarea {
   font-size: 0.78rem;
 }
 
+.article-context,
+.article-action-note {
+  color: #475569;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.article-context {
+  margin: 0.35rem 0;
+}
+
+.article-action-note {
+  background: #eef4fb;
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  padding: 0.42rem 0.6rem;
+}
+
 .article-meta {
   display: flex;
   justify-content: space-between;

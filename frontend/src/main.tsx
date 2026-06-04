@@ -374,6 +374,111 @@ function renderArticleBody(article: SessionArticle): JSX.Element {
   return <pre className="article-body markdown-body">{article.body_markdown}</pre>;
 }
 
+function getArticleUrl(value: string | null | undefined): string {
+  return typeof value === "string" && value.trim() ? value : "";
+}
+
+function getArticleSourceKindLabel(article: SessionArticle): string {
+  if (article.source?.label) {
+    return article.source.label;
+  }
+  if (article.source_kind === "page") {
+    return "published wiki page";
+  }
+  if (article.source_kind === "systems") {
+    return "Systems entry";
+  }
+  return article.source_kind || "";
+}
+
+function SessionArticleSourceLine({ article }: { article: SessionArticle }) {
+  const sourceTitle = article.source?.title?.trim() || "";
+  const sourceKind = article.source_kind?.trim() || "";
+  const sourceUrl = getArticleUrl(article.links?.source_url);
+  const sourceLabel = getArticleSourceKindLabel(article);
+
+  if (sourceTitle) {
+    return (
+      <p className="article-context">
+        Pulled from {sourceLabel || "source"}:{" "}
+        {sourceUrl ? <a href={sourceUrl}>{sourceTitle}</a> : sourceTitle}
+      </p>
+    );
+  }
+
+  if (sourceKind && article.source?.missing_message) {
+    return <p className="article-context">{article.source.missing_message}</p>;
+  }
+
+  return null;
+}
+
+function SessionArticleReferenceActions({
+  article,
+  includePromotionLinks,
+}: {
+  article: SessionArticle;
+  includePromotionLinks: boolean;
+}) {
+  const sourceUrl = getArticleUrl(article.links?.source_url);
+  const sourceKind = article.source_kind?.trim() || "";
+  if (sourceUrl) {
+    return (
+      <a className="button button-secondary" href={sourceUrl}>
+        {article.source?.action_label || "View source"}
+      </a>
+    );
+  }
+
+  if (sourceKind) {
+    return article.source?.missing_message ? <span className="article-action-note">{article.source.missing_message}</span> : null;
+  }
+
+  const publishedPageUrl = getArticleUrl(article.links?.published_page_url);
+  if (publishedPageUrl) {
+    return (
+      <a className="button button-secondary" href={publishedPageUrl}>
+        View published page
+      </a>
+    );
+  }
+
+  const convertedTitle = article.converted_page?.title?.trim() || "";
+  if (convertedTitle) {
+    return (
+      <span className="article-action-note">
+        Converted to {convertedTitle}
+        {article.converted_page?.reveal_after_session !== null && article.converted_page?.reveal_after_session !== undefined
+          ? `; visible after session ${article.converted_page.reveal_after_session}`
+          : ""}
+        .
+      </span>
+    );
+  }
+
+  if (!includePromotionLinks) {
+    return null;
+  }
+
+  const editorUrl = getArticleUrl(article.links?.player_wiki_editor_url);
+  const convertUrl = getArticleUrl(article.links?.convert_url);
+
+  return (
+    <>
+      {editorUrl ? (
+        <a className="button button-secondary" href={editorUrl}>
+          Open in Player Wiki editor
+        </a>
+      ) : null}
+      {convertUrl ? (
+        <a className="button button-secondary" href={convertUrl}>
+          Convert to wiki page
+        </a>
+      ) : null}
+    </>
+  );
+}
+
 function CharacterDetailDialog({
   detail,
   onClose,
@@ -669,7 +774,11 @@ function SessionArticlesPanel({
                 ) : null}
                 {article.created_at ? <time>{formatTimestamp(article.created_at)}</time> : null}
               </div>
+              <SessionArticleSourceLine article={article} />
               {renderArticleBody(article)}
+              <div className="article-actions">
+                <SessionArticleReferenceActions article={article} includePromotionLinks={false} />
+              </div>
             </details>
           ))}
         </div>
@@ -3483,6 +3592,10 @@ function DmPane({
                     <summary>
                       <strong>{article.title}</strong>
                     </summary>
+                    {article.image ? (
+                      <img className="article-image" src={resolveArticleImage(campaignSlug, article)} alt={article.image.alt_text || "Article image"} />
+                    ) : null}
+                    <SessionArticleSourceLine article={article} />
                     <label htmlFor={`dm-stage-title-${article.id}`} className="chat-label">
                       Title
                     </label>
@@ -3549,6 +3662,7 @@ function DmPane({
                       }}
                     />
                     <div className="article-actions">
+                      <SessionArticleReferenceActions article={article} includePromotionLinks />
                       <button
                         type="button"
                         disabled={updateArticleMutation.isPending}
@@ -3620,8 +3734,10 @@ function DmPane({
                   {article.image ? (
                     <img className="article-image" src={resolveArticleImage(campaignSlug, article)} alt={article.image.alt_text || "Article image"} />
                   ) : null}
+                  <SessionArticleSourceLine article={article} />
                   {renderArticleBody(article)}
                   <div className="article-actions">
+                    <SessionArticleReferenceActions article={article} includePromotionLinks />
                     <button
                       type="button"
                       className="button-danger"
