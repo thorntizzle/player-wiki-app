@@ -11,6 +11,7 @@ import yaml
 
 from player_wiki.auth_store import AuthStore
 from player_wiki.systems_importer import Dnd5eSystemsImporter
+from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 from player_wiki.xianxia_character_model import (
     XIANXIA_CHARACTER_DEFINITION_SCHEMA_VERSION,
     XIANXIA_DEFINITION_FIELD_KEYS,
@@ -68,6 +69,60 @@ def _write_character_state(app, character_slug: str, mutator) -> None:
             payload,
             expected_revision=record.state_record.revision,
         )
+
+
+def _write_campaign_config(app, mutator) -> None:
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    mutator(payload)
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+
+
+def _configure_xianxia_campaign(app) -> None:
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    _write_campaign_config(app, _mutate)
+
+
+def _valid_xianxia_create_data(name: str, *, slug: str = "") -> dict[str, str]:
+    return {
+        "name": name,
+        "character_slug": slug,
+        "attribute_str": "3",
+        "attribute_dex": "0",
+        "attribute_con": "3",
+        "attribute_int": "0",
+        "attribute_wis": "0",
+        "attribute_cha": "0",
+        "effort_basic": "3",
+        "effort_weapon": "1",
+        "effort_guns_explosive": "0",
+        "effort_magic": "1",
+        "effort_ultimate": "0",
+        "energy_jing": "1",
+        "energy_qi": "1",
+        "energy_shen": "1",
+        "trained_skill_1": "Fishing",
+        "trained_skill_2": "Calligraphy",
+        "trained_skill_3": "Tea Ceremony",
+        "martial_art_1_slug": "demons-fist",
+        "martial_art_1_rank": "initiate",
+        "martial_art_2_slug": "heavenly-palm",
+        "martial_art_2_rank": "initiate",
+        "martial_art_3_slug": "taoist-blade",
+        "martial_art_3_rank": "initiate",
+    }
 
 
 def _seed_systems_item_entry(
@@ -1041,6 +1096,205 @@ def test_api_character_session_endpoints_cover_dnd_state_controls(client, app, u
         if int(item.get("level") or 0) == 2
         and str(item.get("slot_lane_id") or "") == str(second_level_slot.get("slot_lane_id") or "")
     )["used"] == 0
+
+
+def test_api_character_session_endpoints_cover_xianxia_state_controls(
+    client,
+    app,
+    users,
+    sign_in,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("API Session Crane"),
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+    assert create_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/api-session-crane"
+    )
+
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-xianxia-session-api")
+    character_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/api-session-crane",
+        headers=api_headers(dm_token),
+    )
+
+    assert character_response.status_code == 200
+    character_payload = character_response.get_json()["character"]
+    assert character_payload["presented_xianxia"]["system_label"] == "Xianxia"
+    assert character_payload["presented_xianxia"]["resources"]["durability"][0]["label"] == "HP"
+    starting_revision = character_payload["state_record"]["revision"]
+
+    vitals_response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/api-session-crane/session/vitals",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": starting_revision,
+            "current_hp": 7,
+            "temp_hp": 2,
+            "current_stance": 8,
+            "temp_stance": 1,
+            "current_jing": 0,
+            "current_qi": 1,
+            "current_shen": 1,
+            "current_yin": 0,
+            "current_yang": 1,
+            "current_dao": 2,
+        },
+    )
+
+    assert vitals_response.status_code == 200
+    vitals_character = vitals_response.get_json()["character"]
+    vitals_state = vitals_character["state_record"]["state"]
+    assert vitals_state["vitals"] == {"current_hp": 7, "temp_hp": 2}
+    assert vitals_state["xianxia"]["vitals"] == {
+        "current_hp": 7,
+        "temp_hp": 2,
+        "current_stance": 8,
+        "temp_stance": 1,
+    }
+    assert vitals_state["xianxia"]["energies"] == {
+        "jing": {"current": 0},
+        "qi": {"current": 1},
+        "shen": {"current": 1},
+    }
+    assert vitals_state["xianxia"]["yin_yang"] == {
+        "yin_current": 0,
+        "yang_current": 1,
+    }
+    assert vitals_state["xianxia"]["dao"] == {"current": 2}
+    assert vitals_character["presented_xianxia"]["resources"]["dao"]["current"] == 2
+
+    active_response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/api-session-crane/session/xianxia-active-state",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": vitals_character["state_record"]["revision"],
+            "active_stance_name": "Stone Root",
+            "active_aura_name": "Azure Bell",
+        },
+    )
+
+    assert active_response.status_code == 200
+    active_character = active_response.get_json()["character"]
+    active_state = active_character["state_record"]["state"]["xianxia"]
+    assert active_state["active_stance"] == {"name": "Stone Root"}
+    assert active_state["active_aura"] == {"name": "Azure Bell"}
+    assert active_character["presented_xianxia"]["active_state"]["stance"]["name"] == "Stone Root"
+
+    add_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/api-session-crane/session/xianxia-inventory",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": active_character["state_record"]["revision"],
+            "item": {
+                "name": "Spirit Fan",
+                "quantity": 2,
+                "item_nature": "Relic",
+                "item_type": "Artifact",
+                "notes": "Painted with cloud sigils.",
+                "tags": ["focus"],
+                "equippable": True,
+                "is_equipped": False,
+            },
+        },
+    )
+
+    assert add_response.status_code == 200
+    add_character = add_response.get_json()["character"]
+    added_item = next(
+        item
+        for item in add_character["presented_xianxia"]["inventory"]["quantities"]
+        if item["name"] == "Spirit Fan"
+    )
+    assert added_item["quantity"] == 2
+    assert added_item["item_type"] == "Artifact"
+
+    quantity_response = client.patch(
+        f"/api/v1/campaigns/linden-pass/characters/api-session-crane/session/inventory/{added_item['id']}",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": add_character["state_record"]["revision"],
+            "quantity": 3,
+        },
+    )
+
+    assert quantity_response.status_code == 200
+    quantity_character = quantity_response.get_json()["character"]
+    quantity_item = next(
+        item
+        for item in quantity_character["presented_xianxia"]["inventory"]["quantities"]
+        if item["id"] == added_item["id"]
+    )
+    assert quantity_item["quantity"] == 3
+
+    update_response = client.patch(
+        f"/api/v1/campaigns/linden-pass/characters/api-session-crane/session/xianxia-inventory/{added_item['id']}",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": quantity_character["state_record"]["revision"],
+            "item": {
+                "id": added_item["id"],
+                "name": "Spirit Fan",
+                "quantity": 4,
+                "item_nature": "Relic",
+                "item_type": "Artifact",
+                "notes": "Painted with storm sigils.",
+                "tags": ["focus", "storm"],
+                "equippable": True,
+                "is_equipped": False,
+            },
+        },
+    )
+
+    assert update_response.status_code == 200
+    update_character = update_response.get_json()["character"]
+    updated_item = next(
+        item
+        for item in update_character["presented_xianxia"]["inventory"]["quantities"]
+        if item["id"] == added_item["id"]
+    )
+    assert updated_item["quantity"] == 4
+    assert updated_item["notes"] == "Painted with storm sigils."
+    assert updated_item["tags"] == ["focus", "storm"]
+
+    equip_response = client.patch(
+        f"/api/v1/campaigns/linden-pass/characters/api-session-crane/session/xianxia-inventory/{added_item['id']}/equipped",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": update_character["state_record"]["revision"],
+            "is_equipped": True,
+        },
+    )
+
+    assert equip_response.status_code == 200
+    equip_character = equip_response.get_json()["character"]
+    equipped_item = next(
+        item
+        for item in equip_character["presented_xianxia"]["equipment"]["equipped_items"]
+        if item["id"] == added_item["id"]
+    )
+    assert equipped_item["is_equipped"] is True
+
+    remove_response = client.delete(
+        f"/api/v1/campaigns/linden-pass/characters/api-session-crane/session/xianxia-inventory/{added_item['id']}",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": equip_character["state_record"]["revision"],
+        },
+    )
+
+    assert remove_response.status_code == 200
+    remove_character = remove_response.get_json()["character"]
+    assert all(
+        item["id"] != added_item["id"]
+        for item in remove_character["presented_xianxia"]["inventory"]["quantities"]
+    )
 
 
 def test_api_character_session_equipment_state_endpoint_updates_wield_mode_and_rejects_invalid_rows(

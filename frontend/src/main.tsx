@@ -27,7 +27,11 @@ import type {
   CharacterInventoryPatchPayload,
   CharacterPresentedInventoryItem,
   CharacterPresentedSpell,
+  CharacterPresentedXianxia,
   CharacterRecord,
+  CharacterXianxiaInventoryItem,
+  CharacterXianxiaInventoryItemPayload,
+  CharacterXianxiaNamedRecord,
   CharacterNotesPatchPayload,
   CharacterResourcePatchPayload,
   CharacterRestApplyResponse,
@@ -65,6 +69,37 @@ interface CharacterVitalsDraft {
   tempHp: string;
 }
 
+interface CharacterXianxiaVitalsDraft extends CharacterVitalsDraft {
+  currentStance: string;
+  tempStance: string;
+  currentJing: string;
+  currentQi: string;
+  currentShen: string;
+  currentYin: string;
+  currentYang: string;
+  currentDao: string;
+}
+
+type CharacterXianxiaVitalsField = Exclude<keyof CharacterXianxiaVitalsDraft, "expectedRevision">;
+
+interface CharacterXianxiaActiveStateDraft {
+  expectedRevision: number;
+  activeStanceName: string;
+  activeAuraName: string;
+}
+
+interface CharacterXianxiaInventoryDraft {
+  name: string;
+  quantity: string;
+  itemNature: string;
+  itemType: string;
+  notes: string;
+  tags: string;
+  catalogRef: string;
+  equippable: boolean;
+  isEquipped: boolean;
+}
+
 interface CharacterNotesDraft {
   expectedRevision: number;
   notes: string;
@@ -91,7 +126,19 @@ interface CharacterDetailDialogState {
   badges?: string[];
 }
 
-type CharacterSection = "overview" | "resources" | "spells" | "equipment" | "inventory" | "abilities" | "notes";
+type CharacterSection =
+  | "overview"
+  | "quick-reference"
+  | "martial-arts"
+  | "resources"
+  | "spells"
+  | "techniques"
+  | "equipment"
+  | "inventory"
+  | "abilities"
+  | "skills"
+  | "personal"
+  | "notes";
 type PaneName = "session" | "character" | "dm";
 type ArticleMode = "manual" | "upload" | "wiki";
 
@@ -132,6 +179,12 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asRecordArray(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.map(asRecord) : [];
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => String(item ?? "").trim()).filter(Boolean)
+    : [];
 }
 
 function readString(value: unknown, fallback = ""): string {
@@ -207,6 +260,10 @@ function isDndCharacter(character: CharacterRecord | undefined): boolean {
   return characterSystem(character).toLowerCase() === "dnd-5e";
 }
 
+function isXianxiaCharacter(character: CharacterRecord | undefined): boolean {
+  return characterSystem(character).toLowerCase() === "xianxia";
+}
+
 const dndCharacterSections: Array<{ id: CharacterSection; label: string }> = [
   { id: "overview", label: "Overview" },
   { id: "resources", label: "Resources" },
@@ -216,6 +273,71 @@ const dndCharacterSections: Array<{ id: CharacterSection; label: string }> = [
   { id: "abilities", label: "Abilities and Skills" },
   { id: "notes", label: "Notes" },
 ];
+
+const xianxiaCharacterSections: Array<{ id: CharacterSection; label: string }> = [
+  { id: "quick-reference", label: "Quick Reference" },
+  { id: "martial-arts", label: "Martial Arts" },
+  { id: "techniques", label: "Techniques" },
+  { id: "resources", label: "Resources" },
+  { id: "skills", label: "Skills" },
+  { id: "equipment", label: "Equipment" },
+  { id: "inventory", label: "Inventory" },
+  { id: "personal", label: "Personal" },
+  { id: "notes", label: "Notes" },
+];
+
+const xianxiaVitalsFields: Array<{ key: CharacterXianxiaVitalsField; label: string }> = [
+  { key: "currentHp", label: "Current HP" },
+  { key: "tempHp", label: "Temp HP" },
+  { key: "currentStance", label: "Current Stance" },
+  { key: "tempStance", label: "Temp Stance" },
+  { key: "currentJing", label: "Jing" },
+  { key: "currentQi", label: "Qi" },
+  { key: "currentShen", label: "Shen" },
+  { key: "currentYin", label: "Yin" },
+  { key: "currentYang", label: "Yang" },
+  { key: "currentDao", label: "Dao" },
+];
+
+function joinDisplay(values: Array<string | number | null | undefined>): string {
+  return values.map((value) => String(value ?? "").trim()).filter(Boolean).join(" | ");
+}
+
+function normalizeTagsInput(value: string): string[] {
+  return value
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+function xianxiaInventoryDraftFromItem(item?: CharacterXianxiaInventoryItem): CharacterXianxiaInventoryDraft {
+  return {
+    name: item?.name ?? "",
+    quantity: String(item?.quantity ?? 1),
+    itemNature: item?.item_nature || "Mundane",
+    itemType: item?.item_type || "Miscellaneous",
+    notes: item?.notes ?? "",
+    tags: (item?.tags ?? []).join(", "),
+    catalogRef: item?.catalog_ref ?? "",
+    equippable: Boolean(item?.equippable),
+    isEquipped: Boolean(item?.is_equipped),
+  };
+}
+
+function xianxiaInventoryPayloadFromDraft(draft: CharacterXianxiaInventoryDraft): CharacterXianxiaInventoryItemPayload {
+  const quantity = Number(draft.quantity);
+  return {
+    name: draft.name.trim(),
+    quantity: Number.isFinite(quantity) ? quantity : 1,
+    item_nature: draft.itemNature.trim() || "Mundane",
+    item_type: draft.itemType.trim() || "Miscellaneous",
+    notes: draft.notes.trim(),
+    tags: normalizeTagsInput(draft.tags),
+    catalog_ref: draft.catalogRef.trim(),
+    equippable: draft.equippable,
+    is_equipped: draft.isEquipped,
+  };
+}
 
 function getApiErrorMessage(error: unknown): ApiMessageEnvelope | null {
   if (isApiError(error)) {
@@ -1107,11 +1229,33 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
     currentHp: "",
     tempHp: "",
   });
+  const [xianxiaVitalsDraft, setXianxiaVitalsDraft] = useState<CharacterXianxiaVitalsDraft>({
+    expectedRevision: 0,
+    currentHp: "",
+    tempHp: "",
+    currentStance: "",
+    tempStance: "",
+    currentJing: "",
+    currentQi: "",
+    currentShen: "",
+    currentYin: "",
+    currentYang: "",
+    currentDao: "",
+  });
+  const [xianxiaActiveDraft, setXianxiaActiveDraft] = useState<CharacterXianxiaActiveStateDraft>({
+    expectedRevision: 0,
+    activeStanceName: "",
+    activeAuraName: "",
+  });
   const [notesDraft, setNotesDraft] = useState<CharacterNotesDraft>({ expectedRevision: 0, notes: "" });
   const [resourceDrafts, setResourceDrafts] = useState<Record<string, string>>({});
   const [spellSlotDrafts, setSpellSlotDrafts] = useState<Record<string, string>>({});
   const [inventoryDrafts, setInventoryDrafts] = useState<Record<string, string>>({});
   const [equipmentDrafts, setEquipmentDrafts] = useState<Record<string, CharacterEquipmentDraft>>({});
+  const [xianxiaInventoryDrafts, setXianxiaInventoryDrafts] = useState<Record<string, CharacterXianxiaInventoryDraft>>({});
+  const [newXianxiaInventoryDraft, setNewXianxiaInventoryDraft] = useState<CharacterXianxiaInventoryDraft>(
+    xianxiaInventoryDraftFromItem(),
+  );
   const [arcaneArmorDraft, setArcaneArmorDraft] = useState(false);
   const [currencyDraft, setCurrencyDraft] = useState<Record<string, string>>({});
   const [restPreview, setRestPreview] = useState<CharacterRestPreviewResponse["preview"] | null>(null);
@@ -1175,8 +1319,15 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
     if (!detailQuery.data) {
       return;
     }
-    const state = asRecord(detailQuery.data.character.state_record.state);
+    const character = detailQuery.data.character;
+    const state = asRecord(character.state_record.state);
     const vitals = asRecord(state.vitals);
+    const xianxiaState = asRecord(state.xianxia);
+    const xianxiaVitals = asRecord(xianxiaState.vitals);
+    const xianxiaEnergies = asRecord(xianxiaState.energies);
+    const xianxiaYinYang = asRecord(xianxiaState.yin_yang);
+    const xianxiaDao = asRecord(xianxiaState.dao);
+    const presentedXianxia = character.presented_xianxia;
     const notes = asRecord(state.notes);
     const nextResourceDrafts: Record<string, string> = {};
     for (const resource of asRecordArray(state.resources)) {
@@ -1197,6 +1348,13 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
         nextInventoryDrafts[id] = String(readNumber(item.quantity, 1));
       }
     }
+    const nextXianxiaInventoryDrafts: Record<string, CharacterXianxiaInventoryDraft> = {};
+    for (const item of presentedXianxia?.inventory?.quantities ?? []) {
+      if (item.id) {
+        nextXianxiaInventoryDrafts[item.id] = xianxiaInventoryDraftFromItem(item);
+        nextInventoryDrafts[item.id] = String(readNumber(item.quantity, 1));
+      }
+    }
     const equipmentState = detailQuery.data.character.equipment_state;
     const nextEquipmentDrafts: Record<string, CharacterEquipmentDraft> = {};
     for (const item of equipmentState?.rows ?? []) {
@@ -1209,8 +1367,9 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
       }
     }
     setEquipmentDrafts(nextEquipmentDrafts);
+    setXianxiaInventoryDrafts(nextXianxiaInventoryDrafts);
     setArcaneArmorDraft(Boolean((detailQuery.data.character.arcane_armor_state ?? equipmentState?.arcane_armor_state)?.enabled));
-    const currency = asRecord(state.currency);
+    const currency = isXianxiaCharacter(character) ? asRecord(xianxiaState.currency) : asRecord(state.currency);
     const nextCurrencyDraft: Record<string, string> = {};
     for (const key of ["cp", "sp", "ep", "gp", "pp", "coin", "supply", "spirit_stones"]) {
       if (currency[key] !== undefined) {
@@ -1221,6 +1380,24 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
       expectedRevision: detailQuery.data.character.state_record.revision,
       currentHp: String(readNumber(vitals.current_hp, 0)),
       tempHp: String(readNumber(vitals.temp_hp, 0)),
+    });
+    setXianxiaVitalsDraft({
+      expectedRevision: detailQuery.data.character.state_record.revision,
+      currentHp: String(readNumber(vitals.current_hp, readNumber(xianxiaVitals.current_hp, 0))),
+      tempHp: String(readNumber(vitals.temp_hp, readNumber(xianxiaVitals.temp_hp, 0))),
+      currentStance: String(readNumber(xianxiaVitals.current_stance, 0)),
+      tempStance: String(readNumber(xianxiaVitals.temp_stance, 0)),
+      currentJing: String(readNumber(asRecord(xianxiaEnergies.jing).current, 0)),
+      currentQi: String(readNumber(asRecord(xianxiaEnergies.qi).current, 0)),
+      currentShen: String(readNumber(asRecord(xianxiaEnergies.shen).current, 0)),
+      currentYin: String(readNumber(xianxiaYinYang.yin_current, 0)),
+      currentYang: String(readNumber(xianxiaYinYang.yang_current, 0)),
+      currentDao: String(readNumber(xianxiaDao.current, 0)),
+    });
+    setXianxiaActiveDraft({
+      expectedRevision: detailQuery.data.character.state_record.revision,
+      activeStanceName: presentedXianxia?.active_state?.stance?.name ?? "",
+      activeAuraName: presentedXianxia?.active_state?.aura?.name ?? "",
     });
     setNotesDraft({
       expectedRevision: detailQuery.data.character.state_record.revision,
@@ -1238,16 +1415,18 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
   const permissions = detailRecord?.permissions;
   const canEdit = Boolean(permissions?.can_edit_session);
   const isDnd = isDndCharacter(detailRecord);
+  const isXianxia = isXianxiaCharacter(detailRecord);
   const definition = asRecord(detailRecord?.definition);
   const profile = asRecord(definition.profile);
   const stats = asRecord(definition.stats);
   const spellcasting = asRecord(definition.spellcasting);
   const state = asRecord(detailRecord?.state_record.state);
+  const xianxiaState = asRecord(state.xianxia);
   const vitals = asRecord(state.vitals);
   const resources = asRecordArray(state.resources);
   const spellSlots = asRecordArray(state.spell_slots);
   const inventory = asRecordArray(state.inventory);
-  const currency = asRecord(state.currency);
+  const currency = isXianxia ? asRecord(xianxiaState.currency) : asRecord(state.currency);
   const notes = asRecord(state.notes);
   const abilityScores = asRecord(stats.ability_scores);
   const spells = asRecordArray(spellcasting.spells);
@@ -1255,6 +1434,14 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
   const equipmentRows = equipmentState?.rows ?? [];
   const arcaneArmorState = detailRecord?.arcane_armor_state ?? equipmentState?.arcane_armor_state;
   const revision = detailRecord?.state_record.revision ?? 0;
+  const presentedXianxia: CharacterPresentedXianxia = detailRecord?.presented_xianxia ?? {};
+  const xianxiaInventory = presentedXianxia.inventory?.quantities ?? [];
+  const xianxiaCurrency = presentedXianxia.inventory?.currency ?? [];
+  const xianxiaDurability = presentedXianxia.resources?.durability ?? [];
+  const xianxiaEnergies = presentedXianxia.resources?.energies ?? [];
+  const xianxiaYinYang = presentedXianxia.resources?.yin_yang ?? [];
+  const xianxiaDao = presentedXianxia.resources?.dao;
+  const xianxiaInsight = presentedXianxia.resources?.insight;
   const presentedSpells = collectPresentedSpells(detailRecord);
   const presentedInventory = detailRecord?.presented_inventory ?? [];
   const presentedInventoryByKey = useMemo(() => {
@@ -1268,6 +1455,15 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
     }
     return lookup;
   }, [presentedInventory]);
+
+  useEffect(() => {
+    if (isXianxia && activeCharacterSection === "overview") {
+      setActiveCharacterSection("quick-reference");
+    }
+    if (isDnd && activeCharacterSection === "quick-reference") {
+      setActiveCharacterSection("overview");
+    }
+  }, [activeCharacterSection, isDnd, isXianxia]);
 
   const handleMutationSuccess = (response: { character: CharacterRecord }, message: string) => {
     if (selectedSlug) {
@@ -1328,6 +1524,44 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
     mutationFn: ({ featureKey, payload }: { featureKey: string; payload: CharacterFeatureStatePatchPayload }) =>
       apiClient.patchCharacterFeatureState(campaignSlug, selectedSlug || "", featureKey, payload),
     onSuccess: (response) => handleMutationSuccess(response, "Feature state saved."),
+    onError: handleMutationError,
+  });
+
+  const patchXianxiaActiveState = useMutation({
+    mutationFn: (payload: { expected_revision: number; active_stance_name?: string; active_aura_name?: string }) =>
+      apiClient.patchCharacterXianxiaActiveState(campaignSlug, selectedSlug || "", payload),
+    onSuccess: (response) => handleMutationSuccess(response, "Active Stance and Aura saved."),
+    onError: handleMutationError,
+  });
+
+  const addXianxiaInventoryItem = useMutation({
+    mutationFn: (payload: { expected_revision: number; item: CharacterXianxiaInventoryItemPayload }) =>
+      apiClient.addCharacterXianxiaInventoryItem(campaignSlug, selectedSlug || "", payload),
+    onSuccess: (response) => {
+      setNewXianxiaInventoryDraft(xianxiaInventoryDraftFromItem());
+      handleMutationSuccess(response, "Inventory item added.");
+    },
+    onError: handleMutationError,
+  });
+
+  const patchXianxiaInventoryItem = useMutation({
+    mutationFn: ({ itemId, payload }: { itemId: string; payload: { expected_revision: number; item: CharacterXianxiaInventoryItemPayload } }) =>
+      apiClient.patchCharacterXianxiaInventoryItem(campaignSlug, selectedSlug || "", itemId, payload),
+    onSuccess: (response) => handleMutationSuccess(response, "Inventory item saved."),
+    onError: handleMutationError,
+  });
+
+  const removeXianxiaInventoryItem = useMutation({
+    mutationFn: ({ itemId, payload }: { itemId: string; payload: { expected_revision: number } }) =>
+      apiClient.removeCharacterXianxiaInventoryItem(campaignSlug, selectedSlug || "", itemId, payload),
+    onSuccess: (response) => handleMutationSuccess(response, "Inventory item removed."),
+    onError: handleMutationError,
+  });
+
+  const patchXianxiaInventoryEquipped = useMutation({
+    mutationFn: ({ itemId, payload }: { itemId: string; payload: { expected_revision: number; is_equipped: boolean } }) =>
+      apiClient.patchCharacterXianxiaInventoryEquipped(campaignSlug, selectedSlug || "", itemId, payload),
+    onSuccess: (response) => handleMutationSuccess(response, "Equipment state saved."),
     onError: handleMutationError,
   });
 
@@ -1419,6 +1653,63 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
     });
   };
 
+  const submitXianxiaVitals = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const fields = [
+      ["current HP", xianxiaVitalsDraft.currentHp],
+      ["temp HP", xianxiaVitalsDraft.tempHp],
+      ["current Stance", xianxiaVitalsDraft.currentStance],
+      ["temp Stance", xianxiaVitalsDraft.tempStance],
+      ["current Jing", xianxiaVitalsDraft.currentJing],
+      ["current Qi", xianxiaVitalsDraft.currentQi],
+      ["current Shen", xianxiaVitalsDraft.currentShen],
+      ["current Yin", xianxiaVitalsDraft.currentYin],
+      ["current Yang", xianxiaVitalsDraft.currentYang],
+      ["current Dao", xianxiaVitalsDraft.currentDao],
+    ] as const;
+    const parsed = new Map<string, number>();
+    for (const [label, value] of fields) {
+      const numberValue = parseNumberInput(value, label);
+      if (numberValue === null) {
+        return;
+      }
+      parsed.set(label, numberValue);
+    }
+    if (!selected || !canEdit) {
+      setErrorMessage("No character selected or permission denied.");
+      return;
+    }
+
+    setStatusMessage("Saving...");
+    patchVitals.mutate({
+      expected_revision: revision,
+      current_hp: parsed.get("current HP"),
+      temp_hp: parsed.get("temp HP"),
+      current_stance: parsed.get("current Stance"),
+      temp_stance: parsed.get("temp Stance"),
+      current_jing: parsed.get("current Jing"),
+      current_qi: parsed.get("current Qi"),
+      current_shen: parsed.get("current Shen"),
+      current_yin: parsed.get("current Yin"),
+      current_yang: parsed.get("current Yang"),
+      current_dao: parsed.get("current Dao"),
+    });
+  };
+
+  const submitXianxiaActiveState = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selected || !canEdit) {
+      setErrorMessage("No character selected or permission denied.");
+      return;
+    }
+    setStatusMessage("Saving...");
+    patchXianxiaActiveState.mutate({
+      expected_revision: revision,
+      active_stance_name: xianxiaActiveDraft.activeStanceName,
+      active_aura_name: xianxiaActiveDraft.activeAuraName,
+    });
+  };
+
   const submitResource = (event: FormEvent<HTMLFormElement>, resourceId: string) => {
     event.preventDefault();
     const current = parseNumberInput(resourceDrafts[resourceId] ?? "", "resource value");
@@ -1465,6 +1756,76 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
     }
     setStatusMessage("Saving...");
     patchInventory.mutate({ itemId, payload: { expected_revision: revision, quantity } });
+  };
+
+  const submitXianxiaInventoryAdd = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selected || !canEdit) {
+      setErrorMessage("No character selected or permission denied.");
+      return;
+    }
+    if (!newXianxiaInventoryDraft.name.trim()) {
+      setErrorMessage("Enter an item name.");
+      setStatusMessage(null);
+      return;
+    }
+    setStatusMessage("Saving...");
+    addXianxiaInventoryItem.mutate({
+      expected_revision: revision,
+      item: xianxiaInventoryPayloadFromDraft(newXianxiaInventoryDraft),
+    });
+  };
+
+  const submitXianxiaInventoryUpdate = (event: FormEvent<HTMLFormElement>, item: CharacterXianxiaInventoryItem) => {
+    event.preventDefault();
+    const draft = xianxiaInventoryDrafts[item.id] ?? xianxiaInventoryDraftFromItem(item);
+    if (!selected || !canEdit) {
+      setErrorMessage("No character selected or permission denied.");
+      return;
+    }
+    if (!draft.name.trim()) {
+      setErrorMessage("Enter an item name.");
+      setStatusMessage(null);
+      return;
+    }
+    setStatusMessage("Saving...");
+    patchXianxiaInventoryItem.mutate({
+      itemId: item.id,
+      payload: {
+        expected_revision: revision,
+        item: {
+          ...xianxiaInventoryPayloadFromDraft(draft),
+          id: item.id,
+        },
+      },
+    });
+  };
+
+  const toggleXianxiaInventoryEquipped = (item: CharacterXianxiaInventoryItem, isEquipped: boolean) => {
+    if (!selected || !canEdit) {
+      setErrorMessage("No character selected or permission denied.");
+      return;
+    }
+    setStatusMessage("Saving...");
+    patchXianxiaInventoryEquipped.mutate({
+      itemId: item.id,
+      payload: {
+        expected_revision: revision,
+        is_equipped: isEquipped,
+      },
+    });
+  };
+
+  const removeXianxiaInventory = (item: CharacterXianxiaInventoryItem) => {
+    if (!selected || !canEdit) {
+      setErrorMessage("No character selected or permission denied.");
+      return;
+    }
+    setStatusMessage("Saving...");
+    removeXianxiaInventoryItem.mutate({
+      itemId: item.id,
+      payload: { expected_revision: revision },
+    });
   };
 
   const submitEquipmentState = (event: FormEvent<HTMLFormElement>, item: CharacterEquipmentRow) => {
@@ -1514,13 +1875,14 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
       return;
     }
     const payload: CharacterCurrencyPatchPayload = { expected_revision: revision };
-    for (const key of ["cp", "sp", "ep", "gp", "pp"]) {
+    const currencyKeys = isXianxia ? ["coin", "supply", "spirit_stones"] : ["cp", "sp", "ep", "gp", "pp"];
+    for (const key of currencyKeys) {
       if (currencyDraft[key] !== undefined) {
-        const value = parseNumberInput(currencyDraft[key], key.toUpperCase());
+        const value = parseNumberInput(currencyDraft[key], key.replace("_", " ").toUpperCase());
         if (value === null) {
           return;
         }
-        payload[key as "cp" | "sp" | "ep" | "gp" | "pp"] = value;
+        payload[key as "cp" | "sp" | "ep" | "gp" | "pp" | "coin" | "supply" | "spirit_stones"] = value;
       }
     }
     setStatusMessage("Saving...");
@@ -1539,6 +1901,50 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
       player_notes_markdown: notesDraft.notes,
     });
   };
+
+  const openXianxiaRecordDetail = (record: CharacterXianxiaNamedRecord, eyebrow: string) => {
+    setDetailDialog({
+      eyebrow,
+      title: record.name || "Xianxia record",
+      html: readString(record.body_html, readString(record.description_html)),
+      notes: readString(record.notes),
+      href: readString(record.href),
+      facts: [
+        { label: "Rank", value: readString(record.current_rank_label) },
+        { label: "Status", value: readString(record.status) },
+        { label: "Type", value: readString(record.type) },
+        { label: "Source", value: readString(record.source_label) },
+      ].filter((fact) => fact.value),
+    });
+  };
+
+  const renderXianxiaRecordCard = (record: CharacterXianxiaNamedRecord, eyebrow: string) => (
+    <article className="character-state-card" key={draftKey(eyebrow, record.name, record.href)}>
+      <p className="meta">{joinDisplay([record.current_rank_label, record.status, record.type, record.source_label]) || eyebrow}</p>
+      <h4>{record.name || "Unnamed record"}</h4>
+      {record.reason ? <p className="meta">{record.reason}</p> : null}
+      {record.rank_progress_label ? <p className="meta">{record.rank_progress_label}</p> : null}
+      {record.body_html || record.description_html || record.notes || record.href ? (
+        <button type="button" className="button button-secondary detail-button" onClick={() => openXianxiaRecordDetail(record, eyebrow)}>
+          Details
+        </button>
+      ) : null}
+    </article>
+  );
+
+  const renderXianxiaPoolCards = (pools: Array<{ key: string; label: string; current: number; max: number; temp?: number }>) => (
+    <div className="character-card-grid">
+      {pools.map((pool) => (
+        <article className="character-state-card" key={pool.key}>
+          <h4>{pool.label}</h4>
+          <p>
+            {pool.current} / {pool.max}
+            {pool.temp !== undefined ? ` +${pool.temp} temp` : ""}
+          </p>
+        </article>
+      ))}
+    </div>
+  );
 
   return (
     <div className="session-pane-content">
@@ -1615,36 +2021,64 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
                   </button>
                 </div>
               </div>
-              <form onSubmit={submitVitals} className="inline-two-col">
-                <label htmlFor="character-current-hp" className="chat-label">
-                  Current HP
-                </label>
-                <input
-                  id="character-current-hp"
-                  type="number"
-                  value={vitalsDraft.currentHp}
-                  disabled={!canEdit}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    setVitalsDraft({ ...vitalsDraft, currentHp: event.currentTarget.value })
-                  }
-                />
-                <label htmlFor="character-temp-hp" className="chat-label">
-                  Temp HP
-                </label>
-                <input
-                  id="character-temp-hp"
-                  type="number"
-                  value={vitalsDraft.tempHp}
-                  disabled={!canEdit}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    setVitalsDraft({ ...vitalsDraft, tempHp: event.currentTarget.value })
-                  }
-                />
-                <div />
-                <button type="submit" disabled={patchVitals.isPending || !canEdit}>
-                  {patchVitals.isPending ? "Saving..." : "Save vitals"}
-                </button>
-              </form>
+              {isXianxia ? (
+                <form onSubmit={submitXianxiaVitals} className="inline-two-col">
+                  {xianxiaVitalsFields.map((field) => (
+                    <React.Fragment key={field.key}>
+                      <label htmlFor={`xianxia-${field.key}`} className="chat-label">
+                        {field.label}
+                      </label>
+                      <input
+                        id={`xianxia-${field.key}`}
+                        type="number"
+                        value={xianxiaVitalsDraft[field.key]}
+                        disabled={!canEdit}
+                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                          setXianxiaVitalsDraft({
+                            ...xianxiaVitalsDraft,
+                            [field.key]: event.currentTarget.value,
+                          })
+                        }
+                      />
+                    </React.Fragment>
+                  ))}
+                  <div />
+                  <button type="submit" disabled={patchVitals.isPending || !canEdit}>
+                    {patchVitals.isPending ? "Saving..." : "Save Xianxia pools"}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={submitVitals} className="inline-two-col">
+                  <label htmlFor="character-current-hp" className="chat-label">
+                    Current HP
+                  </label>
+                  <input
+                    id="character-current-hp"
+                    type="number"
+                    value={vitalsDraft.currentHp}
+                    disabled={!canEdit}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                      setVitalsDraft({ ...vitalsDraft, currentHp: event.currentTarget.value })
+                    }
+                  />
+                  <label htmlFor="character-temp-hp" className="chat-label">
+                    Temp HP
+                  </label>
+                  <input
+                    id="character-temp-hp"
+                    type="number"
+                    value={vitalsDraft.tempHp}
+                    disabled={!canEdit}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                      setVitalsDraft({ ...vitalsDraft, tempHp: event.currentTarget.value })
+                    }
+                  />
+                  <div />
+                  <button type="submit" disabled={patchVitals.isPending || !canEdit}>
+                    {patchVitals.isPending ? "Saving..." : "Save vitals"}
+                  </button>
+                </form>
+              )}
               {restPreview ? (
                 <div className="rest-preview">
                   <div className="panel-header compact-header">
@@ -1686,6 +2120,552 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
                   </button>
                 ))}
               </div>
+            ) : null}
+            {isXianxia ? (
+              <div className="section-tabs" role="tablist" aria-label="Xianxia session character sections">
+                {xianxiaCharacterSections.map((section) => (
+                  <button
+                    key={section.id}
+                    type="button"
+                    className={activeCharacterSection === section.id ? "active" : ""}
+                    onClick={() => setActiveCharacterSection(section.id)}
+                  >
+                    {section.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {isXianxia && activeCharacterSection === "quick-reference" ? (
+              <section className="session-character-form">
+                <h3>Quick Reference</h3>
+                <div className="stat-grid">
+                  <article>
+                    <strong>Realm</strong>
+                    <span>{String(presentedXianxia.identity?.realm ?? "--")}</span>
+                  </article>
+                  <article>
+                    <strong>Actions per turn</strong>
+                    <span>{String(presentedXianxia.identity?.actions_per_turn ?? "--")}</span>
+                    {asRecord(presentedXianxia.quick_reference?.actions).formula ? (
+                      <p className="meta">{readString(asRecord(presentedXianxia.quick_reference?.actions).formula)}</p>
+                    ) : null}
+                  </article>
+                  <article>
+                    <strong>Defense</strong>
+                    <span>{String(asRecord(presentedXianxia.quick_reference?.defense).value ?? presentedXianxia.equipment?.defense ?? "--")}</span>
+                    {asRecord(presentedXianxia.quick_reference?.defense).formula ? (
+                      <p className="meta">Defense = {readString(asRecord(presentedXianxia.quick_reference?.defense).formula)}</p>
+                    ) : null}
+                  </article>
+                  <article>
+                    <strong>Honor</strong>
+                    <span>{String(presentedXianxia.identity?.honor ?? "--")}</span>
+                  </article>
+                  <article>
+                    <strong>Reputation</strong>
+                    <span>{String(presentedXianxia.identity?.reputation ?? "--")}</span>
+                  </article>
+                  <article>
+                    <strong>Insight</strong>
+                    <span>
+                      {xianxiaInsight ? `${xianxiaInsight.available} available / ${xianxiaInsight.spent} spent` : "--"}
+                    </span>
+                  </article>
+                </div>
+                {asRecord(presentedXianxia.quick_reference?.check_formula).summary ? (
+                  <article className="character-state-card">
+                    <h4>Check formula</h4>
+                    <p>{readString(asRecord(presentedXianxia.quick_reference?.check_formula).summary)}</p>
+                  </article>
+                ) : null}
+                {asRecord(presentedXianxia.quick_reference?.difficulty_states).summary ? (
+                  <article className="character-state-card">
+                    <h4>Difficulty states</h4>
+                    <p>{readString(asRecord(presentedXianxia.quick_reference?.difficulty_states).summary)}</p>
+                    <p className="meta">{readString(asRecord(presentedXianxia.quick_reference?.difficulty_states).resolution_note)}</p>
+                  </article>
+                ) : null}
+                {asRecordArray(asRecord(presentedXianxia.quick_reference?.effort_damage).entries).length ? (
+                  <div className="character-card-grid">
+                    {asRecordArray(asRecord(presentedXianxia.quick_reference?.effort_damage).entries).map((entry) => (
+                      <article className="character-state-card" key={readString(entry.key, readString(entry.label))}>
+                        <h4>{readString(entry.label, "Effort")}</h4>
+                        <p>{readString(entry.damage, "--")}</p>
+                        <p className="meta">Score {String(entry.score ?? "--")}</p>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+                {asRecordArray(presentedXianxia.quick_reference?.active_state_reminders).length ? (
+                  <div className="character-card-grid">
+                    {asRecordArray(presentedXianxia.quick_reference?.active_state_reminders).map((reminder) => (
+                      <article className="character-state-card" key={readString(reminder.label)}>
+                        <h4>{readString(reminder.title, readString(reminder.label))}</h4>
+                        <p>{readString(reminder.status_label)}</p>
+                        {asStringArray(reminder.reference_lines).length ? (
+                          <ul className="plain-list compact-list">
+                            {asStringArray(reminder.reference_lines).map((line, index) => (
+                              <li key={`${readString(reminder.label)}-${index}`}>{line}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+
+            {isXianxia && activeCharacterSection === "martial-arts" ? (
+              <section className="session-character-form">
+                <h3>Martial Arts</h3>
+                {presentedXianxia.martial_arts?.length ? (
+                  <div className="character-card-grid">
+                    {presentedXianxia.martial_arts.map((record) => renderXianxiaRecordCard(record, "Martial Art"))}
+                  </div>
+                ) : (
+                  <p className="status status-neutral">No martial arts recorded.</p>
+                )}
+              </section>
+            ) : null}
+
+            {isXianxia && activeCharacterSection === "techniques" ? (
+              <section className="session-character-form">
+                <h3>Techniques</h3>
+                {presentedXianxia.generic_techniques?.length ? (
+                  <div className="character-card-grid">
+                    {presentedXianxia.generic_techniques.map((record) => renderXianxiaRecordCard(record, "Generic Technique"))}
+                  </div>
+                ) : (
+                  <p className="status status-neutral">No generic techniques recorded.</p>
+                )}
+                {presentedXianxia.basic_actions?.length ? (
+                  <>
+                    <h4>Basic actions</h4>
+                    <div className="character-card-grid">
+                      {presentedXianxia.basic_actions.map((record) => renderXianxiaRecordCard(record, "Basic Action"))}
+                    </div>
+                  </>
+                ) : null}
+                {presentedXianxia.approval?.status_groups?.length ? (
+                  <>
+                    <h4>Approvals</h4>
+                    {presentedXianxia.approval.status_groups.map((group) => (
+                      <article className="character-state-card" key={group.key}>
+                        <h4>{group.title}</h4>
+                        {group.records.length ? (
+                          <div className="spell-card-list">
+                            {group.records.map((record) => renderXianxiaRecordCard(record, group.title))}
+                          </div>
+                        ) : (
+                          <p className="meta">{group.empty_message}</p>
+                        )}
+                      </article>
+                    ))}
+                  </>
+                ) : null}
+              </section>
+            ) : null}
+
+            {isXianxia && activeCharacterSection === "resources" ? (
+              <section className="session-character-form">
+                <h3>Resources</h3>
+                {xianxiaDurability.length ? renderXianxiaPoolCards(xianxiaDurability) : null}
+                {xianxiaEnergies.length ? renderXianxiaPoolCards(xianxiaEnergies) : null}
+                {xianxiaYinYang.length ? renderXianxiaPoolCards(xianxiaYinYang) : null}
+                {xianxiaDao ? (
+                  <article className="character-state-card">
+                    <h4>Dao</h4>
+                    <p>
+                      {xianxiaDao.current} / {xianxiaDao.max}
+                    </p>
+                  </article>
+                ) : null}
+                <form onSubmit={submitXianxiaActiveState} className="inline-two-col">
+                  <label htmlFor="xianxia-active-stance" className="chat-label">
+                    Active Stance
+                  </label>
+                  <input
+                    id="xianxia-active-stance"
+                    value={xianxiaActiveDraft.activeStanceName}
+                    disabled={!canEdit}
+                    onChange={(event) => setXianxiaActiveDraft({ ...xianxiaActiveDraft, activeStanceName: event.currentTarget.value })}
+                  />
+                  <label htmlFor="xianxia-active-aura" className="chat-label">
+                    Active Aura
+                  </label>
+                  <input
+                    id="xianxia-active-aura"
+                    value={xianxiaActiveDraft.activeAuraName}
+                    disabled={!canEdit}
+                    onChange={(event) => setXianxiaActiveDraft({ ...xianxiaActiveDraft, activeAuraName: event.currentTarget.value })}
+                  />
+                  <div />
+                  <button type="submit" disabled={patchXianxiaActiveState.isPending || !canEdit}>
+                    {patchXianxiaActiveState.isPending ? "Saving..." : "Save active state"}
+                  </button>
+                </form>
+              </section>
+            ) : null}
+
+            {isXianxia && activeCharacterSection === "skills" ? (
+              <section className="session-character-form">
+                <h3>Skills</h3>
+                <div className="ability-grid">
+                  {presentedXianxia.attributes?.map((attribute) => (
+                    <article className="character-state-card" key={attribute.key}>
+                      <h4>{attribute.label}</h4>
+                      <p>Score {attribute.score}</p>
+                    </article>
+                  ))}
+                  {presentedXianxia.efforts?.map((effort) => (
+                    <article className="character-state-card" key={effort.key}>
+                      <h4>{effort.label}</h4>
+                      <p>Score {effort.score}</p>
+                      {effort.damage ? <p className="meta">{effort.damage}</p> : null}
+                    </article>
+                  ))}
+                </div>
+                {presentedXianxia.skills?.trained?.length ? (
+                  <ul className="plain-list compact-list">
+                    {presentedXianxia.skills.trained.map((skill) => (
+                      <li key={skill.name}>{skill.name}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="status status-neutral">No trained skills recorded.</p>
+                )}
+              </section>
+            ) : null}
+
+            {isXianxia && activeCharacterSection === "equipment" ? (
+              <section className="session-character-form">
+                <h3>Equipment</h3>
+                <div className="stat-grid">
+                  <article>
+                    <strong>Defense</strong>
+                    <span>{String(presentedXianxia.equipment?.defense ?? "--")}</span>
+                  </article>
+                  <article>
+                    <strong>Manual armor bonus</strong>
+                    <span>{String(presentedXianxia.equipment?.manual_armor_bonus ?? 0)}</span>
+                  </article>
+                </div>
+                {presentedXianxia.equipment?.equipped_items?.length ? (
+                  <div className="character-card-grid">
+                    {presentedXianxia.equipment.equipped_items.map((item) => (
+                      <article className="character-state-card" key={item.id}>
+                        <h4>{item.name}</h4>
+                        <p className="meta">{joinDisplay([item.item_nature, item.item_type, item.is_equipped ? "Equipped" : ""])}</p>
+                        {item.notes ? <p className="meta">{item.notes}</p> : null}
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="status status-neutral">No equipped Xianxia weapons, armor, or artifacts.</p>
+                )}
+                {presentedXianxia.equipment?.necessary_weapons?.length ? (
+                  <>
+                    <h4>Necessary weapons</h4>
+                    <div className="character-card-grid">
+                      {presentedXianxia.equipment.necessary_weapons.map((record) => renderXianxiaRecordCard(record, "Necessary Weapon"))}
+                    </div>
+                  </>
+                ) : null}
+                {presentedXianxia.equipment?.necessary_tools?.length ? (
+                  <>
+                    <h4>Necessary tools</h4>
+                    <div className="character-card-grid">
+                      {presentedXianxia.equipment.necessary_tools.map((record) => renderXianxiaRecordCard(record, "Necessary Tool"))}
+                    </div>
+                  </>
+                ) : null}
+              </section>
+            ) : null}
+
+            {isXianxia && activeCharacterSection === "inventory" ? (
+              <section className="session-character-form">
+                <h3>Inventory</h3>
+                {xianxiaInventory.length ? (
+                  <div className="character-card-grid">
+                    {xianxiaInventory.map((item) => {
+                      const draft = xianxiaInventoryDrafts[item.id] ?? xianxiaInventoryDraftFromItem(item);
+                      return (
+                        <article className="character-state-card" key={item.id}>
+                          <h4>{item.name}</h4>
+                          <p className="meta">{joinDisplay([`Qty ${item.quantity}`, item.item_nature, item.item_type, item.is_equipped ? "Equipped" : ""])}</p>
+                          {item.tags.length ? <p className="meta">{item.tags.join(", ")}</p> : null}
+                          {item.notes ? <p className="meta">{item.notes}</p> : null}
+                          {canEdit ? (
+                            <form onSubmit={(event) => submitXianxiaInventoryUpdate(event, item)} className="equipment-state-form">
+                              <label className="chat-label" htmlFor={`xianxia-inventory-name-${item.id}`}>
+                                Name
+                                <input
+                                  id={`xianxia-inventory-name-${item.id}`}
+                                  value={draft.name}
+                                  onChange={(event) =>
+                                    setXianxiaInventoryDrafts({
+                                      ...xianxiaInventoryDrafts,
+                                      [item.id]: { ...draft, name: event.currentTarget.value },
+                                    })
+                                  }
+                                />
+                              </label>
+                              <label className="chat-label" htmlFor={`xianxia-inventory-quantity-${item.id}`}>
+                                Quantity
+                                <input
+                                  id={`xianxia-inventory-quantity-${item.id}`}
+                                  type="number"
+                                  min="0"
+                                  value={draft.quantity}
+                                  onChange={(event) =>
+                                    setXianxiaInventoryDrafts({
+                                      ...xianxiaInventoryDrafts,
+                                      [item.id]: { ...draft, quantity: event.currentTarget.value },
+                                    })
+                                  }
+                                />
+                              </label>
+                              <label className="chat-label" htmlFor={`xianxia-inventory-nature-${item.id}`}>
+                                Nature
+                                <select
+                                  id={`xianxia-inventory-nature-${item.id}`}
+                                  value={draft.itemNature}
+                                  onChange={(event) =>
+                                    setXianxiaInventoryDrafts({
+                                      ...xianxiaInventoryDrafts,
+                                      [item.id]: { ...draft, itemNature: event.currentTarget.value },
+                                    })
+                                  }
+                                >
+                                  <option value="Mundane">Mundane</option>
+                                  <option value="Relic">Relic</option>
+                                </select>
+                              </label>
+                              <label className="chat-label" htmlFor={`xianxia-inventory-type-${item.id}`}>
+                                Type
+                                <select
+                                  id={`xianxia-inventory-type-${item.id}`}
+                                  value={draft.itemType}
+                                  onChange={(event) =>
+                                    setXianxiaInventoryDrafts({
+                                      ...xianxiaInventoryDrafts,
+                                      [item.id]: { ...draft, itemType: event.currentTarget.value },
+                                    })
+                                  }
+                                >
+                                  <option value="Weapon">Weapon</option>
+                                  <option value="Armor">Armor</option>
+                                  <option value="Artifact">Artifact</option>
+                                  <option value="Consumable">Consumable</option>
+                                  <option value="Miscellaneous">Miscellaneous</option>
+                                </select>
+                              </label>
+                              <label className="chat-label" htmlFor={`xianxia-inventory-tags-${item.id}`}>
+                                Tags
+                                <input
+                                  id={`xianxia-inventory-tags-${item.id}`}
+                                  value={draft.tags}
+                                  onChange={(event) =>
+                                    setXianxiaInventoryDrafts({
+                                      ...xianxiaInventoryDrafts,
+                                      [item.id]: { ...draft, tags: event.currentTarget.value },
+                                    })
+                                  }
+                                />
+                              </label>
+                              <label className="chat-label" htmlFor={`xianxia-inventory-notes-${item.id}`}>
+                                Notes
+                                <textarea
+                                  id={`xianxia-inventory-notes-${item.id}`}
+                                  rows={3}
+                                  value={draft.notes}
+                                  onChange={(event) =>
+                                    setXianxiaInventoryDrafts({
+                                      ...xianxiaInventoryDrafts,
+                                      [item.id]: { ...draft, notes: event.currentTarget.value },
+                                    })
+                                  }
+                                />
+                              </label>
+                              <label className="toggle-row">
+                                <input
+                                  type="checkbox"
+                                  checked={draft.equippable}
+                                  onChange={(event) =>
+                                    setXianxiaInventoryDrafts({
+                                      ...xianxiaInventoryDrafts,
+                                      [item.id]: { ...draft, equippable: event.currentTarget.checked },
+                                    })
+                                  }
+                                />
+                                Equippable
+                              </label>
+                              {draft.equippable ? (
+                                <label className="toggle-row">
+                                  <input
+                                    type="checkbox"
+                                    checked={draft.isEquipped}
+                                    onChange={(event) => {
+                                      const isEquipped = event.currentTarget.checked;
+                                      setXianxiaInventoryDrafts({
+                                        ...xianxiaInventoryDrafts,
+                                        [item.id]: { ...draft, isEquipped },
+                                      });
+                                      toggleXianxiaInventoryEquipped(item, isEquipped);
+                                    }}
+                                  />
+                                  Equipped
+                                </label>
+                              ) : null}
+                              <button type="submit" disabled={patchXianxiaInventoryItem.isPending}>
+                                {patchXianxiaInventoryItem.isPending ? "Saving..." : "Save item"}
+                              </button>
+                              <button
+                                type="button"
+                                className="button-danger"
+                                disabled={removeXianxiaInventoryItem.isPending}
+                                onClick={() => removeXianxiaInventory(item)}
+                              >
+                                {removeXianxiaInventoryItem.isPending ? "Removing..." : "Remove"}
+                              </button>
+                            </form>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="status status-neutral">No Xianxia inventory items.</p>
+                )}
+                {canEdit ? (
+                  <form onSubmit={submitXianxiaInventoryAdd} className="equipment-state-form">
+                    <h4>Add item</h4>
+                    <label className="chat-label" htmlFor="xianxia-new-item-name">
+                      Name
+                      <input
+                        id="xianxia-new-item-name"
+                        value={newXianxiaInventoryDraft.name}
+                        onChange={(event) => setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, name: event.currentTarget.value })}
+                      />
+                    </label>
+                    <label className="chat-label" htmlFor="xianxia-new-item-quantity">
+                      Quantity
+                      <input
+                        id="xianxia-new-item-quantity"
+                        type="number"
+                        min="0"
+                        value={newXianxiaInventoryDraft.quantity}
+                        onChange={(event) => setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, quantity: event.currentTarget.value })}
+                      />
+                    </label>
+                    <label className="chat-label" htmlFor="xianxia-new-item-nature">
+                      Nature
+                      <select
+                        id="xianxia-new-item-nature"
+                        value={newXianxiaInventoryDraft.itemNature}
+                        onChange={(event) => setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, itemNature: event.currentTarget.value })}
+                      >
+                        <option value="Mundane">Mundane</option>
+                        <option value="Relic">Relic</option>
+                      </select>
+                    </label>
+                    <label className="chat-label" htmlFor="xianxia-new-item-type">
+                      Type
+                      <select
+                        id="xianxia-new-item-type"
+                        value={newXianxiaInventoryDraft.itemType}
+                        onChange={(event) => setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, itemType: event.currentTarget.value })}
+                      >
+                        <option value="Weapon">Weapon</option>
+                        <option value="Armor">Armor</option>
+                        <option value="Artifact">Artifact</option>
+                        <option value="Consumable">Consumable</option>
+                        <option value="Miscellaneous">Miscellaneous</option>
+                      </select>
+                    </label>
+                    <label className="chat-label" htmlFor="xianxia-new-item-tags">
+                      Tags
+                      <input
+                        id="xianxia-new-item-tags"
+                        value={newXianxiaInventoryDraft.tags}
+                        onChange={(event) => setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, tags: event.currentTarget.value })}
+                      />
+                    </label>
+                    <label className="chat-label" htmlFor="xianxia-new-item-notes">
+                      Notes
+                      <textarea
+                        id="xianxia-new-item-notes"
+                        rows={3}
+                        value={newXianxiaInventoryDraft.notes}
+                        onChange={(event) => setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, notes: event.currentTarget.value })}
+                      />
+                    </label>
+                    <label className="toggle-row">
+                      <input
+                        type="checkbox"
+                        checked={newXianxiaInventoryDraft.equippable}
+                        onChange={(event) => setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, equippable: event.currentTarget.checked })}
+                      />
+                      Equippable
+                    </label>
+                    {newXianxiaInventoryDraft.equippable ? (
+                      <label className="toggle-row">
+                        <input
+                          type="checkbox"
+                          checked={newXianxiaInventoryDraft.isEquipped}
+                          onChange={(event) => setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, isEquipped: event.currentTarget.checked })}
+                        />
+                        Equipped
+                      </label>
+                    ) : null}
+                    <button type="submit" disabled={addXianxiaInventoryItem.isPending}>
+                      {addXianxiaInventoryItem.isPending ? "Adding..." : "Add item"}
+                    </button>
+                  </form>
+                ) : null}
+                <form onSubmit={submitCurrency} className="currency-grid">
+                  {(xianxiaCurrency.length ? xianxiaCurrency : [
+                    { key: "coin", label: "Coin", amount: readNumber(currency.coin) },
+                    { key: "supply", label: "Supply", amount: readNumber(currency.supply) },
+                    { key: "spirit_stones", label: "Spirit Stones", amount: readNumber(currency.spirit_stones) },
+                  ]).map((entry) => (
+                    <label key={entry.key} className="chat-label" htmlFor={`currency-${entry.key}`}>
+                      {entry.label}
+                      <input
+                        id={`currency-${entry.key}`}
+                        type="number"
+                        min="0"
+                        value={currencyDraft[entry.key] ?? String(entry.amount ?? 0)}
+                        disabled={!canEdit}
+                        onChange={(event) => setCurrencyDraft({ ...currencyDraft, [entry.key]: event.currentTarget.value })}
+                      />
+                    </label>
+                  ))}
+                  <button type="submit" disabled={patchCurrency.isPending || !canEdit}>
+                    {patchCurrency.isPending ? "Saving..." : "Save currency"}
+                  </button>
+                </form>
+              </section>
+            ) : null}
+
+            {isXianxia && activeCharacterSection === "personal" ? (
+              <section className="session-character-form">
+                <h3>Personal</h3>
+                <div className="stat-grid">
+                  <article>
+                    <strong>Species</strong>
+                    <span>{readString(profile.species, selected.species || "--")}</span>
+                  </article>
+                  <article>
+                    <strong>Background</strong>
+                    <span>{readString(profile.background, selected.background || "--")}</span>
+                  </article>
+                </div>
+                {readString(profile.biography_markdown) ? <pre className="article-body markdown-body">{readString(profile.biography_markdown)}</pre> : null}
+                {readString(profile.personality_markdown) ? <pre className="article-body markdown-body">{readString(profile.personality_markdown)}</pre> : null}
+              </section>
             ) : null}
 
             {isDnd && activeCharacterSection === "overview" ? (
@@ -2112,7 +3092,7 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
               </section>
             ) : null}
 
-            {(!isDnd || activeCharacterSection === "notes") ? (
+            {((isDnd || isXianxia) ? activeCharacterSection === "notes" : !isDnd) ? (
               <section className="session-character-form">
                 <h3>Player notes</h3>
                 <form onSubmit={submitNotes}>
@@ -2135,7 +3115,7 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
               </section>
             ) : null}
 
-            {!isDnd ? (
+            {!isDnd && !isXianxia ? (
               <section className="session-character-form">
                 <h3>{characterSystem(detailRecord)}</h3>
                 <div className="stat-grid">

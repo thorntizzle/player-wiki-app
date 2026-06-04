@@ -17,6 +17,11 @@ import type {
   CharacterSpellSlotsPatchPayload,
   CharacterVitalsPatchPayload,
   CharacterVitalsPatchResponse,
+  CharacterXianxiaActiveStatePatchPayload,
+  CharacterXianxiaInventoryAddPayload,
+  CharacterXianxiaInventoryEquippedPatchPayload,
+  CharacterXianxiaInventoryRemovePayload,
+  CharacterXianxiaInventoryUpdatePayload,
   MessagePostResponse,
   SessionArticleCreatePayload,
   SessionArticleCreateResponse,
@@ -375,6 +380,89 @@ export class CampaignApiClient {
       `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
         characterSlug,
       )}/session/feature-states/${encodeURIComponent(featureKey)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async patchCharacterXianxiaActiveState(
+    slug: string,
+    characterSlug: string,
+    payload: CharacterXianxiaActiveStatePatchPayload,
+  ): Promise<CharacterVitalsPatchResponse> {
+    return this.requestJson<CharacterVitalsPatchResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
+        characterSlug,
+      )}/session/xianxia-active-state`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async addCharacterXianxiaInventoryItem(
+    slug: string,
+    characterSlug: string,
+    payload: CharacterXianxiaInventoryAddPayload,
+  ): Promise<CharacterVitalsPatchResponse> {
+    return this.requestJson<CharacterVitalsPatchResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
+        characterSlug,
+      )}/session/xianxia-inventory`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async patchCharacterXianxiaInventoryItem(
+    slug: string,
+    characterSlug: string,
+    itemId: string,
+    payload: CharacterXianxiaInventoryUpdatePayload,
+  ): Promise<CharacterVitalsPatchResponse> {
+    return this.requestJson<CharacterVitalsPatchResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
+        characterSlug,
+      )}/session/xianxia-inventory/${encodeURIComponent(itemId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async removeCharacterXianxiaInventoryItem(
+    slug: string,
+    characterSlug: string,
+    itemId: string,
+    payload: CharacterXianxiaInventoryRemovePayload,
+  ): Promise<CharacterVitalsPatchResponse> {
+    return this.requestJson<CharacterVitalsPatchResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
+        characterSlug,
+      )}/session/xianxia-inventory/${encodeURIComponent(itemId)}`,
+      {
+        method: "DELETE",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async patchCharacterXianxiaInventoryEquipped(
+    slug: string,
+    characterSlug: string,
+    itemId: string,
+    payload: CharacterXianxiaInventoryEquippedPatchPayload,
+  ): Promise<CharacterVitalsPatchResponse> {
+    return this.requestJson<CharacterVitalsPatchResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
+        characterSlug,
+      )}/session/xianxia-inventory/${encodeURIComponent(itemId)}/equipped`,
       {
         method: "PATCH",
         body: JSON.stringify(payload),

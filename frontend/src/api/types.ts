@@ -300,6 +300,95 @@ export interface CharacterPresentedInventoryItem {
   tags: string[];
 }
 
+export interface CharacterXianxiaNamedRecord {
+  name: string;
+  href?: string;
+  body_html?: string;
+  description_html?: string;
+  current_rank_label?: string;
+  source_label?: string;
+  rank_progress_label?: string;
+  notes?: string;
+  status?: string;
+  type?: string;
+  reason?: string;
+}
+
+export interface CharacterXianxiaPool {
+  key: string;
+  label: string;
+  current: number;
+  max: number;
+  temp?: number;
+}
+
+export interface CharacterXianxiaInventoryItem {
+  id: string;
+  name: string;
+  quantity: number;
+  item_nature: string;
+  item_type: string;
+  notes: string;
+  tags: string[];
+  catalog_ref?: string;
+  equippable: boolean;
+  is_equipped: boolean;
+  systems_ref?: Record<string, unknown> | null;
+}
+
+export interface CharacterPresentedXianxia {
+  system_label?: string;
+  subpages?: Array<{ slug: string; label: string }>;
+  identity?: Record<string, unknown>;
+  attributes?: Array<{ key: string; label: string; score: number }>;
+  efforts?: Array<{ key: string; label: string; score: number; damage?: string }>;
+  resources?: {
+    durability?: CharacterXianxiaPool[];
+    energies?: CharacterXianxiaPool[];
+    yin_yang?: CharacterXianxiaPool[];
+    dao?: { current: number; max: number };
+    insight?: { available: number; spent: number };
+  };
+  skills?: {
+    trained?: Array<{ name: string }>;
+  };
+  equipment?: {
+    manual_armor_bonus?: number;
+    defense?: number;
+    equipped_items?: CharacterXianxiaInventoryItem[];
+    equipped_weapons?: CharacterXianxiaInventoryItem[];
+    equipped_armor?: CharacterXianxiaInventoryItem[];
+    equipped_artifacts?: CharacterXianxiaInventoryItem[];
+    necessary_weapons?: CharacterXianxiaNamedRecord[];
+    necessary_tools?: CharacterXianxiaNamedRecord[];
+  };
+  martial_arts?: CharacterXianxiaNamedRecord[];
+  generic_techniques?: CharacterXianxiaNamedRecord[];
+  basic_actions?: CharacterXianxiaNamedRecord[];
+  inventory?: {
+    enabled?: boolean;
+    currency?: Array<{ key: string; label: string; amount: number; description?: string }>;
+    quantities?: CharacterXianxiaInventoryItem[];
+  };
+  approval?: {
+    variants?: CharacterXianxiaNamedRecord[];
+    dao_immolating_prepared?: CharacterXianxiaNamedRecord[];
+    dao_immolating_use_history?: CharacterXianxiaNamedRecord[];
+    approval_requests?: CharacterXianxiaNamedRecord[];
+    status_groups?: Array<{
+      key: string;
+      title: string;
+      empty_message: string;
+      records: CharacterXianxiaNamedRecord[];
+    }>;
+  };
+  active_state?: {
+    stance?: { label?: string; name?: string; status_label?: string };
+    aura?: { label?: string; name?: string; status_label?: string };
+  };
+  quick_reference?: Record<string, unknown>;
+}
+
 export interface CharacterStateRecord {
   campaign_slug: string;
   character_slug: string;
@@ -317,6 +406,7 @@ export interface CharacterRecord {
   arcane_armor_state?: CharacterArcaneArmorState;
   presented_spellcasting?: CharacterPresentedSpellcasting;
   presented_inventory?: CharacterPresentedInventoryItem[];
+  presented_xianxia?: CharacterPresentedXianxia;
   permissions: CharacterPermissions;
 }
 
@@ -333,6 +423,14 @@ export interface CharacterVitalsPatchPayload {
   expected_revision: number;
   current_hp?: number | null;
   temp_hp?: number | null;
+  current_stance?: number | null;
+  temp_stance?: number | null;
+  current_jing?: number | null;
+  current_qi?: number | null;
+  current_shen?: number | null;
+  current_yin?: number | null;
+  current_yang?: number | null;
+  current_dao?: number | null;
 }
 
 export interface CharacterResourcePatchPayload {
@@ -373,6 +471,45 @@ export interface CharacterCurrencyPatchPayload {
   coin?: number | null;
   supply?: number | null;
   spirit_stones?: number | null;
+}
+
+export interface CharacterXianxiaActiveStatePatchPayload {
+  expected_revision: number;
+  active_stance_name?: string;
+  active_aura_name?: string;
+}
+
+export interface CharacterXianxiaInventoryItemPayload {
+  id?: string;
+  name: string;
+  quantity?: number | null;
+  item_nature?: string;
+  item_type?: string;
+  notes?: string;
+  tags?: string[];
+  catalog_ref?: string;
+  systems_ref?: Record<string, unknown> | null;
+  equippable?: boolean;
+  is_equipped?: boolean;
+}
+
+export interface CharacterXianxiaInventoryAddPayload {
+  expected_revision: number;
+  item: CharacterXianxiaInventoryItemPayload;
+}
+
+export interface CharacterXianxiaInventoryUpdatePayload {
+  expected_revision: number;
+  item: CharacterXianxiaInventoryItemPayload;
+}
+
+export interface CharacterXianxiaInventoryEquippedPatchPayload {
+  expected_revision: number;
+  is_equipped: boolean;
+}
+
+export interface CharacterXianxiaInventoryRemovePayload {
+  expected_revision: number;
 }
 
 export interface CharacterNotesPatchPayload {

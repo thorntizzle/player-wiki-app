@@ -99,7 +99,7 @@ from .systems_labels import (
     systems_entry_type_sort_key,
 )
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError
-from .system_policy import supports_combat_tracker, supports_native_character_tools
+from .system_policy import is_xianxia_system, supports_combat_tracker, supports_native_character_tools
 from .version import build_app_metadata
 
 def register_api(app) -> None:
@@ -1251,6 +1251,7 @@ def register_api(app) -> None:
             "arcane_armor_state": equipment_state.get("arcane_armor_state"),
             "presented_spellcasting": dict(presented_character.get("spellcasting") or {}),
             "presented_inventory": list(presented_character.get("inventory") or []),
+            "presented_xianxia": dict(presented_character.get("xianxia_read") or {}),
             "permissions": {
                 "can_edit_session": has_session_mode_access(campaign_slug, record.definition.character_slug),
             },
@@ -3411,6 +3412,14 @@ def register_api(app) -> None:
                 expected_revision=int(payload.get("expected_revision")),
                 current_hp=payload.get("current_hp"),
                 temp_hp=payload.get("temp_hp"),
+                current_stance=payload.get("current_stance"),
+                temp_stance=payload.get("temp_stance"),
+                current_jing=payload.get("current_jing"),
+                current_qi=payload.get("current_qi"),
+                current_shen=payload.get("current_shen"),
+                current_yin=payload.get("current_yin"),
+                current_yang=payload.get("current_yang"),
+                current_dao=payload.get("current_dao"),
                 hp_delta=payload.get("hp_delta"),
                 temp_hp_delta=payload.get("temp_hp_delta"),
                 clear_temp_hp=bool(payload.get("clear_temp_hp")),
@@ -3457,15 +3466,126 @@ def register_api(app) -> None:
     @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_inventory_update(campaign_slug: str, character_slug: str, item_id: str):
-        return run_character_mutation(
-            campaign_slug,
-            character_slug,
-            lambda record, payload, user_id: get_character_state_service().update_inventory_quantity(
+        def update_inventory(record, payload, user_id):
+            if is_xianxia_system(record.definition.system):
+                return get_character_state_service().update_xianxia_inventory_quantity(
+                    record,
+                    item_id,
+                    expected_revision=int(payload.get("expected_revision")),
+                    quantity=payload.get("quantity"),
+                    delta=payload.get("delta"),
+                    updated_by_user_id=user_id,
+                )
+            return get_character_state_service().update_inventory_quantity(
                 record,
                 item_id,
                 expected_revision=int(payload.get("expected_revision")),
                 quantity=payload.get("quantity"),
                 delta=payload.get("delta"),
+                updated_by_user_id=user_id,
+            )
+
+        return run_character_mutation(
+            campaign_slug,
+            character_slug,
+            update_inventory,
+        )
+
+    def xianxia_inventory_item_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        item = payload.get("item")
+        if isinstance(item, dict):
+            source = item
+        else:
+            source = payload
+        item_payload: dict[str, Any] = {
+            "id": str(source.get("id") or source.get("item_id") or "").strip(),
+            "name": str(source.get("name") or "").strip(),
+            "quantity": source.get("quantity", 1),
+            "item_nature": str(source.get("item_nature") or "").strip(),
+            "item_type": str(source.get("item_type") or "").strip(),
+            "notes": str(source.get("notes") or "").strip(),
+            "tags": source.get("tags", []),
+            "catalog_ref": str(source.get("catalog_ref") or "").strip(),
+            "systems_ref": source.get("systems_ref"),
+            "equippable": source.get("equippable"),
+            "is_equipped": source.get("is_equipped"),
+        }
+        return {key: value for key, value in item_payload.items() if value not in ("", None)}
+
+    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-active-state")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_xianxia_active_state_update(campaign_slug: str, character_slug: str):
+        return run_character_mutation(
+            campaign_slug,
+            character_slug,
+            lambda record, payload, user_id: get_character_state_service().update_xianxia_active_state(
+                record,
+                expected_revision=int(payload.get("expected_revision")),
+                active_stance_name=payload.get("active_stance_name"),
+                active_aura_name=payload.get("active_aura_name"),
+                updated_by_user_id=user_id,
+            ),
+        )
+
+    @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_xianxia_inventory_add(campaign_slug: str, character_slug: str):
+        return run_character_mutation(
+            campaign_slug,
+            character_slug,
+            lambda record, payload, user_id: get_character_state_service().add_xianxia_inventory_item(
+                record,
+                xianxia_inventory_item_payload(payload),
+                expected_revision=int(payload.get("expected_revision")),
+                updated_by_user_id=user_id,
+            ),
+        )
+
+    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_xianxia_inventory_item_update(campaign_slug: str, character_slug: str, item_id: str):
+        return run_character_mutation(
+            campaign_slug,
+            character_slug,
+            lambda record, payload, user_id: get_character_state_service().update_xianxia_inventory_item(
+                record,
+                item_id,
+                xianxia_inventory_item_payload(payload),
+                expected_revision=int(payload.get("expected_revision")),
+                updated_by_user_id=user_id,
+            ),
+        )
+
+    @api.delete("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_xianxia_inventory_item_remove(campaign_slug: str, character_slug: str, item_id: str):
+        return run_character_mutation(
+            campaign_slug,
+            character_slug,
+            lambda record, payload, user_id: get_character_state_service().remove_xianxia_inventory_item(
+                record,
+                item_id,
+                expected_revision=int(payload.get("expected_revision")),
+                updated_by_user_id=user_id,
+            ),
+        )
+
+    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/equipped")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_xianxia_inventory_equipped_update(campaign_slug: str, character_slug: str, item_id: str):
+        return run_character_mutation(
+            campaign_slug,
+            character_slug,
+            lambda record, payload, user_id: get_character_state_service().update_xianxia_inventory_equipped_state(
+                record,
+                item_id,
+                expected_revision=int(payload.get("expected_revision")),
+                is_equipped=bool(payload.get("is_equipped")),
                 updated_by_user_id=user_id,
             ),
         )
