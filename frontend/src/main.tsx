@@ -54,6 +54,12 @@ import type {
   SessionPayload,
   SessionWikiLookupPreviewResponse,
   SessionWikiLookupSearchResult,
+  WikiHomeResponse,
+  WikiPageDetail,
+  WikiPageResponse,
+  WikiPageSummary,
+  WikiSectionResponse,
+  WikiSubsectionGroup,
 } from "./api/types";
 import {
   coerceSessionPane,
@@ -704,6 +710,10 @@ function AppShell() {
   }, [apiToken, campaignQuery.error, meQuery.error, setAuthRequired]);
 
   useEffect(() => {
+    setCampaignSearchQuery(new URLSearchParams(window.location.search).get("q") || "");
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
     const themeKey = meQuery.data?.preferences?.theme_key;
     if (themeKey) {
       document.documentElement.dataset.theme = themeKey;
@@ -719,9 +729,9 @@ function AppShell() {
   const navItems = useMemo(
     () => [
       {
-        href: `/campaigns/${encodedCampaignSlug}`,
+        href: `/app-next/campaigns/${encodedCampaignSlug}`,
         label: "Campaign Home",
-        isGen2: false,
+        isGen2: true,
         show: campaignVisibilityCanAccess(campaignVisibility, "campaign"),
       },
       {
@@ -781,7 +791,7 @@ function AppShell() {
   );
 
   const visibleNavItems = navItems.filter((entry) => entry.show);
-  const campaignSearchAction = campaignSlug ? `/campaigns/${encodedCampaignSlug}` : "";
+  const campaignSearchAction = campaignSlug ? `/app-next/campaigns/${encodedCampaignSlug}` : "";
   const nextUrl = `${window.location.pathname}${window.location.search}`;
   const signInHref = `/sign-in?next=${encodeURIComponent(nextUrl)}`;
 
@@ -944,9 +954,14 @@ function CampaignListPage() {
             <p>
               <strong>Role:</strong> {entry.role}
             </p>
-            <Link to="/campaigns/$campaignSlug/session" params={{ campaignSlug: entry.campaign.slug }} className="button">
-              Open Session
-            </Link>
+            <div className="article-actions">
+              <a className="button" href={`/app-next/campaigns/${encodeURIComponent(entry.campaign.slug)}`}>
+                Open Campaign
+              </a>
+              <Link to="/campaigns/$campaignSlug/session" params={{ campaignSlug: entry.campaign.slug }} className="button button-secondary">
+                Open Session
+              </Link>
+            </div>
           </article>
         ))}
         {!appQuery.isLoading && !campaignsQuery.isLoading && !campaigns.length && !campaignError ? (
@@ -956,6 +971,374 @@ function CampaignListPage() {
     </section>
   );
 }
+
+function splitPinnedPages(pages: WikiPageSummary[]): { pinned: WikiPageSummary[]; regular: WikiPageSummary[] } {
+  return {
+    pinned: pages.filter((page) => page.is_pinned),
+    regular: pages.filter((page) => !page.is_pinned),
+  };
+}
+
+function WikiPageCard({
+  page,
+  featured = false,
+}: {
+  page: WikiPageSummary;
+  featured?: boolean;
+}) {
+  return (
+    <article className={featured ? "card page-card page-card--featured" : "card page-card"}>
+      <p className="card-kicker">
+        {page.subsection ? `${page.subsection} / ` : ""}
+        {page.display_type}
+      </p>
+      <h3>
+        <a href={page.href}>{page.title}</a>
+      </h3>
+      {page.summary ? <p className={featured ? "page-card__summary" : ""}>{page.summary}</p> : null}
+    </article>
+  );
+}
+
+function WikiPageGrid({
+  pages,
+  featured = false,
+}: {
+  pages: WikiPageSummary[];
+  featured?: boolean;
+}) {
+  if (!pages.length) {
+    return null;
+  }
+  return (
+    <div className={featured ? "page-stack page-stack--featured" : "grid"}>
+      {pages.map((page) => (
+        <WikiPageCard key={page.page_ref} page={page} featured={featured} />
+      ))}
+    </div>
+  );
+}
+
+function WikiSectionBrowse({
+  data,
+}: {
+  data: WikiHomeResponse;
+}) {
+  if (!data.grouped_sections.length) {
+    return null;
+  }
+  return (
+    <section className="wiki-section-browse">
+      <div className="section-heading">
+        <h2>{data.query ? "Search Results" : "Browse By Section"}</h2>
+        <p className="meta">
+          {data.query
+            ? `${data.result_count} match${data.result_count === 1 ? "" : "es"}`
+            : `${data.grouped_sections.length} section${data.grouped_sections.length === 1 ? "" : "s"}`}
+        </p>
+      </div>
+      <div className="grid">
+        {data.grouped_sections.map((section) =>
+          data.query ? (
+            section.pages.map((page) => <WikiPageCard key={page.page_ref} page={page} />)
+          ) : (
+            <article className="card page-card section-card" key={section.section_slug}>
+              <p className="card-kicker">Section</p>
+              <h3>
+                <a href={section.href}>{section.section_name}</a>
+              </h3>
+              <p>
+                {section.page_count} page{section.page_count === 1 ? "" : "s"} available in this section.
+              </p>
+              <p>
+                <a href={section.href}>Open {section.section_name}</a>
+              </p>
+            </article>
+          ),
+        )}
+      </div>
+    </section>
+  );
+}
+
+function WikiHomePage() {
+  const { campaignSlug } = useParams({
+    from: "/campaigns/$campaignSlug",
+  });
+  const resolvedCampaignSlug = campaignSlug ?? "";
+  const { apiClient, setAuthRequired } = useApiClient();
+  const query = new URLSearchParams(window.location.search).get("q") || "";
+
+  const wikiQuery = useQuery({
+    queryKey: ["wiki-home", resolvedCampaignSlug, query],
+    queryFn: () => apiClient.getWikiHome(resolvedCampaignSlug, query),
+    enabled: Boolean(resolvedCampaignSlug),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (isAuthError(wikiQuery.error)) {
+      setAuthRequired(true);
+    }
+  }, [wikiQuery.error, setAuthRequired]);
+
+  const error = getApiErrorMessage(wikiQuery.error);
+  const data = wikiQuery.data;
+
+  return (
+    <section className="panel wiki-home">
+      <div className="panel-header">
+        <div>
+          <p className="meta">Campaign</p>
+          <h1>Campaign Home</h1>
+        </div>
+        {data?.links.flask_campaign_url ? (
+          <a className="button button-secondary" href={data.links.flask_campaign_url}>
+            Flask view
+          </a>
+        ) : null}
+      </div>
+      <ApiErrorNotice isLoading={wikiQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
+      {data ? (
+        <>
+          <p className="lede">{data.campaign.summary}</p>
+          {!data.can_view_wiki ? (
+            <section className="card">
+              <h2>Wiki visibility restricted</h2>
+              <p>{data.message}</p>
+            </section>
+          ) : data.grouped_sections.length ? (
+            <>
+              {!data.query && data.overview_page ? (
+                <article className="article card wiki-overview-card">
+                  <p className="eyebrow">{data.overview_page.display_type} in {data.overview_page.section}</p>
+                  <h2>
+                    <a href={data.overview_page.href}>{data.overview_page.title}</a>
+                  </h2>
+                  {data.overview_page.summary ? <p className="lede">{data.overview_page.summary}</p> : null}
+                  <div className="article-body html-body" dangerouslySetInnerHTML={{ __html: data.overview_page.body_html }} />
+                </article>
+              ) : null}
+              <WikiSectionBrowse data={data} />
+            </>
+          ) : (
+            <section className="card">
+              {data.query ? (
+                <>
+                  <h2>No matching pages</h2>
+                  <p>Try a broader search term or remove the query.</p>
+                </>
+              ) : (
+                <>
+                  <h2>No visible pages yet</h2>
+                  <p>This campaign does not currently have any published pages available to players.</p>
+                </>
+              )}
+            </section>
+          )}
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function WikiSectionPage() {
+  const { campaignSlug, sectionSlug } = useParams({
+    from: "/campaigns/$campaignSlug/sections/$sectionSlug",
+  });
+  const resolvedCampaignSlug = campaignSlug ?? "";
+  const resolvedSectionSlug = sectionSlug ?? "";
+  const { apiClient, setAuthRequired } = useApiClient();
+  const [collapsedSubsections, setCollapsedSubsections] = useState<Set<string>>(() => new Set());
+
+  const sectionQuery = useQuery({
+    queryKey: ["wiki-section", resolvedCampaignSlug, resolvedSectionSlug],
+    queryFn: () => apiClient.getWikiSection(resolvedCampaignSlug, resolvedSectionSlug),
+    enabled: Boolean(resolvedCampaignSlug && resolvedSectionSlug),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (isAuthError(sectionQuery.error)) {
+      setAuthRequired(true);
+    }
+  }, [sectionQuery.error, setAuthRequired]);
+
+  useEffect(() => {
+    setCollapsedSubsections(new Set());
+  }, [resolvedCampaignSlug, resolvedSectionSlug]);
+
+  const data = sectionQuery.data;
+  const error = getApiErrorMessage(sectionQuery.error);
+  const topLevel = splitPinnedPages(data?.top_level_pages ?? []);
+  const allPages = splitPinnedPages(data?.pages ?? []);
+
+  const setAllSubsectionsOpen = (open: boolean) => {
+    if (!data) {
+      return;
+    }
+    setCollapsedSubsections(open ? new Set() : new Set(data.subsection_groups.map((group) => group.subsection_name)));
+  };
+
+  const setSubsectionOpen = (group: WikiSubsectionGroup, open: boolean) => {
+    const next = new Set(collapsedSubsections);
+    if (open) {
+      next.delete(group.subsection_name);
+    } else {
+      next.add(group.subsection_name);
+    }
+    setCollapsedSubsections(next);
+  };
+
+  return (
+    <section className="panel wiki-section-page">
+      <div className="panel-header">
+        <div>
+          <p className="meta">Section</p>
+          <h1>{data?.section_name ?? resolvedSectionSlug}</h1>
+          <p className="lede">Published player-facing pages in this section.</p>
+        </div>
+        <div className="article-actions">
+          <a className="button button-secondary" href={`/app-next/campaigns/${encodeURIComponent(resolvedCampaignSlug)}`}>
+            Campaign Home
+          </a>
+          {data?.links.flask_section_url ? (
+            <a className="button button-secondary" href={data.links.flask_section_url}>
+              Flask view
+            </a>
+          ) : null}
+        </div>
+      </div>
+      <ApiErrorNotice isLoading={sectionQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
+      {data ? (
+        data.show_subsections ? (
+          <>
+            <div className="section-list__controls">
+              <button className="ghost-button section-list__control" type="button" onClick={() => setAllSubsectionsOpen(false)}>
+                Collapse all
+              </button>
+              <button className="ghost-button section-list__control" type="button" onClick={() => setAllSubsectionsOpen(true)}>
+                Expand all
+              </button>
+            </div>
+            <WikiPageGrid pages={topLevel.pinned} featured />
+            <WikiPageGrid pages={topLevel.regular} />
+            <section className="section-list">
+              {data.subsection_groups.map((group) => {
+                const split = splitPinnedPages(group.pages);
+                const isOpen = !collapsedSubsections.has(group.subsection_name);
+                return (
+                  <details
+                    className="section-block section-block--collapsible"
+                    key={group.subsection_name}
+                    open={isOpen}
+                    onToggle={(event) => setSubsectionOpen(group, event.currentTarget.open)}
+                  >
+                    <summary className="section-toggle-summary">
+                      <span className="section-toggle-summary__content">
+                        <span className="section-title">{group.subsection_name}</span>
+                        <span className="meta">
+                          {group.page_count} page{group.page_count === 1 ? "" : "s"}
+                        </span>
+                      </span>
+                      <span className="section-toggle-chevron" aria-hidden="true"></span>
+                    </summary>
+                    <div className="section-block__body">
+                      <WikiPageGrid pages={split.pinned} featured />
+                      <WikiPageGrid pages={split.regular} />
+                    </div>
+                  </details>
+                );
+              })}
+            </section>
+          </>
+        ) : (
+          <>
+            <WikiPageGrid pages={allPages.pinned} featured />
+            <WikiPageGrid pages={allPages.regular} />
+          </>
+        )
+      ) : null}
+    </section>
+  );
+}
+
+function WikiArticlePage() {
+  const params = useParams({
+    from: "/campaigns/$campaignSlug/pages/$",
+  });
+  const campaignSlug = params.campaignSlug ?? "";
+  const pageSlug = params._splat ?? "";
+  const { apiClient, setAuthRequired } = useApiClient();
+
+  const pageQuery = useQuery({
+    queryKey: ["wiki-page", campaignSlug, pageSlug],
+    queryFn: () => apiClient.getWikiPage(campaignSlug, pageSlug),
+    enabled: Boolean(campaignSlug && pageSlug),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (isAuthError(pageQuery.error)) {
+      setAuthRequired(true);
+    }
+  }, [pageQuery.error, setAuthRequired]);
+
+  const data: WikiPageResponse | undefined = pageQuery.data;
+  const page: WikiPageDetail | undefined = data?.page;
+  const error = getApiErrorMessage(pageQuery.error);
+  const showSummary = page?.summary && !["item", "spell", "mechanic"].includes(page.page_type);
+
+  return (
+    <section className="wiki-article-shell">
+      <ApiErrorNotice isLoading={pageQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
+      {page ? (
+        <div className="page-layout">
+          <article className="article card">
+            <h1>{page.title}</h1>
+            {showSummary ? <p className="lede">{page.summary}</p> : null}
+            {page.image ? (
+              <figure className="article-figure">
+                <img className="article-image" src={page.image.url} alt={page.image.alt_text || page.title} />
+                {page.image.caption ? <figcaption className="meta article-image__caption">{page.image.caption}</figcaption> : null}
+              </figure>
+            ) : null}
+            <div className="article-body html-body" dangerouslySetInnerHTML={{ __html: page.body_html }} />
+          </article>
+          <aside className="sidebar">
+            <section className="card sidebar-card">
+              <h2>Context</h2>
+              <p className="meta">
+                Campaign: <a href={data?.links.gen2_campaign_url}>{data?.campaign.title}</a>
+              </p>
+              <p className="meta">
+                Section: <a href={data?.links.gen2_section_url}>{page.section}</a>
+              </p>
+              {data?.links.flask_page_url ? (
+                <p className="meta">
+                  Fallback: <a href={data.links.flask_page_url}>Open Flask page</a>
+                </p>
+              ) : null}
+            </section>
+            {data?.backlinks.length ? (
+              <section className="card sidebar-card">
+                <h2>Linked From</h2>
+                <ul className="plain-list">
+                  {data.backlinks.map((backlink) => (
+                    <li key={backlink.page_ref}>
+                      <a href={backlink.href}>{backlink.title}</a>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+          </aside>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function SessionArticlesPanel({
   campaignSlug,
   articles,
@@ -4416,13 +4799,37 @@ const campaignsRoute = createRoute({
   component: CampaignListPage,
 });
 
+const campaignHomeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/campaigns/$campaignSlug",
+  component: WikiHomePage,
+});
+
+const campaignWikiSectionRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/campaigns/$campaignSlug/sections/$sectionSlug",
+  component: WikiSectionPage,
+});
+
+const campaignWikiPageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/campaigns/$campaignSlug/pages/$",
+  component: WikiArticlePage,
+});
+
 const campaignSessionRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/campaigns/$campaignSlug/session",
   component: SessionPage,
 });
 
-const routeTree = rootRoute.addChildren([campaignsRoute, campaignSessionRoute]);
+const routeTree = rootRoute.addChildren([
+  campaignsRoute,
+  campaignHomeRoute,
+  campaignWikiSectionRoute,
+  campaignWikiPageRoute,
+  campaignSessionRoute,
+]);
 const router = createRouter({
   routeTree,
   basepath: "/app-next",

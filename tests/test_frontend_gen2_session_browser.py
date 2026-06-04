@@ -106,6 +106,68 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             browser.close()
 
 
+def test_gen2_wiki_browser_exposes_home_section_page_and_assets(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["party"]["email"], password=users["party"]["password"])
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass")
+            expect(page.get_by_role("heading", name="Campaign Home")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("heading", name="Echoes of the Alloy Coast")).to_be_visible(timeout=10000)
+            expect(page.get_by_text("Welcome to the shared player briefing")).to_be_visible()
+            expect(page.get_by_role("heading", name="Browse By Section")).to_be_visible()
+            expect(page.get_by_role("link", name="Locations").first).to_be_visible()
+
+            page.get_by_label("Search", exact=True).fill("capt")
+            page.get_by_role("button", name="Search").click()
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass\?q=capt$"), timeout=5000)
+            expect(page.get_by_role("heading", name="Search Results")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("link", name="Captain Lyra Vale").first).to_be_visible()
+
+            page.get_by_role("link", name="Captain Lyra Vale").first.click()
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale$"), timeout=5000)
+            expect(page.get_by_role("heading", name="Captain Lyra Vale")).to_be_visible(timeout=10000)
+            expect(page.get_by_text("Captain Lyra Vale coordinates inspections")).to_be_visible()
+            image = page.locator("article img.article-image")
+            expect(image).to_be_visible()
+            image_src = image.get_attribute("src")
+            assert image_src is not None
+            assert image_src.endswith("/campaigns/linden-pass/assets/npcs/captain-lyra-vale.png")
+            asset_response = page.request.get(f"{base_url}/campaigns/linden-pass/assets/npcs/captain-lyra-vale.png")
+            assert asset_response.status == 200
+            assert asset_response.headers.get("content-type", "").startswith("image/")
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/sections/locations")
+            expect(page.get_by_role("heading", name="Locations")).to_be_visible(timeout=10000)
+            civic_details = page.locator("details", has_text="Civic and Institutional Sites")
+            expect(civic_details).to_be_visible()
+            assert civic_details.evaluate("(element) => element.open") is True
+            page.get_by_role("button", name="Collapse all").click()
+            assert civic_details.evaluate("(element) => element.open") is False
+            page.get_by_role("button", name="Expand all").click()
+            assert civic_details.evaluate("(element) => element.open") is True
+            expect(page.get_by_role("link", name="Tidewatch Hall")).to_be_visible()
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_gen2_session_preserves_local_state_across_live_polling(
     frontend_gen2_session_live_server,
     users,

@@ -203,6 +203,12 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
 }
 
+.grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
 .card {
   border: 1px solid #d8e1ee;
   border-radius: 8px;
@@ -212,6 +218,181 @@ body {
 
 .card h3 {
   margin-top: 0;
+}
+
+.lede {
+  color: #334155;
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+.eyebrow,
+.meta,
+.card-kicker {
+  color: #475569;
+  font-size: 0.84rem;
+}
+
+.eyebrow,
+.card-kicker {
+  font-weight: 800;
+  letter-spacing: 0;
+  margin: 0 0 0.25rem;
+  text-transform: uppercase;
+}
+
+.section-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: end;
+  margin-bottom: 0.75rem;
+}
+
+.section-heading h2 {
+  margin: 0;
+}
+
+.wiki-home,
+.wiki-section-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.wiki-overview-card,
+.wiki-section-browse {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.page-card h3,
+.page-card h2 {
+  margin: 0.1rem 0 0.4rem;
+}
+
+.page-card__summary {
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.page-stack {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.page-stack--featured {
+  margin-bottom: 0.9rem;
+}
+
+.page-card--featured {
+  background: #f7fbff;
+  border-color: #c1d4ec;
+}
+
+.section-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.section-list__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ghost-button {
+  border: 1px solid #93a3bf;
+  border-radius: 8px;
+  background: #f8fbff;
+  color: #1e3a8a;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0.45rem 0.75rem;
+}
+
+.section-block--collapsible {
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0;
+}
+
+.section-toggle-summary {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem;
+}
+
+.section-toggle-summary__content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.section-title {
+  color: #111827;
+  font-weight: 800;
+}
+
+.section-block__body {
+  border-top: 1px solid #e5eaf3;
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem;
+}
+
+.page-layout {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 2fr) minmax(16rem, 0.8fr);
+}
+
+.wiki-article-shell .article {
+  background: #fff;
+}
+
+.wiki-article-shell .article h1 {
+  margin-top: 0;
+}
+
+.wiki-article-shell .article-body,
+.wiki-overview-card .article-body {
+  max-height: none;
+  line-height: 1.6;
+}
+
+.article-figure {
+  margin: 0.75rem 0;
+}
+
+.article-figure .article-image {
+  display: block;
+  max-height: 22rem;
+  max-width: min(100%, 42rem);
+  width: auto;
+}
+
+.article-image__caption {
+  margin-top: 0.35rem;
+}
+
+.sidebar {
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+}
+
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.plain-list li + li {
+  margin-top: 0.35rem;
 }
 
 .status {
@@ -926,6 +1107,15 @@ textarea {
 
   .topbar {
     padding: 0.85rem;
+  }
+
+  .page-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .section-heading,
+  .panel-header {
+    align-items: stretch;
   }
 
   .chat-actions,

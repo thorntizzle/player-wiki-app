@@ -402,6 +402,87 @@ def test_api_me_and_campaigns_use_bearer_token_auth(client, app, users):
     assert revoked_response.get_json()["error"]["code"] == "auth_required"
 
 
+def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, app, users):
+    player_token = issue_api_token(app, users["party"]["email"], label="player-wiki-api")
+
+    home_response = client.get("/api/v1/campaigns/linden-pass/wiki", headers=api_headers(player_token))
+    assert home_response.status_code == 200
+    home_payload = home_response.get_json()
+    assert home_payload["ok"] is True
+    assert home_payload["can_view_wiki"] is True
+    assert home_payload["overview_page"]["title"] == "Echoes of the Alloy Coast"
+    assert "/app-next/campaigns/linden-pass/pages/notes/operations-brief" in home_payload["overview_page"]["body_html"]
+    assert any(section["section_name"] == "Locations" for section in home_payload["grouped_sections"])
+
+    search_response = client.get(
+        "/api/v1/campaigns/linden-pass/wiki?q=capt",
+        headers=api_headers(player_token),
+    )
+    assert search_response.status_code == 200
+    search_payload = search_response.get_json()
+    assert search_payload["query"] == "capt"
+    assert search_payload["overview_page"] is None
+    assert search_payload["result_count"] >= 1
+    search_pages = [
+        page
+        for section in search_payload["grouped_sections"]
+        for page in section["pages"]
+    ]
+    captain = next(page for page in search_pages if page["page_ref"] == "npcs/captain-lyra-vale")
+    assert captain["href"] == "/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
+    assert "source_ref" not in captain
+    assert "aliases" not in captain
+
+    section_response = client.get(
+        "/api/v1/campaigns/linden-pass/wiki/sections/locations",
+        headers=api_headers(player_token),
+    )
+    assert section_response.status_code == 200
+    section_payload = section_response.get_json()
+    assert section_payload["section_name"] == "Locations"
+    assert section_payload["show_subsections"] is True
+    assert section_payload["top_level_pages"][0]["title"] == "Port Meridian"
+    subsection_names = [group["subsection_name"] for group in section_payload["subsection_groups"]]
+    assert "Civic and Institutional Sites" in subsection_names
+    assert "Venues and Residences" in subsection_names
+
+    page_response = client.get(
+        "/api/v1/campaigns/linden-pass/wiki/pages/npcs/captain-lyra-vale",
+        headers=api_headers(player_token),
+    )
+    assert page_response.status_code == 200
+    page_payload = page_response.get_json()
+    assert page_payload["page"]["title"] == "Captain Lyra Vale"
+    assert page_payload["page"]["image"]["url"] == "/campaigns/linden-pass/assets/npcs/captain-lyra-vale.png"
+    assert page_payload["page"]["image"]["caption"] == "Harbor watch captain and trusted ally of the crew."
+    assert "Captain Lyra Vale coordinates inspections" in page_payload["page"]["body_html"]
+    assert page_payload["links"]["flask_page_url"] == "/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
+
+
+def test_api_player_wiki_home_reports_restricted_wiki_scope(
+    client,
+    app,
+    users,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", wiki="dm")
+    player_token = issue_api_token(app, users["party"]["email"], label="restricted-player-wiki-api")
+
+    home_response = client.get("/api/v1/campaigns/linden-pass/wiki", headers=api_headers(player_token))
+    assert home_response.status_code == 200
+    home_payload = home_response.get_json()
+    assert home_payload["can_view_wiki"] is False
+    assert home_payload["grouped_sections"] == []
+    assert "requires DM access" in home_payload["message"]
+
+    page_response = client.get(
+        "/api/v1/campaigns/linden-pass/wiki/pages/npcs/captain-lyra-vale",
+        headers=api_headers(player_token),
+    )
+    assert page_response.status_code == 403
+    assert page_response.get_json()["error"]["code"] == "forbidden"
+
+
 def test_api_session_endpoints_follow_permissions(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-api")
     player_token = issue_api_token(app, users["party"]["email"], label="player-session-api")

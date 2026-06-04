@@ -95,6 +95,93 @@ export interface ApiAppResponse extends ApiResponseBase {
   app: AppMeta;
 }
 
+export interface WikiImage {
+  asset_ref: string;
+  url: string;
+  media_type: string;
+  alt_text: string;
+  caption: string;
+}
+
+export interface WikiPageSummary {
+  page_ref: string;
+  title: string;
+  route_slug: string;
+  href: string;
+  section: string;
+  section_slug: string;
+  section_href: string;
+  subsection: string;
+  page_type: string;
+  display_type: string;
+  summary: string;
+  display_order: number;
+  reveal_after_session: number;
+  is_pinned: boolean;
+}
+
+export interface WikiPageDetail extends WikiPageSummary {
+  body_html: string;
+  image: WikiImage | null;
+}
+
+export interface WikiSectionGroup {
+  section_name: string;
+  section_slug: string;
+  href: string;
+  page_count: number;
+  pages: WikiPageSummary[];
+}
+
+export interface WikiSubsectionGroup {
+  subsection_name: string;
+  page_count: number;
+  pages: WikiPageSummary[];
+}
+
+export interface WikiHomeLinks {
+  flask_campaign_url: string;
+  gen2_campaign_url: string;
+}
+
+export interface WikiHomeResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  can_view_wiki: boolean;
+  wiki_visibility_label: string;
+  query: string;
+  result_count: number;
+  grouped_sections: WikiSectionGroup[];
+  overview_page: WikiPageDetail | null;
+  message: string;
+  links: WikiHomeLinks;
+}
+
+export interface WikiSectionResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  section_name: string;
+  section_slug: string;
+  page_count: number;
+  pages: WikiPageSummary[];
+  top_level_pages: WikiPageSummary[];
+  subsection_groups: WikiSubsectionGroup[];
+  show_subsections: boolean;
+  links: {
+    flask_section_url: string;
+    gen2_campaign_url: string;
+  };
+}
+
+export interface WikiPageResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  page: WikiPageDetail;
+  backlinks: WikiPageSummary[];
+  links: {
+    flask_page_url: string;
+    gen2_campaign_url: string;
+    gen2_section_url: string;
+  };
+}
+
 export interface SessionArticleImage {
   filename: string;
   media_type: string;

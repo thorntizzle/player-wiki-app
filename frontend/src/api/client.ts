@@ -41,6 +41,9 @@ import type {
   SessionStartCloseResponse,
   SessionWikiLookupPreviewResponse,
   SessionWikiLookupSearchResponse,
+  WikiHomeResponse,
+  WikiPageResponse,
+  WikiSectionResponse,
 } from "./types";
 
 const DEFAULT_BASE_PATH = "";
@@ -180,6 +183,27 @@ export class CampaignApiClient {
 
   async getCampaigns(): Promise<CampaignsResponse> {
     return this.requestJson<CampaignsResponse>("/api/v1/campaigns");
+  }
+
+  async getWikiHome(slug: string, q = ""): Promise<WikiHomeResponse> {
+    const query = q.trim();
+    const suffix = query ? `?q=${encodeURIComponent(query)}` : "";
+    return this.requestJson<WikiHomeResponse>(`/api/v1/campaigns/${encodeURIComponent(slug)}/wiki${suffix}`);
+  }
+
+  async getWikiSection(slug: string, sectionSlug: string): Promise<WikiSectionResponse> {
+    return this.requestJson<WikiSectionResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/wiki/sections/${encodeURIComponent(sectionSlug)}`,
+    );
+  }
+
+  async getWikiPage(slug: string, pageSlug: string): Promise<WikiPageResponse> {
+    return this.requestJson<WikiPageResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/wiki/pages/${pageSlug
+        .split("/")
+        .map((part) => encodeURIComponent(part))
+        .join("/")}`,
+    );
   }
 
   async getSession(slug: string): Promise<SessionPayload> {

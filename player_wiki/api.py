@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+from collections import defaultdict
 from functools import wraps
 import hashlib
 from io import BytesIO
@@ -59,7 +60,7 @@ from .campaign_dm_content_service import (
     build_statblock_parser_feedback,
 )
 from .campaign_session_service import CampaignSessionValidationError
-from .campaign_visibility import CAMPAIGN_VISIBILITY_SCOPES
+from .campaign_visibility import CAMPAIGN_VISIBILITY_SCOPES, VISIBILITY_LABELS
 from .character_builder import (
     CAMPAIGN_ITEMS_SECTION,
     _attach_campaign_item_page_support,
@@ -91,6 +92,8 @@ from .character_service import CharacterStateValidationError, merge_state_with_d
 from .character_store import CharacterStateConflictError
 from .character_repository import load_campaign_character_config
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
+from .models import section_sort_key, subsection_sort_key
+from .repository import slugify
 from .session_models import (
     SESSION_ARTICLE_SOURCE_KIND_PAGE,
     SESSION_ARTICLE_SOURCE_KIND_SYSTEMS,
@@ -354,6 +357,98 @@ def register_api(app) -> None:
             "reveal_after_session": page.reveal_after_session,
             "source_ref": page.source_ref,
             "is_pinned": page.is_pinned,
+        }
+
+    def gen2_campaign_href(campaign_slug: str, suffix: str = "") -> str:
+        suffix = suffix.strip("/")
+        if suffix:
+            return f"/app-next/campaigns/{campaign_slug}/{suffix}"
+        return f"/app-next/campaigns/{campaign_slug}"
+
+    def gen2_wiki_body_html(campaign_slug: str, body_html: str) -> str:
+        return body_html.replace(
+            "/campaigns/{campaign_slug}/",
+            f"/app-next/campaigns/{campaign_slug}/",
+        )
+
+    def get_public_wiki_page_image(campaign, page) -> dict[str, Any] | None:
+        if not page.image_path:
+            return None
+        try:
+            asset_record = get_campaign_asset_file_record(campaign, page.image_path)
+        except CampaignContentError:
+            return None
+        if asset_record is None:
+            return None
+        return {
+            "asset_ref": asset_record.asset_ref,
+            "url": url_for("campaign_asset", campaign_slug=campaign.slug, asset_path=asset_record.asset_ref),
+            "media_type": asset_record.media_type,
+            "alt_text": page.image_alt or page.title,
+            "caption": page.image_caption,
+        }
+
+    def serialize_public_wiki_page(campaign, page, *, include_image: bool = False) -> dict[str, Any]:
+        payload = {
+            "page_ref": page.route_slug,
+            "title": page.title,
+            "route_slug": page.route_slug,
+            "href": gen2_campaign_href(campaign.slug, f"pages/{page.route_slug}"),
+            "section": page.section,
+            "section_slug": slugify(page.section),
+            "section_href": gen2_campaign_href(campaign.slug, f"sections/{slugify(page.section)}"),
+            "subsection": page.subsection,
+            "page_type": page.page_type,
+            "display_type": page.display_type,
+            "summary": page.summary,
+            "display_order": page.display_order,
+            "reveal_after_session": page.reveal_after_session,
+            "is_pinned": page.is_pinned,
+        }
+        if include_image:
+            payload["image"] = get_public_wiki_page_image(campaign, page)
+        return payload
+
+    def serialize_public_wiki_page_with_body(campaign, page, body_html: str) -> dict[str, Any]:
+        return {
+            **serialize_public_wiki_page(campaign, page, include_image=True),
+            "body_html": gen2_wiki_body_html(campaign.slug, body_html),
+        }
+
+    def serialize_public_wiki_section_group(campaign, section_name: str, pages: list[Any]) -> dict[str, Any]:
+        return {
+            "section_name": section_name,
+            "section_slug": slugify(section_name),
+            "href": gen2_campaign_href(campaign.slug, f"sections/{slugify(section_name)}"),
+            "page_count": len(pages),
+            "pages": [serialize_public_wiki_page(campaign, page) for page in pages],
+        }
+
+    def split_public_wiki_pages_by_subsection(campaign, section_name: str, pages: list[Any]) -> dict[str, Any]:
+        top_level_pages = [page for page in pages if not page.subsection]
+        subsection_groups: dict[str, list[Any]] = defaultdict(list)
+        for page in pages:
+            if page.subsection:
+                subsection_groups[page.subsection].append(page)
+
+        ordered_subsection_groups = [
+            {
+                "subsection_name": subsection_name,
+                "page_count": len(subsection_groups[subsection_name]),
+                "pages": [
+                    serialize_public_wiki_page(campaign, page)
+                    for page in subsection_groups[subsection_name]
+                ],
+            }
+            for subsection_name in sorted(
+                subsection_groups,
+                key=lambda subsection_name: subsection_sort_key(section_name, subsection_name),
+            )
+        ]
+        return {
+            "top_level_pages": [serialize_public_wiki_page(campaign, page) for page in top_level_pages],
+            "subsection_groups": ordered_subsection_groups,
+            "show_subsections": bool(ordered_subsection_groups),
         }
 
     def serialize_page_file_record(campaign_slug: str, record) -> dict[str, Any]:
@@ -1681,6 +1776,134 @@ def register_api(app) -> None:
                     "can_manage_dm_content": can_manage_campaign_dm_content(campaign_slug),
                     "can_manage_visibility": can_manage_campaign_visibility(campaign_slug),
                     "can_post_session_messages": can_post_campaign_session_messages(campaign_slug),
+                },
+            }
+        )
+
+    @api.get("/campaigns/<campaign_slug>/wiki")
+    @api_campaign_scope_access_required("campaign")
+    def campaign_wiki_home(campaign_slug: str):
+        repository = get_repository()
+        campaign = repository.get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+
+        wiki_visibility = get_effective_campaign_visibility(campaign_slug, "wiki")
+        wiki_visibility_label = VISIBILITY_LABELS.get(wiki_visibility, wiki_visibility)
+        can_view_wiki = can_access_campaign_scope(campaign_slug, "wiki")
+        query = request.args.get("q", "").strip() if can_view_wiki else ""
+        grouped_sections: list[dict[str, Any]] = []
+        result_count = 0
+        overview_page = None
+
+        if can_view_wiki:
+            pages = repository.search_pages(campaign_slug, query)
+            grouped_pages_map: dict[str, list[Any]] = defaultdict(list)
+            for page in pages:
+                grouped_pages_map[page.section].append(page)
+            grouped_sections = [
+                serialize_public_wiki_section_group(campaign, section_name, grouped_pages_map[section_name])
+                for section_name in sorted(grouped_pages_map, key=section_sort_key)
+            ]
+            result_count = len(pages)
+            if not query:
+                overview_pages = grouped_pages_map.get("Overview", [])
+                if overview_pages:
+                    body_html = repository.get_page_body_html(campaign_slug, overview_pages[0].route_slug)
+                    if body_html is not None:
+                        overview_page = serialize_public_wiki_page_with_body(
+                            campaign,
+                            overview_pages[0],
+                            body_html,
+                        )
+
+        return jsonify(
+            {
+                "ok": True,
+                "campaign": serialize_campaign(campaign),
+                "can_view_wiki": can_view_wiki,
+                "wiki_visibility_label": wiki_visibility_label,
+                "query": query,
+                "result_count": result_count,
+                "grouped_sections": grouped_sections,
+                "overview_page": overview_page,
+                "message": (
+                    f"The player wiki for this campaign currently requires {wiki_visibility_label} access."
+                    if not can_view_wiki
+                    else ""
+                ),
+                "links": {
+                    "flask_campaign_url": url_for("campaign_view", campaign_slug=campaign.slug),
+                    "gen2_campaign_url": gen2_campaign_href(campaign.slug),
+                },
+            }
+        )
+
+    @api.get("/campaigns/<campaign_slug>/wiki/sections/<section_slug>")
+    @api_campaign_scope_access_required("wiki")
+    def campaign_wiki_section(campaign_slug: str, section_slug: str):
+        repository = get_repository()
+        campaign = repository.get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+
+        pages = repository.get_section_pages(campaign_slug, section_slug)
+        if not pages:
+            abort(404)
+
+        section_name = pages[0].section
+        split_pages = split_public_wiki_pages_by_subsection(campaign, section_name, pages)
+        return jsonify(
+            {
+                "ok": True,
+                "campaign": serialize_campaign(campaign),
+                "section_name": section_name,
+                "section_slug": section_slug,
+                "page_count": len(pages),
+                "pages": [serialize_public_wiki_page(campaign, page) for page in pages],
+                **split_pages,
+                "links": {
+                    "flask_section_url": url_for(
+                        "section_view",
+                        campaign_slug=campaign.slug,
+                        section_slug=section_slug,
+                    ),
+                    "gen2_campaign_url": gen2_campaign_href(campaign.slug),
+                },
+            }
+        )
+
+    @api.get("/campaigns/<campaign_slug>/wiki/pages/<path:page_slug>")
+    @api_campaign_scope_access_required("wiki")
+    def campaign_wiki_page(campaign_slug: str, page_slug: str):
+        repository = get_repository()
+        campaign = repository.get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+
+        page = repository.get_page(campaign_slug, page_slug)
+        if page is None:
+            abort(404)
+
+        body_html = repository.get_page_body_html(campaign_slug, page_slug)
+        if body_html is None:
+            abort(404)
+
+        backlinks = repository.get_backlinks(campaign_slug, page_slug)
+        return jsonify(
+            {
+                "ok": True,
+                "campaign": serialize_campaign(campaign),
+                "page": serialize_public_wiki_page_with_body(campaign, page, body_html),
+                "backlinks": [serialize_public_wiki_page(campaign, backlink) for backlink in backlinks],
+                "links": {
+                    "flask_page_url": url_for(
+                        "page_view",
+                        campaign_slug=campaign.slug,
+                        page_slug=page.route_slug,
+                    ),
+                    "gen2_campaign_url": gen2_campaign_href(campaign.slug),
+                    "gen2_section_url": gen2_campaign_href(campaign.slug, f"sections/{slugify(page.section)}"),
                 },
             }
         )
