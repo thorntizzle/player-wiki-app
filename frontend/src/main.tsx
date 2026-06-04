@@ -48,8 +48,16 @@ import type {
   ContentPageMetadata,
   ContentPageRemovalSafety,
   ContentPageUpsertPayload,
+  CombatAvailableCharacterChoice,
+  CombatAvailableStatblockChoice,
+  CombatSystemsMonsterSearchResult,
   CombatLiveStatePayload,
   CombatPayload,
+  CombatCondition,
+  CombatAddNpcPayload,
+  CombatTurnPatchPayload,
+  CombatVitalsPatchPayload,
+  CombatResourcesPatchPayload,
   CombatantSummary,
   DmContentStatblock,
   DmContentStatblockCreatePayload,
@@ -178,6 +186,63 @@ type CharacterSection =
   | "notes";
 type PaneName = SessionRoutePane;
 type ArticleMode = "manual" | "upload" | "wiki";
+type CombatView = "player" | "status" | "controls";
+
+interface CombatVitalsDraft {
+  currentHp: string;
+  maxHp: string;
+  tempHp: string;
+  movementTotal: string;
+}
+
+interface CombatResourcesDraft {
+  movementRemaining: string;
+  hasAction: boolean;
+  hasBonusAction: boolean;
+  hasReaction: boolean;
+}
+
+interface CombatTurnDraft {
+  turnValue: string;
+  initiativePriority: string;
+}
+
+interface CombatConditionDraft {
+  name: string;
+  durationText: string;
+}
+
+interface CombatPlayerSeedDraft {
+  characterSlug: string;
+  turnValue: string;
+  initiativePriority: string;
+}
+
+interface CombatNpcSeedDraft {
+  displayName: string;
+  turnValue: string;
+  initiativeBonus: string;
+  dexterityModifier: string;
+  initiativePriority: string;
+  currentHp: string;
+  maxHp: string;
+  tempHp: string;
+  movementTotal: string;
+}
+
+interface CombatStatblockSeedDraft {
+  statblockId: string;
+  displayName: string;
+  turnValue: string;
+  initiativePriority: string;
+}
+
+interface CombatSystemsSeedDraft {
+  entryKey: string;
+  displayName: string;
+  turnValue: string;
+  initiativePriority: string;
+}
 
 interface ApiClientContextValue {
   apiClient: CampaignApiClient;
@@ -415,6 +480,20 @@ function resolveCombatLivePayload(
 ): CombatPayload | null {
   if (isCombatUnchangedPayload(liveResponse)) {
     return previous ?? null;
+  }
+  if (previous) {
+    return {
+      ...liveResponse,
+      available_character_choices: liveResponse.available_character_choices?.length
+        ? liveResponse.available_character_choices
+        : previous.available_character_choices,
+      available_statblock_choices: liveResponse.available_statblock_choices?.length
+        ? liveResponse.available_statblock_choices
+        : previous.available_statblock_choices,
+      combat_condition_options: liveResponse.combat_condition_options?.length
+        ? liveResponse.combat_condition_options
+        : previous.combat_condition_options,
+    };
   }
   return liveResponse;
 }
@@ -6930,20 +7009,81 @@ function CombatPage() {
   const location = useLocation();
   const campaignSlug = params.campaignSlug ?? "";
   const { apiClient, setAuthRequired } = useApiClient();
+  const readSearchView = (search: string): CombatView => {
+    const requested = new URLSearchParams(search).get("view");
+    return requested === "status" || requested === "controls" ? requested : "player";
+  };
   const [selectedCombatantId, setSelectedCombatantId] = useState<number | null>(() => {
     const parsed = Number(new URLSearchParams(window.location.search).get("combatant") || "");
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   });
+  const [activeCombatView, setActiveCombatView] = useState<CombatView>(() => readSearchView(window.location.search));
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [vitalsDraft, setVitalsDraft] = useState<CombatVitalsDraft>({
+    currentHp: "",
+    maxHp: "",
+    tempHp: "",
+    movementTotal: "",
+  });
+  const [resourcesDraft, setResourcesDraft] = useState<CombatResourcesDraft>({
+    movementRemaining: "",
+    hasAction: false,
+    hasBonusAction: false,
+    hasReaction: false,
+  });
+  const [turnDraft, setTurnDraft] = useState<CombatTurnDraft>({ turnValue: "", initiativePriority: "1" });
+  const [conditionDraft, setConditionDraft] = useState<CombatConditionDraft>({ name: "", durationText: "" });
+  const [playerSeedDraft, setPlayerSeedDraft] = useState<CombatPlayerSeedDraft>({
+    characterSlug: "",
+    turnValue: "",
+    initiativePriority: "1",
+  });
+  const [npcSeedDraft, setNpcSeedDraft] = useState<CombatNpcSeedDraft>({
+    displayName: "",
+    turnValue: "",
+    initiativeBonus: "0",
+    dexterityModifier: "",
+    initiativePriority: "1",
+    currentHp: "",
+    maxHp: "",
+    tempHp: "0",
+    movementTotal: "30",
+  });
+  const [statblockSeedDraft, setStatblockSeedDraft] = useState<CombatStatblockSeedDraft>({
+    statblockId: "",
+    displayName: "",
+    turnValue: "",
+    initiativePriority: "1",
+  });
+  const [systemsSeedDraft, setSystemsSeedDraft] = useState<CombatSystemsSeedDraft>({
+    entryKey: "",
+    displayName: "",
+    turnValue: "",
+    initiativePriority: "1",
+  });
+  const [systemsSearchQuery, setSystemsSearchQuery] = useState("");
+  const [systemsSearchStatus, setSystemsSearchStatus] = useState<string | null>(null);
+  const [systemsSearchResults, setSystemsSearchResults] = useState<CombatSystemsMonsterSearchResult[]>([]);
+  const [confirmClearTracker, setConfirmClearTracker] = useState(false);
 
   useEffect(() => {
-    const parsed = Number(new URLSearchParams(location.search).get("combatant") || "");
+    const currentSearch = window.location.search;
+    const params = new URLSearchParams(currentSearch);
+    const parsed = Number(params.get("combatant") || "");
     setSelectedCombatantId(Number.isFinite(parsed) && parsed > 0 ? parsed : null);
-  }, [location.search]);
+    setActiveCombatView(readSearchView(currentSearch));
+  }, [location.href]);
 
   const combatQuery = useQuery({
-    queryKey: ["combat", campaignSlug, selectedCombatantId],
+    queryKey: ["combat", campaignSlug, activeCombatView, selectedCombatantId],
     queryFn: async () => {
-      const previous = queryClient.getQueryData<CombatPayload>(["combat", campaignSlug, selectedCombatantId]);
+      const previous = queryClient.getQueryData<CombatPayload>([
+        "combat",
+        campaignSlug,
+        activeCombatView,
+        selectedCombatantId,
+      ]);
       if (!previous) {
         return apiClient.getCombat(campaignSlug, selectedCombatantId);
       }
@@ -6978,21 +7118,297 @@ function CombatPage() {
   const selectedPlayerCharacter = payload?.selected_player_character ?? null;
   const selectedCharacterSlug = selectedPlayerCharacter?.character_slug || null;
   const canManageCombat = Boolean(payload?.permissions.can_manage_combat);
+  const canAccessDmContent = Boolean(payload?.permissions.can_access_dm_content);
+  const canAccessSystems = Boolean(payload?.permissions.can_access_systems);
+  const effectiveCombatView: CombatView = canManageCombat ? activeCombatView : "player";
   const paneError = getApiErrorMessage(combatQuery.error);
+  const availableCharacters: CombatAvailableCharacterChoice[] = payload?.available_character_choices ?? [];
+  const availableStatblocks: CombatAvailableStatblockChoice[] = payload?.available_statblock_choices ?? [];
+  const conditionOptions = payload?.combat_condition_options ?? [];
+  const encodedCampaignSlug = encodeURIComponent(campaignSlug);
+
+  const setCombatUrl = (view: CombatView, combatantId: number | null) => {
+    const params = new URLSearchParams();
+    if (view !== "player") {
+      params.set("view", view);
+    }
+    if (combatantId) {
+      params.set("combatant", String(combatantId));
+    }
+    const query = params.toString();
+    window.history.pushState(null, "", `/app-next/campaigns/${encodedCampaignSlug}/combat${query ? `?${query}` : ""}`);
+  };
+
+  useEffect(() => {
+    if (!payload?.permissions.can_manage_combat) {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("view") && activeCombatView === "player") {
+      setActiveCombatView("status");
+      setCombatUrl("status", selectedCombatantId);
+    }
+  }, [payload?.permissions.can_manage_combat]);
+
+  useEffect(() => {
+    if (!selectedCombatant) {
+      return;
+    }
+    setVitalsDraft({
+      currentHp: String(readNumber(selectedCombatant.current_hp)),
+      maxHp: String(readNumber(selectedCombatant.max_hp)),
+      tempHp: String(readNumber(selectedCombatant.temp_hp)),
+      movementTotal: String(readNumber(selectedCombatant.movement_total)),
+    });
+    setResourcesDraft({
+      movementRemaining: String(readNumber(selectedCombatant.movement_remaining)),
+      hasAction: Boolean(selectedCombatant.has_action),
+      hasBonusAction: Boolean(selectedCombatant.has_bonus_action),
+      hasReaction: Boolean(selectedCombatant.has_reaction),
+    });
+    setTurnDraft({
+      turnValue: String(readNumber(selectedCombatant.turn_value)),
+      initiativePriority: String(readNumber(selectedCombatant.initiative_priority, 1)),
+    });
+    setConditionDraft({ name: "", durationText: "" });
+  }, [selectedCombatant?.id]);
 
   const selectCombatant = (combatantId: number) => {
     setSelectedCombatantId(combatantId);
-    window.history.pushState(
-      null,
-      "",
-      `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/combat?combatant=${encodeURIComponent(String(combatantId))}`,
-    );
+    setCombatUrl(effectiveCombatView, combatantId);
+  };
+
+  const selectCombatView = (view: CombatView) => {
+    setActiveCombatView(view);
+    setCombatUrl(view, selectedCombatantId);
   };
 
   const selectCharacterTarget = (characterSlug: string) => {
     const target = payload?.player_character_targets.find((item) => item.character_slug === characterSlug);
     if (target?.combatant_id) {
       selectCombatant(target.combatant_id);
+    }
+  };
+
+  const replaceCombatPayload = (response: CombatPayload, message: string) => {
+    queryClient.setQueryData(["combat", campaignSlug, activeCombatView, selectedCombatantId], response);
+    setStatusMessage(message);
+    setErrorMessage(null);
+    void combatQuery.refetch();
+  };
+
+  const handleCombatMutationError = (error: unknown) => {
+    if (isAuthError(error)) {
+      setAuthRequired(true);
+    }
+    setStatusMessage(null);
+    setErrorMessage(apiErrorMessage(error));
+  };
+
+  const updateTurnMutation = useMutation({
+    mutationFn: (draft: CombatTurnPatchPayload) => {
+      if (!selectedCombatant) {
+        throw new Error("Choose a combatant first.");
+      }
+      return apiClient.patchCombatantTurn(campaignSlug, selectedCombatant.id, draft);
+    },
+    onSuccess: (response) => replaceCombatPayload(response, "Turn order saved."),
+    onError: handleCombatMutationError,
+  });
+
+  const updateVitalsMutation = useMutation({
+    mutationFn: (draft: CombatVitalsPatchPayload) => {
+      if (!selectedCombatant) {
+        throw new Error("Choose a combatant first.");
+      }
+      return apiClient.patchCombatantVitals(campaignSlug, selectedCombatant.id, draft);
+    },
+    onSuccess: (response) => replaceCombatPayload(response, "Vitals saved."),
+    onError: handleCombatMutationError,
+  });
+
+  const updateResourcesMutation = useMutation({
+    mutationFn: (draft: CombatResourcesPatchPayload) => {
+      if (!selectedCombatant) {
+        throw new Error("Choose a combatant first.");
+      }
+      return apiClient.patchCombatantResources(campaignSlug, selectedCombatant.id, draft);
+    },
+    onSuccess: (response) => replaceCombatPayload(response, "Action economy saved."),
+    onError: handleCombatMutationError,
+  });
+
+  const addConditionMutation = useMutation({
+    mutationFn: (draft: CombatConditionDraft) => {
+      if (!selectedCombatant) {
+        throw new Error("Choose a combatant first.");
+      }
+      return apiClient.addCombatCondition(campaignSlug, selectedCombatant.id, {
+        name: draft.name.trim(),
+        duration_text: draft.durationText.trim(),
+      });
+    },
+    onSuccess: (response) => {
+      setConditionDraft({ name: "", durationText: "" });
+      replaceCombatPayload(response, "Condition added.");
+    },
+    onError: handleCombatMutationError,
+  });
+
+  const deleteConditionMutation = useMutation({
+    mutationFn: (condition: CombatCondition) =>
+      apiClient.deleteCombatCondition(campaignSlug, condition.id, selectedCombatant?.id ?? null),
+    onSuccess: (response) => replaceCombatPayload(response, "Condition removed."),
+    onError: handleCombatMutationError,
+  });
+
+  const setCurrentMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedCombatant) {
+        throw new Error("Choose a combatant first.");
+      }
+      return apiClient.setCurrentCombatant(campaignSlug, selectedCombatant.id);
+    },
+    onSuccess: (response) => replaceCombatPayload(response, "Current turn set."),
+    onError: handleCombatMutationError,
+  });
+
+  const advanceTurnMutation = useMutation({
+    mutationFn: () => apiClient.advanceCombatTurn(campaignSlug, selectedCombatant?.id ?? null),
+    onSuccess: (response) => replaceCombatPayload(response, "Turn advanced."),
+    onError: handleCombatMutationError,
+  });
+
+  const clearCombatMutation = useMutation({
+    mutationFn: () => apiClient.clearCombat(campaignSlug),
+    onSuccess: (response) => {
+      setSelectedCombatantId(null);
+      setConfirmClearTracker(false);
+      replaceCombatPayload(response, "Combat tracker cleared.");
+    },
+    onError: handleCombatMutationError,
+  });
+
+  const deleteCombatantMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedCombatant) {
+        throw new Error("Choose a combatant first.");
+      }
+      return apiClient.deleteCombatant(campaignSlug, selectedCombatant.id);
+    },
+    onSuccess: (response) => {
+      setSelectedCombatantId(response.selected_combatant_id ?? null);
+      replaceCombatPayload(response, "Combatant removed.");
+    },
+    onError: handleCombatMutationError,
+  });
+
+  const addPlayerMutation = useMutation({
+    mutationFn: () =>
+      apiClient.addCombatPlayer(
+        campaignSlug,
+        {
+          character_slug: playerSeedDraft.characterSlug,
+          turn_value: playerSeedDraft.turnValue,
+          initiative_priority: playerSeedDraft.initiativePriority,
+        },
+        selectedCombatantId,
+      ),
+    onSuccess: (response) => {
+      setPlayerSeedDraft({ characterSlug: "", turnValue: "", initiativePriority: "1" });
+      replaceCombatPayload(response, "Player character added.");
+    },
+    onError: handleCombatMutationError,
+  });
+
+  const addNpcMutation = useMutation({
+    mutationFn: () => {
+      const payload: CombatAddNpcPayload = {
+        display_name: npcSeedDraft.displayName.trim(),
+        turn_value: npcSeedDraft.turnValue,
+        initiative_bonus: npcSeedDraft.initiativeBonus,
+        dexterity_modifier: npcSeedDraft.dexterityModifier,
+        initiative_priority: npcSeedDraft.initiativePriority,
+        current_hp: npcSeedDraft.currentHp,
+        max_hp: npcSeedDraft.maxHp,
+        temp_hp: npcSeedDraft.tempHp,
+        movement_total: npcSeedDraft.movementTotal,
+      };
+      return apiClient.addCombatNpc(campaignSlug, payload, selectedCombatantId);
+    },
+    onSuccess: (response) => {
+      setNpcSeedDraft({
+        displayName: "",
+        turnValue: "",
+        initiativeBonus: "0",
+        dexterityModifier: "",
+        initiativePriority: "1",
+        currentHp: "",
+        maxHp: "",
+        tempHp: "0",
+        movementTotal: "30",
+      });
+      replaceCombatPayload(response, "NPC added.");
+    },
+    onError: handleCombatMutationError,
+  });
+
+  const addStatblockMutation = useMutation({
+    mutationFn: () =>
+      apiClient.addCombatStatblock(
+        campaignSlug,
+        {
+          statblock_id: statblockSeedDraft.statblockId,
+          display_name: statblockSeedDraft.displayName.trim(),
+          turn_value: statblockSeedDraft.turnValue,
+          initiative_priority: statblockSeedDraft.initiativePriority,
+        },
+        selectedCombatantId,
+      ),
+    onSuccess: (response) => {
+      setStatblockSeedDraft({ statblockId: "", displayName: "", turnValue: "", initiativePriority: "1" });
+      replaceCombatPayload(response, "DM Content statblock added.");
+    },
+    onError: handleCombatMutationError,
+  });
+
+  const addSystemsMonsterMutation = useMutation({
+    mutationFn: (entryKey: string) =>
+      apiClient.addCombatSystemsMonster(
+        campaignSlug,
+        {
+          entry_key: entryKey,
+          display_name: systemsSeedDraft.displayName.trim(),
+          turn_value: systemsSeedDraft.turnValue,
+          initiative_priority: systemsSeedDraft.initiativePriority,
+        },
+        selectedCombatantId,
+      ),
+    onSuccess: (response) => {
+      setSystemsSeedDraft({ entryKey: "", displayName: "", turnValue: "", initiativePriority: "1" });
+      replaceCombatPayload(response, "Systems monster added.");
+    },
+    onError: handleCombatMutationError,
+  });
+
+  const searchSystemsMonsters = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const query = systemsSearchQuery.trim();
+    if (query.length < 2) {
+      setSystemsSearchStatus("Type at least 2 letters to search Systems monsters.");
+      setSystemsSearchResults([]);
+      return;
+    }
+    setSystemsSearchStatus("Searching Systems monsters ...");
+    try {
+      const response = await apiClient.searchCombatSystemsMonsters(campaignSlug, query);
+      setSystemsSearchResults(response.results);
+      setSystemsSearchStatus(response.message);
+      setErrorMessage(null);
+    } catch (error) {
+      handleCombatMutationError(error);
+      setSystemsSearchResults([]);
+      setSystemsSearchStatus(null);
     }
   };
 
@@ -7031,6 +7447,706 @@ function CombatPage() {
     );
   };
 
+  const renderCombatViewSwitch = () => {
+    if (!canManageCombat) {
+      return null;
+    }
+    return (
+      <nav className="combat-view-switch" aria-label="Combat view">
+        {[
+          { id: "status" as CombatView, label: "DM Status" },
+          { id: "controls" as CombatView, label: "DM Controls" },
+          { id: "player" as CombatView, label: "Player View" },
+        ].map((view) => (
+          <button
+            type="button"
+            key={view.id}
+            className={effectiveCombatView === view.id ? "tab-button active" : "tab-button"}
+            onClick={() => selectCombatView(view.id)}
+          >
+            {view.label}
+          </button>
+        ))}
+      </nav>
+    );
+  };
+
+  const renderDmStatus = () => {
+    if (!canManageCombat) {
+      return (
+        <article className="card">
+          <p>DM combat status requires combat management access.</p>
+        </article>
+      );
+    }
+    if (!selectedCombatant) {
+      return (
+        <article className="card">
+          <h3>No selected combatant</h3>
+          <p>Add combatants in DM Controls, then select one from the turn order.</p>
+        </article>
+      );
+    }
+    const isPlayerCharacter = Boolean(selectedCombatant.character_slug);
+    const vitalsPayload = (): CombatVitalsPatchPayload => {
+      const base: CombatVitalsPatchPayload = {
+        current_hp: vitalsDraft.currentHp,
+        temp_hp: vitalsDraft.tempHp,
+      };
+      if (isPlayerCharacter) {
+        base.expected_revision = selectedCombatant.state_revision;
+      } else {
+        base.expected_combatant_revision = selectedCombatant.combatant_revision;
+        base.max_hp = vitalsDraft.maxHp;
+        base.movement_total = vitalsDraft.movementTotal;
+      }
+      return base;
+    };
+
+    return (
+      <>
+        <section className="combat-dm-grid" aria-label="DM tactical controls">
+          <article className="card combat-control-card">
+            <div className="compact-header">
+              <div>
+                <p className="meta">Authority</p>
+                <h3>Turn Focus</h3>
+              </div>
+              {selectedCombatant.is_current_turn ? <span className="pill">Current</span> : null}
+            </div>
+            <form
+              className="combat-inline-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                updateTurnMutation.mutate({
+                  expected_combatant_revision: selectedCombatant.combatant_revision,
+                  turn_value: turnDraft.turnValue,
+                  initiative_priority: turnDraft.initiativePriority,
+                });
+              }}
+            >
+              <label className="chat-label">
+                Turn value
+                <input
+                  type="number"
+                  value={turnDraft.turnValue}
+                  onChange={(event) => setTurnDraft({ ...turnDraft, turnValue: event.currentTarget.value })}
+                />
+              </label>
+              <label className="chat-label">
+                Priority
+                <input
+                  type="number"
+                  min="1"
+                  value={turnDraft.initiativePriority}
+                  onChange={(event) =>
+                    setTurnDraft({ ...turnDraft, initiativePriority: event.currentTarget.value })
+                  }
+                />
+              </label>
+              <button type="submit" disabled={updateTurnMutation.isPending}>
+                {updateTurnMutation.isPending ? "Saving..." : "Save turn"}
+              </button>
+            </form>
+            <div className="button-row">
+              <button type="button" onClick={() => setCurrentMutation.mutate()} disabled={setCurrentMutation.isPending}>
+                {setCurrentMutation.isPending ? "Setting..." : "Set current"}
+              </button>
+              <button type="button" onClick={() => advanceTurnMutation.mutate()} disabled={advanceTurnMutation.isPending}>
+                {advanceTurnMutation.isPending ? "Advancing..." : "Advance turn"}
+              </button>
+            </div>
+          </article>
+
+          <article className="card combat-control-card">
+            <div>
+              <p className="meta">Snapshot</p>
+              <h3>Vitals</h3>
+            </div>
+            <form
+              className="combat-inline-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                updateVitalsMutation.mutate(vitalsPayload());
+              }}
+            >
+              <label className="chat-label">
+                Current HP
+                <input
+                  aria-label="DM Current HP"
+                  type="number"
+                  value={vitalsDraft.currentHp}
+                  onChange={(event) => setVitalsDraft({ ...vitalsDraft, currentHp: event.currentTarget.value })}
+                />
+              </label>
+              <label className="chat-label">
+                Temp HP
+                <input
+                  aria-label="DM Temp HP"
+                  type="number"
+                  min="0"
+                  value={vitalsDraft.tempHp}
+                  onChange={(event) => setVitalsDraft({ ...vitalsDraft, tempHp: event.currentTarget.value })}
+                />
+              </label>
+              {!isPlayerCharacter ? (
+                <>
+                  <label className="chat-label">
+                    Max HP
+                    <input
+                      aria-label="DM Max HP"
+                      type="number"
+                      min="0"
+                      value={vitalsDraft.maxHp}
+                      onChange={(event) => setVitalsDraft({ ...vitalsDraft, maxHp: event.currentTarget.value })}
+                    />
+                  </label>
+                  <label className="chat-label">
+                    Movement total
+                    <input
+                      type="number"
+                      min="0"
+                      value={vitalsDraft.movementTotal}
+                      onChange={(event) =>
+                        setVitalsDraft({ ...vitalsDraft, movementTotal: event.currentTarget.value })
+                      }
+                    />
+                  </label>
+                </>
+              ) : null}
+              <button type="submit" aria-label="Save DM vitals" disabled={updateVitalsMutation.isPending}>
+                {updateVitalsMutation.isPending ? "Saving..." : "Save vitals"}
+              </button>
+            </form>
+          </article>
+
+          <article className="card combat-control-card">
+            <div>
+              <p className="meta">Round tools</p>
+              <h3>Action Economy</h3>
+            </div>
+            <form
+              className="combat-inline-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                updateResourcesMutation.mutate({
+                  expected_combatant_revision: selectedCombatant.combatant_revision,
+                  movement_remaining: resourcesDraft.movementRemaining,
+                  has_action: resourcesDraft.hasAction,
+                  has_bonus_action: resourcesDraft.hasBonusAction,
+                  has_reaction: resourcesDraft.hasReaction,
+                });
+              }}
+            >
+              <label className="chat-label">
+                Movement remaining
+                <input
+                  aria-label="DM Movement Remaining"
+                  type="number"
+                  min="0"
+                  value={resourcesDraft.movementRemaining}
+                  onChange={(event) =>
+                    setResourcesDraft({ ...resourcesDraft, movementRemaining: event.currentTarget.value })
+                  }
+                />
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={resourcesDraft.hasAction}
+                  onChange={(event) => setResourcesDraft({ ...resourcesDraft, hasAction: event.currentTarget.checked })}
+                />
+                Action
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={resourcesDraft.hasBonusAction}
+                  onChange={(event) =>
+                    setResourcesDraft({ ...resourcesDraft, hasBonusAction: event.currentTarget.checked })
+                  }
+                />
+                Bonus action
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={resourcesDraft.hasReaction}
+                  onChange={(event) =>
+                    setResourcesDraft({ ...resourcesDraft, hasReaction: event.currentTarget.checked })
+                  }
+                />
+                Reaction
+              </label>
+              <button type="submit" disabled={updateResourcesMutation.isPending}>
+                {updateResourcesMutation.isPending ? "Saving..." : "Save economy"}
+              </button>
+            </form>
+          </article>
+
+          <article className="card combat-control-card">
+            <div>
+              <p className="meta">Tactical state</p>
+              <h3>Conditions</h3>
+            </div>
+            <datalist id="gen2-combat-condition-options">
+              {conditionOptions.map((option) => (
+                <option key={option} value={option} />
+              ))}
+            </datalist>
+            {selectedCombatant.conditions.length ? (
+              <div className="combat-condition-stack">
+                {selectedCombatant.conditions.map((condition) => (
+                  <div className="combat-condition-chip" key={condition.id}>
+                    <span>
+                      <strong>{condition.name}</strong>
+                      {condition.duration_text ? <small>{condition.duration_text}</small> : null}
+                    </span>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => deleteConditionMutation.mutate(condition)}
+                      disabled={deleteConditionMutation.isPending}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="meta">No conditions are active on this combatant.</p>
+            )}
+            <form
+              className="combat-inline-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                addConditionMutation.mutate(conditionDraft);
+              }}
+            >
+              <label className="chat-label">
+                Condition
+                <input
+                  type="text"
+                  list="gen2-combat-condition-options"
+                  value={conditionDraft.name}
+                  onChange={(event) => setConditionDraft({ ...conditionDraft, name: event.currentTarget.value })}
+                />
+              </label>
+              <label className="chat-label">
+                Duration
+                <input
+                  type="text"
+                  value={conditionDraft.durationText}
+                  onChange={(event) =>
+                    setConditionDraft({ ...conditionDraft, durationText: event.currentTarget.value })
+                  }
+                />
+              </label>
+              <button type="submit" disabled={addConditionMutation.isPending}>
+                {addConditionMutation.isPending ? "Adding..." : "Add condition"}
+              </button>
+            </form>
+          </article>
+        </section>
+
+        {selectedCombatant.character_slug ? (
+          <section className="combat-pc-workspace">
+            <div className="compact-header">
+              <div>
+                <p className="meta">Selected PC detail</p>
+                <h3>{selectedCombatant.name}</h3>
+              </div>
+            </div>
+            <CharacterPane campaignSlug={campaignSlug} initialCharacterSlug={selectedCombatant.character_slug} surface="combat" />
+          </section>
+        ) : null}
+
+        <section className="card combat-danger-card">
+          <div>
+            <p className="meta">Cleanup</p>
+            <h3>Selected combatant</h3>
+          </div>
+          <button type="button" className="button button-secondary" onClick={() => deleteCombatantMutation.mutate()}>
+            {deleteCombatantMutation.isPending ? "Removing..." : "Remove selected combatant"}
+          </button>
+        </section>
+      </>
+    );
+  };
+
+  const renderDmControls = () => {
+    if (!canManageCombat) {
+      return (
+        <article className="card">
+          <p>DM combat controls require combat management access.</p>
+        </article>
+      );
+    }
+    return (
+      <section className="combat-controls-layout" aria-label="DM combat controls">
+        <article className="card combat-control-card">
+          <div>
+            <p className="meta">Encounter controls</p>
+            <h3>Tracker</h3>
+          </div>
+          <div className="button-row">
+            <button type="button" onClick={() => advanceTurnMutation.mutate()} disabled={advanceTurnMutation.isPending}>
+              {advanceTurnMutation.isPending ? "Advancing..." : "Advance turn"}
+            </button>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={confirmClearTracker}
+                onChange={(event) => setConfirmClearTracker(event.currentTarget.checked)}
+              />
+              Confirm clear tracker
+            </label>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => clearCombatMutation.mutate()}
+              disabled={!confirmClearTracker || clearCombatMutation.isPending}
+            >
+              {clearCombatMutation.isPending ? "Clearing..." : "Clear tracker"}
+            </button>
+          </div>
+        </article>
+
+        <article className="card combat-control-card">
+          <div>
+            <p className="meta">Player character</p>
+            <h3>Add PC</h3>
+          </div>
+          {availableCharacters.length ? (
+            <form
+              className="combat-inline-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                addPlayerMutation.mutate();
+              }}
+            >
+              <label className="chat-label">
+                Character
+                <select
+                  value={playerSeedDraft.characterSlug}
+                  onChange={(event) => setPlayerSeedDraft({ ...playerSeedDraft, characterSlug: event.currentTarget.value })}
+                >
+                  <option value="">Choose character</option>
+                  {availableCharacters.map((choice) => (
+                    <option key={choice.slug} value={choice.slug}>
+                      {choice.name} {choice.subtitle ? `- ${choice.subtitle}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="chat-label">
+                Turn value
+                <input
+                  type="number"
+                  value={playerSeedDraft.turnValue}
+                  onChange={(event) => setPlayerSeedDraft({ ...playerSeedDraft, turnValue: event.currentTarget.value })}
+                />
+              </label>
+              <label className="chat-label">
+                Priority
+                <input
+                  type="number"
+                  min="1"
+                  value={playerSeedDraft.initiativePriority}
+                  onChange={(event) =>
+                    setPlayerSeedDraft({ ...playerSeedDraft, initiativePriority: event.currentTarget.value })
+                  }
+                />
+              </label>
+              <button type="submit" disabled={addPlayerMutation.isPending}>
+                {addPlayerMutation.isPending ? "Adding..." : "Add player character"}
+              </button>
+            </form>
+          ) : (
+            <p className="meta">All available visible characters are already in the tracker.</p>
+          )}
+        </article>
+
+        <article className="card combat-control-card">
+          <div>
+            <p className="meta">Manual NPC</p>
+            <h3>Add NPC</h3>
+          </div>
+          <form
+            className="combat-inline-form combat-inline-form--wide"
+            onSubmit={(event) => {
+              event.preventDefault();
+              addNpcMutation.mutate();
+            }}
+          >
+            <label className="chat-label">
+              Name
+              <input
+                type="text"
+                value={npcSeedDraft.displayName}
+                onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, displayName: event.currentTarget.value })}
+              />
+            </label>
+            <label className="chat-label">
+              Turn
+              <input
+                type="number"
+                value={npcSeedDraft.turnValue}
+                onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, turnValue: event.currentTarget.value })}
+              />
+            </label>
+            <label className="chat-label">
+              Initiative bonus
+              <input
+                type="number"
+                value={npcSeedDraft.initiativeBonus}
+                onChange={(event) =>
+                  setNpcSeedDraft({ ...npcSeedDraft, initiativeBonus: event.currentTarget.value })
+                }
+              />
+            </label>
+            <label className="chat-label">
+              DEX mod
+              <input
+                type="number"
+                value={npcSeedDraft.dexterityModifier}
+                onChange={(event) =>
+                  setNpcSeedDraft({ ...npcSeedDraft, dexterityModifier: event.currentTarget.value })
+                }
+              />
+            </label>
+            <label className="chat-label">
+              Max HP
+              <input
+                type="number"
+                min="0"
+                value={npcSeedDraft.maxHp}
+                onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, maxHp: event.currentTarget.value })}
+              />
+            </label>
+            <label className="chat-label">
+              Current HP
+              <input
+                type="number"
+                min="0"
+                value={npcSeedDraft.currentHp}
+                onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, currentHp: event.currentTarget.value })}
+              />
+            </label>
+            <label className="chat-label">
+              Movement
+              <input
+                type="number"
+                min="0"
+                value={npcSeedDraft.movementTotal}
+                onChange={(event) =>
+                  setNpcSeedDraft({ ...npcSeedDraft, movementTotal: event.currentTarget.value })
+                }
+              />
+            </label>
+            <label className="chat-label">
+              Priority
+              <input
+                type="number"
+                min="1"
+                value={npcSeedDraft.initiativePriority}
+                onChange={(event) =>
+                  setNpcSeedDraft({ ...npcSeedDraft, initiativePriority: event.currentTarget.value })
+                }
+              />
+            </label>
+            <button type="submit" disabled={addNpcMutation.isPending}>
+              {addNpcMutation.isPending ? "Adding..." : "Add manual NPC"}
+            </button>
+          </form>
+        </article>
+
+        <article className="card combat-control-card">
+          <div>
+            <p className="meta">DM Content</p>
+            <h3>Add Statblock</h3>
+          </div>
+          {canAccessDmContent && availableStatblocks.length ? (
+            <form
+              className="combat-inline-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                addStatblockMutation.mutate();
+              }}
+            >
+              <label className="chat-label">
+                Statblock
+                <select
+                  value={statblockSeedDraft.statblockId}
+                  onChange={(event) => setStatblockSeedDraft({ ...statblockSeedDraft, statblockId: event.currentTarget.value })}
+                >
+                  <option value="">Choose statblock</option>
+                  {availableStatblocks.map((choice) => (
+                    <option key={choice.id} value={choice.id}>
+                      {choice.title} - {choice.subtitle}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="chat-label">
+                Display name override
+                <input
+                  type="text"
+                  value={statblockSeedDraft.displayName}
+                  onChange={(event) =>
+                    setStatblockSeedDraft({ ...statblockSeedDraft, displayName: event.currentTarget.value })
+                  }
+                />
+              </label>
+              <label className="chat-label">
+                Turn override
+                <input
+                  type="number"
+                  value={statblockSeedDraft.turnValue}
+                  onChange={(event) =>
+                    setStatblockSeedDraft({ ...statblockSeedDraft, turnValue: event.currentTarget.value })
+                  }
+                />
+              </label>
+              <label className="chat-label">
+                Priority
+                <input
+                  type="number"
+                  min="1"
+                  value={statblockSeedDraft.initiativePriority}
+                  onChange={(event) =>
+                    setStatblockSeedDraft({ ...statblockSeedDraft, initiativePriority: event.currentTarget.value })
+                  }
+                />
+              </label>
+              <button type="submit" disabled={addStatblockMutation.isPending}>
+                {addStatblockMutation.isPending ? "Adding..." : "Add statblock"}
+              </button>
+            </form>
+          ) : (
+            <p className="meta">
+              {canAccessDmContent ? "No DM Content statblocks are available." : "DM Content access is required for statblock seeding."}
+            </p>
+          )}
+        </article>
+
+        <article className="card combat-control-card">
+          <div>
+            <p className="meta">Systems source</p>
+            <h3>Add Systems Monster</h3>
+          </div>
+          {canAccessSystems ? (
+            <>
+              <form className="search-form" onSubmit={searchSystemsMonsters}>
+                <label htmlFor="combat-systems-search">Search Systems monsters</label>
+                <input
+                  id="combat-systems-search"
+                  type="search"
+                  value={systemsSearchQuery}
+                  onChange={(event) => setSystemsSearchQuery(event.currentTarget.value)}
+                />
+                <button type="submit">Search</button>
+              </form>
+              {systemsSearchStatus ? <p className="status status-neutral">{systemsSearchStatus}</p> : null}
+              <div className="combat-systems-results">
+                {systemsSearchResults.map((result) => (
+                  <article className="compact-card" key={result.entry_key}>
+                    <div>
+                      <strong>{result.title}</strong>
+                      <p className="meta">
+                        {result.source_id} - {result.subtitle} - Init {result.initiative_bonus}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => addSystemsMonsterMutation.mutate(result.entry_key)}
+                      disabled={addSystemsMonsterMutation.isPending}
+                    >
+                      Add
+                    </button>
+                  </article>
+                ))}
+              </div>
+              <div className="combat-inline-form">
+                <label className="chat-label">
+                  Display name override
+                  <input
+                    type="text"
+                    value={systemsSeedDraft.displayName}
+                    onChange={(event) => setSystemsSeedDraft({ ...systemsSeedDraft, displayName: event.currentTarget.value })}
+                  />
+                </label>
+                <label className="chat-label">
+                  Turn override
+                  <input
+                    type="number"
+                    value={systemsSeedDraft.turnValue}
+                    onChange={(event) => setSystemsSeedDraft({ ...systemsSeedDraft, turnValue: event.currentTarget.value })}
+                  />
+                </label>
+                <label className="chat-label">
+                  Priority
+                  <input
+                    type="number"
+                    min="1"
+                    value={systemsSeedDraft.initiativePriority}
+                    onChange={(event) =>
+                      setSystemsSeedDraft({ ...systemsSeedDraft, initiativePriority: event.currentTarget.value })
+                    }
+                  />
+                </label>
+              </div>
+            </>
+          ) : (
+            <p className="meta">Systems access is required for monster source search.</p>
+          )}
+        </article>
+      </section>
+    );
+  };
+
+  const renderPlayerWorkspace = () => (
+    <section className="combat-pc-workspace">
+      <div className="compact-header">
+        <div>
+          <p className="meta">Selected PC workspace</p>
+          <h3>{selectedPlayerCharacter?.name ?? "No tracked PC in combat"}</h3>
+        </div>
+        {payload?.player_character_targets.length ? (
+          <div className="button-row">
+            {payload.player_character_targets.map((target) => (
+              <button
+                type="button"
+                key={target.combatant_id}
+                className={target.is_selected ? "tab-button active" : "tab-button"}
+                onClick={() => selectCombatant(target.combatant_id)}
+              >
+                {target.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      {selectedCharacterSlug ? (
+        <CharacterPane
+          campaignSlug={campaignSlug}
+          initialCharacterSlug={selectedCharacterSlug}
+          surface="combat"
+          onSelectedCharacterChange={selectCharacterTarget}
+        />
+      ) : (
+        <article className="card">
+          <p>No assigned player character is currently available in this tracker.</p>
+          {payload?.links?.flask_combat_url ? (
+            <a className="button button-secondary" href={payload.links.flask_combat_url}>
+              Open Flask Combat
+            </a>
+          ) : null}
+        </article>
+      )}
+    </section>
+  );
+
   return (
     <section className="panel combat-page">
       <div className="panel-header">
@@ -7056,12 +8172,15 @@ function CombatPage() {
           ) : null}
         </div>
       </div>
+      {renderCombatViewSwitch()}
 
       <ApiErrorNotice
         isLoading={combatQuery.isLoading}
         message={paneError}
         onAuth={() => setAuthRequired(true)}
       />
+      {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
+      {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
 
       {payload && !payload.combat_system_supported ? (
         <section className="card">
@@ -7146,45 +8265,9 @@ function CombatPage() {
             </section>
           ) : null}
 
-          <section className="combat-pc-workspace">
-            <div className="compact-header">
-              <div>
-                <p className="meta">Selected PC workspace</p>
-                <h3>{selectedPlayerCharacter?.name ?? "No tracked PC in combat"}</h3>
-              </div>
-              {payload.player_character_targets.length ? (
-                <div className="button-row">
-                  {payload.player_character_targets.map((target) => (
-                    <button
-                      type="button"
-                      key={target.combatant_id}
-                      className={target.is_selected ? "tab-button active" : "tab-button"}
-                      onClick={() => selectCombatant(target.combatant_id)}
-                    >
-                      {target.name}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-            {selectedCharacterSlug ? (
-              <CharacterPane
-                campaignSlug={campaignSlug}
-                initialCharacterSlug={selectedCharacterSlug}
-                surface="combat"
-                onSelectedCharacterChange={selectCharacterTarget}
-              />
-            ) : (
-              <article className="card">
-                <p>No assigned player character is currently available in this tracker.</p>
-                {payload.links?.flask_combat_url ? (
-                  <a className="button button-secondary" href={payload.links.flask_combat_url}>
-                    Open Flask Combat
-                  </a>
-                ) : null}
-              </article>
-            )}
-          </section>
+          {effectiveCombatView === "status" ? renderDmStatus() : null}
+          {effectiveCombatView === "controls" ? renderDmControls() : null}
+          {effectiveCombatView === "player" ? renderPlayerWorkspace() : null}
         </>
       ) : null}
     </section>

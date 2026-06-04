@@ -2936,6 +2936,21 @@ def test_api_combat_endpoints_allow_dm_management_and_owner_player_vitals_update
     assert conditioned_hound is not None
     assert conditioned_hound["conditions"][0]["name"] == "Restrained"
 
+    focused_update = client.patch(
+        f"/api/v1/campaigns/linden-pass/combat/combatants/{hound['id']}/vitals?combatant={hound['id']}",
+        headers=api_headers(dm_token),
+        json={
+            "expected_combatant_revision": conditioned_hound["combatant_revision"],
+            "current_hp": 19,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+    )
+    assert focused_update.status_code == 200
+    assert focused_update.get_json()["selected_combatant"]["id"] == hound["id"]
+    assert focused_update.get_json()["selected_combatant"]["current_hp"] == 19
+
     live_state = client.get(
         "/api/v1/campaigns/linden-pass/combat/live-state",
         headers=api_headers(dm_token),
@@ -3041,9 +3056,13 @@ def test_api_combat_read_exposes_gen2_live_selection_and_fallback_links(client, 
 
     dm_read = client.get("/api/v1/campaigns/linden-pass/combat", headers=api_headers(dm_token))
     assert dm_read.status_code == 200
-    dm_links = dm_read.get_json()["links"]
+    dm_payload = dm_read.get_json()
+    dm_links = dm_payload["links"]
     assert dm_links["flask_dm_status_url"] == "/campaigns/linden-pass/combat/dm"
     assert dm_links["flask_dm_controls_url"] == "/campaigns/linden-pass/combat/dm?view=controls"
+    assert "Restrained" in dm_payload["combat_condition_options"]
+    assert isinstance(dm_payload["available_character_choices"], list)
+    assert isinstance(dm_payload["available_statblock_choices"], list)
 
 
 def test_api_combat_read_reports_unsupported_system_without_live_poll_targets(client, app, users):

@@ -26,6 +26,8 @@ export interface CampaignPermissions {
   can_manage_session?: boolean;
   can_manage_dm_content?: boolean;
   can_manage_visibility?: boolean;
+  can_access_dm_content?: boolean;
+  can_access_systems?: boolean;
   can_post_session_messages?: boolean;
   can_record_xianxia_dao_immolating_use?: boolean;
 }
@@ -353,6 +355,33 @@ export interface CombatPlayerCharacterTarget {
   flask_href: string;
 }
 
+export interface CombatAvailableCharacterChoice {
+  slug: string;
+  name: string;
+  subtitle: string;
+  initiative_bonus: string;
+}
+
+export interface CombatAvailableStatblockChoice {
+  id: string;
+  title: string;
+  subtitle: string;
+  initiative_bonus: string;
+}
+
+export interface CombatSystemsMonsterSearchResult {
+  entry_key: string;
+  title: string;
+  source_id: string;
+  subtitle: string;
+  initiative_bonus: string;
+}
+
+export interface CombatSystemsMonsterSearchResponse extends ApiResponseBase {
+  results: CombatSystemsMonsterSearchResult[];
+  message: string;
+}
+
 export interface CombatPayload extends ApiResponseBase {
   changed?: true;
   campaign: CampaignRecord;
@@ -364,6 +393,9 @@ export interface CombatPayload extends ApiResponseBase {
   selected_combatant?: CombatantSummary | null;
   selected_player_character?: CombatantSummary | null;
   player_character_targets: CombatPlayerCharacterTarget[];
+  available_character_choices?: CombatAvailableCharacterChoice[];
+  available_statblock_choices?: CombatAvailableStatblockChoice[];
+  combat_condition_options?: string[];
   poll_settings?: {
     active_interval_ms?: number;
     idle_interval_ms?: number;
@@ -385,6 +417,66 @@ export interface CombatUnchangedPayload extends ApiResponseBase {
 }
 
 export type CombatLiveStatePayload = CombatPayload | CombatUnchangedPayload;
+
+export interface CombatAddPlayerPayload {
+  character_slug: string;
+  turn_value?: number | string | null;
+  initiative_priority?: number | string | null;
+}
+
+export interface CombatAddNpcPayload {
+  display_name: string;
+  turn_value?: number | string | null;
+  initiative_bonus?: number | string | null;
+  dexterity_modifier?: number | string | null;
+  initiative_priority?: number | string | null;
+  current_hp?: number | string | null;
+  max_hp?: number | string | null;
+  temp_hp?: number | string | null;
+  movement_total?: number | string | null;
+}
+
+export interface CombatAddStatblockPayload {
+  statblock_id: number | string;
+  display_name?: string;
+  turn_value?: number | string | null;
+  initiative_priority?: number | string | null;
+}
+
+export interface CombatAddSystemsMonsterPayload {
+  entry_key: string;
+  display_name?: string;
+  turn_value?: number | string | null;
+  initiative_priority?: number | string | null;
+}
+
+export interface CombatTurnPatchPayload {
+  expected_combatant_revision?: number | string | null;
+  turn_value?: number | string | null;
+  initiative_priority?: number | string | null;
+}
+
+export interface CombatVitalsPatchPayload {
+  expected_revision?: number | string | null;
+  expected_combatant_revision?: number | string | null;
+  current_hp?: number | string | null;
+  max_hp?: number | string | null;
+  temp_hp?: number | string | null;
+  movement_total?: number | string | null;
+}
+
+export interface CombatResourcesPatchPayload {
+  expected_combatant_revision?: number | string | null;
+  has_action?: boolean;
+  has_bonus_action?: boolean;
+  has_reaction?: boolean;
+  movement_remaining?: number | string | null;
+}
+
+export interface CombatConditionAddPayload {
+  name: string;
+  duration_text?: string;
+}
 
 export interface MessagePostResponse extends ApiResponseBase {
   message: SessionMessage;

@@ -32,6 +32,15 @@ import type {
   ContentPageDetailResponse,
   ContentPageListResponse,
   ContentPageUpsertPayload,
+  CombatAddNpcPayload,
+  CombatAddPlayerPayload,
+  CombatAddStatblockPayload,
+  CombatAddSystemsMonsterPayload,
+  CombatConditionAddPayload,
+  CombatResourcesPatchPayload,
+  CombatSystemsMonsterSearchResponse,
+  CombatTurnPatchPayload,
+  CombatVitalsPatchPayload,
   CombatLiveStatePayload,
   CombatPayload,
   DmContentResponse,
@@ -271,6 +280,167 @@ export class CampaignApiClient {
     return this.requestJson<CombatLiveStatePayload>(
       `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/live-state${suffix}`,
       { headers },
+    );
+  }
+
+  private combatFocusSuffix(combatantId?: number | null): string {
+    return combatantId ? `?combatant=${encodeURIComponent(String(combatantId))}` : "";
+  }
+
+  async addCombatPlayer(
+    slug: string,
+    payload: CombatAddPlayerPayload,
+    combatantId?: number | null,
+  ): Promise<CombatPayload> {
+    return this.requestJson<CombatPayload>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/player-combatants${this.combatFocusSuffix(combatantId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async addCombatNpc(
+    slug: string,
+    payload: CombatAddNpcPayload,
+    combatantId?: number | null,
+  ): Promise<CombatPayload> {
+    return this.requestJson<CombatPayload>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/npc-combatants${this.combatFocusSuffix(combatantId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async addCombatStatblock(
+    slug: string,
+    payload: CombatAddStatblockPayload,
+    combatantId?: number | null,
+  ): Promise<CombatPayload> {
+    return this.requestJson<CombatPayload>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/statblock-combatants${this.combatFocusSuffix(combatantId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async searchCombatSystemsMonsters(slug: string, query: string): Promise<CombatSystemsMonsterSearchResponse> {
+    const suffix = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
+    return this.requestJson<CombatSystemsMonsterSearchResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/systems-monsters/search${suffix}`,
+    );
+  }
+
+  async addCombatSystemsMonster(
+    slug: string,
+    payload: CombatAddSystemsMonsterPayload,
+    combatantId?: number | null,
+  ): Promise<CombatPayload> {
+    return this.requestJson<CombatPayload>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/systems-monsters${this.combatFocusSuffix(combatantId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async advanceCombatTurn(slug: string, combatantId?: number | null): Promise<CombatPayload> {
+    return this.requestJson<CombatPayload>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/advance-turn${this.combatFocusSuffix(combatantId)}`,
+      { method: "POST" },
+    );
+  }
+
+  async clearCombat(slug: string): Promise<CombatPayload> {
+    return this.requestJson<CombatPayload>(`/api/v1/campaigns/${encodeURIComponent(slug)}/combat/clear`, {
+      method: "POST",
+    });
+  }
+
+  async setCurrentCombatant(slug: string, combatantId: number): Promise<CombatPayload> {
+    return this.requestJson<CombatPayload>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/combatants/${combatantId}/set-current${this.combatFocusSuffix(combatantId)}`,
+      { method: "POST" },
+    );
+  }
+
+  async patchCombatantTurn(
+    slug: string,
+    combatantId: number,
+    payload: CombatTurnPatchPayload,
+  ): Promise<CombatPayload> {
+    return this.requestJson<CombatPayload>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/combatants/${combatantId}/turn${this.combatFocusSuffix(combatantId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async patchCombatantVitals(
+    slug: string,
+    combatantId: number,
+    payload: CombatVitalsPatchPayload,
+  ): Promise<CombatPayload> {
+    return this.requestJson<CombatPayload>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/combatants/${combatantId}/vitals${this.combatFocusSuffix(combatantId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async patchCombatantResources(
+    slug: string,
+    combatantId: number,
+    payload: CombatResourcesPatchPayload,
+  ): Promise<CombatPayload> {
+    return this.requestJson<CombatPayload>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/combatants/${combatantId}/resources${this.combatFocusSuffix(combatantId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async addCombatCondition(
+    slug: string,
+    combatantId: number,
+    payload: CombatConditionAddPayload,
+  ): Promise<CombatPayload> {
+    return this.requestJson<CombatPayload>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/combatants/${combatantId}/conditions${this.combatFocusSuffix(combatantId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async deleteCombatCondition(slug: string, conditionId: number, combatantId?: number | null): Promise<CombatPayload> {
+    return this.requestJson<CombatPayload>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/conditions/${conditionId}${this.combatFocusSuffix(combatantId)}`,
+      {
+        method: "DELETE",
+      },
+    );
+  }
+
+  async deleteCombatant(slug: string, combatantId: number): Promise<CombatPayload> {
+    return this.requestJson<CombatPayload>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/combatants/${combatantId}`,
+      {
+        method: "DELETE",
+      },
     );
   }
 

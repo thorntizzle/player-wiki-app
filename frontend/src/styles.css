@@ -1248,6 +1248,14 @@ textarea {
   gap: 0.9rem;
 }
 
+.combat-view-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  border-bottom: 1px solid #d8e1ee;
+  padding-bottom: 0.55rem;
+}
+
 .combat-summary-band,
 .combat-selected-snapshot,
 .combat-selected-snapshot__stats {
@@ -1363,6 +1371,73 @@ textarea {
   min-width: 0;
 }
 
+.combat-dm-grid,
+.combat-controls-layout {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  align-items: start;
+}
+
+.combat-control-card {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.combat-inline-form {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  align-items: end;
+}
+
+.combat-inline-form--wide {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.combat-inline-form button,
+.combat-control-card .button-row {
+  grid-column: 1 / -1;
+}
+
+.combat-inline-form input,
+.combat-inline-form select {
+  width: 100%;
+}
+
+.combat-condition-stack,
+.combat-systems-results {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.combat-condition-chip,
+.compact-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.55rem;
+}
+
+.combat-condition-chip span {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.combat-condition-chip small {
+  color: #64748b;
+}
+
+.combat-danger-card {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
 @media (max-width: 740px) {
   .session-pilot,
   .session-shell {
@@ -1393,8 +1468,11 @@ textarea {
   .session-tab-strip,
   .inline-two-col,
   .combat-carousel .compact-header,
-  .combat-pc-workspace .compact-header {
+  .combat-pc-workspace .compact-header,
+  .combat-condition-chip,
+  .compact-card {
     flex-direction: column;
+    align-items: stretch;
   }
 
   .combat-carousel-track {

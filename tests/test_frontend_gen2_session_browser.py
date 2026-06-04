@@ -200,6 +200,71 @@ def test_gen2_combat_browser_opens_player_workspace_and_preserves_focused_draft(
             browser.close()
 
 
+def test_gen2_combat_browser_exposes_dm_status_and_controls(
+    app,
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    _seed_gen2_combat(app, users)
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=status")
+            expect(page.get_by_role("heading", name=re.compile(r"Combat:", re.I))).to_be_visible(timeout=10000)
+            combat_nav = page.get_by_role("navigation", name="Combat view")
+            expect(combat_nav.get_by_role("button", name="DM Status")).to_be_visible()
+            expect(combat_nav.get_by_role("button", name="DM Controls")).to_be_visible()
+
+            carousel = page.locator(".combat-carousel")
+            carousel.get_by_role("button", name=re.compile(r"Clockwork Hound", re.I)).click()
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?view=status&combatant=\d+"))
+            expect(page.get_by_role("heading", name="Vitals")).to_be_visible(timeout=5000)
+
+            dm_current_hp = page.get_by_label("DM Current HP", exact=True)
+            expect(dm_current_hp).to_be_visible()
+            dm_current_hp.fill("19")
+            page.get_by_role("button", name="Save DM vitals").click()
+            expect(page.get_by_text("Vitals saved.")).to_be_visible(timeout=5000)
+            expect(dm_current_hp).to_have_value("19")
+
+            page.get_by_label("Condition", exact=True).fill("Restrained")
+            page.get_by_label("Duration", exact=True).fill("Until round 3")
+            page.get_by_role("button", name="Add condition").click()
+            expect(page.get_by_text("Condition added.")).to_be_visible(timeout=5000)
+            expect(page.locator(".combat-condition-chip", has_text="Restrained")).to_be_visible()
+
+            combat_nav.get_by_role("button", name="DM Controls").click()
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?view=controls&combatant=\d+"))
+            expect(page.get_by_role("heading", name="Add NPC")).to_be_visible(timeout=5000)
+            name_input = page.get_by_label("Name", exact=True)
+            name_input.fill("Glass Raider")
+            page.get_by_label("Max HP", exact=True).fill("11")
+            page.get_by_label("Current HP", exact=True).fill("11")
+            page.get_by_label("Turn", exact=True).fill("7")
+            page.wait_for_timeout(1300)
+            expect(name_input).to_have_value("Glass Raider")
+            page.get_by_role("button", name="Add manual NPC").click()
+            expect(page.get_by_text("NPC added.")).to_be_visible(timeout=5000)
+            expect(page.locator(".combat-carousel").get_by_role("button", name=re.compile(r"Glass Raider", re.I))).to_be_visible()
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_gen2_wiki_browser_exposes_home_section_page_and_assets(
     frontend_gen2_session_live_server,
     users,
