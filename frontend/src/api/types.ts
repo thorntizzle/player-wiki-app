@@ -401,6 +401,13 @@ export interface SessionArticleCreateResponse extends ApiResponseBase {
 export interface SessionArticleUpdatePayload {
   title?: string;
   body_markdown?: string;
+  image?: {
+    filename: string;
+    data_base64: string;
+    media_type?: string;
+    alt_text?: string | null;
+    caption?: string | null;
+  } | null;
   image_alt_text?: string | null;
   image_caption?: string | null;
 }

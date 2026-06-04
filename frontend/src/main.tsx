@@ -52,6 +52,7 @@ import type {
   SessionArticleCreatePayloadUpload,
   SessionArticleCreatePayloadWiki,
   SessionArticleSourceResult,
+  SessionArticleUpdatePayload,
   SessionLogSummary,
   SessionMessage,
   SessionPayload,
@@ -776,9 +777,9 @@ function AppShell() {
         show: campaignVisibilityCanAccess(campaignVisibility, "systems"),
       },
       {
-        href: `/campaigns/${encodedCampaignSlug}/dm-content`,
+        href: `/app-next/campaigns/${encodedCampaignSlug}/dm-content`,
         label: "DM Content",
-        isGen2: false,
+        isGen2: true,
         show:
           campaignVisibilityCanAccess(campaignVisibility, "dm_content")
           || campaignPermissions?.can_manage_dm_content === true
@@ -4219,6 +4220,7 @@ interface StagedArticleDraftState {
   body: string;
   imageAltText: string;
   imageCaption: string;
+  image?: EmbeddedImageInput | null;
 }
 
 function DmPane({
@@ -4324,12 +4326,7 @@ function DmPane({
 
   const updateArticleMutation = useMutation({
     mutationFn: (args: { id: number; payload: { title: string; body_markdown: string; image_alt_text?: string; image_caption?: string } }) =>
-      apiClient.updateSessionArticle(campaignSlug, args.id, {
-        title: args.payload.title,
-        body_markdown: args.payload.body_markdown,
-        image_alt_text: args.payload.image_alt_text,
-        image_caption: args.payload.image_caption,
-      }),
+      apiClient.updateSessionArticle(campaignSlug, args.id, args.payload),
     onSuccess: () => {
       setUiMessage("Article updated.");
       setPaneError(null);
@@ -4519,7 +4516,7 @@ function DmPane({
           selectedSourceRef={selectedSourceRef}
           setSelectedSourceRef={(next) => {
             setSelectedSourceRef(next);
-            setSourceStatus(`Source selected: ${next}`);
+            setSourceStatus(null);
           }}
           manualDraft={manualDraft}
           setManualDraft={(next) => {
@@ -4630,17 +4627,25 @@ function DmPane({
                       <button
                         type="button"
                         disabled={updateArticleMutation.isPending}
-                        onClick={() =>
+                        onClick={() => {
+                          const articlePayload: {
+                            title: string;
+                            body_markdown: string;
+                            image_alt_text?: string;
+                            image_caption?: string;
+                          } = {
+                            title: draft.title,
+                            body_markdown: draft.body,
+                          };
+                          if (article.image) {
+                            articlePayload.image_alt_text = draft.imageAltText || "";
+                            articlePayload.image_caption = draft.imageCaption || "";
+                          }
                           updateArticleMutation.mutate({
                             id: article.id,
-                            payload: {
-                              title: draft.title,
-                              body_markdown: draft.body,
-                              image_alt_text: draft.imageAltText || "",
-                              image_caption: draft.imageCaption || "",
-                            },
-                          })
-                        }
+                            payload: articlePayload,
+                          });
+                        }}
                       >
                         {updateArticleMutation.isPending ? "Saving..." : "Save draft"}
                       </button>
@@ -4777,6 +4782,431 @@ function DmPane({
         </section>
       </section>
     </div>
+  );
+}
+
+function DmContentPage() {
+  const { campaignSlug } = useParams({
+    from: "/campaigns/$campaignSlug/dm-content",
+  });
+  const resolvedCampaignSlug = campaignSlug ?? "";
+  const encodedCampaignSlug = encodeURIComponent(resolvedCampaignSlug);
+  const { apiClient, setAuthRequired } = useApiClient();
+  const [mode, setMode] = useState<ArticleMode>("manual");
+  const [manualDraft, setManualDraft] = useState({ title: "", body: "" });
+  const [uploadDraft, setUploadDraft] = useState({
+    filename: "",
+    markdown: "",
+    image: null as EmbeddedImageInput | null,
+  });
+  const [sourceQuery, setSourceQuery] = useState("");
+  const [sourceResults, setSourceResults] = useState<SessionArticleSourceResult[]>([]);
+  const [sourceStatus, setSourceStatus] = useState<string | null>(null);
+  const [selectedSourceRef, setSelectedSourceRef] = useState("");
+  const [stagedDrafts, setStagedDrafts] = useState<Record<number, StagedArticleDraftState>>({});
+  const [uiMessage, setUiMessage] = useState<string | null>(null);
+  const [paneError, setPaneError] = useState<string | null>(null);
+
+  const sessionQuery = useQuery({
+    queryKey: ["dm-content-staged-articles", resolvedCampaignSlug],
+    queryFn: async () => {
+      const response = await apiClient.getSessionLiveState(resolvedCampaignSlug);
+      const resolved = resolveSessionLivePayload(undefined, response);
+      if (resolved.state === "full" || resolved.state === "reuse") {
+        return resolved.payload;
+      }
+      throw new Error("Unable to load staged articles.");
+    },
+    enabled: Boolean(resolvedCampaignSlug),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (isAuthError(sessionQuery.error)) {
+      setAuthRequired(true);
+    }
+  }, [sessionQuery.error, setAuthRequired]);
+
+  const stagedArticles: SessionArticle[] = sessionQuery.data?.staged_articles ?? [];
+  const canManageSession = sessionQuery.data?.permissions.can_manage_session ?? false;
+
+  useEffect(() => {
+    setStagedDrafts((current) => {
+      const next: Record<number, StagedArticleDraftState> = {};
+      for (const article of stagedArticles) {
+        const existing = current[article.id];
+        next[article.id] = existing ?? {
+          title: article.title,
+          body: article.body_markdown,
+          imageAltText: article.image?.alt_text || "",
+          imageCaption: article.image?.caption || "",
+          image: null,
+        };
+      }
+      return next;
+    });
+  }, [stagedArticles]);
+
+  const createArticleMutation = useMutation({
+    mutationFn: (payload: SessionArticleCreatePayload) => apiClient.createSessionArticle(resolvedCampaignSlug, payload),
+    onSuccess: () => {
+      setUiMessage("Article staged.");
+      setPaneError(null);
+      setManualDraft({ title: "", body: "" });
+      setUploadDraft({ filename: "", markdown: "", image: null });
+      setSelectedSourceRef("");
+      void sessionQuery.refetch();
+    },
+    onError: (error) => {
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+      setPaneError(apiErrorMessage(error));
+      setUiMessage(null);
+    },
+  });
+
+  const updateArticleMutation = useMutation({
+    mutationFn: (args: { id: number; payload: StagedArticleDraftState; hasExistingImage: boolean }) => {
+      const imagePayload = args.payload.image
+        ? {
+            ...args.payload.image,
+            alt_text: args.payload.imageAltText || null,
+            caption: args.payload.imageCaption || null,
+          }
+        : undefined;
+      const articlePayload: SessionArticleUpdatePayload = {
+        title: args.payload.title,
+        body_markdown: args.payload.body,
+      };
+      if (imagePayload) {
+        articlePayload.image = imagePayload;
+      } else if (args.hasExistingImage) {
+        articlePayload.image_alt_text = args.payload.imageAltText || "";
+        articlePayload.image_caption = args.payload.imageCaption || "";
+      }
+      return apiClient.updateSessionArticle(resolvedCampaignSlug, args.id, articlePayload);
+    },
+    onSuccess: (_response, args) => {
+      setUiMessage("Article updated.");
+      setPaneError(null);
+      setStagedDrafts((current) => ({
+        ...current,
+        [args.id]: {
+          ...current[args.id],
+          image: null,
+        },
+      }));
+      void sessionQuery.refetch();
+    },
+    onError: (error) => {
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+      setPaneError(apiErrorMessage(error));
+      setUiMessage(null);
+    },
+  });
+
+  const deleteArticleMutation = useMutation({
+    mutationFn: (articleId: number) => apiClient.deleteSessionArticle(resolvedCampaignSlug, articleId),
+    onSuccess: () => {
+      setUiMessage("Article removed.");
+      setPaneError(null);
+      void sessionQuery.refetch();
+    },
+    onError: (error) => {
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+      setPaneError(apiErrorMessage(error));
+      setUiMessage(null);
+    },
+  });
+
+  const searchSources = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const query = sourceQuery.trim();
+    if (!query) {
+      setSourceStatus("Search with a query.");
+      return;
+    }
+    setSourceStatus("Searching ...");
+    try {
+      const response = await apiClient.searchSessionArticleSources(resolvedCampaignSlug, query);
+      setSourceResults(response.results);
+      setSourceStatus(response.message || "Search complete.");
+      if (!response.results.length) {
+        setSelectedSourceRef("");
+      }
+    } catch (error) {
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+      setSourceResults([]);
+      setSourceStatus(null);
+      setPaneError(apiErrorMessage(error));
+    }
+  };
+
+  const clearArticleStatus = () => {
+    setPaneError(null);
+    setUiMessage(null);
+  };
+  const pageError = getApiErrorMessage(sessionQuery.error);
+
+  return (
+    <section className="panel dm-content-gen2-page">
+      <div className="panel-header">
+        <Link to="/" className="button button-secondary">
+          Back to list
+        </Link>
+        <h2>DM Content: Staged Articles</h2>
+        {canManageSession ? <span className="pill">DM+</span> : null}
+      </div>
+
+      <ApiErrorNotice
+        isLoading={sessionQuery.isLoading}
+        message={pageError}
+        onAuth={() => setAuthRequired(true)}
+      />
+
+      <div className="dm-content-gen2-links">
+        <a href={`/campaigns/${encodedCampaignSlug}/dm-content`}>Statblocks</a>
+        <a href={`/campaigns/${encodedCampaignSlug}/dm-content/conditions`}>Conditions</a>
+        <a href={`/campaigns/${encodedCampaignSlug}/dm-content/player-wiki`}>Player Wiki</a>
+        <a href={`/campaigns/${encodedCampaignSlug}/dm-content/systems`}>Systems</a>
+        <a href={`/campaigns/${encodedCampaignSlug}/session/dm`}>Session DM</a>
+      </div>
+
+      {paneError ? <p className="status status-error">{paneError}</p> : null}
+      {uiMessage ? <p className="status status-neutral">{uiMessage}</p> : null}
+      {!canManageSession && !sessionQuery.isLoading ? (
+        <p className="status status-error">You do not have permission to manage staged articles.</p>
+      ) : null}
+
+      <div className="split-grid dm-content-staged-grid">
+        <DmArticleCreator
+          mode={mode}
+          setMode={(next) => {
+            clearArticleStatus();
+            setMode(next);
+          }}
+          sourceQuery={sourceQuery}
+          setSourceQuery={setSourceQuery}
+          sourceStatus={sourceStatus}
+          setSourceStatus={setSourceStatus}
+          sourceResults={sourceResults}
+          selectedSourceRef={selectedSourceRef}
+          setSelectedSourceRef={(next) => {
+            setSelectedSourceRef(next);
+            setSourceStatus(null);
+          }}
+          manualDraft={manualDraft}
+          setManualDraft={(next) => {
+            clearArticleStatus();
+            setManualDraft(next);
+          }}
+          uploadDraft={uploadDraft}
+          setUploadDraft={(next) => {
+            clearArticleStatus();
+            setUploadDraft(next);
+          }}
+          onSearchSources={searchSources}
+          onCreate={(payload) => {
+            clearArticleStatus();
+            createArticleMutation.mutate(payload);
+          }}
+          isCreating={createArticleMutation.isPending}
+        />
+
+        <section className="panel panel-nested">
+          <div className="panel-header">
+            <h3>Staged articles</h3>
+            <span className="pill">{stagedArticles.length}</span>
+          </div>
+          {stagedArticles.length ? (
+            <div className="article-stack">
+              {stagedArticles.map((article) => {
+                const draft = stagedDrafts[article.id] ?? {
+                  title: article.title,
+                  body: article.body_markdown,
+                  imageAltText: article.image?.alt_text || "",
+                  imageCaption: article.image?.caption || "",
+                  image: null,
+                };
+                return (
+                  <details className="article-card" key={article.id}>
+                    <summary>
+                      <strong>{article.title}</strong>
+                      <span className="article-kind">{article.source_kind || "manual"}</span>
+                    </summary>
+                    {article.image ? (
+                      <img
+                        className="article-image"
+                        src={resolveArticleImage(resolvedCampaignSlug, article)}
+                        alt={article.image.alt_text || "Article image"}
+                      />
+                    ) : null}
+                    <SessionArticleSourceLine article={article} />
+                    <form
+                      className="session-form"
+                      onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                        event.preventDefault();
+                        const formData = new FormData(event.currentTarget);
+                        const currentDraft = stagedDrafts[article.id] ?? draft;
+                        updateArticleMutation.mutate({
+                          id: article.id,
+                          hasExistingImage: Boolean(article.image),
+                          payload: {
+                            title: String(formData.get("title") || ""),
+                            body: String(formData.get("body_markdown") || ""),
+                            imageAltText: String(formData.get("image_alt_text") || ""),
+                            imageCaption: String(formData.get("image_caption") || ""),
+                            image: currentDraft.image ?? null,
+                          },
+                        });
+                      }}
+                    >
+                      <label htmlFor={`dm-content-stage-title-${article.id}`} className="chat-label">
+                        Title
+                      </label>
+                      <input
+                        id={`dm-content-stage-title-${article.id}`}
+                        name="title"
+                        value={draft.title}
+                        disabled={!canManageSession}
+                        onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                          const title = event.currentTarget.value;
+                          setStagedDrafts((current) => ({
+                            ...current,
+                            [article.id]: {
+                              ...(current[article.id] ?? draft),
+                              title,
+                            },
+                          }));
+                        }}
+                      />
+                      <label htmlFor={`dm-content-stage-body-${article.id}`} className="chat-label">
+                        Body
+                      </label>
+                      <textarea
+                        id={`dm-content-stage-body-${article.id}`}
+                        name="body_markdown"
+                        rows={8}
+                        value={draft.body}
+                        disabled={!canManageSession}
+                        onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+                          const body = event.currentTarget.value;
+                          setStagedDrafts((current) => ({
+                            ...current,
+                            [article.id]: {
+                              ...(current[article.id] ?? draft),
+                              body,
+                            },
+                          }));
+                        }}
+                      />
+                      <div className="dm-content-image-edit-row">
+                        <label htmlFor={`dm-content-stage-alt-${article.id}`} className="chat-label">
+                          Image alt text
+                          <input
+                            id={`dm-content-stage-alt-${article.id}`}
+                            name="image_alt_text"
+                            value={draft.imageAltText}
+                            disabled={!canManageSession}
+                            onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                              const imageAltText = event.currentTarget.value;
+                              setStagedDrafts((current) => ({
+                                ...current,
+                                [article.id]: {
+                                  ...(current[article.id] ?? draft),
+                                  imageAltText,
+                                },
+                              }));
+                            }}
+                          />
+                        </label>
+                        <label htmlFor={`dm-content-stage-caption-${article.id}`} className="chat-label">
+                          Image caption
+                          <input
+                            id={`dm-content-stage-caption-${article.id}`}
+                            name="image_caption"
+                            value={draft.imageCaption}
+                            disabled={!canManageSession}
+                            onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                              const imageCaption = event.currentTarget.value;
+                              setStagedDrafts((current) => ({
+                                ...current,
+                                [article.id]: {
+                                  ...(current[article.id] ?? draft),
+                                  imageCaption,
+                                },
+                              }));
+                            }}
+                          />
+                        </label>
+                      </div>
+                      <label htmlFor={`dm-content-stage-image-${article.id}`} className="chat-label">
+                        Replacement image
+                      </label>
+                      <input
+                        id={`dm-content-stage-image-${article.id}`}
+                        type="file"
+                        accept=".png,.jpg,.jpeg,.webp,.gif"
+                        disabled={!canManageSession}
+                        onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                          const file = event.currentTarget.files?.item(0);
+                          if (!file) {
+                            setStagedDrafts((current) => ({
+                              ...current,
+                              [article.id]: {
+                                ...(current[article.id] ?? draft),
+                                image: null,
+                              },
+                            }));
+                            return;
+                          }
+                          readBinaryAsBase64(file, (payload) => {
+                            setStagedDrafts((current) => ({
+                              ...current,
+                              [article.id]: {
+                                ...(current[article.id] ?? draft),
+                                image: payload,
+                              },
+                            }));
+                          });
+                        }}
+                      />
+                      {draft.image ? <p className="status status-neutral">Selected image: {draft.image.filename}</p> : null}
+                      <div className="article-actions">
+                        <SessionArticleReferenceActions article={article} includePromotionLinks />
+                        <button
+                          type="submit"
+                          disabled={!canManageSession || updateArticleMutation.isPending}
+                        >
+                          {updateArticleMutation.isPending ? "Saving..." : "Save draft"}
+                        </button>
+                        <button
+                          type="button"
+                          className="button-danger"
+                          disabled={!canManageSession || deleteArticleMutation.isPending}
+                          onClick={() => deleteArticleMutation.mutate(article.id)}
+                        >
+                          {deleteArticleMutation.isPending ? "Deleting..." : "Delete"}
+                        </button>
+                      </div>
+                    </form>
+                  </details>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="status status-neutral">No staged articles.</p>
+          )}
+        </section>
+      </div>
+    </section>
   );
 }
 
@@ -5386,6 +5816,12 @@ const campaignSessionRoute = createRoute({
   component: SessionPage,
 });
 
+const campaignDmContentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/campaigns/$campaignSlug/dm-content",
+  component: DmContentPage,
+});
+
 const routeTree = rootRoute.addChildren([
   campaignsRoute,
   campaignHomeRoute,
@@ -5395,6 +5831,7 @@ const routeTree = rootRoute.addChildren([
   campaignCharacterDetailRoute,
   campaignCombatRoute,
   campaignSessionRoute,
+  campaignDmContentRoute,
 ]);
 const router = createRouter({
   routeTree,

@@ -105,6 +105,26 @@ body {
   background: #d7e3ff;
 }
 
+.dm-content-gen2-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.dm-content-gen2-links a {
+  border: 1px solid #93a3bf;
+  border-radius: 8px;
+  color: #1f4f63;
+  font-weight: 700;
+  padding: 0.45rem 0.7rem;
+  text-decoration: none;
+}
+
+.dm-content-gen2-links a:hover {
+  background: #edf4ff;
+}
+
 .campaign-search-form {
   display: flex;
   align-items: end;
@@ -532,6 +552,16 @@ body {
 
 .split-grid {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.dm-content-staged-grid {
+  align-items: start;
+}
+
+.dm-content-image-edit-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
 }
 
 .session-log-row {
