@@ -9,6 +9,27 @@ export interface ApiResponseBase {
   ok: boolean;
 }
 
+export interface CampaignVisibilityScopeState {
+  effective: string;
+  can_access: boolean;
+  configured?: string;
+}
+
+export interface CampaignVisibilityMap {
+  [scope: string]: CampaignVisibilityScopeState;
+}
+
+export interface CampaignPermissions {
+  can_manage_content?: boolean;
+  can_manage_systems?: boolean;
+  can_manage_combat?: boolean;
+  can_manage_session?: boolean;
+  can_manage_dm_content?: boolean;
+  can_manage_visibility?: boolean;
+  can_post_session_messages?: boolean;
+  can_record_xianxia_dao_immolating_use?: boolean;
+}
+
 export interface CampaignRecord {
   slug: string;
   title: string;
@@ -22,8 +43,48 @@ export interface CampaignEntry {
   campaign: CampaignRecord;
   role: string;
   auth_source?: string | null;
-  visibility?: Record<string, unknown>;
-  permissions?: Record<string, unknown>;
+  visibility?: CampaignVisibilityMap;
+  permissions?: CampaignPermissions;
+}
+
+export interface CampaignDetailResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  role: string;
+  auth_source: string;
+  visibility: CampaignVisibilityMap;
+  permissions: CampaignPermissions;
+}
+
+export interface UserMembership {
+  id: number;
+  campaign_slug: string;
+  role: string;
+  status: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface UserProfile {
+  id: number;
+  email: string;
+  display_name: string;
+  is_admin: boolean;
+  status: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface UserPreferences {
+  theme_key?: string | null;
+  session_chat_order?: string | null;
+}
+
+export interface MeResponse extends ApiResponseBase {
+  app: AppMeta;
+  auth_source: string;
+  user: UserProfile;
+  memberships: UserMembership[];
+  preferences?: UserPreferences;
 }
 
 export interface CampaignsResponse extends ApiResponseBase {

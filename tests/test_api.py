@@ -380,6 +380,8 @@ def test_api_me_and_campaigns_use_bearer_token_auth(client, app, users):
     assert me_payload["ok"] is True
     assert me_payload["auth_source"] == "api_token"
     assert me_payload["user"]["email"] == users["dm"]["email"]
+    assert me_payload["preferences"]["theme_key"] is not None
+    assert me_payload["preferences"]["session_chat_order"] is not None
 
     campaigns_response = client.get("/api/v1/campaigns", headers=api_headers(token))
 
@@ -2339,7 +2341,9 @@ def test_api_content_config_and_assets_refresh_repository_and_manage_files(clien
 
     campaign_detail = client.get("/api/v1/campaigns/linden-pass", headers=api_headers(dm_token))
     assert campaign_detail.status_code == 200
-    assert campaign_detail.get_json()["campaign"]["current_session"] == 3
+    campaign_detail_payload = campaign_detail.get_json()
+    assert campaign_detail_payload["campaign"]["current_session"] == 3
+    assert campaign_detail_payload["permissions"]["can_manage_visibility"] is True
 
     with app.app_context():
         campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")

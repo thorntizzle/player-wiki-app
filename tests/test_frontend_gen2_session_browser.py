@@ -58,12 +58,28 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(page.get_by_role("heading", name="Chat logs")).to_be_visible(timeout=5000)
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
+            expect(page.get_by_role("link", name="Campaign Player Wiki")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("link", name="Account")).to_be_visible()
+            expect(page.locator(".campaign-nav-link").get_by_text("Session")).to_be_visible()
+            expect(page.locator(".campaign-nav-link").get_by_text("Campaign Home")).to_be_visible()
+            expect(page.locator(".campaign-nav-link").get_by_text("Combat")).to_be_visible()
+            expect(page.locator(".campaign-nav-link").get_by_text("Characters")).to_be_visible()
+            expect(page.locator(".campaign-nav-link").get_by_text("Systems")).to_be_visible()
+            expect(page.locator(".campaign-nav-link").get_by_text("DM Content")).to_be_visible()
+            expect(page.locator(".campaign-nav-link").get_by_text("Control")).to_be_visible()
+            expect(page.get_by_label("Search", exact=True)).to_be_visible()
+            assert page.locator("a", has_text="Sign in").count() == 0
+
             session_heading = page.get_by_role("heading", name=re.compile(r"Session:", re.I)).first
             session_tabs = page.locator(".session-tab-strip")
             expect(session_heading).to_be_visible(timeout=10000)
             expect(session_tabs.get_by_role("button", name="Session", exact=True)).to_be_visible()
             expect(session_tabs.get_by_role("button", name="Character", exact=True)).to_be_visible()
             expect(session_tabs.get_by_role("button", name="DM", exact=True)).to_be_visible()
+
+            page.reload()
+            expect(page.get_by_role("heading", name=re.compile(r"Session:", re.I)).first).to_be_visible(timeout=10000)
+            expect(page.locator(".campaign-nav-link").get_by_text("Session")).to_be_visible()
 
             session_tabs.get_by_role("button", name="DM", exact=True).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))

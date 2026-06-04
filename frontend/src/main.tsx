@@ -7,6 +7,7 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useLocation,
   useParams,
 } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
@@ -28,6 +29,7 @@ import type {
   CharacterPresentedInventoryItem,
   CharacterPresentedSpell,
   CharacterPresentedXianxia,
+  CampaignVisibilityMap,
   CharacterRecord,
   CharacterXianxiaDaoUseRecordPayload,
   CharacterXianxiaDaoUseRequestPayload,
@@ -181,6 +183,22 @@ function useApiClient(): ApiClientContextValue {
     throw new Error("CampaignApiClient context is missing.");
   }
   return context;
+}
+
+function parseCampaignSlugFromPath(pathname: string): string {
+  const appNextMatch = pathname.match(/^\/app-next\/campaigns\/([^/?#]+)/);
+  if (appNextMatch && appNextMatch[1]) {
+    return decodeURIComponent(appNextMatch[1]);
+  }
+  const routedMatch = pathname.match(/^\/campaigns\/([^/?#]+)/);
+  if (routedMatch && routedMatch[1]) {
+    return decodeURIComponent(routedMatch[1]);
+  }
+  return "";
+}
+
+function campaignVisibilityCanAccess(visibility: CampaignVisibilityMap | undefined, scope: string): boolean {
+  return Boolean(visibility?.[scope]?.can_access);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -612,6 +630,7 @@ function AuthNotice() {
 }
 
 function AppShell() {
+  const location = useLocation();
   const [apiToken, setApiToken] = useState(() => {
     try {
       return localStorage.getItem("cpw-pilot-api-token") || "";
@@ -620,6 +639,8 @@ function AppShell() {
     }
   });
   const [authRequired, setAuthRequired] = useState(false);
+  const [campaignSearchQuery, setCampaignSearchQuery] = useState("");
+  const [navigationLabel, setNavigationLabel] = useState<string | null>(null);
   const hasMounted = useRef(false);
 
   const apiClient = useMemo(() => {
@@ -653,35 +674,214 @@ function AppShell() {
     }
   };
 
+  const meQuery = useQuery({
+    queryKey: ["me"],
+    queryFn: async () => {
+      try {
+        return await apiClient.getMe();
+      } catch (error) {
+        if (isAuthError(error)) {
+          return null;
+        }
+        throw error;
+      }
+    },
+    retry: false,
+  });
+
+  const campaignSlug = parseCampaignSlugFromPath(location.pathname);
+  const campaignQuery = useQuery({
+    queryKey: ["campaign", campaignSlug],
+    queryFn: () => apiClient.getCampaign(campaignSlug),
+    enabled: Boolean(campaignSlug),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (isAuthError(campaignQuery.error) || (Boolean(apiToken) && isAuthError(meQuery.error))) {
+      setAuthRequired(true);
+    }
+  }, [apiToken, campaignQuery.error, meQuery.error, setAuthRequired]);
+
+  useEffect(() => {
+    const themeKey = meQuery.data?.preferences?.theme_key;
+    if (themeKey) {
+      document.documentElement.dataset.theme = themeKey;
+    }
+  }, [meQuery.data?.preferences?.theme_key]);
+
+  const user = meQuery.data?.user;
+  const campaign = campaignQuery.data?.campaign;
+  const campaignPermissions = campaignQuery.data?.permissions;
+  const campaignVisibility = campaignQuery.data?.visibility;
+  const encodedCampaignSlug = encodeURIComponent(campaignSlug);
+
+  const navItems = useMemo(
+    () => [
+      {
+        href: `/campaigns/${encodedCampaignSlug}`,
+        label: "Campaign Home",
+        isGen2: false,
+        show: campaignVisibilityCanAccess(campaignVisibility, "campaign"),
+      },
+      {
+        href: `/app-next/campaigns/${encodedCampaignSlug}/session`,
+        label: "Session",
+        isGen2: true,
+        show: campaignVisibilityCanAccess(campaignVisibility, "session"),
+      },
+      {
+        href: `/campaigns/${encodedCampaignSlug}/combat`,
+        label: "Combat",
+        isGen2: false,
+        show: campaignVisibilityCanAccess(campaignVisibility, "combat"),
+      },
+      {
+        href: `/campaigns/${encodedCampaignSlug}/characters`,
+        label: "Characters",
+        isGen2: false,
+        show: campaignVisibilityCanAccess(campaignVisibility, "characters"),
+      },
+      {
+        href: `/campaigns/${encodedCampaignSlug}/systems`,
+        label: "Systems",
+        isGen2: false,
+        show: campaignVisibilityCanAccess(campaignVisibility, "systems"),
+      },
+      {
+        href: `/campaigns/${encodedCampaignSlug}/dm-content`,
+        label: "DM Content",
+        isGen2: false,
+        show:
+          campaignVisibilityCanAccess(campaignVisibility, "dm_content")
+          || campaignPermissions?.can_manage_dm_content === true
+          || campaignPermissions?.can_manage_content === true,
+      },
+      {
+        href: `/campaigns/${encodedCampaignSlug}/control-panel`,
+        label: "Control",
+        isGen2: false,
+        show: campaignPermissions?.can_manage_visibility === true,
+      },
+      {
+        href: `/campaigns/${encodedCampaignSlug}/help`,
+        label: "Help",
+        isGen2: false,
+        show: Boolean(campaignQuery.data),
+      },
+    ],
+    [
+      campaignPermissions?.can_manage_content,
+      campaignPermissions?.can_manage_dm_content,
+      campaignPermissions?.can_manage_visibility,
+      campaignQuery.data,
+      campaignVisibility,
+      encodedCampaignSlug,
+    ],
+  );
+
+  const visibleNavItems = navItems.filter((entry) => entry.show);
+  const campaignSearchAction = campaignSlug ? `/campaigns/${encodedCampaignSlug}` : "";
+  const nextUrl = `${window.location.pathname}${window.location.search}`;
+  const signInHref = `/sign-in?next=${encodeURIComponent(nextUrl)}`;
+
   return (
     <ApiClientContext.Provider value={{ apiClient, apiToken, setApiToken: setStoredToken, authRequired, setAuthRequired }}>
       <div className="session-shell">
         <header className="topbar">
           <div className="brand-block">
             <Link to="/" className="brand-link">
-              Session Companion
+              Campaign Player Wiki
             </Link>
-            <p className="subtitle">app-next / /app-next/campaigns/.../session</p>
+            {campaign ? <p className="subtitle">Campaign: {campaign.title}</p> : null}
+            <p className="subtitle">/app-next</p>
           </div>
-          <label className="token-row" htmlFor="pilot-api-token">
-            <span>API token (optional)</span>
-            <input
-              id="pilot-api-token"
-              type="password"
-              value={apiToken}
-              placeholder="Bearer token for API-only testing"
-              onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                setStoredToken(event.currentTarget.value);
-              }}
-            />
-          </label>
-          <a
-            className="button button-secondary sign-in-link"
-            href={`/sign-in?next=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`}
-          >
-            Sign in
-          </a>
+          <div className="topbar-controls">
+            <label className="token-row" htmlFor="pilot-api-token">
+              <span>API token (optional)</span>
+              <input
+                id="pilot-api-token"
+                type="password"
+                value={apiToken}
+                placeholder="Bearer token for API-only testing"
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  setStoredToken(event.currentTarget.value);
+                }}
+              />
+            </label>
+            <div className="account-row">
+              {user ? (
+                <>
+                  {user.is_admin ? (
+                    <a className="button button-secondary" href="/admin">
+                      Admin
+                    </a>
+                  ) : null}
+                  <a className="button button-secondary" href="/account">
+                    Account
+                  </a>
+                  <span className="user-badge">
+                    {user.display_name}
+                    {user.is_admin ? <span className="user-badge__role">Admin</span> : null}
+                  </span>
+                  <form method="post" action="/sign-out">
+                    <button type="submit" className="button button-secondary">
+                      Sign out
+                    </button>
+                  </form>
+                </>
+              ) : (
+                <a className="button button-secondary sign-in-link" href={signInHref}>
+                  Sign in
+                </a>
+              )}
+            </div>
+          </div>
         </header>
+        {campaign ? (
+          <div className="campaign-nav-row">
+            <nav className="campaign-nav-strip" aria-label="Campaign navigation">
+              {visibleNavItems.map((item) => (
+                <a
+                  key={item.label}
+                  className="campaign-nav-link"
+                  href={item.href}
+                  onClick={() => {
+                    if (!item.isGen2) {
+                      setNavigationLabel(item.label);
+                    }
+                  }}
+                >
+                  {item.label}
+                </a>
+              ))}
+            </nav>
+            {campaignVisibilityCanAccess(campaignVisibility, "wiki") ? (
+              <form className="campaign-search-form" action={campaignSearchAction} method="get">
+                <label htmlFor="gen2-campaign-search">Search</label>
+                <input
+                  id="gen2-campaign-search"
+                  name="q"
+                  type="search"
+                  value={campaignSearchQuery}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setCampaignSearchQuery(event.currentTarget.value)}
+                />
+                <button
+                  type="submit"
+                  className="button button-secondary"
+                  onClick={() => setNavigationLabel("Campaign Home")}
+                >
+                  Search
+                </button>
+              </form>
+            ) : null}
+            {navigationLabel ? (
+              <p className="navigation-status" role="status">
+                Loading {navigationLabel}...
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         <AuthNotice />
         <main className="main-shell">
           <Outlet />

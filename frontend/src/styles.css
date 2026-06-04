@@ -40,9 +40,94 @@ body {
   align-items: center;
 }
 
+.topbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 .brand-block {
   display: grid;
   gap: 0.15rem;
+}
+
+.account-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.account-row .button,
+.topbar .button,
+.topbar .sign-in-link,
+.topbar .button-secondary {
+  white-space: nowrap;
+}
+
+.user-badge {
+  color: #d8e2ff;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.user-badge__role {
+  margin-left: 0.35rem;
+  color: #cbd5e1;
+  font-size: 0.78rem;
+}
+
+.campaign-nav-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.campaign-nav-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.campaign-nav-link {
+  color: #1f2937;
+  text-decoration: none;
+  font-weight: 700;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid #93a3bf;
+  border-radius: 8px;
+  background: #e5edff;
+}
+
+.campaign-nav-link:hover {
+  background: #d7e3ff;
+}
+
+.campaign-search-form {
+  display: flex;
+  align-items: end;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.campaign-search-form label {
+  display: grid;
+  gap: 0.2rem;
+  color: #1f2937;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.campaign-search-form input {
+  width: min(18rem, 48vw);
+}
+
+.navigation-status {
+  margin: 0;
+  color: #4b5563;
+  font-size: 0.9rem;
 }
 
 .brand-link {
@@ -844,6 +929,11 @@ textarea {
   }
 
   .chat-actions,
+  .campaign-nav-row,
+  .campaign-nav-strip,
+  .campaign-search-form,
+  .topbar-controls,
+  .account-row,
   .split-grid,
   .session-log-row,
   .session-tab-strip,

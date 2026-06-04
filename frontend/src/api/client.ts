@@ -1,6 +1,8 @@
 import type {
   ApiAppResponse,
   ApiErrorPayload,
+  CampaignDetailResponse,
+  MeResponse,
   CampaignsResponse,
   CharacterDetailResponse,
   CharacterCurrencyPatchPayload,
@@ -166,6 +168,14 @@ export class CampaignApiClient {
 
   async getAppState(): Promise<ApiAppResponse> {
     return this.requestJson<ApiAppResponse>("/api/v1/app");
+  }
+
+  async getMe(): Promise<MeResponse> {
+    return this.requestJson<MeResponse>("/api/v1/me");
+  }
+
+  async getCampaign(slug: string): Promise<CampaignDetailResponse> {
+    return this.requestJson<CampaignDetailResponse>(`/api/v1/campaigns/${encodeURIComponent(slug)}`);
   }
 
   async getCampaigns(): Promise<CampaignsResponse> {

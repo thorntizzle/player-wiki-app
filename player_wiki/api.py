@@ -17,6 +17,7 @@ from .auth import (
     can_manage_campaign_combat,
     can_manage_campaign_content,
     can_manage_campaign_dm_content,
+    can_manage_campaign_visibility,
     can_manage_campaign_session,
     can_manage_campaign_systems,
     can_post_campaign_session_messages,
@@ -1536,6 +1537,10 @@ def register_api(app) -> None:
                 "auth_source": get_current_auth_source(),
                 "user": serialize_user(user),
                 "memberships": [serialize_membership(item) for item in get_current_memberships()],
+                "preferences": {
+                    "theme_key": get_current_user_preferences().theme_key,
+                    "session_chat_order": get_current_user_preferences().session_chat_order,
+                },
             }
         )
 
@@ -1674,6 +1679,7 @@ def register_api(app) -> None:
                     "can_manage_combat": can_manage_campaign_combat(campaign_slug),
                     "can_manage_session": can_manage_campaign_session(campaign_slug),
                     "can_manage_dm_content": can_manage_campaign_dm_content(campaign_slug),
+                    "can_manage_visibility": can_manage_campaign_visibility(campaign_slug),
                     "can_post_session_messages": can_post_campaign_session_messages(campaign_slug),
                 },
             }
