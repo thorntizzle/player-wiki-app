@@ -459,6 +459,90 @@ textarea {
   padding: 0.5rem;
 }
 
+.badge-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.35rem 0;
+}
+
+.meta-badge {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.2rem 0.45rem;
+}
+
+.detail-button {
+  width: fit-content;
+  margin-top: 0.35rem;
+}
+
+.detail-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.detail-modal {
+  width: min(42rem, 100%);
+  max-height: min(84vh, 48rem);
+  overflow: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #111827;
+  padding: 1rem;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+}
+
+.detail-modal-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+  margin-bottom: 0.75rem;
+}
+
+.detail-modal-header h3 {
+  margin: 0.1rem 0 0;
+}
+
+.detail-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 0.5rem;
+  margin: 0.6rem 0;
+}
+
+.detail-facts div {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 0.45rem;
+}
+
+.detail-facts dt {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.detail-facts dd {
+  margin: 0.15rem 0 0;
+}
+
+.detail-html {
+  max-height: none;
+}
+
 .wiki-search {
   display: grid;
   gap: 0.4rem;

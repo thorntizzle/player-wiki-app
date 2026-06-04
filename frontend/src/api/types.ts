@@ -210,6 +210,8 @@ export interface CharacterEquipmentRow {
   weight: string;
   notes: string;
   tags: string[];
+  href: string;
+  description_html: string;
   source_label: string;
   is_equipped: boolean;
   equipped_label: string;
@@ -246,6 +248,58 @@ export interface CharacterEquipmentState {
   arcane_armor_state: CharacterArcaneArmorState;
 }
 
+export interface CharacterPresentedSpell {
+  name: string;
+  href: string;
+  description_html: string;
+  level_label: string;
+  school: string;
+  casting_time: string;
+  range: string;
+  duration: string;
+  components: string;
+  save_or_hit: string;
+  source: string;
+  reference: string;
+  badges: string[];
+  class_row_id: string;
+  management_note: string;
+}
+
+export interface CharacterPresentedSpellSection {
+  class_row_id: string;
+  title: string;
+  spells: CharacterPresentedSpell[];
+  spell_level_sections?: Array<{
+    title: string;
+    groups: Array<{
+      title?: string;
+      spells: CharacterPresentedSpell[];
+    }>;
+  }>;
+}
+
+export interface CharacterPresentedSpellcasting {
+  spellcasting_class: string;
+  spellcasting_ability: string;
+  spell_save_dc: number | string | null;
+  spell_attack_bonus: string;
+  current_row_sections: CharacterPresentedSpellSection[];
+  row_sections: CharacterPresentedSpellSection[];
+}
+
+export interface CharacterPresentedInventoryItem {
+  id: string;
+  item_ref: string;
+  name: string;
+  href: string;
+  description_html: string;
+  quantity: number;
+  weight: string;
+  notes: string;
+  tags: string[];
+}
+
 export interface CharacterStateRecord {
   campaign_slug: string;
   character_slug: string;
@@ -261,6 +315,8 @@ export interface CharacterRecord {
   state_record: CharacterStateRecord;
   equipment_state?: CharacterEquipmentState;
   arcane_armor_state?: CharacterArcaneArmorState;
+  presented_spellcasting?: CharacterPresentedSpellcasting;
+  presented_inventory?: CharacterPresentedInventoryItem[];
   permissions: CharacterPermissions;
 }
 

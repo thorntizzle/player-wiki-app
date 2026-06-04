@@ -77,8 +77,10 @@ The current pilot build is local-only: `frontend/dist` is intentionally ignored 
 - `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>`
 - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>`
 
+The character detail response includes Gen2 presentation fields for DND-5E linked details: equipment rows, presented inventory items, and presented spellcasting spells carry source `href` values plus server-rendered `description_html` for the Session Character detail dialogs.
+
 Authentication notes:
 
 - Session polling and writes default to browser cookies using `same-origin` requests.
 - Optional API token is supported in a local test field and sent as `Authorization: Bearer ...` when present.
-- When an auth-gated call returns 401, the shell shows a clear recovery prompt to sign in and continue.
+- When an auth-gated call returns 401, the shell shows a clear recovery prompt to sign in and continue. Updating the API token field invalidates current queries so failed reads retry with the new token.

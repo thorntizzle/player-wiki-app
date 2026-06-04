@@ -73,7 +73,13 @@ from .character_editor import CharacterEditValidationError, apply_equipment_stat
 from .character_importer import write_yaml
 from .character_models import CharacterRecord, CharacterStateRecord
 from .character_profile import profile_class_level_text
-from .character_presenter import build_character_inventory_item_ref, present_arcane_armor_state
+from .character_presenter import (
+    build_character_entry_href,
+    build_character_inventory_item_ref,
+    present_arcane_armor_state,
+    present_character_detail,
+    resolve_item_description_html,
+)
 from .character_service import CharacterStateValidationError, merge_state_with_definition
 from .character_store import CharacterStateConflictError
 from .character_repository import load_campaign_character_config
@@ -1038,6 +1044,13 @@ def register_api(app) -> None:
         ]
         return _attach_campaign_item_page_support(item_catalog, campaign_item_pages)
 
+    def list_visible_character_page_records(campaign_slug: str, campaign) -> list[object]:
+        return [
+            page_record
+            for page_record in get_campaign_page_store().list_page_records(campaign_slug, include_body=True)
+            if getattr(page_record, "page", None) is not None and campaign.is_page_visible(page_record.page)
+        ]
+
     def build_record_equipment_support_lookup(
         record: CharacterRecord,
         *,
@@ -1067,7 +1080,22 @@ def register_api(app) -> None:
             )
         return definition_item_lookup, support_lookup
 
-    def build_character_equipment_state_payload(campaign_slug: str, record: CharacterRecord) -> dict[str, Any]:
+    def build_character_equipment_state_payload(
+        campaign_slug: str,
+        record: CharacterRecord,
+        *,
+        campaign=None,
+        campaign_page_records: list[object] | None = None,
+    ) -> dict[str, Any]:
+        resolved_campaign = campaign or get_repository().get_campaign(campaign_slug)
+        resolved_campaign_page_records = (
+            campaign_page_records
+            if campaign_page_records is not None
+            else list_visible_character_page_records(campaign_slug, resolved_campaign)
+            if resolved_campaign is not None
+            else []
+        )
+        systems_service = current_app.extensions["systems_service"]
         item_catalog = build_character_item_catalog(campaign_slug)
         definition_item_lookup, support_lookup = build_record_equipment_support_lookup(
             record,
@@ -1108,6 +1136,21 @@ def register_api(app) -> None:
                 if is_equipped
                 else "Not equipped"
             )
+            href = build_character_entry_href(
+                campaign_slug,
+                systems_ref=definition_item.get("systems_ref"),
+                page_ref=definition_item.get("page_ref"),
+            )
+            description_html = (
+                resolve_item_description_html(
+                    resolved_campaign,
+                    definition_item,
+                    systems_service=systems_service,
+                    campaign_page_records=resolved_campaign_page_records,
+                )
+                if resolved_campaign is not None and href
+                else ""
+            )
             equipment_items.append(
                 {
                     "id": item_ref,
@@ -1120,6 +1163,8 @@ def register_api(app) -> None:
                         for tag in list(inventory_item.get("tags") or definition_item.get("tags") or [])
                         if str(tag).strip()
                     ],
+                    "href": href,
+                    "description_html": description_html,
                     "is_equipped": is_equipped,
                     "equipped_label": equipped_label,
                     "is_attuned": bool(inventory_item.get("is_attuned", False)) if requires_attunement else False,
@@ -1178,13 +1223,34 @@ def register_api(app) -> None:
         }
 
     def serialize_character_record(campaign_slug: str, record: CharacterRecord) -> dict[str, Any]:
-        equipment_state = build_character_equipment_state_payload(campaign_slug, record)
+        campaign = get_repository().get_campaign(campaign_slug)
+        campaign_page_records = (
+            list_visible_character_page_records(campaign_slug, campaign) if campaign is not None else []
+        )
+        presented_character = (
+            present_character_detail(
+                campaign,
+                record,
+                systems_service=current_app.extensions["systems_service"],
+                campaign_page_records=campaign_page_records,
+            )
+            if campaign is not None
+            else {}
+        )
+        equipment_state = build_character_equipment_state_payload(
+            campaign_slug,
+            record,
+            campaign=campaign,
+            campaign_page_records=campaign_page_records,
+        )
         return {
             "definition": record.definition.to_dict(),
             "import_metadata": record.import_metadata.to_dict(),
             "state_record": serialize_character_state(record.state_record),
             "equipment_state": equipment_state,
             "arcane_armor_state": equipment_state.get("arcane_armor_state"),
+            "presented_spellcasting": dict(presented_character.get("spellcasting") or {}),
+            "presented_inventory": list(presented_character.get("inventory") or []),
             "permissions": {
                 "can_edit_session": has_session_mode_access(campaign_slug, record.definition.character_slug),
             },

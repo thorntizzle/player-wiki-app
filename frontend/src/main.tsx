@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useContext, createContext } from "react";
+import React, { useState, useEffect, useMemo, useContext, createContext, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Link,
@@ -25,6 +25,8 @@ import type {
   CharacterEquipmentStatePatchPayload,
   CharacterFeatureStatePatchPayload,
   CharacterInventoryPatchPayload,
+  CharacterPresentedInventoryItem,
+  CharacterPresentedSpell,
   CharacterRecord,
   CharacterNotesPatchPayload,
   CharacterResourcePatchPayload,
@@ -72,6 +74,21 @@ interface CharacterEquipmentDraft {
   isEquipped: boolean;
   isAttuned: boolean;
   weaponWieldMode: string;
+}
+
+interface DetailFact {
+  label: string;
+  value: string;
+}
+
+interface CharacterDetailDialogState {
+  eyebrow: string;
+  title: string;
+  html: string;
+  notes?: string;
+  href?: string;
+  facts?: DetailFact[];
+  badges?: string[];
 }
 
 type CharacterSection = "overview" | "resources" | "spells" | "equipment" | "inventory" | "abilities" | "notes";
@@ -136,6 +153,52 @@ function draftKey(...parts: Array<string | number | null | undefined>): string {
   return parts.map((part) => String(part ?? "")).join("::");
 }
 
+function collectPresentedSpells(character: CharacterRecord | undefined): CharacterPresentedSpell[] {
+  const spellcasting = character?.presented_spellcasting;
+  const sections =
+    spellcasting?.current_row_sections?.length
+      ? spellcasting.current_row_sections
+      : spellcasting?.row_sections ?? [];
+  const spells: CharacterPresentedSpell[] = [];
+  const seen = new Set<string>();
+
+  const addSpell = (spell: CharacterPresentedSpell) => {
+    const key = draftKey(spell.class_row_id, spell.name, spell.level_label).toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    spells.push(spell);
+  };
+
+  for (const section of sections) {
+    for (const spell of section.spells ?? []) {
+      addSpell(spell);
+    }
+    for (const levelSection of section.spell_level_sections ?? []) {
+      for (const group of levelSection.groups ?? []) {
+        for (const spell of group.spells ?? []) {
+          addSpell(spell);
+        }
+      }
+    }
+  }
+
+  return spells;
+}
+
+function spellDetailFacts(spell: CharacterPresentedSpell): DetailFact[] {
+  const levelAndSchool = [spell.level_label, spell.school ? `(${spell.school})` : ""].filter(Boolean).join(" ");
+  return [
+    { label: "Level", value: levelAndSchool },
+    { label: "Casting time", value: spell.casting_time },
+    { label: "Range", value: spell.range },
+    { label: "Duration", value: spell.duration },
+    { label: "Components", value: spell.components },
+    { label: "Save / attack", value: spell.save_or_hit },
+  ].filter((fact) => fact.value && fact.value !== "--");
+}
+
 function characterSystem(character: CharacterRecord | undefined): string {
   return readString(character?.definition?.system, "DND-5E");
 }
@@ -187,6 +250,69 @@ function renderArticleBody(article: SessionArticle): JSX.Element {
     return <div className="article-body html-body" dangerouslySetInnerHTML={{ __html: article.body_markdown }} />;
   }
   return <pre className="article-body markdown-body">{article.body_markdown}</pre>;
+}
+
+function CharacterDetailDialog({
+  detail,
+  onClose,
+}: {
+  detail: CharacterDetailDialogState | null;
+  onClose: () => void;
+}) {
+  if (!detail) {
+    return null;
+  }
+  return (
+    <div className="detail-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="detail-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={detail.title}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="detail-modal-header">
+          <div>
+            <p className="meta">{detail.eyebrow}</p>
+            <h3>{detail.title}</h3>
+          </div>
+          <button type="button" onClick={onClose}>
+            Close
+          </button>
+        </header>
+        {detail.badges?.length ? (
+          <div className="badge-list">
+            {detail.badges.map((badge) => (
+              <span className="meta-badge" key={badge}>
+                {badge}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {detail.facts?.length ? (
+          <dl className="detail-facts">
+            {detail.facts.map((fact) => (
+              <div key={fact.label}>
+                <dt>{fact.label}</dt>
+                <dd>{fact.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+        {detail.href ? (
+          <p className="meta">
+            <a href={detail.href}>Open source entry</a>
+          </p>
+        ) : null}
+        {detail.notes ? <p>{detail.notes}</p> : null}
+        {detail.html ? (
+          <div className="article-body html-body detail-html" dangerouslySetInnerHTML={{ __html: detail.html }} />
+        ) : (
+          <p className="meta">No linked detail text is available yet.</p>
+        )}
+      </section>
+    </div>
+  );
 }
 
 function ApiErrorNotice({
@@ -250,11 +376,20 @@ function AppShell() {
     }
   });
   const [authRequired, setAuthRequired] = useState(false);
+  const hasMounted = useRef(false);
 
   const apiClient = useMemo(() => {
     return new CampaignApiClient({
       bearerToken: apiToken,
     });
+  }, [apiToken]);
+
+  useEffect(() => {
+    if (!hasMounted.current) {
+      hasMounted.current = true;
+      return;
+    }
+    void queryClient.invalidateQueries();
   }, [apiToken]);
 
   const setStoredToken = (next: string) => {
@@ -982,6 +1117,7 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
   const [restPreview, setRestPreview] = useState<CharacterRestPreviewResponse["preview"] | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [detailDialog, setDetailDialog] = useState<CharacterDetailDialogState | null>(null);
 
   const listQuery = useQuery({
     queryKey: ["characters", campaignSlug],
@@ -1021,6 +1157,19 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
       setAuthRequired(true);
     }
   }, [detailQuery.error, setAuthRequired]);
+
+  useEffect(() => {
+    if (!detailDialog) {
+      return;
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setDetailDialog(null);
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [detailDialog]);
 
   useEffect(() => {
     if (!detailQuery.data) {
@@ -1106,6 +1255,19 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
   const equipmentRows = equipmentState?.rows ?? [];
   const arcaneArmorState = detailRecord?.arcane_armor_state ?? equipmentState?.arcane_armor_state;
   const revision = detailRecord?.state_record.revision ?? 0;
+  const presentedSpells = collectPresentedSpells(detailRecord);
+  const presentedInventory = detailRecord?.presented_inventory ?? [];
+  const presentedInventoryByKey = useMemo(() => {
+    const lookup = new Map<string, CharacterPresentedInventoryItem>();
+    for (const item of presentedInventory) {
+      for (const key of [item.id, item.item_ref]) {
+        if (key) {
+          lookup.set(key, item);
+        }
+      }
+    }
+    return lookup;
+  }, [presentedInventory]);
 
   const handleMutationSuccess = (response: { character: CharacterRecord }, message: string) => {
     if (selectedSlug) {
@@ -1211,6 +1373,29 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
       return null;
     }
     return parsed;
+  };
+
+  const openItemDetail = (item: { name: string; href?: string; description_html?: string; notes?: string }) => {
+    setDetailDialog({
+      eyebrow: "Item details",
+      title: item.name || "Item",
+      html: item.description_html || "",
+      notes: item.notes || "",
+      href: item.href || "",
+    });
+  };
+
+  const openSpellDetail = (spell: CharacterPresentedSpell) => {
+    const source = [spell.source, spell.reference].filter(Boolean).join(" | ");
+    setDetailDialog({
+      eyebrow: [spell.level_label, spell.school].filter(Boolean).join(" | ") || "Spell details",
+      title: spell.name || "Spell",
+      html: spell.description_html || "",
+      notes: spell.management_note || "",
+      href: spell.href || "",
+      facts: [...spellDetailFacts(spell), ...(source ? [{ label: "Source", value: source }] : [])],
+      badges: spell.badges ?? [],
+    });
   };
 
   const submitVitals = (event: FormEvent<HTMLFormElement>) => {
@@ -1377,6 +1562,7 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
             setRestPreview(null);
             setStatusMessage(null);
             setErrorMessage(null);
+            setDetailDialog(null);
           }}
         >
           {characterList.map((item) => (
@@ -1631,7 +1817,35 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
                     })}
                   </div>
                 ) : null}
-                {spells.length ? (
+                {presentedSpells.length ? (
+                  <div className="spell-card-list">
+                    {presentedSpells.map((spell) => (
+                      <article className="character-state-card" key={draftKey(spell.class_row_id, spell.name, spell.level_label)}>
+                        <p className="meta">
+                          {[spell.level_label, spell.school].filter(Boolean).join(" | ") || "Spell"}
+                        </p>
+                        <h4>{spell.name || "Spell"}</h4>
+                        {spell.badges?.length ? (
+                          <div className="badge-list">
+                            {spell.badges.map((badge) => (
+                              <span className="meta-badge" key={badge}>
+                                {badge}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                        <p className="meta">
+                          {[spell.casting_time, spell.range].filter((value) => value && value !== "--").join(" | ")}
+                        </p>
+                        {spell.description_html || spell.href ? (
+                          <button type="button" className="button button-secondary detail-button" onClick={() => openSpellDetail(spell)}>
+                            Details
+                          </button>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
+                ) : spells.length ? (
                   <div className="spell-card-list">
                     {spells.map((spell) => (
                       <article className="character-state-card" key={readString(spell.id, readString(spell.name))}>
@@ -1706,6 +1920,11 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
                               .join(" | ")}
                           </p>
                           {item.tags.length ? <p className="meta">{item.tags.join(", ")}</p> : null}
+                          {item.description_html || item.notes || item.href ? (
+                            <button type="button" className="button button-secondary detail-button" onClick={() => openItemDetail(item)}>
+                              Item details
+                            </button>
+                          ) : null}
                           {canEdit ? (
                             <form onSubmit={(event) => submitEquipmentState(event, item)} className="equipment-state-form">
                               {item.supports_weapon_wield_mode ? (
@@ -1784,13 +2003,37 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
                   <div className="character-card-grid">
                     {inventory.map((item) => {
                       const id = readString(item.id);
+                      const itemRef = readString(item.catalog_ref, id);
+                      const presentedItem = presentedInventoryByKey.get(itemRef) ?? presentedInventoryByKey.get(id);
+                      const itemName = readString(presentedItem?.name, readString(item.name, "Item"));
+                      const itemNotes = readString(presentedItem?.notes, readString(item.notes));
+                      const itemHref = readString(presentedItem?.href);
+                      const itemDescriptionHtml = readString(presentedItem?.description_html);
+                      const itemTags = presentedItem?.tags?.length ? presentedItem.tags : [];
                       return (
-                        <article className="character-state-card" key={id || readString(item.name)}>
-                          <h4>{readString(item.name, "Item")}</h4>
+                        <article className="character-state-card" key={id || itemRef || itemName}>
+                          <h4>{itemName}</h4>
                           <p className="meta">
                             Qty {readNumber(item.quantity, 1)}
                             {item.weight ? ` | ${readString(item.weight)}` : ""}
                           </p>
+                          {itemTags.length ? <p className="meta">{itemTags.join(", ")}</p> : null}
+                          {itemDescriptionHtml || itemNotes || itemHref ? (
+                            <button
+                              type="button"
+                              className="button button-secondary detail-button"
+                              onClick={() =>
+                                openItemDetail({
+                                  name: itemName,
+                                  href: itemHref,
+                                  description_html: itemDescriptionHtml,
+                                  notes: itemNotes,
+                                })
+                              }
+                            >
+                              Item details
+                            </button>
+                          ) : null}
                           {canEdit && id ? (
                             <form onSubmit={(event) => submitInventory(event, id)} className="compact-state-form">
                               <label className="chat-label" htmlFor={`inventory-${id}`}>
@@ -1913,6 +2156,7 @@ function CharacterPane({ campaignSlug }: { campaignSlug: string }) {
         {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
         {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
       </section>
+      <CharacterDetailDialog detail={detailDialog} onClose={() => setDetailDialog(null)} />
     </div>
   );
 }

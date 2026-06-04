@@ -76,6 +76,7 @@ def _seed_systems_item_entry(
     slug: str = "phb-item-rope",
     title: str = "Rope",
     metadata: dict[str, object] | None = None,
+    rendered_html: str | None = None,
 ):
     with app.app_context():
         systems_store = app.extensions["systems_store"]
@@ -124,7 +125,71 @@ def _seed_systems_item_entry(
                     "dm_heavy": False,
                     "metadata": {"weight": 1, **dict(metadata or {})},
                     "body": {},
-                    "rendered_html": f"<p>{title}.</p>",
+                    "rendered_html": rendered_html if rendered_html is not None else f"<p>{title}.</p>",
+                }
+            ],
+        )
+        entry = app.extensions["systems_service"].get_entry_by_slug_for_campaign("linden-pass", slug)
+        assert entry is not None
+        return entry
+
+
+def _seed_systems_spell_entry(
+    app,
+    *,
+    slug: str = "phb-spell-api-detail",
+    title: str = "API Detail Spell",
+    metadata: dict[str, object] | None = None,
+    rendered_html: str | None = None,
+):
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        existing_entries = [
+            {
+                "entry_key": record.entry_key,
+                "entry_type": record.entry_type,
+                "slug": record.slug,
+                "title": record.title,
+                "source_page": record.source_page,
+                "source_path": record.source_path,
+                "search_text": record.search_text,
+                "player_safe_default": record.player_safe_default,
+                "dm_heavy": record.dm_heavy,
+                "metadata": dict(record.metadata or {}),
+                "body": dict(record.body or {}),
+                "rendered_html": record.rendered_html,
+            }
+            for record in systems_store.list_entries_for_source("DND-5E", "PHB", entry_type="spell")
+            if str(record.slug or "").strip() != slug
+        ]
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["spell"],
+            entries=existing_entries
+            + [
+                {
+                    "entry_key": f"dnd-5e|spell|phb|{slug}",
+                    "entry_type": "spell",
+                    "slug": slug,
+                    "title": title,
+                    "source_page": "220",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": title.lower(),
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"level": 1, "school": "evocation", **dict(metadata or {})},
+                    "body": {},
+                    "rendered_html": rendered_html if rendered_html is not None else f"<p>{title} spell detail.</p>",
                 }
             ],
         )
@@ -1045,6 +1110,100 @@ def test_api_character_session_equipment_state_endpoint_updates_wield_mode_and_r
     assert invalid_response.status_code == 400
     assert invalid_response.get_json()["error"]["code"] == "validation_error"
     assert "does not support equipment state" in invalid_response.get_json()["error"]["message"]
+
+
+def test_api_character_detail_exposes_linked_item_and_spell_details(
+    client,
+    app,
+    users,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    item_entry = _seed_systems_item_entry(
+        app,
+        slug="phb-item-api-linked-quarterstaff",
+        title="Quarterstaff",
+        metadata={"weapon_category": "simple", "weapon_type": "M", "damage": "1d6", "properties": ["V"]},
+        rendered_html="<p>API linked quarterstaff detail.</p>",
+    )
+    spell_entry = _seed_systems_spell_entry(
+        app,
+        slug="phb-spell-api-linked-detail",
+        title="API Detail Spell",
+        metadata={"level": 1, "school": "evocation"},
+        rendered_html="<p>API linked spell detail.</p>",
+    )
+
+    def _mutate_definition(payload: dict) -> None:
+        linked_item = False
+        equipment_catalog = list(payload.get("equipment_catalog") or [])
+        for index, item in enumerate(equipment_catalog):
+            item_payload = dict(item or {})
+            if str(item_payload.get("id") or "").strip() != "quarterstaff-2":
+                continue
+            equipment_catalog[index] = {
+                **item_payload,
+                "name": "Quarterstaff",
+                "systems_ref": _systems_ref(item_entry),
+            }
+            linked_item = True
+        assert linked_item
+        payload["equipment_catalog"] = equipment_catalog
+
+        spellcasting = dict(payload.get("spellcasting") or {})
+        spells = list(spellcasting.get("spells") or [])
+        assert spells
+        spells[0] = {
+            **dict(spells[0] or {}),
+            "name": "API Detail Spell",
+            "systems_ref": _systems_ref(spell_entry),
+            "casting_time": "1 action",
+            "range": "60 feet",
+            "duration": "Instantaneous",
+            "components": "V, S",
+            "save_or_hit": "Dex save",
+        }
+        spellcasting["spells"] = spells
+        payload["spellcasting"] = spellcasting
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-session-linked-details-api")
+
+    response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(owner_token),
+    )
+
+    assert response.status_code == 200
+    character = response.get_json()["character"]
+    quarterstaff = {item["id"]: item for item in character["equipment_state"]["rows"]}["quarterstaff-2"]
+    assert quarterstaff["href"].endswith("/systems/entries/phb-item-api-linked-quarterstaff")
+    assert "API linked quarterstaff detail" in quarterstaff["description_html"]
+
+    inventory_quarterstaff = {
+        item["item_ref"]: item for item in character["presented_inventory"]
+    }["quarterstaff-2"]
+    assert inventory_quarterstaff["href"].endswith("/systems/entries/phb-item-api-linked-quarterstaff")
+    assert "API linked quarterstaff detail" in inventory_quarterstaff["description_html"]
+
+    def _find_presented_spell(payload: dict, spell_name: str) -> dict:
+        spellcasting_payload = dict(payload.get("presented_spellcasting") or {})
+        for section_key in ("current_row_sections", "row_sections", "preparation_row_sections"):
+            for section in list(spellcasting_payload.get(section_key) or []):
+                for spell in list(dict(section or {}).get("spells") or []):
+                    if str(dict(spell).get("name") or "").strip() == spell_name:
+                        return dict(spell)
+                for level_section in list(dict(section or {}).get("spell_level_sections") or []):
+                    for group in list(dict(level_section or {}).get("groups") or []):
+                        for spell in list(dict(group or {}).get("spells") or []):
+                            if str(dict(spell).get("name") or "").strip() == spell_name:
+                                return dict(spell)
+        raise AssertionError(f"Presented spell {spell_name!r} was not found.")
+
+    detail_spell = _find_presented_spell(character, "API Detail Spell")
+    assert detail_spell["href"].endswith("/systems/entries/phb-spell-api-linked-detail")
+    assert "API linked spell detail" in detail_spell["description_html"]
+    assert detail_spell["school"] == "Evocation"
 
 
 def test_api_character_session_equipment_state_endpoint_preserves_attunement_limit(
