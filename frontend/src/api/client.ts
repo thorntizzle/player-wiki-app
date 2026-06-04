@@ -26,6 +26,8 @@ import type {
   CharacterXianxiaInventoryEquippedPatchPayload,
   CharacterXianxiaInventoryRemovePayload,
   CharacterXianxiaInventoryUpdatePayload,
+  CombatLiveStatePayload,
+  CombatPayload,
   MessagePostResponse,
   SessionArticleCreatePayload,
   SessionArticleCreateResponse,
@@ -56,6 +58,12 @@ export interface CampaignApiClientOptions {
 export interface SessionLiveStateRequest {
   sessionRevision?: number;
   sessionViewToken?: string;
+}
+
+export interface CombatLiveStateRequest {
+  liveRevision?: number;
+  liveViewToken?: string;
+  combatantId?: number | null;
 }
 
 export class ApiError extends Error {
@@ -223,6 +231,27 @@ export class CampaignApiClient {
     return this.requestJson<SessionLiveStatePayload>(`/api/v1/campaigns/${encodeURIComponent(slug)}/session`, {
       headers,
     });
+  }
+
+  async getCombat(slug: string, combatantId?: number | null): Promise<CombatPayload> {
+    const suffix = combatantId ? `?combatant=${encodeURIComponent(String(combatantId))}` : "";
+    return this.requestJson<CombatPayload>(`/api/v1/campaigns/${encodeURIComponent(slug)}/combat${suffix}`);
+  }
+
+  async getCombatLiveState(
+    slug: string,
+    liveState: CombatLiveStateRequest = {},
+  ): Promise<CombatLiveStatePayload> {
+    const headers: Record<string, string> = {};
+    if (liveState.liveRevision !== undefined && liveState.liveViewToken) {
+      headers["X-Live-Revision"] = String(liveState.liveRevision);
+      headers["X-Live-View-Token"] = liveState.liveViewToken;
+    }
+    const suffix = liveState.combatantId ? `?combatant=${encodeURIComponent(String(liveState.combatantId))}` : "";
+    return this.requestJson<CombatLiveStatePayload>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/live-state${suffix}`,
+      { headers },
+    );
   }
 
   async postSessionMessage(slug: string, body: string): Promise<MessagePostResponse> {

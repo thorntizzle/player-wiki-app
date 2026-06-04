@@ -646,13 +646,16 @@ def get_campaign_role(campaign_slug: str) -> str | None:
 
 
 def can_edit_character(campaign_slug: str, character_slug: str) -> bool:
-    if not can_access_campaign_scope(campaign_slug, "characters"):
-        return False
     user = get_current_user()
     if user is None:
         return False
     if user.is_admin:
         return True
+    if not any(
+        can_access_campaign_scope(campaign_slug, scope)
+        for scope in ("characters", "session", "combat")
+    ):
+        return False
 
     role = get_campaign_role(campaign_slug)
     if role == "dm":

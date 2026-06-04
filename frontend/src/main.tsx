@@ -43,6 +43,9 @@ import type {
   CharacterSpellSlotsPatchPayload,
   CharacterSummary,
   CharacterVitalsPatchPayload,
+  CombatLiveStatePayload,
+  CombatPayload,
+  CombatantSummary,
   SessionArticle,
   SessionArticleCreatePayload,
   SessionArticleCreatePayloadManual,
@@ -388,6 +391,20 @@ function getApiErrorMessage(error: unknown): ApiMessageEnvelope | null {
     return { status: 0, message: error.message };
   }
   return null;
+}
+
+function isCombatUnchangedPayload(payload: CombatLiveStatePayload): payload is Extract<CombatLiveStatePayload, { changed: false }> {
+  return payload.changed === false;
+}
+
+function resolveCombatLivePayload(
+  previous: CombatPayload | undefined,
+  liveResponse: CombatLiveStatePayload,
+): CombatPayload | null {
+  if (isCombatUnchangedPayload(liveResponse)) {
+    return previous ?? null;
+  }
+  return liveResponse;
 }
 
 function formatTimestamp(value: string | null): string {
@@ -741,9 +758,9 @@ function AppShell() {
         show: campaignVisibilityCanAccess(campaignVisibility, "session"),
       },
       {
-        href: `/campaigns/${encodedCampaignSlug}/combat`,
+        href: `/app-next/campaigns/${encodedCampaignSlug}/combat`,
         label: "Combat",
-        isGen2: false,
+        isGen2: true,
         show: campaignVisibilityCanAccess(campaignVisibility, "combat"),
       },
       {
@@ -1937,7 +1954,7 @@ function CharacterPane({
 }: {
   campaignSlug: string;
   initialCharacterSlug?: string | null;
-  surface?: "session" | "read";
+  surface?: "session" | "read" | "combat";
   onSelectedCharacterChange?: (characterSlug: string) => void;
 }) {
   const { apiClient, setAuthRequired } = useApiClient();
@@ -2202,6 +2219,11 @@ function CharacterPane({
     }
     return lookup;
   }, [presentedInventory]);
+
+  const isReadSurface = surface === "read";
+  const isCombatSurface = surface === "combat";
+  const surfaceMetaLabel = isReadSurface ? "Character sheet" : isCombatSurface ? "Combat Character" : "Session Character";
+  const surfaceHeading = isReadSurface ? "Character Sheet" : isCombatSurface ? "Combat Character" : "Session Character";
 
   useEffect(() => {
     if (isXianxia && activeCharacterSection === "overview") {
@@ -2863,17 +2885,21 @@ function CharacterPane({
   };
 
   return (
-    <div className={surface === "read" ? "session-pane-content character-read-content" : "session-pane-content"}>
+    <div className={isReadSurface ? "session-pane-content character-read-content" : "session-pane-content"}>
       <section className="panel">
         <div className="panel-header">
           <div>
-            <p className="meta">{surface === "read" ? "Character sheet" : "Session Character"}</p>
-            <h2>{surface === "read" ? "Character Sheet" : "Session Character"}</h2>
+            <p className="meta">{surfaceMetaLabel}</p>
+            <h2>{surfaceHeading}</h2>
           </div>
           <div className="article-actions">
-            {surface === "read" ? (
+            {isReadSurface ? (
               <a href={`/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters`} className="button button-secondary">
                 Roster
+              </a>
+            ) : isCombatSurface ? (
+              <a href={`/campaigns/${encodeURIComponent(campaignSlug)}/combat`} className="button button-secondary">
+                Flask Combat
               </a>
             ) : (
               <a
@@ -2944,7 +2970,7 @@ function CharacterPane({
                 ))}
               </ul>
             ) : null}
-            {surface === "read" && detailRecord ? (
+            {isReadSurface && detailRecord ? (
               <div className="button-row character-action-row">
                 {detailLinks.flask_character_url ? (
                   <a className="button button-secondary" href={detailLinks.flask_character_url}>
@@ -4921,6 +4947,274 @@ function CharacterDetailPage() {
   );
 }
 
+function CombatPage() {
+  const params = useParams({
+    from: "/campaigns/$campaignSlug/combat",
+  });
+  const location = useLocation();
+  const campaignSlug = params.campaignSlug ?? "";
+  const { apiClient, setAuthRequired } = useApiClient();
+  const [selectedCombatantId, setSelectedCombatantId] = useState<number | null>(() => {
+    const parsed = Number(new URLSearchParams(window.location.search).get("combatant") || "");
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  });
+
+  useEffect(() => {
+    const parsed = Number(new URLSearchParams(location.search).get("combatant") || "");
+    setSelectedCombatantId(Number.isFinite(parsed) && parsed > 0 ? parsed : null);
+  }, [location.search]);
+
+  const combatQuery = useQuery({
+    queryKey: ["combat", campaignSlug, selectedCombatantId],
+    queryFn: async () => {
+      const previous = queryClient.getQueryData<CombatPayload>(["combat", campaignSlug, selectedCombatantId]);
+      if (!previous) {
+        return apiClient.getCombat(campaignSlug, selectedCombatantId);
+      }
+      const liveResponse = await apiClient.getCombatLiveState(campaignSlug, {
+        liveRevision: previous.live_revision,
+        liveViewToken: previous.live_view_token,
+        combatantId: selectedCombatantId,
+      });
+      const resolved = resolveCombatLivePayload(previous, liveResponse);
+      return resolved ?? apiClient.getCombat(campaignSlug, selectedCombatantId);
+    },
+    enabled: Boolean(campaignSlug),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data && !data.combat_system_supported) {
+        return false;
+      }
+      return data?.poll_settings?.active_interval_ms ?? 3000;
+    },
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (isAuthError(combatQuery.error)) {
+      setAuthRequired(true);
+    }
+  }, [combatQuery.error, setAuthRequired]);
+
+  const payload = combatQuery.data;
+  const tracker = payload?.tracker;
+  const selectedCombatant = payload?.selected_combatant ?? null;
+  const selectedPlayerCharacter = payload?.selected_player_character ?? null;
+  const selectedCharacterSlug = selectedPlayerCharacter?.character_slug || null;
+  const canManageCombat = Boolean(payload?.permissions.can_manage_combat);
+  const paneError = getApiErrorMessage(combatQuery.error);
+
+  const selectCombatant = (combatantId: number) => {
+    setSelectedCombatantId(combatantId);
+    window.history.pushState(
+      null,
+      "",
+      `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/combat?combatant=${encodeURIComponent(String(combatantId))}`,
+    );
+  };
+
+  const selectCharacterTarget = (characterSlug: string) => {
+    const target = payload?.player_character_targets.find((item) => item.character_slug === characterSlug);
+    if (target?.combatant_id) {
+      selectCombatant(target.combatant_id);
+    }
+  };
+
+  const renderCombatantCard = (combatant: CombatantSummary) => {
+    const isSelected = selectedCombatant?.id === combatant.id;
+    return (
+      <button
+        type="button"
+        className={isSelected ? "combatant-card combatant-card--selected" : "combatant-card"}
+        key={combatant.id}
+        onClick={() => selectCombatant(combatant.id)}
+        aria-pressed={isSelected}
+      >
+        <span className="combatant-card__topline">
+          <strong>{combatant.name}</strong>
+          {combatant.is_current_turn ? <span className="pill">Current</span> : null}
+        </span>
+        <span className="meta">{combatant.subtitle || combatant.type_label}</span>
+        <span className="combatant-card__stats">
+          <span>Turn {combatant.turn_value}</span>
+          {combatant.show_detail ? (
+            <span>
+              HP {readNumber(combatant.current_hp)} / {readNumber(combatant.max_hp)}
+              {readNumber(combatant.temp_hp) ? ` +${readNumber(combatant.temp_hp)} temp` : ""}
+            </span>
+          ) : (
+            <span>Hidden detail</span>
+          )}
+        </span>
+        {combatant.conditions.length ? (
+          <span className="combatant-card__conditions">
+            {combatant.conditions.map((condition) => condition.name).join(", ")}
+          </span>
+        ) : null}
+      </button>
+    );
+  };
+
+  return (
+    <section className="panel combat-page">
+      <div className="panel-header">
+        <div>
+          <p className="meta">Live play</p>
+          <h2>Combat: {payload?.campaign.title ?? campaignSlug}</h2>
+        </div>
+        <div className="article-actions">
+          {payload?.links?.flask_combat_url ? (
+            <a className="button button-secondary" href={payload.links.flask_combat_url}>
+              Flask Combat
+            </a>
+          ) : null}
+          {canManageCombat && payload?.links?.flask_dm_status_url ? (
+            <a className="button button-secondary" href={payload.links.flask_dm_status_url}>
+              DM Status
+            </a>
+          ) : null}
+          {canManageCombat && payload?.links?.flask_dm_controls_url ? (
+            <a className="button button-secondary" href={payload.links.flask_dm_controls_url}>
+              DM Controls
+            </a>
+          ) : null}
+        </div>
+      </div>
+
+      <ApiErrorNotice
+        isLoading={combatQuery.isLoading}
+        message={paneError}
+        onAuth={() => setAuthRequired(true)}
+      />
+
+      {payload && !payload.combat_system_supported ? (
+        <section className="card">
+          <h3>Combat tracker unavailable</h3>
+          <p>This campaign system does not use the DND-5E combat tracker yet.</p>
+          {payload.links?.flask_combat_url ? (
+            <a className="button button-secondary" href={payload.links.flask_combat_url}>
+              Open Flask Combat
+            </a>
+          ) : null}
+        </section>
+      ) : null}
+
+      {payload?.combat_system_supported ? (
+        <>
+          <section className="combat-summary-band" aria-label="Encounter summary">
+            <article>
+              <span className="meta">Round</span>
+              <strong>{tracker?.round_number ?? 1}</strong>
+            </article>
+            <article>
+              <span className="meta">Current turn</span>
+              <strong>{tracker?.current_turn_label || "None"}</strong>
+            </article>
+            <article>
+              <span className="meta">Combatants</span>
+              <strong>{tracker?.combatant_count ?? 0}</strong>
+            </article>
+            <article>
+              <span className="meta">Live revision</span>
+              <strong>{payload.live_revision}</strong>
+            </article>
+          </section>
+
+          {tracker?.combatants.length ? (
+            <section className="combat-carousel" aria-label="Combatant carousel">
+              <div className="compact-header">
+                <h3>Turn Order</h3>
+                <label className="chat-label combat-jump-label">
+                  Jump
+                  <select
+                    value={selectedCombatant?.id ?? ""}
+                    onChange={(event) => selectCombatant(Number(event.currentTarget.value))}
+                  >
+                    {tracker.combatants.map((combatant) => (
+                      <option key={combatant.id} value={combatant.id}>
+                        {combatant.name} - turn {combatant.turn_value}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="combat-carousel-track">
+                {tracker.combatants.map((combatant) => renderCombatantCard(combatant))}
+              </div>
+            </section>
+          ) : (
+            <section className="card">
+              <h3>No combatants</h3>
+              <p>The tracker is empty. Use the Flask DM controls to seed the encounter for now.</p>
+            </section>
+          )}
+
+          {selectedCombatant ? (
+            <section className="combat-selected-snapshot">
+              <div>
+                <p className="meta">Inspected combatant</p>
+                <h3>{selectedCombatant.name}</h3>
+                <p>{selectedCombatant.subtitle || selectedCombatant.source_label || selectedCombatant.type_label}</p>
+              </div>
+              {selectedCombatant.show_detail ? (
+                <div className="combat-selected-snapshot__stats">
+                  <span>HP {readNumber(selectedCombatant.current_hp)} / {readNumber(selectedCombatant.max_hp)}</span>
+                  <span>Move {readNumber(selectedCombatant.movement_remaining)} / {readNumber(selectedCombatant.movement_total)}</span>
+                  <span>{selectedCombatant.has_action ? "Action" : "No action"}</span>
+                  <span>{selectedCombatant.has_bonus_action ? "Bonus" : "No bonus"}</span>
+                  <span>{selectedCombatant.has_reaction ? "Reaction" : "No reaction"}</span>
+                </div>
+              ) : (
+                <p className="meta">Detailed stats are currently hidden from players.</p>
+              )}
+            </section>
+          ) : null}
+
+          <section className="combat-pc-workspace">
+            <div className="compact-header">
+              <div>
+                <p className="meta">Selected PC workspace</p>
+                <h3>{selectedPlayerCharacter?.name ?? "No tracked PC in combat"}</h3>
+              </div>
+              {payload.player_character_targets.length ? (
+                <div className="button-row">
+                  {payload.player_character_targets.map((target) => (
+                    <button
+                      type="button"
+                      key={target.combatant_id}
+                      className={target.is_selected ? "tab-button active" : "tab-button"}
+                      onClick={() => selectCombatant(target.combatant_id)}
+                    >
+                      {target.name}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            {selectedCharacterSlug ? (
+              <CharacterPane
+                campaignSlug={campaignSlug}
+                initialCharacterSlug={selectedCharacterSlug}
+                surface="combat"
+                onSelectedCharacterChange={selectCharacterTarget}
+              />
+            ) : (
+              <article className="card">
+                <p>No assigned player character is currently available in this tracker.</p>
+                {payload.links?.flask_combat_url ? (
+                  <a className="button button-secondary" href={payload.links.flask_combat_url}>
+                    Open Flask Combat
+                  </a>
+                ) : null}
+              </article>
+            )}
+          </section>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 function SessionPage() {
   const { campaignSlug } = useParams({
     from: "/campaigns/$campaignSlug/session",
@@ -5080,6 +5374,12 @@ const campaignCharacterDetailRoute = createRoute({
   component: CharacterDetailPage,
 });
 
+const campaignCombatRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/campaigns/$campaignSlug/combat",
+  component: CombatPage,
+});
+
 const campaignSessionRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/campaigns/$campaignSlug/session",
@@ -5093,6 +5393,7 @@ const routeTree = rootRoute.addChildren([
   campaignWikiPageRoute,
   campaignCharacterRosterRoute,
   campaignCharacterDetailRoute,
+  campaignCombatRoute,
   campaignSessionRoute,
 ]);
 const router = createRouter({

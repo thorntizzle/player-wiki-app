@@ -52,6 +52,27 @@ def _seed_arden_portrait(app) -> None:
     definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
+def _seed_gen2_combat(app, users) -> None:
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        service.add_player_character(
+            "linden-pass",
+            character_slug="arden-march",
+            turn_value=18,
+            created_by_user_id=users["dm"]["id"],
+        )
+        service.add_npc_combatant(
+            "linden-pass",
+            display_name="Clockwork Hound",
+            turn_value=12,
+            current_hp=22,
+            max_hp=22,
+            temp_hp=0,
+            movement_total=40,
+            created_by_user_id=users["dm"]["id"],
+        )
+
+
 def test_gen2_session_browser_exposes_flask_session_capabilities(
     frontend_gen2_session_live_server,
     users,
@@ -125,6 +146,55 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))
             expect(page.get_by_role("heading", name="Session Character")).to_be_visible(timeout=10000)
             expect(page.get_by_label("Character", exact=True)).to_be_visible()
+        finally:
+            page.close()
+            browser.close()
+
+
+def test_gen2_combat_browser_opens_player_workspace_and_preserves_focused_draft(
+    app,
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    _seed_gen2_combat(app, users)
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["owner"]["email"], password=users["owner"]["password"])
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat")
+            expect(page.get_by_role("heading", name=re.compile(r"Combat:", re.I))).to_be_visible(timeout=10000)
+            expect(page.get_by_role("heading", name="Turn Order")).to_be_visible()
+            carousel = page.locator(".combat-carousel")
+            expect(carousel.get_by_role("button", name=re.compile(r"Arden March", re.I))).to_be_visible()
+            expect(carousel.get_by_role("button", name=re.compile(r"Clockwork Hound", re.I))).to_be_visible()
+            expect(page.get_by_role("heading", name="Combat Character")).to_be_visible(timeout=10000)
+
+            carousel.get_by_role("button", name=re.compile(r"Clockwork Hound", re.I)).click()
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?combatant=\d+"))
+            expect(page.get_by_role("heading", name="Clockwork Hound")).to_be_visible()
+            expect(page.get_by_role("heading", name="Combat Character")).to_be_visible()
+
+            workspace = page.locator(".combat-pc-workspace")
+            current_hp = workspace.get_by_label("Current HP", exact=True).first
+            expect(current_hp).to_be_visible(timeout=10000)
+            current_hp.fill("33")
+            expect(current_hp).to_have_value("33")
+            page.wait_for_timeout(1300)
+            expect(current_hp).to_have_value("33")
+            assert current_hp.evaluate("el => document.activeElement === el")
         finally:
             page.close()
             browser.close()

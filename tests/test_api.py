@@ -2856,6 +2856,125 @@ def test_api_combat_endpoints_allow_dm_management_and_owner_player_vitals_update
     assert live_state.get_json()["tracker"]["combatant_count"] == 2
 
 
+def test_api_combat_read_exposes_gen2_live_selection_and_fallback_links(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-combat-gen2-read-api")
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-combat-gen2-read-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="player-combat-gen2-read-api")
+
+    add_player = client.post(
+        "/api/v1/campaigns/linden-pass/combat/player-combatants",
+        headers=api_headers(dm_token),
+        json={"character_slug": "arden-march", "turn_value": 18},
+    )
+    assert add_player.status_code == 200
+    arden = _find_tracker_combatant(add_player.get_json(), character_slug="arden-march")
+    assert arden is not None
+
+    add_npc = client.post(
+        "/api/v1/campaigns/linden-pass/combat/npc-combatants",
+        headers=api_headers(dm_token),
+        json={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+    )
+    assert add_npc.status_code == 200
+    hound = _find_tracker_combatant(add_npc.get_json(), name="Clockwork Hound")
+    assert hound is not None
+
+    owner_read = client.get(
+        f"/api/v1/campaigns/linden-pass/combat?combatant={hound['id']}",
+        headers=api_headers(owner_token),
+    )
+    assert owner_read.status_code == 200
+    payload = owner_read.get_json()
+
+    assert payload["ok"] is True
+    assert payload["changed"] is True
+    assert payload["combat_system_supported"] is True
+    assert isinstance(payload["live_revision"], int)
+    assert isinstance(payload["live_view_token"], str)
+    assert len(payload["live_view_token"]) == 12
+    assert payload["selected_combatant"]["name"] == "Clockwork Hound"
+    assert payload["selected_combatant_id"] == hound["id"]
+    assert payload["selected_player_character"]["character_slug"] == "arden-march"
+    assert payload["player_character_targets"] == [
+        {
+            "combatant_id": arden["id"],
+            "character_slug": "arden-march",
+            "name": "Arden March",
+            "subtitle": "Sorcerer 5",
+            "is_selected": True,
+            "href": f"/app-next/campaigns/linden-pass/combat?combatant={arden['id']}",
+            "flask_href": f"/campaigns/linden-pass/combat?combatant={arden['id']}",
+        }
+    ]
+    assert payload["links"]["flask_combat_url"] == "/campaigns/linden-pass/combat"
+    assert payload["links"]["flask_dm_status_url"] == ""
+    assert payload["poll_settings"]["active_interval_ms"] == 500
+
+    owner_character_list = client.get(
+        "/api/v1/campaigns/linden-pass/characters",
+        headers=api_headers(owner_token),
+    )
+    assert owner_character_list.status_code == 200
+    assert [character["slug"] for character in owner_character_list.get_json()["characters"]] == ["arden-march"]
+
+    owner_character_detail = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(owner_token),
+    )
+    assert owner_character_detail.status_code == 200
+
+    unassigned_character_detail = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(player_token),
+    )
+    assert unassigned_character_detail.status_code == 403
+
+    unchanged = client.get(
+        f"/api/v1/campaigns/linden-pass/combat?combatant={hound['id']}",
+        headers={
+            **api_headers(owner_token),
+            "X-Live-Revision": str(payload["live_revision"]),
+            "X-Live-View-Token": payload["live_view_token"],
+        },
+    )
+    assert unchanged.status_code == 200
+    unchanged_payload = unchanged.get_json()
+    assert unchanged_payload["changed"] is False
+    assert unchanged_payload["live_revision"] == payload["live_revision"]
+    assert unchanged_payload["live_view_token"] == payload["live_view_token"]
+    assert set(unchanged_payload.keys()) == {"ok", "changed", "live_revision", "live_view_token"}
+
+    dm_read = client.get("/api/v1/campaigns/linden-pass/combat", headers=api_headers(dm_token))
+    assert dm_read.status_code == 200
+    dm_links = dm_read.get_json()["links"]
+    assert dm_links["flask_dm_status_url"] == "/campaigns/linden-pass/combat/dm"
+    assert dm_links["flask_dm_controls_url"] == "/campaigns/linden-pass/combat/dm?view=controls"
+
+
+def test_api_combat_read_reports_unsupported_system_without_live_poll_targets(client, app, users):
+    _configure_xianxia_campaign(app)
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-combat-gen2-xianxia-api")
+
+    response = client.get("/api/v1/campaigns/linden-pass/combat", headers=api_headers(owner_token))
+    assert response.status_code == 200
+    payload = response.get_json()
+
+    assert payload["combat_system_supported"] is False
+    assert payload["live_revision"] == 0
+    assert payload["tracker"]["combatant_count"] == 0
+    assert payload["selected_combatant"] is None
+    assert payload["selected_player_character"] is None
+    assert payload["player_character_targets"] == []
+    assert payload["links"]["flask_combat_url"] == "/campaigns/linden-pass/combat"
+
+
 def test_api_combat_statblock_seed_uses_dex_modifier_for_tie_breaker(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-combat-statblock-api")
     with app.app_context():

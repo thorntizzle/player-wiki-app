@@ -956,6 +956,19 @@ def register_api(app) -> None:
             "1" if can_post_campaign_session_messages(campaign_slug) else "0",
         )
 
+    def build_combat_live_view_token(
+        campaign_slug: str,
+        *,
+        selected_combatant_id: int | None = None,
+    ) -> str:
+        return build_live_hash(
+            "combat",
+            "player",
+            "1" if can_manage_campaign_combat(campaign_slug) else "0",
+            str(selected_combatant_id or ""),
+            *sorted(get_owned_character_slugs(campaign_slug)),
+        )
+
     def parse_live_revision_header() -> int | None:
         raw_value = request.headers.get("X-Live-Revision", "").strip()
         if not raw_value:
@@ -970,6 +983,13 @@ def register_api(app) -> None:
         return request.headers.get("X-Live-View-Token", "").strip()
 
     def should_short_circuit_live_session(*, live_revision: int, live_view_token: str) -> bool:
+        requested_revision = parse_live_revision_header()
+        requested_view_token = parse_live_view_token_header()
+        if requested_revision is None or not requested_view_token:
+            return False
+        return requested_revision == live_revision and requested_view_token == live_view_token
+
+    def should_short_circuit_live_response(*, live_revision: int, live_view_token: str) -> bool:
         requested_revision = parse_live_revision_header()
         requested_view_token = parse_live_view_token_header()
         if requested_revision is None or not requested_view_token:
@@ -1258,11 +1278,21 @@ def register_api(app) -> None:
         available_character_choices: list[dict[str, str]] = []
         available_statblock_choices: list[dict[str, str]] = []
         combat_condition_options = list(DND_5E_CONDITION_OPTIONS)
+        live_revision = 0
+        requested_combatant_id: int | None = None
+        selected_combatant: dict[str, Any] | None = None
+        selected_player_character: dict[str, Any] | None = None
+        player_character_targets: list[dict[str, Any]] = []
+        try:
+            requested_combatant_id = int(str(request.args.get("combatant") or "").strip())
+        except ValueError:
+            requested_combatant_id = None
 
         if combat_system_supported:
             combat_service = current_app.extensions["campaign_combat_service"]
             dm_content_service = current_app.extensions["campaign_dm_content_service"]
             tracker = combat_service.get_tracker(campaign_slug)
+            live_revision = tracker.revision
             combatants = combat_service.list_combatants(campaign_slug)
             character_records_by_slug = {}
             for combatant in combatants:
@@ -1280,6 +1310,81 @@ def register_api(app) -> None:
                 owned_character_slugs=get_owned_character_slugs(campaign_slug),
                 can_manage_combat=can_manage_combat,
             )
+            combatant_cards = [
+                dict(combatant)
+                for combatant in list(tracker_view.get("combatants") or [])
+                if isinstance(combatant, dict)
+            ]
+            current_combatant = next(
+                (combatant for combatant in combatant_cards if combatant.get("is_current_turn")),
+                None,
+            )
+            if requested_combatant_id is not None:
+                selected_combatant = next(
+                    (
+                        combatant
+                        for combatant in combatant_cards
+                        if int(combatant.get("id") or 0) == requested_combatant_id
+                    ),
+                    None,
+                )
+            if selected_combatant is None:
+                selected_combatant = current_combatant or (combatant_cards[0] if combatant_cards else None)
+
+            owned_character_slugs = get_owned_character_slugs(campaign_slug)
+            player_character_cards = [
+                combatant
+                for combatant in combatant_cards
+                if str(combatant.get("character_slug") or "").strip()
+                and (
+                    can_manage_combat
+                    or str(combatant.get("character_slug") or "").strip() in owned_character_slugs
+                )
+            ]
+            if requested_combatant_id is not None:
+                selected_player_character = next(
+                    (
+                        combatant
+                        for combatant in player_character_cards
+                        if int(combatant.get("id") or 0) == requested_combatant_id
+                    ),
+                    None,
+                )
+            if selected_player_character is None and selected_combatant is not None:
+                selected_combatant_slug = str(selected_combatant.get("character_slug") or "").strip()
+                selected_player_character = next(
+                    (
+                        combatant
+                        for combatant in player_character_cards
+                        if selected_combatant_slug
+                        and str(combatant.get("character_slug") or "").strip() == selected_combatant_slug
+                    ),
+                    None,
+                )
+            if selected_player_character is None:
+                selected_player_character = next(
+                    (combatant for combatant in player_character_cards if combatant.get("is_current_turn")),
+                    None,
+                ) or (player_character_cards[0] if player_character_cards else None)
+            player_character_targets = [
+                {
+                    "combatant_id": combatant.get("id"),
+                    "character_slug": combatant.get("character_slug"),
+                    "name": combatant.get("name"),
+                    "subtitle": combatant.get("subtitle"),
+                    "is_selected": (
+                        selected_player_character is not None
+                        and combatant.get("id") == selected_player_character.get("id")
+                    ),
+                    "href": gen2_campaign_href(campaign_slug, f"combat?combatant={combatant.get('id')}"),
+                    "flask_href": url_for(
+                        "campaign_combat_view",
+                        campaign_slug=campaign_slug,
+                        combatant=combatant.get("id"),
+                    ),
+                }
+                for combatant in player_character_cards
+            ]
 
             if can_manage_combat and include_sidebar_choices:
                 available_character_choices = [
@@ -1317,13 +1422,53 @@ def register_api(app) -> None:
                 }
             )
 
+        selected_combatant_id = (
+            int(selected_combatant.get("id"))
+            if selected_combatant is not None and selected_combatant.get("id") is not None
+            else None
+        )
+        live_view_token = build_combat_live_view_token(
+            campaign_slug,
+            selected_combatant_id=selected_combatant_id,
+        )
+
         return {
             "campaign": serialize_campaign(campaign),
             "combat_system_supported": combat_system_supported,
+            "changed": True,
+            "live_revision": live_revision,
+            "live_view_token": live_view_token,
             "tracker": tracker_view,
+            "selected_combatant_id": selected_combatant_id,
+            "selected_combatant": selected_combatant,
+            "selected_player_character": selected_player_character,
+            "player_character_targets": player_character_targets,
             "available_character_choices": available_character_choices,
             "available_statblock_choices": available_statblock_choices,
             "combat_condition_options": combat_condition_options,
+            "poll_settings": {
+                "active_interval_ms": 500,
+                "idle_interval_ms": 3000,
+                "idle_threshold_ms": 30000,
+            },
+            "links": {
+                "flask_combat_url": url_for("campaign_combat_view", campaign_slug=campaign_slug),
+                "flask_dm_status_url": (
+                    url_for("campaign_combat_dm_view", campaign_slug=campaign_slug)
+                    if can_manage_combat
+                    else ""
+                ),
+                "flask_dm_controls_url": (
+                    url_for("campaign_combat_dm_view", campaign_slug=campaign_slug, view="controls")
+                    if can_manage_combat
+                    else ""
+                ),
+                "flask_status_url": (
+                    url_for("campaign_combat_status_view", campaign_slug=campaign_slug)
+                    if can_manage_combat
+                    else ""
+                ),
+            },
             "permissions": {
                 "can_manage_combat": can_manage_combat,
                 "can_access_dm_content": can_access_dm_content,
@@ -1403,14 +1548,19 @@ def register_api(app) -> None:
                 character_slug=character_slug,
             ),
         }
-        if has_session_mode_access(campaign_slug, character_slug) and supports_native_character_tools(campaign_system):
+        if (
+            can_access_campaign_scope(campaign_slug, "characters")
+            and has_session_mode_access(campaign_slug, character_slug)
+            and supports_native_character_tools(campaign_system)
+        ):
             links["advanced_editor_url"] = url_for(
                 "character_edit_view",
                 campaign_slug=campaign_slug,
                 character_slug=character_slug,
             )
         if (
-            has_session_mode_access(campaign_slug, character_slug)
+            can_access_campaign_scope(campaign_slug, "characters")
+            and has_session_mode_access(campaign_slug, character_slug)
             and character_advancement_lane(campaign_system) == CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION
         ):
             links["cultivation_url"] = url_for(
@@ -3199,12 +3349,38 @@ def register_api(app) -> None:
     @api.get("/campaigns/<campaign_slug>/combat")
     @api_campaign_scope_access_required("combat")
     def combat_state(campaign_slug: str):
-        return jsonify({"ok": True, **build_combat_payload(campaign_slug)})
+        payload = build_combat_payload(campaign_slug)
+        if should_short_circuit_live_response(
+            live_revision=int(payload["live_revision"] or 0),
+            live_view_token=str(payload["live_view_token"] or ""),
+        ):
+            return jsonify(
+                {
+                    "ok": True,
+                    "changed": False,
+                    "live_revision": payload["live_revision"],
+                    "live_view_token": payload["live_view_token"],
+                }
+            )
+        return jsonify({"ok": True, **payload})
 
     @api.get("/campaigns/<campaign_slug>/combat/live-state")
     @api_campaign_scope_access_required("combat")
     def combat_live_state(campaign_slug: str):
-        return jsonify({"ok": True, **build_combat_payload(campaign_slug, include_sidebar_choices=False)})
+        payload = build_combat_payload(campaign_slug, include_sidebar_choices=False)
+        if should_short_circuit_live_response(
+            live_revision=int(payload["live_revision"] or 0),
+            live_view_token=str(payload["live_view_token"] or ""),
+        ):
+            return jsonify(
+                {
+                    "ok": True,
+                    "changed": False,
+                    "live_revision": payload["live_revision"],
+                    "live_view_token": payload["live_view_token"],
+                }
+            )
+        return jsonify({"ok": True, **payload})
 
     @api.get("/campaigns/<campaign_slug>/combat/systems-monsters/search")
     @api_campaign_scope_access_required("combat")
@@ -3693,13 +3869,25 @@ def register_api(app) -> None:
         return jsonify({"ok": True, **build_combat_payload(campaign_slug)})
 
     @api.get("/campaigns/<campaign_slug>/characters")
-    @api_campaign_scope_access_required("characters")
     def character_list(campaign_slug: str):
         campaign = get_repository().get_campaign(campaign_slug)
         if campaign is None:
             abort(404)
 
+        can_access_character_roster = can_access_campaign_scope(campaign_slug, "characters")
+        owned_character_slugs = get_owned_character_slugs(campaign_slug)
+        if not can_access_character_roster and not owned_character_slugs:
+            if get_current_user() is None:
+                return json_error("Authentication required.", 401, code="auth_required")
+            return json_error("You do not have access to campaign characters.", 403, code="forbidden")
+
         records = get_character_repository().list_visible_characters(campaign_slug)
+        if not can_access_character_roster:
+            records = [
+                record
+                for record in records
+                if record.definition.character_slug in owned_character_slugs
+            ]
         query = request.args.get("q", "").strip()
         character_cards = [serialize_character_summary(campaign, record) for record in records]
         if query:
@@ -3720,8 +3908,14 @@ def register_api(app) -> None:
         )
 
     @api.get("/campaigns/<campaign_slug>/characters/<character_slug>")
-    @api_campaign_scope_access_required("characters")
     def character_detail(campaign_slug: str, character_slug: str):
+        if not can_access_campaign_scope(campaign_slug, "characters") and not has_session_mode_access(
+            campaign_slug,
+            character_slug,
+        ):
+            if get_current_user() is None:
+                return json_error("Authentication required.", 401, code="auth_required")
+            return json_error("You do not have access to this character.", 403, code="forbidden")
         record = load_character_record(campaign_slug, character_slug)
         campaign = get_repository().get_campaign(campaign_slug)
         if campaign is None:
@@ -3735,7 +3929,6 @@ def register_api(app) -> None:
         )
 
     @api.get("/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_rest_preview(campaign_slug: str, character_slug: str, rest_type: str):
         record = load_character_record(campaign_slug, character_slug)
@@ -3978,7 +4171,6 @@ def register_api(app) -> None:
         )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_vitals_update(campaign_slug: str, character_slug: str):
         return run_character_mutation(
@@ -4005,7 +4197,6 @@ def register_api(app) -> None:
         )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_resource_update(campaign_slug: str, character_slug: str, resource_id: str):
         return run_character_mutation(
@@ -4022,7 +4213,6 @@ def register_api(app) -> None:
         )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<int:level>")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_spell_slots_update(campaign_slug: str, character_slug: str, level: int):
         return run_character_mutation(
@@ -4040,7 +4230,6 @@ def register_api(app) -> None:
         )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_inventory_update(campaign_slug: str, character_slug: str, item_id: str):
         def update_inventory(record, payload, user_id):
@@ -4125,7 +4314,6 @@ def register_api(app) -> None:
         )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-active-state")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_xianxia_active_state_update(campaign_slug: str, character_slug: str):
         return run_character_mutation(
@@ -4141,7 +4329,6 @@ def register_api(app) -> None:
         )
 
     @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-requests")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_xianxia_dao_immolating_use_request(campaign_slug: str, character_slug: str):
         def request_dao_use(record: CharacterRecord, payload: dict[str, Any], user_id: int):
@@ -4172,7 +4359,6 @@ def register_api(app) -> None:
         )
 
     @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-records")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_xianxia_dao_immolating_use_record(campaign_slug: str, character_slug: str):
         if not can_manage_campaign_session(campaign_slug):
@@ -4207,7 +4393,6 @@ def register_api(app) -> None:
         )
 
     @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_xianxia_inventory_add(campaign_slug: str, character_slug: str):
         return run_character_mutation(
@@ -4222,7 +4407,6 @@ def register_api(app) -> None:
         )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_xianxia_inventory_item_update(campaign_slug: str, character_slug: str, item_id: str):
         return run_character_mutation(
@@ -4238,7 +4422,6 @@ def register_api(app) -> None:
         )
 
     @api.delete("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_xianxia_inventory_item_remove(campaign_slug: str, character_slug: str, item_id: str):
         return run_character_mutation(
@@ -4253,7 +4436,6 @@ def register_api(app) -> None:
         )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/equipped")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_xianxia_inventory_equipped_update(campaign_slug: str, character_slug: str, item_id: str):
         return run_character_mutation(
@@ -4269,7 +4451,6 @@ def register_api(app) -> None:
         )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/equipment/<item_id>")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_equipment_state_update(campaign_slug: str, character_slug: str, item_id: str):
         item_catalog = build_character_item_catalog(campaign_slug)
@@ -4286,7 +4467,6 @@ def register_api(app) -> None:
         )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/feature-states/<feature_key>")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_feature_state_update(campaign_slug: str, character_slug: str, feature_key: str):
         return run_character_mutation(
@@ -4302,7 +4482,6 @@ def register_api(app) -> None:
         )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/currency")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_currency_update(campaign_slug: str, character_slug: str):
         return run_character_mutation(
@@ -4329,7 +4508,6 @@ def register_api(app) -> None:
         )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/notes")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_notes_update(campaign_slug: str, character_slug: str):
         return run_character_mutation(
@@ -4360,7 +4538,6 @@ def register_api(app) -> None:
         )
 
     @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_rest_apply(campaign_slug: str, character_slug: str, rest_type: str):
         return run_character_mutation(

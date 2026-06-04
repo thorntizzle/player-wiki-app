@@ -290,6 +290,102 @@ export interface SessionUnchangedPayload extends ApiResponseBase {
 
 export type SessionLiveStatePayload = SessionPayload | SessionUnchangedPayload;
 
+export interface CombatCondition {
+  id: number;
+  name: string;
+  duration_text: string;
+}
+
+export interface CombatantSummary {
+  id: number;
+  name: string;
+  character_slug: string;
+  source_kind: string;
+  source_ref: string;
+  source_label: string;
+  type_label: string;
+  subtitle: string;
+  show_detail: boolean;
+  player_detail_visible: boolean;
+  turn_value: number;
+  initiative_bonus_label: string;
+  dexterity_modifier?: number | null;
+  dexterity_modifier_label?: string;
+  initiative_priority?: number;
+  initiative_priority_label?: string;
+  current_hp?: number | null;
+  max_hp?: number | null;
+  temp_hp?: number | null;
+  hit_dice?: { value?: string; pools?: Array<Record<string, unknown>> } | null;
+  movement_total?: number | null;
+  movement_remaining?: number | null;
+  speed_label?: string;
+  has_action: boolean;
+  has_bonus_action: boolean;
+  has_reaction: boolean;
+  is_current_turn: boolean;
+  can_edit_vitals: boolean;
+  can_edit_resources: boolean;
+  can_open_character_page: boolean;
+  can_open_status_page: boolean;
+  can_toggle_player_detail_visibility: boolean;
+  can_manage_combat: boolean;
+  combatant_revision: number;
+  state_revision?: number | null;
+  conditions: CombatCondition[];
+}
+
+export interface CombatTrackerPayload {
+  round_number: number;
+  current_turn_label: string;
+  has_current_turn: boolean;
+  combatant_count: number;
+  combatants: CombatantSummary[];
+}
+
+export interface CombatPlayerCharacterTarget {
+  combatant_id: number;
+  character_slug: string;
+  name: string;
+  subtitle: string;
+  is_selected: boolean;
+  href: string;
+  flask_href: string;
+}
+
+export interface CombatPayload extends ApiResponseBase {
+  changed?: true;
+  campaign: CampaignRecord;
+  combat_system_supported: boolean;
+  live_revision: number;
+  live_view_token: string;
+  tracker: CombatTrackerPayload;
+  selected_combatant_id?: number | null;
+  selected_combatant?: CombatantSummary | null;
+  selected_player_character?: CombatantSummary | null;
+  player_character_targets: CombatPlayerCharacterTarget[];
+  poll_settings?: {
+    active_interval_ms?: number;
+    idle_interval_ms?: number;
+    idle_threshold_ms?: number;
+  };
+  links?: {
+    flask_combat_url?: string;
+    flask_dm_status_url?: string;
+    flask_dm_controls_url?: string;
+    flask_status_url?: string;
+  };
+  permissions: CampaignPermissions;
+}
+
+export interface CombatUnchangedPayload extends ApiResponseBase {
+  changed: false;
+  live_revision: number;
+  live_view_token: string;
+}
+
+export type CombatLiveStatePayload = CombatPayload | CombatUnchangedPayload;
+
 export interface MessagePostResponse extends ApiResponseBase {
   message: SessionMessage;
 }

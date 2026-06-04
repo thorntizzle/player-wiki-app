@@ -24,6 +24,10 @@ def test_frontend_pilot_routes_and_spa_fallback(client, app, tmp_path):
     assert character_route_response.status_code == 200
     assert character_route_response.data == response.data
 
+    combat_route_response = client.get("/app-next/campaigns/linden-pass/combat")
+    assert combat_route_response.status_code == 200
+    assert combat_route_response.data == response.data
+
     missing_asset_response = client.get("/app-next/assets/missing.js")
     assert missing_asset_response.status_code == 404
 

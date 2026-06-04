@@ -1175,6 +1175,126 @@ textarea {
   width: 100%;
 }
 
+.combat-page {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.combat-summary-band,
+.combat-selected-snapshot,
+.combat-selected-snapshot__stats {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.combat-summary-band {
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  border-block: 1px solid #d8e1ee;
+  padding: 0.7rem 0;
+}
+
+.combat-summary-band article {
+  min-width: 0;
+}
+
+.combat-summary-band strong {
+  display: block;
+  font-size: 1.15rem;
+  overflow-wrap: anywhere;
+}
+
+.combat-carousel {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.combat-carousel .compact-header,
+.combat-pc-workspace .compact-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.combat-jump-label {
+  width: min(280px, 100%);
+}
+
+.combat-carousel-track {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(210px, 260px);
+  gap: 0.65rem;
+  overflow-x: auto;
+  padding-bottom: 0.35rem;
+  scroll-snap-type: x proximity;
+}
+
+.combatant-card {
+  scroll-snap-align: start;
+  min-height: 145px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2937;
+  padding: 0.75rem;
+  text-align: left;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.combatant-card--selected {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.14);
+}
+
+.combatant-card__topline,
+.combatant-card__stats {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.45rem;
+  align-items: start;
+}
+
+.combatant-card__stats,
+.combatant-card__conditions {
+  font-size: 0.88rem;
+}
+
+.combatant-card__stats {
+  flex-direction: column;
+}
+
+.combatant-card__conditions {
+  color: #475569;
+  overflow-wrap: anywhere;
+}
+
+.combat-selected-snapshot {
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  background: #f8fbff;
+  padding: 0.8rem;
+}
+
+.combat-selected-snapshot__stats {
+  grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
+}
+
+.combat-selected-snapshot__stats span {
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.45rem 0.55rem;
+  font-weight: 700;
+}
+
+.combat-pc-workspace {
+  display: grid;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
 @media (max-width: 740px) {
   .session-pilot,
   .session-shell {
@@ -1203,7 +1323,13 @@ textarea {
   .split-grid,
   .session-log-row,
   .session-tab-strip,
-  .inline-two-col {
+  .inline-two-col,
+  .combat-carousel .compact-header,
+  .combat-pc-workspace .compact-header {
     flex-direction: column;
+  }
+
+  .combat-carousel-track {
+    grid-auto-columns: minmax(190px, 82vw);
   }
 }
