@@ -122,6 +122,9 @@ export interface SessionPermissions {
 }
 
 export interface SessionPayload extends ApiResponseBase {
+  session_revision: number;
+  session_view_token: string;
+  changed?: true;
   campaign: CampaignRecord;
   permissions: SessionPermissions;
   active_session: SessionRecord | null;
@@ -130,6 +133,14 @@ export interface SessionPayload extends ApiResponseBase {
   revealed_articles?: SessionArticle[];
   session_logs?: SessionLogSummary[];
 }
+
+export interface SessionUnchangedPayload extends ApiResponseBase {
+  changed: false;
+  session_revision: number;
+  session_view_token: string;
+}
+
+export type SessionLiveStatePayload = SessionPayload | SessionUnchangedPayload;
 
 export interface MessagePostResponse extends ApiResponseBase {
   message: SessionMessage;

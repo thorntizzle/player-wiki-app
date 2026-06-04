@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 from functools import wraps
+import hashlib
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ from .auth import (
     get_campaign_role,
     get_campaign_scope_visibility,
     get_current_auth_source,
+    get_current_user_preferences,
     get_current_memberships,
     get_current_user,
     get_effective_campaign_visibility,
@@ -831,6 +833,42 @@ def register_api(app) -> None:
             ]
 
         return payload
+
+    def build_live_hash(*parts: object) -> str:
+        normalized_parts = [str(part).strip().lower() for part in parts]
+        digest = hashlib.sha1("||".join(normalized_parts).encode("utf-8")).hexdigest()
+        return digest[:12]
+
+    def build_session_live_view_token(campaign_slug: str, session_subpage: str) -> str:
+        normalized_subpage = "session" if str(session_subpage or "").strip().lower() != "dm" else "dm"
+        current_preferences = get_current_user_preferences()
+        return build_live_hash(
+            "session",
+            normalized_subpage,
+            current_preferences.session_chat_order,
+            "1" if can_manage_campaign_session(campaign_slug) else "0",
+            "1" if can_post_campaign_session_messages(campaign_slug) else "0",
+        )
+
+    def parse_live_revision_header() -> int | None:
+        raw_value = request.headers.get("X-Live-Revision", "").strip()
+        if not raw_value:
+            return None
+        try:
+            parsed_value = int(raw_value)
+        except ValueError:
+            return None
+        return parsed_value if parsed_value >= 0 else None
+
+    def parse_live_view_token_header() -> str:
+        return request.headers.get("X-Live-View-Token", "").strip()
+
+    def should_short_circuit_live_session(*, live_revision: int, live_view_token: str) -> bool:
+        requested_revision = parse_live_revision_header()
+        requested_view_token = parse_live_view_token_header()
+        if requested_revision is None or not requested_view_token:
+            return False
+        return requested_revision == live_revision and requested_view_token == live_view_token
 
     def serialize_dm_statblock(statblock) -> dict[str, Any]:
         return {
@@ -2166,12 +2204,26 @@ def register_api(app) -> None:
     @api.get("/campaigns/<campaign_slug>/session")
     @api_campaign_scope_access_required("session")
     def session_state(campaign_slug: str):
-        return jsonify(
-            {
-                "ok": True,
-                **build_session_payload(campaign_slug),
-            }
-        )
+        session_service = current_app.extensions["campaign_session_service"]
+        live_revision = session_service.get_live_revision(campaign_slug)
+        live_view_token = build_session_live_view_token(campaign_slug, "session")
+        if should_short_circuit_live_session(
+            live_revision=live_revision,
+            live_view_token=live_view_token,
+        ):
+            return jsonify(
+                {
+                    "ok": True,
+                    "changed": False,
+                    "session_revision": live_revision,
+                    "session_view_token": live_view_token,
+                }
+            )
+
+        payload = build_session_payload(campaign_slug)
+        payload["session_revision"] = live_revision
+        payload["session_view_token"] = live_view_token
+        return jsonify({"ok": True, **payload})
 
     @api.get("/campaigns/<campaign_slug>/session/article-sources/search")
     @api_campaign_scope_access_required("session")

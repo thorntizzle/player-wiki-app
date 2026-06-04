@@ -47,9 +47,11 @@ import type {
   SessionArticleCreatePayloadUpload,
   SessionArticleCreatePayloadWiki,
   SessionArticleSourceResult,
+  SessionLiveStatePayload,
   SessionLogSummary,
   SessionMessage,
   SessionPayload,
+  SessionUnchangedPayload,
   SessionWikiLookupPreviewResponse,
   SessionWikiLookupSearchResult,
 } from "./api/types";
@@ -380,6 +382,10 @@ function resolveArticleImage(slug: string, article: SessionArticle): string {
     return article.image.url;
   }
   return `/api/v1/campaigns/${encodeURIComponent(slug)}/session/articles/${article.id}/image`;
+}
+
+function isSessionUnchangedPayload(payload: SessionLiveStatePayload): payload is SessionUnchangedPayload {
+  return payload.changed === false;
 }
 
 function renderArticleBody(article: SessionArticle): JSX.Element {
@@ -4096,7 +4102,22 @@ function SessionPage() {
 
   const sessionQuery = useQuery({
     queryKey: ["session", resolvedCampaignSlug],
-    queryFn: () => apiClient.getSession(resolvedCampaignSlug),
+    queryFn: async () => {
+      const previous = queryClient.getQueryData<SessionPayload>(["session", resolvedCampaignSlug]);
+      const response = await apiClient.getSessionLiveState(
+        resolvedCampaignSlug,
+        previous
+          ? {
+              sessionRevision: previous.session_revision,
+              sessionViewToken: previous.session_view_token,
+            }
+          : undefined,
+      );
+      if (isSessionUnchangedPayload(response)) {
+        return previous ?? apiClient.getSession(resolvedCampaignSlug);
+      }
+      return response;
+    },
     enabled: Boolean(resolvedCampaignSlug),
     refetchInterval: (query) => {
       return query.state.data?.active_session?.is_active ? 3000 : 8000;

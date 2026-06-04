@@ -32,6 +32,7 @@ import type {
   SessionArticleRevealResponse,
   SessionArticleSourcesResponse,
   SessionClearRevealedResponse,
+  SessionLiveStatePayload,
   SessionLogDeleteResponse,
   SessionLogDetailResponse,
   SessionPayload,
@@ -45,6 +46,11 @@ const DEFAULT_BASE_PATH = "";
 export interface CampaignApiClientOptions {
   baseUrl?: string;
   bearerToken?: string;
+}
+
+export interface SessionLiveStateRequest {
+  sessionRevision?: number;
+  sessionViewToken?: string;
 }
 
 export class ApiError extends Error {
@@ -168,6 +174,21 @@ export class CampaignApiClient {
 
   async getSession(slug: string): Promise<SessionPayload> {
     return this.requestJson<SessionPayload>(`/api/v1/campaigns/${encodeURIComponent(slug)}/session`);
+  }
+
+  async getSessionLiveState(
+    slug: string,
+    liveState: SessionLiveStateRequest = {},
+  ): Promise<SessionLiveStatePayload> {
+    const headers: Record<string, string> = {};
+    if (liveState.sessionRevision !== undefined && liveState.sessionViewToken) {
+      headers["X-Live-Revision"] = String(liveState.sessionRevision);
+      headers["X-Live-View-Token"] = liveState.sessionViewToken;
+    }
+
+    return this.requestJson<SessionLiveStatePayload>(`/api/v1/campaigns/${encodeURIComponent(slug)}/session`, {
+      headers,
+    });
   }
 
   async postSessionMessage(slug: string, body: string): Promise<MessagePostResponse> {

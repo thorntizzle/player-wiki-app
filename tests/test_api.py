@@ -476,6 +476,46 @@ def test_api_session_endpoints_follow_permissions(client, app, users):
     assert reveal_messages[0]["article"]["title"] == "Sealed Orders"
 
 
+def test_api_session_state_includes_revision_and_view_token(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-metadata-api")
+
+    response = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
+    assert response.status_code == 200
+    payload = response.get_json()
+
+    assert payload["ok"] is True
+    assert isinstance(payload["session_revision"], int)
+    assert payload["session_revision"] >= 0
+    assert isinstance(payload["session_view_token"], str)
+    assert len(payload["session_view_token"]) == 12
+
+
+def test_api_session_state_short_circuits_with_matching_live_tokens(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-unchanged-api")
+
+    initial_response = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
+    assert initial_response.status_code == 200
+    initial_payload = initial_response.get_json()
+    assert initial_payload["ok"] is True
+
+    unchanged_response = client.get(
+        "/api/v1/campaigns/linden-pass/session",
+        headers={
+            **api_headers(dm_token),
+            "X-Live-Revision": str(initial_payload["session_revision"]),
+            "X-Live-View-Token": initial_payload["session_view_token"],
+        },
+    )
+    assert unchanged_response.status_code == 200
+    unchanged_payload = unchanged_response.get_json()
+
+    assert unchanged_payload["ok"] is True
+    assert unchanged_payload["changed"] is False
+    assert unchanged_payload["session_revision"] == initial_payload["session_revision"]
+    assert unchanged_payload["session_view_token"] == initial_payload["session_view_token"]
+    assert set(unchanged_payload.keys()) == {"ok", "changed", "session_revision", "session_view_token"}
+
+
 def test_api_can_pull_visible_wiki_page_into_session_store(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-wiki-api")
 

@@ -128,6 +128,16 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/notes`
 - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>`
 
+## Session Polling
+
+`GET /api/v1/campaigns/<campaign_slug>/session` now participates in session polling:
+
+- Include `X-Live-Revision` and `X-Live-View-Token` request headers for each poll.
+- The response always includes `session_revision` and `session_view_token`.
+- If both headers match current server values, the endpoint returns:
+  - `{"ok": true, "changed": false, "session_revision": <int>, "session_view_token": "<token>"}`.
+- If either header differs, the endpoint returns the full `/session` payload with updated revision/token metadata.
+
 ## Browser Content Management Coverage
 
 The browser `DM Content` hub now covers the main DM-managed content lanes while still reusing the same app services and JSON API where those are the right write contract:
