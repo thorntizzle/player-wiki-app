@@ -1724,6 +1724,7 @@ export interface CharacterAdvancedEditorResponse extends ApiResponseBase {
     flask_cultivation_url?: string;
     level_up_url?: string;
     flask_level_up_url?: string;
+    progression_repair_url?: string;
     flask_progression_repair_url?: string;
   };
 }
@@ -1756,6 +1757,7 @@ export interface CharacterRetrainingResponse extends ApiResponseBase {
     flask_advanced_editor_url?: string;
     retraining_url?: string;
     flask_retraining_url?: string;
+    progression_repair_url?: string;
     flask_progression_repair_url?: string;
     cultivation_url?: string;
     flask_cultivation_url?: string;
@@ -1813,6 +1815,7 @@ export interface CharacterLevelUpResponse extends ApiResponseBase {
     flask_retraining_url?: string;
     level_up_url?: string;
     flask_level_up_url?: string;
+    progression_repair_url?: string;
     flask_progression_repair_url?: string;
     cultivation_url?: string;
     flask_cultivation_url?: string;
@@ -1820,6 +1823,83 @@ export interface CharacterLevelUpResponse extends ApiResponseBase {
 }
 
 export interface CharacterLevelUpPayload {
+  expected_revision: number;
+  values: Record<string, string>;
+}
+
+export interface CharacterProgressionRepairClassRow {
+  row_id?: string;
+  row_level?: number;
+  class_name?: string;
+  class_field_name: string;
+  class_selected?: string;
+  class_options: CharacterBuilderOption[];
+  subclass_field_name: string;
+  subclass_selected?: string;
+  subclass_options: CharacterBuilderOption[];
+}
+
+export interface CharacterProgressionRepairChoiceRow {
+  index?: number;
+  name: string;
+  selected?: string;
+  options: CharacterBuilderOption[];
+}
+
+export interface CharacterProgressionRepairSpellRow {
+  name?: string;
+  field_name: string;
+  selected?: string;
+  options: CharacterBuilderOption[];
+  class_row_field_name?: string;
+  class_row_selected?: string;
+  class_row_options?: CharacterBuilderOption[];
+}
+
+export interface CharacterProgressionRepairContext {
+  state_revision: number;
+  values?: Record<string, string>;
+  character_name?: string;
+  current_level?: number;
+  readiness?: {
+    message?: string;
+    reasons?: string[];
+    [key: string]: unknown;
+  };
+  class_rows: CharacterProgressionRepairClassRow[];
+  species_options: CharacterBuilderOption[];
+  background_options: CharacterBuilderOption[];
+  feat_rows: CharacterProgressionRepairChoiceRow[];
+  optionalfeature_rows: CharacterProgressionRepairChoiceRow[];
+  spell_rows: CharacterProgressionRepairSpellRow[];
+}
+
+export interface CharacterProgressionRepairResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  character: CharacterRecord;
+  lane: "repairable" | "ready" | "unsupported";
+  supported: boolean;
+  message?: string | null;
+  unsupported_message?: string;
+  readiness?: Record<string, unknown>;
+  repair?: CharacterProgressionRepairContext | null;
+  links: {
+    character_url?: string;
+    flask_character_url?: string;
+    advanced_editor_url?: string;
+    flask_advanced_editor_url?: string;
+    retraining_url?: string;
+    flask_retraining_url?: string;
+    level_up_url?: string;
+    flask_level_up_url?: string;
+    progression_repair_url?: string;
+    flask_progression_repair_url?: string;
+    cultivation_url?: string;
+    flask_cultivation_url?: string;
+  };
+}
+
+export interface CharacterProgressionRepairPayload {
   expected_revision: number;
   values: Record<string, string>;
 }
@@ -1880,6 +1960,7 @@ export interface CharacterCultivationResponse extends ApiResponseBase {
     flask_advanced_editor_url?: string;
     retraining_url?: string;
     flask_retraining_url?: string;
+    progression_repair_url?: string;
     flask_progression_repair_url?: string;
     cultivation_url?: string;
     flask_cultivation_url?: string;
@@ -1903,6 +1984,7 @@ export interface CharacterDetailResponse extends ApiResponseBase {
     flask_retraining_url?: string;
     level_up_url?: string;
     flask_level_up_url?: string;
+    progression_repair_url?: string;
     flask_progression_repair_url?: string;
     cultivation_url?: string;
     flask_cultivation_url?: string;

@@ -35,6 +35,8 @@ import type {
   CharacterPortraitDeletePayload,
   CharacterPortraitMutationResponse,
   CharacterPortraitUpsertPayload,
+  CharacterProgressionRepairPayload,
+  CharacterProgressionRepairResponse,
   CharacterResourcePatchPayload,
   CharacterRetrainingPayload,
   CharacterRetrainingResponse,
@@ -941,6 +943,29 @@ export class CampaignApiClient {
   ): Promise<CharacterLevelUpResponse> {
     return this.requestJson<CharacterLevelUpResponse>(
       `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/level-up`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async getCharacterProgressionRepair(
+    slug: string,
+    characterSlug: string,
+  ): Promise<CharacterProgressionRepairResponse> {
+    return this.requestJson<CharacterProgressionRepairResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/progression-repair`,
+    );
+  }
+
+  async submitCharacterProgressionRepair(
+    slug: string,
+    characterSlug: string,
+    payload: CharacterProgressionRepairPayload,
+  ): Promise<CharacterProgressionRepairResponse> {
+    return this.requestJson<CharacterProgressionRepairResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/progression-repair`,
       {
         method: "POST",
         body: JSON.stringify(payload),

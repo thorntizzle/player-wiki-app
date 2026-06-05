@@ -2691,6 +2691,210 @@ def test_api_character_level_up_context_save_and_access(client, app, users, set_
     assert stale_response.get_json()["error"]["code"] == "state_conflict"
 
 
+def test_api_character_progression_repair_context_save_and_access(
+    client,
+    app,
+    users,
+    set_campaign_visibility,
+    monkeypatch,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-repair-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="blocked-character-repair-api")
+
+    def _repairable_readiness(*_args, **_kwargs):
+        return {
+            "status": "repairable",
+            "message": "This imported character needs a quick progression repair before native level-up.",
+            "reasons": [
+                "Choose a supported base class link for this character.",
+                "Classify the current imported spell rows so native spell progression can trust them.",
+            ],
+        }
+
+    def _repair_context(_systems_service, _campaign_slug, definition, form_values=None, **_kwargs):
+        values = {
+            "repair_class_slug_class-row-1": str(dict(form_values or {}).get("repair_class_slug_class-row-1") or ""),
+            "repair_subclass_slug_class-row-1": str(
+                dict(form_values or {}).get("repair_subclass_slug_class-row-1") or ""
+            ),
+            "repair_species_slug": str(dict(form_values or {}).get("repair_species_slug") or ""),
+            "repair_background_slug": str(dict(form_values or {}).get("repair_background_slug") or ""),
+            "repair_feat_1": str(dict(form_values or {}).get("repair_feat_1") or ""),
+            "repair_spell_mark_1": str(dict(form_values or {}).get("repair_spell_mark_1") or ""),
+            "repair_spell_class_row_1": str(dict(form_values or {}).get("repair_spell_class_row_1") or ""),
+        }
+        return {
+            "values": values,
+            "character_name": definition.name,
+            "current_level": 5,
+            "readiness": _repairable_readiness(),
+            "class_rows": [
+                {
+                    "row_id": "class-row-1",
+                    "row_level": 5,
+                    "class_name": "Imported Sorcerer",
+                    "class_field_name": "repair_class_slug_class-row-1",
+                    "class_selected": values["repair_class_slug_class-row-1"],
+                    "class_options": [{"value": "systems:sorcerer", "label": "Sorcerer"}],
+                    "subclass_field_name": "repair_subclass_slug_class-row-1",
+                    "subclass_selected": values["repair_subclass_slug_class-row-1"],
+                    "subclass_options": [{"value": "systems:draconic-bloodline", "label": "Draconic Bloodline"}],
+                }
+            ],
+            "species_options": [{"value": "systems:human", "label": "Human"}],
+            "background_options": [{"value": "systems:acolyte", "label": "Acolyte"}],
+            "feat_rows": [
+                {
+                    "index": 1,
+                    "name": "repair_feat_1",
+                    "selected": values["repair_feat_1"],
+                    "options": [{"value": "systems:lucky", "label": "Lucky"}],
+                }
+            ],
+            "optionalfeature_rows": [],
+            "spell_rows": [
+                {
+                    "name": "Fire Bolt",
+                    "field_name": "repair_spell_mark_1",
+                    "selected": values["repair_spell_mark_1"],
+                    "options": [{"value": "known", "label": "Known"}],
+                    "class_row_field_name": "repair_spell_class_row_1",
+                    "class_row_selected": values["repair_spell_class_row_1"],
+                    "class_row_options": [{"value": "class-row-1", "label": "Imported Sorcerer 5"}],
+                }
+            ],
+            "class_entries": [],
+            "species_entries": [],
+            "background_entries": [],
+            "subclass_entries": [],
+            "feat_entries": [],
+            "optionalfeature_entries": [],
+        }
+
+    def _apply_repair(_campaign_slug, current_definition, current_import_metadata, _repair_context, form_values):
+        assert dict(form_values).get("repair_class_slug_class-row-1") == "systems:sorcerer"
+        payload = current_definition.to_dict()
+        source = dict(payload.get("source") or {})
+        native_progression = dict(source.get("native_progression") or {})
+        native_progression["baseline_repaired_at"] = "2026-06-05T00:00:00Z"
+        native_progression["history"] = list(native_progression.get("history") or []) + [
+            {"kind": "repair", "action": "repair", "target_level": 5}
+        ]
+        source["native_progression"] = native_progression
+        payload["source"] = source
+        return CharacterDefinition.from_dict(payload), current_import_metadata
+
+    monkeypatch.setattr(api_module, "native_level_up_readiness", _repairable_readiness)
+    monkeypatch.setattr(api_module, "build_imported_progression_repair_context", _repair_context)
+    monkeypatch.setattr(api_module, "apply_imported_progression_repairs", _apply_repair)
+
+    detail_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(dm_token),
+    )
+    assert detail_response.status_code == 200
+    detail_links = detail_response.get_json()["links"]
+    assert detail_links["progression_repair_url"] == (
+        "/app-next/campaigns/linden-pass/characters/arden-march/progression-repair"
+    )
+    assert detail_links["flask_progression_repair_url"] == (
+        "/campaigns/linden-pass/characters/arden-march/progression-repair"
+    )
+
+    level_up_repairable_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/level-up",
+        headers=api_headers(dm_token),
+    )
+    assert level_up_repairable_response.status_code == 200
+    level_up_repairable_payload = level_up_repairable_response.get_json()
+    assert level_up_repairable_payload["supported"] is False
+    assert level_up_repairable_payload["lane"] == "repairable"
+    assert level_up_repairable_payload["links"]["progression_repair_url"] == (
+        "/app-next/campaigns/linden-pass/characters/arden-march/progression-repair"
+    )
+
+    retraining_repairable_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/retraining",
+        headers=api_headers(dm_token),
+    )
+    assert retraining_repairable_response.status_code == 200
+    retraining_repairable_payload = retraining_repairable_response.get_json()
+    assert retraining_repairable_payload["supported"] is False
+    assert retraining_repairable_payload["lane"] == "repairable"
+    assert retraining_repairable_payload["links"]["progression_repair_url"] == (
+        "/app-next/campaigns/linden-pass/characters/arden-march/progression-repair"
+    )
+
+    response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/progression-repair",
+        headers=api_headers(dm_token),
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["supported"] is True
+    assert payload["lane"] == "repairable"
+    assert payload["links"]["progression_repair_url"] == (
+        "/app-next/campaigns/linden-pass/characters/arden-march/progression-repair"
+    )
+    repair = payload["repair"]
+    assert repair["state_revision"] == payload["character"]["state_record"]["revision"]
+    assert repair["class_rows"][0]["class_field_name"] == "repair_class_slug_class-row-1"
+    assert repair["species_options"][0]["label"] == "Human"
+    assert repair["spell_rows"][0]["field_name"] == "repair_spell_mark_1"
+
+    blocked_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/progression-repair",
+        headers=api_headers(player_token),
+    )
+    assert blocked_response.status_code == 403
+    assert blocked_response.get_json()["error"]["code"] == "forbidden"
+
+    update_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/progression-repair",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": repair["state_revision"],
+            "values": {
+                "repair_class_slug_class-row-1": "systems:sorcerer",
+                "repair_subclass_slug_class-row-1": "systems:draconic-bloodline",
+                "repair_species_slug": "systems:human",
+                "repair_background_slug": "systems:acolyte",
+                "repair_feat_1": "systems:lucky",
+                "repair_spell_mark_1": "known",
+                "repair_spell_class_row_1": "class-row-1",
+            },
+        },
+    )
+    assert update_response.status_code == 200
+    updated_payload = update_response.get_json()
+    assert updated_payload["message"].startswith("Progression repair saved")
+    assert updated_payload["character"]["state_record"]["revision"] == repair["state_revision"] + 1
+
+    definition_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / "arden-march"
+        / "definition.yaml"
+    )
+    saved_definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
+    latest_event = saved_definition["source"]["native_progression"]["history"][-1]
+    assert latest_event["kind"] == "repair"
+    assert latest_event["target_level"] == 5
+
+    stale_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/progression-repair",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": repair["state_revision"],
+            "values": {"repair_class_slug_class-row-1": "systems:sorcerer"},
+        },
+    )
+    assert stale_response.status_code == 409
+    assert stale_response.get_json()["error"]["code"] == "state_conflict"
+
+
 def test_api_character_create_context_uses_gen2_links_and_permissions(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-create-api")
     player_token = issue_api_token(app, users["party"]["email"], label="player-character-create-api")
@@ -2813,6 +3017,19 @@ def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_reco
         "/campaigns/linden-pass/characters/gen2-crane/cultivation"
     )
 
+    unsupported_repair_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/gen2-crane/progression-repair",
+        headers=api_headers(dm_token),
+    )
+    assert unsupported_repair_response.status_code == 200
+    unsupported_repair_payload = unsupported_repair_response.get_json()
+    assert unsupported_repair_payload["supported"] is False
+    assert unsupported_repair_payload["lane"] == "unsupported"
+    assert unsupported_repair_payload["repair"] is None
+    assert unsupported_repair_payload["links"]["cultivation_url"] == (
+        "/app-next/campaigns/linden-pass/characters/gen2-crane/cultivation"
+    )
+
     blocked_level_up_response = client.get(
         "/api/v1/campaigns/linden-pass/characters/gen2-crane/level-up",
         headers=api_headers(player_token),
@@ -2826,6 +3043,13 @@ def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_reco
     )
     assert blocked_retraining_response.status_code == 403
     assert blocked_retraining_response.get_json()["error"]["code"] == "forbidden"
+
+    blocked_repair_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/gen2-crane/progression-repair",
+        headers=api_headers(player_token),
+    )
+    assert blocked_repair_response.status_code == 403
+    assert blocked_repair_response.get_json()["error"]["code"] == "forbidden"
 
     cultivation_response = client.get(
         "/api/v1/campaigns/linden-pass/characters/gen2-crane/cultivation",

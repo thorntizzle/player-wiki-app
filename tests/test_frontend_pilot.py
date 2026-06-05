@@ -48,6 +48,12 @@ def test_frontend_pilot_routes_and_spa_fallback(client, app, tmp_path):
     assert character_retraining_route_response.status_code == 200
     assert character_retraining_route_response.data == response.data
 
+    character_progression_repair_route_response = client.get(
+        "/app-next/campaigns/linden-pass/characters/arden-march/progression-repair"
+    )
+    assert character_progression_repair_route_response.status_code == 200
+    assert character_progression_repair_route_response.data == response.data
+
     character_cultivation_route_response = client.get(
         "/app-next/campaigns/linden-pass/characters/arden-march/cultivation"
     )
