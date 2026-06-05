@@ -159,9 +159,22 @@ from .system_policy import (
 )
 from .version import build_app_metadata
 from .xianxia_advancement import (
+    advance_xianxia_martial_art_rank_definition,
+    apply_xianxia_divine_realm_rebuild_definition,
+    apply_xianxia_immortal_realm_rebuild_definition,
+    confirm_xianxia_realm_ascension_definition,
+    learn_xianxia_generic_technique_definition,
+    list_xianxia_generic_technique_learning_options,
     record_xianxia_dao_immolating_use_definition,
     request_xianxia_dao_immolating_use_definition,
+    reset_xianxia_realm_ascension_stats_definition,
+    spend_xianxia_conditioning_definition,
+    spend_xianxia_cultivation_energy_definition,
+    spend_xianxia_meditation_definition,
+    spend_xianxia_training_definition,
+    start_xianxia_realm_ascension_review_definition,
 )
+from . import xianxia_cultivation
 from .xianxia_character_builder import (
     XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT,
     XIANXIA_MARTIAL_ART_IMPORT_RANKS,
@@ -2539,10 +2552,14 @@ def register_api(app) -> None:
             )
         if (
             can_access_campaign_scope(campaign_slug, "characters")
-            and has_session_mode_access(campaign_slug, character_slug)
+            and can_manage_campaign_session(campaign_slug)
             and character_advancement_lane(campaign_system) == CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION
         ):
-            links["cultivation_url"] = url_for(
+            links["cultivation_url"] = gen2_campaign_href(
+                campaign_slug,
+                f"characters/{character_slug}/cultivation",
+            )
+            links["flask_cultivation_url"] = url_for(
                 "character_xianxia_cultivation_view",
                 campaign_slug=campaign_slug,
                 character_slug=character_slug,
@@ -2813,6 +2830,404 @@ def register_api(app) -> None:
             refreshed_record,
             edit_context=edit_context,
             message="Character details updated.",
+        )
+
+    def normalize_cultivation_values(payload: dict[str, Any]) -> dict[str, str]:
+        raw_values = payload.get("values") if isinstance(payload.get("values"), dict) else payload
+        values: dict[str, str] = {}
+        for key, value in dict(raw_values or {}).items():
+            field_name = str(key or "").strip()
+            if not field_name:
+                continue
+            values[field_name] = "" if value is None else str(value)
+        return values
+
+    def normalize_cultivation_int(value: object, *, field_label: str, default: int = 0) -> int:
+        raw_value = str(value or "").strip()
+        if not raw_value:
+            return default
+        try:
+            normalized_value = int(raw_value)
+        except ValueError as exc:
+            raise ValueError(f"{field_label} must be a whole number.") from exc
+        if normalized_value < 0:
+            raise ValueError(f"{field_label} must be zero or greater.")
+        return normalized_value
+
+    def character_cultivation_is_supported(campaign, record: CharacterRecord) -> bool:
+        return bool(
+            character_advancement_lane(getattr(campaign, "system", ""))
+            == CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION
+            and is_xianxia_system(getattr(record.definition, "system", ""))
+        )
+
+    def build_xianxia_cultivation_parts(campaign_slug: str, campaign, record: CharacterRecord) -> dict[str, Any]:
+        character = present_character_detail(
+            campaign,
+            record,
+            include_player_notes_section=True,
+            systems_service=current_app.extensions["systems_service"],
+            campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
+        )
+        xianxia_read = character.get("xianxia_read")
+        if not isinstance(xianxia_read, dict):
+            abort(404)
+        generic_technique_options = []
+        for option in list_xianxia_generic_technique_learning_options(
+            record.definition,
+            campaign_slug=campaign_slug,
+            systems_service=current_app.extensions["systems_service"],
+        ):
+            systems_ref = dict(option.get("systems_ref") or {})
+            generic_technique_options.append(
+                {
+                    **option,
+                    "href": build_character_entry_href(
+                        campaign_slug,
+                        systems_ref=systems_ref,
+                    ),
+                }
+            )
+        return xianxia_cultivation.present_xianxia_cultivation_context(
+            character,
+            record.definition.xianxia,
+            generic_technique_learning_options=generic_technique_options,
+        )
+
+    def serialize_character_cultivation_response(
+        campaign_slug: str,
+        campaign,
+        record: CharacterRecord,
+        *,
+        message: str | None = None,
+        anchor: str | None = None,
+    ):
+        supported = character_cultivation_is_supported(campaign, record)
+        character_slug = record.definition.character_slug
+        return jsonify(
+            {
+                "ok": True,
+                "campaign": serialize_campaign(campaign),
+                "character": serialize_character_record(campaign_slug, record),
+                "lane": "xianxia" if supported else "unsupported",
+                "supported": supported,
+                "message": message,
+                "anchor": anchor,
+                "unsupported_message": (
+                    ""
+                    if supported
+                    else "Cultivation is only available for Xianxia character sheets."
+                ),
+                "cultivation": (
+                    make_json_safe(build_xianxia_cultivation_parts(campaign_slug, campaign, record))
+                    if supported
+                    else None
+                ),
+                "links": {
+                    **serialize_character_links(campaign_slug, campaign, record),
+                    "character_url": gen2_campaign_href(campaign_slug, f"characters/{character_slug}"),
+                    "flask_character_url": url_for(
+                        "character_read_view",
+                        campaign_slug=campaign_slug,
+                        character_slug=character_slug,
+                    ),
+                    "cultivation_url": gen2_campaign_href(
+                        campaign_slug,
+                        f"characters/{character_slug}/cultivation",
+                    ),
+                    "flask_cultivation_url": url_for(
+                        "character_xianxia_cultivation_view",
+                        campaign_slug=campaign_slug,
+                        character_slug=character_slug,
+                    ),
+                },
+            }
+        )
+
+    def load_character_cultivation_target(campaign_slug: str, character_slug: str):
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+        record = load_character_record(campaign_slug, character_slug)
+        if not can_manage_campaign_session(campaign_slug):
+            return campaign, record, json_error(
+                "You do not have permission to manage cultivation for this character.",
+                403,
+                code="forbidden",
+            )
+        return campaign, record, None
+
+    def apply_xianxia_cultivation_action(
+        campaign_slug: str,
+        record: CharacterRecord,
+        payload: dict[str, Any],
+    ) -> tuple[object, str, str]:
+        values = normalize_cultivation_values(payload)
+        action = str(payload.get("action") or values.get("cultivation_action") or "save_insight").strip()
+        redirect_anchor = "xianxia-cultivation-insight"
+        if action == "save_insight":
+            definition = xianxia_cultivation.update_xianxia_insight_definition(
+                record.definition,
+                available=normalize_cultivation_int(
+                    values.get("insight_available", ""),
+                    field_label="Insight available",
+                ),
+                spent=normalize_cultivation_int(
+                    values.get("insight_spent", ""),
+                    field_label="Insight spent",
+                ),
+            )
+            return definition, "Insight counters saved.", redirect_anchor
+        if action == "record_gathering_insight":
+            redirect_anchor = "xianxia-cultivation-gathering-insight"
+            definition = xianxia_cultivation.update_xianxia_gathering_insight_definition(
+                record.definition,
+                amount=normalize_cultivation_int(
+                    values.get("insight_gain_amount", ""),
+                    field_label="Gathered Insight",
+                ),
+                downtime=values.get("gathering_insight_downtime", ""),
+                notes=values.get("gathering_insight_notes", ""),
+            )
+            return definition, "Gathering Insight recorded.", redirect_anchor
+        if action == "spend_cultivation_energy":
+            redirect_anchor = "xianxia-cultivation-energy"
+            energy_result = spend_xianxia_cultivation_energy_definition(
+                record.definition,
+                energy_key=values.get("energy_key", ""),
+                notes=values.get("cultivation_energy_notes", ""),
+            )
+            return (
+                energy_result.definition,
+                f"Spent {energy_result.insight_cost} Insight on Cultivation to increase {energy_result.energy_name}.",
+                redirect_anchor,
+            )
+        if action == "spend_meditation_yin_yang":
+            redirect_anchor = "xianxia-cultivation-meditation"
+            meditation_result = spend_xianxia_meditation_definition(
+                record.definition,
+                yin_yang_key=values.get("yin_yang_key", ""),
+                notes=values.get("meditation_notes", ""),
+            )
+            return (
+                meditation_result.definition,
+                f"Spent {meditation_result.insight_cost} Insight on Meditation to increase {meditation_result.yin_yang_name}.",
+                redirect_anchor,
+            )
+        if action == "spend_conditioning":
+            redirect_anchor = "xianxia-cultivation-conditioning"
+            conditioning_result = spend_xianxia_conditioning_definition(
+                record.definition,
+                conditioning_target=values.get("conditioning_target", ""),
+                effort_key=values.get("effort_key", ""),
+                notes=values.get("conditioning_notes", ""),
+            )
+            return (
+                conditioning_result.definition,
+                f"Spent {conditioning_result.insight_cost} Insight on Conditioning to increase {conditioning_result.target_name}.",
+                redirect_anchor,
+            )
+        if action == "spend_training":
+            redirect_anchor = "xianxia-cultivation-training"
+            training_result = spend_xianxia_training_definition(
+                record.definition,
+                training_target=values.get("training_target", ""),
+                attribute_key=values.get("attribute_key", ""),
+                notes=values.get("training_notes", ""),
+            )
+            return (
+                training_result.definition,
+                f"Spent {training_result.insight_cost} Insight on Training to increase {training_result.target_name}.",
+                redirect_anchor,
+            )
+        if action == "advance_martial_art_rank":
+            redirect_anchor = "xianxia-cultivation-martial-arts"
+            raw_martial_art_index = values.get("martial_art_index", "")
+            if not str(raw_martial_art_index or "").strip():
+                raise ValueError("Martial Art selection is required.")
+            rank_result = advance_xianxia_martial_art_rank_definition(
+                record.definition,
+                campaign_slug=campaign_slug,
+                systems_service=current_app.extensions["systems_service"],
+                martial_art_index=normalize_cultivation_int(
+                    raw_martial_art_index,
+                    field_label="Martial Art selection",
+                ),
+                target_rank_key=values.get("target_rank_key", ""),
+                legendary_quest_note=values.get("legendary_quest_note", ""),
+            )
+            return (
+                rank_result.definition,
+                f"Spent {rank_result.insight_cost} Insight to advance {rank_result.martial_art_name} to {rank_result.rank_name}.",
+                redirect_anchor,
+            )
+        if action == "learn_generic_technique":
+            redirect_anchor = "xianxia-cultivation-techniques"
+            technique_result = learn_xianxia_generic_technique_definition(
+                record.definition,
+                campaign_slug=campaign_slug,
+                systems_service=current_app.extensions["systems_service"],
+                generic_technique_entry_key=values.get("generic_technique_entry_key", ""),
+                notes=values.get("generic_technique_notes", ""),
+            )
+            return (
+                technique_result.definition,
+                f"Spent {technique_result.insight_cost} Insight to learn {technique_result.technique_name}.",
+                redirect_anchor,
+            )
+        if action == "start_realm_ascension_review":
+            redirect_anchor = "xianxia-cultivation-realm-ascension"
+            realm_result = start_xianxia_realm_ascension_review_definition(
+                record.definition,
+                target_realm=values.get("target_realm", ""),
+                gm_review_note=values.get("realm_ascension_gm_review_note", ""),
+                seclusion_notes=values.get("realm_ascension_seclusion_notes", ""),
+                hp_stance_trade_notes=values.get("realm_ascension_hp_stance_trade_notes", ""),
+            )
+            return (
+                realm_result.definition,
+                f"Started Realm ascension review from {realm_result.current_realm} to {realm_result.target_realm}.",
+                redirect_anchor,
+            )
+        if action == "reset_realm_ascension_stats":
+            redirect_anchor = "xianxia-cultivation-realm-ascension"
+            reset_result = reset_xianxia_realm_ascension_stats_definition(
+                record.definition,
+                target_realm=values.get("target_realm", ""),
+                notes=values.get("realm_ascension_reset_notes", ""),
+            )
+            return (
+                reset_result.definition,
+                f"Reset Attributes and Efforts for {reset_result.current_realm} to {reset_result.target_realm} Realm ascension.",
+                redirect_anchor,
+            )
+        if action == "apply_immortal_realm_rebuild":
+            redirect_anchor = "xianxia-cultivation-realm-ascension"
+            rebuild_result = apply_xianxia_immortal_realm_rebuild_definition(
+                record.definition,
+                target_realm=values.get("target_realm", ""),
+                attribute_scores={
+                    key: values.get(f"realm_rebuild_attribute_{key}", "")
+                    for key in XIANXIA_ATTRIBUTE_KEYS
+                },
+                effort_scores={
+                    key: values.get(f"realm_rebuild_effort_{key}", "")
+                    for key in XIANXIA_EFFORT_KEYS
+                },
+                hp_maximum_trade=values.get("realm_ascension_trade_hp", ""),
+                stance_maximum_trade=values.get("realm_ascension_trade_stance", ""),
+                notes=values.get("realm_ascension_rebuild_notes", ""),
+            )
+            return (
+                rebuild_result.definition,
+                f"Applied the Immortal rebuild budget for {rebuild_result.total_rebuild_points} points and {rebuild_result.actions_per_turn} actions.",
+                redirect_anchor,
+            )
+        if action == "apply_divine_realm_rebuild":
+            redirect_anchor = "xianxia-cultivation-realm-ascension"
+            rebuild_result = apply_xianxia_divine_realm_rebuild_definition(
+                record.definition,
+                target_realm=values.get("target_realm", ""),
+                attribute_scores={
+                    key: values.get(f"realm_rebuild_attribute_{key}", "")
+                    for key in XIANXIA_ATTRIBUTE_KEYS
+                },
+                effort_scores={
+                    key: values.get(f"realm_rebuild_effort_{key}", "")
+                    for key in XIANXIA_EFFORT_KEYS
+                },
+                hp_maximum_trade=values.get("realm_ascension_trade_hp", ""),
+                stance_maximum_trade=values.get("realm_ascension_trade_stance", ""),
+                notes=values.get("realm_ascension_rebuild_notes", ""),
+            )
+            return (
+                rebuild_result.definition,
+                f"Applied the Divine rebuild budget for {rebuild_result.total_rebuild_points} points and {rebuild_result.actions_per_turn} actions.",
+                redirect_anchor,
+            )
+        if action == "confirm_realm_ascension":
+            redirect_anchor = "xianxia-cultivation-realm-ascension"
+            confirmation_result = confirm_xianxia_realm_ascension_definition(
+                record.definition,
+                target_realm=values.get("target_realm", ""),
+                gm_confirmation_note=values.get("realm_ascension_gm_confirmation_note", ""),
+            )
+            return (
+                confirmation_result.definition,
+                f"Recorded GM confirmation for the {confirmation_result.target_realm} Realm ascension.",
+                redirect_anchor,
+            )
+        raise ValueError("Unsupported cultivation action. Refresh the page and try again.")
+
+    @api.get("/campaigns/<campaign_slug>/characters/<character_slug>/cultivation")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_cultivation_read(campaign_slug: str, character_slug: str):
+        campaign, record, access_error = load_character_cultivation_target(campaign_slug, character_slug)
+        if access_error is not None:
+            return access_error
+        return serialize_character_cultivation_response(campaign_slug, campaign, record)
+
+    @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/cultivation")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_cultivation_action(campaign_slug: str, character_slug: str):
+        campaign, record, access_error = load_character_cultivation_target(campaign_slug, character_slug)
+        if access_error is not None:
+            return access_error
+        if not character_cultivation_is_supported(campaign, record):
+            return json_error(
+                "Cultivation is only available for Xianxia character sheets.",
+                400,
+                code="unsupported_campaign_system",
+            )
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+        try:
+            payload = load_json_object()
+            expected_revision = int(payload.get("expected_revision"))
+            definition, success_message, anchor = apply_xianxia_cultivation_action(
+                campaign_slug,
+                record,
+                payload,
+            )
+            definition = finalize_character_definition_for_write(campaign_slug, definition)
+            import_metadata = build_managed_character_import_metadata(
+                campaign_slug,
+                record.definition.character_slug,
+                record.import_metadata,
+            )
+            merged_state = merge_state_with_definition(
+                definition,
+                record.state_record.state,
+            )
+            current_app.extensions["character_state_store"].replace_state(
+                definition,
+                merged_state,
+                expected_revision=expected_revision,
+                updated_by_user_id=user.id,
+            )
+            config = load_campaign_character_config(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
+            character_dir = config.characters_dir / character_slug
+            write_yaml(character_dir / "definition.yaml", definition.to_dict())
+            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
+        except CharacterStateConflictError:
+            return json_error(
+                "This sheet changed in another session. Refresh and try again.",
+                409,
+                code="state_conflict",
+            )
+        except (CharacterStateValidationError, TypeError, ValueError) as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        refreshed_record = load_character_record(campaign_slug, character_slug)
+        return serialize_character_cultivation_response(
+            campaign_slug,
+            campaign,
+            refreshed_record,
+            message=success_message,
+            anchor=anchor,
         )
 
     def serialize_character_controls(campaign_slug: str, campaign, record: CharacterRecord) -> dict[str, Any] | None:

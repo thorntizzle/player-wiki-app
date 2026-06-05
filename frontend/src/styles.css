@@ -1830,6 +1830,23 @@ textarea {
   background: #fff7f7;
 }
 
+.cultivation-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.cultivation-card {
+  min-width: 0;
+}
+
+.cultivation-action-form {
+  margin-top: 0.55rem;
+}
+
+.cultivation-action-form .hero-actions {
+  justify-content: flex-start;
+}
+
 @media (max-width: 740px) {
   .session-pilot,
   .session-shell {

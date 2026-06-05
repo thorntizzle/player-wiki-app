@@ -1718,12 +1718,76 @@ export interface CharacterAdvancedEditorResponse extends ApiResponseBase {
     advanced_editor_url?: string;
     flask_advanced_editor_url?: string;
     cultivation_url?: string;
+    flask_cultivation_url?: string;
   };
 }
 
 export interface CharacterAdvancedEditorPayload {
   expected_revision: number;
   values: Record<string, string>;
+}
+
+export interface CharacterCultivationStatRow {
+  key?: string;
+  label?: string;
+  score?: number;
+  current?: number;
+  max?: number;
+  cap?: number;
+  insight_cost?: number;
+  shortfall?: number;
+  has_enough_insight?: boolean;
+  can_increase?: boolean;
+  [key: string]: unknown;
+}
+
+export interface CharacterCultivationContext {
+  insight: {
+    available: number;
+    spent: number;
+  };
+  energies: CharacterCultivationStatRow[];
+  yin_yang: CharacterCultivationStatRow[];
+  conditioning: {
+    hp: CharacterCultivationStatRow;
+    efforts: CharacterCultivationStatRow[];
+  };
+  training: {
+    stance: CharacterCultivationStatRow;
+    attributes: CharacterCultivationStatRow[];
+  };
+  martial_arts: Array<Record<string, unknown>>;
+  generic_techniques: Array<Record<string, unknown>>;
+  generic_technique_options: Array<Record<string, unknown>>;
+  realm_ascension: Record<string, unknown>;
+  history: Array<{
+    index: number;
+    action: string;
+    details?: Array<{ label: string; value: string }>;
+  }>;
+}
+
+export interface CharacterCultivationResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  character: CharacterRecord;
+  lane: "xianxia" | "unsupported";
+  supported: boolean;
+  message?: string | null;
+  anchor?: string | null;
+  unsupported_message?: string;
+  cultivation?: CharacterCultivationContext | null;
+  links: {
+    character_url?: string;
+    flask_character_url?: string;
+    cultivation_url?: string;
+    flask_cultivation_url?: string;
+  };
+}
+
+export interface CharacterCultivationActionPayload {
+  expected_revision: number;
+  action: string;
+  values?: Record<string, string>;
 }
 
 export interface CharacterDetailResponse extends ApiResponseBase {
@@ -1734,6 +1798,7 @@ export interface CharacterDetailResponse extends ApiResponseBase {
     advanced_editor_url?: string;
     flask_advanced_editor_url?: string;
     cultivation_url?: string;
+    flask_cultivation_url?: string;
   };
 }
 

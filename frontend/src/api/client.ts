@@ -13,6 +13,8 @@ import type {
   CampaignsResponse,
   CharacterAdvancedEditorPayload,
   CharacterAdvancedEditorResponse,
+  CharacterCultivationActionPayload,
+  CharacterCultivationResponse,
   CharacterDetailResponse,
   CharacterAssignmentUpdatePayload,
   CharacterControlsMutationResponse,
@@ -884,6 +886,26 @@ export class CampaignApiClient {
       `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/advanced-editor`,
       {
         method: "PUT",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async getCharacterCultivation(slug: string, characterSlug: string): Promise<CharacterCultivationResponse> {
+    return this.requestJson<CharacterCultivationResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/cultivation`,
+    );
+  }
+
+  async runCharacterCultivationAction(
+    slug: string,
+    characterSlug: string,
+    payload: CharacterCultivationActionPayload,
+  ): Promise<CharacterCultivationResponse> {
+    return this.requestJson<CharacterCultivationResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/cultivation`,
+      {
+        method: "POST",
         body: JSON.stringify(payload),
       },
     );

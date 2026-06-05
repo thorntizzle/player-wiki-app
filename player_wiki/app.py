@@ -116,6 +116,7 @@ from .xianxia_advancement import (
     normalize_xianxia_martial_art_rank_key,
     rank_label as xianxia_martial_art_rank_label,
 )
+from . import xianxia_cultivation
 from .xianxia_character_model import (
     XIANXIA_ATTRIBUTE_KEYS,
     XIANXIA_ATTRIBUTE_LABELS,
@@ -13036,7 +13037,7 @@ def create_app() -> Flask:
                         request.form.get("insight_spent", ""),
                         field_label="Insight spent",
                     )
-                    definition = update_xianxia_insight_definition(
+                    definition = xianxia_cultivation.update_xianxia_insight_definition(
                         record.definition,
                         available=insight_available,
                         spent=insight_spent,
@@ -13048,7 +13049,7 @@ def create_app() -> Flask:
                         request.form.get("insight_gain_amount", ""),
                         field_label="Gathered Insight",
                     )
-                    definition = update_xianxia_gathering_insight_definition(
+                    definition = xianxia_cultivation.update_xianxia_gathering_insight_definition(
                         record.definition,
                         amount=insight_gain,
                         downtime=request.form.get("gathering_insight_downtime", ""),
@@ -13316,7 +13317,7 @@ def create_app() -> Flask:
             "character_cultivation_xianxia.html",
             campaign=campaign,
             character=character,
-            cultivation=present_xianxia_cultivation_context(
+            cultivation=xianxia_cultivation.present_xianxia_cultivation_context(
                 character,
                 record.definition.xianxia,
                 generic_technique_learning_options=generic_technique_options,

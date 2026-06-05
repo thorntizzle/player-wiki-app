@@ -568,7 +568,7 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             expect(page.get_by_role("link", name="Flask sheet")).to_be_visible()
             expect(page.get_by_role("link", name="Advanced Editor")).to_be_visible()
             expect(page.get_by_role("link", name="Flask editor")).to_be_visible()
-            expect(page.get_by_text("Level-up, retraining, repair, and cultivation stay in Flask")).to_be_visible()
+            expect(page.get_by_text("Level-up, retraining, and repair stay in Flask")).to_be_visible()
 
             page.get_by_role("link", name="Advanced Editor").click()
             expect(page).to_have_url(
@@ -667,6 +667,7 @@ def test_gen2_xianxia_character_authoring_create_and_import(
     frontend_gen2_session_live_server,
     app,
     users,
+    set_campaign_visibility,
 ):
     try:
         from playwright.sync_api import expect, sync_playwright
@@ -674,6 +675,7 @@ def test_gen2_xianxia_character_authoring_create_and_import(
         pytest.skip(f"Playwright unavailable: {exc}")
 
     _configure_xianxia_campaign(app)
+    set_campaign_visibility("linden-pass", characters="players")
     base_url = frontend_gen2_session_live_server
 
     create_values = {
@@ -748,7 +750,9 @@ def test_gen2_xianxia_character_authoring_create_and_import(
         try:
             browser = playwright.chromium.launch(headless=True)
             context = browser.new_context(viewport={"width": 1280, "height": 900})
+            player_context = browser.new_context(viewport={"width": 1280, "height": 900})
             page = context.new_page()
+            player_page = player_context.new_page()
         except Exception as exc:
             pytest.skip(f"Playwright browser unavailable: {exc}")
 
@@ -774,6 +778,34 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/characters/browser-gen2-crane$"), timeout=10000)
             expect(page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)
             expect(page.get_by_role("heading", name=re.compile(r"Browser Gen2 Crane"))).to_be_visible()
+            cultivation_link = page.get_by_role("link", name="Cultivation", exact=True)
+            expect(cultivation_link).to_have_attribute(
+                "href",
+                re.compile(r"/app-next/campaigns/linden-pass/characters/browser-gen2-crane/cultivation$"),
+            )
+            expect(page.get_by_role("link", name="Flask Cultivation")).to_be_visible()
+
+            cultivation_link.click()
+            expect(page).to_have_url(
+                re.compile(r"/app-next/campaigns/linden-pass/characters/browser-gen2-crane/cultivation$"),
+                timeout=5000,
+            )
+            expect(page.get_by_role("heading", name="Cultivation: Browser Gen2 Crane")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("heading", name="Insight", exact=True)).to_be_visible()
+            expect(page.get_by_role("heading", name="Realm Ascension")).to_be_visible()
+            expect(page.get_by_role("link", name="Flask Cultivation")).to_be_visible()
+            page.get_by_label("Insight available").fill("2")
+            page.get_by_label("Insight spent").fill("1")
+            page.get_by_role("button", name="Save Insight").click()
+            expect(page.get_by_text("Insight counters saved.")).to_be_visible(timeout=10000)
+            expect(page.locator("#xianxia-cultivation-insight .glance-card", has_text="Available").get_by_text("2")).to_be_visible()
+
+            _sign_in(player_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
+            player_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/browser-gen2-crane/cultivation")
+            expect(player_page.get_by_text("You do not have permission to manage cultivation for this character.")).to_be_visible(
+                timeout=10000
+            )
+            assert player_page.get_by_role("button", name="Save Insight").count() == 0
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/import/xianxia-manual")
             expect(page.get_by_role("heading", name="Import Existing Xianxia Character")).to_be_visible(timeout=10000)
@@ -792,7 +824,9 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             expect(page.get_by_role("heading", name=re.compile(r"Browser Imported Lotus"))).to_be_visible()
         finally:
             page.close()
+            player_page.close()
             context.close()
+            player_context.close()
             browser.close()
 
 

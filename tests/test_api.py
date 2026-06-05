@@ -2379,9 +2379,16 @@ def test_api_character_create_context_uses_gen2_links_and_permissions(client, ap
     assert anonymous_response.get_json()["error"]["code"] == "auth_required"
 
 
-def test_api_xianxia_gen2_create_and_manual_import_write_native_records(client, app, users):
+def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_records(
+    client,
+    app,
+    users,
+    set_campaign_visibility,
+):
     _configure_xianxia_campaign(app)
+    set_campaign_visibility("linden-pass", characters="players")
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-xianxia-authoring-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="player-xianxia-authoring-api")
 
     context_response = client.get(
         "/api/v1/campaigns/linden-pass/characters/create",
@@ -2428,8 +2435,86 @@ def test_api_xianxia_gen2_create_and_manual_import_write_native_records(client, 
     assert unsupported_editor_payload["lane"] == "unsupported"
     assert unsupported_editor_payload["editor"] is None
     assert unsupported_editor_payload["links"]["cultivation_url"] == (
+        "/app-next/campaigns/linden-pass/characters/gen2-crane/cultivation"
+    )
+    assert unsupported_editor_payload["links"]["flask_cultivation_url"] == (
         "/campaigns/linden-pass/characters/gen2-crane/cultivation"
     )
+
+    cultivation_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/gen2-crane/cultivation",
+        headers=api_headers(dm_token),
+    )
+    assert cultivation_response.status_code == 200
+    cultivation_payload = cultivation_response.get_json()
+    assert cultivation_payload["supported"] is True
+    assert cultivation_payload["lane"] == "xianxia"
+    assert cultivation_payload["links"]["cultivation_url"] == (
+        "/app-next/campaigns/linden-pass/characters/gen2-crane/cultivation"
+    )
+    assert cultivation_payload["links"]["flask_cultivation_url"] == (
+        "/campaigns/linden-pass/characters/gen2-crane/cultivation"
+    )
+    assert cultivation_payload["cultivation"]["insight"]["available"] == 0
+    cultivation_revision = cultivation_payload["character"]["state_record"]["revision"]
+
+    blocked_cultivation_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/gen2-crane/cultivation",
+        headers=api_headers(player_token),
+    )
+    assert blocked_cultivation_response.status_code == 403
+    assert blocked_cultivation_response.get_json()["error"]["code"] == "forbidden"
+
+    def _mark_arden_dnd(payload: dict) -> None:
+        payload["system"] = "DND-5E"
+
+    _write_character_definition(app, "arden-march", _mark_arden_dnd)
+    unsupported_cultivation_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/cultivation",
+        headers=api_headers(dm_token),
+    )
+    assert unsupported_cultivation_response.status_code == 200
+    unsupported_cultivation_payload = unsupported_cultivation_response.get_json()
+    assert unsupported_cultivation_payload["supported"] is False
+    assert unsupported_cultivation_payload["lane"] == "unsupported"
+    assert unsupported_cultivation_payload["cultivation"] is None
+
+    insight_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/gen2-crane/cultivation",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": cultivation_revision,
+            "action": "save_insight",
+            "values": {
+                "insight_available": "3",
+                "insight_spent": "1",
+            },
+        },
+    )
+    assert insight_response.status_code == 200
+    insight_payload = insight_response.get_json()
+    assert insight_payload["message"] == "Insight counters saved."
+    assert insight_payload["cultivation"]["insight"]["available"] == 3
+    assert insight_payload["cultivation"]["insight"]["spent"] == 1
+    assert insight_payload["character"]["state_record"]["revision"] == cultivation_revision + 1
+    updated_definition = yaml.safe_load(created_definition_path.read_text(encoding="utf-8"))
+    assert updated_definition["xianxia"]["insight"] == {"available": 3, "spent": 1}
+    assert updated_definition["xianxia"]["advancement_history"][-1]["action"] == "insight_counter_adjustment"
+
+    stale_cultivation_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/gen2-crane/cultivation",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": cultivation_revision,
+            "action": "record_gathering_insight",
+            "values": {
+                "insight_gain_amount": "1",
+                "gathering_insight_downtime": "A quiet week",
+            },
+        },
+    )
+    assert stale_cultivation_response.status_code == 409
+    assert stale_cultivation_response.get_json()["error"]["code"] == "state_conflict"
 
     import_values = _valid_xianxia_manual_import_data("Gen2 Imported Lotus", slug="gen2-imported-lotus")
     preview_response = client.post(

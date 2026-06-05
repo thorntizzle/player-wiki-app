@@ -36,7 +36,7 @@ The current Gen2 build covers:
 
 - campaign list, campaign home, published wiki sections, and published wiki pages
 - Session player/character/DM panes
-- Characters roster, character read/edit shell, native create/import lanes, Advanced Editor, portrait controls, and Controls assignment/delete
+- Characters roster, character read/edit shell, native create/import lanes, Advanced Editor, Xianxia Cultivation, portrait controls, and Controls assignment/delete
 - Combat player view, DM status, and DM controls
 - DM Content statblocks, conditions, staged articles, Player Wiki, and Systems management lanes
 - Systems browsing landing/search, source pages, source categories, and entry detail pages
@@ -44,7 +44,7 @@ The current Gen2 build covers:
 - Campaign Help guidance, effective access, visibility notes, and Flask fallback links
 - Campaign Control visibility editing for campaign and scope access floors
 
-Flask remains the source of truth for workflows that are still Flask-first, including Cultivation, level-up, retraining, progression repair, Admin, shared/core Systems entry editing, and Systems imports.
+Flask remains the source of truth for workflows that are still Flask-first, including level-up, retraining, progression repair, Admin, shared/core Systems entry editing, and Systems imports.
 
 ## Build & Preview
 
@@ -114,7 +114,7 @@ The full API reference is maintained in `docs/api-v1.md`. The list below is a qu
 - `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>`
 - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>`
 
-The character create/import endpoints reuse the same backend DND-5E and Xianxia builders as Flask, including Xianxia manual import preview/confirm behavior. The Gen2 Advanced Editor route uses `/api/v1/campaigns/<slug>/characters/<characterSlug>/advanced-editor` to read and save the existing DND-5E native edit schema for proficiencies, reference text, campaign adjustments, recoverable penalties, custom features, and manual equipment. Cultivation, level-up, retraining, and progression repair remain Flask-backed authoring lanes. The character detail response includes Gen2 presentation fields for DND-5E linked details: equipment rows, presented inventory items, and presented spellcasting spells carry source `href` values plus server-rendered `description_html` for the Session Character detail dialogs. The full Gen2 Character route can upload or remove the character portrait through the revision-checked portrait endpoints, and its Controls section now covers owner assignment/clear plus checked character deletion where permissions allow.
+The character create/import endpoints reuse the same backend DND-5E and Xianxia builders as Flask, including Xianxia manual import preview/confirm behavior. The Gen2 Advanced Editor route uses `/api/v1/campaigns/<slug>/characters/<characterSlug>/advanced-editor` to read and save the existing DND-5E native edit schema for proficiencies, reference text, campaign adjustments, recoverable penalties, custom features, and manual equipment. The Gen2 Cultivation route uses `/api/v1/campaigns/<slug>/characters/<characterSlug>/cultivation` to read the existing Xianxia advancement context and submit the same Insight, advancement-spend, Martial Art, Generic Technique, and Realm Ascension actions as Flask. Level-up, retraining, and progression repair remain Flask-backed authoring lanes. The character detail response includes Gen2 presentation fields for DND-5E linked details: equipment rows, presented inventory items, and presented spellcasting spells carry source `href` values plus server-rendered `description_html` for the Session Character detail dialogs. The full Gen2 Character route can upload or remove the character portrait through the revision-checked portrait endpoints, and its Controls section now covers owner assignment/clear plus checked character deletion where permissions allow.
 
 Authentication notes:
 
