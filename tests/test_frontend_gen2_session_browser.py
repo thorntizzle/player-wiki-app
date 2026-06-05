@@ -493,6 +493,7 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
     frontend_gen2_session_live_server,
     app,
     users,
+    tmp_path,
 ):
     try:
         from playwright.sync_api import expect, sync_playwright
@@ -541,7 +542,26 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             expect(page.get_by_text("Shown on the Gen2 sheet.")).to_be_visible()
             expect(page.get_by_role("link", name="Flask sheet")).to_be_visible()
             expect(page.get_by_role("link", name="Advanced Editor")).to_be_visible()
-            expect(page.get_by_text("Create, import, portrait upload, controls, and broader authoring stay in Flask")).to_be_visible()
+            expect(page.get_by_text("Create, import, controls, and broader authoring stay in Flask")).to_be_visible()
+
+            portrait_file = tmp_path / "gen2-portrait.png"
+            portrait_file.write_bytes(
+                base64.b64decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+                )
+            )
+            portrait_manager = page.locator("form.character-portrait-manager")
+            expect(portrait_manager).to_be_visible()
+            portrait_manager.get_by_label("Alt text").fill("Arden Gen2 portrait")
+            portrait_manager.get_by_label("Caption").fill("Uploaded from the Gen2 browser test.")
+            portrait_manager.locator("input[type='file']").set_input_files(str(portrait_file))
+            expect(portrait_manager.get_by_text("gen2-portrait.png")).to_be_visible(timeout=5000)
+            portrait_manager.get_by_role("button", name="Save portrait").click()
+            expect(page.get_by_text("Portrait saved.")).to_be_visible(timeout=5000)
+            expect(page.get_by_text("Uploaded from the Gen2 browser test.")).to_be_visible()
+            portrait_manager.get_by_role("button", name="Remove portrait").click()
+            expect(page.get_by_text("Portrait removed.")).to_be_visible(timeout=5000)
+            expect(page.locator(".character-portrait img")).not_to_be_visible()
 
             page.reload()
             expect(page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)

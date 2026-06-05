@@ -1259,6 +1259,39 @@ textarea {
   margin-top: 0.75rem;
 }
 
+.character-portrait-manager {
+  border-top: 1px solid #d8e1ee;
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+}
+
+.character-portrait-manager__fields {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.character-portrait-manager label {
+  display: grid;
+  gap: 0.3rem;
+  color: #334155;
+  font-weight: 700;
+}
+
+.character-portrait-manager input {
+  font-weight: 400;
+}
+
+.character-portrait-manager__actions {
+  align-items: center;
+}
+
+.character-portrait-manager button:disabled {
+  opacity: 0.55;
+}
+
 .session-character-form {
   margin-top: 1rem;
   border: 1px solid #d8e1ee;

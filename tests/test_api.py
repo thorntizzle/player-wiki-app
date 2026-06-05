@@ -2175,6 +2175,124 @@ def test_api_character_roster_exposes_gen2_links_search_and_portraits(client, ap
     assert detail_payload["links"]["advanced_editor_url"] == "/campaigns/linden-pass/characters/arden-march/edit"
 
 
+def test_api_character_portrait_upload_remove_uses_revisioned_gen2_contract(
+    client,
+    app,
+    users,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    tiny_png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+    )
+    encoded_png = base64.b64encode(tiny_png).decode("ascii")
+    portrait_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "assets"
+        / "characters"
+        / "arden-march"
+        / "portrait.png"
+    )
+    definition_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / "arden-march"
+        / "definition.yaml"
+    )
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-portrait-api")
+    other_player_token = issue_api_token(app, users["party"]["email"], label="other-character-portrait-api")
+
+    detail_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(dm_token),
+    )
+
+    assert detail_response.status_code == 200
+    starting_revision = detail_response.get_json()["character"]["state_record"]["revision"]
+
+    upload_response = client.put(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/portrait",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": starting_revision,
+            "portrait_file": {
+                "filename": "updated-portrait.png",
+                "data_base64": encoded_png,
+                "media_type": "image/png",
+            },
+            "alt_text": "Arden updated portrait",
+            "caption": "Uploaded through Gen2.",
+        },
+    )
+
+    assert upload_response.status_code == 200
+    uploaded_character = upload_response.get_json()["character"]
+    assert uploaded_character["state_record"]["revision"] == starting_revision + 1
+    assert uploaded_character["portrait"]["asset_ref"] == "characters/arden-march/portrait.png"
+    assert uploaded_character["portrait"]["alt_text"] == "Arden updated portrait"
+    assert uploaded_character["portrait"]["caption"] == "Uploaded through Gen2."
+    assert portrait_path.read_bytes() == tiny_png
+    profile = yaml.safe_load(definition_path.read_text(encoding="utf-8"))["profile"]
+    assert profile["portrait_asset_ref"] == "characters/arden-march/portrait.png"
+    assert profile["portrait_alt"] == "Arden updated portrait"
+    assert profile["portrait_caption"] == "Uploaded through Gen2."
+
+    portrait_response = client.get(uploaded_character["portrait"]["url"], headers=api_headers(dm_token))
+    assert portrait_response.status_code == 200
+    assert portrait_response.mimetype == "image/png"
+
+    stale_upload_response = client.put(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/portrait",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": starting_revision,
+            "portrait_file": {
+                "filename": "stale-portrait.webp",
+                "data_base64": encoded_png,
+                "media_type": "image/webp",
+            },
+        },
+    )
+
+    assert stale_upload_response.status_code == 409
+    assert stale_upload_response.get_json()["error"]["code"] == "state_conflict"
+
+    blocked_upload_response = client.put(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/portrait",
+        headers=api_headers(other_player_token),
+        json={
+            "expected_revision": uploaded_character["state_record"]["revision"],
+            "portrait_file": {
+                "filename": "blocked.png",
+                "data_base64": encoded_png,
+                "media_type": "image/png",
+            },
+        },
+    )
+
+    assert blocked_upload_response.status_code == 403
+    assert blocked_upload_response.get_json()["error"]["code"] == "forbidden"
+
+    remove_response = client.delete(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/portrait",
+        headers=api_headers(dm_token),
+        json={"expected_revision": uploaded_character["state_record"]["revision"]},
+    )
+
+    assert remove_response.status_code == 200
+    removed_character = remove_response.get_json()["character"]
+    assert removed_character["state_record"]["revision"] == starting_revision + 2
+    assert removed_character["portrait"] is None
+    assert not portrait_path.exists()
+    profile = yaml.safe_load(definition_path.read_text(encoding="utf-8"))["profile"]
+    assert "portrait_asset_ref" not in profile
+    assert "portrait_alt" not in profile
+    assert "portrait_caption" not in profile
+
+
 def test_api_content_page_management_requires_dm_and_refreshes_repository(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-content-pages-api")
     player_token = issue_api_token(app, users["party"]["email"], label="player-content-pages-api")

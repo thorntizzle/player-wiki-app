@@ -67,7 +67,10 @@ from .campaign_dm_content_service import (
     build_statblock_parser_feedback,
 )
 from .campaign_wiki_safety import build_dm_player_wiki_removal_safety_index
-from .campaign_session_service import CampaignSessionValidationError
+from .campaign_session_service import (
+    ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS,
+    CampaignSessionValidationError,
+)
 from .campaign_visibility import (
     CAMPAIGN_VISIBILITY_SCOPES,
     CAMPAIGN_VISIBILITY_SCOPE_LABELS,
@@ -146,6 +149,12 @@ from .xianxia_advancement import (
     record_xianxia_dao_immolating_use_definition,
     request_xianxia_dao_immolating_use_definition,
 )
+
+
+CHARACTER_PORTRAIT_ALT_MAX_LENGTH = 200
+CHARACTER_PORTRAIT_CAPTION_MAX_LENGTH = 300
+CHARACTER_PORTRAIT_MAX_BYTES = 8 * 1024 * 1024
+
 
 def register_api(app) -> None:
     api = Blueprint("api", __name__, url_prefix="/api/v1")
@@ -2074,6 +2083,57 @@ def register_api(app) -> None:
             "updated_at": serialize_datetime(state_record.updated_at),
             "updated_by_user_id": state_record.updated_by_user_id,
         }
+
+    def build_character_portrait_asset_ref(character_slug: str, filename: str) -> str:
+        extension = Path(filename).suffix.lower()
+        return f"characters/{character_slug}/portrait{extension}"
+
+    def validate_character_portrait_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        portrait_file = decode_embedded_file(payload.get("portrait_file"), label="portrait_file")
+        filename = Path(str(portrait_file["filename"] or "").strip()).name
+        if not filename:
+            raise ValueError("Choose an image file before saving the portrait.")
+        extension = Path(filename).suffix.lower()
+        if extension not in ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS:
+            raise ValueError("Character portraits must be PNG, JPG, GIF, or WEBP files.")
+        data_blob = portrait_file["data_blob"]
+        if not data_blob:
+            raise ValueError("Uploaded portrait files cannot be empty.")
+        if len(data_blob) > CHARACTER_PORTRAIT_MAX_BYTES:
+            raise ValueError("Character portraits must stay under 8 MB.")
+        alt_text = str(payload.get("alt_text") or "").strip()
+        caption = str(payload.get("caption") or "").strip()
+        if len(alt_text) > CHARACTER_PORTRAIT_ALT_MAX_LENGTH:
+            raise ValueError(f"Portrait alt text must stay under {CHARACTER_PORTRAIT_ALT_MAX_LENGTH} characters.")
+        if len(caption) > CHARACTER_PORTRAIT_CAPTION_MAX_LENGTH:
+            raise ValueError(f"Portrait captions must stay under {CHARACTER_PORTRAIT_CAPTION_MAX_LENGTH} characters.")
+        return {
+            "filename": filename,
+            "data_blob": data_blob,
+            "alt_text": alt_text,
+            "caption": caption,
+        }
+
+    def update_character_portrait_profile(
+        definition,
+        *,
+        asset_ref: str = "",
+        alt_text: str = "",
+        caption: str = "",
+    ):
+        definition_payload = definition.to_dict()
+        profile = dict(definition_payload.get("profile") or {})
+        clean_asset_ref = str(asset_ref or "").strip()
+        if clean_asset_ref:
+            profile["portrait_asset_ref"] = clean_asset_ref
+            profile["portrait_alt"] = str(alt_text or "").strip()
+            profile["portrait_caption"] = str(caption or "").strip()
+        else:
+            profile.pop("portrait_asset_ref", None)
+            profile.pop("portrait_alt", None)
+            profile.pop("portrait_caption", None)
+        definition_payload["profile"] = profile
+        return definition.__class__.from_dict(definition_payload)
 
     def build_character_portrait_payload(campaign, record: CharacterRecord) -> dict[str, Any] | None:
         profile = dict(record.definition.profile or {})
@@ -5169,6 +5229,106 @@ def register_api(app) -> None:
                 "links": serialize_character_links(campaign_slug, campaign, record),
             }
         )
+
+    @api.put("/campaigns/<campaign_slug>/characters/<character_slug>/portrait")
+    def character_portrait_upsert(campaign_slug: str, character_slug: str):
+        record = load_character_record(campaign_slug, character_slug)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            return json_error("You do not have permission to update this character from this view.", 403, code="forbidden")
+
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+
+        try:
+            payload = load_json_object()
+            expected_revision = int(payload.get("expected_revision"))
+            portrait_payload = validate_character_portrait_payload(payload)
+            existing_asset_ref = str((record.definition.profile or {}).get("portrait_asset_ref") or "").strip()
+            next_asset_ref = build_character_portrait_asset_ref(character_slug, portrait_payload["filename"])
+            definition = update_character_portrait_profile(
+                record.definition,
+                asset_ref=next_asset_ref,
+                alt_text=portrait_payload["alt_text"],
+                caption=portrait_payload["caption"],
+            )
+            definition = finalize_character_definition_for_write(campaign_slug, definition)
+            import_metadata = build_managed_character_import_metadata(
+                campaign_slug,
+                record.definition.character_slug,
+                record.import_metadata,
+            )
+            merged_state = merge_state_with_definition(definition, record.state_record.state)
+            current_app.extensions["character_state_store"].replace_state(
+                definition,
+                merged_state,
+                expected_revision=expected_revision,
+                updated_by_user_id=user.id,
+            )
+            config = load_campaign_character_config(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
+            character_dir = config.characters_dir / character_slug
+            write_yaml(character_dir / "definition.yaml", definition.to_dict())
+            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
+            write_campaign_asset_file(campaign, next_asset_ref, data_blob=portrait_payload["data_blob"])
+            if existing_asset_ref and existing_asset_ref != next_asset_ref:
+                delete_campaign_asset_file(campaign, existing_asset_ref)
+        except CharacterStateConflictError:
+            return json_error("This sheet changed in another session. Refresh and try again.", 409, code="state_conflict")
+        except (CampaignContentError, CharacterEditValidationError, CharacterStateValidationError, TypeError, ValueError) as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        return serialize_updated_character(campaign_slug, character_slug)
+
+    @api.delete("/campaigns/<campaign_slug>/characters/<character_slug>/portrait")
+    def character_portrait_delete(campaign_slug: str, character_slug: str):
+        record = load_character_record(campaign_slug, character_slug)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            return json_error("You do not have permission to update this character from this view.", 403, code="forbidden")
+
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+
+        existing_asset_ref = str((record.definition.profile or {}).get("portrait_asset_ref") or "").strip()
+        if not existing_asset_ref:
+            return json_error("That character does not currently have a portrait.", 400, code="validation_error")
+
+        try:
+            payload = load_json_object()
+            expected_revision = int(payload.get("expected_revision"))
+            definition = update_character_portrait_profile(record.definition)
+            definition = finalize_character_definition_for_write(campaign_slug, definition)
+            import_metadata = build_managed_character_import_metadata(
+                campaign_slug,
+                record.definition.character_slug,
+                record.import_metadata,
+            )
+            merged_state = merge_state_with_definition(definition, record.state_record.state)
+            current_app.extensions["character_state_store"].replace_state(
+                definition,
+                merged_state,
+                expected_revision=expected_revision,
+                updated_by_user_id=user.id,
+            )
+            config = load_campaign_character_config(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
+            character_dir = config.characters_dir / character_slug
+            write_yaml(character_dir / "definition.yaml", definition.to_dict())
+            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
+            delete_campaign_asset_file(campaign, existing_asset_ref)
+        except CharacterStateConflictError:
+            return json_error("This sheet changed in another session. Refresh and try again.", 409, code="state_conflict")
+        except (CampaignContentError, CharacterEditValidationError, CharacterStateValidationError, TypeError, ValueError) as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        return serialize_updated_character(campaign_slug, character_slug)
 
     @api.get("/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>")
     @api_login_required

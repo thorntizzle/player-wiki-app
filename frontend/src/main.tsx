@@ -34,6 +34,7 @@ import type {
   CharacterPresentedSpell,
   CharacterPresentedXianxia,
   CampaignVisibilityMap,
+  CharacterPortraitUpsertPayload,
   CharacterRecord,
   CharacterXianxiaDaoUseRecordPayload,
   CharacterXianxiaDaoUseRequestPayload,
@@ -169,6 +170,13 @@ interface CharacterEquipmentDraft {
   isEquipped: boolean;
   isAttuned: boolean;
   weaponWieldMode: string;
+}
+
+interface CharacterPortraitDraft {
+  file: EmbeddedImageInput | null;
+  fileName: string;
+  altText: string;
+  caption: string;
 }
 
 interface DetailFact {
@@ -3245,10 +3253,17 @@ function CharacterPane({
   const [xianxiaDaoUseNotesDrafts, setXianxiaDaoUseNotesDrafts] = useState<Record<string, string>>({});
   const [arcaneArmorDraft, setArcaneArmorDraft] = useState(false);
   const [currencyDraft, setCurrencyDraft] = useState<Record<string, string>>({});
+  const [portraitDraft, setPortraitDraft] = useState<CharacterPortraitDraft>({
+    file: null,
+    fileName: "",
+    altText: "",
+    caption: "",
+  });
   const [restPreview, setRestPreview] = useState<CharacterRestPreviewResponse["preview"] | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [detailDialog, setDetailDialog] = useState<CharacterDetailDialogState | null>(null);
+  const portraitFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const listQuery = useQuery({
     queryKey: ["characters", campaignSlug, ""],
@@ -3411,13 +3426,22 @@ function CharacterPane({
     setSpellSlotDrafts(nextSpellSlotDrafts);
     setInventoryDrafts(nextInventoryDrafts);
     setCurrencyDraft(nextCurrencyDraft);
+    setPortraitDraft({
+      file: null,
+      fileName: "",
+      altText: character.portrait?.alt_text ?? "",
+      caption: character.portrait?.caption ?? "",
+    });
+    if (portraitFileInputRef.current) {
+      portraitFileInputRef.current.value = "";
+    }
   }, [detailQuery.data?.character.state_record.revision, selectedSlug]);
 
   const detail = detailQuery.data as CharacterDetailResponse | undefined;
   const detailRecord = detail?.character;
   const detailLinks = detail?.links ?? {};
   const selected = characterList.find((item) => item.slug === selectedSlug);
-  const selectedPortrait = selected?.portrait ?? detailRecord?.portrait ?? null;
+  const selectedPortrait = detailRecord?.portrait ?? selected?.portrait ?? null;
   const permissions = detailRecord?.permissions;
   const canEdit = Boolean(permissions?.can_edit_session);
   const canRecordXianxiaDaoUse = Boolean(
@@ -3467,6 +3491,7 @@ function CharacterPane({
 
   const isReadSurface = surface === "read";
   const isCombatSurface = surface === "combat";
+  const canManagePortrait = isReadSurface && canEdit;
   const surfaceMetaLabel = isReadSurface ? "Character sheet" : isCombatSurface ? "Combat Character" : "Session Character";
   const surfaceHeading = isReadSurface ? "Character Sheet" : isCombatSurface ? "Combat Character" : "Session Character";
 
@@ -3481,9 +3506,11 @@ function CharacterPane({
 
   const handleMutationSuccess = (response: { character: CharacterRecord }, message: string) => {
     if (selectedSlug) {
+      const previousDetail = queryClient.getQueryData<CharacterDetailResponse>(["character-detail", campaignSlug, selectedSlug]);
       queryClient.setQueryData<CharacterDetailResponse>(["character-detail", campaignSlug, selectedSlug], {
         ok: true,
         character: response.character,
+        links: previousDetail?.links,
       });
     }
     void listQuery.refetch();
@@ -3610,6 +3637,34 @@ function CharacterPane({
     onError: handleMutationError,
   });
 
+  const upsertPortrait = useMutation({
+    mutationFn: (payload: CharacterPortraitUpsertPayload) =>
+      apiClient.upsertCharacterPortrait(campaignSlug, selectedSlug || "", payload),
+    onSuccess: (response) => {
+      handleMutationSuccess(response, "Portrait saved.");
+      setPortraitDraft((current) => ({ ...current, file: null, fileName: "" }));
+      if (portraitFileInputRef.current) {
+        portraitFileInputRef.current.value = "";
+      }
+    },
+    onError: handleMutationError,
+  });
+
+  const deletePortrait = useMutation({
+    mutationFn: (payload: { expected_revision: number }) =>
+      apiClient.deleteCharacterPortrait(campaignSlug, selectedSlug || "", payload),
+    onSuccess: (response) => {
+      handleMutationSuccess(response, "Portrait removed.");
+      setPortraitDraft({ file: null, fileName: "", altText: "", caption: "" });
+      if (portraitFileInputRef.current) {
+        portraitFileInputRef.current.value = "";
+      }
+    },
+    onError: handleMutationError,
+  });
+
+  const portraitMutationPending = upsertPortrait.isPending || deletePortrait.isPending;
+
   const previewRest = useMutation({
     mutationFn: (restType: "short" | "long") => apiClient.getCharacterRestPreview(campaignSlug, selectedSlug || "", restType),
     onSuccess: (response) => {
@@ -3638,6 +3693,43 @@ function CharacterPane({
       return null;
     }
     return parsed;
+  };
+
+  const handlePortraitFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0] ?? null;
+    if (!file) {
+      setPortraitDraft((current) => ({ ...current, file: null, fileName: "" }));
+      return;
+    }
+    readBinaryAsBase64(file, (payload) => {
+      if (!payload) {
+        setPortraitDraft((current) => ({ ...current, file: null, fileName: "" }));
+        setStatusMessage(null);
+        setErrorMessage("Could not read the portrait file.");
+        return;
+      }
+      setPortraitDraft((current) => ({ ...current, file: payload, fileName: file.name }));
+      setErrorMessage(null);
+    });
+  };
+
+  const submitPortrait = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!portraitDraft.file) {
+      setStatusMessage(null);
+      setErrorMessage("Choose an image file before saving the portrait.");
+      return;
+    }
+    upsertPortrait.mutate({
+      expected_revision: revision,
+      portrait_file: portraitDraft.file,
+      alt_text: portraitDraft.altText,
+      caption: portraitDraft.caption,
+    });
+  };
+
+  const removePortrait = () => {
+    deletePortrait.mutate({ expected_revision: revision });
   };
 
   const openItemDetail = (item: { name: string; href?: string; description_html?: string; notes?: string }) => {
@@ -4232,8 +4324,63 @@ function CharacterPane({
                     Cultivation
                   </a>
                 ) : null}
-                <span className="meta">Create, import, portrait upload, controls, and broader authoring stay in Flask for now.</span>
+                <span className="meta">Create, import, controls, and broader authoring stay in Flask for now.</span>
               </div>
+            ) : null}
+            {canManagePortrait ? (
+              <form className="character-portrait-manager" onSubmit={submitPortrait}>
+                <div className="character-portrait-manager__fields">
+                  <label htmlFor="character-portrait-file">
+                    Portrait image
+                    <input
+                      id="character-portrait-file"
+                      ref={portraitFileInputRef}
+                      type="file"
+                      accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp"
+                      disabled={portraitMutationPending}
+                      onChange={handlePortraitFileChange}
+                    />
+                  </label>
+                  <label htmlFor="character-portrait-alt">
+                    Alt text
+                    <input
+                      id="character-portrait-alt"
+                      type="text"
+                      maxLength={200}
+                      value={portraitDraft.altText}
+                      disabled={portraitMutationPending}
+                      onChange={(event) => setPortraitDraft((current) => ({ ...current, altText: event.currentTarget.value }))}
+                    />
+                  </label>
+                  <label htmlFor="character-portrait-caption">
+                    Caption
+                    <input
+                      id="character-portrait-caption"
+                      type="text"
+                      maxLength={300}
+                      value={portraitDraft.caption}
+                      disabled={portraitMutationPending}
+                      onChange={(event) => setPortraitDraft((current) => ({ ...current, caption: event.currentTarget.value }))}
+                    />
+                  </label>
+                </div>
+                <div className="button-row character-portrait-manager__actions">
+                  <button className="button" type="submit" disabled={portraitMutationPending || !portraitDraft.file}>
+                    Save portrait
+                  </button>
+                  {selectedPortrait ? (
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      disabled={portraitMutationPending}
+                      onClick={removePortrait}
+                    >
+                      Remove portrait
+                    </button>
+                  ) : null}
+                  {portraitDraft.fileName ? <span className="meta">{portraitDraft.fileName}</span> : null}
+                </div>
+              </form>
             ) : null}
           </article>
         ) : null}

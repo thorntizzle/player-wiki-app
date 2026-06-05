@@ -94,6 +94,8 @@ The full API reference is maintained in `docs/api-v1.md`. The list below is a qu
 - `GET /campaigns/<campaign_slug>/session/wiki-lookup/preview?page_ref=...` (same-origin, browser route)
 - `GET /api/v1/campaigns/<campaign_slug>/characters`
 - `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>`
+- `PUT /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/portrait`
+- `DELETE /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/portrait`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<level>`
@@ -105,7 +107,7 @@ The full API reference is maintained in `docs/api-v1.md`. The list below is a qu
 - `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>`
 - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>`
 
-The character detail response includes Gen2 presentation fields for DND-5E linked details: equipment rows, presented inventory items, and presented spellcasting spells carry source `href` values plus server-rendered `description_html` for the Session Character detail dialogs.
+The character detail response includes Gen2 presentation fields for DND-5E linked details: equipment rows, presented inventory items, and presented spellcasting spells carry source `href` values plus server-rendered `description_html` for the Session Character detail dialogs. The full Gen2 Character route can also upload or remove the character portrait through the revision-checked portrait endpoints.
 
 Authentication notes:
 

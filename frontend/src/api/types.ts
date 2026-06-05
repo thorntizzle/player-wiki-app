@@ -1567,11 +1567,30 @@ export interface CharacterNotesPatchPayload {
   player_notes_markdown: string;
 }
 
+export interface CharacterPortraitUpsertPayload {
+  expected_revision: number;
+  portrait_file: {
+    filename: string;
+    data_base64: string;
+    media_type?: string | null;
+  };
+  alt_text?: string;
+  caption?: string;
+}
+
+export interface CharacterPortraitDeletePayload {
+  expected_revision: number;
+}
+
 export interface CharacterVitalsPatchResponse extends ApiResponseBase {
   character: CharacterRecord;
 }
 
 export interface CharacterNotesPatchResponse extends ApiResponseBase {
+  character: CharacterRecord;
+}
+
+export interface CharacterPortraitMutationResponse extends ApiResponseBase {
   character: CharacterRecord;
 }
 

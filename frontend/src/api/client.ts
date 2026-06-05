@@ -19,6 +19,9 @@ import type {
   CharacterInventoryPatchPayload,
   CharacterNotesPatchPayload,
   CharacterNotesPatchResponse,
+  CharacterPortraitDeletePayload,
+  CharacterPortraitMutationResponse,
+  CharacterPortraitUpsertPayload,
   CharacterResourcePatchPayload,
   CharacterRestApplyPayload,
   CharacterRestApplyResponse,
@@ -852,6 +855,34 @@ export class CampaignApiClient {
   async getCharacter(slug: string, characterSlug: string): Promise<CharacterDetailResponse> {
     return this.requestJson<CharacterDetailResponse>(
       `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}`,
+    );
+  }
+
+  async upsertCharacterPortrait(
+    slug: string,
+    characterSlug: string,
+    payload: CharacterPortraitUpsertPayload,
+  ): Promise<CharacterPortraitMutationResponse> {
+    return this.requestJson<CharacterPortraitMutationResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/portrait`,
+      {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async deleteCharacterPortrait(
+    slug: string,
+    characterSlug: string,
+    payload: CharacterPortraitDeletePayload,
+  ): Promise<CharacterPortraitMutationResponse> {
+    return this.requestJson<CharacterPortraitMutationResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/portrait`,
+      {
+        method: "DELETE",
+        body: JSON.stringify(payload),
+      },
     );
   }
 
