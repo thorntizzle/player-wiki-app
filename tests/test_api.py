@@ -2350,6 +2350,201 @@ def test_api_character_advanced_editor_context_save_and_access(client, app, user
     assert stale_response.get_json()["error"]["code"] == "state_conflict"
 
 
+def test_api_character_retraining_context_save_and_access(client, app, users, set_campaign_visibility):
+    feat_page_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "mechanics"
+        / "harbor-drill.md"
+    )
+    feat_page_path.write_text(
+        """---
+title: Harbor Drill
+section: Mechanics
+subsection: Feats
+published: true
+summary: A harbor discipline that grants a fighting style.
+character_option:
+  kind: feat
+  name: Harbor Drill
+  description_markdown: Harbor veterans drill you into a practiced fighting style.
+  optionalfeature_progression:
+    - name: Fighting Style
+      featureType:
+        - FS:F
+      progression:
+        "1": 1
+---
+The harbor masters insist on repetition until every motion is clean.
+""",
+        encoding="utf-8",
+    )
+
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["optionalfeature"],
+            entries=[
+                {
+                    "entry_key": "dnd-5e|optionalfeature|phb|archery",
+                    "entry_type": "optionalfeature",
+                    "slug": "phb-optionalfeature-archery",
+                    "title": "Archery",
+                    "source_page": "72",
+                    "source_path": "data/class/class-fighter.json",
+                    "search_text": "archery fighting style",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"feature_type": ["FS:F"]},
+                    "body": {},
+                    "rendered_html": "<p>Archery.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|optionalfeature|phb|defense",
+                    "entry_type": "optionalfeature",
+                    "slug": "phb-optionalfeature-defense",
+                    "title": "Defense",
+                    "source_page": "72",
+                    "source_path": "data/class/class-fighter.json",
+                    "search_text": "defense fighting style",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"feature_type": ["FS:F"]},
+                    "body": {},
+                    "rendered_html": "<p>Defense.</p>",
+                },
+            ],
+        )
+
+    set_campaign_visibility("linden-pass", characters="players")
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-retraining-api")
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-character-retraining-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="blocked-character-retraining-api")
+
+    editor_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/advanced-editor",
+        headers=api_headers(dm_token),
+    )
+    assert editor_response.status_code == 200
+    editor = editor_response.get_json()["editor"]
+    editor_values = _advanced_editor_values(editor)
+    editor_values.update(
+        {
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "mechanics/harbor-drill",
+            "custom_feature_activation_type_1": "passive",
+            "custom_feature_description_1": "",
+            "custom_feature_optionalfeature_1_1_1": "phb-optionalfeature-archery",
+        }
+    )
+    add_response = client.put(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/advanced-editor",
+        headers=api_headers(dm_token),
+        json={"expected_revision": editor["state_revision"], "values": editor_values},
+    )
+    assert add_response.status_code == 200
+    assert add_response.get_json()["links"]["retraining_url"] == (
+        "/app-next/campaigns/linden-pass/characters/arden-march/retraining"
+    )
+
+    detail_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(dm_token),
+    )
+    assert detail_response.status_code == 200
+    detail_links = detail_response.get_json()["links"]
+    assert detail_links["retraining_url"] == "/app-next/campaigns/linden-pass/characters/arden-march/retraining"
+    assert detail_links["flask_retraining_url"] == "/campaigns/linden-pass/characters/arden-march/retraining"
+
+    response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/retraining",
+        headers=api_headers(dm_token),
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["supported"] is True
+    assert payload["lane"] == "dnd5e"
+    assert payload["links"]["retraining_url"] == "/app-next/campaigns/linden-pass/characters/arden-march/retraining"
+    assert payload["links"]["flask_retraining_url"] == "/campaigns/linden-pass/characters/arden-march/retraining"
+    retraining = payload["retraining"]
+    assert retraining["state_revision"] == payload["character"]["state_record"]["revision"]
+    assert "retraining_context" not in payload["readiness"]
+    row = next(
+        row
+        for row in retraining["feature_rows"]
+        if any(field.get("name") == "custom_feature_optionalfeature_1_1_1" for field in row.get("choice_fields", []))
+    )
+    assert row["name"] == "Harbor Drill"
+    choice_field = next(field for field in row["choice_fields"] if field["name"] == "custom_feature_optionalfeature_1_1_1")
+    assert choice_field["name"] == "custom_feature_optionalfeature_1_1_1"
+    assert choice_field["selected"] == "phb-optionalfeature-archery"
+
+    owner_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/retraining",
+        headers=api_headers(owner_token),
+    )
+    assert owner_response.status_code == 200
+    assert owner_response.get_json()["supported"] is True
+
+    blocked_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/retraining",
+        headers=api_headers(player_token),
+    )
+    assert blocked_response.status_code == 403
+    assert blocked_response.get_json()["error"]["code"] == "forbidden"
+
+    update_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/retraining",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": retraining["state_revision"],
+            "values": {"custom_feature_optionalfeature_1_1_1": "phb-optionalfeature-defense"},
+        },
+    )
+    assert update_response.status_code == 200
+    updated_payload = update_response.get_json()
+    assert updated_payload["message"] == "Retraining saved."
+    assert updated_payload["character"]["state_record"]["revision"] == retraining["state_revision"] + 1
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+    assert record is not None
+    feature_slugs = {
+        str(dict(feature.get("systems_ref") or {}).get("slug") or "").strip()
+        for feature in record.definition.features
+    }
+    retrained_crossbow = next(attack for attack in record.definition.attacks if "Crossbow" in attack["name"])
+    latest_event = list((record.definition.source or {}).get("native_progression", {}).get("history") or [])[-1]
+    assert "phb-optionalfeature-archery" not in feature_slugs
+    assert "phb-optionalfeature-defense" in feature_slugs
+    assert retrained_crossbow["attack_bonus"] == 5
+    assert latest_event["action"] == "retrain"
+    assert latest_event["kind"] == "retrain"
+
+    stale_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/retraining",
+        headers=api_headers(dm_token),
+        json={
+            "expected_revision": retraining["state_revision"],
+            "values": {"custom_feature_optionalfeature_1_1_1": "phb-optionalfeature-defense"},
+        },
+    )
+    assert stale_response.status_code == 409
+    assert stale_response.get_json()["error"]["code"] == "state_conflict"
+
+
 def test_api_character_level_up_context_save_and_access(client, app, users, set_campaign_visibility, monkeypatch):
     set_campaign_visibility("linden-pass", characters="players")
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-level-up-api")
@@ -2602,12 +2797,35 @@ def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_reco
         "/app-next/campaigns/linden-pass/characters/gen2-crane/cultivation"
     )
 
+    unsupported_retraining_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/gen2-crane/retraining",
+        headers=api_headers(dm_token),
+    )
+    assert unsupported_retraining_response.status_code == 200
+    unsupported_retraining_payload = unsupported_retraining_response.get_json()
+    assert unsupported_retraining_payload["supported"] is False
+    assert unsupported_retraining_payload["lane"] == "unsupported"
+    assert unsupported_retraining_payload["retraining"] is None
+    assert unsupported_retraining_payload["links"]["cultivation_url"] == (
+        "/app-next/campaigns/linden-pass/characters/gen2-crane/cultivation"
+    )
+    assert unsupported_retraining_payload["links"]["flask_cultivation_url"] == (
+        "/campaigns/linden-pass/characters/gen2-crane/cultivation"
+    )
+
     blocked_level_up_response = client.get(
         "/api/v1/campaigns/linden-pass/characters/gen2-crane/level-up",
         headers=api_headers(player_token),
     )
     assert blocked_level_up_response.status_code == 403
     assert blocked_level_up_response.get_json()["error"]["code"] == "forbidden"
+
+    blocked_retraining_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/gen2-crane/retraining",
+        headers=api_headers(player_token),
+    )
+    assert blocked_retraining_response.status_code == 403
+    assert blocked_retraining_response.get_json()["error"]["code"] == "forbidden"
 
     cultivation_response = client.get(
         "/api/v1/campaigns/linden-pass/characters/gen2-crane/cultivation",

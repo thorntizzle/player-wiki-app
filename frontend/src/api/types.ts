@@ -1663,6 +1663,7 @@ export interface CharacterEditorFeatureRow {
   name?: string;
   page_ref?: string;
   activation_type?: string;
+  summary?: string;
   description_markdown?: string;
   resource_max?: string;
   resource_reset_on?: string;
@@ -1717,6 +1718,8 @@ export interface CharacterAdvancedEditorResponse extends ApiResponseBase {
     flask_character_url?: string;
     advanced_editor_url?: string;
     flask_advanced_editor_url?: string;
+    retraining_url?: string;
+    flask_retraining_url?: string;
     cultivation_url?: string;
     flask_cultivation_url?: string;
     level_up_url?: string;
@@ -1726,6 +1729,40 @@ export interface CharacterAdvancedEditorResponse extends ApiResponseBase {
 }
 
 export interface CharacterAdvancedEditorPayload {
+  expected_revision: number;
+  values: Record<string, string>;
+}
+
+export interface CharacterRetrainingContext {
+  state_revision: number;
+  values?: Record<string, string>;
+  feature_rows: CharacterEditorFeatureRow[];
+  supported_scope: string[];
+}
+
+export interface CharacterRetrainingResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  character: CharacterRecord;
+  lane: "dnd5e" | "repairable" | "unsupported";
+  supported: boolean;
+  message?: string | null;
+  unsupported_message?: string;
+  readiness?: Record<string, unknown>;
+  retraining?: CharacterRetrainingContext | null;
+  links: {
+    character_url?: string;
+    flask_character_url?: string;
+    advanced_editor_url?: string;
+    flask_advanced_editor_url?: string;
+    retraining_url?: string;
+    flask_retraining_url?: string;
+    flask_progression_repair_url?: string;
+    cultivation_url?: string;
+    flask_cultivation_url?: string;
+  };
+}
+
+export interface CharacterRetrainingPayload {
   expected_revision: number;
   values: Record<string, string>;
 }
@@ -1772,6 +1809,8 @@ export interface CharacterLevelUpResponse extends ApiResponseBase {
     flask_character_url?: string;
     advanced_editor_url?: string;
     flask_advanced_editor_url?: string;
+    retraining_url?: string;
+    flask_retraining_url?: string;
     level_up_url?: string;
     flask_level_up_url?: string;
     flask_progression_repair_url?: string;
@@ -1837,6 +1876,11 @@ export interface CharacterCultivationResponse extends ApiResponseBase {
   links: {
     character_url?: string;
     flask_character_url?: string;
+    advanced_editor_url?: string;
+    flask_advanced_editor_url?: string;
+    retraining_url?: string;
+    flask_retraining_url?: string;
+    flask_progression_repair_url?: string;
     cultivation_url?: string;
     flask_cultivation_url?: string;
   };
@@ -1855,6 +1899,8 @@ export interface CharacterDetailResponse extends ApiResponseBase {
     flask_character_url?: string;
     advanced_editor_url?: string;
     flask_advanced_editor_url?: string;
+    retraining_url?: string;
+    flask_retraining_url?: string;
     level_up_url?: string;
     flask_level_up_url?: string;
     flask_progression_repair_url?: string;

@@ -36,6 +36,8 @@ import type {
   CharacterPortraitMutationResponse,
   CharacterPortraitUpsertPayload,
   CharacterResourcePatchPayload,
+  CharacterRetrainingPayload,
+  CharacterRetrainingResponse,
   CharacterRestApplyPayload,
   CharacterRestApplyResponse,
   CharacterRestPreviewResponse,
@@ -888,6 +890,26 @@ export class CampaignApiClient {
       `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/advanced-editor`,
       {
         method: "PUT",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async getCharacterRetraining(slug: string, characterSlug: string): Promise<CharacterRetrainingResponse> {
+    return this.requestJson<CharacterRetrainingResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/retraining`,
+    );
+  }
+
+  async submitCharacterRetraining(
+    slug: string,
+    characterSlug: string,
+    payload: CharacterRetrainingPayload,
+  ): Promise<CharacterRetrainingResponse> {
+    return this.requestJson<CharacterRetrainingResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/retraining`,
+      {
+        method: "POST",
         body: JSON.stringify(payload),
       },
     );

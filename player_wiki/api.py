@@ -103,11 +103,13 @@ from .character_builder import (
 )
 from .character_editor import (
     CharacterEditValidationError,
+    apply_native_character_retraining,
     apply_native_character_edits,
     apply_equipment_state_edit,
     build_linked_feature_authoring_support,
     build_managed_character_import_metadata,
     build_native_character_edit_context,
+    build_native_character_retraining_context,
 )
 from .character_importer import write_yaml
 from .character_models import CharacterRecord, CharacterStateRecord
@@ -2555,6 +2557,17 @@ def register_api(app) -> None:
                 campaign_slug=campaign_slug,
                 character_slug=character_slug,
             )
+            retraining_availability = character_retraining_availability(campaign_slug, campaign, record)
+            if str(retraining_availability.get("status") or "").strip() == "ready":
+                links["retraining_url"] = gen2_campaign_href(
+                    campaign_slug,
+                    f"characters/{character_slug}/retraining",
+                )
+                links["flask_retraining_url"] = url_for(
+                    "character_retraining_view",
+                    campaign_slug=campaign_slug,
+                    character_slug=character_slug,
+                )
         if (
             can_access_campaign_scope(campaign_slug, "characters")
             and can_manage_campaign_session(campaign_slug)
@@ -2864,6 +2877,364 @@ def register_api(app) -> None:
             refreshed_record,
             edit_context=edit_context,
             message="Character details updated.",
+        )
+
+    def normalize_character_retraining_values(payload: dict[str, Any]) -> dict[str, str]:
+        raw_values = payload.get("values") if isinstance(payload.get("values"), dict) else payload
+        values: dict[str, str] = {}
+        for key, value in dict(raw_values or {}).items():
+            field_name = str(key or "").strip()
+            if not field_name:
+                continue
+            if isinstance(value, list):
+                values[field_name] = str(value[-1] if value else "")
+            elif value is None:
+                values[field_name] = ""
+            else:
+                values[field_name] = str(value)
+        return values
+
+    def character_retraining_base_readiness(campaign_slug: str, campaign, record: CharacterRecord) -> dict[str, Any]:
+        campaign_system = getattr(campaign, "system", "")
+        if not supports_native_character_tools(campaign_system):
+            return {
+                "status": "unsupported",
+                "message": character_advancement_unsupported_message(campaign_system),
+            }
+        if not supports_native_character_tools(getattr(record.definition, "system", "")):
+            return {
+                "status": "unsupported",
+                "message": "Retraining is currently available only for DND-5E native character tools in Gen2.",
+            }
+        level_up_readiness = native_level_up_readiness(
+            current_app.extensions["systems_service"],
+            campaign_slug,
+            record.definition,
+            campaign_page_records=list_builder_campaign_page_records(campaign_slug, campaign),
+        )
+        linked_feature_authoring = build_linked_feature_authoring_support(
+            record.definition,
+            readiness=level_up_readiness,
+        )
+        if not bool(linked_feature_authoring.get("supported")):
+            readiness_status = str(level_up_readiness.get("status") or "").strip()
+            return {
+                "status": "repairable" if readiness_status == "repairable" else "unsupported",
+                "message": str(linked_feature_authoring.get("message") or "This character cannot use retraining yet."),
+                "level_up_readiness": level_up_readiness,
+                "linked_feature_authoring": linked_feature_authoring,
+            }
+        return {
+            "status": "candidate",
+            "message": "",
+            "level_up_readiness": level_up_readiness,
+            "linked_feature_authoring": linked_feature_authoring,
+        }
+
+    def character_retraining_catalog_parts(campaign_slug: str, campaign) -> tuple[list[object], dict[str, Any], dict[str, Any], dict[str, Any]]:
+        campaign_page_records = [
+            page_record
+            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
+            if page_record.page.published
+            and page_record.page.reveal_after_session <= campaign.current_session
+            and str(page_record.page.section or "").strip() != "Sessions"
+        ]
+        spell_catalog = _build_spell_catalog(
+            _list_campaign_enabled_entries(
+                current_app.extensions["systems_service"],
+                campaign_slug,
+                "spell",
+            )
+        )
+        optionalfeature_catalog = {
+            str(entry.slug or "").strip(): entry
+            for entry in _list_campaign_enabled_entries(
+                current_app.extensions["systems_service"],
+                campaign_slug,
+                "optionalfeature",
+            )
+            if str(entry.slug or "").strip()
+        }
+        item_catalog = build_character_item_catalog(campaign_slug)
+        return campaign_page_records, optionalfeature_catalog, spell_catalog, item_catalog
+
+    def build_character_retraining_context_parts(
+        campaign_slug: str,
+        campaign,
+        record: CharacterRecord,
+        *,
+        form_values: dict[str, str] | None = None,
+    ) -> tuple[dict[str, Any], list[object], dict[str, Any], dict[str, Any], dict[str, Any]]:
+        campaign_page_records, optionalfeature_catalog, spell_catalog, item_catalog = character_retraining_catalog_parts(
+            campaign_slug,
+            campaign,
+        )
+        retraining_context = build_native_character_retraining_context(
+            record.definition,
+            campaign_page_records=campaign_page_records,
+            form_values=form_values,
+            optionalfeature_catalog=optionalfeature_catalog,
+            spell_catalog=spell_catalog,
+            item_catalog=item_catalog,
+        )
+        retraining_context["state_revision"] = record.state_record.revision
+        return retraining_context, campaign_page_records, optionalfeature_catalog, spell_catalog, item_catalog
+
+    def character_retraining_availability(
+        campaign_slug: str,
+        campaign,
+        record: CharacterRecord,
+        *,
+        form_values: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        readiness = character_retraining_base_readiness(campaign_slug, campaign, record)
+        if str(readiness.get("status") or "").strip() != "candidate":
+            return readiness
+        try:
+            retraining_context, *_ = build_character_retraining_context_parts(
+                campaign_slug,
+                campaign,
+                record,
+                form_values=form_values,
+            )
+        except (CharacterEditValidationError, ValueError) as exc:
+            return {
+                **readiness,
+                "status": "unsupported",
+                "message": str(exc),
+            }
+        if not list(retraining_context.get("feature_rows") or []):
+            return {
+                **readiness,
+                "status": "empty",
+                "message": "This character does not currently have any supported structured retraining options.",
+                "retraining_context": retraining_context,
+            }
+        return {
+            **readiness,
+            "status": "ready",
+            "message": "",
+            "retraining_context": retraining_context,
+        }
+
+    def character_retraining_is_supported(readiness: dict[str, Any]) -> bool:
+        return str(readiness.get("status") or "").strip() == "ready"
+
+    def serialize_character_retraining_context(retraining_context: dict[str, Any]) -> dict[str, Any]:
+        keys = (
+            "state_revision",
+            "values",
+            "feature_rows",
+            "supported_scope",
+        )
+        return {key: make_json_safe(retraining_context.get(key)) for key in keys}
+
+    def character_retraining_links(
+        campaign_slug: str,
+        campaign,
+        record: CharacterRecord,
+        readiness: dict[str, Any],
+    ) -> dict[str, str]:
+        character_slug = record.definition.character_slug
+        links = {
+            **serialize_character_links(campaign_slug, campaign, record),
+            "character_url": gen2_campaign_href(campaign_slug, f"characters/{character_slug}"),
+            "flask_character_url": url_for(
+                "character_read_view",
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+            ),
+        }
+        if character_advanced_editor_is_supported(campaign, record):
+            links["advanced_editor_url"] = gen2_campaign_href(campaign_slug, f"characters/{character_slug}/edit")
+            links["flask_advanced_editor_url"] = url_for(
+                "character_edit_view",
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+            )
+        readiness_status = str(readiness.get("status") or "").strip()
+        if readiness_status == "ready":
+            links["retraining_url"] = gen2_campaign_href(
+                campaign_slug,
+                f"characters/{character_slug}/retraining",
+            )
+            links["flask_retraining_url"] = url_for(
+                "character_retraining_view",
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+            )
+        elif readiness_status == "repairable":
+            links["flask_progression_repair_url"] = url_for(
+                "character_progression_repair_view",
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+            )
+        return links
+
+    def serialize_character_retraining_response(
+        campaign_slug: str,
+        campaign,
+        record: CharacterRecord,
+        *,
+        readiness: dict[str, Any] | None = None,
+        retraining_context: dict[str, Any] | None = None,
+        message: str | None = None,
+    ):
+        readiness = readiness or character_retraining_availability(campaign_slug, campaign, record)
+        if retraining_context is None:
+            retraining_context = dict(readiness.get("retraining_context") or {}) or None
+        readiness_status = str(readiness.get("status") or "").strip() or "unsupported"
+        supported = character_retraining_is_supported(readiness)
+        lane = "dnd5e" if supported else ("repairable" if readiness_status == "repairable" else "unsupported")
+        unsupported_message = "" if supported else str(
+            readiness.get("message") or "This character is not ready for Gen2 retraining."
+        )
+        serialized_readiness = {
+            key: value
+            for key, value in dict(readiness or {}).items()
+            if key != "retraining_context"
+        }
+        return jsonify(
+            {
+                "ok": True,
+                "campaign": serialize_campaign(campaign),
+                "character": serialize_character_record(campaign_slug, record),
+                "lane": lane,
+                "supported": supported,
+                "message": message,
+                "unsupported_message": unsupported_message,
+                "readiness": make_json_safe(serialized_readiness),
+                "retraining": (
+                    serialize_character_retraining_context(retraining_context)
+                    if retraining_context is not None and supported
+                    else None
+                ),
+                "links": character_retraining_links(campaign_slug, campaign, record, readiness),
+            }
+        )
+
+    def load_character_retraining_target(campaign_slug: str, character_slug: str):
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+        record = load_character_record(campaign_slug, character_slug)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            return campaign, record, json_error(
+                "You do not have permission to retrain this character.",
+                403,
+                code="forbidden",
+            )
+        return campaign, record, None
+
+    @api.get("/campaigns/<campaign_slug>/characters/<character_slug>/retraining")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_retraining_read(campaign_slug: str, character_slug: str):
+        campaign, record, access_error = load_character_retraining_target(campaign_slug, character_slug)
+        if access_error is not None:
+            return access_error
+        form_values = normalize_character_retraining_values(dict(request.args))
+        readiness = character_retraining_availability(
+            campaign_slug,
+            campaign,
+            record,
+            form_values=form_values,
+        )
+        return serialize_character_retraining_response(campaign_slug, campaign, record, readiness=readiness)
+
+    @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/retraining")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_retraining_submit(campaign_slug: str, character_slug: str):
+        campaign, record, access_error = load_character_retraining_target(campaign_slug, character_slug)
+        if access_error is not None:
+            return access_error
+        readiness = character_retraining_availability(campaign_slug, campaign, record)
+        if not character_retraining_is_supported(readiness):
+            return json_error(
+                str(readiness.get("message") or "This character is not ready for Gen2 retraining."),
+                400,
+                code="unsupported_campaign_system",
+            )
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        try:
+            payload = load_json_object()
+            expected_revision = int(payload.get("expected_revision"))
+            form_values = normalize_character_retraining_values(payload)
+            (
+                _retraining_context,
+                campaign_page_records,
+                optionalfeature_catalog,
+                spell_catalog,
+                item_catalog,
+            ) = build_character_retraining_context_parts(
+                campaign_slug,
+                campaign,
+                record,
+                form_values=form_values,
+            )
+            definition, import_metadata, inventory_quantity_overrides = apply_native_character_retraining(
+                campaign_slug,
+                record.definition,
+                record.import_metadata,
+                campaign_page_records=campaign_page_records,
+                form_values=form_values,
+                optionalfeature_catalog=optionalfeature_catalog,
+                spell_catalog=spell_catalog,
+                item_catalog=item_catalog,
+                systems_service=current_app.extensions["systems_service"],
+            )
+            definition = finalize_character_definition_for_write(campaign_slug, definition)
+            removed_resource_ids: set[str] = set()
+            source_type = str((record.definition.source or {}).get("source_type") or "").strip()
+            if source_type and source_type != "native_character_builder":
+                previous_resource_ids = {
+                    str(template.get("id") or "").strip()
+                    for template in list(record.definition.resource_templates or [])
+                    if str(template.get("id") or "").strip()
+                }
+                current_resource_ids = {
+                    str(template.get("id") or "").strip()
+                    for template in list(definition.resource_templates or [])
+                    if str(template.get("id") or "").strip()
+                }
+                removed_resource_ids = previous_resource_ids - current_resource_ids
+            merged_state = merge_state_with_definition(
+                definition,
+                record.state_record.state,
+                inventory_quantity_overrides=inventory_quantity_overrides,
+                removed_resource_ids=removed_resource_ids,
+            )
+            current_app.extensions["character_state_store"].replace_state(
+                definition,
+                merged_state,
+                expected_revision=expected_revision,
+                updated_by_user_id=user.id,
+            )
+            config = load_campaign_character_config(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
+            character_dir = config.characters_dir / character_slug
+            write_yaml(character_dir / "definition.yaml", definition.to_dict())
+            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
+        except CharacterStateConflictError:
+            return json_error(
+                "This sheet changed in another session. Refresh and try again.",
+                409,
+                code="state_conflict",
+            )
+        except (CharacterEditValidationError, CharacterStateValidationError, TypeError, ValueError) as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        refreshed_record = load_character_record(campaign_slug, character_slug)
+        refreshed_readiness = character_retraining_availability(campaign_slug, campaign, refreshed_record)
+        return serialize_character_retraining_response(
+            campaign_slug,
+            campaign,
+            refreshed_record,
+            readiness=refreshed_readiness,
+            message="Retraining saved.",
         )
 
     def normalize_character_level_up_values(payload: dict[str, Any]) -> dict[str, str]:
