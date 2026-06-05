@@ -49,6 +49,18 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 - `GET /api/v1/me`
 - `GET /api/v1/me/settings`
 - `PATCH /api/v1/me/settings`
+- `GET /api/v1/admin`
+- `GET /api/v1/admin/users/<user_id>`
+- `POST /api/v1/admin/users/invite`
+- `POST /api/v1/admin/users/<user_id>/membership`
+- `DELETE /api/v1/admin/users/<user_id>/membership`
+- `POST /api/v1/admin/users/<user_id>/assignment`
+- `DELETE /api/v1/admin/users/<user_id>/assignment`
+- `POST /api/v1/admin/users/<user_id>/invite`
+- `POST /api/v1/admin/users/<user_id>/password-reset`
+- `POST /api/v1/admin/users/<user_id>/disable`
+- `POST /api/v1/admin/users/<user_id>/enable`
+- `DELETE /api/v1/admin/users/<user_id>`
 - `GET /api/v1/campaigns`
 - `GET /api/v1/campaigns/<campaign_slug>`
 - `GET /api/v1/campaigns/<campaign_slug>/control`
@@ -177,6 +189,8 @@ Use the browser Player Wiki lane when you want the built-in removal guidance, ar
 - Custom campaign Systems entry create/edit/archive/restore is exposed through DM/admin JSON endpoints under `/api/v1/campaigns/<campaign_slug>/systems/custom-entries`. Each mutation returns both the saved `entry` and a refreshed `systems` management payload for Gen2. Imported shared-library Systems entries remain read-only at the content level; use campaign source policy or entry overrides for campaign-specific changes unless a shared-library edit model is deliberately added later.
 - `GET /api/v1/me` now includes the same app metadata block alongside the authenticated user payload, memberships, and user preferences such as `theme_key` and `session_chat_order`.
 - `GET /api/v1/me/settings` returns the authenticated user's account-settings payload for Gen2, including theme presets with preview colors, live-session chat-order choices, and current preferences. `PATCH /api/v1/me/settings` accepts `theme_key` and/or `session_chat_order`, validates them with the same account helpers as Flask, persists the preferences, and returns the refreshed preference values used by `/api/v1/me` theme hydration.
+- `GET /api/v1/admin` and `GET /api/v1/admin/users/<user_id>` are app-admin-only Gen2 Admin reads. They expose dashboard and user-detail context, user cards, campaign and character choices, audit filter choices, paginated audit rows, and Flask CSV export URLs.
+- Admin mutations under `/api/v1/admin/users...` reuse the same auth-store operations and audit events as Flask for invites, membership save/remove, character assignment/clear, invite links, password reset links, disable/enable, and checked user deletion. Deletion requires a matching `confirm_email`; anonymous users receive `401`, non-admin users receive `403`, and one-shot invite/reset URLs are returned only in mutation responses rather than audit rows.
 - `GET /api/v1/campaigns/<campaign_slug>` includes visibility-aware campaign permissions such as `can_manage_visibility`, which the Gen2 shell uses to decide whether to show the Control link.
 - `GET /api/v1/campaigns/<campaign_slug>/control` and `PATCH /api/v1/campaigns/<campaign_slug>/control/visibility` expose the Campaign Control visibility editor for Gen2. They require campaign visibility management permission, return the same selected/configured/default/effective visibility rows as the Flask Control panel, reject invalid visibility values, reserve `private` for app admins, clear visibility caches after writes, and write `campaign_visibility_updated` audit events for changed scopes.
 - `GET /api/v1/campaigns/<campaign_slug>/help` returns the campaign-scoped Help context used by Gen2, including visible help surfaces, viewer-role summary, effective visibility rows, cross-cutting limits, and Flask/Gen2 fallback links. It follows campaign-scope access and reuses the same Help context builder as the Flask Help page.

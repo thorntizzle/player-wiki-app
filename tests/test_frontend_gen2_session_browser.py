@@ -332,6 +332,80 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
             browser.close()
 
 
+def test_gen2_admin_user_management_route_and_permissions(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            admin_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            player_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            admin_page = admin_context.new_page()
+            player_page = player_context.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(admin_page, base_url, email=users["admin"]["email"], password=users["admin"]["password"])
+
+            admin_page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
+            admin_link = admin_page.get_by_role("link", name="Admin")
+            expect(admin_link).to_be_visible(timeout=10000)
+            expect(admin_link).to_have_attribute("href", re.compile(r"/app-next/admin$"))
+            admin_link.click()
+            expect(admin_page).to_have_url(re.compile(r"/app-next/admin$"))
+            expect(admin_page.get_by_role("heading", name="Admin dashboard")).to_be_visible(timeout=10000)
+            expect(admin_page.get_by_role("heading", name="Invite user")).to_be_visible()
+            expect(admin_page.get_by_role("heading", name="Users")).to_be_visible()
+            expect(admin_page.get_by_role("heading", name="Recent activity")).to_be_visible()
+            expect(admin_page.get_by_role("link", name="Flask admin")).to_be_visible()
+
+            admin_page.locator("#admin-invite-email").fill("gen2-browser-admin@example.com")
+            admin_page.locator("#admin-invite-display-name").fill("Gen2 Browser Admin")
+            admin_page.locator("#admin-invite-user-type").select_option("standard")
+            admin_page.get_by_role("button", name="Create invite").click()
+            expect(admin_page.get_by_text("Invite URL:")).to_be_visible(timeout=10000)
+            created_user_link = admin_page.get_by_role("link", name="Gen2 Browser Admin").first
+            expect(created_user_link).to_be_visible(timeout=10000)
+
+            created_user_link.click()
+            expect(admin_page).to_have_url(re.compile(r"/app-next/admin/users/\d+"))
+            expect(admin_page.get_by_role("heading", name="Gen2 Browser Admin")).to_be_visible(timeout=10000)
+            expect(admin_page.get_by_role("heading", name="Campaign membership")).to_be_visible()
+            expect(admin_page.get_by_role("heading", name="Character assignment")).to_be_visible()
+            expect(admin_page.get_by_role("link", name="Flask user record")).to_be_visible()
+
+            membership_panel = admin_page.locator("article.admin-panel").filter(has_text="Campaign membership")
+            membership_panel.locator("#admin-membership-campaign-slug").select_option("linden-pass")
+            membership_panel.locator("#admin-membership-role").select_option("player")
+            membership_panel.locator("#admin-membership-status").select_option("active")
+            membership_panel.get_by_role("button", name="Save membership").click()
+            expect(admin_page.get_by_text(re.compile(r"Membership updated: linden-pass -> player"))).to_be_visible(timeout=10000)
+
+            admin_page.locator("#admin-assignment-character-ref").select_option("linden-pass::selene-brook")
+            admin_page.get_by_role("button", name="Assign character").click()
+            expect(admin_page.get_by_text("Assigned selene-brook in linden-pass")).to_be_visible(timeout=10000)
+            expect(admin_page.get_by_text("selene-brook | owner")).to_be_visible()
+
+            _sign_in(player_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
+            player_page.goto(f"{base_url}/app-next/admin")
+            expect(player_page.get_by_text("You do not have permission to use the admin API.")).to_be_visible(timeout=10000)
+        finally:
+            admin_page.close()
+            player_page.close()
+            admin_context.close()
+            player_context.close()
+            browser.close()
+
+
 def test_gen2_combat_browser_opens_player_workspace_and_preserves_focused_draft(
     app,
     frontend_gen2_session_live_server,

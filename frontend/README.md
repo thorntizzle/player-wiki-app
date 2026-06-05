@@ -41,10 +41,11 @@ The current Gen2 build covers:
 - DM Content statblocks, conditions, staged articles, Player Wiki, and Systems management lanes
 - Systems browsing landing/search, source pages, source categories, and entry detail pages
 - Account settings for theme and live-session chat-order preferences
+- Admin dashboard and user-management operations
 - Campaign Help guidance, effective access, visibility notes, and Flask fallback links
 - Campaign Control visibility editing for campaign and scope access floors
 
-Flask remains the source of truth for workflows that are still Flask-first, including Admin, shared/core Systems entry editing, and Systems imports.
+Flask remains the source of truth for workflows that are still Flask-first or intentionally fallback-only, including shared/core Systems entry editing, Systems imports, and CLI/bootstrap recovery operations.
 
 ## Build & Preview
 
@@ -119,8 +120,22 @@ The full API reference is maintained in `docs/api-v1.md`. The list below is a qu
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/notes`
 - `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>`
 - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>`
+- `GET /api/v1/admin`
+- `GET /api/v1/admin/users/<user_id>`
+- `POST /api/v1/admin/users/invite`
+- `POST /api/v1/admin/users/<user_id>/membership`
+- `DELETE /api/v1/admin/users/<user_id>/membership`
+- `POST /api/v1/admin/users/<user_id>/assignment`
+- `DELETE /api/v1/admin/users/<user_id>/assignment`
+- `POST /api/v1/admin/users/<user_id>/invite`
+- `POST /api/v1/admin/users/<user_id>/password-reset`
+- `POST /api/v1/admin/users/<user_id>/disable`
+- `POST /api/v1/admin/users/<user_id>/enable`
+- `DELETE /api/v1/admin/users/<user_id>`
 
 The character create/import endpoints reuse the same backend DND-5E and Xianxia builders as Flask, including Xianxia manual import preview/confirm behavior. The Gen2 Advanced Editor route uses `/api/v1/campaigns/<slug>/characters/<characterSlug>/advanced-editor` to read and save the existing DND-5E native edit schema for proficiencies, reference text, campaign adjustments, recoverable penalties, custom features, and manual equipment. The Gen2 Progression Repair route uses `/api/v1/campaigns/<slug>/characters/<characterSlug>/progression-repair` to read and save the existing imported-character repair context for baseline class/subclass/species/background links, prior feat/optional-feature backfills, and spell-row classification. The Gen2 Level Up route uses `/api/v1/campaigns/<slug>/characters/<characterSlug>/level-up` to read and submit the existing DND-5E native one-level advancement context with stale revision checks and Gen2 repair handoffs for repairable imports. The Gen2 Retraining route uses `/api/v1/campaigns/<slug>/characters/<characterSlug>/retraining` to read and save the existing bounded structured retraining context for persisted linked-feature choices while keeping repairable imports pointed at Gen2 progression repair. The Gen2 Cultivation route uses `/api/v1/campaigns/<slug>/characters/<characterSlug>/cultivation` to read the existing Xianxia advancement context and submit the same Insight, advancement-spend, Martial Art, Generic Technique, and Realm Ascension actions as Flask. The character detail response includes Gen2 presentation fields for DND-5E linked details: equipment rows, presented inventory items, and presented spellcasting spells carry source `href` values plus server-rendered `description_html` for the Session Character detail dialogs. The full Gen2 Character route can upload or remove the character portrait through the revision-checked portrait endpoints, and its Controls section now covers owner assignment/clear plus checked character deletion where permissions allow.
+
+The Gen2 Admin route uses `/api/v1/admin` and `/api/v1/admin/users/<user_id>` to read the same dashboard, user-detail, membership, assignment, and audit contexts as the Flask Admin screen. Its mutations reuse the same auth-store operations and audit event metadata for invites, password resets, membership updates/removal, character assignment/clear, disable/enable, and checked user deletion while keeping the Flask Admin route available as a fallback.
 
 Authentication notes:
 

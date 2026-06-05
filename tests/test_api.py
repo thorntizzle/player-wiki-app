@@ -579,6 +579,136 @@ def test_api_account_settings_rejects_invalid_preferences(client, app, users):
         assert preferences.session_chat_order == "newest_first"
 
 
+def test_api_admin_user_management_context_actions_and_permissions(client, app, users):
+    admin_token = issue_api_token(app, users["admin"]["email"], label="admin-gen2-api")
+    owner_token = issue_api_token(app, users["owner"]["email"], label="admin-gen2-blocked-api")
+
+    anonymous = client.get("/api/v1/admin")
+    blocked = client.get("/api/v1/admin", headers=api_headers(owner_token))
+    dashboard = client.get("/api/v1/admin", headers=api_headers(admin_token))
+
+    assert anonymous.status_code == 401
+    assert blocked.status_code == 403
+    assert dashboard.status_code == 200
+    dashboard_payload = dashboard.get_json()
+    assert dashboard_payload["ok"] is True
+    assert dashboard_payload["links"]["gen2_admin_url"] == "/app-next/admin"
+    assert any(user["email"] == users["owner"]["email"] for user in dashboard_payload["user_cards"])
+    assert any(choice["value"] == "user_invited" for choice in dashboard_payload["audit_event_type_choices"])
+
+    invite_response = client.post(
+        "/api/v1/admin/users/invite",
+        headers=api_headers(admin_token),
+        json={
+            "email": "gen2-admin-api@example.com",
+            "display_name": "Gen2 Admin API",
+            "user_type": "standard",
+        },
+    )
+    assert invite_response.status_code == 201
+    invite_payload = invite_response.get_json()
+    assert invite_payload["managed_user"]["email"] == "gen2-admin-api@example.com"
+    assert "/invite/" in invite_payload["invite_url"]
+    assert "/invite/" in invite_payload["message"]
+    created_user_id = invite_payload["managed_user"]["id"]
+
+    detail_response = client.get(f"/api/v1/admin/users/{created_user_id}", headers=api_headers(admin_token))
+    detail_payload = detail_response.get_json()
+    assert detail_response.status_code == 200
+    assert detail_payload["managed_user"]["status"] == "invited"
+    assert detail_payload["links"]["gen2_user_url"] == f"/app-next/admin/users/{created_user_id}"
+
+    membership_response = client.post(
+        f"/api/v1/admin/users/{created_user_id}/membership",
+        headers=api_headers(admin_token),
+        json={
+            "campaign_slug": "linden-pass",
+            "role": "player",
+            "status": "active",
+        },
+    )
+    assert membership_response.status_code == 200
+    membership_payload = membership_response.get_json()
+    assert any(
+        membership["campaign_slug"] == "linden-pass"
+        and membership["role"] == "player"
+        and membership["status"] == "active"
+        for membership in membership_payload["memberships"]
+    )
+
+    assignment_response = client.post(
+        f"/api/v1/admin/users/{created_user_id}/assignment",
+        headers=api_headers(admin_token),
+        json={"character_ref": "linden-pass::selene-brook"},
+    )
+    assert assignment_response.status_code == 200
+    assignment_payload = assignment_response.get_json()
+    assert any(
+        assignment["campaign_slug"] == "linden-pass"
+        and assignment["character_slug"] == "selene-brook"
+        for assignment in assignment_payload["assignments"]
+    )
+
+    filtered_detail = client.get(
+        f"/api/v1/admin/users/{created_user_id}?audit_q=selene-brook",
+        headers=api_headers(admin_token),
+    )
+    filtered_payload = filtered_detail.get_json()
+    assert filtered_detail.status_code == 200
+    assert any(event["event_type"] == "character_assignment_created" for event in filtered_payload["recent_audit_events"])
+    assert all("/invite/" not in event.get("details", "") for event in filtered_payload["recent_audit_events"])
+
+    invite_again = client.post(
+        f"/api/v1/admin/users/{created_user_id}/invite",
+        headers=api_headers(admin_token),
+    )
+    assert invite_again.status_code == 200
+    assert "/invite/" in invite_again.get_json()["invite_url"]
+
+    reset_response = client.post(
+        f"/api/v1/admin/users/{users['owner']['id']}/password-reset",
+        headers=api_headers(admin_token),
+    )
+    assert reset_response.status_code == 200
+    assert "/reset/" in reset_response.get_json()["reset_url"]
+
+    disable_response = client.post(
+        f"/api/v1/admin/users/{users['owner']['id']}/disable",
+        headers=api_headers(admin_token),
+    )
+    assert disable_response.status_code == 200
+    assert disable_response.get_json()["managed_user"]["status"] == "disabled"
+
+    enable_response = client.post(
+        f"/api/v1/admin/users/{users['owner']['id']}/enable",
+        headers=api_headers(admin_token),
+    )
+    assert enable_response.status_code == 200
+    assert enable_response.get_json()["managed_user"]["status"] == "active"
+
+    delete_without_confirmation = client.delete(
+        f"/api/v1/admin/users/{created_user_id}",
+        headers=api_headers(admin_token),
+        json={"confirm_email": ""},
+    )
+    assert delete_without_confirmation.status_code == 400
+
+    delete_response = client.delete(
+        f"/api/v1/admin/users/{created_user_id}",
+        headers=api_headers(admin_token),
+        json={"confirm_email": "gen2-admin-api@example.com"},
+    )
+    assert delete_response.status_code == 200
+    delete_payload = delete_response.get_json()
+    assert delete_payload["deleted_user"]["email"] == "gen2-admin-api@example.com"
+    assert all(user["email"] != "gen2-admin-api@example.com" for user in delete_payload["user_cards"])
+
+    with app.app_context():
+        store = AuthStore()
+        assert store.get_user_by_id(created_user_id) is None
+        assert store.get_character_assignment("linden-pass", "selene-brook") is None
+
+
 def test_api_campaign_help_returns_surface_guidance_for_viewer_access(client, app, users):
     player_token = issue_api_token(app, users["party"]["email"], label="campaign-help-player-api")
 

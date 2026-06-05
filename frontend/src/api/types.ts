@@ -119,6 +119,169 @@ export interface AccountSettingsUpdateResponse extends ApiResponseBase {
   preferences: UserPreferences;
 }
 
+export interface AdminCampaignChoice {
+  slug: string;
+  title: string;
+}
+
+export interface AdminCharacterChoice {
+  campaign_slug: string;
+  character_slug: string;
+  label: string;
+  value: string;
+}
+
+export interface AdminAuditEventTypeChoice {
+  value: string;
+  label: string;
+}
+
+export interface AdminActivityFilters {
+  query: string;
+  event_type: string;
+  campaign_slug: string;
+  page: number;
+}
+
+export interface AdminPagination {
+  current_page: number;
+  page_size: number;
+  total_events: number;
+  total_pages: number;
+  has_previous: boolean;
+  has_next: boolean;
+  previous_url: string;
+  next_url: string;
+}
+
+export interface AdminUserReference {
+  label: string;
+  meta: string;
+  href: string;
+  flask_href?: string;
+}
+
+export interface AdminAuditEvent {
+  id: number;
+  event_type: string;
+  title: string;
+  timestamp: string;
+  actor: AdminUserReference | null;
+  target: AdminUserReference | null;
+  actor_email: string;
+  target_email: string;
+  campaign_slug: string;
+  character_slug: string;
+  scope: string;
+  details: string;
+}
+
+export interface AdminUserCard {
+  id: number;
+  email: string;
+  display_name: string;
+  status: string;
+  is_admin: boolean;
+  href: string;
+  flask_href: string;
+  membership_summary: string[];
+  assignment_summary: string[];
+}
+
+export interface AdminMembership {
+  id: number;
+  campaign_slug: string;
+  campaign_title: string;
+  role: string;
+  status: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AdminAssignment {
+  id: number;
+  user_id: number;
+  campaign_slug: string;
+  campaign_title: string;
+  character_slug: string;
+  assignment_type: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AdminLinks {
+  gen2_admin_url: string;
+  flask_admin_url: string;
+  gen2_user_url?: string;
+  flask_user_url?: string;
+}
+
+export interface AdminDashboardResponse extends ApiResponseBase {
+  admin_user: UserProfile | null;
+  campaign_choices: AdminCampaignChoice[];
+  invite_form_defaults: {
+    user_type: string;
+    campaign_slug: string;
+  };
+  audit_event_type_choices: AdminAuditEventTypeChoice[];
+  user_cards: AdminUserCard[];
+  activity_filters: AdminActivityFilters;
+  pagination: AdminPagination;
+  export_url: string;
+  recent_audit_events: AdminAuditEvent[];
+  links: AdminLinks;
+  message?: string;
+}
+
+export interface AdminUserDetailResponse extends ApiResponseBase {
+  managed_user: UserProfile;
+  campaign_choices: AdminCampaignChoice[];
+  character_choices: AdminCharacterChoice[];
+  memberships: AdminMembership[];
+  assignments: AdminAssignment[];
+  audit_event_type_choices: AdminAuditEventTypeChoice[];
+  membership_form_defaults: {
+    campaign_slug: string;
+    role: string;
+    status: string;
+  };
+  assignment_form_defaults: {
+    character_ref: string;
+  };
+  can_manage_account: boolean;
+  activity_filters: AdminActivityFilters;
+  pagination: AdminPagination;
+  export_url: string;
+  recent_audit_events: AdminAuditEvent[];
+  links: AdminLinks;
+  message?: string;
+  invite_url?: string;
+  reset_url?: string;
+}
+
+export interface AdminInvitePayload {
+  email: string;
+  display_name: string;
+  user_type: string;
+  campaign_slug?: string;
+}
+
+export interface AdminMembershipPayload {
+  campaign_slug: string;
+  role: string;
+  status: string;
+}
+
+export interface AdminAssignmentPayload {
+  character_ref?: string;
+  campaign_slug?: string;
+  character_slug?: string;
+}
+
+export interface AdminDeleteUserPayload {
+  confirm_email: string;
+}
+
 export interface CampaignsResponse extends ApiResponseBase {
   campaigns: CampaignEntry[];
 }

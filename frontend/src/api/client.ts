@@ -2,6 +2,12 @@ import type {
   AccountSettingsResponse,
   AccountSettingsUpdatePayload,
   AccountSettingsUpdateResponse,
+  AdminAssignmentPayload,
+  AdminDashboardResponse,
+  AdminDeleteUserPayload,
+  AdminInvitePayload,
+  AdminMembershipPayload,
+  AdminUserDetailResponse,
   ApiAppResponse,
   ApiErrorPayload,
   CampaignControlResponse,
@@ -263,6 +269,95 @@ export class CampaignApiClient {
   ): Promise<AccountSettingsUpdateResponse> {
     return this.requestJson<AccountSettingsUpdateResponse>("/api/v1/me/settings", {
       method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getAdminDashboard(search = ""): Promise<AdminDashboardResponse> {
+    const suffix = search.startsWith("?") ? search : search ? `?${search}` : "";
+    return this.requestJson<AdminDashboardResponse>(`/api/v1/admin${suffix}`);
+  }
+
+  async getAdminUser(userId: number, search = ""): Promise<AdminUserDetailResponse> {
+    const suffix = search.startsWith("?") ? search : search ? `?${search}` : "";
+    return this.requestJson<AdminUserDetailResponse>(`/api/v1/admin/users/${encodeURIComponent(String(userId))}${suffix}`);
+  }
+
+  async inviteAdminUser(payload: AdminInvitePayload): Promise<AdminUserDetailResponse> {
+    return this.requestJson<AdminUserDetailResponse>("/api/v1/admin/users/invite", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async setAdminUserMembership(
+    userId: number,
+    payload: AdminMembershipPayload,
+  ): Promise<AdminUserDetailResponse> {
+    return this.requestJson<AdminUserDetailResponse>(`/api/v1/admin/users/${encodeURIComponent(String(userId))}/membership`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async removeAdminUserMembership(
+    userId: number,
+    payload: { campaign_slug: string },
+  ): Promise<AdminUserDetailResponse> {
+    return this.requestJson<AdminUserDetailResponse>(`/api/v1/admin/users/${encodeURIComponent(String(userId))}/membership`, {
+      method: "DELETE",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async assignAdminUserCharacter(
+    userId: number,
+    payload: AdminAssignmentPayload,
+  ): Promise<AdminUserDetailResponse> {
+    return this.requestJson<AdminUserDetailResponse>(`/api/v1/admin/users/${encodeURIComponent(String(userId))}/assignment`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async removeAdminUserCharacterAssignment(
+    userId: number,
+    payload: { campaign_slug: string; character_slug: string },
+  ): Promise<AdminUserDetailResponse> {
+    return this.requestJson<AdminUserDetailResponse>(`/api/v1/admin/users/${encodeURIComponent(String(userId))}/assignment`, {
+      method: "DELETE",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async issueAdminUserInvite(userId: number): Promise<AdminUserDetailResponse> {
+    return this.requestJson<AdminUserDetailResponse>(`/api/v1/admin/users/${encodeURIComponent(String(userId))}/invite`, {
+      method: "POST",
+    });
+  }
+
+  async issueAdminUserPasswordReset(userId: number): Promise<AdminUserDetailResponse> {
+    return this.requestJson<AdminUserDetailResponse>(
+      `/api/v1/admin/users/${encodeURIComponent(String(userId))}/password-reset`,
+      { method: "POST" },
+    );
+  }
+
+  async disableAdminUser(userId: number): Promise<AdminUserDetailResponse> {
+    return this.requestJson<AdminUserDetailResponse>(`/api/v1/admin/users/${encodeURIComponent(String(userId))}/disable`, {
+      method: "POST",
+    });
+  }
+
+  async enableAdminUser(userId: number): Promise<AdminUserDetailResponse> {
+    return this.requestJson<AdminUserDetailResponse>(`/api/v1/admin/users/${encodeURIComponent(String(userId))}/enable`, {
+      method: "POST",
+    });
+  }
+
+  async deleteAdminUser(userId: number, payload: AdminDeleteUserPayload): Promise<AdminDashboardResponse> {
+    return this.requestJson<AdminDashboardResponse>(`/api/v1/admin/users/${encodeURIComponent(String(userId))}`, {
+      method: "DELETE",
       body: JSON.stringify(payload),
     });
   }

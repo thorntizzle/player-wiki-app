@@ -19,6 +19,12 @@ import {
   isApiError,
 } from "./api/client";
 import type {
+  AdminAssignment,
+  AdminAuditEvent,
+  AdminDashboardResponse,
+  AdminInvitePayload,
+  AdminMembership,
+  AdminUserDetailResponse,
   CampaignEntry,
   AccountSettingsUpdatePayload,
   CampaignControlResponse,
@@ -4147,7 +4153,7 @@ function AppShell() {
               {user ? (
                 <>
                   {user.is_admin ? (
-                    <a className="button button-secondary" href="/admin">
+                    <a className="button button-secondary" href="/app-next/admin">
                       Admin
                     </a>
                   ) : null}
@@ -4292,6 +4298,731 @@ function CampaignListPage() {
           <p className="status status-neutral">No campaigns are visible to this account.</p>
         ) : null}
       </div>
+    </section>
+  );
+}
+
+function adminSearch(search: string): string {
+  return search.startsWith("?") ? search : search ? `?${search}` : "";
+}
+
+function AdminActivityFilters({
+  action,
+  clearHref,
+  data,
+}: {
+  action: string;
+  clearHref: string;
+  data: Pick<AdminDashboardResponse, "activity_filters" | "audit_event_type_choices" | "campaign_choices" | "export_url">;
+}) {
+  return (
+    <form method="get" action={action} className="audit-filter-form admin-filter-form">
+      <label className="field">
+        <span>Search</span>
+        <input
+          type="text"
+          name="audit_q"
+          defaultValue={data.activity_filters.query}
+          placeholder="user, campaign, character, event"
+        />
+      </label>
+      <label className="field">
+        <span>Event</span>
+        <select name="audit_event_type" defaultValue={data.activity_filters.event_type}>
+          <option value="">All events</option>
+          {data.audit_event_type_choices.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        <span>Campaign</span>
+        <select name="audit_campaign_slug" defaultValue={data.activity_filters.campaign_slug}>
+          <option value="">All campaigns</option>
+          {data.campaign_choices.map((campaign) => (
+            <option key={campaign.slug} value={campaign.slug}>
+              {campaign.title}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="button-row">
+        <button type="submit" className="button">
+          Filter activity
+        </button>
+        <a className="button button-secondary" href={clearHref}>
+          Clear
+        </a>
+        <a className="button button-secondary" href={data.export_url}>
+          Export CSV
+        </a>
+      </div>
+    </form>
+  );
+}
+
+function AdminActivityList({ events }: { events: AdminAuditEvent[] }) {
+  if (!events.length) {
+    return <p className="meta">No audit activity matched the current filters.</p>;
+  }
+
+  return (
+    <ul className="plain-list audit-list admin-audit-list">
+      {events.map((event) => (
+        <li
+          key={event.id}
+          className="audit-row admin-audit-row"
+          data-event-type={event.event_type}
+          data-campaign-slug={event.campaign_slug}
+          data-character-slug={event.character_slug}
+          data-actor-email={event.actor_email}
+          data-target-email={event.target_email}
+        >
+          <div className="audit-row__header">
+            <strong>{event.title}</strong>
+            <span className="meta">{event.timestamp}</span>
+          </div>
+          <p className="meta">
+            {event.actor ? (
+              <>
+                <a href={event.actor.href}>{event.actor.label}</a>
+                {event.actor.meta ? <span> {event.actor.meta}</span> : null}
+              </>
+            ) : (
+              "System"
+            )}
+            {event.target && (!event.actor || event.target.href !== event.actor.href) ? (
+              <>
+                {" -> "}
+                <a href={event.target.href}>{event.target.label}</a>
+                {event.target.meta ? <span> {event.target.meta}</span> : null}
+              </>
+            ) : null}
+          </p>
+          {event.scope ? <p className="meta">{event.scope}</p> : null}
+          {event.details ? <p>{event.details}</p> : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function AdminPagination({ pagination }: Pick<AdminDashboardResponse, "pagination">) {
+  return (
+    <div className="pagination-bar admin-pagination">
+      <p className="meta">
+        Page {pagination.current_page} of {pagination.total_pages}
+      </p>
+      <div className="button-row">
+        {pagination.has_previous ? (
+          <a className="button button-secondary" href={pagination.previous_url}>
+            Previous
+          </a>
+        ) : null}
+        {pagination.has_next ? (
+          <a className="button button-secondary" href={pagination.next_url}>
+            Next
+          </a>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function AdminDashboardPage() {
+  const { apiClient, setAuthRequired } = useApiClient();
+  useLocation();
+  const currentSearch = window.location.search;
+  const [inviteDraft, setInviteDraft] = useState<AdminInvitePayload>({
+    email: "",
+    display_name: "",
+    user_type: "player",
+    campaign_slug: "",
+  });
+  const [statusMessage, setStatusMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const dashboardQuery = useQuery({
+    queryKey: ["admin-dashboard", currentSearch],
+    queryFn: () => apiClient.getAdminDashboard(adminSearch(currentSearch)),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (isAuthError(dashboardQuery.error)) {
+      setAuthRequired(true);
+    }
+  }, [dashboardQuery.error, setAuthRequired]);
+
+  useEffect(() => {
+    const defaults = dashboardQuery.data?.invite_form_defaults;
+    if (!defaults) {
+      return;
+    }
+    setInviteDraft((current) => ({
+      ...current,
+      user_type: current.user_type || defaults.user_type,
+      campaign_slug: current.campaign_slug || defaults.campaign_slug,
+    }));
+  }, [dashboardQuery.data?.invite_form_defaults]);
+
+  const inviteMutation = useMutation({
+    mutationFn: (payload: AdminInvitePayload) => apiClient.inviteAdminUser(payload),
+    onSuccess: (response) => {
+      setErrorMessage("");
+      setStatusMessage(response.message || "Invite created.");
+      setInviteDraft((current) => ({
+        ...current,
+        email: "",
+        display_name: "",
+      }));
+      queryClient.setQueryData(["admin-user", response.managed_user.id, ""], response);
+      void queryClient.invalidateQueries({ queryKey: ["admin-dashboard"] });
+    },
+    onError: (error) => {
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+      setStatusMessage("");
+      setErrorMessage(apiErrorMessage(error));
+    },
+  });
+
+  const queryError = getApiErrorMessage(dashboardQuery.error);
+  const data = dashboardQuery.data;
+
+  return (
+    <section className="admin-page">
+      <div className="panel admin-hero">
+        <p className="eyebrow">Admin</p>
+        <h1>Admin dashboard</h1>
+        <p className="lede">Use this screen for lighter operational work. The CLI remains the full-control path for bootstrap and recovery.</p>
+        {data ? (
+          <div className="button-row">
+            <a className="button button-secondary" href={data.links.flask_admin_url}>
+              Flask admin
+            </a>
+          </div>
+        ) : null}
+      </div>
+
+      <ApiErrorNotice isLoading={dashboardQuery.isLoading} message={queryError} onAuth={() => setAuthRequired(true)} />
+      {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
+      {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
+
+      {data ? (
+        <>
+          <section className="page-layout admin-layout">
+            <article className="panel admin-panel">
+              <h2>Invite user</h2>
+              <form
+                className="stack-form"
+                onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                  event.preventDefault();
+                  inviteMutation.mutate(inviteDraft);
+                }}
+              >
+                <label className="field">
+                  <span>Email</span>
+                  <input
+                    id="admin-invite-email"
+                    name="email"
+                    type="email"
+                    required
+                    value={inviteDraft.email}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setInviteDraft((current) => ({ ...current, email: value }));
+                    }}
+                  />
+                </label>
+                <label className="field">
+                  <span>Display name</span>
+                  <input
+                    id="admin-invite-display-name"
+                    name="display_name"
+                    type="text"
+                    required
+                    value={inviteDraft.display_name}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setInviteDraft((current) => ({ ...current, display_name: value }));
+                    }}
+                  />
+                </label>
+                <label className="field">
+                  <span>User type</span>
+                  <select
+                    id="admin-invite-user-type"
+                    name="user_type"
+                    value={inviteDraft.user_type}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setInviteDraft((current) => ({ ...current, user_type: value }));
+                    }}
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="dm">DM</option>
+                    <option value="player">Player</option>
+                    <option value="standard">Standard user</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Campaign for DM or Player</span>
+                  <select
+                    id="admin-invite-campaign-slug"
+                    name="campaign_slug"
+                    value={inviteDraft.campaign_slug || ""}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setInviteDraft((current) => ({ ...current, campaign_slug: value }));
+                    }}
+                  >
+                    {data.campaign_choices.length ? (
+                      data.campaign_choices.map((campaign) => (
+                        <option key={campaign.slug} value={campaign.slug}>
+                          {campaign.title}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">No campaigns available</option>
+                    )}
+                  </select>
+                </label>
+                <p className="meta">Admin is app-wide. DM and Player invites also create an active membership in the selected campaign.</p>
+                <button type="submit" className="button" disabled={inviteMutation.isPending}>
+                  {inviteMutation.isPending ? "Creating..." : "Create invite"}
+                </button>
+              </form>
+            </article>
+
+            <aside className="panel admin-panel">
+              <h2>Campaigns</h2>
+              <ul className="plain-list">
+                {data.campaign_choices.map((campaign) => (
+                  <li key={campaign.slug}>
+                    {campaign.title} <span className="meta">({campaign.slug})</span>
+                  </li>
+                ))}
+              </ul>
+            </aside>
+          </section>
+
+          <section className="section-list">
+            <div className="section-heading">
+              <h2>Users</h2>
+              <p className="meta">{data.user_cards.length} total</p>
+            </div>
+            <div className="grid admin-user-grid">
+              {data.user_cards.map((user) => (
+                <article key={user.id} className="panel admin-user-card">
+                  <p className="card-kicker">
+                    {user.status}
+                    {user.is_admin ? " | Admin" : ""}
+                  </p>
+                  <h3>
+                    <a href={user.href}>{user.display_name}</a>
+                  </h3>
+                  <p>{user.email}</p>
+                  {user.membership_summary.length ? <p className="meta">{user.membership_summary.join(" | ")}</p> : null}
+                  {user.assignment_summary.length ? <p className="meta">Assignments: {user.assignment_summary.join(", ")}</p> : null}
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="section-list">
+            <div className="section-heading">
+              <h2>Recent activity</h2>
+              <p className="meta">{data.pagination.total_events} matching events</p>
+            </div>
+            <article className="panel admin-panel">
+              <AdminActivityFilters action="/app-next/admin" clearHref="/app-next/admin" data={data} />
+              <AdminActivityList events={data.recent_audit_events} />
+              <AdminPagination pagination={data.pagination} />
+            </article>
+          </section>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function AdminUserDetailPage() {
+  const { apiClient, setAuthRequired } = useApiClient();
+  const params = useParams({ from: "/admin/users/$userId" });
+  useLocation();
+  const currentSearch = window.location.search;
+  const userId = Number(params.userId);
+  const [membershipDraft, setMembershipDraft] = useState({ campaign_slug: "", role: "player", status: "active" });
+  const [assignmentDraft, setAssignmentDraft] = useState({ character_ref: "" });
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [statusMessage, setStatusMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const userQuery = useQuery({
+    queryKey: ["admin-user", userId, currentSearch],
+    queryFn: () => apiClient.getAdminUser(userId, adminSearch(currentSearch)),
+    enabled: Number.isFinite(userId),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (isAuthError(userQuery.error)) {
+      setAuthRequired(true);
+    }
+  }, [userQuery.error, setAuthRequired]);
+
+  useEffect(() => {
+    if (!userQuery.data) {
+      return;
+    }
+    setMembershipDraft(userQuery.data.membership_form_defaults);
+    setAssignmentDraft(userQuery.data.assignment_form_defaults);
+  }, [userQuery.data?.membership_form_defaults, userQuery.data?.assignment_form_defaults]);
+
+  const handleDetailSuccess = (response: AdminUserDetailResponse) => {
+    setErrorMessage("");
+    setStatusMessage(response.message || "Admin user saved.");
+    queryClient.setQueryData(["admin-user", response.managed_user.id, currentSearch], response);
+    void queryClient.invalidateQueries({ queryKey: ["admin-dashboard"] });
+    void queryClient.invalidateQueries({ queryKey: ["me"] });
+  };
+
+  const handleMutationError = (error: unknown) => {
+    if (isAuthError(error)) {
+      setAuthRequired(true);
+    }
+    setStatusMessage("");
+    setErrorMessage(apiErrorMessage(error));
+  };
+
+  const setMembership = useMutation({
+    mutationFn: () => apiClient.setAdminUserMembership(userId, membershipDraft),
+    onSuccess: handleDetailSuccess,
+    onError: handleMutationError,
+  });
+  const removeMembership = useMutation({
+    mutationFn: (membership: AdminMembership) => apiClient.removeAdminUserMembership(userId, { campaign_slug: membership.campaign_slug }),
+    onSuccess: handleDetailSuccess,
+    onError: handleMutationError,
+  });
+  const assignCharacter = useMutation({
+    mutationFn: () => apiClient.assignAdminUserCharacter(userId, assignmentDraft),
+    onSuccess: handleDetailSuccess,
+    onError: handleMutationError,
+  });
+  const removeAssignment = useMutation({
+    mutationFn: (assignment: AdminAssignment) => apiClient.removeAdminUserCharacterAssignment(userId, {
+      campaign_slug: assignment.campaign_slug,
+      character_slug: assignment.character_slug,
+    }),
+    onSuccess: handleDetailSuccess,
+    onError: handleMutationError,
+  });
+  const issueInvite = useMutation({
+    mutationFn: () => apiClient.issueAdminUserInvite(userId),
+    onSuccess: handleDetailSuccess,
+    onError: handleMutationError,
+  });
+  const issuePasswordReset = useMutation({
+    mutationFn: () => apiClient.issueAdminUserPasswordReset(userId),
+    onSuccess: handleDetailSuccess,
+    onError: handleMutationError,
+  });
+  const disableUser = useMutation({
+    mutationFn: () => apiClient.disableAdminUser(userId),
+    onSuccess: handleDetailSuccess,
+    onError: handleMutationError,
+  });
+  const enableUser = useMutation({
+    mutationFn: () => apiClient.enableAdminUser(userId),
+    onSuccess: handleDetailSuccess,
+    onError: handleMutationError,
+  });
+  const deleteUser = useMutation({
+    mutationFn: () => apiClient.deleteAdminUser(userId, { confirm_email: deleteConfirm }),
+    onSuccess: (response) => {
+      setErrorMessage("");
+      setStatusMessage(response.message || "User deleted.");
+      void queryClient.invalidateQueries({ queryKey: ["admin-dashboard"] });
+      window.location.assign("/app-next/admin");
+    },
+    onError: handleMutationError,
+  });
+
+  const data = userQuery.data;
+  const queryError = getApiErrorMessage(userQuery.error);
+  const mutationPending =
+    setMembership.isPending
+    || removeMembership.isPending
+    || assignCharacter.isPending
+    || removeAssignment.isPending
+    || issueInvite.isPending
+    || issuePasswordReset.isPending
+    || disableUser.isPending
+    || enableUser.isPending
+    || deleteUser.isPending;
+
+  return (
+    <section className="admin-page admin-user-detail-page">
+      <div className="panel admin-hero">
+        <p className="eyebrow">Admin user detail</p>
+        <h1>{data?.managed_user.display_name || "Admin user"}</h1>
+        {data ? (
+          <>
+            <p className="lede">{data.managed_user.email}</p>
+            <p className="meta">
+              Status: {data.managed_user.status}
+              {data.managed_user.is_admin ? " | App admin" : ""}
+            </p>
+            <div className="button-row">
+              <a className="button button-secondary" href={data.links.gen2_admin_url}>
+                Back to admin dashboard
+              </a>
+              <a className="button button-secondary" href={data.links.flask_user_url}>
+                Flask user record
+              </a>
+            </div>
+          </>
+        ) : null}
+      </div>
+
+      <ApiErrorNotice isLoading={userQuery.isLoading} message={queryError} onAuth={() => setAuthRequired(true)} />
+      {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
+      {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
+
+      {data ? (
+        <>
+          <section className="page-layout admin-layout">
+            <article className="panel admin-panel">
+              <h2>Campaign membership</h2>
+              <form
+                className="stack-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  setMembership.mutate();
+                }}
+              >
+                <label className="field">
+                  <span>Campaign</span>
+                  <select
+                    id="admin-membership-campaign-slug"
+                    name="campaign_slug"
+                    required
+                    value={membershipDraft.campaign_slug}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setMembershipDraft((current) => ({ ...current, campaign_slug: value }));
+                    }}
+                  >
+                    {data.campaign_choices.map((campaign) => (
+                      <option key={campaign.slug} value={campaign.slug}>
+                        {campaign.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Role</span>
+                  <select
+                    id="admin-membership-role"
+                    name="role"
+                    required
+                    value={membershipDraft.role}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setMembershipDraft((current) => ({ ...current, role: value }));
+                    }}
+                  >
+                    <option value="dm">DM</option>
+                    <option value="player">Player</option>
+                    <option value="observer">Observer</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Status</span>
+                  <select
+                    id="admin-membership-status"
+                    name="status"
+                    required
+                    value={membershipDraft.status}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setMembershipDraft((current) => ({ ...current, status: value }));
+                    }}
+                  >
+                    <option value="active">Active</option>
+                    <option value="invited">Invited</option>
+                    <option value="removed">Removed</option>
+                  </select>
+                </label>
+                <button type="submit" className="button" disabled={mutationPending || !membershipDraft.campaign_slug}>
+                  {setMembership.isPending ? "Saving..." : "Save membership"}
+                </button>
+              </form>
+            </article>
+
+            <article className="panel admin-panel">
+              <h2>Character assignment</h2>
+              <p className="meta">Assignments require an active player membership in the same campaign.</p>
+              <form
+                className="stack-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  assignCharacter.mutate();
+                }}
+              >
+                <label className="field">
+                  <span>Character</span>
+                  <select
+                    id="admin-assignment-character-ref"
+                    name="character_ref"
+                    required
+                    value={assignmentDraft.character_ref}
+                    onChange={(event) => {
+                      setAssignmentDraft({ character_ref: event.currentTarget.value });
+                    }}
+                  >
+                    {data.character_choices.map((character) => (
+                      <option key={character.value} value={character.value}>
+                        {character.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button type="submit" className="button" disabled={mutationPending || !assignmentDraft.character_ref}>
+                  {assignCharacter.isPending ? "Assigning..." : "Assign character"}
+                </button>
+              </form>
+            </article>
+          </section>
+
+          <section className="page-layout admin-layout">
+            <article className="panel admin-panel">
+              <h2>Current memberships</h2>
+              {data.memberships.length ? (
+                <ul className="plain-list admin-item-list">
+                  {data.memberships.map((membership) => (
+                    <li key={membership.id} className="admin-item-row">
+                      <div>
+                        <strong>{membership.campaign_title}</strong>
+                        <span className="meta"> {membership.role} | {membership.status}</span>
+                      </div>
+                      <div className="button-row">
+                        <a className="button button-secondary" href={`${data.links.gen2_user_url}?edit_membership_campaign_slug=${encodeURIComponent(membership.campaign_slug)}`}>
+                          Edit
+                        </a>
+                        {membership.status !== "removed" ? (
+                          <button type="button" className="button button-secondary" disabled={mutationPending} onClick={() => removeMembership.mutate(membership)}>
+                            Remove
+                          </button>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="meta">No campaign memberships yet.</p>
+              )}
+            </article>
+
+            <article className="panel admin-panel">
+              <h2>Current assignments</h2>
+              {data.assignments.length ? (
+                <ul className="plain-list admin-item-list">
+                  {data.assignments.map((assignment) => (
+                    <li key={assignment.id} className="admin-item-row">
+                      <div>
+                        <strong>{assignment.campaign_title}</strong>
+                        <span className="meta"> {assignment.character_slug} | {assignment.assignment_type}</span>
+                      </div>
+                      <div className="button-row">
+                        <a
+                          className="button button-secondary"
+                          href={`${data.links.gen2_user_url}?edit_assignment_campaign_slug=${encodeURIComponent(assignment.campaign_slug)}&edit_assignment_character_slug=${encodeURIComponent(assignment.character_slug)}`}
+                        >
+                          Edit
+                        </a>
+                        <button type="button" className="button button-secondary" disabled={mutationPending} onClick={() => removeAssignment.mutate(assignment)}>
+                          Clear
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="meta">No character assignments yet.</p>
+              )}
+            </article>
+          </section>
+
+          <section className="page-layout admin-layout">
+            <article className="panel admin-panel">
+              <h2>Account actions</h2>
+              <div className="admin-action-stack">
+                {data.managed_user.status === "invited" ? (
+                  <button type="button" className="button" disabled={mutationPending} onClick={() => issueInvite.mutate()}>
+                    {issueInvite.isPending ? "Generating..." : "Generate invite link"}
+                  </button>
+                ) : null}
+                {data.managed_user.status === "active" ? (
+                  <button type="button" className="button" disabled={mutationPending} onClick={() => issuePasswordReset.mutate()}>
+                    {issuePasswordReset.isPending ? "Generating..." : "Generate password reset link"}
+                  </button>
+                ) : null}
+                {data.can_manage_account && data.managed_user.status === "disabled" ? (
+                  <button type="button" className="button" disabled={mutationPending} onClick={() => enableUser.mutate()}>
+                    {enableUser.isPending ? "Saving..." : "Re-enable user"}
+                  </button>
+                ) : null}
+                {data.can_manage_account && data.managed_user.status !== "disabled" ? (
+                  <button type="button" className="button button-secondary" disabled={mutationPending} onClick={() => disableUser.mutate()}>
+                    {disableUser.isPending ? "Saving..." : "Disable user"}
+                  </button>
+                ) : null}
+                {data.can_manage_account ? (
+                  <div className="admin-danger-box">
+                    <label className="field">
+                      <span>Confirm delete by email</span>
+                      <input
+                        id="admin-delete-confirm-email"
+                        name="confirm_email"
+                        type="text"
+                        value={deleteConfirm}
+                        onChange={(event) => setDeleteConfirm(event.currentTarget.value)}
+                        placeholder={data.managed_user.email}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="button-danger"
+                      disabled={mutationPending || deleteConfirm.trim().toLowerCase() !== data.managed_user.email.toLowerCase()}
+                      onClick={() => deleteUser.mutate()}
+                    >
+                      {deleteUser.isPending ? "Deleting..." : "Delete user"}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="meta">Use a different admin account or the CLI if you ever need to change the account you are currently using.</p>
+                )}
+              </div>
+            </article>
+
+            <article className="panel admin-panel">
+              <div className="panel-header">
+                <h2>Recent activity for this user</h2>
+                <p className="meta">{data.pagination.total_events} matching events</p>
+              </div>
+              <AdminActivityFilters action={data.links.gen2_user_url || `/app-next/admin/users/${userId}`} clearHref={data.links.gen2_user_url || `/app-next/admin/users/${userId}`} data={data} />
+              <AdminActivityList events={data.recent_audit_events} />
+              <AdminPagination pagination={data.pagination} />
+            </article>
+          </section>
+        </>
+      ) : null}
     </section>
   );
 }
@@ -13903,6 +14634,18 @@ const accountSettingsRoute = createRoute({
   component: AccountSettingsPage,
 });
 
+const adminDashboardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin",
+  component: AdminDashboardPage,
+});
+
+const adminUserDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/users/$userId",
+  component: AdminUserDetailPage,
+});
+
 const campaignHomeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/campaigns/$campaignSlug",
@@ -14032,6 +14775,8 @@ const campaignDmContentRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   campaignsRoute,
   accountSettingsRoute,
+  adminDashboardRoute,
+  adminUserDetailRoute,
   campaignHomeRoute,
   campaignHelpRoute,
   campaignControlRoute,

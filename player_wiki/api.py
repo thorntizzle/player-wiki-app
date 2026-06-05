@@ -8,7 +8,9 @@ import hashlib
 from io import BytesIO
 from pathlib import Path
 import re
+from datetime import timedelta
 from typing import Any
+from urllib.parse import urlencode
 
 from flask import Blueprint, abort, current_app, jsonify, request, send_file, url_for
 
@@ -44,6 +46,7 @@ from .auth_store import (
     normalize_session_chat_order,
     isoformat,
 )
+from .admin import AUDIT_PAGE_SIZE, EVENT_TITLES as ADMIN_EVENT_TITLES, SOURCE_LABELS as ADMIN_SOURCE_LABELS
 from .campaign_combat_service import CampaignCombatRevisionConflictError, CampaignCombatValidationError
 from .campaign_content_service import (
     CampaignContentError,
@@ -286,7 +289,7 @@ def register_api(app) -> None:
             if user is None:
                 return json_error("Authentication required.", 401, code="auth_required")
             if not user.is_admin:
-                return json_error("You do not have permission to manage shared systems imports.", 403, code="forbidden")
+                return json_error("You do not have permission to use the admin API.", 403, code="forbidden")
             return view(*args, **kwargs)
 
         return wrapped
@@ -443,6 +446,450 @@ def register_api(app) -> None:
         return {
             "campaign": serialize_campaign(entry.campaign),
             "role": entry.role,
+        }
+
+    def build_admin_local_url(path: str) -> str:
+        return f"{current_app.config['BASE_URL'].rstrip('/')}{path}"
+
+    def list_admin_campaign_choices() -> list[dict[str, str]]:
+        repository = get_repository()
+        return [
+            {"slug": campaign.slug, "title": campaign.title}
+            for campaign in sorted(repository.campaigns.values(), key=lambda item: item.title.lower())
+        ]
+
+    def list_admin_character_choices() -> list[dict[str, str]]:
+        choices: list[dict[str, str]] = []
+        for campaign in sorted(get_repository().campaigns.values(), key=lambda item: item.title.lower()):
+            for record in get_character_repository().list_visible_characters(campaign.slug):
+                choices.append(
+                    {
+                        "campaign_slug": campaign.slug,
+                        "character_slug": record.definition.character_slug,
+                        "label": f"{campaign.title} | {record.definition.name}",
+                        "value": f"{campaign.slug}::{record.definition.character_slug}",
+                    }
+                )
+        return choices
+
+    def list_admin_audit_event_type_choices() -> list[dict[str, str]]:
+        return [
+            {"value": event_type, "label": ADMIN_EVENT_TITLES.get(event_type, event_type.replace("_", " ").title())}
+            for event_type in sorted(ADMIN_EVENT_TITLES)
+        ]
+
+    def get_admin_activity_filters(campaign_choices: list[dict[str, str]]) -> dict[str, Any]:
+        allowed_campaigns = {item["slug"] for item in campaign_choices}
+        allowed_event_types = set(ADMIN_EVENT_TITLES)
+
+        query = request.args.get("audit_q", "").strip()
+        event_type = request.args.get("audit_event_type", "").strip()
+        campaign_slug = request.args.get("audit_campaign_slug", "").strip()
+        raw_page = request.args.get("audit_page", "").strip()
+
+        if event_type not in allowed_event_types:
+            event_type = ""
+        if campaign_slug not in allowed_campaigns:
+            campaign_slug = ""
+        try:
+            page = max(1, int(raw_page))
+        except (TypeError, ValueError):
+            page = 1
+
+        return {
+            "query": query,
+            "event_type": event_type,
+            "campaign_slug": campaign_slug,
+            "page": page,
+        }
+
+    def build_admin_activity_params(
+        activity_filters: dict[str, Any],
+        *,
+        page: int | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if activity_filters.get("query"):
+            params["audit_q"] = activity_filters["query"]
+        if activity_filters.get("event_type"):
+            params["audit_event_type"] = activity_filters["event_type"]
+        if activity_filters.get("campaign_slug"):
+            params["audit_campaign_slug"] = activity_filters["campaign_slug"]
+
+        page_value = activity_filters.get("page", 1) if page is None else page
+        if isinstance(page_value, int) and page_value > 1:
+            params["audit_page"] = page_value
+        return params
+
+    def build_admin_gen2_activity_url(
+        path: str,
+        activity_filters: dict[str, Any],
+        *,
+        page: int | None = None,
+    ) -> str:
+        params = build_admin_activity_params(activity_filters, page=page)
+        query = urlencode(params)
+        return f"{path}?{query}" if query else path
+
+    def format_admin_timestamp(value) -> str:
+        return value.strftime("%Y-%m-%d %H:%M UTC")
+
+    def build_admin_user_reference(
+        *,
+        user_id: int | None,
+        display_name: str | None,
+        email: str | None,
+    ) -> dict[str, str] | None:
+        if user_id is None or email is None:
+            return None
+
+        label = display_name or email
+        return {
+            "label": label,
+            "meta": email if display_name and display_name != email else "",
+            "href": f"/app-next/admin/users/{user_id}",
+            "flask_href": url_for("admin_user_detail", user_id=user_id),
+        }
+
+    def summarize_admin_audit_event(event) -> str | None:
+        detail_bits: list[str] = []
+        metadata = event.metadata
+
+        if metadata.get("is_admin") is True:
+            detail_bits.append("app admin")
+
+        role = metadata.get("role")
+        if isinstance(role, str) and role:
+            detail_bits.append(f"role {role}")
+
+        status = metadata.get("status")
+        if isinstance(status, str) and status:
+            detail_bits.append(f"status {status}")
+
+        scope = metadata.get("scope")
+        if isinstance(scope, str) and scope:
+            detail_bits.append(f"scope {scope}")
+
+        visibility = metadata.get("visibility")
+        if isinstance(visibility, str) and visibility:
+            detail_bits.append(f"visibility {visibility}")
+
+        source_id = metadata.get("source_id")
+        if isinstance(source_id, str) and source_id:
+            detail_bits.append(f"source {source_id}")
+
+        library_slug = metadata.get("library_slug")
+        if isinstance(library_slug, str) and library_slug:
+            detail_bits.append(f"library {library_slug}")
+
+        entry_key = metadata.get("entry_key")
+        if isinstance(entry_key, str) and entry_key:
+            detail_bits.append(f"entry {entry_key}")
+
+        email = metadata.get("email")
+        if isinstance(email, str) and email:
+            detail_bits.append(f"user {email}")
+
+        if metadata.get("is_enabled") is True:
+            detail_bits.append("enabled")
+        elif metadata.get("is_enabled") is False:
+            detail_bits.append("disabled")
+
+        assignment_type = metadata.get("assignment_type")
+        if isinstance(assignment_type, str) and assignment_type:
+            detail_bits.append(f"assignment {assignment_type}")
+
+        if metadata.get("previous_user_id") is not None:
+            detail_bits.append("reassigned")
+
+        source_key = metadata.get("source") or metadata.get("via")
+        if isinstance(source_key, str) and source_key:
+            source_label = ADMIN_SOURCE_LABELS.get(source_key, source_key.replace("_", " "))
+            detail_bits.append(f"via {source_label}")
+
+        return " | ".join(detail_bits) if detail_bits else None
+
+    def present_admin_audit_event(event, *, campaign_lookup: dict[str, str]) -> dict[str, Any]:
+        scope_bits: list[str] = []
+        if event.campaign_slug:
+            scope_bits.append(campaign_lookup.get(event.campaign_slug, event.campaign_slug))
+        if event.character_slug:
+            scope_bits.append(event.character_slug)
+
+        return {
+            "id": event.id,
+            "event_type": event.event_type,
+            "title": ADMIN_EVENT_TITLES.get(event.event_type, event.event_type.replace("_", " ").title()),
+            "timestamp": format_admin_timestamp(event.created_at),
+            "actor": build_admin_user_reference(
+                user_id=event.actor_user_id,
+                display_name=event.actor_display_name,
+                email=event.actor_email,
+            ),
+            "target": build_admin_user_reference(
+                user_id=event.target_user_id,
+                display_name=event.target_display_name,
+                email=event.target_email,
+            ),
+            "actor_email": event.actor_email or "",
+            "target_email": event.target_email or "",
+            "campaign_slug": event.campaign_slug or "",
+            "character_slug": event.character_slug or "",
+            "scope": " / ".join(scope_bits) if scope_bits else "",
+            "details": summarize_admin_audit_event(event) or "",
+        }
+
+    def build_admin_pagination_context(
+        activity_filters: dict[str, Any],
+        *,
+        total_events: int,
+        path: str,
+    ) -> dict[str, Any]:
+        total_pages = max(1, (total_events + AUDIT_PAGE_SIZE - 1) // AUDIT_PAGE_SIZE)
+        current_page = min(int(activity_filters.get("page", 1)), total_pages)
+
+        return {
+            "current_page": current_page,
+            "page_size": AUDIT_PAGE_SIZE,
+            "total_events": total_events,
+            "total_pages": total_pages,
+            "has_previous": current_page > 1,
+            "has_next": current_page < total_pages,
+            "previous_url": build_admin_gen2_activity_url(path, activity_filters, page=current_page - 1)
+            if current_page > 1
+            else "",
+            "next_url": build_admin_gen2_activity_url(path, activity_filters, page=current_page + 1)
+            if current_page < total_pages
+            else "",
+        }
+
+    def load_admin_dashboard_audit_context(
+        store,
+        campaign_lookup: dict[str, str],
+        activity_filters: dict[str, Any],
+    ) -> dict[str, Any]:
+        total_events = store.count_recent_audit_events(
+            query=activity_filters["query"] or None,
+            event_type=activity_filters["event_type"] or None,
+            campaign_slug=activity_filters["campaign_slug"] or None,
+        )
+        pagination = build_admin_pagination_context(
+            activity_filters,
+            total_events=total_events,
+            path="/app-next/admin",
+        )
+        effective_filters = {**activity_filters, "page": pagination["current_page"]}
+        events = store.list_recent_audit_events(
+            limit=AUDIT_PAGE_SIZE,
+            offset=(pagination["current_page"] - 1) * AUDIT_PAGE_SIZE,
+            query=effective_filters["query"] or None,
+            event_type=effective_filters["event_type"] or None,
+            campaign_slug=effective_filters["campaign_slug"] or None,
+        )
+        export_params = build_admin_activity_params(effective_filters, page=1)
+        return {
+            "activity_filters": effective_filters,
+            "pagination": pagination,
+            "export_url": url_for("admin_activity_export", **export_params),
+            "recent_audit_events": [
+                present_admin_audit_event(event, campaign_lookup=campaign_lookup)
+                for event in events
+            ],
+        }
+
+    def load_admin_user_audit_context(
+        store,
+        campaign_lookup: dict[str, str],
+        activity_filters: dict[str, Any],
+        *,
+        user_id: int,
+    ) -> dict[str, Any]:
+        total_events = store.count_audit_events_for_user(
+            user_id,
+            query=activity_filters["query"] or None,
+            event_type=activity_filters["event_type"] or None,
+            campaign_slug=activity_filters["campaign_slug"] or None,
+        )
+        path = f"/app-next/admin/users/{user_id}"
+        pagination = build_admin_pagination_context(
+            activity_filters,
+            total_events=total_events,
+            path=path,
+        )
+        effective_filters = {**activity_filters, "page": pagination["current_page"]}
+        events = store.list_audit_events_for_user(
+            user_id,
+            limit=AUDIT_PAGE_SIZE,
+            offset=(pagination["current_page"] - 1) * AUDIT_PAGE_SIZE,
+            query=effective_filters["query"] or None,
+            event_type=effective_filters["event_type"] or None,
+            campaign_slug=effective_filters["campaign_slug"] or None,
+        )
+        export_params = build_admin_activity_params(effective_filters, page=1)
+        return {
+            "activity_filters": effective_filters,
+            "pagination": pagination,
+            "export_url": url_for("admin_user_activity_export", user_id=user_id, **export_params),
+            "recent_audit_events": [
+                present_admin_audit_event(event, campaign_lookup=campaign_lookup)
+                for event in events
+            ],
+        }
+
+    def serialize_admin_membership(membership, campaign_lookup: dict[str, str]) -> dict[str, Any]:
+        payload = serialize_membership(membership)
+        payload["campaign_title"] = campaign_lookup.get(membership.campaign_slug, membership.campaign_slug)
+        return payload
+
+    def serialize_admin_assignment(assignment, campaign_lookup: dict[str, str]) -> dict[str, Any]:
+        return {
+            "id": assignment.id,
+            "user_id": assignment.user_id,
+            "campaign_slug": assignment.campaign_slug,
+            "campaign_title": campaign_lookup.get(assignment.campaign_slug, assignment.campaign_slug),
+            "character_slug": assignment.character_slug,
+            "assignment_type": assignment.assignment_type,
+            "created_at": serialize_datetime(assignment.created_at),
+            "updated_at": serialize_datetime(assignment.updated_at),
+        }
+
+    def get_admin_membership_form_defaults(user, campaigns: list[dict[str, str]]) -> dict[str, str]:
+        requested_campaign_slug = request.args.get("edit_membership_campaign_slug", "").strip()
+        if requested_campaign_slug:
+            membership = get_auth_store().get_membership(user.id, requested_campaign_slug, statuses=None)
+            if membership is not None:
+                return {
+                    "campaign_slug": membership.campaign_slug,
+                    "role": membership.role,
+                    "status": membership.status,
+                }
+
+        default_campaign_slug = campaigns[0]["slug"] if campaigns else ""
+        return {
+            "campaign_slug": default_campaign_slug,
+            "role": "player",
+            "status": "active",
+        }
+
+    def get_admin_assignment_form_defaults(character_choices: list[dict[str, str]]) -> dict[str, str]:
+        requested_campaign_slug = request.args.get("edit_assignment_campaign_slug", "").strip()
+        requested_character_slug = request.args.get("edit_assignment_character_slug", "").strip()
+        requested_ref = ""
+        if requested_campaign_slug and requested_character_slug:
+            requested_ref = f"{requested_campaign_slug}::{requested_character_slug}"
+
+        available_refs = {item["value"] for item in character_choices}
+        if requested_ref and requested_ref in available_refs:
+            return {"character_ref": requested_ref}
+
+        default_ref = character_choices[0]["value"] if character_choices else ""
+        return {"character_ref": default_ref}
+
+    def get_admin_invite_form_defaults(campaigns: list[dict[str, str]]) -> dict[str, str]:
+        default_campaign_slug = campaigns[0]["slug"] if campaigns else ""
+        return {
+            "user_type": "player" if campaigns else "admin",
+            "campaign_slug": default_campaign_slug,
+        }
+
+    def build_admin_dashboard_context() -> dict[str, Any]:
+        store = get_auth_store()
+        repository = get_repository()
+        users = store.list_users()
+        campaign_choices = list_admin_campaign_choices()
+        campaign_lookup = {campaign.slug: campaign.title for campaign in repository.campaigns.values()}
+
+        user_cards: list[dict[str, Any]] = []
+        for user in users:
+            memberships = store.list_memberships_for_user(
+                user.id,
+                statuses=("active", "invited", "removed"),
+            )
+            assignments = store.list_character_assignments_for_user(user.id)
+            user_cards.append(
+                {
+                    "id": user.id,
+                    "email": user.email,
+                    "display_name": user.display_name,
+                    "status": user.status,
+                    "is_admin": user.is_admin,
+                    "href": f"/app-next/admin/users/{user.id}",
+                    "flask_href": url_for("admin_user_detail", user_id=user.id),
+                    "membership_summary": [
+                        f"{campaign_lookup.get(membership.campaign_slug, membership.campaign_slug)}"
+                        f" | {membership.role} ({membership.status})"
+                        for membership in memberships
+                    ],
+                    "assignment_summary": [
+                        f"{assignment.campaign_slug}/{assignment.character_slug}" for assignment in assignments
+                    ],
+                }
+            )
+
+        dashboard_audit_context = load_admin_dashboard_audit_context(
+            store,
+            campaign_lookup,
+            get_admin_activity_filters(campaign_choices),
+        )
+
+        current_user = get_current_user()
+        return {
+            "ok": True,
+            "admin_user": serialize_user(current_user) if current_user is not None else None,
+            "campaign_choices": campaign_choices,
+            "invite_form_defaults": get_admin_invite_form_defaults(campaign_choices),
+            "audit_event_type_choices": list_admin_audit_event_type_choices(),
+            "user_cards": sorted(user_cards, key=lambda item: item["email"]),
+            "links": {
+                "gen2_admin_url": "/app-next/admin",
+                "flask_admin_url": url_for("admin_dashboard"),
+            },
+            **dashboard_audit_context,
+        }
+
+    def require_admin_target_user(user_id: int):
+        user = get_auth_store().get_user_by_id(user_id)
+        if user is None:
+            abort(404)
+        return user
+
+    def build_admin_user_detail_context(user) -> dict[str, Any]:
+        store = get_auth_store()
+        repository = get_repository()
+        campaigns = list_admin_campaign_choices()
+        character_choices = list_admin_character_choices()
+        campaign_lookup = {campaign.slug: campaign.title for campaign in repository.campaigns.values()}
+        memberships = store.list_memberships_for_user(
+            user.id,
+            statuses=("active", "invited", "removed"),
+        )
+        assignments = store.list_character_assignments_for_user(user.id)
+        current_user = get_current_user()
+        user_audit_context = load_admin_user_audit_context(
+            store,
+            campaign_lookup,
+            get_admin_activity_filters(campaigns),
+            user_id=user.id,
+        )
+
+        return {
+            "ok": True,
+            "managed_user": serialize_user(user),
+            "campaign_choices": campaigns,
+            "character_choices": character_choices,
+            "memberships": [serialize_admin_membership(membership, campaign_lookup) for membership in memberships],
+            "assignments": [serialize_admin_assignment(assignment, campaign_lookup) for assignment in assignments],
+            "audit_event_type_choices": list_admin_audit_event_type_choices(),
+            "membership_form_defaults": get_admin_membership_form_defaults(user, campaigns),
+            "assignment_form_defaults": get_admin_assignment_form_defaults(character_choices),
+            "can_manage_account": current_user is not None and current_user.id != user.id,
+            "links": {
+                "gen2_admin_url": "/app-next/admin",
+                "flask_admin_url": url_for("admin_dashboard"),
+                "gen2_user_url": f"/app-next/admin/users/{user.id}",
+                "flask_user_url": url_for("admin_user_detail", user_id=user.id),
+            },
+            **user_audit_context,
         }
 
     def serialize_campaign_help_link(link: object) -> dict[str, str]:
@@ -4669,6 +5116,446 @@ def register_api(app) -> None:
                 },
             }
         )
+
+    @api.get("/admin")
+    @api_login_required
+    @api_admin_required
+    def admin_dashboard_api():
+        return jsonify(build_admin_dashboard_context())
+
+    @api.get("/admin/users/<int:user_id>")
+    @api_login_required
+    @api_admin_required
+    def admin_user_detail_api(user_id: int):
+        user = require_admin_target_user(user_id)
+        return jsonify(build_admin_user_detail_context(user))
+
+    @api.post("/admin/users/invite")
+    @api_login_required
+    @api_admin_required
+    def admin_invite_user_api():
+        store = get_auth_store()
+        try:
+            payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        email = str(payload.get("email") or "").strip()
+        display_name = str(payload.get("display_name") or "").strip()
+        requested_user_type = str(payload.get("user_type") or "").strip().lower()
+        campaign_slug = str(payload.get("campaign_slug") or "").strip()
+
+        if not requested_user_type:
+            legacy_is_admin = str(payload.get("is_admin") or "").strip()
+            if legacy_is_admin == "1":
+                requested_user_type = "admin"
+            elif legacy_is_admin == "0":
+                requested_user_type = "standard"
+
+        if requested_user_type not in {"admin", "dm", "player", "standard"}:
+            return json_error("Choose a valid user type.", 400, code="validation_error")
+        if requested_user_type in {"dm", "player"} and (
+            not campaign_slug or get_repository().get_campaign(campaign_slug) is None
+        ):
+            return json_error("Choose a valid campaign for DM or Player invites.", 400, code="validation_error")
+
+        make_admin = requested_user_type == "admin"
+
+        if not email or not display_name:
+            return json_error("Email and display name are required.", 400, code="validation_error")
+        if store.get_user_by_email(email) is not None:
+            return json_error(f"User already exists: {email}", 400, code="validation_error")
+
+        actor = get_current_user()
+        actor_user_id = actor.id if actor is not None else None
+        user = store.create_user(
+            email,
+            display_name,
+            is_admin=make_admin,
+            status="invited",
+        )
+        invite_token = store.issue_invite_token(
+            user.id,
+            expires_in=timedelta(hours=current_app.config["INVITE_TTL_HOURS"]),
+            created_by_user_id=actor_user_id,
+        )
+        store.write_audit_event(
+            event_type="user_created",
+            actor_user_id=actor_user_id,
+            target_user_id=user.id,
+            metadata={"is_admin": make_admin, "source": "admin_screen"},
+        )
+        store.write_audit_event(
+            event_type="user_invited",
+            actor_user_id=actor_user_id,
+            target_user_id=user.id,
+            metadata={"source": "admin_screen"},
+        )
+        if requested_user_type in {"dm", "player"}:
+            membership = store.upsert_membership(
+                user.id,
+                campaign_slug,
+                role=requested_user_type,
+                status="active",
+            )
+            store.write_audit_event(
+                event_type="membership_created",
+                actor_user_id=actor_user_id,
+                target_user_id=user.id,
+                campaign_slug=campaign_slug,
+                metadata={
+                    "role": membership.role,
+                    "status": membership.status,
+                    "source": "admin_screen",
+                },
+            )
+        invite_url = build_admin_local_url(f"/invite/{invite_token}")
+        detail_context = build_admin_user_detail_context(user)
+        detail_context.update(
+            {
+                "message": f"Invite URL: {invite_url}",
+                "invite_url": invite_url,
+            }
+        )
+        return jsonify(detail_context), 201
+
+    @api.post("/admin/users/<int:user_id>/membership")
+    @api_login_required
+    @api_admin_required
+    def admin_set_membership_api(user_id: int):
+        user = require_admin_target_user(user_id)
+        try:
+            payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        store = get_auth_store()
+        campaign_slug = str(payload.get("campaign_slug") or "").strip()
+        role = str(payload.get("role") or "").strip()
+        status = str(payload.get("status") or "").strip()
+
+        if not campaign_slug or get_repository().get_campaign(campaign_slug) is None:
+            return json_error("Choose a valid campaign.", 400, code="validation_error")
+        if role not in {"dm", "player", "observer"}:
+            return json_error("Choose a valid campaign role.", 400, code="validation_error")
+        if status not in {"active", "invited", "removed"}:
+            return json_error("Choose a valid membership status.", 400, code="validation_error")
+
+        actor = get_current_user()
+        actor_user_id = actor.id if actor is not None else None
+        previous = store.get_membership(user.id, campaign_slug, statuses=None)
+        membership = store.upsert_membership(user.id, campaign_slug, role=role, status=status)
+        if previous is None or previous.status == "removed":
+            event_type = "membership_created"
+        elif membership.status == "removed":
+            event_type = "membership_removed"
+        else:
+            event_type = "membership_role_changed"
+        store.write_audit_event(
+            event_type=event_type,
+            actor_user_id=actor_user_id,
+            target_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={"role": membership.role, "status": membership.status, "source": "admin_screen"},
+        )
+        context = build_admin_user_detail_context(user)
+        context["message"] = f"Membership updated: {campaign_slug} -> {membership.role} ({membership.status})"
+        return jsonify(context)
+
+    @api.delete("/admin/users/<int:user_id>/membership")
+    @api_login_required
+    @api_admin_required
+    def admin_remove_membership_api(user_id: int):
+        user = require_admin_target_user(user_id)
+        try:
+            payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        store = get_auth_store()
+        campaign_slug = str(payload.get("campaign_slug") or "").strip()
+        membership = store.get_membership(user.id, campaign_slug, statuses=None)
+        if membership is None:
+            return json_error("Choose a valid membership to remove.", 400, code="validation_error")
+        if membership.status == "removed":
+            return json_error("That membership is already removed.", 400, code="validation_error")
+
+        actor = get_current_user()
+        actor_user_id = actor.id if actor is not None else None
+        updated_membership = store.upsert_membership(
+            user.id,
+            membership.campaign_slug,
+            role=membership.role,
+            status="removed",
+        )
+        store.write_audit_event(
+            event_type="membership_removed",
+            actor_user_id=actor_user_id,
+            target_user_id=user.id,
+            campaign_slug=membership.campaign_slug,
+            metadata={
+                "role": updated_membership.role,
+                "status": updated_membership.status,
+                "source": "admin_screen",
+            },
+        )
+        context = build_admin_user_detail_context(user)
+        context["message"] = f"Removed membership for {membership.campaign_slug}."
+        return jsonify(context)
+
+    @api.post("/admin/users/<int:user_id>/assignment")
+    @api_login_required
+    @api_admin_required
+    def admin_assign_character_api(user_id: int):
+        user = require_admin_target_user(user_id)
+        try:
+            payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        raw_assignment = str(payload.get("character_ref") or "").strip()
+        if not raw_assignment:
+            campaign_slug = str(payload.get("campaign_slug") or "").strip()
+            character_slug = str(payload.get("character_slug") or "").strip()
+            if campaign_slug and character_slug:
+                raw_assignment = f"{campaign_slug}::{character_slug}"
+
+        if "::" not in raw_assignment:
+            return json_error("Choose a valid character.", 400, code="validation_error")
+
+        campaign_slug, character_slug = raw_assignment.split("::", 1)
+        record = get_character_repository().get_visible_character(campaign_slug, character_slug)
+        if record is None:
+            return json_error("Choose a valid visible character.", 400, code="validation_error")
+
+        store = get_auth_store()
+        membership = store.get_membership(user.id, campaign_slug, statuses=("active",))
+        if membership is None or membership.role != "player":
+            return json_error(
+                "Character owners must have an active player membership in that campaign.",
+                400,
+                code="validation_error",
+            )
+
+        actor = get_current_user()
+        actor_user_id = actor.id if actor is not None else None
+        previous = store.get_character_assignment(campaign_slug, character_slug)
+        assignment = store.upsert_character_assignment(user.id, campaign_slug, character_slug)
+        store.write_audit_event(
+            event_type="character_assignment_created",
+            actor_user_id=actor_user_id,
+            target_user_id=user.id,
+            campaign_slug=campaign_slug,
+            character_slug=character_slug,
+            metadata={
+                "previous_user_id": previous.user_id if previous is not None else None,
+                "assignment_type": assignment.assignment_type,
+                "source": "admin_screen",
+            },
+        )
+        context = build_admin_user_detail_context(user)
+        context["message"] = f"Assigned {character_slug} in {campaign_slug} to {user.email}."
+        return jsonify(context)
+
+    @api.delete("/admin/users/<int:user_id>/assignment")
+    @api_login_required
+    @api_admin_required
+    def admin_remove_character_assignment_api(user_id: int):
+        user = require_admin_target_user(user_id)
+        try:
+            payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        campaign_slug = str(payload.get("campaign_slug") or "").strip()
+        character_slug = str(payload.get("character_slug") or "").strip()
+        store = get_auth_store()
+        assignment = store.get_character_assignment(campaign_slug, character_slug)
+        if assignment is None or assignment.user_id != user.id:
+            return json_error("Choose a valid character assignment to remove.", 400, code="validation_error")
+
+        actor = get_current_user()
+        actor_user_id = actor.id if actor is not None else None
+        removed_assignment = store.delete_character_assignment(campaign_slug, character_slug)
+        if removed_assignment is None:
+            return json_error("That character assignment no longer exists.", 400, code="validation_error")
+
+        store.write_audit_event(
+            event_type="character_assignment_removed",
+            actor_user_id=actor_user_id,
+            target_user_id=user.id,
+            campaign_slug=campaign_slug,
+            character_slug=character_slug,
+            metadata={
+                "assignment_type": removed_assignment.assignment_type,
+                "source": "admin_screen",
+            },
+        )
+        context = build_admin_user_detail_context(user)
+        context["message"] = f"Cleared assignment for {character_slug} in {campaign_slug}."
+        return jsonify(context)
+
+    @api.post("/admin/users/<int:user_id>/invite")
+    @api_login_required
+    @api_admin_required
+    def admin_issue_invite_api(user_id: int):
+        user = require_admin_target_user(user_id)
+        if user.status != "invited":
+            return json_error("Invite links are only available for invited users.", 400, code="validation_error")
+
+        actor = get_current_user()
+        actor_user_id = actor.id if actor is not None else None
+        store = get_auth_store()
+        invite_token = store.issue_invite_token(
+            user.id,
+            expires_in=timedelta(hours=current_app.config["INVITE_TTL_HOURS"]),
+            created_by_user_id=actor_user_id,
+        )
+        store.write_audit_event(
+            event_type="user_invited",
+            actor_user_id=actor_user_id,
+            target_user_id=user.id,
+            metadata={"source": "admin_screen"},
+        )
+        invite_url = build_admin_local_url(f"/invite/{invite_token}")
+        context = build_admin_user_detail_context(user)
+        context.update({"message": f"Invite URL: {invite_url}", "invite_url": invite_url})
+        return jsonify(context)
+
+    @api.post("/admin/users/<int:user_id>/password-reset")
+    @api_login_required
+    @api_admin_required
+    def admin_issue_password_reset_api(user_id: int):
+        user = require_admin_target_user(user_id)
+        if not user.is_active:
+            return json_error("Password resets are only available for active users.", 400, code="validation_error")
+
+        actor = get_current_user()
+        actor_user_id = actor.id if actor is not None else None
+        store = get_auth_store()
+        reset_token = store.issue_password_reset_token(
+            user.id,
+            expires_in=timedelta(hours=current_app.config["RESET_TTL_HOURS"]),
+            created_by_user_id=actor_user_id,
+        )
+        store.write_audit_event(
+            event_type="password_reset_issued",
+            actor_user_id=actor_user_id,
+            target_user_id=user.id,
+            metadata={"source": "admin_screen"},
+        )
+        reset_url = build_admin_local_url(f"/reset/{reset_token}")
+        context = build_admin_user_detail_context(user)
+        context.update({"message": f"Password reset URL: {reset_url}", "reset_url": reset_url})
+        return jsonify(context)
+
+    @api.post("/admin/users/<int:user_id>/disable")
+    @api_login_required
+    @api_admin_required
+    def admin_disable_user_api(user_id: int):
+        user = require_admin_target_user(user_id)
+        actor = get_current_user()
+        if actor is not None and actor.id == user.id:
+            return json_error(
+                "The admin screen will not disable the account you are currently using.",
+                400,
+                code="validation_error",
+            )
+
+        store = get_auth_store()
+        actor_user_id = actor.id if actor is not None else None
+        updated_user = store.disable_user(user.id)
+        store.revoke_all_user_sessions(user.id)
+        store.revoke_all_user_api_tokens(user.id)
+        store.write_audit_event(
+            event_type="user_disabled",
+            actor_user_id=actor_user_id,
+            target_user_id=user.id,
+            metadata={"source": "admin_screen"},
+        )
+        context = build_admin_user_detail_context(updated_user)
+        context["message"] = f"Disabled user {updated_user.email}."
+        return jsonify(context)
+
+    @api.post("/admin/users/<int:user_id>/enable")
+    @api_login_required
+    @api_admin_required
+    def admin_enable_user_api(user_id: int):
+        user = require_admin_target_user(user_id)
+        if user.status != "disabled":
+            return json_error("Only disabled users can be re-enabled.", 400, code="validation_error")
+
+        actor = get_current_user()
+        if actor is not None and actor.id == user.id:
+            return json_error(
+                "The admin screen will not re-enable the account you are currently using.",
+                400,
+                code="validation_error",
+            )
+
+        store = get_auth_store()
+        actor_user_id = actor.id if actor is not None else None
+        enabled_user = store.enable_user(user.id)
+        store.write_audit_event(
+            event_type="user_enabled",
+            actor_user_id=actor_user_id,
+            target_user_id=user.id,
+            metadata={"status": enabled_user.status, "source": "admin_screen"},
+        )
+        context = build_admin_user_detail_context(enabled_user)
+        if enabled_user.status == "active":
+            context["message"] = f"Re-enabled user {enabled_user.email}."
+        else:
+            context["message"] = (
+                f"Re-enabled user {enabled_user.email}. The account is back in invited status."
+            )
+        return jsonify(context)
+
+    @api.delete("/admin/users/<int:user_id>")
+    @api_login_required
+    @api_admin_required
+    def admin_delete_user_api(user_id: int):
+        user = require_admin_target_user(user_id)
+        actor = get_current_user()
+        if actor is not None and actor.id == user.id:
+            return json_error(
+                "The admin screen will not delete the account you are currently using.",
+                400,
+                code="validation_error",
+            )
+
+        try:
+            payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+        confirm_email = str(payload.get("confirm_email") or payload.get("confirm_user_email") or "").strip()
+        if confirm_email.lower() != user.email.lower():
+            return json_error("Type the user's email address to confirm deletion.", 400, code="validation_error")
+
+        store = get_auth_store()
+        actor_user_id = actor.id if actor is not None else None
+        deleted_user = store.delete_user(user.id)
+        if deleted_user is None:
+            abort(404)
+
+        store.write_audit_event(
+            event_type="user_deleted",
+            actor_user_id=actor_user_id,
+            metadata={
+                "email": deleted_user.email,
+                "status": deleted_user.status,
+                "is_admin": deleted_user.is_admin,
+                "source": "admin_screen",
+            },
+        )
+        context = build_admin_dashboard_context()
+        context.update(
+            {
+                "message": f"Deleted user {deleted_user.email}.",
+                "deleted_user": serialize_user(deleted_user),
+            }
+        )
+        return jsonify(context)
 
     @api.get("/app")
     def app_state():
