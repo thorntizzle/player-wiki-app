@@ -134,6 +134,7 @@ The app now treats deployed functionality and live content as separate concerns:
 - live SQLite-backed content is updated through the JSON API
 - live campaign files on Fly live on the mounted `/data/campaigns` volume instead of inside the image
 - campaign config, published assets, published wiki pages, and character definition/import files can also be managed through the JSON API
+- Gen2 now has JSON-backed native character create/import lanes for DND-5E creation, Xianxia creation, and Xianxia manual existing-character import, while advanced character authoring still falls back to the Flask routes until those parity slices land
 - DMs/admins can create, edit, attach images to, promote staged/session articles into, unpublish/archive, and hard-delete published wiki page files from the browser under DM Content -> Player Wiki; hard delete is blocked when backlinks, character hooks, or session provenance make removal risky
 - shared DND 5E source ingest can now be driven through an admin-only JSON API upload plus import-run history endpoints
 - Xianxia is a first-class campaign system lane using the shared `Xianxia` Systems library and `XIANXIA-HOMEBREW` source; its Systems Wiki defaults to DM-only while Player Wiki access remains player-facing until changed through the existing visibility/source controls

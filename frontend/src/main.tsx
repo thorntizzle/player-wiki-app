@@ -23,7 +23,12 @@ import type {
   AccountSettingsUpdatePayload,
   CampaignControlResponse,
   CampaignControlVisibilityRow,
+  CharacterBuilderOption,
+  CharacterCreateContextResponse,
+  CharacterCreateSubmitPayload,
   CharacterCurrencyPatchPayload,
+  CharacterDndCreateContext,
+  CharacterDndChoiceField,
   CampaignHelpResponse,
   CharacterDetailResponse,
   CharacterEquipmentRow,
@@ -40,6 +45,8 @@ import type {
   CharacterXianxiaDaoUseRequestPayload,
   CharacterXianxiaInventoryItem,
   CharacterXianxiaInventoryItemPayload,
+  CharacterXianxiaManualImportContext,
+  CharacterXianxiaManualImportRow,
   CharacterXianxiaNamedRecord,
   CharacterNotesPatchPayload,
   CharacterResourcePatchPayload,
@@ -48,6 +55,7 @@ import type {
   CharacterSpellSlotsPatchPayload,
   CharacterSummary,
   CharacterVitalsPatchPayload,
+  CharacterXianxiaCreateContext,
   ContentPageFileRecord,
   ContentPageFileSummary,
   ContentPageMetadata,
@@ -523,6 +531,835 @@ function xianxiaInventoryPayloadFromDraft(draft: CharacterXianxiaInventoryDraft)
     equippable: draft.equippable,
     is_equipped: draft.isEquipped,
   };
+}
+
+type CharacterAuthoringValues = Record<string, string | string[]>;
+
+function optionValue(option: CharacterBuilderOption): string {
+  return String(option.value || option.slug || option.entry_key || option.key || "");
+}
+
+function optionLabel(option: CharacterBuilderOption): string {
+  const value = optionValue(option);
+  const label = option.label || option.title || option.name || value;
+  return option.source_id ? `${label} (${option.source_id})` : label;
+}
+
+function draftString(values: CharacterAuthoringValues, key: string, fallback = ""): string {
+  const value = values[key];
+  if (Array.isArray(value)) {
+    return value[0] ?? fallback;
+  }
+  return value ?? fallback;
+}
+
+function draftStringArray(values: CharacterAuthoringValues, key: string): string[] {
+  const value = values[key];
+  return Array.isArray(value) ? value : value ? [value] : [];
+}
+
+function stringFromUnknown(value: unknown, fallback = ""): string {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  return String(value);
+}
+
+function updateAuthoringValue(
+  setValues: React.Dispatch<React.SetStateAction<CharacterAuthoringValues>>,
+  key: string,
+  value: string | string[],
+) {
+  setValues((current) => ({ ...current, [key]: value }));
+}
+
+function selectOptions(options: CharacterBuilderOption[]) {
+  return options.map((option) => {
+    const value = optionValue(option);
+    return (
+      <option key={value || optionLabel(option)} value={value}>
+        {optionLabel(option)}
+      </option>
+    );
+  });
+}
+
+function CharacterPreviewList({ preview }: { preview: Record<string, unknown> }) {
+  const facts = ([
+    ["Class / level", preview.class_level_text],
+    ["Max HP", preview.max_hp],
+    ["Speed", preview.speed],
+    ["Size", preview.size],
+    ["Carrying", preview.carrying_capacity],
+    ["Push / drag / lift", preview.push_drag_lift],
+    ["Currency", preview.starting_currency],
+  ] as Array<[string, unknown]>).filter(([, value]) => value !== undefined && value !== null && String(value).trim());
+  const listSections = ([
+    ["Saving throws", asStringArray(preview.saving_throws)],
+    ["Languages", asStringArray(preview.languages)],
+    ["Features", asStringArray(preview.features)],
+    ["Resources", asStringArray(preview.resources)],
+    ["Equipment", asStringArray(preview.equipment)],
+    ["Attacks", asStringArray(preview.attacks)],
+    ["Spells", asStringArray(preview.spells)],
+  ] as Array<[string, string[]]>).filter(([, values]) => Array.isArray(values) && values.length);
+
+  return (
+    <aside className="panel character-authoring-sidebar">
+      <h2>Preview</h2>
+      {facts.length ? (
+        <div className="builder-preview-list">
+          {facts.map(([label, value]) => (
+            <div key={label}>
+              <span className="meta">{label}</span>
+              <strong>{stringFromUnknown(value, "Not set")}</strong>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="meta">Choose core options to populate the preview.</p>
+      )}
+      {listSections.map(([label, values]) => (
+        <section className="character-authoring-preview-section" key={String(label)}>
+          <h3>{label}</h3>
+          <ul className="plain-list resource-preview-list">
+            {(values as string[]).map((item) => (
+              <li key={`${label}-${item}`}>
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </aside>
+  );
+}
+
+function isDndCreateContext(value: CharacterCreateContextResponse["create"] | undefined): value is CharacterDndCreateContext {
+  return Boolean(value && value.lane === "dnd5e");
+}
+
+function isXianxiaCreateContext(value: CharacterCreateContextResponse["create"] | undefined): value is CharacterXianxiaCreateContext {
+  return Boolean(value && value.lane === "xianxia");
+}
+
+function CharacterDndChoiceSelect({
+  field,
+  draftValues,
+  setDraftValues,
+  refreshContext,
+}: {
+  field: CharacterDndChoiceField;
+  draftValues: CharacterAuthoringValues;
+  setDraftValues: React.Dispatch<React.SetStateAction<CharacterAuthoringValues>>;
+  refreshContext: (values?: CharacterAuthoringValues) => void;
+}) {
+  const value = draftString(draftValues, field.name, field.selected || "");
+  return (
+    <label className="field">
+      <span>{field.label}</span>
+      <select
+        name={field.name}
+        value={value}
+        onChange={(event) => {
+          const nextValues = { ...draftValues, [field.name]: event.currentTarget.value };
+          setDraftValues(nextValues);
+          refreshContext(nextValues);
+        }}
+      >
+        <option value="">Choose an option</option>
+        {selectOptions(field.options ?? [])}
+      </select>
+      {field.help_text ? <small>{field.help_text}</small> : null}
+    </label>
+  );
+}
+
+function CharacterCreatePage() {
+  const { campaignSlug } = useParams({
+    from: "/campaigns/$campaignSlug/characters/new",
+  });
+  const resolvedCampaignSlug = campaignSlug ?? "";
+  const { apiClient, setAuthRequired } = useApiClient();
+  const [draftValues, setDraftValues] = useState<CharacterAuthoringValues>({});
+  const [contextValues, setContextValues] = useState<CharacterAuthoringValues>({});
+  const [statusMessage, setStatusMessage] = useState("");
+
+  const createQuery = useQuery({
+    queryKey: ["character-create", resolvedCampaignSlug, JSON.stringify(contextValues)],
+    queryFn: () => apiClient.getCharacterCreateContext(resolvedCampaignSlug, contextValues),
+    enabled: Boolean(resolvedCampaignSlug),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (isAuthError(createQuery.error)) {
+      setAuthRequired(true);
+    }
+  }, [createQuery.error, setAuthRequired]);
+
+  useEffect(() => {
+    const create = createQuery.data?.create;
+    if (!create || Object.keys(draftValues).length) {
+      return;
+    }
+    if (isDndCreateContext(create)) {
+      setDraftValues({ ...create.values });
+    } else if (isXianxiaCreateContext(create)) {
+      const nextValues: CharacterAuthoringValues = {};
+      for (const field of [...create.attribute_fields, ...create.effort_fields, ...create.energy_fields, ...create.trained_skill_fields]) {
+        nextValues[field.input_name] = field.value;
+      }
+      for (const field of create.martial_art_fields) {
+        nextValues[field.art_input_name] = field.selected_slug;
+        nextValues[field.rank_input_name] = field.selected_rank;
+      }
+      nextValues[create.manual_armor_field.input_name] = create.manual_armor_field.value;
+      nextValues[create.dao_field.input_name] = create.dao_field.value;
+      setDraftValues(nextValues);
+    }
+  }, [createQuery.data, draftValues]);
+
+  const createMutation = useMutation({
+    mutationFn: (payload: CharacterCreateSubmitPayload) => apiClient.createCharacter(resolvedCampaignSlug, payload),
+    onSuccess: (payload) => {
+      setStatusMessage(payload.message);
+      if (payload.links.character_url) {
+        window.location.assign(payload.links.character_url);
+      }
+    },
+  });
+
+  const error = getApiErrorMessage(createQuery.error || createMutation.error);
+  const data = createQuery.data;
+  const create = data?.create;
+
+  const refreshContext = (values: CharacterAuthoringValues = draftValues) => {
+    setContextValues({ ...values });
+  };
+
+  const submitCreate = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setStatusMessage("");
+    createMutation.mutate({ values: draftValues });
+  };
+
+  const updateValue = (key: string, value: string | string[], refresh = false) => {
+    const nextValues = { ...draftValues, [key]: value };
+    setDraftValues(nextValues);
+    if (refresh) {
+      refreshContext(nextValues);
+    }
+  };
+
+  return (
+    <section className="panel character-authoring-page">
+      <div className="panel-header">
+        <div>
+          <p className="meta">Character authoring</p>
+          <h1>{create?.lane === "xianxia" ? "Create Xianxia Character" : "Create Character"}</h1>
+          <p className="lede">Create native character records through the same campaign system lane used by the Flask builder.</p>
+        </div>
+        <div className="article-actions">
+          {data?.links.gen2_roster_url ? (
+            <a className="button button-secondary" href={data.links.gen2_roster_url}>
+              Back to roster
+            </a>
+          ) : null}
+          {data?.links.flask_create_url ? (
+            <a className="button button-secondary" href={data.links.flask_create_url}>
+              Flask create
+            </a>
+          ) : null}
+          {data?.links.gen2_import_xianxia_url ? (
+            <a className="button button-secondary" href={data.links.gen2_import_xianxia_url}>
+              Import existing
+            </a>
+          ) : null}
+        </div>
+      </div>
+      <ApiErrorNotice isLoading={createQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
+      {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
+
+      {isDndCreateContext(create) ? (
+        <div className="character-authoring-layout">
+          <form className="stack-form character-authoring-form" onSubmit={submitCreate}>
+            {!create.builder_ready ? (
+              <p className="status status-warning">The builder needs a supported base class plus enabled Systems species and backgrounds before it can create characters in this campaign.</p>
+            ) : null}
+            <section className="builder-section">
+              <h2>Identity</h2>
+              <div className="builder-field-grid">
+                {[
+                  ["name", "Character Name", "Zigzag Blackscar"],
+                  ["character_slug", "Character Slug", "Auto-generated from name if blank"],
+                  ["alignment", "Alignment", "Neutral Good"],
+                  ["experience_model", "Experience Model", "Milestone"],
+                ].map(([key, label, placeholder]) => (
+                  <label className="field" key={key}>
+                    <span>{label}</span>
+                    <input
+                      type="text"
+                      name={key}
+                      value={draftString(draftValues, key, create.values[key] || "")}
+                      placeholder={placeholder}
+                      onChange={(event) => updateValue(key, event.currentTarget.value)}
+                    />
+                  </label>
+                ))}
+              </div>
+            </section>
+
+            <section className="builder-section">
+              <h2>Core Build</h2>
+              <div className="builder-field-grid">
+                <label className="field">
+                  <span>Class</span>
+                  <select
+                    name="class_slug"
+                    value={draftString(draftValues, "class_slug", create.values.class_slug || "")}
+                    onChange={(event) => updateValue("class_slug", event.currentTarget.value, true)}
+                  >
+                    <option value="">Choose a class</option>
+                    {selectOptions(create.class_options)}
+                  </select>
+                </label>
+                {create.subclass_options.length || create.requires_subclass ? (
+                  <label className="field">
+                    <span>Subclass</span>
+                    <select
+                      name="subclass_slug"
+                      value={draftString(draftValues, "subclass_slug", create.values.subclass_slug || "")}
+                      onChange={(event) => updateValue("subclass_slug", event.currentTarget.value, true)}
+                    >
+                      <option value="">{create.requires_subclass ? "Choose a subclass" : "No subclass"}</option>
+                      {selectOptions(create.subclass_options)}
+                    </select>
+                  </label>
+                ) : null}
+                <label className="field">
+                  <span>Species</span>
+                  <select
+                    name="species_slug"
+                    value={draftString(draftValues, "species_slug", create.values.species_slug || "")}
+                    onChange={(event) => updateValue("species_slug", event.currentTarget.value, true)}
+                  >
+                    <option value="">Choose a species</option>
+                    {selectOptions(create.species_options)}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Background</span>
+                  <select
+                    name="background_slug"
+                    value={draftString(draftValues, "background_slug", create.values.background_slug || "")}
+                    onChange={(event) => updateValue("background_slug", event.currentTarget.value, true)}
+                  >
+                    <option value="">Choose a background</option>
+                    {selectOptions(create.background_options)}
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <section className="builder-section">
+              <h2>Ability Scores</h2>
+              <div className="builder-ability-grid">
+                {[
+                  ["str", "Strength"],
+                  ["dex", "Dexterity"],
+                  ["con", "Constitution"],
+                  ["int", "Intelligence"],
+                  ["wis", "Wisdom"],
+                  ["cha", "Charisma"],
+                ].map(([key, label]) => (
+                  <label className="field" key={key}>
+                    <span>{label}</span>
+                    <input
+                      type="number"
+                      name={key}
+                      min={1}
+                      max={30}
+                      value={draftString(draftValues, key, create.values[key] || "10")}
+                      onChange={(event) => updateValue(key, event.currentTarget.value)}
+                    />
+                  </label>
+                ))}
+              </div>
+            </section>
+
+            {create.choice_sections.map((section) => (
+              <section className="builder-section" key={section.title}>
+                <h2>{section.title}</h2>
+                <div className="builder-field-grid">
+                  {section.fields.map((field) => (
+                    <CharacterDndChoiceSelect
+                      key={field.name}
+                      field={field}
+                      draftValues={draftValues}
+                      setDraftValues={setDraftValues}
+                      refreshContext={refreshContext}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+
+            <div className="builder-actions">
+              <button type="button" className="button button-secondary" onClick={() => refreshContext()}>
+                Refresh options
+              </button>
+              <button type="submit" disabled={!create.builder_ready || createMutation.isPending}>
+                {createMutation.isPending ? "Creating..." : "Create character"}
+              </button>
+            </div>
+          </form>
+          <CharacterPreviewList preview={create.preview} />
+        </div>
+      ) : null}
+
+      {isXianxiaCreateContext(create) ? (
+        <div className="character-authoring-layout">
+          <form className="stack-form character-authoring-form" onSubmit={submitCreate}>
+            <section className="builder-section">
+              <h2>Identity</h2>
+              <div className="builder-field-grid">
+                <label className="field">
+                  <span>Character Name</span>
+                  <input type="text" name="name" value={draftString(draftValues, "name")} onChange={(event) => updateValue("name", event.currentTarget.value)} required />
+                </label>
+                <label className="field">
+                  <span>Character Slug</span>
+                  <input type="text" name="character_slug" value={draftString(draftValues, "character_slug")} onChange={(event) => updateValue("character_slug", event.currentTarget.value)} />
+                </label>
+              </div>
+            </section>
+
+            {([
+              { title: "Attributes", fields: create.attribute_fields, inputType: "number" },
+              { title: "Efforts", fields: create.effort_fields, inputType: "number" },
+              { title: "Energies", fields: create.energy_fields, inputType: "number" },
+              { title: "Trained Skills", fields: create.trained_skill_fields, inputType: "text" },
+            ] as Array<{ title: string; fields: CharacterXianxiaCreateContext["attribute_fields"]; inputType: "number" | "text" }>).map(({ title, fields, inputType }) => (
+              <section className="builder-section" key={title}>
+                <h2>{title}</h2>
+                <div className="builder-field-grid">
+                  {fields.map((field) => (
+                    <label className="field" key={field.input_name}>
+                      <span>{field.label}</span>
+                      <input
+                        type={inputType}
+                        name={field.input_name}
+                        min={field.min ?? 0}
+                        max={field.max}
+                        step={1}
+                        value={draftString(draftValues, field.input_name, field.value)}
+                        onChange={(event) => updateValue(field.input_name, event.currentTarget.value)}
+                        required
+                      />
+                    </label>
+                  ))}
+                </div>
+              </section>
+            ))}
+
+            <section className="builder-section">
+              <h2>Starting Martial Arts</h2>
+              <div className="builder-field-grid">
+                {create.martial_art_fields.map((field) => (
+                  <React.Fragment key={field.index}>
+                    <label className="field">
+                      <span>Martial Art {field.index}</span>
+                      <select
+                        name={field.art_input_name}
+                        value={draftString(draftValues, field.art_input_name, field.selected_slug)}
+                        onChange={(event) => updateValue(field.art_input_name, event.currentTarget.value)}
+                      >
+                        <option value="">Choose Martial Art</option>
+                        {selectOptions(create.martial_art_options)}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Starting Rank {field.index}</span>
+                      <select
+                        name={field.rank_input_name}
+                        value={draftString(draftValues, field.rank_input_name, field.selected_rank)}
+                        onChange={(event) => updateValue(field.rank_input_name, event.currentTarget.value)}
+                      >
+                        <option value="">Choose Rank</option>
+                        {selectOptions(create.martial_art_rank_choices)}
+                      </select>
+                    </label>
+                  </React.Fragment>
+                ))}
+              </div>
+            </section>
+
+            <section className="builder-section">
+              <h2>GM Grants</h2>
+              <div className="builder-field-grid">
+                {[create.manual_armor_field, create.dao_field].map((field) => (
+                  <label className="field" key={field.input_name}>
+                    <span>{field.input_name === "dao_current" ? "Starting Dao" : "Manual Armor Bonus"}</span>
+                    <input
+                      type="number"
+                      name={field.input_name}
+                      min={field.min ?? 0}
+                      max={field.max}
+                      step={1}
+                      value={draftString(draftValues, field.input_name, field.value)}
+                      onChange={(event) => updateValue(field.input_name, event.currentTarget.value)}
+                    />
+                  </label>
+                ))}
+                {create.generic_technique_options.length ? (
+                  <label className="field">
+                    <span>GM-Granted Generic Techniques</span>
+                    <select
+                      name={create.gm_granted_generic_technique_input}
+                      multiple
+                      size={6}
+                      value={draftStringArray(draftValues, create.gm_granted_generic_technique_input)}
+                      onChange={(event) =>
+                        updateValue(
+                          create.gm_granted_generic_technique_input,
+                          Array.from(event.currentTarget.selectedOptions).map((option) => option.value),
+                        )
+                      }
+                    >
+                      {selectOptions(create.generic_technique_options)}
+                    </select>
+                  </label>
+                ) : null}
+              </div>
+            </section>
+
+            <div className="builder-actions">
+              <button type="submit" disabled={createMutation.isPending}>
+                {createMutation.isPending ? "Creating..." : "Create character"}
+              </button>
+            </div>
+          </form>
+          <aside className="panel character-authoring-sidebar">
+            <h2>Starting Defaults</h2>
+            <div className="builder-preview-list">
+              {Object.entries(create.defaults).map(([key, value]) => (
+                <div key={key}>
+                  <span className="meta">{key.replace(/_/g, " ")}</span>
+                  <strong>{stringFromUnknown(value)}</strong>
+                </div>
+              ))}
+            </div>
+          </aside>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function manualImportRows(context: CharacterXianxiaManualImportContext | undefined, rowCount: number, values: CharacterAuthoringValues): CharacterXianxiaManualImportRow[] {
+  const baseRows = context?.martial_art_rows ?? [];
+  const maxRows = Math.max(rowCount, baseRows.length, 3);
+  return Array.from({ length: maxRows }, (_, offset) => {
+    const index = offset + 1;
+    const existing = baseRows.find((row) => row.index === index);
+    return {
+      index,
+      slug_input_name: `martial_art_${index}_slug`,
+      name_input_name: `martial_art_${index}_name`,
+      rank_input_name: `martial_art_${index}_rank`,
+      teacher_input_name: `martial_art_${index}_teacher`,
+      breakthrough_input_name: `martial_art_${index}_breakthrough`,
+      notes_input_name: `martial_art_${index}_notes`,
+      selected_slug: draftString(values, `martial_art_${index}_slug`, existing?.selected_slug || ""),
+      name: draftString(values, `martial_art_${index}_name`, existing?.name || ""),
+      rank: draftString(values, `martial_art_${index}_rank`, existing?.rank || ""),
+      teacher: draftString(values, `martial_art_${index}_teacher`, existing?.teacher || ""),
+      breakthrough: draftString(values, `martial_art_${index}_breakthrough`, existing?.breakthrough || ""),
+      notes: draftString(values, `martial_art_${index}_notes`, existing?.notes || ""),
+    };
+  });
+}
+
+function CharacterXianxiaManualImportPage() {
+  const { campaignSlug } = useParams({
+    from: "/campaigns/$campaignSlug/characters/import/xianxia-manual",
+  });
+  const resolvedCampaignSlug = campaignSlug ?? "";
+  const { apiClient, setAuthRequired } = useApiClient();
+  const [draftValues, setDraftValues] = useState<CharacterAuthoringValues>({});
+  const [contextValues, setContextValues] = useState<Record<string, string>>({});
+  const [manualContext, setManualContext] = useState<CharacterXianxiaManualImportContext | null>(null);
+  const [rowCount, setRowCount] = useState(3);
+  const [statusMessage, setStatusMessage] = useState("");
+
+  const importQuery = useQuery({
+    queryKey: ["character-xianxia-import", resolvedCampaignSlug, JSON.stringify(contextValues)],
+    queryFn: () => apiClient.getXianxiaManualImportContext(resolvedCampaignSlug, contextValues),
+    enabled: Boolean(resolvedCampaignSlug),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (isAuthError(importQuery.error)) {
+      setAuthRequired(true);
+    }
+  }, [importQuery.error, setAuthRequired]);
+
+  useEffect(() => {
+    if (!manualContext && importQuery.data?.import_context) {
+      setManualContext(importQuery.data.import_context);
+    }
+  }, [importQuery.data, manualContext]);
+
+  const importMutation = useMutation({
+    mutationFn: ({ confirm }: { confirm: boolean }) =>
+      apiClient.submitXianxiaManualImport(resolvedCampaignSlug, {
+        values: Object.fromEntries(Object.entries(draftValues).map(([key, value]) => [key, Array.isArray(value) ? value.join("\n") : value])),
+        confirm_import: confirm,
+      }),
+    onSuccess: (payload) => {
+      setStatusMessage(payload.message || "");
+      if ("character" in payload) {
+        if (payload.links.character_url) {
+          window.location.assign(payload.links.character_url);
+        }
+        return;
+      }
+      setManualContext(payload.import_context);
+      setContextValues(payload.import_context.values);
+    },
+  });
+
+  const context = manualContext || importQuery.data?.import_context;
+  const links = importQuery.data?.links;
+  const error = getApiErrorMessage(importQuery.error || importMutation.error);
+
+  const updateValue = (key: string, value: string) => {
+    updateAuthoringValue(setDraftValues, key, value);
+  };
+
+  const submitPreview = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setStatusMessage("");
+    importMutation.mutate({ confirm: false });
+  };
+
+  const confirmImport = () => {
+    setStatusMessage("");
+    importMutation.mutate({ confirm: true });
+  };
+
+  return (
+    <section className="panel character-authoring-page">
+      <div className="panel-header">
+        <div>
+          <p className="meta">Character importer</p>
+          <h1>Import Existing Xianxia Character</h1>
+          <p className="lede">Preview copied values, then create a normal native Xianxia sheet with SQLite-backed mutable state.</p>
+        </div>
+        <div className="article-actions">
+          {links?.gen2_roster_url ? (
+            <a className="button button-secondary" href={links.gen2_roster_url}>
+              Back to roster
+            </a>
+          ) : null}
+          {links?.flask_import_xianxia_url ? (
+            <a className="button button-secondary" href={links.flask_import_xianxia_url}>
+              Flask import
+            </a>
+          ) : null}
+        </div>
+      </div>
+      <ApiErrorNotice isLoading={importQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
+      {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
+      {context?.preview ? (
+        <section className="card character-authoring-preview-card">
+          <h2>Review Import</h2>
+          <div className="builder-preview-list">
+            {Object.entries(context.preview).map(([key, value]) => (
+              <div key={key}>
+                <span className="meta">{key.replace(/_/g, " ")}</span>
+                <strong>{stringFromUnknown(value)}</strong>
+              </div>
+            ))}
+          </div>
+          <button type="button" onClick={confirmImport} disabled={importMutation.isPending}>
+            {importMutation.isPending ? "Importing..." : "Confirm import"}
+          </button>
+        </section>
+      ) : null}
+
+      {context ? (
+        <div className="character-authoring-layout">
+          <form className="stack-form character-authoring-form" onSubmit={submitPreview}>
+            <section className="builder-section">
+              <h2>Identity</h2>
+              <div className="builder-field-grid">
+                {[
+                  ["name", "Character Name", ""],
+                  ["character_slug", "Character Slug", ""],
+                  ["reputation", "Reputation", "Unknown"],
+                ].map(([key, label, fallback]) => (
+                  <label className="field" key={key}>
+                    <span>{label}</span>
+                    <input type="text" name={key} value={draftString(draftValues, key, context.values[key] || fallback)} onChange={(event) => updateValue(key, event.currentTarget.value)} />
+                  </label>
+                ))}
+                <label className="field">
+                  <span>Realm</span>
+                  <select name="realm" value={draftString(draftValues, "realm", context.values.realm || "Mortal")} onChange={(event) => updateValue("realm", event.currentTarget.value)}>
+                    {context.realm_choices.map((realm) => (
+                      <option key={realm} value={realm}>
+                        {realm}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Honor</span>
+                  <select name="honor" value={draftString(draftValues, "honor", context.values.honor || "Honorable")} onChange={(event) => updateValue("honor", event.currentTarget.value)}>
+                    {context.honor_choices.map((honor) => (
+                      <option key={honor} value={honor}>
+                        {honor}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            {([
+              { title: "Attributes", fields: context.attribute_fields },
+              { title: "Efforts", fields: context.effort_fields },
+            ] as Array<{ title: string; fields: CharacterXianxiaManualImportContext["attribute_fields"] }>).map(({ title, fields }) => (
+              <section className="builder-section" key={title}>
+                <h2>{title}</h2>
+                <div className="builder-field-grid">
+                  {fields.map((field) => (
+                    <label className="field" key={field.input_name}>
+                      <span>{field.label}</span>
+                      <input type="number" name={field.input_name} value={draftString(draftValues, field.input_name, field.value)} step={1} onChange={(event) => updateValue(field.input_name, event.currentTarget.value)} />
+                    </label>
+                  ))}
+                </div>
+              </section>
+            ))}
+
+            <section className="builder-section">
+              <h2>Resources</h2>
+              <div className="builder-field-grid">
+                {[
+                  ["hp_max", "HP Max", "10"],
+                  ["stance_max", "Stance Max", "10"],
+                  ["manual_armor_bonus", "Manual Armor Bonus", "0"],
+                  ["insight_available", "Insight Available", "0"],
+                  ["insight_spent", "Insight Spent", "0"],
+                  ["yin_max", "Yin Max", "1"],
+                  ["yang_max", "Yang Max", "1"],
+                  ["dao_max", "Dao Max", "3"],
+                  ["coin", "Coin", "0"],
+                  ["supply", "Supply", "0"],
+                  ["spirit_stones", "Spirit Stones", "0"],
+                ].map(([key, label, fallback]) => (
+                  <label className="field" key={key}>
+                    <span>{label}</span>
+                    <input type="number" name={key} value={draftString(draftValues, key, context.values[key] || fallback)} step={1} onChange={(event) => updateValue(key, event.currentTarget.value)} />
+                  </label>
+                ))}
+                {context.energy_fields.map((field) => (
+                  <label className="field" key={field.max_input_name}>
+                    <span>{field.label} Max</span>
+                    <input type="number" name={field.max_input_name} value={draftString(draftValues, field.max_input_name, field.max_value)} step={1} onChange={(event) => updateValue(field.max_input_name, event.currentTarget.value)} />
+                  </label>
+                ))}
+              </div>
+            </section>
+
+            <section className="builder-section">
+              <h2>Skills</h2>
+              <label className="field">
+                <span>Trained Skills</span>
+                <textarea name="trained_skills_text" rows={6} value={draftString(draftValues, "trained_skills_text", context.values.trained_skills_text || "")} onChange={(event) => updateValue("trained_skills_text", event.currentTarget.value)} />
+              </label>
+            </section>
+
+            <section className="builder-section">
+              <h2>Martial Arts</h2>
+              <div className="manual-import-rows">
+                {manualImportRows(context, rowCount, draftValues).map((row) => (
+                  <article className="manual-import-row" key={row.index}>
+                    <h3>Martial Art {row.index}</h3>
+                    <div className="builder-field-grid">
+                      <label className="field">
+                        <span>Stored Martial Art</span>
+                        <select name={row.slug_input_name} value={row.selected_slug} onChange={(event) => updateValue(row.slug_input_name, event.currentTarget.value)}>
+                          <option value="">Unlinked/manual</option>
+                          {selectOptions(context.martial_art_options)}
+                        </select>
+                      </label>
+                      {[
+                        [row.name_input_name, "Manual Name", row.name],
+                        [row.rank_input_name, "Current Rank", row.rank],
+                        [row.teacher_input_name, "Teacher", row.teacher],
+                        [row.breakthrough_input_name, "Breakthrough", row.breakthrough],
+                        [row.notes_input_name, "Notes", row.notes],
+                      ].map(([key, label, value]) => (
+                        <label className="field" key={key}>
+                          <span>{label}</span>
+                          <input type="text" name={key} value={value} onChange={(event) => updateValue(key, event.currentTarget.value)} />
+                        </label>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <button type="button" className="button button-secondary" onClick={() => setRowCount((current) => current + 1)}>
+                Add Martial Art
+              </button>
+            </section>
+
+            <section className="builder-section">
+              <h2>Inventory And Notes</h2>
+              <label className="field">
+                <span>Manual Inventory</span>
+                <textarea name="inventory_text" rows={8} value={draftString(draftValues, "inventory_text", context.values.inventory_text || "")} onChange={(event) => updateValue("inventory_text", event.currentTarget.value)} />
+              </label>
+              <label className="field">
+                <span>Reference Notes</span>
+                <textarea name="additional_notes_markdown" rows={5} value={draftString(draftValues, "additional_notes_markdown", context.values.additional_notes_markdown || "")} onChange={(event) => updateValue("additional_notes_markdown", event.currentTarget.value)} />
+              </label>
+              <label className="field">
+                <span>Player Notes</span>
+                <textarea name="player_notes_markdown" rows={5} value={draftString(draftValues, "player_notes_markdown", context.values.player_notes_markdown || "")} onChange={(event) => updateValue("player_notes_markdown", event.currentTarget.value)} />
+              </label>
+            </section>
+
+            <div className="builder-actions">
+              <button type="submit" disabled={importMutation.isPending}>
+                {importMutation.isPending ? "Previewing..." : "Preview import"}
+              </button>
+            </div>
+          </form>
+          <aside className="panel character-authoring-sidebar">
+            <h2>Available Martial Arts</h2>
+            {context.martial_art_options.length ? (
+              <ul className="plain-list resource-preview-list">
+                {context.martial_art_options.map((option) => (
+                  <li key={optionValue(option)}>
+                    <span>{optionLabel(option)}</span>
+                    <strong>{option.available_rank_labels?.join(", ") || option.martial_art_style || optionValue(option)}</strong>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="meta">No enabled Martial Art Systems entries are available.</p>
+            )}
+          </aside>
+        </div>
+      ) : null}
+    </section>
+  );
 }
 
 function getApiErrorMessage(error: unknown): ApiMessageEnvelope | null {
@@ -4480,7 +5317,7 @@ function CharacterPane({
                     Cultivation
                   </a>
                 ) : null}
-                <span className="meta">Create, import, and broader authoring stay in Flask for now.</span>
+                <span className="meta">Advanced Editor, level-up, retraining, repair, and cultivation stay in Flask for now.</span>
               </div>
             ) : null}
             {canManagePortrait ? (
@@ -10773,6 +11610,18 @@ const campaignCharacterRosterRoute = createRoute({
   component: CharacterRosterPage,
 });
 
+const campaignCharacterCreateRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/campaigns/$campaignSlug/characters/new",
+  component: CharacterCreatePage,
+});
+
+const campaignCharacterXianxiaManualImportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/campaigns/$campaignSlug/characters/import/xianxia-manual",
+  component: CharacterXianxiaManualImportPage,
+});
+
 const campaignCharacterDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/campaigns/$campaignSlug/characters/$characterSlug",
@@ -10810,6 +11659,8 @@ const routeTree = rootRoute.addChildren([
   campaignSystemsSourceCategoryRoute,
   campaignSystemsEntryRoute,
   campaignCharacterRosterRoute,
+  campaignCharacterCreateRoute,
+  campaignCharacterXianxiaManualImportRoute,
   campaignCharacterDetailRoute,
   campaignCombatRoute,
   campaignSessionRoute,

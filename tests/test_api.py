@@ -125,6 +125,55 @@ def _valid_xianxia_create_data(name: str, *, slug: str = "") -> dict[str, str]:
     }
 
 
+def _valid_xianxia_manual_import_data(name: str = "Imported Lotus", *, slug: str = "imported-lotus") -> dict[str, str]:
+    return {
+        "name": name,
+        "character_slug": slug,
+        "realm": "Immortal",
+        "honor": "Majestic",
+        "reputation": "Saffron court witness",
+        "attribute_str": "9",
+        "attribute_dex": "8",
+        "attribute_con": "7",
+        "attribute_int": "6",
+        "attribute_wis": "5",
+        "attribute_cha": "4",
+        "effort_basic": "3",
+        "effort_weapon": "4",
+        "effort_guns_explosive": "5",
+        "effort_magic": "6",
+        "effort_ultimate": "7",
+        "hp_max": "19",
+        "stance_max": "17",
+        "manual_armor_bonus": "4",
+        "insight_available": "12",
+        "insight_spent": "8",
+        "energy_jing_max": "5",
+        "energy_qi_max": "6",
+        "energy_shen_max": "7",
+        "yin_max": "9",
+        "yang_max": "10",
+        "dao_max": "3",
+        "coin": "12",
+        "supply": "3",
+        "spirit_stones": "2",
+        "trained_skills_text": "Tea Ceremony\nQi Sense | Raised by a wandering hermit\nSky Calling\nBlade Focus",
+        "martial_art_1_slug": "heavenly-palm",
+        "martial_art_1_rank": "Novice",
+        "martial_art_1_teacher": "Elder Qing",
+        "martial_art_1_breakthrough": "Cloud breakthrough",
+        "martial_art_1_notes": "Linked branch",
+        "martial_art_2_name": "Unlisted Fist",
+        "martial_art_2_rank": "Apprentice",
+        "martial_art_2_teacher": "Wandering monk",
+        "martial_art_2_breakthrough": "Wind step",
+        "martial_art_2_notes": "Manual record",
+        "inventory_text": "Spirit rice | 3 | consumable, treasure | Emergency cache\nTravel cloak | 1 | tool | Weathered",
+        "additional_notes_markdown": "Imported from the table sheet.",
+        "player_notes_markdown": "Keep an eye on the spirit rice.",
+    }
+
+
 def _seed_systems_item_entry(
     app,
     *,
@@ -2148,7 +2197,8 @@ def test_api_character_roster_exposes_gen2_links_search_and_portraits(client, ap
     assert payload["result_count"] == 1
     assert payload["tools"]["can_create_characters"] is True
     assert payload["links"]["flask_roster_url"] == "/campaigns/linden-pass/characters"
-    assert payload["links"]["create_character_url"] == "/campaigns/linden-pass/characters/new"
+    assert payload["links"]["create_character_url"] == "/app-next/campaigns/linden-pass/characters/new"
+    assert payload["links"]["flask_create_character_url"] == "/campaigns/linden-pass/characters/new"
     arden = payload["characters"][0]
     assert arden["slug"] == "arden-march"
     assert arden["href"] == "/app-next/campaigns/linden-pass/characters/arden-march"
@@ -2178,6 +2228,110 @@ def test_api_character_roster_exposes_gen2_links_search_and_portraits(client, ap
     assert detail_payload["character"]["controls"]["can_assign_owner"] is False
     assert detail_payload["links"]["flask_character_url"] == "/campaigns/linden-pass/characters/arden-march"
     assert detail_payload["links"]["advanced_editor_url"] == "/campaigns/linden-pass/characters/arden-march/edit"
+
+
+def test_api_character_create_context_uses_gen2_links_and_permissions(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-create-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="player-character-create-api")
+
+    response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/create",
+        headers=api_headers(dm_token),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["lane"] == "dnd5e"
+    assert payload["create"]["lane"] == "dnd5e"
+    assert payload["links"]["create_character_url"] == "/app-next/campaigns/linden-pass/characters/new"
+    assert payload["links"]["flask_create_character_url"] == "/campaigns/linden-pass/characters/new"
+    assert payload["links"]["flask_create_url"] == "/campaigns/linden-pass/characters/new"
+
+    blocked_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/create",
+        headers=api_headers(player_token),
+    )
+
+    assert blocked_response.status_code == 403
+    assert blocked_response.get_json()["error"]["code"] == "forbidden"
+
+    anonymous_response = client.get("/api/v1/campaigns/linden-pass/characters/create")
+
+    assert anonymous_response.status_code == 401
+    assert anonymous_response.get_json()["error"]["code"] == "auth_required"
+
+
+def test_api_xianxia_gen2_create_and_manual_import_write_native_records(client, app, users):
+    _configure_xianxia_campaign(app)
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-xianxia-authoring-api")
+
+    context_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/create",
+        headers=api_headers(dm_token),
+    )
+
+    assert context_response.status_code == 200
+    context_payload = context_response.get_json()
+    assert context_payload["lane"] == "xianxia"
+    assert context_payload["create"]["lane"] == "xianxia"
+    assert context_payload["links"]["create_character_url"] == "/app-next/campaigns/linden-pass/characters/new"
+    assert context_payload["links"]["import_xianxia_url"] == "/app-next/campaigns/linden-pass/characters/import/xianxia-manual"
+    assert context_payload["links"]["flask_import_xianxia_url"] == "/campaigns/linden-pass/characters/import/xianxia-manual"
+
+    create_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/create",
+        headers=api_headers(dm_token),
+        json={"values": _valid_xianxia_create_data("Gen2 Crane", slug="gen2-crane")},
+    )
+
+    assert create_response.status_code == 200
+    create_payload = create_response.get_json()
+    assert create_payload["message"] == "Gen2 Crane created."
+    assert create_payload["links"]["character_url"] == "/app-next/campaigns/linden-pass/characters/gen2-crane"
+    created_definition_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / "gen2-crane"
+        / "definition.yaml"
+    )
+    created_definition = yaml.safe_load(created_definition_path.read_text(encoding="utf-8"))
+    assert created_definition["system"] == "Xianxia"
+    assert created_definition["xianxia"]["realm"] == "Mortal"
+
+    import_values = _valid_xianxia_manual_import_data("Gen2 Imported Lotus", slug="gen2-imported-lotus")
+    preview_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/import/xianxia-manual",
+        headers=api_headers(dm_token),
+        json={"values": import_values},
+    )
+
+    assert preview_response.status_code == 200
+    preview_payload = preview_response.get_json()
+    assert preview_payload["message"] == "Review the imported sheet summary, then confirm to create the character."
+    assert preview_payload["import_context"]["preview"]["name"] == "Gen2 Imported Lotus"
+    preview_definition_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / "gen2-imported-lotus"
+        / "definition.yaml"
+    )
+    assert not preview_definition_path.exists()
+
+    confirm_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/import/xianxia-manual",
+        headers=api_headers(dm_token),
+        json={"values": import_values, "confirm_import": True},
+    )
+
+    assert confirm_response.status_code == 200
+    confirm_payload = confirm_response.get_json()
+    assert confirm_payload["message"] == "Gen2 Imported Lotus imported."
+    assert confirm_payload["links"]["character_url"] == "/app-next/campaigns/linden-pass/characters/gen2-imported-lotus"
+    imported_definition = yaml.safe_load(preview_definition_path.read_text(encoding="utf-8"))
+    assert imported_definition["system"] == "Xianxia"
+    assert imported_definition["source"]["source_path"] == "importer://xianxia-manual"
 
 
 def test_api_character_controls_assignment_and_delete_use_gen2_contract(client, app, users):

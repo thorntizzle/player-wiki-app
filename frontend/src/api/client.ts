@@ -17,6 +17,9 @@ import type {
   CharacterCurrencyPatchPayload,
   CharacterDeletePayload,
   CharacterDeleteResponse,
+  CharacterCreateContextResponse,
+  CharacterCreateSubmitPayload,
+  CharacterCreateSubmitResponse,
   CharacterEquipmentStatePatchPayload,
   CharacterFeatureStatePatchPayload,
   CharacterListResponse,
@@ -40,6 +43,8 @@ import type {
   CharacterXianxiaInventoryEquippedPatchPayload,
   CharacterXianxiaInventoryRemovePayload,
   CharacterXianxiaInventoryUpdatePayload,
+  CharacterXianxiaManualImportPayload,
+  CharacterXianxiaManualImportResponse,
   ContentAssetResponse,
   ContentAssetUpsertPayload,
   ContentPageDeleteResponse,
@@ -859,6 +864,60 @@ export class CampaignApiClient {
   async getCharacter(slug: string, characterSlug: string): Promise<CharacterDetailResponse> {
     return this.requestJson<CharacterDetailResponse>(
       `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}`,
+    );
+  }
+
+  async getCharacterCreateContext(slug: string, values: Record<string, string | string[]> = {}): Promise<CharacterCreateContextResponse> {
+    const params = new URLSearchParams();
+    Object.entries(values).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach((item) => params.append(key, item));
+      } else if (value) {
+        params.set(key, value);
+      }
+    });
+    const search = params.toString() ? `?${params.toString()}` : "";
+    return this.requestJson<CharacterCreateContextResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/create${search}`,
+    );
+  }
+
+  async createCharacter(slug: string, payload: CharacterCreateSubmitPayload): Promise<CharacterCreateSubmitResponse> {
+    return this.requestJson<CharacterCreateSubmitResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/create`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async getXianxiaManualImportContext(
+    slug: string,
+    values: Record<string, string> = {},
+  ): Promise<CharacterXianxiaManualImportResponse> {
+    const params = new URLSearchParams();
+    Object.entries(values).forEach(([key, value]) => {
+      if (value) {
+        params.set(key, value);
+      }
+    });
+    const search = params.toString() ? `?${params.toString()}` : "";
+    return this.requestJson<CharacterXianxiaManualImportResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/import/xianxia-manual${search}`,
+    );
+  }
+
+  async submitXianxiaManualImport(
+    slug: string,
+    payload: CharacterXianxiaManualImportPayload,
+  ): Promise<CharacterXianxiaManualImportResponse | CharacterCreateSubmitResponse> {
+    return this.requestJson<CharacterXianxiaManualImportResponse | CharacterCreateSubmitResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/import/xianxia-manual`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
     );
   }
 

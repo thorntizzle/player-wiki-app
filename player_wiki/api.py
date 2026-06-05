@@ -7,6 +7,7 @@ from functools import wraps
 import hashlib
 from io import BytesIO
 from pathlib import Path
+import re
 from typing import Any
 
 from flask import Blueprint, abort, current_app, jsonify, request, send_file, url_for
@@ -82,11 +83,15 @@ from .campaign_visibility import (
 )
 from .character_builder import (
     CAMPAIGN_ITEMS_SECTION,
+    CAMPAIGN_MECHANICS_SECTION,
     _attach_campaign_item_page_support,
     _build_item_catalog,
     _list_campaign_enabled_entries,
     _normalize_equipment_payloads,
     _normalize_weapon_wield_mode_value,
+    CharacterBuildError,
+    build_level_one_builder_context,
+    build_level_one_character_definition,
     describe_equipment_state_support,
     normalize_definition_to_native_model,
     resolve_weapon_wield_mode,
@@ -109,7 +114,7 @@ from .character_presenter import (
     resolve_item_description_html,
 )
 from .themes import get_theme_preset, is_valid_theme_key, list_theme_presets
-from .character_service import CharacterStateValidationError, merge_state_with_definition
+from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
 from .character_store import CharacterStateConflictError
 from .character_repository import load_campaign_character_config
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
@@ -135,9 +140,11 @@ from .systems_labels import (
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError
 from .system_policy import (
     CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION,
+    CHARACTER_ROUTE_LANE_DND5E,
     CHARACTER_ROUTE_LANE_XIANXIA,
     character_advancement_lane,
     native_character_create_lane,
+    native_character_create_unsupported_message,
     supports_character_controls_routes,
     supports_combat_tracker,
     supports_dnd5e_systems_import,
@@ -149,6 +156,22 @@ from .version import build_app_metadata
 from .xianxia_advancement import (
     record_xianxia_dao_immolating_use_definition,
     request_xianxia_dao_immolating_use_definition,
+)
+from .xianxia_character_builder import (
+    XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT,
+    XIANXIA_MARTIAL_ART_IMPORT_RANKS,
+    build_xianxia_character_create_context,
+    build_xianxia_character_definition,
+    build_xianxia_character_initial_state,
+    list_xianxia_manual_import_martial_art_options,
+)
+from .xianxia_character_importer import build_xianxia_manual_import_character
+from .xianxia_character_model import (
+    XIANXIA_ATTRIBUTE_KEYS,
+    XIANXIA_ATTRIBUTE_LABELS,
+    XIANXIA_EFFORT_KEYS,
+    XIANXIA_EFFORT_LABELS,
+    XIANXIA_ENERGY_KEYS,
 )
 
 
@@ -2175,17 +2198,314 @@ def register_api(app) -> None:
 
     def serialize_character_roster_links(campaign_slug: str, campaign) -> dict[str, str]:
         tools = serialize_character_roster_tools(campaign_slug, campaign)
+        encoded_campaign_slug = campaign_slug
         links = {
             "flask_roster_url": url_for("character_roster_view", campaign_slug=campaign_slug),
+            "gen2_roster_url": f"/app-next/campaigns/{encoded_campaign_slug}/characters",
         }
         if tools["can_create_characters"]:
-            links["create_character_url"] = url_for("character_create_view", campaign_slug=campaign_slug)
+            links["flask_create_character_url"] = url_for("character_create_view", campaign_slug=campaign_slug)
+            links["create_character_url"] = f"/app-next/campaigns/{encoded_campaign_slug}/characters/new"
         if tools["can_import_xianxia_characters"]:
-            links["import_xianxia_url"] = url_for(
+            links["flask_import_xianxia_url"] = url_for(
                 "character_import_xianxia_manual_view",
                 campaign_slug=campaign_slug,
             )
+            links["import_xianxia_url"] = (
+                f"/app-next/campaigns/{encoded_campaign_slug}/characters/import/xianxia-manual"
+            )
         return links
+
+    def list_builder_campaign_page_records(campaign_slug: str, campaign) -> list[object]:
+        relevant_sections = frozenset({CAMPAIGN_MECHANICS_SECTION, CAMPAIGN_ITEMS_SECTION})
+        return [
+            page_record
+            for page_record in current_app.extensions["campaign_page_store"].list_page_records(campaign_slug)
+            if campaign.is_page_visible(page_record.page)
+            and str(page_record.page.section or "").strip() in relevant_sections
+        ]
+
+    def make_json_safe(value: object) -> object:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, dict):
+            return {str(key): make_json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [make_json_safe(item) for item in value]
+        if hasattr(value, "to_dict"):
+            return make_json_safe(value.to_dict())
+        if hasattr(value, "__dict__"):
+            return make_json_safe(
+                {
+                    key: item
+                    for key, item in vars(value).items()
+                    if not str(key).startswith("_")
+                }
+            )
+        return str(value)
+
+    def normalize_character_authoring_values(payload: dict[str, Any]) -> dict[str, Any]:
+        raw_values = payload.get("values") if isinstance(payload.get("values"), dict) else payload
+        values: dict[str, Any] = {}
+        for key, value in dict(raw_values or {}).items():
+            if isinstance(value, list):
+                values[str(key)] = [str(item or "") for item in value]
+            elif value is None:
+                values[str(key)] = ""
+            else:
+                values[str(key)] = str(value)
+        return values
+
+    def serialize_character_authoring_links(campaign_slug: str, campaign) -> dict[str, str]:
+        links = serialize_character_roster_links(campaign_slug, campaign)
+        links["flask_create_url"] = url_for("character_create_view", campaign_slug=campaign_slug)
+        links["gen2_create_url"] = f"/app-next/campaigns/{campaign_slug}/characters/new"
+        if native_character_create_lane(getattr(campaign, "system", "")) == CHARACTER_ROUTE_LANE_XIANXIA:
+            links["flask_import_xianxia_url"] = url_for(
+                "character_import_xianxia_manual_view",
+                campaign_slug=campaign_slug,
+            )
+            links["gen2_import_xianxia_url"] = (
+                f"/app-next/campaigns/{campaign_slug}/characters/import/xianxia-manual"
+            )
+        return links
+
+    def ensure_character_authoring_access(campaign_slug: str):
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+        if get_current_user() is None:
+            return campaign, json_error("Authentication required.", 401, code="auth_required")
+        if not can_access_campaign_scope(campaign_slug, "characters") or not can_manage_campaign_session(
+            campaign_slug
+        ):
+            return campaign, json_error(
+                "You do not have permission to create characters in this campaign.",
+                403,
+                code="forbidden",
+            )
+        if not supports_native_character_create(getattr(campaign, "system", "")):
+            return campaign, json_error(
+                native_character_create_unsupported_message(getattr(campaign, "system", "")),
+                400,
+                code="unsupported_campaign_system",
+            )
+        return campaign, None
+
+    def serialize_dnd_character_create_context(
+        campaign_slug: str,
+        campaign,
+        values: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        builder_context = build_level_one_builder_context(
+            current_app.extensions["systems_service"],
+            campaign_slug,
+            values or {},
+            campaign_page_records=list_builder_campaign_page_records(campaign_slug, campaign),
+        )
+        builder_ready = bool(
+            builder_context.get("class_options")
+            and builder_context.get("species_options")
+            and builder_context.get("background_options")
+        )
+        return {
+            "lane": CHARACTER_ROUTE_LANE_DND5E,
+            "builder_ready": builder_ready,
+            "values": make_json_safe(builder_context.get("values") or {}),
+            "class_options": make_json_safe(builder_context.get("class_options") or []),
+            "species_options": make_json_safe(builder_context.get("species_options") or []),
+            "background_options": make_json_safe(builder_context.get("background_options") or []),
+            "subclass_options": make_json_safe(builder_context.get("subclass_options") or []),
+            "requires_subclass": bool(builder_context.get("requires_subclass")),
+            "choice_sections": make_json_safe(builder_context.get("choice_sections") or []),
+            "preview": make_json_safe(builder_context.get("preview") or {}),
+            "limitations": make_json_safe(builder_context.get("limitations") or []),
+        }
+
+    def serialize_xianxia_character_create_context(
+        campaign_slug: str,
+        values: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        create_context = build_xianxia_character_create_context(
+            values or {},
+            systems_service=current_app.extensions["systems_service"],
+            campaign_slug=campaign_slug,
+        )
+        return {
+            "lane": CHARACTER_ROUTE_LANE_XIANXIA,
+            "values": make_json_safe(create_context.get("values") or {}),
+            "attribute_fields": make_json_safe(create_context.get("attribute_fields") or []),
+            "effort_fields": make_json_safe(create_context.get("effort_fields") or []),
+            "energy_fields": make_json_safe(create_context.get("energy_fields") or []),
+            "trained_skill_fields": make_json_safe(create_context.get("trained_skill_fields") or []),
+            "martial_art_fields": make_json_safe(create_context.get("martial_art_fields") or []),
+            "martial_art_options": make_json_safe(create_context.get("martial_art_options") or []),
+            "martial_art_rank_choices": make_json_safe(create_context.get("martial_art_rank_choices") or []),
+            "manual_armor_field": make_json_safe(create_context.get("manual_armor_field") or {}),
+            "dao_field": make_json_safe(create_context.get("dao_field") or {}),
+            "generic_technique_options": make_json_safe(create_context.get("generic_technique_options") or []),
+            "gm_granted_generic_technique_input": XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT,
+            "defaults": make_json_safe(create_context.get("defaults") or {}),
+        }
+
+    def build_character_create_payload(
+        campaign_slug: str,
+        campaign,
+        values: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        lane = native_character_create_lane(getattr(campaign, "system", ""))
+        if lane == CHARACTER_ROUTE_LANE_DND5E:
+            create_context = serialize_dnd_character_create_context(campaign_slug, campaign, values)
+        elif lane == CHARACTER_ROUTE_LANE_XIANXIA:
+            create_context = serialize_xianxia_character_create_context(campaign_slug, values)
+        else:
+            create_context = {"lane": lane, "builder_ready": False}
+        return {
+            "ok": True,
+            "campaign": serialize_campaign(campaign),
+            "lane": lane,
+            "tools": serialize_character_roster_tools(campaign_slug, campaign),
+            "links": serialize_character_authoring_links(campaign_slug, campaign),
+            "create": create_context,
+        }
+
+    def write_new_character_record(campaign_slug: str, definition, import_metadata, initial_state: dict[str, Any]):
+        config = load_campaign_character_config(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
+        character_dir = config.characters_dir / definition.character_slug
+        definition_path = character_dir / "definition.yaml"
+        import_path = character_dir / "import.yaml"
+        if definition_path.exists() or import_path.exists():
+            raise FileExistsError(
+                f"A character with slug '{definition.character_slug}' already exists in this campaign."
+            )
+        write_yaml(definition_path, definition.to_dict())
+        write_yaml(import_path, import_metadata.to_dict())
+        current_app.extensions["character_state_store"].initialize_state_if_missing(
+            definition,
+            initial_state,
+        )
+        return load_character_record(campaign_slug, definition.character_slug)
+
+    def build_xianxia_manual_import_martial_art_rows(values: dict[str, Any]) -> list[dict[str, object]]:
+        row_numbers: set[int] = set()
+        for key in values:
+            match = re.match(
+                r"^martial_art_(\d+)_(slug|name|rank|teacher|breakthrough|notes)$",
+                str(key),
+            )
+            if match:
+                row_numbers.add(int(match.group(1)))
+        row_count = max(max(row_numbers, default=0), 3)
+        return [
+            {
+                "index": index,
+                "slug_input_name": f"martial_art_{index}_slug",
+                "name_input_name": f"martial_art_{index}_name",
+                "rank_input_name": f"martial_art_{index}_rank",
+                "teacher_input_name": f"martial_art_{index}_teacher",
+                "breakthrough_input_name": f"martial_art_{index}_breakthrough",
+                "notes_input_name": f"martial_art_{index}_notes",
+                "selected_slug": values.get(f"martial_art_{index}_slug", ""),
+                "name": values.get(f"martial_art_{index}_name", ""),
+                "rank": values.get(f"martial_art_{index}_rank", ""),
+                "teacher": values.get(f"martial_art_{index}_teacher", ""),
+                "breakthrough": values.get(f"martial_art_{index}_breakthrough", ""),
+                "notes": values.get(f"martial_art_{index}_notes", ""),
+            }
+            for index in range(1, row_count + 1)
+        ]
+
+    def build_xianxia_manual_import_context(
+        campaign_slug: str,
+        values: dict[str, Any] | None = None,
+        *,
+        preview: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized_values = normalize_character_authoring_values({"values": values or {}})
+        martial_art_options = list_xianxia_manual_import_martial_art_options(
+            systems_service=current_app.extensions["systems_service"],
+            campaign_slug=campaign_slug,
+        )
+        return {
+            "values": normalized_values,
+            "realm_choices": ("Mortal", "Immortal", "Divine"),
+            "honor_choices": ("Venerable", "Majestic", "Honorable", "Disgraced", "Demonic"),
+            "martial_art_rank_choices": list(XIANXIA_MARTIAL_ART_IMPORT_RANKS),
+            "martial_art_rows": build_xianxia_manual_import_martial_art_rows(normalized_values),
+            "attribute_fields": [
+                {
+                    "key": key,
+                    "label": XIANXIA_ATTRIBUTE_LABELS[key],
+                    "input_name": f"attribute_{key}",
+                    "value": normalized_values.get(f"attribute_{key}", "0"),
+                }
+                for key in XIANXIA_ATTRIBUTE_KEYS
+            ],
+            "effort_fields": [
+                {
+                    "key": key,
+                    "label": XIANXIA_EFFORT_LABELS[key],
+                    "input_name": f"effort_{key}",
+                    "value": normalized_values.get(f"effort_{key}", "0"),
+                }
+                for key in XIANXIA_EFFORT_KEYS
+            ],
+            "energy_fields": [
+                {
+                    "key": key,
+                    "label": key.title(),
+                    "max_input_name": f"energy_{key}_max",
+                    "max_value": normalized_values.get(f"energy_{key}_max", "0"),
+                }
+                for key in XIANXIA_ENERGY_KEYS
+            ],
+            "martial_art_options": make_json_safe(martial_art_options),
+            "preview": preview,
+        }
+
+    def build_xianxia_manual_import_payload(values: dict[str, Any]) -> dict[str, Any]:
+        ignored_inputs = {"active_stance", "active_aura"}
+        normalized_values = {
+            key: str(value or "")
+            for key, value in dict(values or {}).items()
+            if key not in ignored_inputs
+        }
+        payload: dict[str, Any] = dict(normalized_values)
+        payload["energy_maxima"] = {
+            key: normalized_values.get(f"energy_{key}_max", "")
+            for key in XIANXIA_ENERGY_KEYS
+        }
+        payload["state"] = {
+            "xianxia": {
+                "currency": {
+                    "coin": normalized_values.get("coin", ""),
+                    "supply": normalized_values.get("supply", ""),
+                    "spirit_stones": normalized_values.get("spirit_stones", ""),
+                },
+                "notes": {
+                    "player_notes_markdown": normalized_values.get("player_notes_markdown", ""),
+                },
+            },
+        }
+        return payload
+
+    def build_xianxia_manual_import_preview(definition, initial_state: dict[str, Any]) -> dict[str, Any]:
+        xianxia = dict(getattr(definition, "xianxia", {}) or {})
+        state_xianxia = dict(initial_state.get("xianxia") or {})
+        inventory = dict(state_xianxia.get("inventory") or {})
+        return {
+            "name": definition.name,
+            "slug": definition.character_slug,
+            "realm": xianxia.get("realm"),
+            "actions_per_turn": xianxia.get("actions_per_turn"),
+            "trained_skill_count": len(list(dict(xianxia.get("skills") or {}).get("trained") or [])),
+            "martial_art_count": len(list(xianxia.get("martial_arts") or [])),
+            "inventory_count": len(list(inventory.get("quantities") or [])),
+            "hp": dict(state_xianxia.get("vitals") or {}).get("current_hp"),
+            "hp_max": dict(xianxia.get("durability") or {}).get("hp_max"),
+            "stance": dict(state_xianxia.get("vitals") or {}).get("current_stance"),
+            "stance_max": dict(xianxia.get("durability") or {}).get("stance_max"),
+        }
 
     def serialize_character_links(campaign_slug: str, campaign, record: CharacterRecord) -> dict[str, str]:
         character_slug = record.definition.character_slug
@@ -5277,6 +5597,189 @@ def register_api(app) -> None:
                 "result_count": len(character_cards),
                 "tools": serialize_character_roster_tools(campaign_slug, campaign),
                 "links": serialize_character_roster_links(campaign_slug, campaign),
+            }
+        )
+
+    @api.get("/campaigns/<campaign_slug>/characters/create")
+    def character_create_context(campaign_slug: str):
+        campaign, access_error = ensure_character_authoring_access(campaign_slug)
+        if access_error is not None:
+            return access_error
+        return jsonify(build_character_create_payload(campaign_slug, campaign, dict(request.args)))
+
+    @api.post("/campaigns/<campaign_slug>/characters/create")
+    def character_create_submit(campaign_slug: str):
+        campaign, access_error = ensure_character_authoring_access(campaign_slug)
+        if access_error is not None:
+            return access_error
+
+        try:
+            payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="invalid_json")
+        values = normalize_character_authoring_values(payload)
+        lane = native_character_create_lane(getattr(campaign, "system", ""))
+        try:
+            if lane == CHARACTER_ROUTE_LANE_XIANXIA:
+                create_context = build_xianxia_character_create_context(
+                    values,
+                    systems_service=current_app.extensions["systems_service"],
+                    campaign_slug=campaign_slug,
+                )
+                definition, import_metadata = build_xianxia_character_definition(
+                    campaign_slug,
+                    create_context,
+                    values,
+                )
+                initial_state = build_xianxia_character_initial_state(definition, values)
+            elif lane == CHARACTER_ROUTE_LANE_DND5E:
+                builder_context = build_level_one_builder_context(
+                    current_app.extensions["systems_service"],
+                    campaign_slug,
+                    values,
+                    campaign_page_records=list_builder_campaign_page_records(campaign_slug, campaign),
+                )
+                builder_ready = bool(
+                    builder_context.get("class_options")
+                    and builder_context.get("species_options")
+                    and builder_context.get("background_options")
+                )
+                if not builder_ready:
+                    return json_error(
+                        "The native character builder needs a supported base class plus enabled Systems species and backgrounds first.",
+                        400,
+                        code="validation_error",
+                    )
+                definition, import_metadata = build_level_one_character_definition(
+                    campaign_slug,
+                    builder_context,
+                    values,
+                )
+                definition = finalize_character_definition_for_write(campaign_slug, definition)
+                initial_state = build_initial_state(definition)
+            else:
+                return json_error(
+                    native_character_create_unsupported_message(getattr(campaign, "system", "")),
+                    400,
+                    code="unsupported_campaign_system",
+                )
+            record = write_new_character_record(campaign_slug, definition, import_metadata, initial_state)
+        except CharacterBuildError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+        except FileExistsError as exc:
+            return json_error(str(exc), 409, code="character_exists")
+        except (CharacterStateValidationError, TypeError, ValueError) as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        return jsonify(
+            {
+                "ok": True,
+                "message": f"{record.definition.name} created.",
+                "character": serialize_character_record(campaign_slug, record),
+                "links": {
+                    **serialize_character_authoring_links(campaign_slug, campaign),
+                    "character_url": (
+                        f"/app-next/campaigns/{campaign_slug}/characters/"
+                        f"{record.definition.character_slug}"
+                    ),
+                    "flask_character_url": url_for(
+                        "character_read_view",
+                        campaign_slug=campaign_slug,
+                        character_slug=record.definition.character_slug,
+                    ),
+                },
+            }
+        )
+
+    @api.get("/campaigns/<campaign_slug>/characters/import/xianxia-manual")
+    def character_xianxia_manual_import_context(campaign_slug: str):
+        campaign, access_error = ensure_character_authoring_access(campaign_slug)
+        if access_error is not None:
+            return access_error
+        if native_character_create_lane(getattr(campaign, "system", "")) != CHARACTER_ROUTE_LANE_XIANXIA:
+            return json_error(
+                "Manual Xianxia character import is only available for Xianxia campaigns.",
+                400,
+                code="unsupported_campaign_system",
+            )
+        values = normalize_character_authoring_values({"values": dict(request.args)})
+        return jsonify(
+            {
+                "ok": True,
+                "campaign": serialize_campaign(campaign),
+                "lane": CHARACTER_ROUTE_LANE_XIANXIA,
+                "links": serialize_character_authoring_links(campaign_slug, campaign),
+                "import_context": build_xianxia_manual_import_context(campaign_slug, values),
+            }
+        )
+
+    @api.post("/campaigns/<campaign_slug>/characters/import/xianxia-manual")
+    def character_xianxia_manual_import_submit(campaign_slug: str):
+        campaign, access_error = ensure_character_authoring_access(campaign_slug)
+        if access_error is not None:
+            return access_error
+        if native_character_create_lane(getattr(campaign, "system", "")) != CHARACTER_ROUTE_LANE_XIANXIA:
+            return json_error(
+                "Manual Xianxia character import is only available for Xianxia campaigns.",
+                400,
+                code="unsupported_campaign_system",
+            )
+        try:
+            request_payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="invalid_json")
+
+        values = normalize_character_authoring_values(request_payload)
+        import_context = build_xianxia_manual_import_context(campaign_slug, values)
+        import_payload = build_xianxia_manual_import_payload(values)
+        try:
+            definition, import_metadata, initial_state = build_xianxia_manual_import_character(
+                import_payload,
+                campaign_slug=campaign_slug,
+                martial_art_options=list(import_context.get("martial_art_options") or []),
+            )
+            preview = build_xianxia_manual_import_preview(definition, initial_state)
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        if not bool(request_payload.get("confirm_import")):
+            return jsonify(
+                {
+                    "ok": True,
+                    "message": "Review the imported sheet summary, then confirm to create the character.",
+                    "campaign": serialize_campaign(campaign),
+                    "lane": CHARACTER_ROUTE_LANE_XIANXIA,
+                    "links": serialize_character_authoring_links(campaign_slug, campaign),
+                    "import_context": build_xianxia_manual_import_context(
+                        campaign_slug,
+                        values,
+                        preview=preview,
+                    ),
+                }
+            )
+
+        try:
+            record = write_new_character_record(campaign_slug, definition, import_metadata, initial_state)
+        except FileExistsError as exc:
+            return json_error(str(exc), 409, code="character_exists")
+
+        return jsonify(
+            {
+                "ok": True,
+                "message": f"{record.definition.name} imported.",
+                "character": serialize_character_record(campaign_slug, record),
+                "links": {
+                    **serialize_character_authoring_links(campaign_slug, campaign),
+                    "character_url": (
+                        f"/app-next/campaigns/{campaign_slug}/characters/"
+                        f"{record.definition.character_slug}"
+                    ),
+                    "flask_character_url": url_for(
+                        "character_read_view",
+                        campaign_slug=campaign_slug,
+                        character_slug=record.definition.character_slug,
+                    ),
+                },
             }
         )
 

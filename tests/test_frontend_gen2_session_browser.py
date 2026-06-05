@@ -6,6 +6,8 @@ import threading
 import pytest
 import yaml
 
+from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
+
 
 @pytest.fixture
 def frontend_gen2_session_live_server(app):
@@ -72,6 +74,23 @@ def _seed_gen2_combat(app, users) -> None:
             movement_total=40,
             created_by_user_id=users["dm"]["id"],
         )
+
+
+def _configure_xianxia_campaign(app) -> None:
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    payload["systems_sources"] = [
+        {
+            "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+            "enabled": True,
+            "default_visibility": "dm",
+        }
+    ]
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
 
 
 def test_gen2_session_browser_exposes_flask_session_capabilities(
@@ -548,7 +567,7 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             expect(page.get_by_text("Shown on the Gen2 sheet.")).to_be_visible()
             expect(page.get_by_role("link", name="Flask sheet")).to_be_visible()
             expect(page.get_by_role("link", name="Advanced Editor")).to_be_visible()
-            expect(page.get_by_text("Create, import, and broader authoring stay in Flask")).to_be_visible()
+            expect(page.get_by_text("Advanced Editor, level-up, retraining, repair, and cultivation stay in Flask")).to_be_visible()
 
             page.locator(".section-tabs").get_by_role("button", name="Controls").click()
             expect(page).to_have_url(
@@ -614,6 +633,139 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             dm_context.close()
             owner_context.close()
             player_context.close()
+            browser.close()
+
+
+def test_gen2_xianxia_character_authoring_create_and_import(
+    frontend_gen2_session_live_server,
+    app,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    _configure_xianxia_campaign(app)
+    base_url = frontend_gen2_session_live_server
+
+    create_values = {
+        "name": "Browser Gen2 Crane",
+        "character_slug": "browser-gen2-crane",
+        "attribute_str": "3",
+        "attribute_dex": "0",
+        "attribute_con": "3",
+        "attribute_int": "0",
+        "attribute_wis": "0",
+        "attribute_cha": "0",
+        "effort_basic": "3",
+        "effort_weapon": "1",
+        "effort_guns_explosive": "0",
+        "effort_magic": "1",
+        "effort_ultimate": "0",
+        "energy_jing": "1",
+        "energy_qi": "1",
+        "energy_shen": "1",
+        "trained_skill_1": "Fishing",
+        "trained_skill_2": "Calligraphy",
+        "trained_skill_3": "Tea Ceremony",
+        "manual_armor_bonus": "1",
+        "dao_current": "1",
+    }
+    create_selects = {
+        "martial_art_1_slug": "demons-fist",
+        "martial_art_1_rank": "initiate",
+        "martial_art_2_slug": "heavenly-palm",
+        "martial_art_2_rank": "initiate",
+        "martial_art_3_slug": "taoist-blade",
+        "martial_art_3_rank": "initiate",
+    }
+    import_values = {
+        "name": "Browser Imported Lotus",
+        "character_slug": "browser-imported-lotus",
+        "reputation": "Browser route witness",
+        "attribute_str": "9",
+        "attribute_dex": "8",
+        "attribute_con": "7",
+        "attribute_int": "6",
+        "attribute_wis": "5",
+        "attribute_cha": "4",
+        "effort_basic": "3",
+        "effort_weapon": "4",
+        "effort_guns_explosive": "5",
+        "effort_magic": "6",
+        "effort_ultimate": "7",
+        "hp_max": "19",
+        "stance_max": "17",
+        "manual_armor_bonus": "4",
+        "insight_available": "12",
+        "insight_spent": "8",
+        "energy_jing_max": "5",
+        "energy_qi_max": "6",
+        "energy_shen_max": "7",
+        "yin_max": "9",
+        "yang_max": "10",
+        "dao_max": "3",
+        "coin": "12",
+        "supply": "3",
+        "spirit_stones": "2",
+        "trained_skills_text": "Tea Ceremony\nQi Sense | Raised by a wandering hermit\nSky Calling",
+        "martial_art_1_rank": "Novice",
+        "martial_art_1_teacher": "Elder Qing",
+        "inventory_text": "Spirit rice | 3 | consumable | Emergency cache",
+        "additional_notes_markdown": "Imported through Gen2.",
+        "player_notes_markdown": "Browser import note.",
+    }
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1280, "height": 900})
+            page = context.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters")
+            expect(page.get_by_role("heading", name="Characters")).to_be_visible(timeout=10000)
+            create_link = page.get_by_role("link", name="Create character")
+            import_link = page.get_by_role("link", name="Import existing")
+            expect(create_link).to_have_attribute("href", re.compile(r"/app-next/campaigns/linden-pass/characters/new$"))
+            expect(import_link).to_have_attribute("href", re.compile(r"/app-next/campaigns/linden-pass/characters/import/xianxia-manual$"))
+
+            create_link.click()
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/characters/new$"))
+            expect(page.get_by_role("heading", name="Create Xianxia Character")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("link", name="Flask create")).to_be_visible()
+            for field_name, value in create_values.items():
+                page.locator(f"[name='{field_name}']").fill(value)
+            for field_name, value in create_selects.items():
+                page.locator(f"[name='{field_name}']").select_option(value)
+            page.get_by_role("button", name="Create character").click()
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/characters/browser-gen2-crane$"), timeout=10000)
+            expect(page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("heading", name=re.compile(r"Browser Gen2 Crane"))).to_be_visible()
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/import/xianxia-manual")
+            expect(page.get_by_role("heading", name="Import Existing Xianxia Character")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("link", name="Flask import")).to_be_visible()
+            page.locator("[name='realm']").select_option("Immortal")
+            page.locator("[name='honor']").select_option("Majestic")
+            page.locator("[name='martial_art_1_slug']").select_option("heavenly-palm")
+            for field_name, value in import_values.items():
+                page.locator(f"[name='{field_name}']").fill(value)
+            page.get_by_role("button", name="Preview import").click()
+            expect(page.get_by_role("heading", name="Review Import")).to_be_visible(timeout=10000)
+            expect(page.get_by_text("Browser Imported Lotus")).to_be_visible()
+            page.get_by_role("button", name="Confirm import").click()
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/characters/browser-imported-lotus$"), timeout=10000)
+            expect(page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("heading", name=re.compile(r"Browser Imported Lotus"))).to_be_visible()
+        finally:
+            page.close()
+            context.close()
             browser.close()
 
 

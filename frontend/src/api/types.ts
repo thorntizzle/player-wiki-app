@@ -1470,9 +1470,167 @@ export interface CharacterListResponse extends ApiResponseBase {
   };
   links?: {
     flask_roster_url?: string;
+    gen2_roster_url?: string;
+    flask_create_character_url?: string;
     create_character_url?: string;
+    flask_import_xianxia_url?: string;
     import_xianxia_url?: string;
   };
+}
+
+export interface CharacterAuthoringLinks {
+  flask_roster_url?: string;
+  gen2_roster_url?: string;
+  flask_create_character_url?: string;
+  create_character_url?: string;
+  flask_import_xianxia_url?: string;
+  import_xianxia_url?: string;
+  flask_create_url?: string;
+  gen2_create_url?: string;
+  gen2_import_xianxia_url?: string;
+  character_url?: string;
+  flask_character_url?: string;
+}
+
+export interface CharacterBuilderOption {
+  key?: string;
+  value?: string;
+  slug?: string;
+  label?: string;
+  title?: string;
+  source_id?: string;
+  entry_key?: string;
+  name?: string;
+  insight_cost?: number;
+  selected?: boolean;
+  available_rank_labels?: string[];
+  martial_art_style?: string;
+}
+
+export interface CharacterDndChoiceField {
+  name: string;
+  label: string;
+  selected?: string;
+  help_text?: string;
+  options: CharacterBuilderOption[];
+}
+
+export interface CharacterDndChoiceSection {
+  title: string;
+  fields: CharacterDndChoiceField[];
+}
+
+export interface CharacterDndCreateContext {
+  lane: "dnd5e";
+  builder_ready: boolean;
+  values: Record<string, string>;
+  class_options: CharacterBuilderOption[];
+  species_options: CharacterBuilderOption[];
+  background_options: CharacterBuilderOption[];
+  subclass_options: CharacterBuilderOption[];
+  requires_subclass: boolean;
+  choice_sections: CharacterDndChoiceSection[];
+  preview: Record<string, unknown>;
+  limitations: string[];
+}
+
+export interface CharacterXianxiaField {
+  key?: string;
+  label: string;
+  input_name: string;
+  value: string;
+  max?: number;
+  min?: number;
+}
+
+export interface CharacterXianxiaMartialArtField {
+  index: number;
+  art_input_name: string;
+  rank_input_name: string;
+  selected_slug: string;
+  selected_rank: string;
+}
+
+export interface CharacterXianxiaCreateContext {
+  lane: "xianxia";
+  values: Record<string, unknown>;
+  attribute_fields: CharacterXianxiaField[];
+  effort_fields: CharacterXianxiaField[];
+  energy_fields: CharacterXianxiaField[];
+  trained_skill_fields: CharacterXianxiaField[];
+  martial_art_fields: CharacterXianxiaMartialArtField[];
+  martial_art_options: CharacterBuilderOption[];
+  martial_art_rank_choices: CharacterBuilderOption[];
+  manual_armor_field: CharacterXianxiaField;
+  dao_field: CharacterXianxiaField;
+  generic_technique_options: CharacterBuilderOption[];
+  gm_granted_generic_technique_input: string;
+  defaults: Record<string, unknown>;
+}
+
+export interface CharacterCreateContextResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  lane: string;
+  tools?: CharacterListResponse["tools"];
+  links: CharacterAuthoringLinks;
+  create: CharacterDndCreateContext | CharacterXianxiaCreateContext | Record<string, unknown>;
+}
+
+export interface CharacterCreateSubmitPayload {
+  values: Record<string, string | string[]>;
+}
+
+export interface CharacterCreateSubmitResponse extends ApiResponseBase {
+  message: string;
+  character: CharacterRecord;
+  links: CharacterAuthoringLinks;
+}
+
+export interface CharacterXianxiaManualImportRow {
+  index: number;
+  slug_input_name: string;
+  name_input_name: string;
+  rank_input_name: string;
+  teacher_input_name: string;
+  breakthrough_input_name: string;
+  notes_input_name: string;
+  selected_slug: string;
+  name: string;
+  rank: string;
+  teacher: string;
+  breakthrough: string;
+  notes: string;
+}
+
+export interface CharacterXianxiaManualImportContext {
+  values: Record<string, string>;
+  realm_choices: string[];
+  honor_choices: string[];
+  martial_art_rank_choices: string[];
+  martial_art_rows: CharacterXianxiaManualImportRow[];
+  attribute_fields: CharacterXianxiaField[];
+  effort_fields: CharacterXianxiaField[];
+  energy_fields: Array<{
+    key: string;
+    label: string;
+    max_input_name: string;
+    max_value: string;
+  }>;
+  martial_art_options: CharacterBuilderOption[];
+  preview?: Record<string, unknown> | null;
+}
+
+export interface CharacterXianxiaManualImportResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  lane: "xianxia";
+  links: CharacterAuthoringLinks;
+  import_context: CharacterXianxiaManualImportContext;
+  message?: string;
+}
+
+export interface CharacterXianxiaManualImportPayload {
+  values: Record<string, string>;
+  confirm_import?: boolean;
 }
 
 export interface CharacterDetailResponse extends ApiResponseBase {

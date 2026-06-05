@@ -235,6 +235,114 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
 
+.character-authoring-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.character-authoring-layout {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.75fr);
+  align-items: start;
+}
+
+.stack-form,
+.character-authoring-form,
+.builder-section,
+.builder-preview-list,
+.manual-import-rows,
+.manual-import-row,
+.character-authoring-sidebar {
+  display: grid;
+  gap: 1rem;
+}
+
+.builder-section {
+  border-top: 1px solid #e5eaf3;
+  padding-top: 1rem;
+}
+
+.builder-section:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.builder-section h2,
+.builder-section h3,
+.character-authoring-sidebar h2,
+.character-authoring-preview-card h2 {
+  margin: 0;
+}
+
+.builder-field-grid,
+.builder-ability-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.field {
+  display: grid;
+  gap: 0.35rem;
+  color: #24344d;
+  font-weight: 700;
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #cfd9e8;
+  border-radius: 6px;
+  padding: 0.55rem 0.65rem;
+  font: inherit;
+  color: #182437;
+  background: #fff;
+}
+
+.field small {
+  color: #60708a;
+  font-weight: 500;
+}
+
+.builder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.builder-preview-list {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.builder-preview-list div {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.55rem;
+  border: 1px solid #e5eaf3;
+  border-radius: 6px;
+  background: #f9fbff;
+}
+
+.manual-import-row {
+  padding: 0.85rem;
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  background: #f9fbff;
+}
+
+.character-authoring-preview-section {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.character-authoring-preview-card {
+  display: grid;
+  gap: 1rem;
+}
+
 .grid {
   display: grid;
   gap: 1rem;
@@ -1692,7 +1800,8 @@ textarea {
   }
 
   .page-layout,
-  .account-settings-layout {
+  .account-settings-layout,
+  .character-authoring-layout {
     grid-template-columns: 1fr;
   }
 
