@@ -1719,10 +1719,68 @@ export interface CharacterAdvancedEditorResponse extends ApiResponseBase {
     flask_advanced_editor_url?: string;
     cultivation_url?: string;
     flask_cultivation_url?: string;
+    level_up_url?: string;
+    flask_level_up_url?: string;
+    flask_progression_repair_url?: string;
   };
 }
 
 export interface CharacterAdvancedEditorPayload {
+  expected_revision: number;
+  values: Record<string, string>;
+}
+
+export interface CharacterLevelUpContext {
+  state_revision: number;
+  values?: Record<string, string>;
+  character_name?: string;
+  current_level: number;
+  next_level: number;
+  advancement_mode?: string;
+  mode_options: CharacterBuilderOption[];
+  can_add_class?: boolean;
+  current_class_rows: string[];
+  target_row_options: CharacterBuilderOption[];
+  target_class_row_id?: string;
+  row_current_level?: number;
+  row_target_level?: number;
+  new_class_options: CharacterBuilderOption[];
+  new_subclass_options: CharacterBuilderOption[];
+  multiclass_requirement_text?: string;
+  multiclass_requirements_met?: boolean;
+  subclass_options: CharacterBuilderOption[];
+  requires_subclass?: boolean;
+  choice_sections: CharacterDndChoiceSection[];
+  limitations: string[];
+  preview: Record<string, unknown>;
+  field_live_preview?: Record<string, unknown>;
+  preview_region_ids?: string[];
+  live_region_ids?: string[];
+}
+
+export interface CharacterLevelUpResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  character: CharacterRecord;
+  lane: "dnd5e" | "repairable" | "unsupported";
+  supported: boolean;
+  message?: string | null;
+  unsupported_message?: string;
+  readiness?: Record<string, unknown>;
+  level_up?: CharacterLevelUpContext | null;
+  links: {
+    character_url?: string;
+    flask_character_url?: string;
+    advanced_editor_url?: string;
+    flask_advanced_editor_url?: string;
+    level_up_url?: string;
+    flask_level_up_url?: string;
+    flask_progression_repair_url?: string;
+    cultivation_url?: string;
+    flask_cultivation_url?: string;
+  };
+}
+
+export interface CharacterLevelUpPayload {
   expected_revision: number;
   values: Record<string, string>;
 }
@@ -1797,6 +1855,9 @@ export interface CharacterDetailResponse extends ApiResponseBase {
     flask_character_url?: string;
     advanced_editor_url?: string;
     flask_advanced_editor_url?: string;
+    level_up_url?: string;
+    flask_level_up_url?: string;
+    flask_progression_repair_url?: string;
     cultivation_url?: string;
     flask_cultivation_url?: string;
   };

@@ -800,12 +800,23 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             expect(page.get_by_text("Insight counters saved.")).to_be_visible(timeout=10000)
             expect(page.locator("#xianxia-cultivation-insight .glance-card", has_text="Available").get_by_text("2")).to_be_visible()
 
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/browser-gen2-crane/level-up")
+            expect(page.get_by_role("heading", name="Level Up Browser Gen2 Crane")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("heading", name="Level-Up Is Not Available In Gen2")).to_be_visible()
+            expect(page.get_by_role("link", name="Cultivation")).to_be_visible()
+
             _sign_in(player_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
             player_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/browser-gen2-crane/cultivation")
             expect(player_page.get_by_text("You do not have permission to manage cultivation for this character.")).to_be_visible(
                 timeout=10000
             )
             assert player_page.get_by_role("button", name="Save Insight").count() == 0
+
+            player_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/browser-gen2-crane/level-up")
+            expect(player_page.get_by_text("You do not have permission to level up this character.")).to_be_visible(
+                timeout=10000
+            )
+            assert player_page.get_by_role("button", name=re.compile(r"Advance to level")).count() == 0
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/import/xianxia-manual")
             expect(page.get_by_role("heading", name="Import Existing Xianxia Character")).to_be_visible(timeout=10000)

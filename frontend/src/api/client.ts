@@ -28,6 +28,8 @@ import type {
   CharacterFeatureStatePatchPayload,
   CharacterListResponse,
   CharacterInventoryPatchPayload,
+  CharacterLevelUpPayload,
+  CharacterLevelUpResponse,
   CharacterNotesPatchPayload,
   CharacterNotesPatchResponse,
   CharacterPortraitDeletePayload,
@@ -886,6 +888,39 @@ export class CampaignApiClient {
       `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/advanced-editor`,
       {
         method: "PUT",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async getCharacterLevelUp(
+    slug: string,
+    characterSlug: string,
+    values: Record<string, string | string[]> = {},
+  ): Promise<CharacterLevelUpResponse> {
+    const params = new URLSearchParams();
+    Object.entries(values).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach((item) => params.append(key, item));
+      } else if (value) {
+        params.set(key, value);
+      }
+    });
+    const search = params.toString() ? `?${params.toString()}` : "";
+    return this.requestJson<CharacterLevelUpResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/level-up${search}`,
+    );
+  }
+
+  async submitCharacterLevelUp(
+    slug: string,
+    characterSlug: string,
+    payload: CharacterLevelUpPayload,
+  ): Promise<CharacterLevelUpResponse> {
+    return this.requestJson<CharacterLevelUpResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/level-up`,
+      {
+        method: "POST",
         body: JSON.stringify(payload),
       },
     );

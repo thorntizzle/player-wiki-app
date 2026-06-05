@@ -9,7 +9,9 @@ import zipfile
 
 import yaml
 
+import player_wiki.api as api_module
 from player_wiki.auth_store import AuthStore
+from player_wiki.character_models import CharacterDefinition
 from player_wiki.systems_importer import Dnd5eSystemsImporter
 from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 from player_wiki.xianxia_character_model import (
@@ -2348,6 +2350,152 @@ def test_api_character_advanced_editor_context_save_and_access(client, app, user
     assert stale_response.get_json()["error"]["code"] == "state_conflict"
 
 
+def test_api_character_level_up_context_save_and_access(client, app, users, set_campaign_visibility, monkeypatch):
+    set_campaign_visibility("linden-pass", characters="players")
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-level-up-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="blocked-character-level-up-api")
+
+    def _ready_level_up(*_args, **_kwargs):
+        return {
+            "status": "ready",
+            "message": "",
+            "current_level": 5,
+            "selected_class_rows": [
+                {
+                    "row_id": "class-row-1",
+                    "row_level": 5,
+                    "class_payload": {"class_name": "Sorcerer", "level": 5},
+                }
+            ],
+        }
+
+    def _level_up_context(_systems_service, campaign_slug, definition, form_values=None, **_kwargs):
+        values = {
+            "advancement_mode": "advance_existing",
+            "target_class_row_id": "class-row-1",
+            "hp_gain": str(dict(form_values or {}).get("hp_gain") or ""),
+        }
+        return {
+            "values": values,
+            "character_name": definition.name,
+            "current_level": 5,
+            "next_level": 6,
+            "campaign_slug": campaign_slug,
+            "advancement_mode": "advance_existing",
+            "mode_options": [{"value": "advance_existing", "label": "Advance existing class"}],
+            "can_add_class": False,
+            "current_class_rows": ["Sorcerer 5"],
+            "target_row_options": [{"value": "class-row-1", "label": "Sorcerer 5"}],
+            "target_class_row_id": "class-row-1",
+            "row_current_level": 5,
+            "row_target_level": 6,
+            "new_class_options": [],
+            "new_subclass_options": [],
+            "multiclass_requirement_text": "",
+            "multiclass_requirements_met": True,
+            "subclass_options": [],
+            "requires_subclass": False,
+            "choice_sections": [],
+            "limitations": ["Fixture level-up boundary."],
+            "preview": {
+                "class_level_text": "Sorcerer 6",
+                "class_rows": ["Sorcerer 6"],
+                "max_hp": 43,
+                "gained_features": ["Font of Magic scaling"],
+                "resources": ["Sorcery Points: 6"],
+                "attacks": [],
+                "spell_slots": [],
+                "new_spells": [],
+            },
+            "field_live_preview": {},
+            "preview_region_ids": [],
+            "live_region_ids": [],
+        }
+
+    def _apply_level_up(_campaign_slug, current_definition, _level_up_context, form_values=None, **kwargs):
+        payload = current_definition.to_dict()
+        profile = dict(payload.get("profile") or {})
+        classes = [dict(row or {}) for row in list(profile.get("classes") or [])]
+        if classes:
+            classes[0]["level"] = 6
+        profile["classes"] = classes
+        profile["class_level_text"] = "Sorcerer 6"
+        payload["profile"] = profile
+        stats = dict(payload.get("stats") or {})
+        stats["max_hp"] = 43
+        payload["stats"] = stats
+        return CharacterDefinition.from_dict(payload), kwargs.get("current_import_metadata"), int(
+            dict(form_values or {}).get("hp_gain") or 0
+        )
+
+    monkeypatch.setattr(api_module, "native_level_up_readiness", _ready_level_up)
+    monkeypatch.setattr(api_module, "build_native_level_up_context", _level_up_context)
+    monkeypatch.setattr(api_module, "build_native_level_up_character_definition", _apply_level_up)
+
+    detail_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(dm_token),
+    )
+    assert detail_response.status_code == 200
+    detail_links = detail_response.get_json()["links"]
+    assert detail_links["level_up_url"] == "/app-next/campaigns/linden-pass/characters/arden-march/level-up"
+    assert detail_links["flask_level_up_url"] == "/campaigns/linden-pass/characters/arden-march/level-up"
+
+    response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/level-up?hp_gain=5",
+        headers=api_headers(dm_token),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["supported"] is True
+    assert payload["lane"] == "dnd5e"
+    assert payload["links"]["level_up_url"] == "/app-next/campaigns/linden-pass/characters/arden-march/level-up"
+    assert payload["links"]["flask_level_up_url"] == "/campaigns/linden-pass/characters/arden-march/level-up"
+    level_up = payload["level_up"]
+    assert level_up["state_revision"] == payload["character"]["state_record"]["revision"]
+    assert level_up["current_level"] == 5
+    assert level_up["next_level"] == 6
+    assert level_up["values"]["hp_gain"] == "5"
+    assert level_up["preview"]["class_level_text"] == "Sorcerer 6"
+
+    blocked_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/level-up",
+        headers=api_headers(player_token),
+    )
+    assert blocked_response.status_code == 403
+    assert blocked_response.get_json()["error"]["code"] == "forbidden"
+
+    update_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/level-up",
+        headers=api_headers(dm_token),
+        json={"expected_revision": level_up["state_revision"], "values": {"hp_gain": "5"}},
+    )
+
+    assert update_response.status_code == 200
+    updated_payload = update_response.get_json()
+    assert updated_payload["message"] == "Arden March advanced to level 6."
+    assert updated_payload["character"]["definition"]["profile"]["class_level_text"] == "Sorcerer 6"
+    assert updated_payload["character"]["state_record"]["revision"] == level_up["state_revision"] + 1
+    definition_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / "arden-march"
+        / "definition.yaml"
+    )
+    saved_definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
+    assert saved_definition["profile"]["class_level_text"] == "Sorcerer 6"
+
+    stale_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/level-up",
+        headers=api_headers(dm_token),
+        json={"expected_revision": level_up["state_revision"], "values": {"hp_gain": "5"}},
+    )
+    assert stale_response.status_code == 409
+    assert stale_response.get_json()["error"]["code"] == "state_conflict"
+
+
 def test_api_character_create_context_uses_gen2_links_and_permissions(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-create-api")
     player_token = issue_api_token(app, users["party"]["email"], label="player-character-create-api")
@@ -2440,6 +2588,26 @@ def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_reco
     assert unsupported_editor_payload["links"]["flask_cultivation_url"] == (
         "/campaigns/linden-pass/characters/gen2-crane/cultivation"
     )
+
+    unsupported_level_up_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/gen2-crane/level-up",
+        headers=api_headers(dm_token),
+    )
+    assert unsupported_level_up_response.status_code == 200
+    unsupported_level_up_payload = unsupported_level_up_response.get_json()
+    assert unsupported_level_up_payload["supported"] is False
+    assert unsupported_level_up_payload["lane"] == "unsupported"
+    assert unsupported_level_up_payload["level_up"] is None
+    assert unsupported_level_up_payload["links"]["cultivation_url"] == (
+        "/app-next/campaigns/linden-pass/characters/gen2-crane/cultivation"
+    )
+
+    blocked_level_up_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/gen2-crane/level-up",
+        headers=api_headers(player_token),
+    )
+    assert blocked_level_up_response.status_code == 403
+    assert blocked_level_up_response.get_json()["error"]["code"] == "forbidden"
 
     cultivation_response = client.get(
         "/api/v1/campaigns/linden-pass/characters/gen2-crane/cultivation",

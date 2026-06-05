@@ -93,6 +93,8 @@ from .character_builder import (
     CharacterBuildError,
     build_level_one_builder_context,
     build_level_one_character_definition,
+    build_native_level_up_character_definition,
+    build_native_level_up_context,
     describe_equipment_state_support,
     native_level_up_readiness,
     normalize_definition_to_native_model,
@@ -144,10 +146,12 @@ from .systems_labels import (
 )
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError
 from .system_policy import (
+    CHARACTER_ADVANCEMENT_LANE_DND5E_LEVEL_UP,
     CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION,
     CHARACTER_ROUTE_LANE_DND5E,
     CHARACTER_ROUTE_LANE_XIANXIA,
     character_advancement_lane,
+    character_advancement_unsupported_message,
     native_character_create_lane,
     native_character_create_unsupported_message,
     supports_character_controls_routes,
@@ -2540,6 +2544,7 @@ def register_api(app) -> None:
             can_access_campaign_scope(campaign_slug, "characters")
             and has_session_mode_access(campaign_slug, character_slug)
             and supports_native_character_tools(campaign_system)
+            and supports_native_character_tools(getattr(record.definition, "system", ""))
         ):
             links["advanced_editor_url"] = gen2_campaign_href(
                 campaign_slug,
@@ -2550,6 +2555,35 @@ def register_api(app) -> None:
                 campaign_slug=campaign_slug,
                 character_slug=character_slug,
             )
+        if (
+            can_access_campaign_scope(campaign_slug, "characters")
+            and can_manage_campaign_session(campaign_slug)
+            and character_advancement_lane(campaign_system) == CHARACTER_ADVANCEMENT_LANE_DND5E_LEVEL_UP
+            and supports_native_character_tools(getattr(record.definition, "system", ""))
+        ):
+            level_up_readiness = native_level_up_readiness(
+                current_app.extensions["systems_service"],
+                campaign_slug,
+                record.definition,
+                campaign_page_records=list_builder_campaign_page_records(campaign_slug, campaign),
+            )
+            readiness_status = str(level_up_readiness.get("status") or "").strip()
+            if readiness_status == "ready":
+                links["level_up_url"] = gen2_campaign_href(
+                    campaign_slug,
+                    f"characters/{character_slug}/level-up",
+                )
+                links["flask_level_up_url"] = url_for(
+                    "character_level_up_view",
+                    campaign_slug=campaign_slug,
+                    character_slug=character_slug,
+                )
+            elif readiness_status == "repairable":
+                links["flask_progression_repair_url"] = url_for(
+                    "character_progression_repair_view",
+                    campaign_slug=campaign_slug,
+                    character_slug=character_slug,
+                )
         if (
             can_access_campaign_scope(campaign_slug, "characters")
             and can_manage_campaign_session(campaign_slug)
@@ -2830,6 +2864,275 @@ def register_api(app) -> None:
             refreshed_record,
             edit_context=edit_context,
             message="Character details updated.",
+        )
+
+    def normalize_character_level_up_values(payload: dict[str, Any]) -> dict[str, str]:
+        raw_values = payload.get("values") if isinstance(payload.get("values"), dict) else payload
+        values: dict[str, str] = {}
+        for key, value in dict(raw_values or {}).items():
+            field_name = str(key or "").strip()
+            if not field_name:
+                continue
+            if isinstance(value, list):
+                values[field_name] = str(value[-1] if value else "")
+            elif value is None:
+                values[field_name] = ""
+            else:
+                values[field_name] = str(value)
+        return values
+
+    def character_level_up_readiness(campaign_slug: str, campaign, record: CharacterRecord) -> dict[str, Any]:
+        campaign_system = getattr(campaign, "system", "")
+        if character_advancement_lane(campaign_system) != CHARACTER_ADVANCEMENT_LANE_DND5E_LEVEL_UP:
+            return {
+                "status": "unsupported",
+                "message": character_advancement_unsupported_message(campaign_system),
+            }
+        if not supports_native_character_tools(getattr(record.definition, "system", "")):
+            return {
+                "status": "unsupported",
+                "message": "Level-up is currently available only for DND-5E native character tools in Gen2.",
+            }
+        return native_level_up_readiness(
+            current_app.extensions["systems_service"],
+            campaign_slug,
+            record.definition,
+            campaign_page_records=list_builder_campaign_page_records(campaign_slug, campaign),
+        )
+
+    def character_level_up_is_supported(readiness: dict[str, Any]) -> bool:
+        return str(readiness.get("status") or "").strip() == "ready"
+
+    def serialize_character_level_up_context(level_up_context: dict[str, Any]) -> dict[str, Any]:
+        keys = (
+            "state_revision",
+            "values",
+            "character_name",
+            "current_level",
+            "next_level",
+            "advancement_mode",
+            "mode_options",
+            "can_add_class",
+            "current_class_rows",
+            "target_row_options",
+            "target_class_row_id",
+            "row_current_level",
+            "row_target_level",
+            "new_class_options",
+            "new_subclass_options",
+            "multiclass_requirement_text",
+            "multiclass_requirements_met",
+            "subclass_options",
+            "requires_subclass",
+            "choice_sections",
+            "limitations",
+            "preview",
+            "field_live_preview",
+            "preview_region_ids",
+            "live_region_ids",
+        )
+        return {key: make_json_safe(level_up_context.get(key)) for key in keys}
+
+    def build_character_level_up_context_parts(
+        campaign_slug: str,
+        campaign,
+        record: CharacterRecord,
+        *,
+        form_values: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        level_up_context = build_native_level_up_context(
+            current_app.extensions["systems_service"],
+            campaign_slug,
+            record.definition,
+            form_values or {},
+            campaign_page_records=list_builder_campaign_page_records(campaign_slug, campaign),
+        )
+        level_up_context["state_revision"] = record.state_record.revision
+        return level_up_context
+
+    def character_level_up_links(
+        campaign_slug: str,
+        campaign,
+        record: CharacterRecord,
+        readiness: dict[str, Any],
+    ) -> dict[str, str]:
+        character_slug = record.definition.character_slug
+        links = {
+            **serialize_character_links(campaign_slug, campaign, record),
+            "character_url": gen2_campaign_href(campaign_slug, f"characters/{character_slug}"),
+            "flask_character_url": url_for(
+                "character_read_view",
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+            ),
+        }
+        readiness_status = str(readiness.get("status") or "").strip()
+        if readiness_status == "ready":
+            links["level_up_url"] = gen2_campaign_href(
+                campaign_slug,
+                f"characters/{character_slug}/level-up",
+            )
+            links["flask_level_up_url"] = url_for(
+                "character_level_up_view",
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+            )
+        elif readiness_status == "repairable":
+            links["flask_progression_repair_url"] = url_for(
+                "character_progression_repair_view",
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+            )
+        return links
+
+    def serialize_character_level_up_response(
+        campaign_slug: str,
+        campaign,
+        record: CharacterRecord,
+        *,
+        readiness: dict[str, Any] | None = None,
+        level_up_context: dict[str, Any] | None = None,
+        message: str | None = None,
+    ):
+        readiness = readiness or character_level_up_readiness(campaign_slug, campaign, record)
+        readiness_status = str(readiness.get("status") or "").strip() or "unsupported"
+        supported = character_level_up_is_supported(readiness)
+        lane = "dnd5e" if supported else ("repairable" if readiness_status == "repairable" else "unsupported")
+        unsupported_message = "" if supported else str(readiness.get("message") or "This character is not ready for Gen2 level-up.")
+        return jsonify(
+            {
+                "ok": True,
+                "campaign": serialize_campaign(campaign),
+                "character": serialize_character_record(campaign_slug, record),
+                "lane": lane,
+                "supported": supported,
+                "message": message,
+                "unsupported_message": unsupported_message,
+                "readiness": make_json_safe(readiness),
+                "level_up": (
+                    serialize_character_level_up_context(level_up_context)
+                    if level_up_context is not None
+                    else None
+                ),
+                "links": character_level_up_links(campaign_slug, campaign, record, readiness),
+            }
+        )
+
+    def load_character_level_up_target(campaign_slug: str, character_slug: str):
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+        record = load_character_record(campaign_slug, character_slug)
+        if not can_manage_campaign_session(campaign_slug):
+            return campaign, record, json_error(
+                "You do not have permission to level up this character.",
+                403,
+                code="forbidden",
+            )
+        return campaign, record, None
+
+    @api.get("/campaigns/<campaign_slug>/characters/<character_slug>/level-up")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_level_up_read(campaign_slug: str, character_slug: str):
+        campaign, record, access_error = load_character_level_up_target(campaign_slug, character_slug)
+        if access_error is not None:
+            return access_error
+        readiness = character_level_up_readiness(campaign_slug, campaign, record)
+        if not character_level_up_is_supported(readiness):
+            return serialize_character_level_up_response(campaign_slug, campaign, record, readiness=readiness)
+        form_values = normalize_character_level_up_values(dict(request.args))
+        try:
+            level_up_context = build_character_level_up_context_parts(
+                campaign_slug,
+                campaign,
+                record,
+                form_values=form_values,
+            )
+        except CharacterBuildError as exc:
+            readiness = {"status": "unsupported", "message": str(exc)}
+            return serialize_character_level_up_response(campaign_slug, campaign, record, readiness=readiness)
+        return serialize_character_level_up_response(
+            campaign_slug,
+            campaign,
+            record,
+            readiness=readiness,
+            level_up_context=level_up_context,
+        )
+
+    @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/level-up")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_level_up_submit(campaign_slug: str, character_slug: str):
+        campaign, record, access_error = load_character_level_up_target(campaign_slug, character_slug)
+        if access_error is not None:
+            return access_error
+        readiness = character_level_up_readiness(campaign_slug, campaign, record)
+        if not character_level_up_is_supported(readiness):
+            return json_error(
+                str(readiness.get("message") or "This character is not ready for Gen2 level-up."),
+                400,
+                code="unsupported_campaign_system",
+            )
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        try:
+            payload = load_json_object()
+            expected_revision = int(payload.get("expected_revision"))
+            form_values = normalize_character_level_up_values(payload)
+            level_up_context = build_character_level_up_context_parts(
+                campaign_slug,
+                campaign,
+                record,
+                form_values=form_values,
+            )
+            target_level = int(level_up_context.get("next_level") or 0)
+            definition, import_metadata, hp_gain = build_native_level_up_character_definition(
+                campaign_slug,
+                record.definition,
+                level_up_context,
+                form_values,
+                current_import_metadata=record.import_metadata,
+            )
+            definition = finalize_character_definition_for_write(campaign_slug, definition)
+            merged_state = merge_state_with_definition(
+                definition,
+                record.state_record.state,
+                hp_delta=hp_gain,
+            )
+            current_app.extensions["character_state_store"].replace_state(
+                definition,
+                merged_state,
+                expected_revision=expected_revision,
+                updated_by_user_id=user.id,
+            )
+            config = load_campaign_character_config(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
+            character_dir = config.characters_dir / character_slug
+            write_yaml(character_dir / "definition.yaml", definition.to_dict())
+            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
+        except CharacterStateConflictError:
+            return json_error(
+                "This sheet changed in another session. Refresh and try again.",
+                409,
+                code="state_conflict",
+            )
+        except (CharacterBuildError, CharacterStateValidationError, TypeError, ValueError) as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        refreshed_record = load_character_record(campaign_slug, character_slug)
+        refreshed_readiness = character_level_up_readiness(campaign_slug, campaign, refreshed_record)
+        refreshed_context = None
+        if character_level_up_is_supported(refreshed_readiness):
+            refreshed_context = build_character_level_up_context_parts(campaign_slug, campaign, refreshed_record)
+        return serialize_character_level_up_response(
+            campaign_slug,
+            campaign,
+            refreshed_record,
+            readiness=refreshed_readiness,
+            level_up_context=refreshed_context,
+            message=f"{definition.name} advanced to level {target_level}.",
         )
 
     def normalize_cultivation_values(payload: dict[str, Any]) -> dict[str, str]:
