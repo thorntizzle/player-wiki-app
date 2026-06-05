@@ -138,6 +138,7 @@ from .system_policy import (
     CHARACTER_ROUTE_LANE_XIANXIA,
     character_advancement_lane,
     native_character_create_lane,
+    supports_character_controls_routes,
     supports_combat_tracker,
     supports_dnd5e_systems_import,
     supports_native_character_create,
@@ -2219,6 +2220,70 @@ def register_api(app) -> None:
             )
         return links
 
+    def serialize_character_controls(campaign_slug: str, campaign, record: CharacterRecord) -> dict[str, Any] | None:
+        character_slug = record.definition.character_slug
+        if not supports_character_controls_routes(getattr(campaign, "system", "")):
+            return None
+        if not has_session_mode_access(campaign_slug, character_slug):
+            return None
+
+        store = get_auth_store()
+        user = get_current_user()
+        assignment = store.get_character_assignment(campaign_slug, character_slug)
+        assigned_user = store.get_user_by_id(assignment.user_id) if assignment is not None else None
+        can_assign_owner = bool(user and user.is_admin)
+
+        player_choices: list[dict[str, Any]] = []
+        if can_assign_owner:
+            for candidate in sorted(
+                store.list_users(),
+                key=lambda item: ((item.display_name or "").lower(), item.email.lower()),
+            ):
+                if not candidate.is_active:
+                    continue
+                membership = store.get_membership(candidate.id, campaign_slug, statuses=("active",))
+                if membership is None or membership.role != "player":
+                    continue
+                player_choices.append(
+                    {
+                        "user_id": candidate.id,
+                        "label": f"{candidate.display_name} ({candidate.email})",
+                        "is_current": bool(assignment and assignment.user_id == candidate.id),
+                    }
+                )
+
+        return {
+            "available": True,
+            "assignment": (
+                {
+                    "user_id": assignment.user_id,
+                    "assignment_type": assignment.assignment_type,
+                    "display_name": assigned_user.display_name if assigned_user is not None else "Unknown user",
+                    "email": assigned_user.email if assigned_user is not None else None,
+                    "admin_href": (
+                        url_for("admin_user_detail", user_id=assigned_user.id)
+                        if can_assign_owner and assigned_user is not None
+                        else None
+                    ),
+                }
+                if assignment is not None
+                else None
+            ),
+            "can_assign_owner": can_assign_owner,
+            "can_delete_character": can_manage_campaign_content(campaign_slug),
+            "current_user_is_owner": bool(user and assignment and assignment.user_id == user.id),
+            "player_choices": player_choices,
+            "links": {
+                "flask_controls_url": url_for(
+                    "character_read_view",
+                    campaign_slug=campaign_slug,
+                    character_slug=character_slug,
+                    page="controls",
+                ),
+                "gen2_roster_url": gen2_campaign_href(campaign_slug, "characters"),
+            },
+        }
+
     def serialize_character_summary(campaign, record: CharacterRecord) -> dict[str, Any]:
         presented = present_character_roster([record])[0]
         return {
@@ -2459,9 +2524,15 @@ def register_api(app) -> None:
             "presented_inventory": list(presented_character.get("inventory") or []),
             "presented_xianxia": dict(presented_character.get("xianxia_read") or {}),
             "portrait": build_character_portrait_payload(campaign, record) if campaign is not None else None,
+            "controls": serialize_character_controls(campaign_slug, campaign, record) if campaign is not None else None,
             "permissions": {
                 "can_edit_session": has_session_mode_access(campaign_slug, record.definition.character_slug),
                 "can_manage_session": can_manage_campaign_session(campaign_slug),
+                "can_use_controls": (
+                    campaign is not None
+                    and supports_character_controls_routes(getattr(campaign, "system", ""))
+                    and has_session_mode_access(campaign_slug, record.definition.character_slug)
+                ),
                 "can_record_xianxia_dao_immolating_use": can_manage_campaign_session(campaign_slug),
             },
         }
@@ -5227,6 +5298,179 @@ def register_api(app) -> None:
                 "ok": True,
                 "character": serialize_character_record(campaign_slug, record),
                 "links": serialize_character_links(campaign_slug, campaign, record),
+            }
+        )
+
+    def load_character_controls_target(campaign_slug: str, character_slug: str):
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+        if not supports_character_controls_routes(getattr(campaign, "system", "")):
+            abort(404)
+        record = load_character_record(campaign_slug, character_slug)
+        return campaign, record
+
+    def serialize_character_controls_response(
+        campaign_slug: str,
+        campaign,
+        record: CharacterRecord,
+        *,
+        message: str,
+    ):
+        return jsonify(
+            {
+                "ok": True,
+                "message": message,
+                "character": serialize_character_record(campaign_slug, record),
+                "links": serialize_character_links(campaign_slug, campaign, record),
+            }
+        )
+
+    @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment")
+    @api_login_required
+    def character_controls_assignment_update(campaign_slug: str, character_slug: str):
+        campaign, record = load_character_controls_target(campaign_slug, character_slug)
+        actor = get_current_user()
+        if actor is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+        if not actor.is_admin:
+            return json_error("You do not have permission to assign character owners.", 403, code="forbidden")
+
+        try:
+            payload = load_json_object()
+            target_user_id = int(payload.get("user_id"))
+        except (TypeError, ValueError):
+            return json_error("Choose a valid player to assign.", 400, code="validation_error")
+
+        store = get_auth_store()
+        target_user = store.get_user_by_id(target_user_id)
+        if target_user is None or not target_user.is_active:
+            return json_error("Choose an active player account to assign.", 400, code="validation_error")
+
+        membership = store.get_membership(target_user.id, campaign_slug, statuses=("active",))
+        if membership is None or membership.role != "player":
+            return json_error(
+                "Character owners must have an active player membership in that campaign.",
+                400,
+                code="validation_error",
+            )
+
+        previous = store.get_character_assignment(campaign_slug, character_slug)
+        assignment = store.upsert_character_assignment(target_user.id, campaign_slug, character_slug)
+        store.write_audit_event(
+            event_type="character_assignment_created",
+            actor_user_id=actor.id,
+            target_user_id=target_user.id,
+            campaign_slug=campaign_slug,
+            character_slug=character_slug,
+            metadata={
+                "previous_user_id": previous.user_id if previous is not None else None,
+                "assignment_type": assignment.assignment_type,
+                "source": "gen2_character_controls",
+            },
+        )
+
+        return serialize_character_controls_response(
+            campaign_slug,
+            campaign,
+            record,
+            message=f"Assigned {character_slug} to {target_user.email}.",
+        )
+
+    @api.delete("/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment")
+    @api_login_required
+    def character_controls_assignment_delete(campaign_slug: str, character_slug: str):
+        campaign, record = load_character_controls_target(campaign_slug, character_slug)
+        actor = get_current_user()
+        if actor is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+        if not actor.is_admin:
+            return json_error("You do not have permission to assign character owners.", 403, code="forbidden")
+
+        store = get_auth_store()
+        assignment = store.get_character_assignment(campaign_slug, character_slug)
+        if assignment is None:
+            return json_error(
+                "That character does not currently have an assigned player.",
+                400,
+                code="validation_error",
+            )
+
+        removed_assignment = store.delete_character_assignment(campaign_slug, character_slug)
+        if removed_assignment is None:
+            return json_error("That character assignment no longer exists.", 400, code="validation_error")
+
+        store.write_audit_event(
+            event_type="character_assignment_removed",
+            actor_user_id=actor.id,
+            target_user_id=removed_assignment.user_id,
+            campaign_slug=campaign_slug,
+            character_slug=character_slug,
+            metadata={
+                "assignment_type": removed_assignment.assignment_type,
+                "source": "gen2_character_controls",
+            },
+        )
+
+        return serialize_character_controls_response(
+            campaign_slug,
+            campaign,
+            record,
+            message=f"Cleared assignment for {character_slug}.",
+        )
+
+    @api.delete("/campaigns/<campaign_slug>/characters/<character_slug>/controls")
+    @api_login_required
+    def character_controls_delete(campaign_slug: str, character_slug: str):
+        campaign, record = load_character_controls_target(campaign_slug, character_slug)
+        if not can_manage_campaign_content(campaign_slug):
+            return json_error("You do not have permission to delete this character.", 403, code="forbidden")
+
+        try:
+            payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+        confirmation = str(payload.get("confirm_character_slug") or "").strip()
+        if confirmation != character_slug:
+            return json_error(f"Type {character_slug} to confirm deletion.", 400, code="validation_error")
+
+        store = get_auth_store()
+        actor = get_current_user()
+        previous_assignment = store.get_character_assignment(campaign_slug, character_slug)
+        deleted = delete_campaign_character_file(
+            current_app.config["CAMPAIGNS_DIR"],
+            campaign_slug,
+            character_slug,
+            state_store=current_app.extensions["character_state_store"],
+            auth_store=store,
+        )
+        if deleted is None:
+            return json_error("That character no longer exists.", 404, code="not_found")
+
+        store.write_audit_event(
+            event_type="character_deleted",
+            actor_user_id=actor.id if actor is not None else None,
+            target_user_id=previous_assignment.user_id if previous_assignment is not None else None,
+            campaign_slug=campaign_slug,
+            character_slug=character_slug,
+            metadata={
+                "deleted_files": deleted.deleted_files,
+                "deleted_state": deleted.deleted_state,
+                "deleted_assignment": deleted.deleted_assignment,
+                "deleted_assets": deleted.deleted_assets,
+                "source": "gen2_character_controls",
+            },
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "message": f"Deleted character {record.definition.name}.",
+                "deleted_character_slug": character_slug,
+                "deleted_character_name": record.definition.name,
+                "links": {
+                    "gen2_roster_url": gen2_campaign_href(campaign_slug, "characters"),
+                    "flask_roster_url": url_for("character_roster_view", campaign_slug=campaign.slug),
+                },
             }
         )
 

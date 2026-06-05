@@ -179,6 +179,11 @@ interface CharacterPortraitDraft {
   caption: string;
 }
 
+interface CharacterControlsDraft {
+  assignedUserId: string;
+  deleteConfirmation: string;
+}
+
 interface DetailFact {
   label: string;
   value: string;
@@ -206,7 +211,8 @@ type CharacterSection =
   | "abilities"
   | "skills"
   | "personal"
-  | "notes";
+  | "notes"
+  | "controls";
 type PaneName = SessionRoutePane;
 type ArticleMode = "manual" | "upload" | "wiki";
 type CombatView = "player" | "status" | "controls";
@@ -422,6 +428,42 @@ const xianxiaCharacterSections: Array<{ id: CharacterSection; label: string }> =
   { id: "personal", label: "Personal" },
   { id: "notes", label: "Notes" },
 ];
+
+function normalizeCharacterSection(value: string | null): CharacterSection | null {
+  switch ((value || "").trim().toLowerCase()) {
+    case "overview":
+    case "quick":
+      return "overview";
+    case "quick-reference":
+      return "quick-reference";
+    case "martial-arts":
+      return "martial-arts";
+    case "resources":
+      return "resources";
+    case "spells":
+    case "spellcasting":
+      return "spells";
+    case "techniques":
+      return "techniques";
+    case "equipment":
+      return "equipment";
+    case "inventory":
+      return "inventory";
+    case "abilities":
+    case "abilities-and-skills":
+      return "abilities";
+    case "skills":
+      return "skills";
+    case "personal":
+      return "personal";
+    case "notes":
+      return "notes";
+    case "controls":
+      return "controls";
+    default:
+      return null;
+  }
+}
 
 const xianxiaVitalsFields: Array<{ key: CharacterXianxiaVitalsField; label: string }> = [
   { key: "currentHp", label: "Current HP" },
@@ -3202,17 +3244,19 @@ function SessionPane({
 function CharacterPane({
   campaignSlug,
   initialCharacterSlug = null,
+  initialSection = null,
   surface = "session",
   onSelectedCharacterChange,
 }: {
   campaignSlug: string;
   initialCharacterSlug?: string | null;
+  initialSection?: CharacterSection | null;
   surface?: "session" | "read" | "combat";
   onSelectedCharacterChange?: (characterSlug: string) => void;
 }) {
   const { apiClient, setAuthRequired } = useApiClient();
   const [selectedSlug, setSelectedSlug] = useState<string | null>(initialCharacterSlug);
-  const [activeCharacterSection, setActiveCharacterSection] = useState<CharacterSection>("overview");
+  const [activeCharacterSection, setActiveCharacterSection] = useState<CharacterSection>(initialSection ?? "overview");
   const [vitalsDraft, setVitalsDraft] = useState<CharacterVitalsDraft>({
     expectedRevision: 0,
     currentHp: "",
@@ -3259,6 +3303,10 @@ function CharacterPane({
     altText: "",
     caption: "",
   });
+  const [controlsDraft, setControlsDraft] = useState<CharacterControlsDraft>({
+    assignedUserId: "",
+    deleteConfirmation: "",
+  });
   const [restPreview, setRestPreview] = useState<CharacterRestPreviewResponse["preview"] | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -3279,6 +3327,12 @@ function CharacterPane({
       setSelectedSlug(initialCharacterSlug || null);
     }
   }, [initialCharacterSlug]);
+
+  useEffect(() => {
+    if (initialSection && initialSection !== activeCharacterSection) {
+      setActiveCharacterSection(initialSection);
+    }
+  }, [initialSection]);
 
   useEffect(() => {
     if (!initialCharacterSlug && !selectedSlug && characterList.length > 0) {
@@ -3432,10 +3486,18 @@ function CharacterPane({
       altText: character.portrait?.alt_text ?? "",
       caption: character.portrait?.caption ?? "",
     });
+    setControlsDraft({
+      assignedUserId: character.controls?.assignment?.user_id ? String(character.controls.assignment.user_id) : "",
+      deleteConfirmation: "",
+    });
     if (portraitFileInputRef.current) {
       portraitFileInputRef.current.value = "";
     }
-  }, [detailQuery.data?.character.state_record.revision, selectedSlug]);
+  }, [
+    detailQuery.data?.character.state_record.revision,
+    detailQuery.data?.character.controls?.assignment?.user_id,
+    selectedSlug,
+  ]);
 
   const detail = detailQuery.data as CharacterDetailResponse | undefined;
   const detailRecord = detail?.character;
@@ -3443,6 +3505,7 @@ function CharacterPane({
   const selected = characterList.find((item) => item.slug === selectedSlug);
   const selectedPortrait = detailRecord?.portrait ?? selected?.portrait ?? null;
   const permissions = detailRecord?.permissions;
+  const controls = detailRecord?.controls ?? null;
   const canEdit = Boolean(permissions?.can_edit_session);
   const canRecordXianxiaDaoUse = Boolean(
     permissions?.can_record_xianxia_dao_immolating_use ?? permissions?.can_manage_session,
@@ -3491,6 +3554,7 @@ function CharacterPane({
 
   const isReadSurface = surface === "read";
   const isCombatSurface = surface === "combat";
+  const canUseControls = isReadSurface && Boolean(permissions?.can_use_controls && controls?.available);
   const canManagePortrait = isReadSurface && canEdit;
   const surfaceMetaLabel = isReadSurface ? "Character sheet" : isCombatSurface ? "Combat Character" : "Session Character";
   const surfaceHeading = isReadSurface ? "Character Sheet" : isCombatSurface ? "Combat Character" : "Session Character";
@@ -3502,7 +3566,17 @@ function CharacterPane({
     if (isDnd && activeCharacterSection === "quick-reference") {
       setActiveCharacterSection("overview");
     }
-  }, [activeCharacterSection, isDnd, isXianxia]);
+    if (activeCharacterSection === "controls" && detailRecord && !canUseControls) {
+      setActiveCharacterSection(isXianxia ? "quick-reference" : "overview");
+    }
+  }, [activeCharacterSection, canUseControls, detailRecord, isDnd, isXianxia]);
+
+  const dndVisibleCharacterSections = canUseControls
+    ? [...dndCharacterSections, { id: "controls" as CharacterSection, label: "Controls" }]
+    : dndCharacterSections;
+  const xianxiaVisibleCharacterSections = canUseControls
+    ? [...xianxiaCharacterSections, { id: "controls" as CharacterSection, label: "Controls" }]
+    : xianxiaCharacterSections;
 
   const handleMutationSuccess = (response: { character: CharacterRecord }, message: string) => {
     if (selectedSlug) {
@@ -3665,6 +3739,37 @@ function CharacterPane({
 
   const portraitMutationPending = upsertPortrait.isPending || deletePortrait.isPending;
 
+  const assignCharacterOwner = useMutation({
+    mutationFn: (payload: { user_id: number }) =>
+      apiClient.assignCharacterOwner(campaignSlug, selectedSlug || "", payload),
+    onSuccess: (response) => handleMutationSuccess(response, response.message || "Assignment saved."),
+    onError: handleMutationError,
+  });
+
+  const clearCharacterOwner = useMutation({
+    mutationFn: () => apiClient.clearCharacterOwner(campaignSlug, selectedSlug || ""),
+    onSuccess: (response) => {
+      setControlsDraft((current) => ({ ...current, assignedUserId: "" }));
+      handleMutationSuccess(response, response.message || "Assignment cleared.");
+    },
+    onError: handleMutationError,
+  });
+
+  const deleteCharacterMutation = useMutation({
+    mutationFn: (payload: { confirm_character_slug: string }) =>
+      apiClient.deleteCharacter(campaignSlug, selectedSlug || "", payload),
+    onSuccess: (response) => {
+      setStatusMessage(response.message || "Character deleted.");
+      setErrorMessage(null);
+      void queryClient.invalidateQueries({ queryKey: ["characters", campaignSlug] });
+      window.location.assign(response.links?.gen2_roster_url || `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters`);
+    },
+    onError: handleMutationError,
+  });
+
+  const controlsMutationPending =
+    assignCharacterOwner.isPending || clearCharacterOwner.isPending || deleteCharacterMutation.isPending;
+
   const previewRest = useMutation({
     mutationFn: (restType: "short" | "long") => apiClient.getCharacterRestPreview(campaignSlug, selectedSlug || "", restType),
     onSuccess: (response) => {
@@ -3730,6 +3835,46 @@ function CharacterPane({
 
   const removePortrait = () => {
     deletePortrait.mutate({ expected_revision: revision });
+  };
+
+  const submitCharacterAssignment = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedSlug || !controls?.can_assign_owner) {
+      setStatusMessage(null);
+      setErrorMessage("Only admins can assign character owners.");
+      return;
+    }
+    const userId = Number(controlsDraft.assignedUserId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      setStatusMessage(null);
+      setErrorMessage("Choose a valid player to assign.");
+      return;
+    }
+    setStatusMessage("Saving...");
+    assignCharacterOwner.mutate({ user_id: userId });
+  };
+
+  const clearCharacterAssignment = () => {
+    if (!selectedSlug || !controls?.can_assign_owner) {
+      setStatusMessage(null);
+      setErrorMessage("Only admins can clear character owners.");
+      return;
+    }
+    setStatusMessage("Saving...");
+    clearCharacterOwner.mutate();
+  };
+
+  const submitCharacterDelete = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedSlug || !controls?.can_delete_character) {
+      setStatusMessage(null);
+      setErrorMessage("You do not have permission to delete this character.");
+      return;
+    }
+    setStatusMessage("Deleting...");
+    deleteCharacterMutation.mutate({
+      confirm_character_slug: controlsDraft.deleteConfirmation.trim(),
+    });
   };
 
   const openItemDetail = (item: { name: string; href?: string; description_html?: string; notes?: string }) => {
@@ -4221,6 +4366,17 @@ function CharacterPane({
     }
   };
 
+  const selectCharacterSection = (section: CharacterSection) => {
+    setActiveCharacterSection(section);
+    if (!isReadSurface || !selectedSlug) {
+      return;
+    }
+    const defaultSection = isXianxia ? "quick-reference" : "overview";
+    const basePath = `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters/${encodeURIComponent(selectedSlug)}`;
+    const nextUrl = section === defaultSection ? basePath : `${basePath}?page=${encodeURIComponent(section)}`;
+    window.history.replaceState(null, "", nextUrl);
+  };
+
   return (
     <div className={isReadSurface ? "session-pane-content character-read-content" : "session-pane-content"}>
       <section className="panel">
@@ -4324,7 +4480,7 @@ function CharacterPane({
                     Cultivation
                   </a>
                 ) : null}
-                <span className="meta">Create, import, controls, and broader authoring stay in Flask for now.</span>
+                <span className="meta">Create, import, and broader authoring stay in Flask for now.</span>
               </div>
             ) : null}
             {canManagePortrait ? (
@@ -4497,12 +4653,12 @@ function CharacterPane({
 
             {isDnd ? (
               <div className="section-tabs" role="tablist" aria-label="Session character sections">
-                {dndCharacterSections.map((section) => (
+                {dndVisibleCharacterSections.map((section) => (
                   <button
                     key={section.id}
                     type="button"
                     className={activeCharacterSection === section.id ? "active" : ""}
-                    onClick={() => setActiveCharacterSection(section.id)}
+                    onClick={() => selectCharacterSection(section.id)}
                   >
                     {section.label}
                   </button>
@@ -4511,12 +4667,12 @@ function CharacterPane({
             ) : null}
             {isXianxia ? (
               <div className="section-tabs" role="tablist" aria-label="Xianxia session character sections">
-                {xianxiaCharacterSections.map((section) => (
+                {xianxiaVisibleCharacterSections.map((section) => (
                   <button
                     key={section.id}
                     type="button"
                     className={activeCharacterSection === section.id ? "active" : ""}
-                    onClick={() => setActiveCharacterSection(section.id)}
+                    onClick={() => selectCharacterSection(section.id)}
                   >
                     {section.label}
                   </button>
@@ -5554,6 +5710,134 @@ function CharacterPane({
                     <span>{String(stats.passive_investigation ?? "--")}</span>
                   </article>
                 </div>
+              </section>
+            ) : null}
+
+            {isReadSurface && activeCharacterSection === "controls" && canUseControls && controls ? (
+              <section className="session-character-form character-controls-panel">
+                <h3>Controls</h3>
+                <div className="character-card-grid character-controls-grid">
+                  <article className="character-state-card">
+                    <h4>Player controls</h4>
+                    {controls.current_user_is_owner ? (
+                      <p>Player-controls workspace for {selected.name}.</p>
+                    ) : (
+                      <p>Character management controls for campaign staff.</p>
+                    )}
+                  </article>
+                  <article className="character-state-card">
+                    <h4>Current owner</h4>
+                    {controls.assignment ? (
+                      <>
+                        <p>
+                          <strong>{controls.assignment.display_name}</strong>
+                          {controls.assignment.email ? <span className="meta"> | {controls.assignment.email}</span> : null}
+                        </p>
+                        <p className="meta">
+                          Assignment: {controls.assignment.assignment_type
+                            ? `${controls.assignment.assignment_type.charAt(0).toUpperCase()}${controls.assignment.assignment_type.slice(1)}`
+                            : "Owner"}
+                        </p>
+                        {controls.assignment.admin_href ? (
+                          <a className="button button-secondary" href={controls.assignment.admin_href}>
+                            Open user record
+                          </a>
+                        ) : null}
+                      </>
+                    ) : (
+                      <p className="meta">No player owner assigned yet.</p>
+                    )}
+                  </article>
+                </div>
+
+                {controls.can_assign_owner ? (
+                  <article className="character-state-card character-controls-manager">
+                    <h4>Assignment controls</h4>
+                    <p className="meta">Assignments require an active player membership in this campaign.</p>
+                    {controls.player_choices.length ? (
+                      <form onSubmit={submitCharacterAssignment} className="inline-two-col">
+                        <label htmlFor="character-owner-assignment" className="chat-label">
+                          Assign owner
+                        </label>
+                        <select
+                          id="character-owner-assignment"
+                          value={controlsDraft.assignedUserId}
+                          disabled={controlsMutationPending}
+                          required
+                          onChange={(event) =>
+                            setControlsDraft({ ...controlsDraft, assignedUserId: event.currentTarget.value })
+                          }
+                        >
+                          <option value="">Choose a player</option>
+                          {controls.player_choices.map((choice) => (
+                            <option key={choice.user_id} value={String(choice.user_id)}>
+                              {choice.label}
+                            </option>
+                          ))}
+                        </select>
+                        <div />
+                        <button type="submit" disabled={controlsMutationPending || !controlsDraft.assignedUserId}>
+                          {assignCharacterOwner.isPending ? "Saving..." : "Save assignment"}
+                        </button>
+                      </form>
+                    ) : (
+                      <p className="meta">No active player memberships are available for assignment in this campaign.</p>
+                    )}
+                    {controls.assignment ? (
+                      <div className="button-row">
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          disabled={controlsMutationPending}
+                          onClick={clearCharacterAssignment}
+                        >
+                          {clearCharacterOwner.isPending ? "Clearing..." : "Clear assignment"}
+                        </button>
+                      </div>
+                    ) : null}
+                  </article>
+                ) : null}
+
+                {controls.can_delete_character ? (
+                  <article className="character-state-card character-controls-danger">
+                    <h4>Delete character</h4>
+                    <p>
+                      Deleting a character removes the file-backed definition/import metadata, the live character state,
+                      and any current assignment for this character slug.
+                    </p>
+                    <form onSubmit={submitCharacterDelete} className="inline-two-col">
+                      <label htmlFor="character-delete-confirmation" className="chat-label">
+                        Type {selected.slug} to confirm
+                      </label>
+                      <input
+                        id="character-delete-confirmation"
+                        type="text"
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={controlsDraft.deleteConfirmation}
+                        disabled={controlsMutationPending}
+                        onChange={(event) =>
+                          setControlsDraft({ ...controlsDraft, deleteConfirmation: event.currentTarget.value })
+                        }
+                      />
+                      <div />
+                      <button
+                        type="submit"
+                        disabled={controlsMutationPending || controlsDraft.deleteConfirmation.trim() !== selected.slug}
+                      >
+                        {deleteCharacterMutation.isPending ? "Deleting..." : "Delete character"}
+                      </button>
+                    </form>
+                  </article>
+                ) : null}
+
+                {controls.links?.flask_controls_url ? (
+                  <div className="button-row">
+                    <a className="button button-secondary" href={controls.links.flask_controls_url}>
+                      Flask Controls
+                    </a>
+                  </div>
+                ) : null}
               </section>
             ) : null}
 
@@ -9000,13 +9284,16 @@ function CharacterDetailPage() {
   const params = useParams({
     from: "/campaigns/$campaignSlug/characters/$characterSlug",
   });
+  const location = useLocation();
   const campaignSlug = params.campaignSlug ?? "";
   const characterSlug = params.characterSlug ?? "";
+  const initialSection = normalizeCharacterSection(new URLSearchParams(location.search).get("page"));
 
   return (
     <CharacterPane
       campaignSlug={campaignSlug}
       initialCharacterSlug={characterSlug}
+      initialSection={initialSection}
       surface="read"
       onSelectedCharacterChange={(nextSlug) => {
         window.history.pushState(

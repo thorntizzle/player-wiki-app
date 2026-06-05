@@ -1192,7 +1192,35 @@ export interface CharacterPortrait {
 export interface CharacterPermissions {
   can_edit_session: boolean;
   can_manage_session?: boolean;
+  can_use_controls?: boolean;
   can_record_xianxia_dao_immolating_use?: boolean;
+}
+
+export interface CharacterControlsAssignment {
+  user_id: number;
+  assignment_type: string;
+  display_name: string;
+  email?: string | null;
+  admin_href?: string | null;
+}
+
+export interface CharacterControlsPlayerChoice {
+  user_id: number;
+  label: string;
+  is_current: boolean;
+}
+
+export interface CharacterControls {
+  available: boolean;
+  assignment?: CharacterControlsAssignment | null;
+  can_assign_owner: boolean;
+  can_delete_character: boolean;
+  current_user_is_owner: boolean;
+  player_choices: CharacterControlsPlayerChoice[];
+  links?: {
+    flask_controls_url?: string;
+    gen2_roster_url?: string;
+  };
 }
 
 export interface CharacterEquipmentWieldOption {
@@ -1424,6 +1452,7 @@ export interface CharacterRecord {
   presented_inventory?: CharacterPresentedInventoryItem[];
   presented_xianxia?: CharacterPresentedXianxia;
   portrait?: CharacterPortrait | null;
+  controls?: CharacterControls | null;
   permissions: CharacterPermissions;
 }
 
@@ -1582,6 +1611,14 @@ export interface CharacterPortraitDeletePayload {
   expected_revision: number;
 }
 
+export interface CharacterAssignmentUpdatePayload {
+  user_id: number;
+}
+
+export interface CharacterDeletePayload {
+  confirm_character_slug: string;
+}
+
 export interface CharacterVitalsPatchResponse extends ApiResponseBase {
   character: CharacterRecord;
 }
@@ -1592,6 +1629,21 @@ export interface CharacterNotesPatchResponse extends ApiResponseBase {
 
 export interface CharacterPortraitMutationResponse extends ApiResponseBase {
   character: CharacterRecord;
+}
+
+export interface CharacterControlsMutationResponse extends ApiResponseBase {
+  message?: string;
+  character: CharacterRecord;
+}
+
+export interface CharacterDeleteResponse extends ApiResponseBase {
+  message?: string;
+  deleted_character_slug: string;
+  deleted_character_name?: string;
+  links?: {
+    gen2_roster_url?: string;
+    flask_roster_url?: string;
+  };
 }
 
 export interface CharacterRestPreviewChange {

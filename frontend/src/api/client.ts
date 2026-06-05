@@ -12,7 +12,11 @@ import type {
   MeResponse,
   CampaignsResponse,
   CharacterDetailResponse,
+  CharacterAssignmentUpdatePayload,
+  CharacterControlsMutationResponse,
   CharacterCurrencyPatchPayload,
+  CharacterDeletePayload,
+  CharacterDeleteResponse,
   CharacterEquipmentStatePatchPayload,
   CharacterFeatureStatePatchPayload,
   CharacterListResponse,
@@ -879,6 +883,43 @@ export class CampaignApiClient {
   ): Promise<CharacterPortraitMutationResponse> {
     return this.requestJson<CharacterPortraitMutationResponse>(
       `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/portrait`,
+      {
+        method: "DELETE",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async assignCharacterOwner(
+    slug: string,
+    characterSlug: string,
+    payload: CharacterAssignmentUpdatePayload,
+  ): Promise<CharacterControlsMutationResponse> {
+    return this.requestJson<CharacterControlsMutationResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/controls/assignment`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async clearCharacterOwner(slug: string, characterSlug: string): Promise<CharacterControlsMutationResponse> {
+    return this.requestJson<CharacterControlsMutationResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/controls/assignment`,
+      {
+        method: "DELETE",
+      },
+    );
+  }
+
+  async deleteCharacter(
+    slug: string,
+    characterSlug: string,
+    payload: CharacterDeletePayload,
+  ): Promise<CharacterDeleteResponse> {
+    return this.requestJson<CharacterDeleteResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/controls`,
       {
         method: "DELETE",
         body: JSON.stringify(payload),

@@ -36,7 +36,7 @@ The current Gen2 build covers:
 
 - campaign list, campaign home, published wiki sections, and published wiki pages
 - Session player/character/DM panes
-- Characters roster and character read/edit shell
+- Characters roster, character read/edit shell, portrait controls, and Controls assignment/delete
 - Combat player view, DM status, and DM controls
 - DM Content statblocks, conditions, staged articles, Player Wiki, and Systems management lanes
 - Systems browsing landing/search, source pages, source categories, and entry detail pages
@@ -94,6 +94,9 @@ The full API reference is maintained in `docs/api-v1.md`. The list below is a qu
 - `GET /campaigns/<campaign_slug>/session/wiki-lookup/preview?page_ref=...` (same-origin, browser route)
 - `GET /api/v1/campaigns/<campaign_slug>/characters`
 - `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>`
+- `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment`
+- `DELETE /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment`
+- `DELETE /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls`
 - `PUT /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/portrait`
 - `DELETE /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/portrait`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals`
@@ -107,7 +110,7 @@ The full API reference is maintained in `docs/api-v1.md`. The list below is a qu
 - `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>`
 - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>`
 
-The character detail response includes Gen2 presentation fields for DND-5E linked details: equipment rows, presented inventory items, and presented spellcasting spells carry source `href` values plus server-rendered `description_html` for the Session Character detail dialogs. The full Gen2 Character route can also upload or remove the character portrait through the revision-checked portrait endpoints.
+The character detail response includes Gen2 presentation fields for DND-5E linked details: equipment rows, presented inventory items, and presented spellcasting spells carry source `href` values plus server-rendered `description_html` for the Session Character detail dialogs. The full Gen2 Character route can upload or remove the character portrait through the revision-checked portrait endpoints, and its Controls section now covers owner assignment/clear plus checked character deletion where permissions allow.
 
 Authentication notes:
 

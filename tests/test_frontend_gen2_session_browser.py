@@ -493,20 +493,26 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
     frontend_gen2_session_live_server,
     app,
     users,
-    tmp_path,
+    set_campaign_visibility,
 ):
     try:
         from playwright.sync_api import expect, sync_playwright
     except Exception as exc:
         pytest.skip(f"Playwright unavailable: {exc}")
 
+    set_campaign_visibility("linden-pass", characters="players")
     _seed_arden_portrait(app)
     base_url = frontend_gen2_session_live_server
 
     with sync_playwright() as playwright:
         try:
             browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page(viewport={"width": 1280, "height": 900})
+            dm_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            owner_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            player_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            page = dm_context.new_page()
+            owner_page = owner_context.new_page()
+            player_page = player_context.new_page()
         except Exception as exc:
             pytest.skip(f"Playwright browser unavailable: {exc}")
 
@@ -542,26 +548,41 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             expect(page.get_by_text("Shown on the Gen2 sheet.")).to_be_visible()
             expect(page.get_by_role("link", name="Flask sheet")).to_be_visible()
             expect(page.get_by_role("link", name="Advanced Editor")).to_be_visible()
-            expect(page.get_by_text("Create, import, controls, and broader authoring stay in Flask")).to_be_visible()
+            expect(page.get_by_text("Create, import, and broader authoring stay in Flask")).to_be_visible()
 
-            portrait_file = tmp_path / "gen2-portrait.png"
-            portrait_file.write_bytes(
-                base64.b64decode(
-                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-                )
+            page.locator(".section-tabs").get_by_role("button", name="Controls").click()
+            expect(page).to_have_url(
+                re.compile(r"/app-next/campaigns/linden-pass/characters/arden-march\?page=controls$"),
+                timeout=5000,
             )
-            portrait_manager = page.locator("form.character-portrait-manager")
-            expect(portrait_manager).to_be_visible()
-            portrait_manager.get_by_label("Alt text").fill("Arden Gen2 portrait")
-            portrait_manager.get_by_label("Caption").fill("Uploaded from the Gen2 browser test.")
-            portrait_manager.locator("input[type='file']").set_input_files(str(portrait_file))
-            expect(portrait_manager.get_by_text("gen2-portrait.png")).to_be_visible(timeout=5000)
-            portrait_manager.get_by_role("button", name="Save portrait").click()
-            expect(page.get_by_text("Portrait saved.")).to_be_visible(timeout=5000)
-            expect(page.get_by_text("Uploaded from the Gen2 browser test.")).to_be_visible()
-            portrait_manager.get_by_role("button", name="Remove portrait").click()
-            expect(page.get_by_text("Portrait removed.")).to_be_visible(timeout=5000)
-            expect(page.locator(".character-portrait img")).not_to_be_visible()
+            expect(page.get_by_role("heading", name="Controls", exact=True)).to_be_visible(timeout=5000)
+            expect(page.get_by_role("heading", name="Player controls", exact=True)).to_be_visible()
+            expect(page.get_by_role("heading", name="Current owner", exact=True)).to_be_visible()
+            expect(page.get_by_text("Owner Player")).to_be_visible()
+            expect(page.get_by_role("heading", name="Delete character")).to_be_visible()
+            expect(page.get_by_role("button", name="Delete character")).to_be_disabled()
+            expect(page.get_by_role("link", name="Flask Controls")).to_be_visible()
+            assert page.get_by_role("heading", name="Assignment controls").count() == 0
+
+            _sign_in(owner_page, base_url, email=users["owner"]["email"], password=users["owner"]["password"])
+            owner_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/arden-march?page=controls")
+            expect(owner_page.get_by_role("heading", name="Controls", exact=True)).to_be_visible(timeout=10000)
+            expect(owner_page.get_by_text("Player-controls workspace for Arden March.")).to_be_visible()
+            assert owner_page.get_by_role("heading", name="Delete character").count() == 0
+            assert owner_page.get_by_role("heading", name="Assignment controls").count() == 0
+
+            _sign_in(player_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
+            player_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/arden-march?page=controls")
+            expect(player_page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)
+            expect(player_page.get_by_role("button", name="Overview")).to_be_visible()
+            assert player_page.get_by_role("button", name="Controls").count() == 0
+            assert player_page.get_by_role("heading", name="Controls", exact=True).count() == 0
+
+            page.locator(".section-tabs").get_by_role("button", name="Overview").click()
+            expect(page).to_have_url(
+                re.compile(r"/app-next/campaigns/linden-pass/characters/arden-march$"),
+                timeout=5000,
+            )
 
             page.reload()
             expect(page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)
@@ -588,6 +609,11 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             )
         finally:
             page.close()
+            owner_page.close()
+            player_page.close()
+            dm_context.close()
+            owner_context.close()
+            player_context.close()
             browser.close()
 
 

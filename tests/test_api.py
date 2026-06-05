@@ -2171,8 +2171,107 @@ def test_api_character_roster_exposes_gen2_links_search_and_portraits(client, ap
     assert detail_response.status_code == 200
     detail_payload = detail_response.get_json()
     assert detail_payload["character"]["portrait"]["url"] == arden["portrait"]["url"]
+    assert detail_payload["character"]["permissions"]["can_use_controls"] is True
+    assert detail_payload["character"]["controls"]["available"] is True
+    assert detail_payload["character"]["controls"]["assignment"]["display_name"] == "Owner Player"
+    assert detail_payload["character"]["controls"]["can_delete_character"] is True
+    assert detail_payload["character"]["controls"]["can_assign_owner"] is False
     assert detail_payload["links"]["flask_character_url"] == "/campaigns/linden-pass/characters/arden-march"
     assert detail_payload["links"]["advanced_editor_url"] == "/campaigns/linden-pass/characters/arden-march/edit"
+
+
+def test_api_character_controls_assignment_and_delete_use_gen2_contract(client, app, users):
+    admin_token = issue_api_token(app, users["admin"]["email"], label="admin-character-controls-api")
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-controls-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="player-character-controls-api")
+
+    blocked_assign_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/controls/assignment",
+        headers=api_headers(dm_token),
+        json={"user_id": users["party"]["id"]},
+    )
+
+    assert blocked_assign_response.status_code == 403
+    assert blocked_assign_response.get_json()["error"]["code"] == "forbidden"
+
+    assign_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/controls/assignment",
+        headers=api_headers(admin_token),
+        json={"user_id": users["party"]["id"]},
+    )
+
+    assert assign_response.status_code == 200
+    assigned_payload = assign_response.get_json()
+    assert assigned_payload["message"] == "Assigned arden-march to party@example.com."
+    assert assigned_payload["character"]["controls"]["assignment"]["display_name"] == "Party Player"
+    assert assigned_payload["character"]["controls"]["can_assign_owner"] is True
+    assert any(
+        choice["user_id"] == users["party"]["id"] and choice["is_current"]
+        for choice in assigned_payload["character"]["controls"]["player_choices"]
+    )
+
+    with app.app_context():
+        store = AuthStore()
+        assignment = store.get_character_assignment("linden-pass", "arden-march")
+        assert assignment is not None
+        assert assignment.user_id == users["party"]["id"]
+
+    clear_response = client.delete(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/controls/assignment",
+        headers=api_headers(admin_token),
+    )
+
+    assert clear_response.status_code == 200
+    assert clear_response.get_json()["character"]["controls"]["assignment"] is None
+
+    with app.app_context():
+        store = AuthStore()
+        assert store.get_character_assignment("linden-pass", "arden-march") is None
+
+    blocked_delete_response = client.delete(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/controls",
+        headers=api_headers(player_token),
+        json={"confirm_character_slug": "arden-march"},
+    )
+
+    assert blocked_delete_response.status_code == 403
+    assert blocked_delete_response.get_json()["error"]["code"] == "forbidden"
+
+    invalid_delete_response = client.delete(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/controls",
+        headers=api_headers(dm_token),
+        json={"confirm_character_slug": "not-arden-march"},
+    )
+
+    assert invalid_delete_response.status_code == 400
+    assert invalid_delete_response.get_json()["error"]["message"] == "Type arden-march to confirm deletion."
+
+    definition_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / "arden-march"
+        / "definition.yaml"
+    )
+    assert definition_path.exists()
+
+    delete_response = client.delete(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/controls",
+        headers=api_headers(dm_token),
+        json={"confirm_character_slug": "arden-march"},
+    )
+
+    assert delete_response.status_code == 200
+    delete_payload = delete_response.get_json()
+    assert delete_payload["deleted_character_slug"] == "arden-march"
+    assert delete_payload["links"]["gen2_roster_url"] == "/app-next/campaigns/linden-pass/characters"
+
+    with app.app_context():
+        store = AuthStore()
+        state_store = app.extensions["character_state_store"]
+        assert store.get_character_assignment("linden-pass", "arden-march") is None
+        assert state_store.get_state("linden-pass", "arden-march") is None
+    assert not definition_path.exists()
 
 
 def test_api_character_portrait_upload_remove_uses_revisioned_gen2_contract(

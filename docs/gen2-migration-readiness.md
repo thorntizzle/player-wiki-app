@@ -20,8 +20,8 @@ This document tracks the current Flask-to-Gen2 frontend migration state. Flask r
 | Published wiki pages | `/campaigns/<slug>/pages/<page>` | `/app-next/campaigns/<slug>/pages/<page>` | Feel-test ready | Gen2 renders safe article HTML, sidebar context, and protected assets. |
 | Session | `/campaigns/<slug>/session` | `/app-next/campaigns/<slug>/session` | Feel-test ready | Player Session, Session Character, DM Session, live polling, local state preservation, and article handoffs are covered. |
 | Characters roster | `/campaigns/<slug>/characters` | `/app-next/campaigns/<slug>/characters` | Feel-test ready | Roster search, cards, portraits, and fallback tool links are covered. |
-| Character read/edit shell | `/campaigns/<slug>/characters/<character>` | `/app-next/campaigns/<slug>/characters/<character>` | Partial | Gen2 reuses the proven Character pane for DND-5E/Xianxia read, inline state edits, and portrait upload/remove. Broader authoring remains Flask-first. |
-| Character create/import | `/campaigns/<slug>/characters/create`, import routes | Flask fallback links from Gen2 | Needs Gen2 pass | Native create, imports, Advanced Editor, Cultivation, level-up, retraining, progression repair, controls, and deletion remain Flask-rendered. |
+| Character read/edit shell | `/campaigns/<slug>/characters/<character>` | `/app-next/campaigns/<slug>/characters/<character>` | Partial | Gen2 reuses the proven Character pane for DND-5E/Xianxia read, inline state edits, portrait upload/remove, owner assignment/clear, and checked deletion. Broader authoring remains Flask-first. |
+| Character create/import | `/campaigns/<slug>/characters/create`, import routes | Flask fallback links from Gen2 | Needs Gen2 pass | Native create, imports, Advanced Editor, Cultivation, level-up, retraining, and progression repair remain Flask-rendered. |
 | Combat player view | `/campaigns/<slug>/combat` | `/app-next/campaigns/<slug>/combat` | Feel-test ready | Player combat workspace, selected PC workspace, carousel, and polling preservation are covered. |
 | Combat DM status | `/campaigns/<slug>/combat/dm` or status view | `/app-next/campaigns/<slug>/combat?view=status` | Feel-test ready | Selected-combatant focus, compact tactical edits, condition add/remove, and selected-PC detail are covered. |
 | Combat DM controls | `/campaigns/<slug>/combat/dm?view=controls` or controls view | `/app-next/campaigns/<slug>/combat?view=controls` | Feel-test ready | Player/manual/statblock/Systems seeding, turn advance, and checked clear-tracker cleanup are covered. |
@@ -41,7 +41,7 @@ This document tracks the current Flask-to-Gen2 frontend migration state. Flask r
 
 These surfaces should not be considered for default-route promotion until they receive their own Gen2 parity pass:
 
-- Character authoring and management: native create, imports, Advanced Editor, Cultivation, controls, level-up, retraining, progression repair, and deletion.
+- Character authoring and management: native create, imports, Advanced Editor, Cultivation, level-up, retraining, and progression repair.
 - Admin: app administration, bootstrap/support operations, and admin-only maintenance pages.
 
 These pages can continue to be linked from Gen2 chrome as Flask fallbacks, but each needs a dedicated parity slice before the route can move under `/app-next/` or become a redirect candidate.
@@ -56,7 +56,7 @@ The remaining Flask-first pages are not equally risky. Use this order unless a s
 | Done | Account settings | It is small, shared, and directly tied to theme and live-session preferences used by the Gen2 shell. | Users can change theme and live-session preference from Gen2 with the same persistence as Flask. |
 | Done | Campaign Help | It is mostly static campaign guidance and is a good low-risk test of Gen2 matching Flask's explanatory page layout. | Help content is readable in Gen2, linked from the shared campaign chrome, and backed by player/DM browser coverage. |
 | Done | Campaign Control | It is permission-sensitive but smaller than character authoring, and it controls visibility assumptions used by Gen2 navigation. | Visibility/config saves behave like Flask and preserve audit/history expectations. |
-| 1 | Character authoring and management | It is the largest remaining workflow family. The portrait slice has landed; remaining lanes include native create/import, Advanced Editor, Cultivation, level-up, retraining, repair, controls, and deletion. | Each authoring lane has JSON or browser-backed parity, stale-state handling where needed, and fallback links until the whole family is accepted. |
+| 1 | Character authoring and management | It is the largest remaining workflow family. The portrait and Controls/deletion slices have landed; remaining lanes include native create/import, Advanced Editor, Cultivation, level-up, retraining, and repair. | Each authoring lane has JSON or browser-backed parity, stale-state handling where needed, and fallback links until the whole family is accepted. |
 | 2 | Admin | It is sensitive, low-frequency, and does not block player-facing Gen2 promotion. | Admin support/maintenance operations keep their existing permission and safety behavior. |
 
 ## Visual Parity Gate
@@ -99,7 +99,7 @@ Manual acceptance is recorded after the user has tried the Gen2 surface in the l
 | --- | --- | --- | --- |
 | Session | Accepted for current functionality feel test | Needs visual parity pass | User noted the framework feels more responsive and Session appears functionally at parity, but layout still needs to match Flask. |
 | Campaign home/wiki browsing | Pending explicit user acceptance | Needs visual parity pass | Browser coverage exists; user manual acceptance has not been recorded. |
-| Characters read shell | Pending explicit user acceptance | Needs visual parity pass | Broader authoring remains Flask-first. |
+| Characters read shell | Pending explicit user acceptance | Needs visual parity pass | Portrait controls plus owner assignment/clear and checked deletion now have Gen2 parity; broader authoring remains Flask-first. |
 | Combat | Pending explicit user acceptance | Needs visual parity pass | Live pressure remeasurement remains open before transport changes. |
 | DM Content lanes | Pending explicit user acceptance | Needs visual parity pass | Functional browser coverage exists for statblocks, conditions, staged articles, Player Wiki, and Systems management. |
 | Systems browsing | Pending explicit user acceptance | Needs visual parity pass | Functional API/browser coverage exists for landing/search, source, category, and entry detail. |
@@ -118,7 +118,7 @@ Manual acceptance is recorded after the user has tried the Gen2 surface in the l
 ## Current Test Coverage
 
 - `tests/test_frontend_pilot.py` verifies `/app-next/` static serving and SPA fallback for deep links.
-- `tests/test_frontend_gen2_session_browser.py` covers the current promoted Gen2 feel-test surfaces: shell/session, wiki browsing, character roster/detail, combat player/status/controls, all DM Content lanes including Systems, Systems browsing, Account settings, Campaign Help, and Campaign Control.
+- `tests/test_frontend_gen2_session_browser.py` covers the current promoted Gen2 feel-test surfaces: shell/session, wiki browsing, character roster/detail including Controls access, combat player/status/controls, all DM Content lanes including Systems, Systems browsing, Account settings, Campaign Help, and Campaign Control.
 - Focused API coverage exists in `tests/test_api.py` for the JSON contracts used by the Gen2 surfaces.
 
 ## Local Build And Host

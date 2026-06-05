@@ -411,7 +411,7 @@ The detail route renders the structured character definition plus live SQLite-ba
 - system-aware subpage navigation: DND-5E sheets include lanes such as `Quick Reference`, `Spellcasting`, `Features`, `Equipment`, `Inventory`, `Personal`, `Notes`, and `Controls`; Xianxia sheets use `Quick Reference`, `Martial Arts`, `Techniques`, `Resources`, `Skills`, `Equipment`, `Inventory`, `Personal`, `Notes`, and `Controls`
 - a read-mode `Equipment` manager for editable users so they can add Systems-linked or custom supplemental gear without opening the advanced editor
 - a portrait slot on `Personal`, stored as a campaign asset and shown in read mode and on editable Character views
-- a permissioned `Controls` subpage for editable users, with room for current admin/DM controls and future player-owned controls
+- a permissioned `Controls` subpage for editable users, including player-owner status, admin owner assignment/clear, and checked character deletion
 - current HP and temp HP
 - Xianxia current Stance, Jing/Qi/Shen, Yin/Yang, Dao, and manual active Stance/Aura state on the Resources lane for authorized inline editors
 - resource trackers
@@ -441,7 +441,7 @@ Campaign `observer` users remain read-only and do not get inline state-edit form
 The app now keeps the three editing lanes explicit in the browser UI:
 
 - The normal Character page is the in-page state-edit lane for quick HP/resource/spell/inventory/currency and notes updates
-- `Advanced Editor` is the durable sheet-structure lane for spell-list edits, level-up, controls, and other definition-level changes
+- `Advanced Editor` is the durable sheet-structure lane for spell-list edits, level-up, and other definition-level changes
 - `Session Character` is the active-session lane for live play during an active session
 - `Combat` or DM-side `Encounter status` is the encounter-context lane tied to the selected `combatant=<id>` deep link
 
@@ -474,7 +474,7 @@ For Xianxia sheets, the current normal Character inline lane supports:
 
 The inline state forms save immediately by form and follow the same revision-guard pattern used by Session and Combat.
 
-Not every Character subpage or campaign system is yet fully migrated to this pattern. Profile text and portrait controls remain outside the inline state-edit scope for now, and
+Not every Character subpage or campaign system is yet fully migrated to this pattern. Profile text remains outside the inline state-edit scope for now, and
 broader sheet maintenance and advancement tooling stay in `Advanced Editor`.
 
 If a stale write is submitted, the app shows a conflict message and asks the user to refresh before trying again.

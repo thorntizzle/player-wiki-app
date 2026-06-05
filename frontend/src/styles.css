@@ -1387,6 +1387,28 @@ textarea {
   margin: 0.25rem 0;
 }
 
+.character-controls-panel {
+  align-items: stretch;
+}
+
+.character-controls-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.character-controls-manager {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.character-controls-danger {
+  border-color: #f1b4aa;
+  background: #fff7f5;
+}
+
+.character-controls-danger h4 {
+  color: #7f1d1d;
+}
+
 .compact-state-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
