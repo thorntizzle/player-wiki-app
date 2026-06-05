@@ -567,7 +567,28 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             expect(page.get_by_text("Shown on the Gen2 sheet.")).to_be_visible()
             expect(page.get_by_role("link", name="Flask sheet")).to_be_visible()
             expect(page.get_by_role("link", name="Advanced Editor")).to_be_visible()
-            expect(page.get_by_text("Advanced Editor, level-up, retraining, repair, and cultivation stay in Flask")).to_be_visible()
+            expect(page.get_by_role("link", name="Flask editor")).to_be_visible()
+            expect(page.get_by_text("Level-up, retraining, repair, and cultivation stay in Flask")).to_be_visible()
+
+            page.get_by_role("link", name="Advanced Editor").click()
+            expect(page).to_have_url(
+                re.compile(r"/app-next/campaigns/linden-pass/characters/arden-march/edit$"),
+                timeout=5000,
+            )
+            expect(page.get_by_role("heading", name="Edit Arden March")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("heading", name="Reference Text")).to_be_visible()
+            expect(page.get_by_role("heading", name="Custom Features")).to_be_visible()
+            expect(page.get_by_role("link", name="Flask editor")).to_be_visible()
+            page.get_by_label("Biography").fill("Browser Gen2 biography note.")
+            page.get_by_role("button", name="Save character edits").click()
+            expect(page.get_by_text("Character details updated.")).to_be_visible(timeout=10000)
+            expect(page.get_by_label("Biography")).to_have_value("Browser Gen2 biography note.")
+            page.get_by_role("link", name="Back to sheet").first.click()
+            expect(page).to_have_url(
+                re.compile(r"/app-next/campaigns/linden-pass/characters/arden-march$"),
+                timeout=5000,
+            )
+            expect(page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)
 
             page.locator(".section-tabs").get_by_role("button", name="Controls").click()
             expect(page).to_have_url(
@@ -589,6 +610,9 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             expect(owner_page.get_by_text("Player-controls workspace for Arden March.")).to_be_visible()
             assert owner_page.get_by_role("heading", name="Delete character").count() == 0
             assert owner_page.get_by_role("heading", name="Assignment controls").count() == 0
+            owner_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/arden-march/edit")
+            expect(owner_page.get_by_role("heading", name="Edit Arden March")).to_be_visible(timeout=10000)
+            expect(owner_page.get_by_role("button", name="Save character edits")).to_be_visible()
 
             _sign_in(player_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
             player_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/arden-march?page=controls")
@@ -596,6 +620,9 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             expect(player_page.get_by_role("button", name="Overview")).to_be_visible()
             assert player_page.get_by_role("button", name="Controls").count() == 0
             assert player_page.get_by_role("heading", name="Controls", exact=True).count() == 0
+            player_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/arden-march/edit")
+            expect(player_page.get_by_text("You do not have permission to edit this character.")).to_be_visible(timeout=10000)
+            assert player_page.get_by_role("button", name="Save character edits").count() == 0
 
             page.locator(".section-tabs").get_by_role("button", name="Overview").click()
             expect(page).to_have_url(

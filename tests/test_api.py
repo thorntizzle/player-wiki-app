@@ -71,6 +71,54 @@ def _write_character_state(app, character_slug: str, mutator) -> None:
         )
 
 
+def _advanced_editor_values(editor_context: dict) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for group_name in ("proficiency_fields", "reference_fields", "stat_adjustment_fields"):
+        for field in editor_context.get(group_name, []):
+            field_name = str(field.get("name") or "").strip()
+            if field_name:
+                values[field_name] = str(field.get("value") or "")
+
+    for row in editor_context.get("recoverable_penalty_rows", []):
+        row_index = int(row.get("index") or 0)
+        if row_index <= 0:
+            continue
+        values[f"recoverable_penalty_id_{row_index}"] = str(row.get("id") or "")
+        values[f"recoverable_penalty_source_{row_index}"] = str(row.get("source") or "")
+        values[f"recoverable_penalty_target_{row_index}"] = str(row.get("target") or "")
+        values[f"recoverable_penalty_amount_{row_index}"] = str(row.get("amount") or "")
+        values[f"recoverable_penalty_notes_{row_index}"] = str(row.get("notes") or "")
+
+    for row in editor_context.get("feature_rows", []):
+        row_index = int(row.get("index") or 0)
+        if row_index <= 0:
+            continue
+        values[f"custom_feature_id_{row_index}"] = str(row.get("id") or "")
+        values[f"custom_feature_name_{row_index}"] = str(row.get("name") or "")
+        values[f"custom_feature_page_ref_{row_index}"] = str(row.get("page_ref") or "")
+        values[f"custom_feature_activation_type_{row_index}"] = str(row.get("activation_type") or "")
+        values[f"custom_feature_description_{row_index}"] = str(row.get("description_markdown") or "")
+        values[f"custom_feature_resource_max_{row_index}"] = str(row.get("resource_max") or "")
+        values[f"custom_feature_resource_reset_on_{row_index}"] = str(row.get("resource_reset_on") or "")
+        for field in row.get("choice_fields", []):
+            field_name = str(field.get("name") or "").strip()
+            if field_name:
+                values[field_name] = str(field.get("selected") or "")
+
+    for row in editor_context.get("equipment_rows", []):
+        row_index = int(row.get("index") or 0)
+        if row_index <= 0:
+            continue
+        values[f"manual_item_id_{row_index}"] = str(row.get("id") or "")
+        values[f"manual_item_name_{row_index}"] = str(row.get("name") or "")
+        values[f"manual_item_page_ref_{row_index}"] = str(row.get("page_ref") or "")
+        values[f"manual_item_quantity_{row_index}"] = str(row.get("quantity") or "")
+        values[f"manual_item_weight_{row_index}"] = str(row.get("weight") or "")
+        values[f"manual_item_notes_{row_index}"] = str(row.get("notes") or "")
+
+    return values
+
+
 def _write_campaign_config(app, mutator) -> None:
     campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
     payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
@@ -2227,7 +2275,77 @@ def test_api_character_roster_exposes_gen2_links_search_and_portraits(client, ap
     assert detail_payload["character"]["controls"]["can_delete_character"] is True
     assert detail_payload["character"]["controls"]["can_assign_owner"] is False
     assert detail_payload["links"]["flask_character_url"] == "/campaigns/linden-pass/characters/arden-march"
-    assert detail_payload["links"]["advanced_editor_url"] == "/campaigns/linden-pass/characters/arden-march/edit"
+    assert detail_payload["links"]["advanced_editor_url"] == "/app-next/campaigns/linden-pass/characters/arden-march/edit"
+    assert detail_payload["links"]["flask_advanced_editor_url"] == "/campaigns/linden-pass/characters/arden-march/edit"
+
+
+def test_api_character_advanced_editor_context_save_and_access(client, app, users, set_campaign_visibility):
+    set_campaign_visibility("linden-pass", characters="players")
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-editor-api")
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-character-editor-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="blocked-character-editor-api")
+
+    response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/advanced-editor",
+        headers=api_headers(dm_token),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["supported"] is True
+    assert payload["lane"] == "dnd5e"
+    assert payload["links"]["advanced_editor_url"] == "/app-next/campaigns/linden-pass/characters/arden-march/edit"
+    assert payload["links"]["flask_advanced_editor_url"] == "/campaigns/linden-pass/characters/arden-march/edit"
+    editor = payload["editor"]
+    assert editor["state_revision"] == payload["character"]["state_record"]["revision"]
+    assert [field["name"] for field in editor["reference_fields"]][:2] == [
+        "physical_description_markdown",
+        "background_markdown",
+    ]
+    assert editor["feature_rows"]
+    assert editor["equipment_rows"]
+
+    owner_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/advanced-editor",
+        headers=api_headers(owner_token),
+    )
+    assert owner_response.status_code == 200
+    assert owner_response.get_json()["supported"] is True
+
+    blocked_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/advanced-editor",
+        headers=api_headers(player_token),
+    )
+    assert blocked_response.status_code == 403
+    assert blocked_response.get_json()["error"]["code"] == "forbidden"
+
+    values = _advanced_editor_values(editor)
+    values["physical_description_markdown"] = "Gen2 physical reference text."
+    values["biography_markdown"] = "Gen2 biography reference text."
+    values["stat_adjustment_speed"] = "5"
+    update_response = client.put(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/advanced-editor",
+        headers=api_headers(dm_token),
+        json={"expected_revision": editor["state_revision"], "values": values},
+    )
+
+    assert update_response.status_code == 200
+    updated_payload = update_response.get_json()
+    assert updated_payload["message"] == "Character details updated."
+    assert updated_payload["editor"]["state_revision"] == editor["state_revision"] + 1
+    assert updated_payload["character"]["definition"]["profile"]["biography_markdown"] == "Gen2 biography reference text."
+    assert updated_payload["character"]["state_record"]["state"]["notes"]["physical_description_markdown"] == (
+        "Gen2 physical reference text."
+    )
+    assert updated_payload["character"]["definition"]["stats"]["manual_adjustments"]["speed"] == 5
+
+    stale_response = client.put(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/advanced-editor",
+        headers=api_headers(dm_token),
+        json={"expected_revision": editor["state_revision"], "values": values},
+    )
+    assert stale_response.status_code == 409
+    assert stale_response.get_json()["error"]["code"] == "state_conflict"
 
 
 def test_api_character_create_context_uses_gen2_links_and_permissions(client, app, users):
@@ -2298,6 +2416,20 @@ def test_api_xianxia_gen2_create_and_manual_import_write_native_records(client, 
     created_definition = yaml.safe_load(created_definition_path.read_text(encoding="utf-8"))
     assert created_definition["system"] == "Xianxia"
     assert created_definition["xianxia"]["realm"] == "Mortal"
+
+    unsupported_editor_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/gen2-crane/advanced-editor",
+        headers=api_headers(dm_token),
+    )
+
+    assert unsupported_editor_response.status_code == 200
+    unsupported_editor_payload = unsupported_editor_response.get_json()
+    assert unsupported_editor_payload["supported"] is False
+    assert unsupported_editor_payload["lane"] == "unsupported"
+    assert unsupported_editor_payload["editor"] is None
+    assert unsupported_editor_payload["links"]["cultivation_url"] == (
+        "/campaigns/linden-pass/characters/gen2-crane/cultivation"
+    )
 
     import_values = _valid_xianxia_manual_import_data("Gen2 Imported Lotus", slug="gen2-imported-lotus")
     preview_response = client.post(

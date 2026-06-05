@@ -1633,12 +1633,106 @@ export interface CharacterXianxiaManualImportPayload {
   confirm_import?: boolean;
 }
 
+export interface CharacterEditorField {
+  name: string;
+  label: string;
+  value?: string;
+  help_text?: string;
+}
+
+export interface CharacterEditorChoiceField {
+  name: string;
+  label: string;
+  selected?: string;
+  help_text?: string;
+  options: CharacterBuilderOption[];
+}
+
+export interface CharacterEditorRecoverablePenaltyRow {
+  index: number;
+  id?: string;
+  source?: string;
+  target?: string;
+  amount?: string;
+  notes?: string;
+}
+
+export interface CharacterEditorFeatureRow {
+  index: number;
+  id?: string;
+  name?: string;
+  page_ref?: string;
+  activation_type?: string;
+  description_markdown?: string;
+  resource_max?: string;
+  resource_reset_on?: string;
+  choice_fields?: CharacterEditorChoiceField[];
+}
+
+export interface CharacterEditorEquipmentRow {
+  index: number;
+  id?: string;
+  name?: string;
+  page_ref?: string;
+  quantity?: string;
+  weight?: string;
+  notes?: string;
+}
+
+export interface CharacterEditorManagedEquipmentRow {
+  name: string;
+  quantity?: number;
+  weight?: string;
+}
+
+export interface CharacterAdvancedEditorContext {
+  state_revision: number;
+  values?: Record<string, string>;
+  proficiency_fields: CharacterEditorField[];
+  reference_fields: CharacterEditorField[];
+  stat_adjustment_fields: CharacterEditorField[];
+  recoverable_penalty_rows: CharacterEditorRecoverablePenaltyRow[];
+  feature_rows: CharacterEditorFeatureRow[];
+  equipment_rows: CharacterEditorEquipmentRow[];
+  activation_options: CharacterBuilderOption[];
+  resource_reset_options: CharacterBuilderOption[];
+  recoverable_penalty_target_options: CharacterBuilderOption[];
+  campaign_page_options: CharacterBuilderOption[];
+  equipment_page_options: CharacterBuilderOption[];
+  linked_feature_authoring_supported: boolean;
+  linked_feature_authoring_message?: string;
+  existing_managed_equipment?: CharacterEditorManagedEquipmentRow[];
+}
+
+export interface CharacterAdvancedEditorResponse extends ApiResponseBase {
+  campaign: CampaignRecord;
+  character: CharacterRecord;
+  lane: "dnd5e" | "unsupported";
+  supported: boolean;
+  message?: string | null;
+  unsupported_message?: string;
+  editor?: CharacterAdvancedEditorContext | null;
+  links: {
+    character_url?: string;
+    flask_character_url?: string;
+    advanced_editor_url?: string;
+    flask_advanced_editor_url?: string;
+    cultivation_url?: string;
+  };
+}
+
+export interface CharacterAdvancedEditorPayload {
+  expected_revision: number;
+  values: Record<string, string>;
+}
+
 export interface CharacterDetailResponse extends ApiResponseBase {
   character: CharacterRecord;
   links?: {
     flask_roster_url?: string;
     flask_character_url?: string;
     advanced_editor_url?: string;
+    flask_advanced_editor_url?: string;
     cultivation_url?: string;
   };
 }

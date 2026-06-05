@@ -11,6 +11,8 @@ import type {
   CampaignDetailResponse,
   MeResponse,
   CampaignsResponse,
+  CharacterAdvancedEditorPayload,
+  CharacterAdvancedEditorResponse,
   CharacterDetailResponse,
   CharacterAssignmentUpdatePayload,
   CharacterControlsMutationResponse,
@@ -864,6 +866,26 @@ export class CampaignApiClient {
   async getCharacter(slug: string, characterSlug: string): Promise<CharacterDetailResponse> {
     return this.requestJson<CharacterDetailResponse>(
       `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}`,
+    );
+  }
+
+  async getCharacterAdvancedEditor(slug: string, characterSlug: string): Promise<CharacterAdvancedEditorResponse> {
+    return this.requestJson<CharacterAdvancedEditorResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/advanced-editor`,
+    );
+  }
+
+  async updateCharacterAdvancedEditor(
+    slug: string,
+    characterSlug: string,
+    payload: CharacterAdvancedEditorPayload,
+  ): Promise<CharacterAdvancedEditorResponse> {
+    return this.requestJson<CharacterAdvancedEditorResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/advanced-editor`,
+      {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      },
     );
   }
 

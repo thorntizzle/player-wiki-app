@@ -343,6 +343,47 @@ body {
   gap: 1rem;
 }
 
+.gen2-character-editor,
+.gen2-character-editor .read-section,
+.character-edit-stack,
+.character-edit-row {
+  display: grid;
+  gap: 1rem;
+}
+
+.gen2-character-editor .read-section {
+  border-top: 1px solid #e5eaf3;
+  padding-top: 1rem;
+}
+
+.gen2-character-editor .read-section:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.gen2-character-editor .section-heading h2,
+.character-edit-row h3 {
+  margin: 0;
+}
+
+.character-edit-grid,
+.character-edit-row__grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.character-edit-row__grid--equipment {
+  grid-template-columns: minmax(180px, 1fr) minmax(110px, 0.45fr) minmax(120px, 0.55fr);
+}
+
+.character-edit-row {
+  padding: 0.85rem;
+  border: 1px solid #d8e1ee;
+  border-radius: 8px;
+  background: #f9fbff;
+}
+
 .grid {
   display: grid;
   gap: 1rem;
