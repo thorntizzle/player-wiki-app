@@ -2,6 +2,8 @@
 
 This document tracks the current Flask-to-Gen2 frontend migration state. Flask remains the production reference UI until an individual surface is accepted for replacement.
 
+Temporary testing contingency: the Flask campaign picker and Flask Campaign Home page expose a browser-session-backed frontend mode switch. The default mode remains stable Flask; choosing Gen2 preview only changes campaign picker card destinations and exposes explicit `/app-next/campaigns/<slug>` links from Campaign Home. It does not redirect Flask campaign routes to Gen2.
+
 ## Status Labels
 
 - `Feel-test ready`: Gen2 has practical parity for the listed workflow and local browser coverage.
@@ -109,6 +111,7 @@ Manual acceptance is recorded after the user has tried the Gen2 surface in the l
 
 - Keep Flask routes available until the corresponding Gen2 surface has been accepted after manual feel testing.
 - Do not add redirects from Flask routes to Gen2 routes yet. Route-level redirects should wait until a surface is accepted for replacement and the fallback path is still obvious.
+- Keep the temporary Gen2 preview switch opt-in. It can expose `/app-next/` links from Flask home surfaces for testing, but it must not become a route-level redirect or change fresh-session defaults.
 - Keep Flask fallback links on Gen2 surfaces for workflows that remain fallback-only or are still awaiting manual acceptance, especially Systems imports/shared-core editing, CLI/bootstrap recovery handoffs, and newly ported surfaces such as Admin.
 - Treat visual/layout parity as a promotion gate, not as cosmetic follow-up. Several Gen2 surfaces are functionally feel-test ready while still needing layout polish against the Flask rendition.
 
@@ -122,6 +125,7 @@ Manual acceptance is recorded after the user has tried the Gen2 surface in the l
 - `tests/test_frontend_gen2_session_browser.py::test_gen2_combat_visual_parity_smoke` covers the Combat player, DM status, and DM controls visual parity slice with desktop layout checks and mobile overflow checks.
 - `tests/test_frontend_gen2_session_browser.py::test_gen2_dm_content_browser_visual_parity_smoke` covers the DM Content statblocks, staged-articles, conditions, Player Wiki, and Systems visual parity slice with desktop layout checks and mobile overflow checks.
 - Focused API coverage exists in `tests/test_api.py` for the JSON contracts used by the Gen2 surfaces.
+- `tests/test_auth_and_wiki.py` has focused coverage for the Flask campaign picker and Campaign Home Gen2 preview switch, including Flask-by-default links, opt-in Gen2 links, Flask-route preservation, sign-in preservation, and unsafe next-url rejection.
 
 ## Local Build And Host
 

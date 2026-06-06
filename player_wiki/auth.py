@@ -40,6 +40,10 @@ from .repository_store import RepositoryStore
 from .themes import ThemePreset, get_theme_preset, is_valid_theme_key, list_theme_presets, normalize_theme_key
 
 AUTH_SESSION_KEY = "auth_session_token"
+FRONTEND_MODE_SESSION_KEY = "frontend_mode"
+DEFAULT_FRONTEND_MODE = "flask"
+GEN2_FRONTEND_MODE = "gen2"
+VALID_FRONTEND_MODES = frozenset({DEFAULT_FRONTEND_MODE, GEN2_FRONTEND_MODE})
 
 
 @dataclass(slots=True)
@@ -226,7 +230,9 @@ def register_auth(app: Flask) -> None:
         if session_record is not None:
             get_auth_store().revoke_session(session_record.id)
 
+        preserve_frontend_mode = get_frontend_mode()
         session.clear()
+        session[FRONTEND_MODE_SESSION_KEY] = preserve_frontend_mode
         flash("Signed out.", "success")
         return redirect(url_for("sign_in"))
 
@@ -422,7 +428,28 @@ def register_auth(app: Flask) -> None:
             entries = get_public_campaign_entries()
         else:
             entries = get_accessible_campaign_entries()
-        return render_template("campaign_picker.html", campaign_entries=entries)
+        return render_template(
+            "campaign_picker.html",
+            campaign_entries=entries,
+            frontend_mode=get_frontend_mode(),
+        )
+
+    @app.post("/campaigns/mode")
+    def campaign_frontend_mode() -> str:
+        requested_mode = request.form.get("frontend_mode", "").strip().lower()
+        next_url = request.form.get("next", "").strip()
+
+        if requested_mode not in VALID_FRONTEND_MODES:
+            flash("Choose a valid campaign frontend mode.", "error")
+            return redirect(resolve_next_url(next_url))
+
+        session[FRONTEND_MODE_SESSION_KEY] = requested_mode
+        if requested_mode == GEN2_FRONTEND_MODE:
+            flash("Campaign frontend mode set to Gen2 preview.", "success")
+        else:
+            flash("Campaign frontend mode set to Flask.", "success")
+
+        return redirect(resolve_next_url(next_url))
 
 
 def get_auth_store() -> AuthStore:
@@ -900,9 +927,11 @@ def campaign_systems_entry_access_required(view):
 
 
 def begin_browser_session(raw_token: str) -> None:
+    preserved_mode = get_frontend_mode()
     session.clear()
     session.permanent = True
     session[AUTH_SESSION_KEY] = raw_token
+    session[FRONTEND_MODE_SESSION_KEY] = preserved_mode
 
 
 def validate_password_inputs(password: str, password_confirmation: str) -> list[str]:
@@ -928,3 +957,15 @@ def resolve_next_url(next_url: str) -> str:
     if is_safe_next_url(next_url):
         return next_url
     return url_for("home")
+
+
+def normalize_frontend_mode(raw_mode: str | None) -> str:
+    if isinstance(raw_mode, str):
+        normalized = raw_mode.strip().lower()
+    else:
+        normalized = DEFAULT_FRONTEND_MODE
+    return normalized if normalized in VALID_FRONTEND_MODES else DEFAULT_FRONTEND_MODE
+
+
+def get_frontend_mode() -> str:
+    return normalize_frontend_mode(session.get(FRONTEND_MODE_SESSION_KEY))

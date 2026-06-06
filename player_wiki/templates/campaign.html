@@ -24,6 +24,43 @@
     <p class="lede">{{ campaign.summary }}</p>
   </section>
 
+  <section class="card auth-card frontend-mode-card">
+    <p class="card-kicker">Frontend preview</p>
+    <h2>
+      {% if frontend_mode == "gen2" %}
+        Gen2 preview mode is active.
+      {% else %}
+        Stable Flask mode is active.
+      {% endif %}
+    </h2>
+    <p class="lede">
+      {% if frontend_mode == "gen2" %}
+        Campaign pages below load with Flask fallback behavior; switch to Gen2 for this campaign from this card.
+      {% else %}
+        Continue using Flask on this page, or switch this session into Gen2 preview.
+      {% endif %}
+    </p>
+    <form class="frontend-mode-form" method="post" action="{{ url_for('campaign_frontend_mode') }}">
+      <input type="hidden" name="next" value="{{ request.full_path }}">
+      {% if frontend_mode == "gen2" %}
+        <input type="hidden" name="frontend_mode" value="flask">
+        <button class="button-link frontend-mode-form__button" type="submit">
+          Use stable Flask for campaign views
+        </button>
+      {% else %}
+        <input type="hidden" name="frontend_mode" value="gen2">
+        <button class="button-link frontend-mode-form__button" type="submit">
+          Enable Gen2 preview
+        </button>
+      {% endif %}
+    </form>
+    {% if frontend_mode == "gen2" %}
+      <a class="button-link" href="/app-next/campaigns/{{ campaign.slug }}">
+        Open campaign (Gen2 preview)
+      </a>
+    {% endif %}
+  </section>
+
   {% if can_view_wiki and grouped_pages %}
     {% if query %}
       <section class="section-list">

@@ -43,6 +43,103 @@ def test_anonymous_user_can_browse_public_campaign_content(client):
     assert "System: DND-5E" in campaigns_body
 
 
+def test_campaign_picker_defaults_to_stable_flask_mode(client):
+    response = client.get("/campaigns")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Stable Flask mode is active." in body
+    assert 'href="/campaigns/linden-pass"' in body
+    assert 'href="/app-next/campaigns/linden-pass"' not in body
+
+
+def test_campaign_picker_mode_switch_toggles_between_flask_and_gen2(client):
+    enable_response = client.post(
+        "/campaigns/mode",
+        data={"frontend_mode": "gen2", "next": "/campaigns"},
+        follow_redirects=True,
+    )
+
+    assert enable_response.status_code == 200
+    enable_body = enable_response.get_data(as_text=True)
+    assert "Gen2 preview mode is active." in enable_body
+    assert 'href="/app-next/campaigns/linden-pass"' in enable_body
+    assert 'href="/campaigns/linden-pass"' not in enable_body
+
+    disable_response = client.post(
+        "/campaigns/mode",
+        data={"frontend_mode": "flask", "next": "/campaigns"},
+        follow_redirects=True,
+    )
+
+    assert disable_response.status_code == 200
+    disable_body = disable_response.get_data(as_text=True)
+    assert "Stable Flask mode is active." in disable_body
+    assert 'href="/campaigns/linden-pass"' in disable_body
+    assert 'href="/app-next/campaigns/linden-pass"' not in disable_body
+
+
+def test_unsafe_campaign_mode_next_url_redirects_to_home(client):
+    response = client.post(
+        "/campaigns/mode",
+        data={"frontend_mode": "gen2", "next": "https://evil.test/campaigns"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/"
+
+
+def test_campaign_mode_preference_persists_after_sign_in(client, users):
+    response = client.post(
+        "/campaigns/mode",
+        data={"frontend_mode": "gen2", "next": "/campaigns"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+
+    client.post(
+        "/sign-in",
+        data={
+            "email": users["party"]["email"],
+            "password": users["party"]["password"],
+        },
+        follow_redirects=False,
+    )
+
+    picker = client.get("/campaigns")
+    assert 'href="/app-next/campaigns/linden-pass"' in picker.get_data(as_text=True)
+
+
+def test_campaign_home_defaults_to_flask_frontend_mode(client):
+    response = client.get("/campaigns/linden-pass")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Stable Flask mode is active." in body
+    assert "Gen2 preview mode is active." not in body
+    assert "Use stable Flask for campaign views" not in body
+
+
+def test_campaign_home_toggle_gen2_prefers_flask_route_with_gen2_link(client):
+    response = client.post(
+        "/campaigns/mode",
+        data={"frontend_mode": "gen2", "next": "/campaigns/linden-pass"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/campaigns/linden-pass"
+
+    home_response = client.get(response.headers["Location"])
+    assert home_response.status_code == 200
+    assert home_response.request.path == "/campaigns/linden-pass"
+    body = home_response.get_data(as_text=True)
+    assert "Gen2 preview mode is active." in body
+    assert 'href="/app-next/campaigns/linden-pass"' in body
+    assert "Open campaign (Gen2 preview)" in body
+    assert "Use stable Flask for campaign views" in body
+
+
 def test_header_brand_routes_to_campaign_picker_without_separate_campaigns_button(client):
     response = client.get("/campaigns/linden-pass")
 
