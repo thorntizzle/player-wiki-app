@@ -932,6 +932,132 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             browser.close()
 
 
+def test_gen2_character_visual_parity_smoke(
+    frontend_gen2_session_live_server,
+    app,
+    users,
+    set_campaign_visibility,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    _seed_arden_portrait(app)
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            desktop_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            mobile_context = browser.new_context(viewport={"width": 390, "height": 800})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        desktop_page = desktop_context.new_page()
+        mobile_page = mobile_context.new_page()
+
+        try:
+            _sign_in(desktop_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters")
+            expect(desktop_page.get_by_role("heading", name="Characters")).to_be_visible(timeout=10000)
+            expect(desktop_page.locator(".character-roster-page > .panel-header")).to_be_visible()
+            expect(desktop_page.locator(".character-roster-tools")).to_be_visible()
+            expect(desktop_page.locator(".character-roster-grid .character-card").first).to_be_visible()
+            roster_metrics = desktop_page.evaluate(
+                """() => {
+                    const route = document.querySelector(".character-roster-page");
+                    const hero = document.querySelector(".character-roster-page > .panel-header h1");
+                    const tools = document.querySelector(".character-roster-tools");
+                    const cardStat = document.querySelector(".character-card__stats article");
+                    const portrait = document.querySelector(".character-card__portrait");
+                    const search = document.querySelector(".character-roster-search");
+                    return {
+                        routeShadow: route ? window.getComputedStyle(route).boxShadow : "",
+                        heroSize: hero ? Number.parseFloat(window.getComputedStyle(hero).fontSize) : 0,
+                        toolsRadius: tools ? Number.parseFloat(window.getComputedStyle(tools).borderRadius) : 0,
+                        cardStatRadius: cardStat ? Number.parseFloat(window.getComputedStyle(cardStat).borderRadius) : 0,
+                        portraitRadius: portrait ? Number.parseFloat(window.getComputedStyle(portrait).borderRadius) : 0,
+                        searchColumns: search ? window.getComputedStyle(search).gridTemplateColumns.split(" ").length : 0,
+                    };
+                }"""
+            )
+            assert roster_metrics["routeShadow"] == "none"
+            assert roster_metrics["heroSize"] >= 32
+            assert roster_metrics["toolsRadius"] >= 20
+            assert roster_metrics["cardStatRadius"] >= 16
+            assert roster_metrics["portraitRadius"] >= 8
+            assert roster_metrics["searchColumns"] >= 2
+
+            desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/arden-march")
+            expect(desktop_page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)
+            expect(desktop_page.get_by_role("heading", name="Arden March (arden-march)")).to_be_visible()
+            expect(desktop_page.locator(".character-read-shell")).to_be_visible()
+            expect(desktop_page.locator(".character-selector-card")).to_be_visible()
+            expect(desktop_page.locator(".character-summary")).to_be_visible()
+            expect(desktop_page.locator(".section-tabs")).to_be_visible()
+            detail_metrics = desktop_page.evaluate(
+                """() => {
+                    const shell = document.querySelector(".character-read-shell");
+                    const selector = document.querySelector(".character-selector-card");
+                    const summary = document.querySelector(".character-summary");
+                    const summaryHeading = document.querySelector(".character-summary h3");
+                    const tabs = document.querySelector(".section-tabs");
+                    const stateCard = document.querySelector(".stat-grid article, .character-state-card");
+                    return {
+                        shellRadius: shell ? Number.parseFloat(window.getComputedStyle(shell).borderRadius) : 0,
+                        selectorRadius: selector ? Number.parseFloat(window.getComputedStyle(selector).borderRadius) : 0,
+                        summaryRadius: summary ? Number.parseFloat(window.getComputedStyle(summary).borderRadius) : 0,
+                        summaryHeadingSize: summaryHeading ? Number.parseFloat(window.getComputedStyle(summaryHeading).fontSize) : 0,
+                        tabsRadius: tabs ? Number.parseFloat(window.getComputedStyle(tabs).borderRadius) : 0,
+                        stateCardRadius: stateCard ? Number.parseFloat(window.getComputedStyle(stateCard).borderRadius) : 0,
+                    };
+                }"""
+            )
+            assert detail_metrics["shellRadius"] >= 20
+            assert detail_metrics["selectorRadius"] >= 16
+            assert detail_metrics["summaryRadius"] >= 16
+            assert detail_metrics["summaryHeadingSize"] >= 24
+            assert detail_metrics["tabsRadius"] >= 16
+            assert detail_metrics["stateCardRadius"] >= 16
+
+            _sign_in(mobile_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
+            for path in (
+                "/app-next/campaigns/linden-pass/characters",
+                "/app-next/campaigns/linden-pass/characters/arden-march",
+            ):
+                mobile_page.goto(f"{base_url}{path}")
+                expect(mobile_page.get_by_role("link", name="Campaign Player Wiki")).to_be_visible(timeout=10000)
+                mobile_metrics = mobile_page.evaluate(
+                    """() => {
+                        const route = document.querySelector(".character-roster-page, .character-read-shell");
+                        const tabs = document.querySelector(".section-tabs");
+                        const selector = document.querySelector(".character-selector-card");
+                        const search = document.querySelector(".character-roster-search");
+                        return {
+                            innerWidth: window.innerWidth,
+                            scrollWidth: document.documentElement.scrollWidth,
+                            routeWidth: route ? route.getBoundingClientRect().width : 0,
+                            tabsWidth: tabs ? tabs.getBoundingClientRect().width : 0,
+                            selectorWidth: selector ? selector.getBoundingClientRect().width : 0,
+                            searchColumns: search ? window.getComputedStyle(search).gridTemplateColumns.split(" ").length : 1,
+                        };
+                    }"""
+                )
+                assert mobile_metrics["scrollWidth"] <= mobile_metrics["innerWidth"] + 1
+                assert mobile_metrics["routeWidth"] <= mobile_metrics["innerWidth"]
+                assert mobile_metrics["tabsWidth"] <= mobile_metrics["innerWidth"]
+                assert mobile_metrics["selectorWidth"] <= mobile_metrics["innerWidth"]
+                assert mobile_metrics["searchColumns"] == 1
+        finally:
+            desktop_page.close()
+            mobile_page.close()
+            desktop_context.close()
+            mobile_context.close()
+            browser.close()
+
+
 def test_gen2_xianxia_character_authoring_create_and_import(
     frontend_gen2_session_live_server,
     app,

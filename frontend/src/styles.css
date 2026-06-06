@@ -486,7 +486,57 @@ a:hover {
 .character-roster-grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.character-roster-page {
+  display: grid;
+  gap: 1rem;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  backdrop-filter: none;
+}
+
+.character-roster-page > .panel-header {
+  align-items: flex-start;
+  margin-bottom: 0;
+  padding: 0.75rem 0 0.25rem;
+}
+
+.character-roster-page > .panel-header h1 {
+  margin: 0;
+  font-size: clamp(2.15rem, 5vw, 4rem);
+  line-height: 0.98;
+}
+
+.character-roster-page > .panel-header .meta {
+  margin: 0 0 0.25rem;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.character-roster-page > .panel-header .lede {
+  max-width: 70ch;
+  margin: 0;
+  font-size: 1.08rem;
+}
+
+.card.character-roster-tools {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1.25rem;
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+}
+
+.character-roster-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: stretch;
 }
 
 .character-authoring-page {
@@ -1840,6 +1890,49 @@ textarea {
   padding: 0.75rem;
 }
 
+.character-read-content {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.character-read-shell {
+  display: grid;
+  gap: 1rem;
+  border-radius: 22px;
+  padding: 1.25rem;
+}
+
+.character-read-shell__header {
+  align-items: flex-start;
+  margin-bottom: 0;
+}
+
+.character-read-shell__header h2 {
+  margin: 0;
+  font-size: 1.45rem;
+  line-height: 1.1;
+}
+
+.character-read-shell__header .meta {
+  margin: 0 0 0.15rem;
+  text-transform: uppercase;
+  font-weight: 800;
+}
+
+.character-read-shell__actions {
+  justify-content: flex-end;
+}
+
+.character-selector-card {
+  display: grid;
+  gap: 0.4rem;
+  max-width: 28rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface-soft);
+}
+
 .character-summary__main,
 .character-card__top {
   display: grid;
@@ -1850,6 +1943,24 @@ textarea {
 
 .character-summary p {
   margin: 0.35rem 0;
+}
+
+.character-read-content .character-summary {
+  padding: 1rem;
+  border-radius: 18px;
+  background: var(--surface-soft);
+  box-shadow: none;
+}
+
+.character-read-content .character-summary h3 {
+  margin: 0.1rem 0 0.35rem;
+  font-size: clamp(1.7rem, 3vw, 2.6rem);
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.character-read-content .character-summary p {
+  margin: 0.18rem 0;
 }
 
 .character-portrait {
@@ -1876,9 +1987,21 @@ textarea {
   height: 4.5rem;
 }
 
+.character-card {
+  display: grid;
+  gap: 0.85rem;
+  border-radius: 18px;
+}
+
+.character-card__top > div:first-child:last-child {
+  grid-column: 1 / -1;
+}
+
 .character-card h2 {
   margin: 0.15rem 0 0.25rem;
-  font-size: 1.2rem;
+  font-size: 1.35rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
 }
 
 .character-card__stats {
@@ -1890,11 +2013,17 @@ textarea {
 
 .character-card__stats article {
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface-raised);
-  padding: 0.5rem;
+  border-radius: 16px;
+  background: var(--surface-soft);
+  padding: 0.75rem 0.8rem;
   display: grid;
   gap: 0.15rem;
+}
+
+.character-card__stats strong,
+.character-read-content .stat-grid strong {
+  font-size: 1.28rem;
+  line-height: 1.1;
 }
 
 .resource-preview-list {
@@ -1980,6 +2109,13 @@ textarea {
   padding: 0.45rem;
 }
 
+.character-read-content .section-tabs {
+  margin-top: 0;
+  border-radius: 18px;
+  background: var(--surface-soft);
+  overflow-x: auto;
+}
+
 .section-tabs button {
   border: 1px solid transparent;
   border-radius: 999px;
@@ -2024,6 +2160,20 @@ textarea {
   background: var(--surface-raised);
   padding: 0.65rem;
   min-width: 0;
+}
+
+.character-read-content .session-character-form {
+  margin-top: 0;
+  border-radius: 18px;
+  background: var(--session-bar-bg);
+  padding: 1rem;
+}
+
+.character-read-content .stat-grid article,
+.character-read-content .character-state-card {
+  border-radius: 18px;
+  background: var(--surface-soft);
+  padding: 1rem;
 }
 
 .stat-grid article {
@@ -2399,6 +2549,15 @@ textarea {
   .section-tabs {
     width: 100%;
     border-radius: 16px;
+  }
+
+  .character-roster-search {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .character-read-shell__actions,
+  .character-roster-tools .article-actions {
+    justify-content: flex-start;
   }
 
   .page-layout,

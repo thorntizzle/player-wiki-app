@@ -8298,14 +8298,14 @@ function CharacterPane({
   };
 
   return (
-    <div className={isReadSurface ? "session-pane-content character-read-content" : "session-pane-content"}>
-      <section className="panel">
-        <div className="panel-header">
+    <div className={isReadSurface ? "session-pane-content character-read-content character-layout" : "session-pane-content"}>
+      <section className={isReadSurface ? "panel character-read-shell" : "panel"}>
+        <div className={isReadSurface ? "panel-header character-read-shell__header" : "panel-header"}>
           <div>
             <p className="meta">{surfaceMetaLabel}</p>
             <h2>{surfaceHeading}</h2>
           </div>
-          <div className="article-actions">
+          <div className={isReadSurface ? "article-actions character-read-shell__actions" : "article-actions"}>
             {isReadSurface ? (
               <a href={`/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters`} className="button button-secondary">
                 Roster
@@ -8329,22 +8329,24 @@ function CharacterPane({
           </div>
         </div>
 
-        <label className="chat-label" htmlFor="character-selector">
-          Character
-        </label>
-        <select
-          id="character-selector"
-          value={selectedSlug || ""}
-          onChange={(event) => {
-            selectCharacter(event.currentTarget.value || null);
-          }}
-        >
-          {characterList.map((item) => (
-            <option key={item.slug} value={item.slug}>
-              {item.name} ({item.slug})
-            </option>
-          ))}
-        </select>
+        <div className={isReadSurface ? "character-selector-card" : undefined}>
+          <label className="chat-label" htmlFor="character-selector">
+            Character
+          </label>
+          <select
+            id="character-selector"
+            value={selectedSlug || ""}
+            onChange={(event) => {
+              selectCharacter(event.currentTarget.value || null);
+            }}
+          >
+            {characterList.map((item) => (
+              <option key={item.slug} value={item.slug}>
+                {item.name} ({item.slug})
+              </option>
+            ))}
+          </select>
+        </div>
 
         {listQuery.isLoading ? <p className="status status-neutral">Loading characters...</p> : null}
         {detailQuery.isLoading ? <p className="status status-neutral">Loading character...</p> : null}
@@ -13137,40 +13139,49 @@ function CharacterRosterPage() {
           <h1>Characters</h1>
           <p className="lede">Open player sheets, use the shared inline state controls, and keep larger authoring workflows in Flask while Gen2 parity grows.</p>
         </div>
-        <div className="article-actions">
-          {data?.links?.flask_roster_url ? (
-            <a className="button button-secondary" href={data.links.flask_roster_url}>
-              Flask roster
-            </a>
-          ) : null}
-          {data?.links?.create_character_url ? (
-            <a className="button button-secondary" href={data.links.create_character_url}>
-              Create character
-            </a>
-          ) : null}
-          {data?.links?.import_xianxia_url ? (
-            <a className="button button-secondary" href={data.links.import_xianxia_url}>
-              Import existing
-            </a>
-          ) : null}
-        </div>
       </div>
       <ApiErrorNotice isLoading={rosterQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
-      <form className="search-form character-roster-search" onSubmit={submitSearch}>
-        <input
-          type="search"
-          value={searchDraft}
-          onChange={(event) => setSearchDraft(event.currentTarget.value)}
-          placeholder="Search characters by name, class, species, or background"
-          aria-label="Search characters"
-        />
-        <button type="submit">Search</button>
-      </form>
-      {data ? (
-        <>
+      <section className="card character-roster-tools">
+        <div className="section-heading">
+          <div>
+            <h2>Roster tools</h2>
+          </div>
+          <div className="article-actions">
+            {data?.links?.flask_roster_url ? (
+              <a className="button button-secondary" href={data.links.flask_roster_url}>
+                Flask roster
+              </a>
+            ) : null}
+            {data?.links?.create_character_url ? (
+              <a className="button button-secondary" href={data.links.create_character_url}>
+                Create character
+              </a>
+            ) : null}
+            {data?.links?.import_xianxia_url ? (
+              <a className="button button-secondary" href={data.links.import_xianxia_url}>
+                Import existing
+              </a>
+            ) : null}
+          </div>
+        </div>
+        <form className="search-form character-roster-search" onSubmit={submitSearch}>
+          <input
+            type="search"
+            value={searchDraft}
+            onChange={(event) => setSearchDraft(event.currentTarget.value)}
+            placeholder="Search characters by name, class, species, or background"
+            aria-label="Search characters"
+          />
+          <button type="submit">Search</button>
+        </form>
+        {data ? (
           <p className="meta">
             {data.result_count ?? characters.length} character{(data.result_count ?? characters.length) === 1 ? "" : "s"} visible
           </p>
+        ) : null}
+      </section>
+      {data ? (
+        <>
           {characters.length ? (
             <div className="character-roster-grid">
               {characters.map((character) => (
