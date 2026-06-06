@@ -4077,7 +4077,7 @@ function AppShell() {
         show: campaignVisibilityCanAccess(campaignVisibility, "combat"),
       },
       {
-        href: `/campaigns/${encodedCampaignSlug}/characters`,
+        href: `/app-next/campaigns/${encodedCampaignSlug}/characters`,
         label: "Characters",
         isGen2: true,
         show: campaignVisibilityCanAccess(campaignVisibility, "characters"),
@@ -4124,31 +4124,67 @@ function AppShell() {
   const campaignSearchAction = campaignSlug ? `/app-next/campaigns/${encodedCampaignSlug}` : "";
   const nextUrl = `${window.location.pathname}${window.location.search}`;
   const signInHref = `/sign-in?next=${encodeURIComponent(nextUrl)}`;
+  const currentAppPath = `/app-next${location.pathname}`;
+  const campaignBasePath = `/app-next/campaigns/${encodedCampaignSlug}`;
+  const isNavItemActive = (label: string, href: string) => {
+    if (label === "Campaign Home") {
+      return currentAppPath === campaignBasePath;
+    }
+    if (label === "Session") {
+      return currentAppPath === `${campaignBasePath}/session`;
+    }
+    if (label === "Combat") {
+      return currentAppPath.startsWith(`${campaignBasePath}/combat`);
+    }
+    if (label === "Characters") {
+      return currentAppPath.startsWith(`${campaignBasePath}/characters`);
+    }
+    if (label === "Systems") {
+      return currentAppPath.startsWith(`${campaignBasePath}/systems`);
+    }
+    if (label === "DM Content") {
+      return currentAppPath.startsWith(`${campaignBasePath}/dm-content`);
+    }
+    if (label === "Control") {
+      return currentAppPath === `${campaignBasePath}/control`;
+    }
+    if (label === "Help") {
+      return currentAppPath === `${campaignBasePath}/help`;
+    }
+    return currentAppPath === href || currentAppPath.startsWith(`${href}/`);
+  };
 
   return (
     <ApiClientContext.Provider value={{ apiClient, apiToken, setApiToken: setStoredToken, authRequired, setAuthRequired }}>
       <div className="session-shell">
-        <header className="topbar">
+        <header className={campaign ? "topbar topbar--campaign" : "topbar"}>
           <div className="brand-block">
             <Link to="/" className="brand-link">
               Campaign Player Wiki
             </Link>
-            {campaign ? <p className="subtitle">Campaign: {campaign.title}</p> : null}
-            <p className="subtitle">/app-next</p>
+            <p className="subtitle">Gen2 companion</p>
           </div>
+          {campaign ? (
+            <div className="topbar-campaign" aria-label="Current campaign">
+              <span>{campaign.title}</span>
+            </div>
+          ) : null}
           <div className="topbar-controls">
-            <label className="token-row" htmlFor="pilot-api-token">
-              <span>API token (optional)</span>
-              <input
-                id="pilot-api-token"
-                type="password"
-                value={apiToken}
-                placeholder="Bearer token for API-only testing"
-                onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                  setStoredToken(event.currentTarget.value);
-                }}
-              />
-            </label>
+            <details className="api-token-details">
+              <summary>API token</summary>
+              <label className="token-row" htmlFor="pilot-api-token">
+                <span>Optional bearer token for API-only testing</span>
+                <input
+                  id="pilot-api-token"
+                  type="password"
+                  value={apiToken}
+                  placeholder="Bearer token"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                    setStoredToken(event.currentTarget.value);
+                  }}
+                />
+              </label>
+            </details>
             <div className="account-row">
               {user ? (
                 <>
@@ -4184,7 +4220,7 @@ function AppShell() {
               {visibleNavItems.map((item) => (
                 <a
                   key={item.label}
-                  className="campaign-nav-link"
+                  className={isNavItemActive(item.label, item.href) ? "campaign-nav-link is-active" : "campaign-nav-link"}
                   href={item.href}
                   onClick={() => {
                     if (!item.isGen2) {

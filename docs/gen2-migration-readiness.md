@@ -70,13 +70,15 @@ Promotion review should compare:
 
 Functional parity and visual parity are tracked separately. A surface can be feel-test ready for interaction while still blocked from default-route promotion by layout gaps.
 
+First visual parity slice completed on June 6, 2026: the Gen2 shared shell and Session route now reuse Flask-style theme variables, the centered campaign-title treatment, active campaign navigation pills, denser Session tabs/cards/forms, and desktop/mobile browser smoke coverage. This is a visual checkpoint, not a default-route promotion.
+
 | Surface | Flask reference | Gen2 route | Visual checks before promotion |
 | --- | --- | --- | --- |
-| Shared shell | `base.html`, `player_wiki/static/styles.css` | `/app-next/` and all Gen2 campaign routes | Global header height/density, centered campaign title treatment, campaign nav row wrapping, theme variables, account/admin affordances, loading cover/status behavior, and mobile header overflow. |
+| Shared shell | `base.html`, `player_wiki/static/styles.css` | `/app-next/` and all Gen2 campaign routes | First parity slice covers theme variables, centered campaign title treatment, active campaign nav pills, account/admin affordances, collapsed API-token testing control, and mobile overflow smoke coverage. Loading-cover equivalence and manual visual acceptance remain open. |
 | Campaign home and search | `campaign.html` | `/app-next/campaigns/<slug>` | Hero scale, search placement, overview card density, section card hierarchy, pinned/featured content treatment, and empty/restricted-state copy rhythm. |
 | Published wiki sections | `section.html` | `/app-next/campaigns/<slug>/sections/<section>` | Grouped subsection cards, collapse controls, featured/top-level page treatment, list density, mobile stacking, and long-title wrapping. |
 | Published wiki pages | `page.html` | `/app-next/campaigns/<slug>/pages/<page>` | Article width, sidebar context, image/caption placement, rendered body typography, backlink/sidebar card density, and protected image sizing. |
-| Session | `session.html`, `session_character.html`, `session_dm.html` and partials | `/app-next/campaigns/<slug>/session` | Pane switch density, player feed/composer proportions, revealed/staged article cards, Character section workspace, DM lifecycle/log panels, live update feedback, and desktop/mobile pane layout. |
+| Session | `session.html`, `session_character.html`, `session_dm.html` and partials | `/app-next/campaigns/<slug>/session` | First parity slice covers pane-tab density, theme-backed player/DM cards, Session Character workspace cards, desktop/mobile layout smoke coverage, and active campaign nav. Player feed/composer proportions, DM article/log panel comparison screenshots, and manual visual acceptance remain open. |
 | Characters | `character_roster.html`, `character_read.html` and character partials | `/app-next/campaigns/<slug>/characters...` | Roster card layout, portrait sizing, read-shell hierarchy, section navigation, resource/control density, fallback authoring links, and assigned-player restricted views. |
 | Combat | `combat.html`, `combat_status.html`, `combat_dm.html` and partials | `/app-next/campaigns/<slug>/combat...` | Encounter summary, combatant carousel/list, selected-PC workspace, selected-combatant tactical card, setup forms, condition controls, deep-link focus, and mobile combat controls. |
 | DM Content | `dm_content.html` and DM Content partials | `/app-next/campaigns/<slug>/dm-content...` | Lane tabs, editor forms, statblock/source cards, condition list/edit density, staged article store layout, Player Wiki image/upload controls, Systems management tables, and destructive confirmation affordances. |
@@ -92,7 +94,7 @@ Manual acceptance is recorded after the user has tried the Gen2 surface in the l
 
 | Surface | Functional manual status | Visual/layout status | Notes |
 | --- | --- | --- | --- |
-| Session | Accepted for current functionality feel test | Needs visual parity pass | User noted the framework feels more responsive and Session appears functionally at parity, but layout still needs to match Flask. |
+| Session | Accepted for current functionality feel test | First shared-shell/Session parity slice complete; manual visual acceptance still needed | User noted the framework feels more responsive and Session appears functionally at parity. The first visual slice now aligns the shared shell and Session styling with Flask, but it still needs user visual review before promotion. |
 | Campaign home/wiki browsing | Pending explicit user acceptance | Needs visual parity pass | Browser coverage exists; user manual acceptance has not been recorded. |
 | Characters read shell | Pending explicit user acceptance | Needs visual parity pass | Portrait controls, owner assignment/clear, checked deletion, native create/import, Advanced Editor, Cultivation, progression repair, level-up, and retraining now have Gen2 parity. |
 | Combat | Pending explicit user acceptance | Needs visual parity pass | Live pressure remeasurement remains open before transport changes. |
@@ -114,6 +116,7 @@ Manual acceptance is recorded after the user has tried the Gen2 surface in the l
 
 - `tests/test_frontend_pilot.py` verifies `/app-next/` static serving and SPA fallback for deep links.
 - `tests/test_frontend_gen2_session_browser.py` covers the current promoted Gen2 feel-test surfaces: shell/session, wiki browsing, character roster/detail including Controls access, Xianxia create/import/Cultivation fallback behavior, combat player/status/controls, all DM Content lanes including Systems, Systems browsing, Account settings, Admin, Campaign Help, and Campaign Control.
+- `tests/test_frontend_gen2_session_browser.py::test_gen2_shell_and_session_visual_parity_smoke` covers the first visual parity slice with desktop shell/session style checks and mobile overflow checks.
 - Focused API coverage exists in `tests/test_api.py` for the JSON contracts used by the Gen2 surfaces.
 
 ## Local Build And Host

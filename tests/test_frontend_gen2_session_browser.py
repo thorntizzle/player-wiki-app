@@ -171,6 +171,89 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             browser.close()
 
 
+def test_gen2_shell_and_session_visual_parity_smoke(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            desktop_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            mobile_context = browser.new_context(viewport={"width": 390, "height": 800})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        desktop_page = desktop_context.new_page()
+        mobile_page = mobile_context.new_page()
+
+        try:
+            _sign_in(desktop_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
+            expect(desktop_page.locator(".topbar-campaign")).to_be_visible(timeout=10000)
+            expect(desktop_page.locator(".topbar-campaign")).to_contain_text(re.compile(r"\S"))
+            expect(desktop_page.locator(".api-token-details")).to_be_visible()
+            expect(desktop_page.locator("#pilot-api-token")).not_to_be_visible()
+            expect(desktop_page.locator(".campaign-nav-link.is-active", has_text="Session")).to_be_visible()
+            assert desktop_page.locator(".campaign-nav-link.is-active").count() == 1
+            expect(desktop_page.locator(".campaign-nav-link", has_text="Characters")).to_have_attribute(
+                "href",
+                re.compile(r"/app-next/campaigns/linden-pass/characters$"),
+            )
+            expect(desktop_page.locator(".session-tab-strip .tab-button.active", has_text="Session")).to_be_visible()
+
+            desktop_metrics = desktop_page.evaluate(
+                """() => {
+                    const bodyStyle = window.getComputedStyle(document.body);
+                    const nav = document.querySelector(".campaign-nav-link");
+                    const panel = document.querySelector(".panel");
+                    const campaign = document.querySelector(".topbar-campaign");
+                    const header = document.querySelector(".topbar");
+                    return {
+                        fontFamily: bodyStyle.fontFamily,
+                        bodyColor: bodyStyle.color,
+                        navRadius: nav ? Number.parseFloat(window.getComputedStyle(nav).borderRadius) : 0,
+                        panelRadius: panel ? Number.parseFloat(window.getComputedStyle(panel).borderRadius) : 0,
+                        campaignTop: campaign ? campaign.getBoundingClientRect().top : 0,
+                        headerTop: header ? header.getBoundingClientRect().top : 0,
+                    };
+                }"""
+            )
+            assert "Georgia" in desktop_metrics["fontFamily"]
+            assert desktop_metrics["navRadius"] >= 20
+            assert desktop_metrics["panelRadius"] >= 16
+            assert desktop_metrics["campaignTop"] >= desktop_metrics["headerTop"]
+            assert desktop_metrics["bodyColor"] != "rgb(18, 25, 38)"
+
+            _sign_in(mobile_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            mobile_page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
+            expect(mobile_page.locator(".topbar-campaign")).to_be_visible(timeout=10000)
+            expect(mobile_page.locator(".session-tab-strip")).to_be_visible()
+            mobile_metrics = mobile_page.evaluate(
+                """() => ({
+                    innerWidth: window.innerWidth,
+                    scrollWidth: document.documentElement.scrollWidth,
+                    tabWidth: document.querySelector(".session-tab-strip")?.getBoundingClientRect().width ?? 0,
+                    shellWidth: document.querySelector(".session-shell")?.getBoundingClientRect().width ?? 0,
+                })"""
+            )
+            assert mobile_metrics["scrollWidth"] <= mobile_metrics["innerWidth"] + 1
+            assert mobile_metrics["tabWidth"] <= mobile_metrics["innerWidth"]
+            assert mobile_metrics["shellWidth"] <= mobile_metrics["innerWidth"]
+        finally:
+            desktop_page.close()
+            mobile_page.close()
+            desktop_context.close()
+            mobile_context.close()
+            browser.close()
+
+
 def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
     frontend_gen2_session_live_server,
     users,
