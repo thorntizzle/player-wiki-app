@@ -5067,6 +5067,7 @@ function AccountSettingsPage() {
   const { apiClient, setAuthRequired } = useApiClient();
   const [draftThemeKey, setDraftThemeKey] = useState("");
   const [draftChatOrder, setDraftChatOrder] = useState("");
+  const [draftFrontendMode, setDraftFrontendMode] = useState("");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const settingsQuery = useQuery({
@@ -5088,7 +5089,12 @@ function AccountSettingsPage() {
     }
     setDraftThemeKey(preferences.theme_key || "");
     setDraftChatOrder(preferences.session_chat_order || "");
-  }, [settingsQuery.data?.preferences?.theme_key, settingsQuery.data?.preferences?.session_chat_order]);
+    setDraftFrontendMode(preferences.frontend_mode || "");
+  }, [
+    settingsQuery.data?.preferences?.theme_key,
+    settingsQuery.data?.preferences?.session_chat_order,
+    settingsQuery.data?.preferences?.frontend_mode,
+  ]);
 
   const saveSettings = useMutation({
     mutationFn: (payload: AccountSettingsUpdatePayload) => apiClient.patchAccountSettings(payload),
@@ -5096,6 +5102,7 @@ function AccountSettingsPage() {
       setStatusMessage("Account settings saved.");
       setDraftThemeKey(response.preferences.theme_key || "");
       setDraftChatOrder(response.preferences.session_chat_order || "");
+      setDraftFrontendMode(response.preferences.frontend_mode || "");
       if (response.preferences.theme_key) {
         document.documentElement.dataset.theme = response.preferences.theme_key;
       }
@@ -5115,11 +5122,16 @@ function AccountSettingsPage() {
   const preferences = settingsQuery.data?.preferences;
   const themePresets = settingsQuery.data?.theme_presets ?? [];
   const chatOrderChoices = settingsQuery.data?.session_chat_order_choices ?? [];
+  const frontendModeChoices = settingsQuery.data?.frontend_mode_choices ?? [];
   const user = settingsQuery.data?.user;
   const selectedTheme = themePresets.find((theme) => theme.key === (preferences?.theme_key || draftThemeKey));
-  const hasDraft = Boolean(draftThemeKey || draftChatOrder);
+  const selectedFrontendMode = preferences?.frontend_mode || draftFrontendMode || "flask";
+  const campaignBackHref = draftFrontendMode === "gen2" ? "/app-next/" : "/campaigns";
+  const hasDraft = Boolean(draftThemeKey || draftChatOrder || draftFrontendMode);
   const isUnchanged =
-    draftThemeKey === (preferences?.theme_key || "") && draftChatOrder === (preferences?.session_chat_order || "");
+    draftThemeKey === (preferences?.theme_key || "") &&
+    draftChatOrder === (preferences?.session_chat_order || "") &&
+    draftFrontendMode === (preferences?.frontend_mode || "");
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -5130,6 +5142,7 @@ function AccountSettingsPage() {
     saveSettings.mutate({
       theme_key: draftThemeKey,
       session_chat_order: draftChatOrder,
+      frontend_mode: draftFrontendMode,
     });
   };
 
@@ -5192,6 +5205,44 @@ function AccountSettingsPage() {
             <section className="account-settings-group">
               <div className="panel-header">
                 <div>
+                  <h2>Preferred frontend</h2>
+                  <p className="meta">
+                    This controls which interface campaign cards open by default when you are signed in. Flask remains available for fallback testing.
+                  </p>
+                </div>
+              </div>
+              <div className="settings-option-grid">
+                {frontendModeChoices.map((choice) => {
+                  const inputId = `account-frontend-mode-${choice.value}`;
+                  const checked = draftFrontendMode === choice.value;
+                  return (
+                    <label className={checked ? "settings-option is-selected" : "settings-option"} htmlFor={inputId} key={choice.value}>
+                      <input
+                        id={inputId}
+                        type="radio"
+                        name="frontend_mode"
+                        value={choice.value}
+                        checked={checked}
+                        onChange={() => setDraftFrontendMode(choice.value)}
+                      />
+                      <span className="settings-option__header">
+                        <span>
+                          <strong>{choice.label}</strong>
+                          {preferences?.frontend_mode === choice.value ? (
+                            <span className="meta settings-option__status">Current</span>
+                          ) : null}
+                        </span>
+                      </span>
+                      <span className="meta">{choice.description}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="account-settings-group">
+              <div className="panel-header">
+                <div>
                   <h2>Live session chat order</h2>
                   <p className="meta">
                     This changes the order of the live Session chat window for your account only. Stored session logs stay chronological.
@@ -5234,6 +5285,9 @@ function AccountSettingsPage() {
               <a className="button button-secondary" href="/account">
                 Flask account
               </a>
+              <a className="button button-secondary" href="/campaigns">
+                Flask campaigns
+              </a>
               {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
               {saveError ? <p className="status status-error">{saveError}</p> : null}
             </div>
@@ -5246,9 +5300,13 @@ function AccountSettingsPage() {
             </p>
             <p className="meta">{user?.email}</p>
             {user?.is_admin ? <p className="meta-badge">App admin</p> : null}
-            <p className="meta">Theme and live-session chat preferences are stored in the auth database and applied on every signed-in request.</p>
-            <a className="ghost-button" href="/app-next/">
+            <p className="meta">Theme, frontend, and live-session chat preferences are stored in the auth database and applied on every signed-in request.</p>
+            <p className="meta">Preferred frontend: {selectedFrontendMode === "gen2" ? "Gen2 frontend" : "Stable Flask"}</p>
+            <a className="ghost-button" href={campaignBackHref}>
               Back to campaigns
+            </a>
+            <a className="ghost-button" href="/campaigns">
+              Open Flask campaigns
             </a>
           </aside>
         </div>

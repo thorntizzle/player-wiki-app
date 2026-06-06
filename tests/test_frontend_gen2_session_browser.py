@@ -393,12 +393,18 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
             page.goto(f"{base_url}/app-next/account")
             expect(page.get_by_role("heading", name="Party Player")).to_be_visible(timeout=10000)
             expect(page.get_by_role("heading", name="Color theme")).to_be_visible()
+            expect(page.get_by_role("heading", name="Preferred frontend")).to_be_visible()
             expect(page.get_by_role("heading", name="Live session chat order")).to_be_visible()
             expect(page.get_by_role("link", name="Flask account")).to_be_visible()
+            expect(page.get_by_role("link", name="Flask campaigns", exact=True)).to_be_visible()
 
             page.locator("input[name='theme_key'][value='moonlit']").check()
+            page.locator("input[name='frontend_mode'][value='gen2']").check()
             page.locator("input[name='session_chat_order'][value='oldest_first']").check()
-            page.get_by_role("button", name="Save account settings").click()
+            with page.expect_response(
+                lambda response: response.url.endswith("/api/v1/me/settings") and response.request.method == "PATCH"
+            ):
+                page.get_by_role("button", name="Save account settings").click()
 
             expect(page.get_by_text("Account settings saved.")).to_be_visible(timeout=10000)
             expect(page.locator("html")).to_have_attribute("data-theme", "moonlit")
@@ -409,6 +415,22 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
             assert preferences == {
                 "theme_key": "moonlit",
                 "session_chat_order": "oldest_first",
+                "frontend_mode": "gen2",
+            }
+
+            page.locator("input[name='frontend_mode'][value='flask']").check()
+            with page.expect_response(
+                lambda response: response.url.endswith("/api/v1/me/settings") and response.request.method == "PATCH"
+            ):
+                page.get_by_role("button", name="Save account settings").click()
+            expect(page.get_by_text("Account settings saved.")).to_be_visible(timeout=10000)
+
+            flask_preferences_response = page.request.get(f"{base_url}/api/v1/me")
+            assert flask_preferences_response.ok
+            assert flask_preferences_response.json()["preferences"] == {
+                "theme_key": "moonlit",
+                "session_chat_order": "oldest_first",
+                "frontend_mode": "flask",
             }
         finally:
             page.close()

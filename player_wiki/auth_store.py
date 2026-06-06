@@ -14,9 +14,16 @@ from .themes import DEFAULT_THEME_KEY, normalize_theme_key
 SESSION_CHAT_ORDER_NEWEST_FIRST = "newest_first"
 SESSION_CHAT_ORDER_OLDEST_FIRST = "oldest_first"
 DEFAULT_SESSION_CHAT_ORDER = SESSION_CHAT_ORDER_NEWEST_FIRST
+FRONTEND_MODE_FLASK = "flask"
+FRONTEND_MODE_GEN2 = "gen2"
+DEFAULT_FRONTEND_MODE = FRONTEND_MODE_FLASK
 SESSION_CHAT_ORDER_LABELS = {
     SESSION_CHAT_ORDER_NEWEST_FIRST: "Newest first",
     SESSION_CHAT_ORDER_OLDEST_FIRST: "Oldest first",
+}
+FRONTEND_MODE_LABELS = {
+    FRONTEND_MODE_FLASK: "Stable Flask",
+    FRONTEND_MODE_GEN2: "Gen2 frontend",
 }
 SESSION_CHAT_ORDER_CHOICES = [
     {
@@ -30,12 +37,25 @@ SESSION_CHAT_ORDER_CHOICES = [
         "description": "Keep the live Session chat window in chronological order from top to bottom.",
     },
 ]
+FRONTEND_MODE_CHOICES = [
+    {
+        "value": FRONTEND_MODE_FLASK,
+        "label": FRONTEND_MODE_LABELS[FRONTEND_MODE_FLASK],
+        "description": "Use the current Flask interface by default while Gen2 continues toward full visual parity.",
+    },
+    {
+        "value": FRONTEND_MODE_GEN2,
+        "label": FRONTEND_MODE_LABELS[FRONTEND_MODE_GEN2],
+        "description": "Open campaign cards in the Gen2 interface for local evaluation and feel testing.",
+    },
+]
 VALID_SESSION_CHAT_ORDERS = frozenset(
     {
         SESSION_CHAT_ORDER_NEWEST_FIRST,
         SESSION_CHAT_ORDER_OLDEST_FIRST,
     }
 )
+VALID_FRONTEND_MODES = frozenset({FRONTEND_MODE_FLASK, FRONTEND_MODE_GEN2})
 
 
 def utcnow() -> datetime:
@@ -79,6 +99,17 @@ def is_valid_session_chat_order(value: str | None) -> bool:
     return str(value or "").strip().lower() in VALID_SESSION_CHAT_ORDERS
 
 
+def normalize_frontend_mode(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in VALID_FRONTEND_MODES:
+        return normalized
+    return DEFAULT_FRONTEND_MODE
+
+
+def is_valid_frontend_mode(value: str | None) -> bool:
+    return str(value or "").strip().lower() in VALID_FRONTEND_MODES
+
+
 @dataclass(slots=True)
 class UserAccount:
     id: int
@@ -112,6 +143,7 @@ class UserPreferences:
     user_id: int
     theme_key: str
     session_chat_order: str
+    frontend_mode: str
     updated_at: datetime
 
 
@@ -213,16 +245,28 @@ class AuthStore:
             str(row["name"] or "")
             for row in connection.execute("PRAGMA table_info(user_preferences)").fetchall()
         }
-        if "session_chat_order" in columns:
-            return
+        migrated = False
 
-        connection.execute(
-            """
-            ALTER TABLE user_preferences
-            ADD COLUMN session_chat_order TEXT NOT NULL DEFAULT 'newest_first'
-            """
-        )
-        connection.commit()
+        if "session_chat_order" not in columns:
+            connection.execute(
+                """
+                ALTER TABLE user_preferences
+                ADD COLUMN session_chat_order TEXT NOT NULL DEFAULT 'newest_first'
+                """
+            )
+            migrated = True
+
+        if "frontend_mode" not in columns:
+            connection.execute(
+                """
+                ALTER TABLE user_preferences
+                ADD COLUMN frontend_mode TEXT NOT NULL DEFAULT 'flask'
+                """
+            )
+            migrated = True
+
+        if migrated:
+            connection.commit()
 
     def create_user(
         self,
@@ -301,14 +345,15 @@ class AuthStore:
                 user_id,
                 theme_key,
                 session_chat_order,
+                frontend_mode,
                 updated_at
             )
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 theme_key = excluded.theme_key,
                 updated_at = excluded.updated_at
             """,
-            (user_id, normalized_theme_key, DEFAULT_SESSION_CHAT_ORDER, now),
+            (user_id, normalized_theme_key, DEFAULT_SESSION_CHAT_ORDER, DEFAULT_FRONTEND_MODE, now),
         )
         connection.commit()
         return self.get_user_preferences(user_id)
@@ -324,14 +369,39 @@ class AuthStore:
                 user_id,
                 theme_key,
                 session_chat_order,
+                frontend_mode,
                 updated_at
             )
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 session_chat_order = excluded.session_chat_order,
                 updated_at = excluded.updated_at
             """,
-            (user_id, DEFAULT_THEME_KEY, normalized_order, now),
+            (user_id, DEFAULT_THEME_KEY, normalized_order, DEFAULT_FRONTEND_MODE, now),
+        )
+        connection.commit()
+        return self.get_user_preferences(user_id)
+
+    def set_user_frontend_mode(self, user_id: int, frontend_mode: str) -> UserPreferences:
+        self._ensure_user_preferences_schema()
+        normalized_mode = normalize_frontend_mode(frontend_mode)
+        now = isoformat(utcnow())
+        connection = get_db()
+        connection.execute(
+            """
+            INSERT INTO user_preferences (
+                user_id,
+                theme_key,
+                session_chat_order,
+                frontend_mode,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                frontend_mode = excluded.frontend_mode,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, DEFAULT_THEME_KEY, DEFAULT_SESSION_CHAT_ORDER, normalized_mode, now),
         )
         connection.commit()
         return self.get_user_preferences(user_id)
@@ -1318,6 +1388,7 @@ class AuthStore:
                 user_id=user_id,
                 theme_key=DEFAULT_THEME_KEY,
                 session_chat_order=DEFAULT_SESSION_CHAT_ORDER,
+                frontend_mode=DEFAULT_FRONTEND_MODE,
                 updated_at=utcnow(),
             )
         row_keys = set(row.keys())
@@ -1326,6 +1397,9 @@ class AuthStore:
             theme_key=normalize_theme_key(row["theme_key"]),
             session_chat_order=normalize_session_chat_order(
                 row["session_chat_order"] if "session_chat_order" in row_keys else DEFAULT_SESSION_CHAT_ORDER
+            ),
+            frontend_mode=normalize_frontend_mode(
+                row["frontend_mode"] if "frontend_mode" in row_keys else DEFAULT_FRONTEND_MODE
             ),
             updated_at=parse_timestamp(row["updated_at"]) or utcnow(),
         )

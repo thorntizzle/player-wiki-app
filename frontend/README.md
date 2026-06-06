@@ -66,7 +66,7 @@ In the deployed Fly image, the frontend is now built during Docker image creatio
   - `GET /app-next/` -> `index.html`
   - `GET /app-next/<path>` -> static asset if present, otherwise SPA fallback to `index.html`.
 - The build directory can be changed with `APP_NEXT_DIST_DIR` in Flask config.
-- No legacy routes or templates are changed; this is intentionally side-by-side with the existing browser app.
+- Flask remains the default browser app during migration. Signed-in users can opt into Gen2 from Account settings, which only changes campaign picker card destinations; Flask routes and fallback links remain directly available.
 
 ## API Used By Gen2
 

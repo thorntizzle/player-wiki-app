@@ -2,7 +2,7 @@
 
 This document tracks the current Flask-to-Gen2 frontend migration state. Flask remains the production reference UI until an individual surface is accepted for replacement.
 
-Temporary testing contingency: the Flask campaign picker and Flask Campaign Home page expose a browser-session-backed frontend mode switch. The default mode remains stable Flask; choosing Gen2 preview only changes campaign picker card destinations and exposes explicit `/app-next/campaigns/<slug>` links from Campaign Home. It does not redirect Flask campaign routes to Gen2.
+Temporary testing contingency: Flask remains the default frontend. Signed-in users can opt into Gen2 from Account settings; that account preference only changes campaign picker card destinations. Flask routes stay directly available, Gen2 keeps Flask fallback links such as Account and Campaigns, and anonymous or signed-out browsing returns to Flask.
 
 ## Status Labels
 
@@ -35,7 +35,7 @@ Temporary testing contingency: the Flask campaign picker and Flask Campaign Home
 | Systems browsing | `/campaigns/<slug>/systems` and nested source/type/entry routes | `/app-next/campaigns/<slug>/systems` and nested source/type/entry routes | Feel-test ready | Gen2 handles landing/search, source detail, source category, entry detail, source-scoped rules reference search, rendered Systems entry HTML, and management fallbacks. Shared/core entry editing and imports remain Flask/DM Content handoffs. |
 | Campaign Control | `/campaigns/<slug>/control-panel` | `/app-next/campaigns/<slug>/control` | Feel-test ready | Gen2 reads and saves the same campaign/scope visibility rows as Flask Control, preserves admin-only Private visibility, audit events, cache clearing, and a Flask fallback link. |
 | Campaign Help | `/campaigns/<slug>/help` | `/app-next/campaigns/<slug>/help` | Feel-test ready | Gen2 reuses the Flask Help context through `/api/v1/campaigns/<slug>/help`, shows current access, visible surfaces, visibility notes, cross-cutting limits, and keeps a Flask fallback link. |
-| Account settings | `/account` | `/app-next/account` | Feel-test ready | Gen2 reads the same theme/chat-order choices as Flask, saves account preferences through `/api/v1/me/settings`, updates shell theme hydration, and keeps a Flask fallback link. |
+| Account settings | `/account` | `/app-next/account` | Feel-test ready | Gen2 reads the same theme, preferred-frontend, and chat-order choices as Flask, saves account preferences through `/api/v1/me/settings`, updates shell theme hydration, and keeps Flask account/campaign fallback links. |
 | Admin | `/admin` | `/app-next/admin` and `/app-next/admin/users/<user_id>` | Feel-test ready | Gen2 covers dashboard/user detail, invites, membership and assignment management, invite/reset links, disable/enable, checked delete, audit filtering/pagination, CSV export fallback links, non-admin denial, and a Flask fallback link. |
 | API token test field | None | Gen2 shell local field | Partial | Local testing aid only; browser cookies remain the default auth path. |
 
@@ -50,7 +50,7 @@ The remaining Flask-first pages are not equally risky. Use this order unless a s
 | Priority | Surface | Why next | Acceptance target |
 | --- | --- | --- | --- |
 | Done | Systems browsing | It is heavily linked from Session, Combat, Characters, and DM Content, and the Flask presenters already separate browse context from browser routes. | Gen2 landing/search, source, category, and entry detail can be used without losing visibility rules or rendered Systems prose. |
-| Done | Account settings | It is small, shared, and directly tied to theme and live-session preferences used by the Gen2 shell. | Users can change theme and live-session preference from Gen2 with the same persistence as Flask. |
+| Done | Account settings | It is small, shared, and directly tied to theme, preferred frontend, and live-session preferences used by the Gen2 shell. | Users can change theme, preferred frontend, and live-session preference from Gen2 with the same persistence as Flask. |
 | Done | Campaign Help | It is mostly static campaign guidance and is a good low-risk test of Gen2 matching Flask's explanatory page layout. | Help content is readable in Gen2, linked from the shared campaign chrome, and backed by player/DM browser coverage. |
 | Done | Campaign Control | It is permission-sensitive but smaller than character authoring, and it controls visibility assumptions used by Gen2 navigation. | Visibility/config saves behave like Flask and preserve audit/history expectations. |
 | Done | Character authoring and management | It was the largest remaining workflow family. Portrait, Controls/deletion, native create/import, Advanced Editor, Cultivation, progression repair, level-up, and retraining have landed. | Each authoring lane has JSON or browser-backed parity, stale-state handling where needed, and fallback links until the whole family is accepted. |
@@ -85,7 +85,7 @@ First visual parity slice completed on June 6, 2026: the Gen2 shared shell and S
 | Combat | `combat.html`, `combat_status.html`, `combat_dm.html` and partials | `/app-next/campaigns/<slug>/combat...` | First combat visual slice covers unframed combat hero, framed encounter summary, turn-order carousel/list, inspected-combatant snapshot, selected-PC workspace header, selected-combatant tactical cards, setup forms, condition chips, deep-link focus surfaces, and mobile overflow smoke coverage. Manual visual review and live pressure remeasurement remain open. |
 | DM Content | `dm_content.html` and DM Content partials | `/app-next/campaigns/<slug>/dm-content...` | First DM Content visual slice covers lane tabs, editor forms, statblock/source cards, condition list/edit density, staged article store layout, Player Wiki image/upload controls, Systems management cards, destructive confirmation affordances, and mobile overflow smoke coverage. Manual visual review remains open. |
 | Systems browsing | `systems_*.html` | `/app-next/campaigns/<slug>/systems...` | Systems search, source cards, source/category lists, entry article typography, source/sidebar context, related-entry links, book/chapter navigation, and shared-entry management fallback links. |
-| Account settings | `account_settings.html` | `/app-next/account` | Theme option grid, swatches, account sidebar, save feedback, Flask fallback link, and mobile stacking. |
+| Account settings | `account_settings.html` | `/app-next/account` | Theme option grid, frontend preference option grid, swatches, account sidebar, save feedback, Flask fallback links, and mobile stacking. |
 | Campaign Help | `campaign_help.html` | `/app-next/campaigns/<slug>/help` | Explanatory hero density, current-access summary, surface guidance cards, visibility sidebar, cross-cutting notes, fallback link placement, and mobile stacking. |
 | Campaign Control | `campaign_control_panel.html` | `/app-next/campaigns/<slug>/control` | Form density, select sizing, effective/configured/default metadata, campaign-floor override notes, rules sidebar, save feedback, fallback link placement, and mobile stacking. |
 | Admin | `admin.html`, admin user-detail templates | `/app-next/admin` and `/app-next/admin/users/<user_id>` | Dashboard/user list density, invite and membership forms, user-detail action grouping, audit filter/list pagination, CSV export fallback placement, destructive confirmation affordances, non-admin denial, and mobile stacking. |
@@ -102,7 +102,7 @@ Manual acceptance is recorded after the user has tried the Gen2 surface in the l
 | Combat | Pending explicit user acceptance | First combat visual parity slice complete; manual visual acceptance still needed | Player, DM status, and DM controls have desktop/mobile visual smoke coverage. Live pressure remeasurement remains open before transport changes. |
 | DM Content lanes | Pending explicit user acceptance | First DM Content visual parity slice complete; manual visual acceptance still needed | Functional browser coverage exists for statblocks, conditions, staged articles, Player Wiki, and Systems management. Desktop/mobile visual smoke now covers all five lanes. |
 | Systems browsing | Pending explicit user acceptance | Needs visual parity pass | Functional API/browser coverage exists for landing/search, source, category, and entry detail. |
-| Account settings | Pending explicit user acceptance | Needs visual parity pass | Functional API/browser coverage exists for theme and live-session preference saves. |
+| Account settings | Pending explicit user acceptance | Needs visual parity pass | Functional API/browser coverage exists for theme, preferred-frontend, and live-session preference saves. |
 | Campaign Help | Pending explicit user acceptance | Needs visual parity pass | Functional API/browser coverage exists for player and DM guidance views. |
 | Campaign Control | Pending explicit user acceptance | Needs visual parity pass | Functional API/browser coverage exists for manager save and player denial behavior. |
 | Admin | Pending explicit user acceptance | Needs visual parity pass | Functional API/browser coverage exists for dashboard/user detail, invite/reset, membership, assignment, disable/enable, checked deletion, audit filters, and non-admin denial. |
@@ -111,7 +111,7 @@ Manual acceptance is recorded after the user has tried the Gen2 surface in the l
 
 - Keep Flask routes available until the corresponding Gen2 surface has been accepted after manual feel testing.
 - Do not add redirects from Flask routes to Gen2 routes yet. Route-level redirects should wait until a surface is accepted for replacement and the fallback path is still obvious.
-- Keep the temporary Gen2 preview switch opt-in. It can expose `/app-next/` links from Flask home surfaces for testing, but it must not become a route-level redirect or change fresh-session defaults.
+- Keep the temporary Gen2 preference opt-in under Account settings. It can expose `/app-next/` links from the campaign picker for signed-in users who choose Gen2, but it must not become a route-level redirect or change anonymous/signed-out defaults.
 - Keep Flask fallback links on Gen2 surfaces for workflows that remain fallback-only or are still awaiting manual acceptance, especially Systems imports/shared-core editing, CLI/bootstrap recovery handoffs, and newly ported surfaces such as Admin.
 - Treat visual/layout parity as a promotion gate, not as cosmetic follow-up. Several Gen2 surfaces are functionally feel-test ready while still needing layout polish against the Flask rendition.
 
@@ -125,7 +125,7 @@ Manual acceptance is recorded after the user has tried the Gen2 surface in the l
 - `tests/test_frontend_gen2_session_browser.py::test_gen2_combat_visual_parity_smoke` covers the Combat player, DM status, and DM controls visual parity slice with desktop layout checks and mobile overflow checks.
 - `tests/test_frontend_gen2_session_browser.py::test_gen2_dm_content_browser_visual_parity_smoke` covers the DM Content statblocks, staged-articles, conditions, Player Wiki, and Systems visual parity slice with desktop layout checks and mobile overflow checks.
 - Focused API coverage exists in `tests/test_api.py` for the JSON contracts used by the Gen2 surfaces.
-- `tests/test_auth_and_wiki.py` has focused coverage for the Flask campaign picker and Campaign Home Gen2 preview switch, including Flask-by-default links, opt-in Gen2 links, Flask-route preservation, sign-in preservation, and unsafe next-url rejection.
+- `tests/test_auth_and_wiki.py` has focused coverage for the Account-scoped frontend preference, including Flask-by-default campaign links, signed-in opt-in Gen2 campaign links, invalid preference rejection, signed-out Flask fallback, and the absence of page-level preview cards.
 
 ## Local Build And Host
 

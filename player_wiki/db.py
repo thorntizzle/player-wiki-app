@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     user_id INTEGER PRIMARY KEY,
     theme_key TEXT NOT NULL DEFAULT 'parchment',
     session_chat_order TEXT NOT NULL DEFAULT 'newest_first' CHECK (session_chat_order IN ('newest_first', 'oldest_first')),
+    frontend_mode TEXT NOT NULL DEFAULT 'flask' CHECK (frontend_mode IN ('flask', 'gen2')),
     updated_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -616,6 +617,7 @@ def init_database() -> None:
     connection = get_db()
     connection.executescript(SCHEMA)
     _migrate_user_preferences_for_session_chat_order(connection)
+    _migrate_user_preferences_for_frontend_mode(connection)
     _migrate_campaign_visibility_settings_for_additional_scopes(connection)
     _migrate_campaign_combat_trackers_for_revision(connection)
     _migrate_campaign_session_states(connection)
@@ -656,6 +658,22 @@ def _migrate_user_preferences_for_session_chat_order(connection: sqlite3.Connect
         """
         ALTER TABLE user_preferences
         ADD COLUMN session_chat_order TEXT NOT NULL DEFAULT 'newest_first'
+        """
+    )
+
+
+def _migrate_user_preferences_for_frontend_mode(connection: sqlite3.Connection) -> None:
+    columns = {
+        str(row["name"] or "")
+        for row in connection.execute("PRAGMA table_info(user_preferences)").fetchall()
+    }
+    if "frontend_mode" in columns:
+        return
+
+    connection.execute(
+        """
+        ALTER TABLE user_preferences
+        ADD COLUMN frontend_mode TEXT NOT NULL DEFAULT 'flask'
         """
     )
 

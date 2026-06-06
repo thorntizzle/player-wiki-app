@@ -12,12 +12,17 @@ from .auth_store import (
     ApiTokenRecord,
     AuthStore,
     CampaignMembership,
+    DEFAULT_FRONTEND_MODE,
     DEFAULT_SESSION_CHAT_ORDER,
+    FRONTEND_MODE_CHOICES,
+    FRONTEND_MODE_LABELS,
     SESSION_CHAT_ORDER_CHOICES,
     SESSION_CHAT_ORDER_LABELS,
     UserAccount,
     UserPreferences,
+    is_valid_frontend_mode,
     is_valid_session_chat_order,
+    normalize_frontend_mode,
     normalize_session_chat_order,
     utcnow,
 )
@@ -40,10 +45,6 @@ from .repository_store import RepositoryStore
 from .themes import ThemePreset, get_theme_preset, is_valid_theme_key, list_theme_presets, normalize_theme_key
 
 AUTH_SESSION_KEY = "auth_session_token"
-FRONTEND_MODE_SESSION_KEY = "frontend_mode"
-DEFAULT_FRONTEND_MODE = "flask"
-GEN2_FRONTEND_MODE = "gen2"
-VALID_FRONTEND_MODES = frozenset({DEFAULT_FRONTEND_MODE, GEN2_FRONTEND_MODE})
 
 
 @dataclass(slots=True)
@@ -87,6 +88,8 @@ def register_auth(app: Flask) -> None:
             selected_theme_key=get_current_theme().key,
             session_chat_order_choices=SESSION_CHAT_ORDER_CHOICES,
             selected_session_chat_order=get_current_user_preferences().session_chat_order,
+            frontend_mode_choices=FRONTEND_MODE_CHOICES,
+            selected_frontend_mode=get_current_user_preferences().frontend_mode,
         )
         if status_code == 200:
             return rendered
@@ -107,6 +110,7 @@ def register_auth(app: Flask) -> None:
             user_id=0,
             theme_key=get_theme_preset(None).key,
             session_chat_order=DEFAULT_SESSION_CHAT_ORDER,
+            frontend_mode=DEFAULT_FRONTEND_MODE,
             updated_at=utcnow(),
         )
         g.current_theme = get_theme_preset(None)
@@ -230,9 +234,7 @@ def register_auth(app: Flask) -> None:
         if session_record is not None:
             get_auth_store().revoke_session(session_record.id)
 
-        preserve_frontend_mode = get_frontend_mode()
         session.clear()
-        session[FRONTEND_MODE_SESSION_KEY] = preserve_frontend_mode
         flash("Signed out.", "success")
         return redirect(url_for("sign_in"))
 
@@ -292,6 +294,29 @@ def register_auth(app: Flask) -> None:
             f"Live session chat order updated to {SESSION_CHAT_ORDER_LABELS[normalized_order]}.",
             "success",
         )
+        return redirect(url_for("account_settings_view"))
+
+    @app.post("/account/frontend-mode")
+    @login_required
+    def account_frontend_mode_update():
+        user = get_current_user()
+        if user is None:
+            abort(401)
+
+        requested_mode = request.form.get("frontend_mode", "")
+        if not is_valid_frontend_mode(requested_mode):
+            flash("Choose a valid preferred frontend.", "error")
+            return render_account_settings_page(status_code=400)
+
+        normalized_mode = normalize_frontend_mode(requested_mode)
+        current_preferences = get_auth_store().get_user_preferences(user.id)
+        if current_preferences.frontend_mode == normalized_mode:
+            flash(f"Preferred frontend already set to {FRONTEND_MODE_LABELS[normalized_mode]}.", "success")
+            return redirect(url_for("account_settings_view"))
+
+        updated_preferences = get_auth_store().set_user_frontend_mode(user.id, normalized_mode)
+        g.current_user_preferences = updated_preferences
+        flash(f"Preferred frontend updated to {FRONTEND_MODE_LABELS[normalized_mode]}.", "success")
         return redirect(url_for("account_settings_view"))
 
     @app.route("/invite/<token>", methods=["GET", "POST"])
@@ -434,23 +459,6 @@ def register_auth(app: Flask) -> None:
             frontend_mode=get_frontend_mode(),
         )
 
-    @app.post("/campaigns/mode")
-    def campaign_frontend_mode() -> str:
-        requested_mode = request.form.get("frontend_mode", "").strip().lower()
-        next_url = request.form.get("next", "").strip()
-
-        if requested_mode not in VALID_FRONTEND_MODES:
-            flash("Choose a valid campaign frontend mode.", "error")
-            return redirect(resolve_next_url(next_url))
-
-        session[FRONTEND_MODE_SESSION_KEY] = requested_mode
-        if requested_mode == GEN2_FRONTEND_MODE:
-            flash("Campaign frontend mode set to Gen2 preview.", "success")
-        else:
-            flash("Campaign frontend mode set to Flask.", "success")
-
-        return redirect(resolve_next_url(next_url))
-
 
 def get_auth_store() -> AuthStore:
     return current_app.extensions["auth_store"]
@@ -500,6 +508,7 @@ def get_current_user_preferences() -> UserPreferences:
         user_id=0,
         theme_key=get_theme_preset(None).key,
         session_chat_order=DEFAULT_SESSION_CHAT_ORDER,
+        frontend_mode=DEFAULT_FRONTEND_MODE,
         updated_at=utcnow(),
     )
 
@@ -927,11 +936,9 @@ def campaign_systems_entry_access_required(view):
 
 
 def begin_browser_session(raw_token: str) -> None:
-    preserved_mode = get_frontend_mode()
     session.clear()
     session.permanent = True
     session[AUTH_SESSION_KEY] = raw_token
-    session[FRONTEND_MODE_SESSION_KEY] = preserved_mode
 
 
 def validate_password_inputs(password: str, password_confirmation: str) -> list[str]:
@@ -959,13 +966,5 @@ def resolve_next_url(next_url: str) -> str:
     return url_for("home")
 
 
-def normalize_frontend_mode(raw_mode: str | None) -> str:
-    if isinstance(raw_mode, str):
-        normalized = raw_mode.strip().lower()
-    else:
-        normalized = DEFAULT_FRONTEND_MODE
-    return normalized if normalized in VALID_FRONTEND_MODES else DEFAULT_FRONTEND_MODE
-
-
 def get_frontend_mode() -> str:
-    return normalize_frontend_mode(session.get(FRONTEND_MODE_SESSION_KEY))
+    return get_current_user_preferences().frontend_mode

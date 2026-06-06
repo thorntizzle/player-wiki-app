@@ -40,7 +40,6 @@ from .auth import (
     get_current_user,
     get_current_user_preferences,
     get_effective_campaign_visibility,
-    get_frontend_mode,
     get_public_campaign_entries,
     has_session_mode_access,
     login_required,
@@ -9325,7 +9324,6 @@ def create_app() -> Flask:
         return render_template(
             "campaign.html",
             campaign=campaign,
-            frontend_mode=get_frontend_mode(),
             grouped_pages=grouped_pages,
             query=query,
             result_count=result_count,

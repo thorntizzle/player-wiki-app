@@ -481,6 +481,7 @@ def test_api_me_and_campaigns_use_bearer_token_auth(client, app, users):
     assert me_payload["user"]["email"] == users["dm"]["email"]
     assert me_payload["preferences"]["theme_key"] is not None
     assert me_payload["preferences"]["session_chat_order"] is not None
+    assert me_payload["preferences"]["frontend_mode"] == "flask"
 
     campaigns_response = client.get("/api/v1/campaigns", headers=api_headers(token))
 
@@ -513,6 +514,7 @@ def test_api_account_settings_reads_and_updates_user_preferences(client, app, us
     assert settings_payload["preferences"] == {
         "theme_key": "parchment",
         "session_chat_order": "newest_first",
+        "frontend_mode": "flask",
     }
     assert [theme["key"] for theme in settings_payload["theme_presets"]] == [
         "parchment",
@@ -524,11 +526,15 @@ def test_api_account_settings_reads_and_updates_user_preferences(client, app, us
         "newest_first",
         "oldest_first",
     ]
+    assert [choice["value"] for choice in settings_payload["frontend_mode_choices"]] == [
+        "flask",
+        "gen2",
+    ]
 
     update_response = client.patch(
         "/api/v1/me/settings",
         headers=api_headers(token),
-        json={"theme_key": "moonlit", "session_chat_order": "oldest_first"},
+        json={"theme_key": "moonlit", "session_chat_order": "oldest_first", "frontend_mode": "gen2"},
     )
 
     assert update_response.status_code == 200
@@ -536,6 +542,7 @@ def test_api_account_settings_reads_and_updates_user_preferences(client, app, us
     assert update_payload["preferences"] == {
         "theme_key": "moonlit",
         "session_chat_order": "oldest_first",
+        "frontend_mode": "gen2",
     }
 
     me_response = client.get("/api/v1/me", headers=api_headers(token))
@@ -546,6 +553,7 @@ def test_api_account_settings_reads_and_updates_user_preferences(client, app, us
         preferences = AuthStore().get_user_preferences(users["party"]["id"])
         assert preferences.theme_key == "moonlit"
         assert preferences.session_chat_order == "oldest_first"
+        assert preferences.frontend_mode == "gen2"
 
 
 def test_api_account_settings_rejects_invalid_preferences(client, app, users):
@@ -569,6 +577,15 @@ def test_api_account_settings_rejects_invalid_preferences(client, app, users):
     assert invalid_order_response.get_json()["error"]["code"] == "validation_error"
     assert invalid_order_response.get_json()["error"]["message"] == "Choose a valid live session chat order."
 
+    invalid_frontend_response = client.patch(
+        "/api/v1/me/settings",
+        headers=api_headers(token),
+        json={"frontend_mode": "sideways"},
+    )
+    assert invalid_frontend_response.status_code == 400
+    assert invalid_frontend_response.get_json()["error"]["code"] == "validation_error"
+    assert invalid_frontend_response.get_json()["error"]["message"] == "Choose a valid preferred frontend."
+
     empty_response = client.patch("/api/v1/me/settings", headers=api_headers(token), json={})
     assert empty_response.status_code == 400
     assert empty_response.get_json()["error"]["message"] == "No account settings were provided."
@@ -577,6 +594,7 @@ def test_api_account_settings_rejects_invalid_preferences(client, app, users):
         preferences = AuthStore().get_user_preferences(users["party"]["id"])
         assert preferences.theme_key == "parchment"
         assert preferences.session_chat_order == "newest_first"
+        assert preferences.frontend_mode == "flask"
 
 
 def test_api_admin_user_management_context_actions_and_permissions(client, app, users):

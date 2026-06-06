@@ -19,46 +19,6 @@
     {% endif %}
   </section>
 
-  <section class="card auth-card frontend-mode-card">
-    <p class="card-kicker">Frontend preview</p>
-    <h2>
-      {% if frontend_mode == "gen2" %}
-        Gen2 preview mode is active.
-      {% else %}
-        Stable Flask mode is active.
-      {% endif %}
-    </h2>
-    <p class="lede">
-      Pick the interface for campaign cards below.
-    </p>
-    <form class="frontend-mode-form" method="post" action="{{ url_for('campaign_frontend_mode') }}">
-      <input type="hidden" name="next" value="{{ request.full_path }}">
-      <div class="frontend-mode-form__options">
-        <label class="frontend-mode-choice">
-          <input
-            type="radio"
-            name="frontend_mode"
-            value="flask"
-            {% if frontend_mode != "gen2" %}checked{% endif %}
-          >
-          Stable Flask (default)
-        </label>
-        <label class="frontend-mode-choice">
-          <input
-            type="radio"
-            name="frontend_mode"
-            value="gen2"
-            {% if frontend_mode == "gen2" %}checked{% endif %}
-          >
-          Gen2 preview
-        </label>
-      </div>
-      <button class="button-link frontend-mode-form__button" type="submit">
-        Update campaign frontend mode
-      </button>
-    </form>
-  </section>
-
   {% if campaign_entries %}
     <section class="grid">
       {% for entry in campaign_entries %}
@@ -71,16 +31,10 @@
           {% endif %}
           <p class="meta">Visible through session {{ entry.campaign.current_session }}</p>
           {% set campaign_href = url_for("campaign_view", campaign_slug=entry.campaign.slug) %}
-          {% if frontend_mode == "gen2" %}
+          {% if current_user and frontend_mode == "gen2" %}
             {% set campaign_href = "/app-next/campaigns/" ~ entry.campaign.slug %}
           {% endif %}
-          <a class="button-link" href="{{ campaign_href }}">
-            {% if frontend_mode == "gen2" %}
-              Open campaign (Gen2 preview)
-            {% else %}
-              Open campaign
-            {% endif %}
-          </a>
+          <a class="button-link" href="{{ campaign_href }}">Open campaign</a>
         </article>
       {% endfor %}
     </section>
