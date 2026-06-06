@@ -665,6 +665,118 @@ def test_gen2_wiki_browser_exposes_home_section_page_and_assets(
             browser.close()
 
 
+def test_gen2_wiki_visual_parity_smoke(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            desktop_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            mobile_context = browser.new_context(viewport={"width": 390, "height": 800})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        desktop_page = desktop_context.new_page()
+        mobile_page = mobile_context.new_page()
+
+        try:
+            _sign_in(desktop_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
+            desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass")
+            expect(desktop_page.get_by_role("heading", name="Campaign Home")).to_be_visible(timeout=10000)
+            expect(desktop_page.locator(".wiki-home > .panel-header")).to_be_visible()
+            expect(desktop_page.locator(".wiki-overview-card")).to_be_visible()
+            expect(desktop_page.locator(".wiki-section-browse")).to_be_visible()
+            home_metrics = desktop_page.evaluate(
+                """() => {
+                    const route = document.querySelector(".wiki-home");
+                    const header = document.querySelector(".wiki-home > .panel-header");
+                    const overviewBody = document.querySelector(".wiki-overview-card .html-body");
+                    const browse = document.querySelector(".wiki-section-browse");
+                    return {
+                        routeShadow: route ? window.getComputedStyle(route).boxShadow : "",
+                        headerDisplay: header ? window.getComputedStyle(header).display : "",
+                        overviewBorder: overviewBody ? window.getComputedStyle(overviewBody).borderTopWidth : "",
+                        browseRadius: browse ? Number.parseFloat(window.getComputedStyle(browse).borderRadius) : 0,
+                    };
+                }"""
+            )
+            assert home_metrics["routeShadow"] == "none"
+            assert home_metrics["headerDisplay"] == "flex"
+            assert home_metrics["overviewBorder"] == "0px"
+            assert home_metrics["browseRadius"] >= 20
+
+            desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/sections/locations")
+            expect(desktop_page.get_by_role("heading", name="Locations")).to_be_visible(timeout=10000)
+            section_metrics = desktop_page.evaluate(
+                """() => {
+                    const block = document.querySelector(".section-block--collapsible");
+                    const chevron = document.querySelector(".section-toggle-chevron");
+                    const featured = document.querySelector(".page-card--featured");
+                    return {
+                        blockRadius: block ? Number.parseFloat(window.getComputedStyle(block).borderRadius) : 0,
+                        chevronRadius: chevron ? Number.parseFloat(window.getComputedStyle(chevron).borderRadius) : 0,
+                        featuredPaddingTop: featured ? Number.parseFloat(window.getComputedStyle(featured).paddingTop) : 0,
+                    };
+                }"""
+            )
+            assert section_metrics["blockRadius"] >= 20
+            assert section_metrics["chevronRadius"] >= 20
+            assert section_metrics["featuredPaddingTop"] >= 20
+
+            desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale")
+            expect(desktop_page.get_by_role("heading", name="Captain Lyra Vale")).to_be_visible(timeout=10000)
+            expect(desktop_page.locator(".wiki-article-shell .sidebar-card").first).to_be_visible()
+            article_metrics = desktop_page.evaluate(
+                """() => {
+                    const body = document.querySelector(".wiki-article-shell .html-body");
+                    const image = document.querySelector(".article-figure .article-image");
+                    const layout = document.querySelector(".page-layout");
+                    return {
+                        bodyBorder: body ? window.getComputedStyle(body).borderTopWidth : "",
+                        imageRadius: image ? Number.parseFloat(window.getComputedStyle(image).borderRadius) : 0,
+                        columnCount: layout ? window.getComputedStyle(layout).gridTemplateColumns.split(" ").length : 0,
+                    };
+                }"""
+            )
+            assert article_metrics["bodyBorder"] == "0px"
+            assert article_metrics["imageRadius"] >= 20
+            assert article_metrics["columnCount"] >= 2
+
+            _sign_in(mobile_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
+            for path in (
+                "/app-next/campaigns/linden-pass",
+                "/app-next/campaigns/linden-pass/sections/locations",
+                "/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale",
+            ):
+                mobile_page.goto(f"{base_url}{path}")
+                expect(mobile_page.get_by_role("link", name="Campaign Player Wiki")).to_be_visible(timeout=10000)
+                mobile_metrics = mobile_page.evaluate(
+                    """() => ({
+                        innerWidth: window.innerWidth,
+                        scrollWidth: document.documentElement.scrollWidth,
+                        layoutColumns: document.querySelector(".page-layout")
+                            ? window.getComputedStyle(document.querySelector(".page-layout")).gridTemplateColumns.split(" ").length
+                            : 1,
+                    })"""
+                )
+                assert mobile_metrics["scrollWidth"] <= mobile_metrics["innerWidth"] + 1
+                assert mobile_metrics["layoutColumns"] == 1
+        finally:
+            desktop_page.close()
+            mobile_page.close()
+            desktop_context.close()
+            mobile_context.close()
+            browser.close()
+
+
 def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
     frontend_gen2_session_live_server,
     app,
