@@ -1560,6 +1560,124 @@ def test_gen2_session_preserves_local_state_across_live_polling(
             browser.close()
 
 
+@pytest.mark.parametrize(
+    ("lane", "heading", "active_label"),
+    [
+        ("", "DM Content: Statblocks", "Statblocks"),
+        ("staged-articles", "DM Content: Staged Articles", "Staged Articles"),
+        ("conditions", "DM Content: Conditions", "Conditions"),
+        ("player-wiki", "DM Content: Player Wiki", "Player Wiki"),
+        ("systems", "DM Content: Systems", "Systems"),
+    ],
+)
+def test_gen2_dm_content_browser_visual_parity_smoke(
+    frontend_gen2_session_live_server,
+    users,
+    lane: str,
+    heading: str,
+    active_label: str,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+    base_path = f"{base_url}/app-next/campaigns/linden-pass/dm-content"
+    url = base_path if not lane else f"{base_path}?lane={lane}"
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        page = browser.new_page()
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            for viewport in (
+                {"width": 1280, "height": 900},
+                {"width": 390, "height": 900},
+            ):
+                page.set_viewport_size(viewport)
+                page.goto(url)
+
+                page_section = page.locator("section.dm-content-gen2-page")
+                expect(page_section).to_be_visible(timeout=10000)
+                expect(page.get_by_role("heading", name=heading)).to_be_visible(timeout=10000)
+
+                fallback_links = page.locator(".dm-content-gen2-links")
+                expect(fallback_links).to_be_visible()
+                expect(fallback_links.get_by_role("link", name=active_label)).to_be_visible()
+                expect(fallback_links.get_by_role("link", name="Session DM")).to_be_visible()
+                active_classes = fallback_links.get_by_role("link", name=active_label).first.get_attribute("class") or ""
+                assert "is-active" in active_classes
+
+                assert page.evaluate(
+                    """() => {
+                        const pageNode = document.querySelector('.dm-content-gen2-page');
+                        if (!pageNode) {
+                            return false;
+                        }
+                        const styles = getComputedStyle(pageNode);
+                        return (
+                            parseFloat(styles.borderWidth) === 0 &&
+                            parseFloat(styles.borderRadius) === 0 &&
+                            styles.boxShadow === 'none'
+                        );
+                    }""",
+                )
+
+                if viewport["width"] >= 1024 and lane != "systems":
+                    columns = page.evaluate(
+                        """() => {
+                            const grid = document.querySelector('.dm-content-staged-grid');
+                            if (!grid) {
+                                return 0;
+                            }
+                            return getComputedStyle(grid).gridTemplateColumns.trim().split(/\\s+/).length;
+                        }""",
+                    )
+                    assert columns >= 2
+                elif viewport["width"] >= 1024:
+                    systems_metrics = page.evaluate(
+                        """() => {
+                            const lane = document.querySelector('.dm-content-systems-lane');
+                            const panels = Array.from(document.querySelectorAll('.dm-content-systems-lane .panel-nested'));
+                            return {
+                                panelCount: panels.length,
+                                firstRadius: panels.length ? Number.parseFloat(getComputedStyle(panels[0]).borderRadius) : 0,
+                                laneWidth: lane ? Math.ceil(lane.getBoundingClientRect().width) : 0,
+                            };
+                        }""",
+                    )
+                    assert systems_metrics["panelCount"] >= 4
+                    assert systems_metrics["firstRadius"] >= 18
+                    assert systems_metrics["laneWidth"] > 0
+
+                assert page.evaluate(
+                    """() => {
+                        const viewportWidth = Math.ceil(document.documentElement.clientWidth);
+                        const selectors = [
+                            '.dm-content-gen2-links',
+                            '.dm-content-staged-grid',
+                            'section.dm-content-gen2-page',
+                        ];
+                        return selectors.every((selector) => {
+                            const node = document.querySelector(selector);
+                            if (!node) {
+                                return true;
+                            }
+                            return node.scrollWidth <= viewportWidth + 1;
+                        });
+                    }""",
+                )
+                page.evaluate("window.scrollTo(0, 0)")
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_gen2_dm_content_browser_statblock_workflow(
     frontend_gen2_session_live_server,
     users,
