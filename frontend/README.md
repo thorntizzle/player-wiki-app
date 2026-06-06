@@ -56,7 +56,9 @@ npm run build
 
 The build outputs to `frontend/dist`.
 
-The current Gen2 build is local-only: `frontend/dist` is intentionally ignored by Git and Docker context hygiene, and the Fly image does not yet run the frontend build stage. The Flask `/app-next/` route returns 404 until `frontend/dist` exists in the running app environment.
+For local development, run `npm run build` after installing dependencies.
+In the deployed Fly image, the frontend is now built during Docker image creation and shipped as `/app/frontend/dist`, so `/app-next/` works on Fly even without a prebuilt local `frontend/dist`.
+`frontend/dist` is still ignored for local Git/dirty-hosting hygiene and is still excluded from the Docker build context by `.dockerignore` on source builds.
 
 ## Flask integration
 

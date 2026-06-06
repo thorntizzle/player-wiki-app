@@ -153,15 +153,16 @@ Open:
 
 ## Build Artifact Decision
 
-Keep `frontend/dist/` local-only for now. It remains ignored by Git and Docker context hygiene, and Fly does not yet run a frontend build stage.
+`frontend/dist/` is still ignored by Git and Docker context hygiene for local source operations.
+In production deployment, the Fly image now builds the Gen2 frontend from `frontend/package-lock.json` and `frontend/package.json` and ships the bundle at `/app/frontend/dist`.
+This makes explicit `/app-next/` links available on Fly without requiring a prebuilt local artifact.
 
-Revisit deployment packaging when one of these becomes true:
+Revisit deployment packaging again when one of these becomes true:
 
 - a Gen2 route is accepted as the default replacement for a Flask route
-- `/app-next/` needs to work on Fly without a manual local build artifact
 - asset versioning/caching needs to be managed as part of normal deploys
 
-Until then, local testing should rebuild `frontend/dist/` before hosting, and production deployment should continue to treat Gen2 as side-by-side migration work.
+Local testing still rebuilds `frontend/dist/` before local hosting as needed, while production Fly deployment now relies on image-time bundling.
 
 ## Next Readiness Work
 
