@@ -603,6 +603,140 @@ def test_gen2_combat_browser_exposes_dm_status_and_controls(
             browser.close()
 
 
+def test_gen2_combat_visual_parity_smoke(
+    app,
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    _seed_gen2_combat(app, users)
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            desktop_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            mobile_context = browser.new_context(viewport={"width": 390, "height": 800})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        desktop_page = desktop_context.new_page()
+        mobile_page = mobile_context.new_page()
+
+        try:
+            _sign_in(desktop_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=player")
+            expect(desktop_page.get_by_role("heading", name=re.compile(r"Combat:", re.I))).to_be_visible(timeout=10000)
+            expect(desktop_page.locator(".combat-summary-band")).to_be_visible()
+            expect(desktop_page.locator(".combat-carousel")).to_be_visible()
+            expect(desktop_page.locator(".combat-selected-snapshot")).to_be_visible()
+            player_metrics = desktop_page.evaluate(
+                """() => {
+                    const route = document.querySelector(".combat-page");
+                    const hero = document.querySelector(".combat-page > .panel-header h2");
+                    const summary = document.querySelector(".combat-summary-band");
+                    const summaryCard = document.querySelector(".combat-summary-band article");
+                    const carousel = document.querySelector(".combat-carousel");
+                    const combatant = document.querySelector(".combatant-card");
+                    const snapshot = document.querySelector(".combat-selected-snapshot");
+                    return {
+                        routeShadow: route ? window.getComputedStyle(route).boxShadow : "",
+                        heroSize: hero ? Number.parseFloat(window.getComputedStyle(hero).fontSize) : 0,
+                        summaryRadius: summary ? Number.parseFloat(window.getComputedStyle(summary).borderRadius) : 0,
+                        summaryCardRadius: summaryCard ? Number.parseFloat(window.getComputedStyle(summaryCard).borderRadius) : 0,
+                        carouselRadius: carousel ? Number.parseFloat(window.getComputedStyle(carousel).borderRadius) : 0,
+                        combatantRadius: combatant ? Number.parseFloat(window.getComputedStyle(combatant).borderRadius) : 0,
+                        snapshotRadius: snapshot ? Number.parseFloat(window.getComputedStyle(snapshot).borderRadius) : 0,
+                    };
+                }"""
+            )
+            assert player_metrics["routeShadow"] == "none"
+            assert player_metrics["heroSize"] >= 32
+            assert player_metrics["summaryRadius"] >= 20
+            assert player_metrics["summaryCardRadius"] >= 16
+            assert player_metrics["carouselRadius"] >= 20
+            assert player_metrics["combatantRadius"] >= 16
+            assert player_metrics["snapshotRadius"] >= 20
+
+            desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=status")
+            expect(desktop_page.get_by_role("heading", name=re.compile(r"Combat:", re.I))).to_be_visible(timeout=10000)
+            expect(desktop_page.locator(".combat-view-switch")).to_be_visible()
+            expect(desktop_page.locator(".combat-dm-grid .combat-control-card").first).to_be_visible()
+            status_metrics = desktop_page.evaluate(
+                """() => {
+                    const switcher = document.querySelector(".combat-view-switch");
+                    const controlCard = document.querySelector(".combat-dm-grid .combat-control-card");
+                    const condition = document.querySelector(".combat-condition-chip");
+                    const grid = document.querySelector(".combat-dm-grid");
+                    return {
+                        switchRadius: switcher ? Number.parseFloat(window.getComputedStyle(switcher).borderRadius) : 0,
+                        controlRadius: controlCard ? Number.parseFloat(window.getComputedStyle(controlCard).borderRadius) : 0,
+                        conditionRadius: condition ? Number.parseFloat(window.getComputedStyle(condition).borderRadius) : 16,
+                        dmGridColumns: grid ? window.getComputedStyle(grid).gridTemplateColumns.split(" ").length : 0,
+                    };
+                }"""
+            )
+            assert status_metrics["switchRadius"] >= 20
+            assert status_metrics["controlRadius"] >= 16
+            assert status_metrics["conditionRadius"] >= 16
+            assert status_metrics["dmGridColumns"] >= 2
+
+            desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=controls")
+            expect(desktop_page.get_by_role("heading", name="Add NPC")).to_be_visible(timeout=10000)
+            controls_metrics = desktop_page.evaluate(
+                """() => {
+                    const layout = document.querySelector(".combat-controls-layout");
+                    const controlCard = document.querySelector(".combat-controls-layout .combat-control-card");
+                    return {
+                        controlRadius: controlCard ? Number.parseFloat(window.getComputedStyle(controlCard).borderRadius) : 0,
+                        controlsGridColumns: layout ? window.getComputedStyle(layout).gridTemplateColumns.split(" ").length : 0,
+                    };
+                }"""
+            )
+            assert controls_metrics["controlRadius"] >= 16
+            assert controls_metrics["controlsGridColumns"] >= 2
+
+            _sign_in(mobile_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            for path in (
+                "/app-next/campaigns/linden-pass/combat?view=player",
+                "/app-next/campaigns/linden-pass/combat?view=status",
+                "/app-next/campaigns/linden-pass/combat?view=controls",
+            ):
+                mobile_page.goto(f"{base_url}{path}")
+                expect(mobile_page.get_by_role("link", name="Campaign Player Wiki")).to_be_visible(timeout=10000)
+                mobile_metrics = mobile_page.evaluate(
+                    """() => {
+                        const route = document.querySelector(".combat-page");
+                        const switcher = document.querySelector(".combat-view-switch");
+                        const carousel = document.querySelector(".combat-carousel");
+                        const carouselTrack = document.querySelector(".combat-carousel-track");
+                        return {
+                            innerWidth: window.innerWidth,
+                            scrollWidth: document.documentElement.scrollWidth,
+                            routeWidth: route ? route.getBoundingClientRect().width : 0,
+                            switchWidth: switcher ? switcher.getBoundingClientRect().width : 0,
+                            carouselWidth: carousel ? carousel.getBoundingClientRect().width : 0,
+                            trackClientWidth: carouselTrack ? carouselTrack.getBoundingClientRect().width : 0,
+                        };
+                    }"""
+                )
+                assert mobile_metrics["scrollWidth"] <= mobile_metrics["innerWidth"] + 1
+                assert mobile_metrics["routeWidth"] <= mobile_metrics["innerWidth"]
+                assert mobile_metrics["switchWidth"] <= mobile_metrics["innerWidth"]
+                assert mobile_metrics["carouselWidth"] <= mobile_metrics["innerWidth"]
+                assert mobile_metrics["trackClientWidth"] <= mobile_metrics["innerWidth"]
+        finally:
+            desktop_page.close()
+            mobile_page.close()
+            desktop_context.close()
+            mobile_context.close()
+            browser.close()
+
+
 def test_gen2_wiki_browser_exposes_home_section_page_and_assets(
     frontend_gen2_session_live_server,
     users,

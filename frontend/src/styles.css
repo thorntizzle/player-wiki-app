@@ -2296,15 +2296,44 @@ textarea {
 
 .combat-page {
   display: grid;
-  gap: 0.9rem;
+  gap: 1rem;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  backdrop-filter: none;
+}
+
+.combat-page > .panel-header {
+  align-items: flex-start;
+  margin-bottom: 0;
+  padding: 0.75rem 0 0.25rem;
+}
+
+.combat-page > .panel-header h2 {
+  margin: 0;
+  font-size: clamp(2.15rem, 5vw, 4rem);
+  line-height: 0.98;
+}
+
+.combat-page > .panel-header .meta {
+  margin: 0 0 0.25rem;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 
 .combat-view-switch {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
-  border-bottom: 1px solid #d8e1ee;
-  padding-bottom: 0.55rem;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-soft);
+  padding: 0.45rem;
 }
 
 .combat-summary-band,
@@ -2316,23 +2345,38 @@ textarea {
 
 .combat-summary-band {
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  border-block: 1px solid #d8e1ee;
-  padding: 0.7rem 0;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: linear-gradient(180deg, var(--surface-strong), var(--surface));
+  box-shadow: var(--shadow);
 }
 
 .combat-summary-band article {
+  display: grid;
+  gap: 0.15rem;
   min-width: 0;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-soft);
 }
 
 .combat-summary-band strong {
   display: block;
-  font-size: 1.15rem;
+  font-size: 1.35rem;
+  line-height: 1.1;
   overflow-wrap: anywhere;
 }
 
 .combat-carousel {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: linear-gradient(180deg, var(--surface-strong), var(--surface));
+  box-shadow: var(--shadow);
 }
 
 .combat-carousel .compact-header,
@@ -2350,29 +2394,50 @@ textarea {
 .combat-carousel-track {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(210px, 260px);
-  gap: 0.65rem;
+  grid-auto-columns: minmax(230px, 18rem);
+  gap: 0.75rem;
   overflow-x: auto;
-  padding-bottom: 0.35rem;
+  padding: 0.3rem 0.05rem 0.7rem;
   scroll-snap-type: x proximity;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.combat-carousel-track::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.combat-carousel-track::-webkit-scrollbar {
+  height: 0.45rem;
+}
+
+.combat-carousel-track::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--overlay-accent);
 }
 
 .combatant-card {
   scroll-snap-align: start;
   min-height: 145px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  background: #fff;
-  color: #1f2937;
-  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface-soft);
+  color: var(--ink);
+  padding: 0.9rem 1rem;
   text-align: left;
   display: grid;
-  gap: 0.4rem;
+  gap: 0.55rem;
 }
 
 .combatant-card--selected {
-  border-color: #0f766e;
-  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.14);
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-soft);
+}
+
+.combatant-card:hover,
+.combatant-card:focus-visible {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-soft);
 }
 
 .combatant-card__topline,
@@ -2393,15 +2458,16 @@ textarea {
 }
 
 .combatant-card__conditions {
-  color: #475569;
+  color: var(--muted);
   overflow-wrap: anywhere;
 }
 
 .combat-selected-snapshot {
-  border: 1px solid #d8e1ee;
-  border-radius: 8px;
-  background: #f8fbff;
-  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--session-bar-bg);
+  box-shadow: var(--shadow-soft);
+  padding: 1rem;
 }
 
 .combat-selected-snapshot__stats {
@@ -2409,10 +2475,10 @@ textarea {
 }
 
 .combat-selected-snapshot__stats span {
-  border: 1px solid #d8e1ee;
-  border-radius: 8px;
-  background: #fff;
-  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-soft);
+  padding: 0.65rem 0.75rem;
   font-weight: 700;
 }
 
@@ -2422,18 +2488,26 @@ textarea {
   min-width: 0;
 }
 
+.combat-pc-workspace > .compact-header {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface-soft);
+}
+
 .combat-dm-grid,
 .combat-controls-layout {
   display: grid;
-  gap: 0.75rem;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   align-items: start;
 }
 
 .combat-control-card {
   display: grid;
-  gap: 0.65rem;
+  gap: 0.75rem;
   min-width: 0;
+  border-radius: 18px;
 }
 
 .combat-inline-form {
@@ -2469,10 +2543,10 @@ textarea {
   justify-content: space-between;
   align-items: center;
   gap: 0.6rem;
-  border: 1px solid #d8e1ee;
-  border-radius: 8px;
-  background: #fff;
-  padding: 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-soft);
+  padding: 0.65rem 0.75rem;
 }
 
 .combat-condition-chip span {
@@ -2481,12 +2555,17 @@ textarea {
 }
 
 .combat-condition-chip small {
-  color: #64748b;
+  color: var(--muted);
 }
 
 .combat-danger-card {
-  border-color: #fecaca;
-  background: #fff7f7;
+  border-color: var(--error-border);
+  background: var(--error-bg);
+}
+
+.combat-control-card .search-form {
+  display: grid;
+  gap: 0.55rem;
 }
 
 .cultivation-page {
