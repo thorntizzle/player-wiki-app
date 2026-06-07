@@ -1844,6 +1844,100 @@ def test_session_start_and_message_support_async_partial_updates(client, sign_in
     assert message_payload["anchor"] == "session-chat-compose"
 
 
+def test_session_message_composer_includes_audience_controls(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    start = client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    assert start.status_code == 302
+
+    session_page = client.get("/campaigns/linden-pass/session")
+    assert session_page.status_code == 200
+    session_html = session_page.get_data(as_text=True)
+
+    assert 'name="recipient_scope"' in session_html
+    assert 'name="recipient_user_id"' in session_html
+    assert '<option value="global">Global</option>' in session_html
+    assert '<option value="dm_only">DM only</option>' in session_html
+    assert '<option value="player">Specific player</option>' in session_html
+    assert "Owner Player (owner@example.com)" in session_html
+    assert "Party Player (party@example.com)" in session_html
+
+
+def test_session_message_audience_filtering_respects_private_scope(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    global_message = "Global briefing now."
+    dm_only_message = "DM-only tactics should stay private."
+    owner_target_message = "Owner-only tactical note."
+    party_to_dm_only_message = "Party is requesting an update."
+
+    client.post(
+        "/campaigns/linden-pass/session/messages",
+        data={"body": global_message},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/session/messages",
+        data={
+            "body": dm_only_message,
+            "recipient_scope": "dm_only",
+        },
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/session/messages",
+        data={
+            "body": owner_target_message,
+            "recipient_scope": "player",
+            "recipient_user_id": str(users["owner"]["id"]),
+        },
+        follow_redirects=False,
+    )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+    client.post(
+        "/campaigns/linden-pass/session/messages",
+        data={
+            "body": party_to_dm_only_message,
+            "recipient_scope": "dm_only",
+        },
+        follow_redirects=False,
+    )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    owner_view = client.get("/campaigns/linden-pass/session")
+    owner_html = owner_view.get_data(as_text=True)
+    assert owner_view.status_code == 200
+    assert global_message in owner_html
+    assert owner_target_message in owner_html
+    assert dm_only_message not in owner_html
+    assert party_to_dm_only_message not in owner_html
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+    party_view = client.get("/campaigns/linden-pass/session")
+    party_html = party_view.get_data(as_text=True)
+    assert party_view.status_code == 200
+    assert global_message in party_html
+    assert party_to_dm_only_message in party_html
+    assert owner_target_message not in party_html
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    dm_view = client.get("/campaigns/linden-pass/session")
+    dm_html = dm_view.get_data(as_text=True)
+
+    assert dm_view.status_code == 200
+    assert global_message in dm_html
+    assert dm_only_message in dm_html
+    assert owner_target_message in dm_html
+    assert party_to_dm_only_message in dm_html
+
+
 def test_session_articles_stay_out_of_wiki_until_revealed_and_appear_in_chat(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 

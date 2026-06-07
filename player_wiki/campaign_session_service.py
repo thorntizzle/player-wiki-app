@@ -6,6 +6,7 @@ from pathlib import Path
 
 import yaml
 
+from .auth import get_auth_store
 from .campaign_session_store import CampaignSessionConflictError, CampaignSessionStore
 from .repository import normalize_lookup, parse_frontmatter, title_from_slug
 from .session_models import (
@@ -37,6 +38,16 @@ SESSION_ARTICLE_MARKDOWN_IMAGE_PATTERN = re.compile(
 SESSION_ARTICLE_OBSIDIAN_IMAGE_PATTERN = re.compile(
     r"!\[\[(?P<target>[^\]|#]+)(?:#[^\]|]*)?(?:\|(?P<label>[^\]]+))?\]\]"
 )
+
+SESSION_MESSAGE_AUDIENCE_SCOPE_GLOBAL = "global"
+SESSION_MESSAGE_AUDIENCE_SCOPE_DM_ONLY = "dm_only"
+SESSION_MESSAGE_AUDIENCE_SCOPE_PLAYER = "player"
+
+SESSION_MESSAGE_AUDIENCE_SCOPES = {
+    SESSION_MESSAGE_AUDIENCE_SCOPE_GLOBAL,
+    SESSION_MESSAGE_AUDIENCE_SCOPE_DM_ONLY,
+    SESSION_MESSAGE_AUDIENCE_SCOPE_PLAYER,
+}
 
 
 @dataclass(slots=True)
@@ -216,8 +227,52 @@ class CampaignSessionService:
             return None
         return self.store.get_article_image(article_id)
 
-    def list_messages(self, session_id: int) -> list[SessionMessageRecord]:
-        return self.store.list_messages(session_id)
+    def list_messages(
+        self,
+        session_id: int,
+        *,
+        viewer_user_id: int | None = None,
+        can_manage_session: bool = False,
+    ) -> list[SessionMessageRecord]:
+        return self.store.list_messages(
+            session_id,
+            viewer_user_id=viewer_user_id,
+            include_private_messages=can_manage_session,
+        )
+
+    def build_session_message_recipient(
+        self,
+        campaign_slug: str,
+        *,
+        recipient_scope: str,
+        recipient_user_id: int | str | None = None,
+    ) -> tuple[str, int | None]:
+        normalized_scope = str(recipient_scope or SESSION_MESSAGE_AUDIENCE_SCOPE_GLOBAL).strip().lower()
+        if normalized_scope not in SESSION_MESSAGE_AUDIENCE_SCOPES:
+            raise CampaignSessionValidationError(
+                "Message audience must be global, dm_only, or player."
+            )
+        if normalized_scope != SESSION_MESSAGE_AUDIENCE_SCOPE_PLAYER:
+            return normalized_scope, None
+
+        if recipient_user_id is None:
+            raise CampaignSessionValidationError("Choose a player when sending a targeted player message.")
+        if isinstance(recipient_user_id, bool):
+            raise CampaignSessionValidationError("Choose a valid player for the targeted message.")
+
+        try:
+            selected_user_id = int(recipient_user_id)
+        except (TypeError, ValueError):
+            raise CampaignSessionValidationError("Choose a valid player for the targeted message.")
+        if selected_user_id <= 0:
+            raise CampaignSessionValidationError("Choose a valid player for the targeted message.")
+
+        store = get_auth_store()
+        membership = store.get_membership(selected_user_id, campaign_slug, statuses=("active",))
+        if membership is None or membership.role != "player":
+            raise CampaignSessionValidationError("Choose an active campaign player for the targeted message.")
+
+        return normalized_scope, selected_user_id
 
     def begin_session(
         self,
@@ -276,6 +331,8 @@ class CampaignSessionService:
         body_text: str,
         author_display_name: str,
         author_user_id: int | None = None,
+        recipient_scope: str = SESSION_MESSAGE_AUDIENCE_SCOPE_GLOBAL,
+        recipient_user_id: int | None = None,
     ) -> SessionMessageRecord:
         normalized_body = (body_text or "").strip()
         if not normalized_body:
@@ -287,6 +344,12 @@ class CampaignSessionService:
         if active_session is None:
             raise CampaignSessionValidationError("The chat window opens when the DM begins a session.")
 
+        normalized_scope, normalized_recipient_user_id = self.build_session_message_recipient(
+            campaign_slug,
+            recipient_scope=recipient_scope,
+            recipient_user_id=recipient_user_id,
+        )
+
         message = self.store.create_message(
             active_session.id,
             campaign_slug,
@@ -294,6 +357,8 @@ class CampaignSessionService:
             body_text=normalized_body,
             author_display_name=author_display_name,
             author_user_id=author_user_id,
+            recipient_scope=normalized_scope,
+            recipient_user_id=normalized_recipient_user_id,
         )
         self.store.bump_state_revision(campaign_slug, updated_by_user_id=author_user_id)
         return message

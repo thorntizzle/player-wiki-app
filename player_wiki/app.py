@@ -2218,6 +2218,26 @@ def create_app() -> Flask:
             "player_choices": player_choices,
         }
 
+    def build_session_message_recipient_player_choices(campaign_slug: str) -> list[dict[str, object]]:
+        store = get_auth_store()
+        choices: list[dict[str, object]] = []
+        for candidate in sorted(
+            store.list_users(),
+            key=lambda item: ((item.display_name or "").lower(), item.email.lower()),
+        ):
+            if not candidate.is_active:
+                continue
+            membership = store.get_membership(candidate.id, campaign_slug, statuses=("active",))
+            if membership is None or membership.role != "player":
+                continue
+            choices.append(
+                {
+                    "user_id": candidate.id,
+                    "label": f"{candidate.display_name} ({candidate.email})",
+                }
+            )
+        return choices
+
     def normalize_character_page_ref(value: object) -> str:
         if isinstance(value, dict):
             slug = str(value.get("slug") or value.get("page_slug") or "").strip()
@@ -5467,6 +5487,7 @@ def create_app() -> Flask:
     ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
         session_service = get_campaign_session_service()
+        current_user = get_current_user()
         can_manage_session = can_manage_campaign_session(campaign_slug)
         can_post_messages = can_post_campaign_session_messages(campaign_slug)
         session_article_form_mode = normalize_session_article_form_mode(
@@ -5530,7 +5551,11 @@ def create_app() -> Flask:
         session_messages = []
         active_session = None
         if active_session_record is not None:
-            live_messages = session_service.list_messages(active_session_record.id)
+            live_messages = session_service.list_messages(
+                active_session_record.id,
+                viewer_user_id=int(current_user.id if current_user else 0) or None,
+                can_manage_session=can_manage_session,
+            )
             session_messages = present_session_messages(
                 campaign,
                 live_messages,
@@ -5603,6 +5628,7 @@ def create_app() -> Flask:
             "can_post_messages": can_post_messages,
             "chat_is_open": active_session is not None,
             "session_article_form_mode": session_article_form_mode,
+            "session_message_recipient_player_choices": build_session_message_recipient_player_choices(campaign_slug),
             "session_manager_state_token": build_session_manager_state_token(
                 active_session_id=active_session_record.id if active_session_record is not None else None,
                 staged_articles=staged_articles,
@@ -5881,7 +5907,12 @@ def create_app() -> Flask:
         active_session_record = session_service.get_active_session(campaign_slug)
         active_session = None
         if active_session_record is not None:
-            live_messages = session_service.list_messages(active_session_record.id)
+            user = get_current_user()
+            live_messages = session_service.list_messages(
+                active_session_record.id,
+                viewer_user_id=int(user.id if user else 0) or None,
+                can_manage_session=can_manage_session,
+            )
             active_session = present_session_record(
                 active_session_record,
                 message_count=len(live_messages),
@@ -12301,11 +12332,15 @@ def create_app() -> Flask:
 
         mutation_succeeded = False
         try:
+            recipient_scope = request.form.get("recipient_scope", "global")
+            recipient_user_id = request.form.get("recipient_user_id") or None
             get_campaign_session_service().post_message(
                 campaign_slug,
                 body_text=request.form.get("body", ""),
                 author_display_name=user.display_name,
                 author_user_id=user.id,
+                recipient_scope=str(recipient_scope or "").strip().lower(),
+                recipient_user_id=recipient_user_id,
             )
         except CampaignSessionValidationError as exc:
             flash(str(exc), "error")
@@ -12617,7 +12652,11 @@ def create_app() -> Flask:
         session_service = get_campaign_session_service()
         all_articles = session_service.list_articles(campaign_slug)
         article_images = session_service.list_article_images([article.id for article in all_articles])
-        messages = session_service.list_messages(session_record.id)
+        messages = session_service.list_messages(
+            session_record.id,
+            viewer_user_id=int(get_current_user().id) if get_current_user() else None,
+            can_manage_session=True,
+        )
 
         return render_template(
             "session_log.html",

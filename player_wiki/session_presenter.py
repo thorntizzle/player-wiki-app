@@ -3,6 +3,7 @@ from __future__ import annotations
 import markdown
 
 from .models import Campaign
+from .auth import get_auth_store
 from .repository import build_alias_index, render_obsidian_links
 from .session_models import (
     CampaignSessionRecord,
@@ -115,6 +116,19 @@ def present_session_messages(
     for message in messages:
         article = article_lookup.get(message.article_id or -1)
         article_image = article_images.get(article.id) if article is not None else None
+        recipient_user = (
+            get_auth_store().get_user_by_id(message.recipient_user_id)
+            if message.recipient_scope == "player" and message.recipient_user_id
+            else None
+        )
+        recipient_label = str(recipient_user.display_name or "") if recipient_user is not None else ""
+        if not recipient_label and message.recipient_user_id:
+            recipient_label = f"User {message.recipient_user_id}"
+        if not recipient_label and message.recipient_scope == "player":
+            recipient_label = "Unknown player"
+        if not recipient_label and message.recipient_scope == "dm_only":
+            recipient_label = "DM"
+
         presented_messages.append(
             {
                 "id": message.id,
@@ -122,6 +136,9 @@ def present_session_messages(
                 "author_label": message.author_display_name,
                 "timestamp_label": format_session_timestamp(message.created_at),
                 "body_text": message.body_text,
+                "recipient_scope": message.recipient_scope,
+                "recipient_user_id": message.recipient_user_id,
+                "recipient_label": recipient_label,
                 "kind_label": (
                     "Revealed article" if message.message_type == "article_reveal" else message.message_type.title()
                 ),

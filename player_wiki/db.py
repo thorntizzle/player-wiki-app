@@ -191,6 +191,8 @@ CREATE TABLE IF NOT EXISTS campaign_session_messages (
     campaign_slug TEXT NOT NULL,
     message_type TEXT NOT NULL CHECK (message_type IN ('chat', 'article_reveal', 'system')),
     body_text TEXT NOT NULL,
+    recipient_scope TEXT NOT NULL DEFAULT 'global',
+    recipient_user_id INTEGER,
     author_user_id INTEGER,
     author_display_name TEXT NOT NULL,
     article_id INTEGER,
@@ -209,6 +211,7 @@ ON campaign_session_articles(campaign_slug, status, created_at, id);
 
 CREATE INDEX IF NOT EXISTS idx_campaign_session_messages_session
 ON campaign_session_messages(session_id, created_at, id);
+
 
 CREATE INDEX IF NOT EXISTS idx_api_tokens_user
 ON api_tokens(user_id, created_at DESC, id DESC);
@@ -621,6 +624,7 @@ def init_database() -> None:
     _migrate_campaign_visibility_settings_for_additional_scopes(connection)
     _migrate_campaign_combat_trackers_for_revision(connection)
     _migrate_campaign_session_states(connection)
+    _migrate_campaign_session_messages_for_private_recipient_scope(connection)
     _migrate_campaign_session_articles_for_source_page_ref(connection)
     _migrate_campaign_combatants_for_revision(connection)
     _migrate_campaign_combatants_for_source_identity(connection)
@@ -723,6 +727,33 @@ def _migrate_campaign_visibility_settings_for_additional_scopes(connection: sqli
         FROM campaign_visibility_settings_legacy;
 
         DROP TABLE campaign_visibility_settings_legacy;
+        """
+    )
+
+
+def _migrate_campaign_session_messages_for_private_recipient_scope(connection: sqlite3.Connection) -> None:
+    columns = {
+        str(row["name"] or "")
+        for row in connection.execute("PRAGMA table_info(campaign_session_messages)").fetchall()
+    }
+    if "recipient_scope" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE campaign_session_messages
+            ADD COLUMN recipient_scope TEXT NOT NULL DEFAULT 'global'
+            """
+        )
+    if "recipient_user_id" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE campaign_session_messages
+            ADD COLUMN recipient_user_id INTEGER
+            """
+        )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_campaign_session_messages_session_recipient
+        ON campaign_session_messages(session_id, recipient_scope, recipient_user_id, created_at, id)
         """
     )
 

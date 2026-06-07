@@ -518,16 +518,39 @@ class CampaignSessionStore:
             raise RuntimeError("Session article image disappeared after update.")
         return image
 
-    def list_messages(self, session_id: int) -> list[SessionMessageRecord]:
-        rows = get_db().execute(
-            """
-            SELECT *
-            FROM campaign_session_messages
-            WHERE session_id = ?
-            ORDER BY created_at ASC, id ASC
-            """,
-            (session_id,),
-        ).fetchall()
+    def list_messages(
+        self,
+        session_id: int,
+        *,
+        viewer_user_id: int | None = None,
+        include_private_messages: bool = False,
+    ) -> list[SessionMessageRecord]:
+        if include_private_messages:
+            rows = get_db().execute(
+                """
+                SELECT *
+                FROM campaign_session_messages
+                WHERE session_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (session_id,),
+            ).fetchall()
+        else:
+            viewer_id = int(viewer_user_id or 0)
+            rows = get_db().execute(
+                """
+                SELECT *
+                FROM campaign_session_messages
+                WHERE session_id = ?
+                  AND (
+                    COALESCE(recipient_scope, 'global') = 'global'
+                    OR (recipient_scope = 'player' AND recipient_user_id = ?)
+                    OR author_user_id = ?
+                  )
+                ORDER BY created_at ASC, id ASC
+                """,
+                (session_id, viewer_id, viewer_id),
+            ).fetchall()
         return [self._map_message(row) for row in rows]
 
     def create_message(
@@ -540,6 +563,8 @@ class CampaignSessionStore:
         author_display_name: str,
         author_user_id: int | None = None,
         article_id: int | None = None,
+        recipient_scope: str = "global",
+        recipient_user_id: int | None = None,
     ) -> SessionMessageRecord:
         connection = get_db()
         cursor = connection.execute(
@@ -549,18 +574,22 @@ class CampaignSessionStore:
                 campaign_slug,
                 message_type,
                 body_text,
+                recipient_scope,
+                recipient_user_id,
                 author_user_id,
                 author_display_name,
                 article_id,
                 created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
                 campaign_slug,
                 message_type,
                 body_text,
+                recipient_scope,
+                recipient_user_id,
                 author_user_id,
                 author_display_name,
                 article_id,
@@ -615,12 +644,14 @@ class CampaignSessionStore:
                 campaign_slug,
                 message_type,
                 body_text,
+                recipient_scope,
+                recipient_user_id,
                 author_user_id,
                 author_display_name,
                 article_id,
                 created_at
             )
-            VALUES (?, ?, 'article_reveal', '', ?, ?, ?, ?)
+            VALUES (?, ?, 'article_reveal', '', 'global', NULL, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -699,6 +730,8 @@ class CampaignSessionStore:
             campaign_slug=str(row["campaign_slug"]),
             message_type=str(row["message_type"]),
             body_text=str(row["body_text"]),
+            recipient_scope=str(row["recipient_scope"] or "global"),
+            recipient_user_id=int(row["recipient_user_id"]) if row["recipient_user_id"] is not None else None,
             author_user_id=int(row["author_user_id"]) if row["author_user_id"] is not None else None,
             author_display_name=str(row["author_display_name"]),
             article_id=int(row["article_id"]) if row["article_id"] is not None else None,

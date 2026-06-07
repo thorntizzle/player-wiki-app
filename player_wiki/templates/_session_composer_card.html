@@ -8,6 +8,26 @@
       data-session-async
     >
       <label class="field">
+        <span>Audience</span>
+        <select name="recipient_scope" id="session-chat-audience-select">
+          <option value="global">Global</option>
+          <option value="dm_only">DM only</option>
+          <option value="player">Specific player</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Player</span>
+        <select name="recipient_user_id" id="session-chat-recipient-select">
+          {% if session_message_recipient_player_choices %}
+            {% for choice in session_message_recipient_player_choices %}
+              <option value="{{ choice.user_id }}">{{ choice.label }}</option>
+            {% endfor %}
+          {% else %}
+            <option value="" disabled selected>No players available</option>
+          {% endif %}
+        </select>
+      </label>
+      <label class="field">
         <span>Message</span>
         <textarea
           name="body"

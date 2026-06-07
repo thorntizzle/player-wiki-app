@@ -8,6 +8,11 @@
             <p class="card-kicker">{{ message.kind_label }}</p>
             <strong>{{ message.author_label }}</strong>
           </div>
+          {% if message.recipient_scope == "dm_only" %}
+            <p class="meta">DM-only</p>
+          {% elif message.recipient_scope == "player" %}
+            <p class="meta">To: {{ message.recipient_label }}</p>
+          {% endif %}
           <span class="meta">{{ message.timestamp_label }}</span>
         </div>
         {% if message.message_type == "article_reveal" %}

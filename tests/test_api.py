@@ -971,6 +971,121 @@ def test_api_session_endpoints_follow_permissions(client, app, users):
     assert reveal_messages[0]["article"]["title"] == "Sealed Orders"
 
 
+def test_api_session_messages_support_private_audience_scope(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-audience-api")
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-session-audience-api")
+    party_token = issue_api_token(app, users["party"]["email"], label="party-session-audience-api")
+
+    start_response = client.post("/api/v1/campaigns/linden-pass/session/start", headers=api_headers(dm_token))
+    assert start_response.status_code == 200
+    assert start_response.get_json()["session"]["id"] == 1
+
+    global_body = "Council update for everyone."
+    dm_only_body = "DM-only response notes."
+    owner_only_body = "Owner should get this note."
+    party_private_body = "Party-to-DM check-in."
+
+    assert (
+        client.post(
+            "/api/v1/campaigns/linden-pass/session/messages",
+            headers=api_headers(dm_token),
+            json={
+                "body": global_body,
+            },
+        ).status_code
+        == 200
+    )
+
+    assert (
+        client.post(
+            "/api/v1/campaigns/linden-pass/session/messages",
+            headers=api_headers(dm_token),
+            json={
+                "body": dm_only_body,
+                "recipient_scope": "dm_only",
+            },
+        ).status_code
+        == 200
+    )
+
+    owner_create_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/messages",
+        headers=api_headers(dm_token),
+        json={
+            "body": owner_only_body,
+            "recipient_scope": "player",
+            "recipient_user_id": users["owner"]["id"],
+        },
+    )
+    assert owner_create_response.status_code == 200
+    assert owner_create_response.get_json()["message"]["recipient_label"] == "Owner Player"
+
+    assert (
+        client.post(
+            "/api/v1/campaigns/linden-pass/session/messages",
+            headers=api_headers(party_token),
+            json={
+                "body": party_private_body,
+                "recipient_scope": "dm_only",
+            },
+        ).status_code
+        == 200
+    )
+
+    party_payload = client.get(
+        "/api/v1/campaigns/linden-pass/session",
+        headers=api_headers(party_token),
+    ).get_json()
+    party_messages = [entry["body_text"] for entry in party_payload["messages"]]
+    assert global_body in party_messages
+    assert dm_only_body not in party_messages
+    assert owner_only_body not in party_messages
+    assert party_private_body in party_messages
+
+    owner_payload = client.get(
+        "/api/v1/campaigns/linden-pass/session",
+        headers=api_headers(owner_token),
+    ).get_json()
+    owner_messages = {entry["body_text"]: entry for entry in owner_payload["messages"]}
+    assert owner_messages[global_body]["recipient_scope"] == "global"
+    assert owner_messages[owner_only_body]["recipient_scope"] == "player"
+    assert owner_messages[owner_only_body]["recipient_label"] == "Owner Player"
+    assert party_private_body not in owner_messages
+
+    dm_payload = client.get(
+        "/api/v1/campaigns/linden-pass/session",
+        headers=api_headers(dm_token),
+    ).get_json()
+    dm_messages = {entry["body_text"]: entry for entry in dm_payload["messages"]}
+    assert dm_messages[global_body]["recipient_scope"] == "global"
+    assert dm_messages[dm_only_body]["recipient_scope"] == "dm_only"
+    assert dm_messages[dm_only_body]["recipient_label"] == "DM"
+    assert dm_messages[owner_only_body]["recipient_label"] == "Owner Player"
+
+    close_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/close",
+        headers=api_headers(dm_token),
+    )
+    assert close_response.status_code == 200
+
+    log_id = int(close_response.get_json()["session"]["id"])
+    log_payload = client.get(
+        f"/api/v1/campaigns/linden-pass/session/logs/{log_id}",
+        headers=api_headers(dm_token),
+    ).get_json()
+    assert log_payload["ok"] is True
+    log_messages = {entry["body_text"]: entry for entry in log_payload["messages"]}
+    assert set(log_messages.keys()) >= {
+        global_body,
+        dm_only_body,
+        owner_only_body,
+        party_private_body,
+    }
+    assert log_messages[dm_only_body]["recipient_scope"] == "dm_only"
+    assert log_messages[owner_only_body]["recipient_scope"] == "player"
+    assert log_messages[owner_only_body]["recipient_label"] == "Owner Player"
+
+
 def test_api_session_state_includes_revision_and_view_token(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-metadata-api")
 

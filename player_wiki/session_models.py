@@ -97,6 +97,8 @@ class SessionMessageRecord:
     campaign_slug: str
     message_type: str
     body_text: str
+    recipient_scope: str
+    recipient_user_id: int | None
     author_user_id: int | None
     author_display_name: str
     article_id: int | None

@@ -1405,6 +1405,18 @@ def register_api(app) -> None:
         converted_pages: dict[int, Any] | None = None,
     ) -> dict[str, Any]:
         article = article_lookup.get(message.article_id) if message.article_id is not None else None
+        recipient_user = (
+            get_auth_store().get_user_by_id(message.recipient_user_id)
+            if message.recipient_scope == "player" and message.recipient_user_id
+            else None
+        )
+        recipient_label = str(recipient_user.display_name or "") if recipient_user is not None else ""
+        if not recipient_label and message.recipient_user_id:
+            recipient_label = f"User {message.recipient_user_id}"
+        if message.recipient_scope == "dm_only":
+            recipient_label = "DM"
+        elif not recipient_label and message.recipient_scope == "player":
+            recipient_label = "Unknown player"
         return {
             "id": message.id,
             "session_id": message.session_id,
@@ -1415,6 +1427,9 @@ def register_api(app) -> None:
             "author_display_name": message.author_display_name,
             "article_id": message.article_id,
             "created_at": serialize_datetime(message.created_at),
+            "recipient_scope": message.recipient_scope,
+            "recipient_user_id": message.recipient_user_id,
+            "recipient_label": recipient_label,
             "article": (
                 serialize_session_article(
                     campaign_slug,
@@ -1582,6 +1597,7 @@ def register_api(app) -> None:
 
         messages = []
         if active_session is not None:
+            current_user = get_current_user()
             messages = [
                 serialize_session_message(
                     campaign_slug,
@@ -1591,7 +1607,11 @@ def register_api(app) -> None:
                     campaign=campaign,
                     converted_pages=converted_pages,
                 )
-                for message in session_service.list_messages(active_session.id)
+                for message in session_service.list_messages(
+                    active_session.id,
+                    viewer_user_id=int(current_user.id) if current_user else None,
+                    can_manage_session=can_manage_session,
+                )
             ]
 
         payload: dict[str, Any] = {
@@ -6894,7 +6914,10 @@ def register_api(app) -> None:
                 "session": serialize_session_record(session_record),
                 "messages": [
                     serialize_session_message(campaign_slug, message, article_lookup, article_images)
-                    for message in session_service.list_messages(session_record.id)
+                    for message in session_service.list_messages(
+                        session_record.id,
+                        can_manage_session=True,
+                    )
                 ],
             }
         )
@@ -6935,6 +6958,8 @@ def register_api(app) -> None:
                 body_text=payload.get("body", ""),
                 author_display_name=user.display_name,
                 author_user_id=user.id,
+                recipient_scope=str(payload.get("recipient_scope", "global")),
+                recipient_user_id=payload.get("recipient_user_id"),
             )
         except CampaignSessionValidationError as exc:
             return json_error(str(exc), 400, code="validation_error")
@@ -6942,17 +6967,7 @@ def register_api(app) -> None:
         return jsonify(
             {
                 "ok": True,
-                "message": {
-                    "id": message.id,
-                    "session_id": message.session_id,
-                    "campaign_slug": message.campaign_slug,
-                    "message_type": message.message_type,
-                    "body_text": message.body_text,
-                    "author_user_id": message.author_user_id,
-                    "author_display_name": message.author_display_name,
-                    "article_id": message.article_id,
-                    "created_at": serialize_datetime(message.created_at),
-                },
+                "message": serialize_session_message(campaign_slug, message, {}, {}),
             }
         )
 
