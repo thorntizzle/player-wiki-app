@@ -5724,12 +5724,6 @@ def create_app() -> Flask:
                     filename=markdown_filename,
                     data_blob=markdown_file.read() if markdown_file is not None else b"",
                 )
-                article = session_service.create_article(
-                    campaign_slug,
-                    title=markdown_upload.title,
-                    body_markdown=markdown_upload.body_markdown,
-                    created_by_user_id=created_by_user_id,
-                )
                 referenced_image_filename = (
                     (referenced_image_file.filename or "").strip() if referenced_image_file is not None else ""
                 )
@@ -5737,15 +5731,31 @@ def create_app() -> Flask:
                     raise CampaignSessionValidationError(
                         "This markdown file references an image. Upload the referenced image file too."
                     )
+                referenced_image_upload = None
                 if referenced_image_file is not None and referenced_image_filename:
-                    session_service.attach_article_image(
-                        campaign_slug,
-                        article.id,
+                    referenced_image_upload = session_service.prepare_article_image_upload(
                         filename=referenced_image_filename,
                         media_type=referenced_image_file.mimetype,
                         data_blob=referenced_image_file.read(),
                         alt_text=markdown_upload.image_alt,
                         caption=markdown_upload.image_caption,
+                    )
+                article = session_service.create_article(
+                    campaign_slug,
+                    title=markdown_upload.title,
+                    body_markdown=markdown_upload.body_markdown,
+                    has_content_image=referenced_image_upload is not None,
+                    created_by_user_id=created_by_user_id,
+                )
+                if referenced_image_upload is not None:
+                    session_service.attach_article_image(
+                        campaign_slug,
+                        article.id,
+                        filename=referenced_image_upload.filename,
+                        media_type=referenced_image_upload.media_type,
+                        data_blob=referenced_image_upload.data_blob,
+                        alt_text=referenced_image_upload.alt_text,
+                        caption=referenced_image_upload.caption,
                         updated_by_user_id=created_by_user_id,
                     )
             elif article_mode == "wiki":
@@ -5786,49 +5796,69 @@ def create_app() -> Flask:
                             "Choose a visible published wiki page or Systems entry before pulling it into the session store."
                         )
 
-                    source_body_markdown = page_record.body_markdown.strip() or page_record.page.summary.strip()
-                    if not source_body_markdown:
-                        raise CampaignSessionValidationError(
-                            "The selected wiki page does not have any body text or summary to pull into the session store."
-                        )
-
-                    article = session_service.create_article(
-                        campaign_slug,
-                        title=page_record.page.title,
-                        body_markdown=source_body_markdown,
-                        source_page_ref=build_session_article_page_source_ref(page_record.page_ref),
-                        created_by_user_id=created_by_user_id,
-                    )
+                    page_image_upload = None
                     if page_record.page.image_path:
                         image_path = get_campaign_asset_file(campaign, page_record.page.image_path)
                         if image_path is not None:
-                            session_service.attach_article_image(
-                                campaign_slug,
-                                article.id,
+                            page_image_upload = session_service.prepare_article_image_upload(
                                 filename=image_path.name,
                                 media_type=guess_campaign_asset_media_type(image_path),
                                 data_blob=image_path.read_bytes(),
                                 alt_text=page_record.page.image_alt,
                                 caption=page_record.page.image_caption,
-                                updated_by_user_id=created_by_user_id,
                             )
-            else:
-                article = session_service.create_article(
-                    campaign_slug,
-                    title=request.form.get("title", ""),
-                    body_markdown=request.form.get("body_markdown", ""),
-                    created_by_user_id=created_by_user_id,
-                )
-                image_filename = (image_file.filename or "").strip() if image_file is not None else ""
-                if image_file is not None and image_filename:
-                    session_service.attach_article_image(
+
+                    source_body_markdown = page_record.body_markdown.strip() or page_record.page.summary.strip()
+                    if not source_body_markdown and page_image_upload is None:
+                        raise CampaignSessionValidationError(
+                            "The selected wiki page does not have any body text, summary, or image to pull into the session store."
+                        )
+                    article = session_service.create_article(
                         campaign_slug,
-                        article.id,
+                        title=page_record.page.title,
+                        body_markdown=source_body_markdown,
+                        source_page_ref=build_session_article_page_source_ref(page_record.page_ref),
+                        has_content_image=page_image_upload is not None,
+                        created_by_user_id=created_by_user_id,
+                    )
+                    if page_image_upload is not None:
+                        session_service.attach_article_image(
+                            campaign_slug,
+                            article.id,
+                            filename=page_image_upload.filename,
+                            media_type=page_image_upload.media_type,
+                            data_blob=page_image_upload.data_blob,
+                            alt_text=page_image_upload.alt_text,
+                            caption=page_image_upload.caption,
+                            updated_by_user_id=created_by_user_id,
+                        )
+            else:
+                image_filename = (image_file.filename or "").strip() if image_file is not None else ""
+                manual_image_upload = None
+                if image_file is not None and image_filename:
+                    manual_image_upload = session_service.prepare_article_image_upload(
                         filename=image_filename,
                         media_type=image_file.mimetype,
                         data_blob=image_file.read(),
                         alt_text=request.form.get("image_alt", ""),
                         caption=request.form.get("image_caption", ""),
+                    )
+                article = session_service.create_article(
+                    campaign_slug,
+                    title=request.form.get("title", ""),
+                    body_markdown=request.form.get("body_markdown", ""),
+                    has_content_image=manual_image_upload is not None,
+                    created_by_user_id=created_by_user_id,
+                )
+                if manual_image_upload is not None:
+                    session_service.attach_article_image(
+                        campaign_slug,
+                        article.id,
+                        filename=manual_image_upload.filename,
+                        media_type=manual_image_upload.media_type,
+                        data_blob=manual_image_upload.data_blob,
+                        alt_text=manual_image_upload.alt_text,
+                        caption=manual_image_upload.caption,
                         updated_by_user_id=created_by_user_id,
                     )
         except CampaignSessionValidationError:
@@ -5852,26 +5882,38 @@ def create_app() -> Flask:
         image_filename = (image_file.filename or "").strip() if image_file is not None else ""
         image_alt = request.form.get("image_alt", "")
         image_caption = request.form.get("image_caption", "")
+        image_upload = None
+        if image_file is not None and image_filename:
+            image_upload = session_service.prepare_article_image_upload(
+                filename=image_filename,
+                media_type=image_file.mimetype,
+                data_blob=image_file.read(),
+                alt_text=image_alt,
+                caption=image_caption,
+            )
+        existing_image = session_service.get_article_image(campaign_slug, article_id)
+        has_image = image_upload is not None or existing_image is not None
 
         updated_article = session_service.update_article(
             campaign_slug,
             article_id,
             title=request.form.get("title", ""),
             body_markdown=request.form.get("body_markdown", ""),
+            has_content_image=has_image,
             updated_by_user_id=updated_by_user_id,
         )
-        if image_file is not None and image_filename:
+        if image_upload is not None:
             session_service.attach_article_image(
                 campaign_slug,
                 article_id,
-                filename=image_filename,
-                media_type=image_file.mimetype,
-                data_blob=image_file.read(),
-                alt_text=image_alt,
-                caption=image_caption,
+                filename=image_upload.filename,
+                media_type=image_upload.media_type,
+                data_blob=image_upload.data_blob,
+                alt_text=image_upload.alt_text,
+                caption=image_upload.caption,
                 updated_by_user_id=updated_by_user_id,
             )
-        elif session_service.get_article_image(campaign_slug, article_id) is not None:
+        elif existing_image is not None:
             session_service.update_article_image_metadata(
                 campaign_slug,
                 article_id,

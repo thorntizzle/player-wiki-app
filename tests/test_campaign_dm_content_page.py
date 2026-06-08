@@ -61,6 +61,15 @@ Speed 30 ft., fly 45 ft.
 STR 10 (+0)  DEX 16 (+3)  CON 12 (+1)  INT 16 (+3)  WIS 14 (+2)  CHA 11 (+0)
 """
 
+TEST_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\rIHDR"
+    b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00"
+    b"\x90wS\xde"
+    b"\x00\x00\x00\x0cIDAT\x08\xd7c\xf8\xff\xff?\x00\x05\xfe\x02\xfeA\xd9\x8f\x9b"
+    b"\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
 
 def _build_systems_import_archive() -> bytes:
     archive_buffer = BytesIO()
@@ -981,3 +990,40 @@ def test_dm_can_stage_session_article_from_dm_content_and_manage_it_from_session
     delete_html = delete_article.get_data(as_text=True)
     assert "Staged article deleted from the session reveal queue." in delete_html
     assert _list_session_articles(app) == []
+
+
+def test_dm_can_stage_image_only_session_article_from_dm_content(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_article = client.post(
+        "/campaigns/linden-pass/dm-content/staged-articles",
+        data={
+            "article_mode": "manual",
+            "title": "Harbor Signal Sketch",
+            "body_markdown": "",
+            "image_alt": "A sketch of signal flags over the harbor.",
+            "image_caption": "The sketch was shown without added body text.",
+            "image_file": (BytesIO(TEST_PNG_BYTES), "harbor-signal.png"),
+        },
+        follow_redirects=True,
+    )
+
+    assert create_article.status_code == 200
+    create_html = create_article.get_data(as_text=True)
+    assert "Staged article added to the session reveal queue." in create_html
+    assert "Harbor Signal Sketch" in create_html
+    assert "The sketch was shown without added body text." in create_html
+
+    articles = _list_session_articles(app)
+    assert len(articles) == 1
+    assert articles[0].title == "Harbor Signal Sketch"
+    assert articles[0].body_markdown == ""
+    assert not articles[0].is_revealed
+
+    with app.app_context():
+        image = app.extensions["campaign_session_service"].get_article_image("linden-pass", articles[0].id)
+
+    assert image is not None
+    assert image.filename == "harbor-signal.png"
+    assert image.alt_text == "A sketch of signal flags over the harbor."
+    assert image.caption == "The sketch was shown without added body text."

@@ -59,6 +59,15 @@ class SessionArticleMarkdownUpload:
     image_caption: str = ""
 
 
+@dataclass(slots=True)
+class SessionArticleImageUpload:
+    filename: str
+    media_type: str
+    data_blob: bytes
+    alt_text: str = ""
+    caption: str = ""
+
+
 def extract_session_article_title_heading(markdown_text: str) -> tuple[str, str]:
     lines = markdown_text.replace("\r\n", "\n").split("\n")
     line_index = 0
@@ -171,18 +180,61 @@ class CampaignSessionService:
     def __init__(self, store: CampaignSessionStore) -> None:
         self.store = store
 
-    def _normalize_article_fields(self, *, title: str, body_markdown: str) -> tuple[str, str]:
+    def _normalize_article_fields(
+        self,
+        *,
+        title: str,
+        body_markdown: str,
+        has_content_image: bool = False,
+    ) -> tuple[str, str]:
         normalized_title = (title or "").strip()
         normalized_body = (body_markdown or "").strip()
         if not normalized_title:
             raise CampaignSessionValidationError("Session articles need a title.")
-        if not normalized_body:
-            raise CampaignSessionValidationError("Session articles need body text before they can be saved.")
+        if not normalized_body and not has_content_image:
+            raise CampaignSessionValidationError("Session articles need body text or an image before they can be saved.")
         if len(normalized_title) > 200:
             raise CampaignSessionValidationError("Session article titles must stay under 200 characters.")
         if len(normalized_body) > 40_000:
             raise CampaignSessionValidationError("Session articles must stay under 40,000 characters.")
         return normalized_title, normalized_body
+
+    def prepare_article_image_upload(
+        self,
+        *,
+        filename: str,
+        media_type: str | None,
+        data_blob: bytes,
+        alt_text: str = "",
+        caption: str = "",
+    ) -> SessionArticleImageUpload:
+        normalized_filename = Path(filename or "").name.strip()
+        if not normalized_filename:
+            raise CampaignSessionValidationError("Choose an image file before saving the session article.")
+
+        extension = Path(normalized_filename).suffix.lower()
+        allowed_media_type = ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS.get(extension)
+        if allowed_media_type is None:
+            raise CampaignSessionValidationError(
+                "Session article images must be PNG, JPG, GIF, or WEBP files."
+            )
+
+        normalized_media_type = (media_type or "").strip().lower() or allowed_media_type
+        if normalized_media_type != allowed_media_type:
+            normalized_media_type = allowed_media_type
+
+        if not data_blob:
+            raise CampaignSessionValidationError("Uploaded image files cannot be empty.")
+        if len(data_blob) > 8 * 1024 * 1024:
+            raise CampaignSessionValidationError("Session article images must stay under 8 MB.")
+
+        return SessionArticleImageUpload(
+            filename=normalized_filename,
+            media_type=normalized_media_type,
+            data_blob=data_blob,
+            alt_text=(alt_text or "").strip(),
+            caption=(caption or "").strip(),
+        )
 
     def get_live_revision(self, campaign_slug: str) -> int:
         return self.store.get_live_revision(campaign_slug)
@@ -370,11 +422,13 @@ class CampaignSessionService:
         title: str,
         body_markdown: str,
         source_page_ref: str = "",
+        has_content_image: bool = False,
         created_by_user_id: int | None = None,
     ) -> SessionArticleRecord:
         normalized_title, normalized_body = self._normalize_article_fields(
             title=title,
             body_markdown=body_markdown,
+            has_content_image=has_content_image,
         )
         normalized_source_page_ref = normalize_session_article_source_ref(source_page_ref)
         if len(normalized_source_page_ref) > 400:
@@ -397,6 +451,7 @@ class CampaignSessionService:
         *,
         title: str,
         body_markdown: str,
+        has_content_image: bool = False,
         updated_by_user_id: int | None = None,
     ) -> SessionArticleRecord:
         article = self.store.get_article(article_id)
@@ -410,6 +465,7 @@ class CampaignSessionService:
         normalized_title, normalized_body = self._normalize_article_fields(
             title=title,
             body_markdown=body_markdown,
+            has_content_image=has_content_image,
         )
         try:
             updated_article = self.store.update_article(
@@ -553,33 +609,21 @@ class CampaignSessionService:
         if article is None or article.campaign_slug != campaign_slug:
             raise CampaignSessionValidationError("That session article could not be found.")
 
-        normalized_filename = Path(filename or "").name.strip()
-        if not normalized_filename:
-            raise CampaignSessionValidationError("Choose an image file before saving the session article.")
-
-        extension = Path(normalized_filename).suffix.lower()
-        allowed_media_type = ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS.get(extension)
-        if allowed_media_type is None:
-            raise CampaignSessionValidationError(
-                "Session article images must be PNG, JPG, GIF, or WEBP files."
-            )
-
-        normalized_media_type = (media_type or "").strip().lower() or allowed_media_type
-        if normalized_media_type != allowed_media_type:
-            normalized_media_type = allowed_media_type
-
-        if not data_blob:
-            raise CampaignSessionValidationError("Uploaded image files cannot be empty.")
-        if len(data_blob) > 8 * 1024 * 1024:
-            raise CampaignSessionValidationError("Session article images must stay under 8 MB.")
+        image_upload = self.prepare_article_image_upload(
+            filename=filename,
+            media_type=media_type,
+            data_blob=data_blob,
+            alt_text=alt_text,
+            caption=caption,
+        )
 
         image = self.store.upsert_article_image(
             article_id,
-            filename=normalized_filename,
-            media_type=normalized_media_type,
-            data_blob=data_blob,
-            alt_text=(alt_text or "").strip(),
-            caption=(caption or "").strip(),
+            filename=image_upload.filename,
+            media_type=image_upload.media_type,
+            data_blob=image_upload.data_blob,
+            alt_text=image_upload.alt_text,
+            caption=image_upload.caption,
         )
         self.store.bump_state_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
         return image

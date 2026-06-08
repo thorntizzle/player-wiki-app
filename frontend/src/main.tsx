@@ -245,6 +245,24 @@ type PaneName = SessionRoutePane;
 type ArticleMode = "manual" | "upload" | "wiki";
 type CombatView = "player" | "status" | "controls";
 
+interface ManualArticleDraftState {
+  title: string;
+  body: string;
+  image: EmbeddedImageInput | null;
+  imageAltText: string;
+  imageCaption: string;
+}
+
+function buildEmptyManualArticleDraft(): ManualArticleDraftState {
+  return {
+    title: "",
+    body: "",
+    image: null,
+    imageAltText: "",
+    imageCaption: "",
+  };
+}
+
 interface CombatVitalsDraft {
   currentHp: string;
   maxHp: string;
@@ -6871,8 +6889,8 @@ function DmArticleCreator({
   sourceResults: SessionArticleSourceResult[];
   selectedSourceRef: string;
   setSelectedSourceRef: (value: string) => void;
-  manualDraft: { title: string; body: string };
-  setManualDraft: (state: { title: string; body: string }) => void;
+  manualDraft: ManualArticleDraftState;
+  setManualDraft: (state: ManualArticleDraftState) => void;
   uploadDraft: { filename: string; markdown: string; image: EmbeddedImageInput | null };
   setUploadDraft: (state: { filename: string; markdown: string; image: EmbeddedImageInput | null }) => void;
   onSearchSources: (event: FormEvent<HTMLFormElement>) => Promise<void>;
@@ -6881,7 +6899,7 @@ function DmArticleCreator({
 }) {
   const instructions =
     mode === "manual"
-      ? "Use title and markdown body and create an unrevealed article."
+      ? "Use a title with markdown body or an image and create an unrevealed article."
       : mode === "upload"
         ? "Upload mode needs a filename and markdown body."
         : "Search and select a source, then pull into staged articles.";
@@ -6933,15 +6951,57 @@ function DmArticleCreator({
               setManualDraft({ ...manualDraft, body: event.currentTarget.value });
             }}
           />
+          <label htmlFor="dm-manual-image" className="chat-label">Image (optional)</label>
+          <input
+            id="dm-manual-image"
+            type="file"
+            accept=".png,.jpg,.jpeg,.webp,.gif"
+            onChange={(event: ChangeEvent<HTMLInputElement>) => {
+              const file = event.currentTarget.files?.item(0);
+              if (!file) {
+                setManualDraft({ ...manualDraft, image: null });
+                return;
+              }
+              readBinaryAsBase64(file, (payload) => setManualDraft({ ...manualDraft, image: payload }));
+            }}
+          />
+          {manualDraft.image ? <p className="status status-neutral">Selected image: {manualDraft.image.filename}</p> : null}
+          <label htmlFor="dm-manual-image-alt" className="chat-label">Image alt text (optional)</label>
+          <input
+            id="dm-manual-image-alt"
+            value={manualDraft.imageAltText}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => {
+              setManualDraft({ ...manualDraft, imageAltText: event.currentTarget.value });
+            }}
+          />
+          <label htmlFor="dm-manual-image-caption" className="chat-label">Image caption (optional)</label>
+          <input
+            id="dm-manual-image-caption"
+            value={manualDraft.imageCaption}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => {
+              setManualDraft({ ...manualDraft, imageCaption: event.currentTarget.value });
+            }}
+          />
           <button
             type="button"
             className="button"
-            disabled={isCreating || !manualDraft.title.trim() || !manualDraft.body.trim()}
+            disabled={
+              isCreating
+              || !manualDraft.title.trim()
+              || (!manualDraft.body.trim() && !manualDraft.image)
+            }
             onClick={() =>
               onCreate({
                 mode: "manual",
                 title: manualDraft.title.trim(),
                 body_markdown: manualDraft.body,
+                image: manualDraft.image
+                  ? {
+                      ...manualDraft.image,
+                      alt_text: manualDraft.imageAltText.trim() || null,
+                      caption: manualDraft.imageCaption.trim() || null,
+                    }
+                  : undefined,
               } satisfies SessionArticleCreatePayloadManual)
             }
           >
@@ -10235,7 +10295,7 @@ function DmPane({
   const revealedArticles: SessionArticle[] = payload?.revealed_articles ?? [];
   const sessionLogs: SessionLogSummary[] = payload?.session_logs ?? [];
   const [mode, setMode] = useState<ArticleMode>("manual");
-  const [manualDraft, setManualDraft] = useState({ title: "", body: "" });
+  const [manualDraft, setManualDraft] = useState<ManualArticleDraftState>(buildEmptyManualArticleDraft);
   const [uploadDraft, setUploadDraft] = useState({ filename: "", markdown: "", image: null as EmbeddedImageInput | null });
   const [sourceQuery, setSourceQuery] = useState("");
   const [sourceResults, setSourceResults] = useState<SessionArticleSourceResult[]>([]);
@@ -10309,6 +10369,7 @@ function DmPane({
     onSuccess: () => {
       setUiMessage("Article created.");
       setPaneError(null);
+      setManualDraft(buildEmptyManualArticleDraft());
       void refetch();
     },
     onError: (error) => {
@@ -11476,7 +11537,7 @@ function DmContentPage() {
   const [statblockQuery, setStatblockQuery] = useState("");
   const [statblockDrafts, setStatblockDrafts] = useState<Record<number, DmContentStatblockDraftState>>({});
   const [mode, setMode] = useState<ArticleMode>("manual");
-  const [manualDraft, setManualDraft] = useState({ title: "", body: "" });
+  const [manualDraft, setManualDraft] = useState<ManualArticleDraftState>(buildEmptyManualArticleDraft);
   const [uploadDraft, setUploadDraft] = useState({
     filename: "",
     markdown: "",
@@ -11865,7 +11926,7 @@ function DmContentPage() {
     onSuccess: () => {
       setUiMessage("Article staged.");
       setPaneError(null);
-      setManualDraft({ title: "", body: "" });
+      setManualDraft(buildEmptyManualArticleDraft());
       setUploadDraft({ filename: "", markdown: "", image: null });
       setSelectedSourceRef("");
       void sessionQuery.refetch();

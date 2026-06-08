@@ -20,6 +20,27 @@ from player_wiki.xianxia_character_model import (
 )
 
 
+TINY_PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+
+
+def embedded_png_payload(
+    filename: str = "session-article.png",
+    *,
+    alt_text: str | None = None,
+    caption: str | None = None,
+) -> dict[str, str | None]:
+    payload: dict[str, str | None] = {
+        "filename": filename,
+        "media_type": "image/png",
+        "data_base64": TINY_PNG_BASE64,
+    }
+    if alt_text is not None:
+        payload["alt_text"] = alt_text
+    if caption is not None:
+        payload["caption"] = caption
+    return payload
+
+
 def api_headers(token: str) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {token}",
@@ -969,6 +990,126 @@ def test_api_session_endpoints_follow_permissions(client, app, users):
     reveal_messages = [message for message in player_after_payload["messages"] if message["article"] is not None]
     assert len(reveal_messages) == 1
     assert reveal_messages[0]["article"]["title"] == "Sealed Orders"
+
+
+def test_api_session_articles_allow_image_only_manual_staging(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-image-only-api")
+
+    create_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={
+            "mode": "manual",
+            "title": "Signal Sketch",
+            "body_markdown": "",
+            "image": embedded_png_payload(
+                "signal-sketch.png",
+                alt_text="A sketched signal flag.",
+                caption="Shown as the only article content.",
+            ),
+        },
+    )
+
+    assert create_response.status_code == 200
+    article_payload = create_response.get_json()["article"]
+    assert article_payload["title"] == "Signal Sketch"
+    assert article_payload["body_markdown"] == ""
+    assert article_payload["image"]["filename"] == "signal-sketch.png"
+    assert article_payload["image"]["alt_text"] == "A sketched signal flag."
+    assert article_payload["image"]["caption"] == "Shown as the only article content."
+
+    session_response = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
+    assert session_response.status_code == 200
+    staged_payload = session_response.get_json()["staged_articles"]
+    assert any(article["title"] == "Signal Sketch" and article["body_markdown"] == "" for article in staged_payload)
+
+
+def test_api_session_articles_still_reject_title_only_manual_staging(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-empty-article-api")
+
+    create_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={
+            "mode": "manual",
+            "title": "Empty Draft",
+            "body_markdown": "",
+        },
+    )
+
+    assert create_response.status_code == 400
+    payload = create_response.get_json()
+    assert payload["error"]["code"] == "validation_error"
+    assert payload["error"]["message"] == "Session articles need body text or an image before they can be saved."
+
+
+def test_api_session_article_blank_update_requires_existing_or_valid_image(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-image-update-api")
+
+    text_create = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={
+            "mode": "manual",
+            "title": "Text Draft",
+            "body_markdown": "This text should survive a failed image replacement.",
+        },
+    )
+    assert text_create.status_code == 200
+    text_article_id = text_create.get_json()["article"]["id"]
+
+    failed_update = client.put(
+        f"/api/v1/campaigns/linden-pass/session/articles/{text_article_id}",
+        headers=api_headers(dm_token),
+        json={
+            "title": "Text Draft",
+            "body_markdown": "",
+            "image": {
+                "filename": "not-an-image.txt",
+                "media_type": "text/plain",
+                "data_base64": TINY_PNG_BASE64,
+            },
+        },
+    )
+    assert failed_update.status_code == 400
+
+    session_after_failure = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
+    text_article = next(
+        article
+        for article in session_after_failure.get_json()["staged_articles"]
+        if article["id"] == text_article_id
+    )
+    assert text_article["body_markdown"] == "This text should survive a failed image replacement."
+    assert text_article["image"] is None
+
+    image_create = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={
+            "mode": "manual",
+            "title": "Image Draft",
+            "body_markdown": "This body can be cleared because the article has an image.",
+            "image": embedded_png_payload("image-draft.png"),
+        },
+    )
+    assert image_create.status_code == 200
+    image_article_id = image_create.get_json()["article"]["id"]
+
+    blank_update = client.put(
+        f"/api/v1/campaigns/linden-pass/session/articles/{image_article_id}",
+        headers=api_headers(dm_token),
+        json={
+            "title": "Image Draft",
+            "body_markdown": "",
+            "image_alt_text": "Updated image-only draft.",
+            "image_caption": "Body intentionally blank.",
+        },
+    )
+    assert blank_update.status_code == 200
+    updated_article = blank_update.get_json()["article"]
+    assert updated_article["body_markdown"] == ""
+    assert updated_article["image"]["alt_text"] == "Updated image-only draft."
+    assert updated_article["image"]["caption"] == "Body intentionally blank."
 
 
 def test_api_session_messages_support_private_audience_scope(client, app, users):

@@ -2349,7 +2349,7 @@ export interface CharacterRestApplyResponse extends ApiResponseBase {
 export interface SessionArticleCreatePayloadManual {
   mode: "manual";
   title: string;
-  body_markdown: string;
+  body_markdown?: string;
   image?: {
     filename: string;
     data_base64: string;
