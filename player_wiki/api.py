@@ -3040,9 +3040,10 @@ def register_api(app) -> None:
                     campaign_slug=campaign_slug,
                     character_slug=character_slug,
                 )
+        can_level_up_character = has_session_mode_access(campaign_slug, character_slug)
+        can_manage_character = can_manage_campaign_session(campaign_slug)
         if (
-            can_access_campaign_scope(campaign_slug, "characters")
-            and can_manage_campaign_session(campaign_slug)
+            can_level_up_character
             and character_advancement_lane(campaign_system) == CHARACTER_ADVANCEMENT_LANE_DND5E_LEVEL_UP
             and supports_native_character_tools(getattr(record.definition, "system", ""))
         ):
@@ -3063,7 +3064,7 @@ def register_api(app) -> None:
                     campaign_slug=campaign_slug,
                     character_slug=character_slug,
                 )
-            elif readiness_status == "repairable":
+            elif readiness_status == "repairable" and can_manage_character:
                 links["progression_repair_url"] = gen2_campaign_href(
                     campaign_slug,
                     f"characters/{character_slug}/progression-repair",
@@ -3838,7 +3839,7 @@ def register_api(app) -> None:
                 campaign_slug=campaign_slug,
                 character_slug=character_slug,
             )
-        elif readiness_status == "repairable":
+        elif readiness_status == "repairable" and can_manage_campaign_session(campaign_slug):
             links["progression_repair_url"] = gen2_campaign_href(
                 campaign_slug,
                 f"characters/{character_slug}/progression-repair",
@@ -3887,17 +3888,16 @@ def register_api(app) -> None:
         campaign = get_repository().get_campaign(campaign_slug)
         if campaign is None:
             abort(404)
-        record = load_character_record(campaign_slug, character_slug)
-        if not can_manage_campaign_session(campaign_slug):
-            return campaign, record, json_error(
+        if not has_session_mode_access(campaign_slug, character_slug):
+            return campaign, None, json_error(
                 "You do not have permission to level up this character.",
                 403,
                 code="forbidden",
             )
+        record = load_character_record(campaign_slug, character_slug)
         return campaign, record, None
 
     @api.get("/campaigns/<campaign_slug>/characters/<character_slug>/level-up")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_level_up_read(campaign_slug: str, character_slug: str):
         campaign, record, access_error = load_character_level_up_target(campaign_slug, character_slug)
@@ -3926,7 +3926,6 @@ def register_api(app) -> None:
         )
 
     @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/level-up")
-    @api_campaign_scope_access_required("characters")
     @api_login_required
     def character_level_up_submit(campaign_slug: str, character_slug: str):
         campaign, record, access_error = load_character_level_up_target(campaign_slug, character_slug)

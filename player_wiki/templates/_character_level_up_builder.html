@@ -12,7 +12,7 @@
           <h2>Native Level {{ level_up.next_level }} Advancement</h2>
           <p class="meta">Advance an existing class row or add one new strict-martial multiclass row, then review the resulting features, resources, and hit point change before saving.</p>
         </div>
-        <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character_slug) }}">Back to sheet</a>
+        <a class="ghost-button" href="{{ level_up_back_href }}">Back to sheet</a>
       </div>
 
       <form

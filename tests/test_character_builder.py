@@ -23325,6 +23325,41 @@ def test_dm_can_see_level_up_entry_for_supported_native_character(app, client, s
     assert "Level up" in html
 
 
+def test_assigned_player_can_open_level_up_without_characters_scope(
+    app,
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    monkeypatch,
+):
+    set_campaign_visibility("linden-pass", characters="dm", session="players")
+
+    monkeypatch.setattr(
+        app_module,
+        "native_level_up_readiness",
+        lambda *args, **kwargs: {"status": "ready", "message": "", "reasons": []},
+    )
+    monkeypatch.setattr(
+        app_module,
+        "build_native_level_up_context",
+        lambda *args, **kwargs: _level_up_context_fixture(),
+    )
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march/level-up")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Level Up Leveler" in html
+    assert 'href="/app-next/campaigns/linden-pass/characters/arden-march"' in html
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    blocked_response = client.get("/campaigns/linden-pass/characters/arden-march/level-up")
+
+    assert blocked_response.status_code == 403
+
+
 def test_dm_can_see_progression_repair_entry_for_repairable_imported_character(app, client, sign_in, users, monkeypatch):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 

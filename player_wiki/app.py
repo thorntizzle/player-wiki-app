@@ -4645,7 +4645,7 @@ def create_app() -> Flask:
             readiness=level_up_readiness,
         )
         can_level_up = bool(
-            can_manage_character
+            can_use_session_mode
             and level_up_readiness
             and level_up_readiness.get("status") == "ready"
         )
@@ -5206,6 +5206,15 @@ def create_app() -> Flask:
             status_code,
         )
 
+    def character_sheet_return_href(campaign_slug: str, character_slug: str) -> str:
+        if can_access_campaign_scope(campaign_slug, "characters"):
+            return url_for(
+                "character_read_view",
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+            )
+        return f"/app-next/campaigns/{campaign_slug}/characters/{character_slug}"
+
     def render_character_level_up_page(
         campaign_slug: str,
         character_slug: str,
@@ -5243,6 +5252,7 @@ def create_app() -> Flask:
                 template_name,
                 campaign=campaign,
                 character_slug=character_slug,
+                level_up_back_href=character_sheet_return_href(campaign_slug, character_slug),
                 level_up=level_up_context,
                 active_nav="characters",
                 live_diagnostics_enabled=app.config["LIVE_DIAGNOSTICS"],
@@ -12969,9 +12979,11 @@ def create_app() -> Flask:
         )
 
     @app.route("/campaigns/<campaign_slug>/characters/<character_slug>/level-up", methods=["GET", "POST"])
-    @campaign_scope_access_required("characters")
+    @login_required
     def character_level_up_view(campaign_slug: str, character_slug: str):
-        if not can_manage_campaign_session(campaign_slug):
+        if get_repository().get_campaign(campaign_slug) is None:
+            abort(404)
+        if not has_session_mode_access(campaign_slug, character_slug):
             abort(403)
 
         campaign, record = load_character_context(campaign_slug, character_slug)
@@ -12990,6 +13002,8 @@ def create_app() -> Flask:
         )
         if readiness.get("status") == "repairable":
             flash(str(readiness.get("message") or "This imported character needs progression repair first."), "error")
+            if not can_manage_campaign_session(campaign_slug):
+                return redirect(character_sheet_return_href(campaign_slug, character_slug))
             return redirect(
                 url_for(
                     "character_progression_repair_view",
@@ -12999,13 +13013,7 @@ def create_app() -> Flask:
             )
         if readiness.get("status") != "ready":
             flash(str(readiness.get("message") or "This character is not eligible for the current native level-up flow."), "error")
-            return redirect(
-                url_for(
-                    "character_read_view",
-                    campaign_slug=campaign_slug,
-                    character_slug=character_slug,
-                )
-            )
+            return redirect(character_sheet_return_href(campaign_slug, character_slug))
 
         form_values = dict(request.form if request.method == "POST" else request.args)
         try:
@@ -13071,13 +13079,7 @@ def create_app() -> Flask:
         write_yaml(character_dir / "definition.yaml", definition.to_dict())
         write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
         flash(f"{definition.name} advanced to level {int(level_up_context.get('next_level') or 0)}.", "success")
-        return redirect(
-            url_for(
-                "character_read_view",
-                campaign_slug=campaign_slug,
-                character_slug=character_slug,
-            )
-        )
+        return redirect(character_sheet_return_href(campaign_slug, character_slug))
 
     @app.route("/campaigns/<campaign_slug>/characters/<character_slug>/cultivation", methods=["GET", "POST"])
     @campaign_scope_access_required("characters")

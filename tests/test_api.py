@@ -2950,8 +2950,9 @@ The harbor masters insist on repetition until every motion is clean.
 
 
 def test_api_character_level_up_context_save_and_access(client, app, users, set_campaign_visibility, monkeypatch):
-    set_campaign_visibility("linden-pass", characters="players")
+    set_campaign_visibility("linden-pass", characters="dm", session="players")
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-level-up-api")
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-character-level-up-api")
     player_token = issue_api_token(app, users["party"]["email"], label="blocked-character-level-up-api")
 
     def _ready_level_up(*_args, **_kwargs):
@@ -3040,9 +3041,20 @@ def test_api_character_level_up_context_save_and_access(client, app, users, set_
     assert detail_links["level_up_url"] == "/app-next/campaigns/linden-pass/characters/arden-march/level-up"
     assert detail_links["flask_level_up_url"] == "/campaigns/linden-pass/characters/arden-march/level-up"
 
+    owner_detail_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(owner_token),
+    )
+    assert owner_detail_response.status_code == 200
+    owner_detail_links = owner_detail_response.get_json()["links"]
+    assert owner_detail_links["level_up_url"] == "/app-next/campaigns/linden-pass/characters/arden-march/level-up"
+    assert owner_detail_links["flask_level_up_url"] == "/campaigns/linden-pass/characters/arden-march/level-up"
+    assert "advanced_editor_url" not in owner_detail_links
+    assert "progression_repair_url" not in owner_detail_links
+
     response = client.get(
         "/api/v1/campaigns/linden-pass/characters/arden-march/level-up?hp_gain=5",
-        headers=api_headers(dm_token),
+        headers=api_headers(owner_token),
     )
 
     assert response.status_code == 200
@@ -3067,7 +3079,7 @@ def test_api_character_level_up_context_save_and_access(client, app, users, set_
 
     update_response = client.post(
         "/api/v1/campaigns/linden-pass/characters/arden-march/level-up",
-        headers=api_headers(dm_token),
+        headers=api_headers(owner_token),
         json={"expected_revision": level_up["state_revision"], "values": {"hp_gain": "5"}},
     )
 
@@ -3088,7 +3100,7 @@ def test_api_character_level_up_context_save_and_access(client, app, users, set_
 
     stale_response = client.post(
         "/api/v1/campaigns/linden-pass/characters/arden-march/level-up",
-        headers=api_headers(dm_token),
+        headers=api_headers(owner_token),
         json={"expected_revision": level_up["state_revision"], "values": {"hp_gain": "5"}},
     )
     assert stale_response.status_code == 409
