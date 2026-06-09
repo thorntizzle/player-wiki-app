@@ -1598,7 +1598,10 @@ def create_app() -> Flask:
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    campaign_page_store = CampaignPageStore()
+    campaign_page_store = CampaignPageStore(
+        reload_enabled=app.config["RELOAD_CONTENT"],
+        scan_interval_seconds=app.config["CONTENT_SCAN_INTERVAL_SECONDS"],
+    )
     repository_store = RepositoryStore(
         app.config["CAMPAIGNS_DIR"],
         page_store=campaign_page_store,

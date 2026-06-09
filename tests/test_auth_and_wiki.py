@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from player_wiki.auth_store import AuthStore
+from player_wiki.campaign_content_service import write_campaign_page_file
 from player_wiki.db import get_db
 from tests.sample_data import TEST_CAMPAIGN_TITLE
 
@@ -16,6 +17,27 @@ TEST_WEBP_BYTES = (
     b"\x2a\x00\x00\x00"
     b"\x00\x00\x00\x00"
 )
+
+
+def _write_progression_page(campaigns_dir: Path) -> None:
+    page_path = campaigns_dir / "linden-pass" / "content" / "mechanics" / "reload-sync-progression-check.md"
+    page_path.parent.mkdir(parents=True, exist_ok=True)
+    page_path.write_text(
+        "---\n"
+        "title: Reload Sync Progression Check\n"
+        "section: Mechanics\n"
+        "type: page\n"
+        "published: true\n"
+        "character_progression:\n"
+        "  kind: class\n"
+        "  class_name: Fighter\n"
+        "  level: 2\n"
+        "  feature_name: Harbor Drill\n"
+        "  description: Practice turns dockside routines into combat muscle memory.\n"
+        "---\n\n"
+        "Practice turns dockside routines into combat muscle memory.\n",
+        encoding="utf-8",
+    )
 
 
 def test_anonymous_user_can_browse_public_campaign_content(client):
@@ -226,7 +248,8 @@ def test_campaign_help_page_collects_surface_guidance_and_limits(client, sign_in
 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
-    assert f"{TEST_CAMPAIGN_TITLE} Help" in body
+    assert f"Help | {TEST_CAMPAIGN_TITLE}" in body
+    assert "<h1>Help</h1>" in body
     assert "Current access" in body
     assert "Campaign Home" in body
     assert "Systems" in body
@@ -539,6 +562,165 @@ def test_repository_refresh_syncs_manual_file_edits_into_db_read_model(app):
         )
         assert record is not None
         assert "Freshly mirrored content from a manual file edit." in record.body_markdown
+
+
+def test_systems_progression_reads_skip_page_resync_when_reload_disabled(app, monkeypatch):
+    campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    _write_progression_page(campaigns_dir)
+
+    with app.app_context():
+        repository_store = app.extensions["repository_store"]
+        page_store = app.extensions["campaign_page_store"]
+        systems_service = app.extensions["systems_service"]
+
+        repository_store.reload_enabled = False
+        page_store.reload_enabled = False
+
+        upserted_refs: list[str] = []
+        original_upsert_page = page_store.upsert_page
+
+        def counting_upsert_page(campaign_slug, page_ref, **kwargs):
+            upserted_refs.append(f"{campaign_slug}:{page_ref}")
+            return original_upsert_page(campaign_slug, page_ref, **kwargs)
+
+        monkeypatch.setattr(page_store, "upsert_page", counting_upsert_page)
+
+        repository = repository_store.get()
+        assert upserted_refs
+        upserted_refs.clear()
+
+        campaign = repository.get_campaign("linden-pass")
+        assert campaign is not None
+
+        first_entries = systems_service._list_campaign_progression_entries("linden-pass")
+        second_entries = systems_service._list_campaign_progression_entries("linden-pass")
+
+        assert first_entries
+        assert [entry.entry_key for entry in second_entries] == [entry.entry_key for entry in first_entries]
+        assert upserted_refs == []
+
+
+def test_systems_progression_reads_skip_page_resync_when_content_is_already_synced(
+    app,
+    monkeypatch,
+):
+    campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    _write_progression_page(campaigns_dir)
+
+    with app.app_context():
+        repository_store = app.extensions["repository_store"]
+        page_store = app.extensions["campaign_page_store"]
+        systems_service = app.extensions["systems_service"]
+
+        repository_store.scan_interval_seconds = 0
+        page_store.scan_interval_seconds = 0
+
+        upserted_refs: list[str] = []
+        original_upsert_page = page_store.upsert_page
+
+        def counting_upsert_page(campaign_slug, page_ref, **kwargs):
+            upserted_refs.append(f"{campaign_slug}:{page_ref}")
+            return original_upsert_page(campaign_slug, page_ref, **kwargs)
+
+        monkeypatch.setattr(page_store, "upsert_page", counting_upsert_page)
+
+        repository_store.refresh()
+        assert upserted_refs
+        upserted_refs.clear()
+
+        first_entries = systems_service._list_campaign_progression_entries("linden-pass")
+        second_entries = systems_service._list_campaign_progression_entries("linden-pass")
+
+        assert first_entries
+        assert [entry.entry_key for entry in second_entries] == [entry.entry_key for entry in first_entries]
+        assert upserted_refs == []
+
+
+def test_repository_refresh_is_still_required_for_manual_file_edits_when_reload_disabled(app):
+    campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    page_path = campaigns_dir / "linden-pass" / "content" / "notes" / "refresh-required-check.md"
+    page_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with app.app_context():
+        repository_store = app.extensions["repository_store"]
+        page_store = app.extensions["campaign_page_store"]
+        repository_store.reload_enabled = False
+        page_store.reload_enabled = False
+
+        repository = repository_store.get()
+        campaign = repository.get_campaign("linden-pass")
+        assert campaign is not None
+
+        page_path.write_text(
+            "---\n"
+            "title: Refresh Required Check\n"
+            "section: Notes\n"
+            "type: note\n"
+            "published: true\n"
+            "---\n\n"
+            "This page was added outside the app while reload was disabled.\n",
+            encoding="utf-8",
+        )
+
+        unsynced = page_store.get_page_record(
+            "linden-pass",
+            "notes/refresh-required-check",
+            content_dir=Path(campaign.player_content_dir),
+            include_body=True,
+        )
+        assert unsynced is None
+
+        refreshed_repository = repository_store.refresh()
+        refreshed_campaign = refreshed_repository.get_campaign("linden-pass")
+        assert refreshed_campaign is not None
+
+        record = page_store.get_page_record(
+            "linden-pass",
+            "notes/refresh-required-check",
+            include_body=True,
+        )
+        assert record is not None
+        assert "reload was disabled" in record.body_markdown
+        assert refreshed_campaign.get_visible_page("notes/refresh-required-check") is not None
+
+
+def test_content_writes_update_page_store_when_reload_disabled(app):
+    with app.app_context():
+        repository_store = app.extensions["repository_store"]
+        page_store = app.extensions["campaign_page_store"]
+        repository_store.reload_enabled = False
+        page_store.reload_enabled = False
+
+        campaign = repository_store.get().get_campaign("linden-pass")
+        assert campaign is not None
+
+        write_campaign_page_file(
+            campaign,
+            "notes/reload-disabled-write-check",
+            metadata={
+                "title": "Reload Disabled Write Check",
+                "section": "Notes",
+                "type": "note",
+                "published": True,
+            },
+            body_markdown="Writes through the content service should still update the DB read model.",
+            page_store=page_store,
+        )
+
+        repository_store.refresh()
+        record = page_store.get_page_record(
+            "linden-pass",
+            "notes/reload-disabled-write-check",
+            include_body=True,
+        )
+        assert record is not None
+        assert "still update the DB read model" in record.body_markdown
+        assert (
+            repository_store.get()
+            .get_campaign("linden-pass")
+            .get_visible_page("notes/reload-disabled-write-check")
+            is not None
+        )
 
 
 def test_outsider_can_access_public_campaign_pages_but_not_member_only_routes(client, sign_in, users):

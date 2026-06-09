@@ -148,7 +148,8 @@ def load_campaign(config_path: Path, page_store: Any) -> Campaign:
         systems_source_defaults=list(config.get("systems_sources") or []),
     )
 
-    for page in page_store.list_pages(campaign.slug, content_dir=content_root):
+    page_store.ensure_campaign_seeded(campaign.slug, content_root)
+    for page in page_store.list_pages(campaign.slug):
         if page.route_slug in campaign.pages:
             raise ValueError(f"Duplicate page slug '{page.route_slug}' in campaign '{campaign.slug}'")
         campaign.pages[page.route_slug] = page

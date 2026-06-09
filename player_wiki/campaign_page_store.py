@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from threading import Lock
 from typing import Any
 
 from .auth_store import isoformat, utcnow
@@ -23,36 +26,24 @@ class CampaignPageRecord:
 
 
 class CampaignPageStore:
+    def __init__(
+        self,
+        *,
+        reload_enabled: bool = True,
+        scan_interval_seconds: int = 0,
+    ) -> None:
+        self.reload_enabled = reload_enabled
+        self.scan_interval_seconds = max(scan_interval_seconds, 0)
+        self._lock = Lock()
+        self._content_fingerprints: dict[str, str] = {}
+        self._last_check_monotonic: dict[str, float] = {}
+
     def sync_campaign_pages(self, campaign_slug: str, content_dir: Path | None) -> None:
         if content_dir is None:
             return
 
-        connection = get_db()
-        try:
-            existing_page_refs = self._list_existing_page_refs(campaign_slug)
-            discovered_page_refs: set[str] = set()
-            if content_dir is not None and content_dir.exists():
-                for file_path in sorted(content_dir.rglob("*.md")):
-                    raw_text = file_path.read_text(encoding="utf-8")
-                    metadata, body_markdown = parse_frontmatter(raw_text)
-                    page_ref = file_path.relative_to(content_dir).with_suffix("").as_posix()
-                    discovered_page_refs.add(page_ref)
-                    self.upsert_page(
-                        campaign_slug,
-                        page_ref,
-                        metadata=metadata,
-                        body_markdown=body_markdown.strip(),
-                        commit=False,
-                    )
-
-                for page_ref in sorted(existing_page_refs - discovered_page_refs):
-                    self.delete_page(campaign_slug, page_ref, commit=False)
-
-            self._mark_sync_state(campaign_slug)
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
+        with self._lock:
+            self._sync_campaign_pages_locked(campaign_slug, content_dir)
 
     def ensure_campaign_seeded(self, campaign_slug: str, content_dir: Path | None) -> None:
         self.sync_campaign_pages(campaign_slug, content_dir)
@@ -71,7 +62,7 @@ class CampaignPageStore:
         content_dir: Path | None = None,
     ) -> list[Page]:
         if content_dir is not None:
-            self.sync_campaign_pages(campaign_slug, content_dir)
+            self._ensure_campaign_pages_current(campaign_slug, content_dir)
 
         rows = get_db().execute(
             """
@@ -93,7 +84,7 @@ class CampaignPageStore:
         include_body: bool = False,
     ) -> list[CampaignPageRecord]:
         if content_dir is not None:
-            self.sync_campaign_pages(campaign_slug, content_dir)
+            self._ensure_campaign_pages_current(campaign_slug, content_dir)
 
         rows = get_db().execute(
             """
@@ -116,7 +107,7 @@ class CampaignPageStore:
         include_body: bool = True,
     ) -> CampaignPageRecord | None:
         if content_dir is not None:
-            self.sync_campaign_pages(campaign_slug, content_dir)
+            self._ensure_campaign_pages_current(campaign_slug, content_dir)
 
         normalized_page_ref = self.normalize_page_ref(page_ref)
         row = get_db().execute(
@@ -376,6 +367,54 @@ class CampaignPageStore:
         ).fetchone()
         return row is not None
 
+    def _ensure_campaign_pages_current(self, campaign_slug: str, content_dir: Path) -> None:
+        with self._lock:
+            if not self._has_sync_state(campaign_slug):
+                self._sync_campaign_pages_locked(campaign_slug, content_dir)
+                return
+            if not self.reload_enabled:
+                return
+
+            now = time.monotonic()
+            last_check = self._last_check_monotonic.get(campaign_slug, 0.0)
+            if now - last_check < self.scan_interval_seconds:
+                return
+
+            self._last_check_monotonic[campaign_slug] = now
+            fingerprint = self._build_content_fingerprint(content_dir)
+            if self._content_fingerprints.get(campaign_slug) != fingerprint:
+                self._sync_campaign_pages_locked(campaign_slug, content_dir)
+
+    def _sync_campaign_pages_locked(self, campaign_slug: str, content_dir: Path) -> None:
+        connection = get_db()
+        try:
+            existing_page_refs = self._list_existing_page_refs(campaign_slug)
+            discovered_page_refs: set[str] = set()
+            if content_dir.exists():
+                for file_path in sorted(content_dir.rglob("*.md")):
+                    raw_text = file_path.read_text(encoding="utf-8")
+                    metadata, body_markdown = parse_frontmatter(raw_text)
+                    page_ref = file_path.relative_to(content_dir).with_suffix("").as_posix()
+                    discovered_page_refs.add(page_ref)
+                    self.upsert_page(
+                        campaign_slug,
+                        page_ref,
+                        metadata=metadata,
+                        body_markdown=body_markdown.strip(),
+                        commit=False,
+                    )
+
+            for page_ref in sorted(existing_page_refs - discovered_page_refs):
+                self.delete_page(campaign_slug, page_ref, commit=False)
+
+            self._mark_sync_state(campaign_slug)
+            connection.commit()
+            self._content_fingerprints[campaign_slug] = self._build_content_fingerprint(content_dir)
+            self._last_check_monotonic[campaign_slug] = time.monotonic()
+        except Exception:
+            connection.rollback()
+            raise
+
     def _list_existing_page_refs(self, campaign_slug: str) -> set[str]:
         rows = get_db().execute(
             """
@@ -400,6 +439,19 @@ class CampaignPageStore:
             """,
             (campaign_slug, isoformat(utcnow())),
         )
+
+    def _build_content_fingerprint(self, content_dir: Path) -> str:
+        hasher = hashlib.sha1()
+        file_count = 0
+        if content_dir.exists():
+            for file_path in sorted(content_dir.rglob("*.md")):
+                stat = file_path.stat()
+                relative_path = file_path.relative_to(content_dir).as_posix()
+                hasher.update(relative_path.encode("utf-8"))
+                hasher.update(str(stat.st_mtime_ns).encode("utf-8"))
+                hasher.update(str(stat.st_size).encode("utf-8"))
+                file_count += 1
+        return f"{file_count}:{hasher.hexdigest()}"
 
     def _build_page_payload(
         self,
