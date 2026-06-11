@@ -446,8 +446,10 @@ def test_gen2_campaign_control_updates_visibility_and_blocks_players(
         try:
             browser = playwright.chromium.launch(headless=True)
             dm_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            dm_mobile_context = browser.new_context(viewport={"width": 390, "height": 800})
             player_context = browser.new_context(viewport={"width": 1280, "height": 900})
             dm_page = dm_context.new_page()
+            dm_mobile_page = dm_mobile_context.new_page()
             player_page = player_context.new_page()
         except Exception as exc:
             pytest.skip(f"Playwright browser unavailable: {exc}")
@@ -472,14 +474,152 @@ def test_gen2_campaign_control_updates_visibility_and_blocks_players(
             expect(dm_page.get_by_text(re.compile(r"Updated visibility for .*Campaign", re.I))).to_be_visible(timeout=5000)
             expect(dm_page.locator("#campaign-control-campaign")).to_have_value("players")
             expect(dm_page.locator("#campaign-control-wiki")).to_have_value("dm")
+            expect(dm_page.locator(".campaign-control-form .article-actions + .status")).to_be_visible()
+            expect(dm_page.locator(".campaign-control-form .article-actions", has_text="Save visibility")).to_be_visible()
+
+            dm_control_metrics = dm_page.evaluate(
+                """() => {
+                    const countGridTracks = (value) => {
+                        let depth = 0;
+                        let count = 0;
+                        let inToken = false;
+                        for (const char of value) {
+                            if (char === "(") {
+                                depth += 1;
+                            } else if (char === ")") {
+                                depth -= 1;
+                            } else if (char === " " && depth === 0) {
+                                if (inToken) {
+                                    count += 1;
+                                    inToken = false;
+                                }
+                                continue;
+                            }
+                            if (char === " " && depth > 0 && inToken) {
+                                continue;
+                            }
+                            if (char !== " " || depth > 0) {
+                                inToken = true;
+                            }
+                        }
+                        if (inToken) {
+                            count += 1;
+                        }
+                        return count;
+                    };
+                    const hero = document.querySelector(".campaign-control-hero");
+                    const layout = document.querySelector(".campaign-control-layout");
+                    const form = document.querySelector(".campaign-control-form");
+                    const sidebar = document.querySelector(".campaign-control-sidebar");
+                    const fallback = form ? form.querySelector("a[href*='control-panel'], a[href*='control']") : null;
+                    const rows = Array.from(document.querySelectorAll(".campaign-control-row"));
+                    const firstRowMeta = rows[0]?.querySelectorAll(".campaign-control-row__meta p").length ?? 0;
+                    const firstSelect = rows[0]?.querySelector("select");
+                    const firstSelectRect = firstSelect ? firstSelect.getBoundingClientRect() : null;
+                    const firstRowRect = rows[0] ? rows[0].getBoundingClientRect() : null;
+                    return {
+                        innerWidth: window.innerWidth,
+                        scrollWidth: document.documentElement.scrollWidth,
+                        heroRadius: hero ? Number.parseFloat(window.getComputedStyle(hero).borderRadius) : 0,
+                        heroShadow: hero ? window.getComputedStyle(hero).boxShadow : "none",
+                        layoutColumns: layout ? window.getComputedStyle(layout).gridTemplateColumns : "",
+                        layoutColumnsCount: layout ? countGridTracks(window.getComputedStyle(layout).gridTemplateColumns) : 0,
+                        formLeft: form ? form.getBoundingClientRect().left : 0,
+                        sidebarLeft: sidebar ? sidebar.getBoundingClientRect().left : 0,
+                        formWidth: form ? form.getBoundingClientRect().width : 0,
+                        sidebarWidth: sidebar ? sidebar.getBoundingClientRect().width : 0,
+                        hasFallback: Boolean(fallback),
+                        rowMetaCount: firstRowMeta,
+                        selectMinWidth: firstSelectRect ? firstSelectRect.width : 0,
+                        rowHeight: firstRowRect ? firstRowRect.height : 0,
+                    };
+                }"""
+            )
+            assert dm_control_metrics["heroRadius"] == 0
+            assert dm_control_metrics["heroShadow"] == "none"
+            assert dm_control_metrics["layoutColumnsCount"] >= 2
+            assert dm_control_metrics["scrollWidth"] <= dm_control_metrics["innerWidth"] + 1
+            assert dm_control_metrics["sidebarLeft"] >= dm_control_metrics["formLeft"]
+            assert dm_control_metrics["formWidth"] > 0
+            assert dm_control_metrics["sidebarWidth"] > 0
+            assert dm_control_metrics["hasFallback"] is True
+            assert dm_control_metrics["rowMetaCount"] >= 3
+            assert dm_control_metrics["selectMinWidth"] >= 160
+            assert dm_control_metrics["rowHeight"] > 0
 
             _sign_in(player_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
             player_page.goto(f"{base_url}/app-next/campaigns/linden-pass/control")
             expect(player_page.get_by_text("You do not have permission to manage campaign visibility.")).to_be_visible(timeout=10000)
+
+            _sign_in(dm_mobile_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            dm_mobile_page.goto(f"{base_url}/app-next/campaigns/linden-pass/control")
+            expect(dm_mobile_page.get_by_role("heading", name="Visibility", exact=True)).to_be_visible(timeout=10000)
+            mobile_metrics = dm_mobile_page.evaluate(
+                """() => {
+                    const countGridTracks = (value) => {
+                        let depth = 0;
+                        let count = 0;
+                        let inToken = false;
+                        for (const char of value) {
+                            if (char === "(") {
+                                depth += 1;
+                            } else if (char === ")") {
+                                depth -= 1;
+                            } else if (char === " " && depth === 0) {
+                                if (inToken) {
+                                    count += 1;
+                                    inToken = false;
+                                }
+                                continue;
+                            }
+                            if (char === " " && depth > 0 && inToken) {
+                                continue;
+                            }
+                            if (char !== " " || depth > 0) {
+                                inToken = true;
+                            }
+                        }
+                        if (inToken) {
+                            count += 1;
+                        }
+                        return count;
+                    };
+                    const layout = document.querySelector(".campaign-control-layout");
+                    const form = document.querySelector(".campaign-control-form");
+                    const sidebar = document.querySelector(".campaign-control-sidebar");
+                    const formRect = form ? form.getBoundingClientRect() : null;
+                    const sidebarRect = sidebar ? sidebar.getBoundingClientRect() : null;
+                    const rowSelect = document.querySelector(".campaign-control-row select");
+                    const hero = document.querySelector(".campaign-control-hero");
+                    return {
+                        innerWidth: window.innerWidth,
+                        scrollWidth: document.documentElement.scrollWidth,
+                        layoutColumns: layout ? window.getComputedStyle(layout).gridTemplateColumns : "",
+                        layoutColumnsCount: layout ? countGridTracks(window.getComputedStyle(layout).gridTemplateColumns) : 0,
+                        formTop: formRect ? formRect.top : 0,
+                        sidebarTop: sidebarRect ? sidebarRect.top : 0,
+                        formWidth: formRect ? formRect.width : 0,
+                        sidebarWidth: sidebarRect ? sidebarRect.width : 0,
+                        heroRadius: hero ? Number.parseFloat(window.getComputedStyle(hero).borderRadius) : 0,
+                        heroShadow: hero ? window.getComputedStyle(hero).boxShadow : "none",
+                        selectWidth: rowSelect ? rowSelect.getBoundingClientRect().width : 0,
+                    };
+                }"""
+            )
+            assert mobile_metrics["layoutColumnsCount"] == 1
+            assert mobile_metrics["scrollWidth"] <= mobile_metrics["innerWidth"] + 1
+            assert mobile_metrics["formTop"] < mobile_metrics["sidebarTop"]
+            assert mobile_metrics["formWidth"] <= mobile_metrics["innerWidth"] + 1
+            assert mobile_metrics["sidebarWidth"] <= mobile_metrics["innerWidth"] + 1
+            assert mobile_metrics["heroRadius"] == 0
+            assert mobile_metrics["heroShadow"] == "none"
+            assert mobile_metrics["selectWidth"] <= mobile_metrics["innerWidth"] + 1
         finally:
             dm_page.close()
             player_page.close()
+            dm_mobile_page.close()
             dm_context.close()
+            dm_mobile_context.close()
             player_context.close()
             browser.close()
 

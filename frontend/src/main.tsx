@@ -5416,13 +5416,13 @@ function CampaignControlPage() {
 
   return (
     <section className="campaign-control-page">
-      <div className="panel campaign-control-hero">
+      <section className="campaign-control-hero">
         <p className="eyebrow">Control panel</p>
         <h1>Visibility</h1>
         <p className="lede">
           Control who can see the campaign, wiki, systems reference, session tools, combat tracker, DM content, and character section.
         </p>
-      </div>
+      </section>
 
       <ApiErrorNotice isLoading={controlQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
 
@@ -5441,8 +5441,10 @@ function CampaignControlPage() {
                 const fieldId = `campaign-control-${row.scope}`;
                 return (
                   <article className="campaign-control-row" key={row.scope}>
-                    <label className="chat-label" htmlFor={fieldId}>
-                      {row.label}
+                    <div className="campaign-control-row__header">
+                      <label className="campaign-control-row__label" htmlFor={fieldId}>
+                        {row.label}
+                      </label>
                       <select
                         id={fieldId}
                         value={draftVisibility[row.scope] || row.selected_visibility}
@@ -5454,14 +5456,14 @@ function CampaignControlPage() {
                           </option>
                         ))}
                       </select>
-                    </label>
+                    </div>
                     <div className="campaign-control-row__meta">
-                      <span className="meta-badge">Effective: {row.effective_visibility_label}</span>
-                      {row.configured_visibility_label ? (
-                        <span className="meta">Configured: {row.configured_visibility_label}</span>
-                      ) : (
-                        <span className="meta">Using default: {row.default_visibility_label}</span>
-                      )}
+                      <p className="meta">Effective visibility: {row.effective_visibility_label}</p>
+                      <p className="meta">
+                        Configured visibility:{" "}
+                        {row.configured_visibility_label ? row.configured_visibility_label : "Not configured"}
+                      </p>
+                      <p className="meta">Default visibility: {row.default_visibility_label}</p>
                     </div>
                     {row.is_overridden_by_campaign ? (
                       <p className="meta">The campaign-level visibility is currently more private than this section setting.</p>
@@ -5478,9 +5480,9 @@ function CampaignControlPage() {
               <a className="button button-secondary" href={data.links.flask_control_url}>
                 Flask Control
               </a>
-              {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
-              {saveError ? <p className="status status-error">{saveError}</p> : null}
             </div>
+            {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
+            {saveError ? <p className="status status-error">{saveError}</p> : null}
           </form>
 
           <aside className="sidebar campaign-control-sidebar">
