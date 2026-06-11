@@ -5558,7 +5558,7 @@ function CampaignHelpPage() {
 
   return (
     <section className="campaign-help-page">
-      <div className="panel campaign-help-hero">
+      <section className="campaign-help-hero">
         <p className="eyebrow">Help</p>
         <h1>Help</h1>
         <p className="lede">
@@ -5574,7 +5574,7 @@ function CampaignHelpPage() {
             ))}
           </div>
         ) : null}
-      </div>
+      </section>
 
       <ApiErrorNotice isLoading={helpQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
 
@@ -5621,7 +5621,7 @@ function CampaignHelpPage() {
                 </div>
 
                 {surface.links.length ? (
-                  <div className="article-actions">
+                  <div className="article-actions campaign-help-surface-actions">
                     {surface.links.map((link, index) => (
                       <a className={index === 0 ? "button" : "button button-secondary"} href={link.href} key={`${surface.anchor}-${link.href}`}>
                         {link.label}
@@ -5704,7 +5704,7 @@ function CampaignHelpPage() {
                   <p className="meta">{data.account_note}</p>
                 </div>
               </div>
-              <div className="article-actions">
+              <div className="article-actions campaign-help-account-actions">
                 {data.is_authenticated ? (
                   <a className="button" href={data.links.account_url}>Open Account</a>
                 ) : (

@@ -269,8 +269,10 @@ def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
         try:
             browser = playwright.chromium.launch(headless=True)
             player_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            player_mobile_context = browser.new_context(viewport={"width": 390, "height": 800})
             dm_context = browser.new_context(viewport={"width": 1280, "height": 900})
             player_page = player_context.new_page()
+            player_mobile_page = player_mobile_context.new_page()
             dm_page = dm_context.new_page()
         except Exception as exc:
             pytest.skip(f"Playwright browser unavailable: {exc}")
@@ -295,6 +297,122 @@ def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
             expect(player_page.get_by_role("link", name="Flask Help")).to_be_visible()
             assert player_page.locator("#dm-content").count() == 0
             assert player_page.locator("#control").count() == 0
+            player_hero = player_page.locator(".campaign-help-hero")
+            expect(player_hero.get_by_role("heading", name="Help")).to_be_visible()
+            expect(player_hero.get_by_role("link", name="Systems")).to_be_visible()
+            hero_metrics = player_page.evaluate(
+                """() => {
+                    const countGridTracks = (value) => {
+                        let depth = 0;
+                        let count = 0;
+                        let inToken = false;
+                        for (const char of value) {
+                            if (char === "(") {
+                                depth += 1;
+                            } else if (char === ")") {
+                                depth -= 1;
+                            } else if (char === " " && depth === 0) {
+                                if (inToken) {
+                                    count += 1;
+                                    inToken = false;
+                                }
+                                continue;
+                            }
+                            if (char === " " && depth > 0 && inToken) {
+                                continue;
+                            }
+                            if (char !== " " || depth > 0) {
+                                inToken = true;
+                            }
+                        }
+                        if (inToken) {
+                            count += 1;
+                        }
+                        return count;
+                    };
+                    const hero = document.querySelector(".campaign-help-hero");
+                    const layout = document.querySelector(".campaign-help-layout");
+                    const main = document.querySelector(".campaign-help-main");
+                    const sidebar = document.querySelector(".campaign-help-sidebar");
+                    const layoutColumns = layout ? window.getComputedStyle(layout).gridTemplateColumns : "";
+                    return {
+                        innerWidth: window.innerWidth,
+                        scrollWidth: document.documentElement.scrollWidth,
+                        heroRadius: hero ? Number.parseFloat(window.getComputedStyle(hero).borderRadius) : 0,
+                        heroShadow: hero ? window.getComputedStyle(hero).boxShadow : "none",
+                        layoutColumns,
+                        layoutColumnsCount: countGridTracks(layoutColumns),
+                        mainTop: main ? main.getBoundingClientRect().top : 0,
+                        mainLeft: main ? main.getBoundingClientRect().left : 0,
+                        sidebarLeft: sidebar ? sidebar.getBoundingClientRect().left : 0,
+                        mainWidth: main ? main.getBoundingClientRect().width : 0,
+                        sidebarWidth: sidebar ? sidebar.getBoundingClientRect().width : 0,
+                    };
+                }"""
+            )
+            assert hero_metrics["heroRadius"] == 0
+            assert hero_metrics["heroShadow"] == "none"
+            assert hero_metrics["scrollWidth"] <= hero_metrics["innerWidth"] + 1
+            assert hero_metrics["layoutColumnsCount"] >= 2
+            assert hero_metrics["sidebarLeft"] > hero_metrics["mainLeft"]
+            assert hero_metrics["mainWidth"] > 0
+            assert hero_metrics["sidebarWidth"] > 0
+
+            _sign_in(player_mobile_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
+            player_mobile_page.goto(f"{base_url}/app-next/campaigns/linden-pass/help")
+            expect(player_mobile_page.get_by_role("heading", name="Help")).to_be_visible(timeout=10000)
+            mobile_metrics = player_mobile_page.evaluate(
+                """() => {
+                    const layout = document.querySelector(".campaign-help-layout");
+                    const main = document.querySelector(".campaign-help-main");
+                    const sidebar = document.querySelector(".campaign-help-sidebar");
+                    const countGridTracks = (value) => {
+                        let depth = 0;
+                        let count = 0;
+                        let inToken = false;
+                        for (const char of value) {
+                            if (char === "(") {
+                                depth += 1;
+                            } else if (char === ")") {
+                                depth -= 1;
+                            } else if (char === " " && depth === 0) {
+                                if (inToken) {
+                                    count += 1;
+                                    inToken = false;
+                                }
+                                continue;
+                            }
+                            if (char === " " && depth > 0 && inToken) {
+                                continue;
+                            }
+                            if (char !== " " || depth > 0) {
+                                inToken = true;
+                            }
+                        }
+                        if (inToken) {
+                            count += 1;
+                        }
+                        return count;
+                    };
+                    const layoutColumns = layout ? window.getComputedStyle(layout).gridTemplateColumns : "";
+                    return {
+                        innerWidth: window.innerWidth,
+                        scrollWidth: document.documentElement.scrollWidth,
+                        layoutColumns,
+                        layoutColumnsCount: countGridTracks(layoutColumns),
+                        mainTop: main ? main.getBoundingClientRect().top : 0,
+                        mainLeft: main ? main.getBoundingClientRect().left : 0,
+                        sidebarTop: sidebar ? sidebar.getBoundingClientRect().top : 0,
+                        mainWidth: main ? main.getBoundingClientRect().width : 0,
+                        sidebarWidth: sidebar ? sidebar.getBoundingClientRect().width : 0,
+                    };
+                }"""
+            )
+            assert mobile_metrics["scrollWidth"] <= mobile_metrics["innerWidth"] + 1
+            assert mobile_metrics["layoutColumnsCount"] == 1
+            assert mobile_metrics["sidebarTop"] > mobile_metrics["mainTop"]
+            assert mobile_metrics["mainWidth"] <= mobile_metrics["innerWidth"]
+            assert mobile_metrics["sidebarWidth"] <= mobile_metrics["innerWidth"]
 
             _sign_in(dm_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
             dm_page.goto(f"{base_url}/app-next/campaigns/linden-pass/help")
@@ -306,7 +424,9 @@ def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
         finally:
             player_page.close()
             dm_page.close()
+            player_mobile_page.close()
             player_context.close()
+            player_mobile_context.close()
             dm_context.close()
             browser.close()
 

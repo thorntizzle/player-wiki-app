@@ -1015,6 +1015,34 @@ a:hover {
   gap: 1rem;
 }
 
+.campaign-help-hero {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.campaign-help-layout {
+  align-items: start;
+}
+
+.campaign-help-main,
+.campaign-help-sidebar,
+.campaign-help-current,
+.campaign-help-surface,
+.campaign-help-sidebar .sidebar-card {
+  min-width: 0;
+}
+
+.campaign-help-current,
+.campaign-help-surface,
+.campaign-help-sidebar .sidebar-card {
+  gap: 0.9rem;
+}
+
 .campaign-help-hero h1 {
   margin: 0.1rem 0 0.4rem;
 }
@@ -1023,21 +1051,30 @@ a:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
+.campaign-help-surface-actions,
+.campaign-help-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 .help-detail-grid {
   display: grid;
-  gap: 0.75rem;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .help-detail-card {
-  background: #f9fbff;
-  border: 1px solid #d8e1ee;
-  border-radius: 8px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 18px;
   display: grid;
   gap: 0.45rem;
-  padding: 0.75rem;
+  padding: 1rem;
 }
 
 .help-detail-card h3,
