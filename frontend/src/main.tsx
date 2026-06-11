@@ -4402,7 +4402,7 @@ function AdminActivityFilters({
           ))}
         </select>
       </label>
-      <div className="button-row">
+      <div className="admin-filter-form__actions button-row">
         <button type="submit" className="button">
           Filter activity
         </button>
@@ -4469,7 +4469,7 @@ function AdminPagination({ pagination }: Pick<AdminDashboardResponse, "paginatio
       <p className="meta">
         Page {pagination.current_page} of {pagination.total_pages}
       </p>
-      <div className="button-row">
+      <div className="admin-pagination__actions button-row">
         {pagination.has_previous ? (
           <a className="button button-secondary" href={pagination.previous_url}>
             Previous
@@ -4549,7 +4549,7 @@ function AdminDashboardPage() {
 
   return (
     <section className="admin-page">
-      <div className="panel admin-hero">
+      <header className="admin-hero">
         <p className="eyebrow">Admin</p>
         <h1>Admin dashboard</h1>
         <p className="lede">Use this screen for lighter operational work. The CLI remains the full-control path for bootstrap and recovery.</p>
@@ -4560,7 +4560,7 @@ function AdminDashboardPage() {
             </a>
           </div>
         ) : null}
-      </div>
+      </header>
 
       <ApiErrorNotice isLoading={dashboardQuery.isLoading} message={queryError} onAuth={() => setAuthRequired(true)} />
       {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
@@ -4572,7 +4572,7 @@ function AdminDashboardPage() {
             <article className="panel admin-panel">
               <h2>Invite user</h2>
               <form
-                className="stack-form"
+                className="stack-form admin-panel-form"
                 onSubmit={(event: FormEvent<HTMLFormElement>) => {
                   event.preventDefault();
                   inviteMutation.mutate(inviteDraft);
@@ -4646,9 +4646,11 @@ function AdminDashboardPage() {
                   </select>
                 </label>
                 <p className="meta">Admin is app-wide. DM and Player invites also create an active membership in the selected campaign.</p>
-                <button type="submit" className="button" disabled={inviteMutation.isPending}>
-                  {inviteMutation.isPending ? "Creating..." : "Create invite"}
-                </button>
+                <div className="admin-form-actions">
+                  <button type="submit" className="button" disabled={inviteMutation.isPending}>
+                    {inviteMutation.isPending ? "Creating..." : "Create invite"}
+                  </button>
+                </div>
               </form>
             </article>
 
@@ -4664,7 +4666,7 @@ function AdminDashboardPage() {
             </aside>
           </section>
 
-          <section className="section-list">
+          <section className="section-list admin-user-section">
             <div className="section-heading">
               <h2>Users</h2>
               <p className="meta">{data.user_cards.length} total</p>
@@ -4687,12 +4689,12 @@ function AdminDashboardPage() {
             </div>
           </section>
 
-          <section className="section-list">
+          <section className="section-list admin-activity-section">
             <div className="section-heading">
               <h2>Recent activity</h2>
               <p className="meta">{data.pagination.total_events} matching events</p>
             </div>
-            <article className="panel admin-panel">
+            <article className="panel admin-panel admin-activity-panel">
               <AdminActivityFilters action="/app-next/admin" clearHref="/app-next/admin" data={data} />
               <AdminActivityList events={data.recent_audit_events} />
               <AdminPagination pagination={data.pagination} />
@@ -4822,7 +4824,7 @@ function AdminUserDetailPage() {
 
   return (
     <section className="admin-page admin-user-detail-page">
-      <div className="panel admin-hero">
+      <header className="admin-hero">
         <p className="eyebrow">Admin user detail</p>
         <h1>{data?.managed_user.display_name || "Admin user"}</h1>
         {data ? (
@@ -4842,7 +4844,7 @@ function AdminUserDetailPage() {
             </div>
           </>
         ) : null}
-      </div>
+      </header>
 
       <ApiErrorNotice isLoading={userQuery.isLoading} message={queryError} onAuth={() => setAuthRequired(true)} />
       {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
@@ -4854,7 +4856,7 @@ function AdminUserDetailPage() {
             <article className="panel admin-panel">
               <h2>Campaign membership</h2>
               <form
-                className="stack-form"
+                className="stack-form admin-panel-form"
                 onSubmit={(event) => {
                   event.preventDefault();
                   setMembership.mutate();
@@ -4913,9 +4915,11 @@ function AdminUserDetailPage() {
                     <option value="removed">Removed</option>
                   </select>
                 </label>
-                <button type="submit" className="button" disabled={mutationPending || !membershipDraft.campaign_slug}>
-                  {setMembership.isPending ? "Saving..." : "Save membership"}
-                </button>
+                <div className="admin-form-actions">
+                  <button type="submit" className="button" disabled={mutationPending || !membershipDraft.campaign_slug}>
+                    {setMembership.isPending ? "Saving..." : "Save membership"}
+                  </button>
+                </div>
               </form>
             </article>
 
@@ -4923,7 +4927,7 @@ function AdminUserDetailPage() {
               <h2>Character assignment</h2>
               <p className="meta">Assignments require an active player membership in the same campaign.</p>
               <form
-                className="stack-form"
+                className="stack-form admin-panel-form"
                 onSubmit={(event) => {
                   event.preventDefault();
                   assignCharacter.mutate();
@@ -4947,9 +4951,11 @@ function AdminUserDetailPage() {
                     ))}
                   </select>
                 </label>
-                <button type="submit" className="button" disabled={mutationPending || !assignmentDraft.character_ref}>
-                  {assignCharacter.isPending ? "Assigning..." : "Assign character"}
-                </button>
+                <div className="admin-form-actions">
+                  <button type="submit" className="button" disabled={mutationPending || !assignmentDraft.character_ref}>
+                    {assignCharacter.isPending ? "Assigning..." : "Assign character"}
+                  </button>
+                </div>
               </form>
             </article>
           </section>
@@ -4965,7 +4971,7 @@ function AdminUserDetailPage() {
                         <strong>{membership.campaign_title}</strong>
                         <span className="meta"> {membership.role} | {membership.status}</span>
                       </div>
-                      <div className="button-row">
+                      <div className="admin-item-actions button-row">
                         <a className="button button-secondary" href={`${data.links.gen2_user_url}?edit_membership_campaign_slug=${encodeURIComponent(membership.campaign_slug)}`}>
                           Edit
                         </a>
@@ -4993,7 +4999,7 @@ function AdminUserDetailPage() {
                         <strong>{assignment.campaign_title}</strong>
                         <span className="meta"> {assignment.character_slug} | {assignment.assignment_type}</span>
                       </div>
-                      <div className="button-row">
+                      <div className="admin-item-actions button-row">
                         <a
                           className="button button-secondary"
                           href={`${data.links.gen2_user_url}?edit_assignment_campaign_slug=${encodeURIComponent(assignment.campaign_slug)}&edit_assignment_character_slug=${encodeURIComponent(assignment.character_slug)}`}
@@ -5016,51 +5022,66 @@ function AdminUserDetailPage() {
           <section className="page-layout admin-layout">
             <article className="panel admin-panel">
               <h2>Account actions</h2>
-              <div className="admin-action-stack">
-                {data.managed_user.status === "invited" ? (
-                  <button type="button" className="button" disabled={mutationPending} onClick={() => issueInvite.mutate()}>
-                    {issueInvite.isPending ? "Generating..." : "Generate invite link"}
-                  </button>
-                ) : null}
-                {data.managed_user.status === "active" ? (
-                  <button type="button" className="button" disabled={mutationPending} onClick={() => issuePasswordReset.mutate()}>
-                    {issuePasswordReset.isPending ? "Generating..." : "Generate password reset link"}
-                  </button>
-                ) : null}
-                {data.can_manage_account && data.managed_user.status === "disabled" ? (
-                  <button type="button" className="button" disabled={mutationPending} onClick={() => enableUser.mutate()}>
-                    {enableUser.isPending ? "Saving..." : "Re-enable user"}
-                  </button>
-                ) : null}
-                {data.can_manage_account && data.managed_user.status !== "disabled" ? (
-                  <button type="button" className="button button-secondary" disabled={mutationPending} onClick={() => disableUser.mutate()}>
-                    {disableUser.isPending ? "Saving..." : "Disable user"}
-                  </button>
-                ) : null}
+              <div className="admin-action-stack admin-action-groups">
+                <div className="admin-action-group">
+                  <p className="admin-action-group__heading">Credential actions</p>
+                  <div className="admin-action-stack">
+                    {data.managed_user.status === "invited" ? (
+                      <button type="button" className="button" disabled={mutationPending} onClick={() => issueInvite.mutate()}>
+                        {issueInvite.isPending ? "Generating..." : "Generate invite link"}
+                      </button>
+                    ) : null}
+                    {data.managed_user.status === "active" ? (
+                      <button type="button" className="button" disabled={mutationPending} onClick={() => issuePasswordReset.mutate()}>
+                        {issuePasswordReset.isPending ? "Generating..." : "Generate password reset link"}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="admin-action-group">
+                  <p className="admin-action-group__heading">Account state</p>
+                  <div className="admin-action-stack">
+                    {data.can_manage_account && data.managed_user.status === "disabled" ? (
+                      <button type="button" className="button" disabled={mutationPending} onClick={() => enableUser.mutate()}>
+                        {enableUser.isPending ? "Saving..." : "Re-enable user"}
+                      </button>
+                    ) : null}
+                    {data.can_manage_account && data.managed_user.status !== "disabled" ? (
+                      <button type="button" className="button button-secondary" disabled={mutationPending} onClick={() => disableUser.mutate()}>
+                        {disableUser.isPending ? "Saving..." : "Disable user"}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
                 {data.can_manage_account ? (
-                  <div className="admin-danger-box">
-                    <label className="field">
-                      <span>Confirm delete by email</span>
-                      <input
-                        id="admin-delete-confirm-email"
-                        name="confirm_email"
-                        type="text"
-                        value={deleteConfirm}
-                        onChange={(event) => setDeleteConfirm(event.currentTarget.value)}
-                        placeholder={data.managed_user.email}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className="button-danger"
-                      disabled={mutationPending || deleteConfirm.trim().toLowerCase() !== data.managed_user.email.toLowerCase()}
-                      onClick={() => deleteUser.mutate()}
-                    >
-                      {deleteUser.isPending ? "Deleting..." : "Delete user"}
-                    </button>
+                  <div className="admin-action-group admin-action-group--danger">
+                    <p className="admin-action-group__heading">Destructive actions</p>
+                    <div className="admin-danger-box">
+                      <label className="field">
+                        <span>Confirm delete by email</span>
+                        <input
+                          id="admin-delete-confirm-email"
+                          name="confirm_email"
+                          type="text"
+                          value={deleteConfirm}
+                          onChange={(event) => setDeleteConfirm(event.currentTarget.value)}
+                          placeholder={data.managed_user.email}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="button-danger"
+                        disabled={mutationPending || deleteConfirm.trim().toLowerCase() !== data.managed_user.email.toLowerCase()}
+                        onClick={() => deleteUser.mutate()}
+                      >
+                        {deleteUser.isPending ? "Deleting..." : "Delete user"}
+                      </button>
+                    </div>
                   </div>
                 ) : (
-                  <p className="meta">Use a different admin account or the CLI if you ever need to change the account you are currently using.</p>
+                  <p className="status status-error admin-non-admin-note">
+                    Use a different admin account or the CLI if you ever need to change the account you are currently using.
+                  </p>
                 )}
               </div>
             </article>

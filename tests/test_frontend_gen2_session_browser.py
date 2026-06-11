@@ -789,14 +789,17 @@ def test_gen2_admin_user_management_route_and_permissions(
         try:
             browser = playwright.chromium.launch(headless=True)
             admin_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            mobile_context = browser.new_context(viewport={"width": 390, "height": 800})
             player_context = browser.new_context(viewport={"width": 1280, "height": 900})
             admin_page = admin_context.new_page()
+            mobile_page = mobile_context.new_page()
             player_page = player_context.new_page()
         except Exception as exc:
             pytest.skip(f"Playwright browser unavailable: {exc}")
 
         try:
             _sign_in(admin_page, base_url, email=users["admin"]["email"], password=users["admin"]["password"])
+            _sign_in(mobile_page, base_url, email=users["admin"]["email"], password=users["admin"]["password"])
 
             admin_page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
             admin_link = admin_page.get_by_role("link", name="Admin")
@@ -809,6 +812,33 @@ def test_gen2_admin_user_management_route_and_permissions(
             expect(admin_page.get_by_role("heading", name="Users")).to_be_visible()
             expect(admin_page.get_by_role("heading", name="Recent activity")).to_be_visible()
             expect(admin_page.get_by_role("link", name="Flask admin")).to_be_visible()
+
+            admin_dashboard_metrics = admin_page.evaluate(
+                """() => {
+                    const countGridTracks = (value) => value.trim().split(/\\s+/).filter(Boolean).length;
+                    const hero = document.querySelector(".admin-hero");
+                    const panel = document.querySelector(".admin-panel");
+                    const layout = document.querySelector(".admin-layout");
+                    const userGrid = document.querySelector(".admin-user-grid");
+                    const actions = document.querySelector(".admin-filter-form__actions");
+                    return {
+                        heroBorderTop: hero ? window.getComputedStyle(hero).borderTopWidth : "0px",
+                        heroBoxShadow: hero ? window.getComputedStyle(hero).boxShadow : "none",
+                        panelBorderTop: panel ? window.getComputedStyle(panel).borderTopWidth : "0px",
+                        panelBoxShadow: panel ? window.getComputedStyle(panel).boxShadow : "none",
+                        layoutColumns: layout ? countGridTracks(window.getComputedStyle(layout).gridTemplateColumns) : 0,
+                        userGridColumns: userGrid ? countGridTracks(window.getComputedStyle(userGrid).gridTemplateColumns) : 0,
+                        actionsDisplay: actions ? window.getComputedStyle(actions).display : "",
+                    };
+                }"""
+            )
+            assert admin_dashboard_metrics["heroBorderTop"] == "0px"
+            assert admin_dashboard_metrics["heroBoxShadow"] == "none"
+            assert float(admin_dashboard_metrics["panelBorderTop"][:-2]) > 0
+            assert admin_dashboard_metrics["panelBoxShadow"] != "none"
+            assert admin_dashboard_metrics["layoutColumns"] >= 2
+            assert admin_dashboard_metrics["userGridColumns"] >= 2
+            assert admin_dashboard_metrics["actionsDisplay"] == "flex"
 
             admin_page.locator("#admin-invite-email").fill("gen2-browser-admin@example.com")
             admin_page.locator("#admin-invite-display-name").fill("Gen2 Browser Admin")
@@ -824,6 +854,11 @@ def test_gen2_admin_user_management_route_and_permissions(
             expect(admin_page.get_by_role("heading", name="Campaign membership")).to_be_visible()
             expect(admin_page.get_by_role("heading", name="Character assignment")).to_be_visible()
             expect(admin_page.get_by_role("link", name="Flask user record")).to_be_visible()
+            expect(admin_page.get_by_role("heading", name="Account actions")).to_be_visible()
+            expect(admin_page.get_by_text("Credential actions")).to_be_visible()
+            expect(admin_page.get_by_text("Account state")).to_be_visible()
+            expect(admin_page.get_by_text("Destructive actions")).to_be_visible()
+            expect(admin_page.get_by_role("button", name="Delete user")).to_be_disabled()
 
             membership_panel = admin_page.locator("article.admin-panel").filter(has_text="Campaign membership")
             membership_panel.locator("#admin-membership-campaign-slug").select_option("linden-pass")
@@ -837,13 +872,49 @@ def test_gen2_admin_user_management_route_and_permissions(
             expect(admin_page.get_by_text("Assigned selene-brook in linden-pass")).to_be_visible(timeout=10000)
             expect(admin_page.get_by_text("selene-brook | owner")).to_be_visible()
 
+            mobile_page.goto(f"{base_url}/app-next/admin")
+            expect(mobile_page.get_by_role("heading", name="Admin dashboard")).to_be_visible(timeout=10000)
+            mobile_layout = mobile_page.evaluate(
+                """() => {
+                    const countGridTracks = (value) => value.trim().split(/\\s+/).filter(Boolean).length;
+                    const layouts = Array.from(document.querySelectorAll(".admin-layout"));
+                    const firstLayout = layouts[0];
+                    const items = firstLayout ? Array.from(firstLayout.children) : [];
+                    const itemRects = items.map((item) => {
+                        const rect = item.getBoundingClientRect();
+                        return { left: rect.left, width: rect.width };
+                    });
+                    const first = itemRects[0];
+                    const second = itemRects[1];
+                    const filter = document.querySelector(".admin-filter-form");
+                    const page = document.querySelector(".admin-page");
+                    return {
+                        innerWidth: window.innerWidth,
+                        scrollWidth: document.documentElement.scrollWidth,
+                        pageWidth: page ? page.getBoundingClientRect().width : 0,
+                        maxItemWidth: itemRects.reduce((max, item) => Math.max(max, item.width), 0),
+                        layoutCount: layouts.length,
+                        firstLayoutStacked: !second || Math.abs((second.left || 0) - (first.left || 0)) <= 4,
+                        filterColumns: filter ? countGridTracks(window.getComputedStyle(filter).gridTemplateColumns) : 0,
+                    };
+                }"""
+            )
+            assert mobile_layout["layoutCount"] >= 1
+            assert mobile_layout["scrollWidth"] <= mobile_layout["innerWidth"] + 1
+            assert mobile_layout["pageWidth"] <= mobile_layout["innerWidth"] + 1
+            assert mobile_layout["maxItemWidth"] <= mobile_layout["innerWidth"] + 1
+            assert mobile_layout["firstLayoutStacked"] is True
+            assert mobile_layout["filterColumns"] == 1
+
             _sign_in(player_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
             player_page.goto(f"{base_url}/app-next/admin")
             expect(player_page.get_by_text("You do not have permission to use the admin API.")).to_be_visible(timeout=10000)
         finally:
             admin_page.close()
+            mobile_page.close()
             player_page.close()
             admin_context.close()
+            mobile_context.close()
             player_context.close()
             browser.close()
 
