@@ -378,38 +378,78 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
     with sync_playwright() as playwright:
         try:
             browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page(viewport={"width": 1280, "height": 900})
+            desktop_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            mobile_context = browser.new_context(viewport={"width": 390, "height": 800})
+            desktop_page = desktop_context.new_page()
+            mobile_page = mobile_context.new_page()
         except Exception as exc:
             pytest.skip(f"Playwright browser unavailable: {exc}")
 
         try:
-            _sign_in(page, base_url, email=users["party"]["email"], password=users["party"]["password"])
+            _sign_in(desktop_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
+            _sign_in(mobile_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
 
-            page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
-            account_link = page.get_by_role("link", name="Account")
+            desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
+            account_link = desktop_page.get_by_role("link", name="Account")
             expect(account_link).to_be_visible(timeout=10000)
             expect(account_link).to_have_attribute("href", re.compile(r"/app-next/account$"))
 
-            page.goto(f"{base_url}/app-next/account")
-            expect(page.get_by_role("heading", name="Party Player")).to_be_visible(timeout=10000)
-            expect(page.get_by_role("heading", name="Color theme")).to_be_visible()
-            expect(page.get_by_role("heading", name="Preferred frontend")).to_be_visible()
-            expect(page.get_by_role("heading", name="Live session chat order")).to_be_visible()
-            expect(page.get_by_role("link", name="Flask account")).to_be_visible()
-            expect(page.get_by_role("link", name="Flask campaigns", exact=True)).to_be_visible()
+            desktop_page.goto(f"{base_url}/app-next/account")
+            expect(desktop_page.get_by_role("heading", name="Party Player")).to_be_visible(timeout=10000)
+            expect(desktop_page.get_by_role("heading", name="Color theme")).to_be_visible()
+            expect(desktop_page.get_by_role("heading", name="Preferred frontend")).to_be_visible()
+            expect(desktop_page.get_by_role("heading", name="Live session chat order")).to_be_visible()
+            expect(desktop_page.get_by_role("link", name="Flask account")).to_be_visible()
 
-            page.locator("input[name='theme_key'][value='moonlit']").check()
-            page.locator("input[name='frontend_mode'][value='gen2']").check()
-            page.locator("input[name='session_chat_order'][value='oldest_first']").check()
-            with page.expect_response(
+            account_hero_styles = desktop_page.evaluate(
+                """() => {
+                    const hero = document.querySelector(".account-hero");
+                    const form = document.querySelector(".account-settings-form");
+                    const sidebar = document.querySelector(".account-settings-sidebar");
+                    const firstOption = document.querySelector(".settings-option");
+                    const firstSwatch = document.querySelector(".settings-option__swatch");
+                    const firstOptionRect = firstOption ? firstOption.getBoundingClientRect() : null;
+                    const layout = document.querySelector(".account-settings-layout");
+                    return {
+                        heroBorderTop: hero ? window.getComputedStyle(hero).borderTopWidth : "0px",
+                        heroBoxShadow: hero ? window.getComputedStyle(hero).boxShadow : "none",
+                        formBorderTop: form ? window.getComputedStyle(form).borderTopWidth : "0px",
+                        formBoxShadow: form ? window.getComputedStyle(form).boxShadow : "none",
+                        sidebarBorderTop: sidebar ? window.getComputedStyle(sidebar).borderTopWidth : "0px",
+                        sidebarBoxShadow: sidebar ? window.getComputedStyle(sidebar).boxShadow : "none",
+                        firstOptionLeft: firstOption ? firstOptionRect.left : 0,
+                        firstOptionTop: firstOption ? firstOptionRect.top : 0,
+                        hasSwatches: Boolean(firstSwatch),
+                        formRadius: form ? window.getComputedStyle(form).borderRadius : "0px",
+                        sidebarRadius: sidebar ? window.getComputedStyle(sidebar).borderRadius : "0px",
+                    };
+                }"""
+            )
+            assert account_hero_styles["heroBorderTop"] == "0px"
+            assert account_hero_styles["heroBoxShadow"] == "none"
+            assert float(account_hero_styles["formBorderTop"][:-2]) > 0
+            assert float(account_hero_styles["sidebarBorderTop"][:-2]) > 0
+            assert account_hero_styles["formBoxShadow"] != "none"
+            assert account_hero_styles["sidebarBoxShadow"] != "none"
+            assert float(account_hero_styles["formRadius"][:-2]) > 0
+            assert float(account_hero_styles["sidebarRadius"][:-2]) > 0
+            assert account_hero_styles["hasSwatches"] is True
+            assert account_hero_styles["firstOptionTop"] > 0
+            assert account_hero_styles["firstOptionLeft"] >= 0
+            expect(desktop_page.get_by_role("link", name="Flask account")).to_be_visible()
+
+            desktop_page.locator("label[for='account-theme-moonlit']").click()
+            desktop_page.locator("label[for='account-frontend-mode-gen2']").click()
+            desktop_page.locator("label[for='account-chat-order-oldest_first']").click()
+            with desktop_page.expect_response(
                 lambda response: response.url.endswith("/api/v1/me/settings") and response.request.method == "PATCH"
             ):
-                page.get_by_role("button", name="Save account settings").click()
+                desktop_page.get_by_role("button", name="Save account settings").click()
 
-            expect(page.get_by_text("Account settings saved.")).to_be_visible(timeout=10000)
-            expect(page.locator("html")).to_have_attribute("data-theme", "moonlit")
+            expect(desktop_page.get_by_text("Account settings saved.")).to_be_visible(timeout=10000)
+            expect(desktop_page.locator("html")).to_have_attribute("data-theme", "moonlit")
 
-            me_response = page.request.get(f"{base_url}/api/v1/me")
+            me_response = desktop_page.request.get(f"{base_url}/api/v1/me")
             assert me_response.ok
             preferences = me_response.json()["preferences"]
             assert preferences == {
@@ -418,22 +458,59 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
                 "frontend_mode": "gen2",
             }
 
-            page.locator("input[name='frontend_mode'][value='flask']").check()
-            with page.expect_response(
+            desktop_page.locator("label[for='account-frontend-mode-flask']").click()
+            with desktop_page.expect_response(
                 lambda response: response.url.endswith("/api/v1/me/settings") and response.request.method == "PATCH"
             ):
-                page.get_by_role("button", name="Save account settings").click()
-            expect(page.get_by_text("Account settings saved.")).to_be_visible(timeout=10000)
+                desktop_page.get_by_role("button", name="Save account settings").click()
+            expect(desktop_page.get_by_text("Account settings saved.")).to_be_visible(timeout=10000)
 
-            flask_preferences_response = page.request.get(f"{base_url}/api/v1/me")
+            flask_preferences_response = desktop_page.request.get(f"{base_url}/api/v1/me")
             assert flask_preferences_response.ok
             assert flask_preferences_response.json()["preferences"] == {
                 "theme_key": "moonlit",
                 "session_chat_order": "oldest_first",
                 "frontend_mode": "flask",
             }
+
+            mobile_page.goto(f"{base_url}/app-next/account")
+            expect(mobile_page.get_by_role("heading", name="Party Player")).to_be_visible(timeout=10000)
+            mobile_layout = mobile_page.evaluate(
+                """() => {
+                    const layout = document.querySelector(".account-settings-layout");
+                    const items = layout ? Array.from(layout.children) : [];
+                    const shell = document.documentElement;
+                    const metrics = {
+                        innerWidth: window.innerWidth,
+                        scrollWidth: shell.scrollWidth,
+                    };
+                    if (!layout) {
+                        return { ...metrics, maxItemWidth: 0, count: 0, stacked: false };
+                    }
+                    const itemRects = items.map((item) => {
+                        const rect = item.getBoundingClientRect();
+                        return { left: rect.left, right: rect.right, top: rect.top, width: rect.width };
+                    });
+                    const first = itemRects[0];
+                    const second = itemRects[1];
+                    const stacked = !second || Math.abs((second.left || 0) - (first.left || 0)) <= 4;
+                    return {
+                        ...metrics,
+                        count: itemRects.length,
+                        maxItemWidth: itemRects.reduce((max, item) => Math.max(max, item.width), 0),
+                        stacked,
+                    };
+                }"""
+            )
+            assert mobile_layout["count"] == 2
+            assert mobile_layout["scrollWidth"] <= mobile_layout["innerWidth"] + 1
+            assert mobile_layout["maxItemWidth"] <= mobile_layout["innerWidth"] + 1
+            assert mobile_layout["stacked"] is True
         finally:
-            page.close()
+            desktop_page.close()
+            mobile_page.close()
+            desktop_context.close()
+            mobile_context.close()
             browser.close()
 
 

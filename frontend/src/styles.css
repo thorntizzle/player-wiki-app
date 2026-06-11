@@ -762,6 +762,16 @@ a:hover {
   gap: 1rem;
 }
 
+.account-hero {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+
 .account-hero h1 {
   margin: 0.1rem 0 0.4rem;
 }
@@ -769,7 +779,7 @@ a:hover {
 .account-settings-layout {
   display: grid;
   gap: 1rem;
-  grid-template-columns: minmax(0, 2fr) minmax(16rem, 0.75fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.85fr);
 }
 
 .account-settings-form,
@@ -780,35 +790,55 @@ a:hover {
 }
 
 .account-settings-group + .account-settings-group {
-  border-top: 1px solid #e5eaf3;
+  border-top: 1px solid var(--border-soft);
   padding-top: 1rem;
 }
 
 .settings-option-grid {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.85rem;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .settings-option {
+  position: relative;
   align-content: start;
-  background: #f9fbff;
-  border: 1px solid #d8e1ee;
-  border-radius: 8px;
-  cursor: pointer;
   display: grid;
-  gap: 0.55rem;
-  min-height: 8.5rem;
-  padding: 0.75rem;
+  gap: 0.6rem;
+  padding: 1rem;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+  min-height: 8.4rem;
+}
+
+.settings-option:hover,
+.settings-option:focus-within {
+  border-color: var(--border-accent);
+  transform: translateY(-1px);
+}
+
+.settings-option:focus-within {
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .settings-option.is-selected {
-  background: #eef6ff;
-  border-color: #2f7db3;
+  border-color: var(--border-accent);
+  background: var(--surface-highlight);
+  box-shadow: inset 0 0 0 1px var(--overlay-accent);
 }
 
 .settings-option input {
-  inline-size: 1rem;
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.settings-option input[type="radio"] {
+  width: 0.85rem;
+  height: 0.85rem;
   margin: 0;
 }
 
@@ -820,6 +850,7 @@ a:hover {
 }
 
 .settings-option__status {
+  margin-left: 0.45rem;
   display: block;
   margin-top: 0.15rem;
 }
@@ -827,24 +858,35 @@ a:hover {
 .settings-option__swatches {
   display: inline-flex;
   flex-shrink: 0;
-  gap: 0.2rem;
+  gap: 0.35rem;
 }
 
 .settings-option__swatch {
-  border: 1px solid rgba(15, 23, 42, 0.25);
+  border: 1px solid var(--border);
+  width: 1rem;
+  height: 1rem;
   border-radius: 999px;
   display: inline-block;
-  height: 1.1rem;
-  width: 1.1rem;
 }
 
 .account-settings-actions {
-  align-items: center;
-  border-top: 1px solid #e5eaf3;
+  align-items: flex-start;
+  border-top: 1px solid var(--border-soft);
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
   padding-top: 1rem;
+}
+
+.account-settings-sidebar .ghost-button {
+  justify-self: start;
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+}
+
+.account-settings-sidebar .meta {
+  margin-bottom: 0.25rem;
 }
 
 .admin-page {

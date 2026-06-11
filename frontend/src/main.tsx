@@ -5143,8 +5143,8 @@ function AccountSettingsPage() {
   const frontendModeChoices = settingsQuery.data?.frontend_mode_choices ?? [];
   const user = settingsQuery.data?.user;
   const selectedTheme = themePresets.find((theme) => theme.key === (preferences?.theme_key || draftThemeKey));
-  const selectedFrontendMode = preferences?.frontend_mode || draftFrontendMode || "flask";
-  const campaignBackHref = draftFrontendMode === "gen2" ? "/app-next/" : "/campaigns";
+  const selectedFrontendMode = draftFrontendMode || preferences?.frontend_mode || "flask";
+  const campaignBackHref = selectedFrontendMode === "gen2" ? "/app-next/" : "/campaigns";
   const hasDraft = Boolean(draftThemeKey || draftChatOrder || draftFrontendMode);
   const isUnchanged =
     draftThemeKey === (preferences?.theme_key || "") &&
@@ -5166,7 +5166,7 @@ function AccountSettingsPage() {
 
   return (
     <section className="account-settings-page">
-      <div className="panel account-hero">
+      <div className="account-hero">
         <p className="eyebrow">Account settings</p>
         <h1>{user?.display_name ?? "Account"}</h1>
         <p className="lede">Save interface preferences to your account and use them everywhere you are signed in.</p>
@@ -5300,12 +5300,6 @@ function AccountSettingsPage() {
               <button type="submit" className="button" disabled={saveSettings.isPending || !hasDraft || isUnchanged}>
                 {saveSettings.isPending ? "Saving..." : "Save account settings"}
               </button>
-              <a className="button button-secondary" href="/account">
-                Flask account
-              </a>
-              <a className="button button-secondary" href="/campaigns">
-                Flask campaigns
-              </a>
               {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
               {saveError ? <p className="status status-error">{saveError}</p> : null}
             </div>
@@ -5320,11 +5314,16 @@ function AccountSettingsPage() {
             {user?.is_admin ? <p className="meta-badge">App admin</p> : null}
             <p className="meta">Theme, frontend, and live-session chat preferences are stored in the auth database and applied on every signed-in request.</p>
             <p className="meta">Preferred frontend: {selectedFrontendMode === "gen2" ? "Gen2 frontend" : "Stable Flask"}</p>
+            <a className="ghost-button" href="/account">
+              Flask account
+            </a>
+            {selectedFrontendMode === "gen2" ? (
+              <a className="ghost-button" href="/campaigns">
+                Open Flask campaigns
+              </a>
+            ) : null}
             <a className="ghost-button" href={campaignBackHref}>
               Back to campaigns
-            </a>
-            <a className="ghost-button" href="/campaigns">
-              Open Flask campaigns
             </a>
           </aside>
         </div>
