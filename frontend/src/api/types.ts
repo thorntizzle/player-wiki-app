@@ -565,6 +565,13 @@ export interface SessionLogSummary {
   detail_url: string;
 }
 
+export interface SessionDmPassiveScoreRow {
+  name: string;
+  passive_perception: string;
+  passive_insight: string;
+  passive_investigation: string;
+}
+
 export interface SessionPermissions {
   can_manage_session: boolean;
   can_post_messages: boolean;
@@ -582,6 +589,8 @@ export interface SessionPayload extends ApiResponseBase {
   staged_articles?: SessionArticle[];
   revealed_articles?: SessionArticle[];
   session_logs?: SessionLogSummary[];
+  session_dm_passive_scores?: SessionDmPassiveScoreRow[];
+  show_session_dm_passive_scores?: boolean;
 }
 
 export interface SessionUnchangedPayload extends ApiResponseBase {

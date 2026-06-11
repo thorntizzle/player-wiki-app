@@ -145,6 +145,7 @@ from .session_models import (
     parse_session_article_source_ref,
 )
 from .session_article_publisher import list_published_pages_for_session_articles
+from .session_presenter import present_session_dm_passive_score_rows
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
 from .systems_ingest import SystemsIngestError, extracted_systems_archive
 from .systems_labels import (
@@ -169,6 +170,7 @@ from .system_policy import (
     supports_dnd5e_systems_import,
     supports_native_character_create,
     supports_native_character_tools,
+    is_dnd_5e_system,
     is_xianxia_system,
 )
 from .version import build_app_metadata
@@ -1651,6 +1653,16 @@ def register_api(app) -> None:
                 serialize_session_log_summary(summary)
                 for summary in session_service.list_session_logs(campaign_slug, limit=20)
             ]
+
+        show_session_dm_passive_scores = can_manage_session and is_dnd_5e_system(campaign.system)
+        payload["show_session_dm_passive_scores"] = show_session_dm_passive_scores
+        if show_session_dm_passive_scores:
+            payload["session_dm_passive_scores"] = present_session_dm_passive_score_rows(
+                campaign=campaign,
+                records=get_character_repository().list_visible_characters(campaign.slug),
+                systems_service=current_app.extensions["systems_service"],
+                campaign_page_records=list_visible_character_page_records(campaign.slug, campaign),
+            )
 
         return payload
 

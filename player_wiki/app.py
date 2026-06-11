@@ -224,6 +224,7 @@ from .session_models import (
     parse_session_article_source_ref,
 )
 from .session_presenter import (
+    present_session_dm_passive_score_rows,
     present_session_articles,
     present_session_log_summaries,
     present_session_messages,
@@ -3497,54 +3498,6 @@ def create_app() -> Flask:
             if can_access_session_character_surface(campaign_slug, record.definition.character_slug)
         ]
 
-    def _coerce_nonnegative_int(value: object) -> int:
-        try:
-            return max(0, int(float(value or 0)))
-        except (TypeError, ValueError):
-            return 0
-
-    def build_session_dm_passive_score_rows(
-        campaign,
-        records: list[Any],
-    ) -> list[dict[str, str]]:
-        if not is_dnd_5e_system(campaign.system):
-            return []
-
-        rows: list[dict[str, str]] = []
-        systems_service = get_systems_service()
-        campaign_page_records = list_visible_character_page_records(campaign.slug, campaign)
-        for record in records:
-            if not is_dnd_5e_system(record.definition.system):
-                continue
-            try:
-                character_detail = present_character_detail(
-                    campaign,
-                    record,
-                    include_player_notes_section=False,
-                    systems_service=systems_service,
-                    campaign_page_records=campaign_page_records,
-                )
-            except (CharacterBuildError, TypeError, ValueError):
-                continue
-
-            overview_stats = list(character_detail.get("overview_stats") or [])
-            stat_values: dict[str, str] = {}
-            for item in overview_stats:
-                label = str(item.get("label") or "").strip().lower()
-                if label in {"passive perception", "passive insight", "passive investigation"}:
-                    value = str(item.get("value") or 0).strip()
-                    stat_values[label] = value
-
-            rows.append(
-                {
-                    "name": record.definition.name,
-                    "passive_perception": str(_coerce_nonnegative_int(stat_values.get("passive perception", 0))),
-                    "passive_insight": str(_coerce_nonnegative_int(stat_values.get("passive insight", 0))),
-                    "passive_investigation": str(_coerce_nonnegative_int(stat_values.get("passive investigation", 0))),
-                }
-            )
-        return rows
-
     def get_default_session_character_slug(
         campaign_slug: str,
         *,
@@ -5624,9 +5577,11 @@ def create_app() -> Flask:
             campaign_slug,
             accessible_records=accessible_session_character_records,
         )
-        session_dm_passive_scores = build_session_dm_passive_score_rows(
+        session_dm_passive_scores = present_session_dm_passive_score_rows(
             campaign,
             accessible_session_character_records,
+            systems_service=get_systems_service(),
+            campaign_page_records=list_visible_character_page_records(campaign.slug, campaign),
         )
 
         return {

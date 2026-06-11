@@ -132,35 +132,63 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(page.locator(".campaign-nav-link").get_by_text("Systems")).to_be_visible()
             expect(page.locator(".campaign-nav-link").get_by_text("DM Content")).to_be_visible()
             expect(page.locator(".campaign-nav-link").get_by_text("Control")).to_be_visible()
-            expect(page.get_by_label("Search", exact=True)).to_be_visible()
+            assert page.locator(".campaign-search-form").count() == 0
+            expect(page.locator(".session-page-hero").get_by_role("heading", name="Session")).to_be_visible()
+            expect(page.locator(".session-page-hero").get_by_text("Session workspace")).to_be_visible()
+            expect(page.locator(".session-page-hero").get_by_text("Live play workspace.")).to_be_visible()
+            expect(page.locator(".session-page-tab-row")).to_be_visible()
             assert page.locator("a", has_text="Sign in").count() == 0
+            assert page.locator("text=Back to list").count() == 0
+            assert page.locator("text=/Session:/").count() == 0
 
-            session_heading = page.get_by_role("heading", name=re.compile(r"Session:", re.I)).first
             session_tabs = page.locator(".session-tab-strip")
-            expect(session_heading).to_be_visible(timeout=10000)
             expect(session_tabs.get_by_role("button", name="Session", exact=True)).to_be_visible()
             expect(session_tabs.get_by_role("button", name="Character", exact=True)).to_be_visible()
             expect(session_tabs.get_by_role("button", name="DM", exact=True)).to_be_visible()
 
             page.reload()
-            expect(page.get_by_role("heading", name=re.compile(r"Session:", re.I)).first).to_be_visible(timeout=10000)
+            expect(page.locator(".session-page-hero").get_by_role("heading", name="Session")).to_be_visible(timeout=10000)
             expect(page.locator(".campaign-nav-link").get_by_text("Session")).to_be_visible()
 
             session_tabs.get_by_role("button", name="DM", exact=True).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))
-            expect(page.get_by_role("heading", name="DM controls")).to_be_visible(timeout=5000)
+            expect(page.get_by_role("heading", name="Session controls")).to_be_visible(timeout=5000)
+            expect(page.get_by_role("heading", name="Session article store")).to_be_visible(timeout=5000)
+            expect(page.get_by_role("heading", name="Live session")).to_be_visible(timeout=5000)
+            dm_card_texts = page.evaluate(
+                """() => {
+                    const section = document.querySelector(".pane-visible .session-workspace-main");
+                    return Array.from(section ? section.querySelectorAll(":scope > .panel-nested .panel-header h3") : []).map(
+                        (node) => (node.textContent || "").trim(),
+                    );
+                }"""
+            )
+            assert dm_card_texts.index("Live session") != -1
+            assert dm_card_texts.index("Passive scores") != -1
+            assert dm_card_texts.index("Staged articles") != -1
+            assert dm_card_texts.index("Session logs") != -1
+            assert dm_card_texts.index("Live session") < dm_card_texts.index("Passive scores")
+            assert dm_card_texts.index("Passive scores") < dm_card_texts.index("Staged articles")
+            assert dm_card_texts.index("Staged articles") < dm_card_texts.index("Session logs")
             expect(page.get_by_role("button", name=re.compile(r"Begin session|Starting", re.I))).to_be_visible()
             expect(page.get_by_role("button", name=re.compile(r"Close session|Closing", re.I))).to_be_visible()
             expect(page.get_by_role("heading", name="Staged articles")).to_be_visible()
-            expect(page.get_by_role("heading", name="Revealed articles")).to_be_visible()
             expect(page.get_by_role("heading", name="Session logs")).to_be_visible()
 
             session_tabs.get_by_role("button", name="Session", exact=True).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))
-            expect(session_heading).to_be_visible()
+            expect(page.locator(".session-page-hero").get_by_role("heading", name="Session")).to_be_visible()
             expect(page.get_by_role("heading", name="Session chat")).to_be_visible()
-            expect(page.get_by_role("heading", name="Player wiki lookup")).to_be_visible()
+            expect(page.locator(".session-workspace-sidebar").get_by_role("heading", name="Player wiki lookup")).to_be_visible()
             expect(page.get_by_label("Post Session Message")).to_be_visible()
+            player_card_texts = page.evaluate(
+                """() => {
+                    const section = document.querySelector(".pane-visible .session-workspace-main");
+                    return Array.from(section ? section.querySelectorAll(":scope > .panel-nested > .panel-header h3") : []).map((node) => (node.textContent || "").trim());
+                }"""
+            )
+            assert player_card_texts[:2] == ["Live session", "Session chat"]
+            assert "Revealed articles" not in player_card_texts[:2]
 
             session_tabs.get_by_role("button", name="Character", exact=True).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))
@@ -199,7 +227,10 @@ def test_gen2_shell_and_session_visual_parity_smoke(
             expect(desktop_page.locator(".topbar-campaign")).to_be_visible(timeout=10000)
             expect(desktop_page.locator(".topbar-campaign")).to_contain_text(re.compile(r"\S"))
             expect(desktop_page.locator(".api-token-details")).to_be_visible()
+            expect(desktop_page.locator(".api-token-details summary")).to_be_visible()
+            expect(desktop_page.locator(".api-token-details summary")).to_have_text("API token")
             expect(desktop_page.locator("#pilot-api-token")).not_to_be_visible()
+            assert desktop_page.locator("text=/Gen2 companion/i").count() == 0
             expect(desktop_page.locator(".campaign-nav-link.is-active", has_text="Session")).to_be_visible()
             assert desktop_page.locator(".campaign-nav-link.is-active").count() == 1
             expect(desktop_page.locator(".campaign-nav-link", has_text="Characters")).to_have_attribute(
@@ -212,23 +243,25 @@ def test_gen2_shell_and_session_visual_parity_smoke(
                 """() => {
                     const bodyStyle = window.getComputedStyle(document.body);
                     const nav = document.querySelector(".campaign-nav-link");
-                    const panel = document.querySelector(".panel");
-                    const campaign = document.querySelector(".topbar-campaign");
-                    const header = document.querySelector(".topbar");
+                    const hero = document.querySelector(".session-page-hero");
+                    const firstPanel = document.querySelector(".session-workspace-main .panel-nested");
+                    const topbar = document.querySelector(".topbar");
                     return {
                         fontFamily: bodyStyle.fontFamily,
                         bodyColor: bodyStyle.color,
                         navRadius: nav ? Number.parseFloat(window.getComputedStyle(nav).borderRadius) : 0,
-                        panelRadius: panel ? Number.parseFloat(window.getComputedStyle(panel).borderRadius) : 0,
-                        campaignTop: campaign ? campaign.getBoundingClientRect().top : 0,
-                        headerTop: header ? header.getBoundingClientRect().top : 0,
+                        heroTop: hero ? hero.getBoundingClientRect().top : 0,
+                        firstPanelTop: firstPanel ? firstPanel.getBoundingClientRect().top : 0,
+                        topbarBottom: topbar ? topbar.getBoundingClientRect().bottom : 0,
                     };
                 }"""
             )
             assert "Georgia" in desktop_metrics["fontFamily"]
             assert desktop_metrics["navRadius"] >= 20
-            assert desktop_metrics["panelRadius"] >= 16
-            assert desktop_metrics["campaignTop"] >= desktop_metrics["headerTop"]
+            assert desktop_metrics["heroTop"] <= 280
+            assert desktop_metrics["heroTop"] >= desktop_metrics["topbarBottom"]
+            assert desktop_metrics["firstPanelTop"] <= 520
+            assert desktop_metrics["firstPanelTop"] >= desktop_metrics["heroTop"]
             assert desktop_metrics["bodyColor"] != "rgb(18, 25, 38)"
 
             _sign_in(mobile_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
@@ -241,11 +274,17 @@ def test_gen2_shell_and_session_visual_parity_smoke(
                     scrollWidth: document.documentElement.scrollWidth,
                     tabWidth: document.querySelector(".session-tab-strip")?.getBoundingClientRect().width ?? 0,
                     shellWidth: document.querySelector(".session-shell")?.getBoundingClientRect().width ?? 0,
+                    heroTop: document.querySelector(".session-page-hero")?.getBoundingClientRect().top ?? 0,
+                    firstPanelTop: document.querySelector(".session-workspace-main .panel-nested")?.getBoundingClientRect().top ?? 0,
+                    topbarBottom: document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0,
                 })"""
             )
             assert mobile_metrics["scrollWidth"] <= mobile_metrics["innerWidth"] + 1
             assert mobile_metrics["tabWidth"] <= mobile_metrics["innerWidth"]
             assert mobile_metrics["shellWidth"] <= mobile_metrics["innerWidth"]
+            assert mobile_metrics["heroTop"] <= 320
+            assert mobile_metrics["firstPanelTop"] <= mobile_metrics["heroTop"] + 360
+            assert mobile_metrics["firstPanelTop"] >= mobile_metrics["topbarBottom"] + 50
         finally:
             desktop_page.close()
             mobile_page.close()

@@ -109,6 +109,7 @@ import type {
   SessionArticleCreatePayloadWiki,
   SessionArticleSourceResult,
   SessionArticleUpdatePayload,
+  SessionDmPassiveScoreRow,
   SessionLogSummary,
   SessionMessage,
   SessionPayload,
@@ -3993,7 +3994,6 @@ function AppShell() {
     }
   });
   const [authRequired, setAuthRequired] = useState(false);
-  const [campaignSearchQuery, setCampaignSearchQuery] = useState("");
   const [navigationLabel, setNavigationLabel] = useState<string | null>(null);
   const hasMounted = useRef(false);
 
@@ -4056,10 +4056,6 @@ function AppShell() {
       setAuthRequired(true);
     }
   }, [apiToken, campaignQuery.error, meQuery.error, setAuthRequired]);
-
-  useEffect(() => {
-    setCampaignSearchQuery(new URLSearchParams(window.location.search).get("q") || "");
-  }, [location.pathname, location.search]);
 
   useEffect(() => {
     const themeKey = meQuery.data?.preferences?.theme_key;
@@ -4139,7 +4135,6 @@ function AppShell() {
   );
 
   const visibleNavItems = navItems.filter((entry) => entry.show);
-  const campaignSearchAction = campaignSlug ? `/app-next/campaigns/${encodedCampaignSlug}` : "";
   const nextUrl = `${window.location.pathname}${window.location.search}`;
   const signInHref = `/sign-in?next=${encodeURIComponent(nextUrl)}`;
   const currentAppPath = `/app-next${location.pathname}`;
@@ -4180,7 +4175,6 @@ function AppShell() {
             <Link to="/" className="brand-link">
               Campaign Player Wiki
             </Link>
-            <p className="subtitle">Gen2 companion</p>
           </div>
           {campaign ? (
             <div className="topbar-campaign" aria-label="Current campaign">
@@ -4250,25 +4244,6 @@ function AppShell() {
                 </a>
               ))}
             </nav>
-            {campaignVisibilityCanAccess(campaignVisibility, "wiki") ? (
-              <form className="campaign-search-form" action={campaignSearchAction} method="get">
-                <label htmlFor="gen2-campaign-search">Search</label>
-                <input
-                  id="gen2-campaign-search"
-                  name="q"
-                  type="search"
-                  value={campaignSearchQuery}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => setCampaignSearchQuery(event.currentTarget.value)}
-                />
-                <button
-                  type="submit"
-                  className="button button-secondary"
-                  onClick={() => setNavigationLabel("Campaign Home")}
-                >
-                  Search
-                </button>
-              </form>
-            ) : null}
             {navigationLabel ? (
               <p className="navigation-status" role="status">
                 Loading {navigationLabel}...
@@ -5873,6 +5848,15 @@ function WikiHomePage() {
       {data ? (
         <>
           <p className="lede">{data.campaign.summary}</p>
+          {data.can_view_wiki ? (
+            <form className="wiki-home-search search-row" action={`/app-next/campaigns/${encodeURIComponent(resolvedCampaignSlug)}`} method="get">
+              <label htmlFor="wiki-home-search">Search</label>
+              <input id="wiki-home-search" name="q" type="search" defaultValue={query} />
+              <button type="submit" className="button button-secondary">
+                Search
+              </button>
+            </form>
+          ) : null}
           {!data.can_view_wiki ? (
             <section className="card">
               <h2>Wiki visibility restricted</h2>
@@ -7239,36 +7223,49 @@ function SessionPane({
 
   const canShowWikiLookup = payload?.permissions.can_access_wiki_lookup ?? true;
 
+  const revealedArticles = payload?.revealed_articles ?? [];
   return (
-    <div className="session-pane-content">
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Session: {payload?.campaign.title ?? campaignSlug}</h2>
-          <span className="pill">Player</span>
-        </div>
-        <div className="status-row">
-          <article className="stat-card">
-            <h3>Session</h3>
-            <p>{payload?.active_session ? payload.active_session.status : "inactive"}</p>
-          </article>
-          <article className="stat-card">
-            <h3>Messages</h3>
-            <p>{payload?.messages.length ?? 0}</p>
-          </article>
-          <article className="stat-card">
-            <h3>Session ID</h3>
-            <p>{payload?.active_session?.id ?? "none"}</p>
-          </article>
-        </div>
+    <section className="session-workspace-grid">
+      <section className="session-workspace-main">
+        <article className="panel panel-nested">
+          <div className="panel-header">
+            <h3>Live session</h3>
+            <span className="pill">{payload?.active_session ? "Active" : "Inactive"}</span>
+          </div>
+          <div className="status-row">
+            <article className="stat-card">
+              <h3>Session</h3>
+              <p>{payload?.active_session ? payload.active_session.status : "inactive"}</p>
+            </article>
+            <article className="stat-card">
+              <h3>Messages</h3>
+              <p>{payload?.messages.length ?? 0}</p>
+            </article>
+            <article className="stat-card">
+              <h3>Session ID</h3>
+              <p>{payload?.active_session?.id ?? "none"}</p>
+            </article>
+          </div>
+        </article>
+        <SessionPaneChat
+          payload={payload}
+          messageDraft={messageDraft}
+          setMessageDraft={setMessageDraft}
+          sendError={sendError}
+          onSend={sendMessage}
+          isSending={postMessage.isPending}
+        />
+        {revealedArticles.length ? (
+          <SessionArticlesPanel
+            campaignSlug={campaignSlug}
+            articles={revealedArticles}
+            title="Revealed articles"
+            emptyText="No revealed articles yet."
+          />
+        ) : null}
       </section>
 
-      <div className="split-grid">
-        <SessionArticlesPanel
-          campaignSlug={campaignSlug}
-          articles={payload?.revealed_articles ?? []}
-          title="Revealed articles"
-          emptyText="No revealed articles yet."
-        />
+      <aside className="session-workspace-sidebar">
         <SessionPaneWikiLookup
           canShow={canShowWikiLookup}
           query={wikiQuery}
@@ -7286,16 +7283,8 @@ function SessionPane({
             setWikiStatus(null);
           }}
         />
-      </div>
-      <SessionPaneChat
-        payload={payload}
-        messageDraft={messageDraft}
-        setMessageDraft={setMessageDraft}
-        sendError={sendError}
-        onSend={sendMessage}
-        isSending={postMessage.isPending}
-      />
-    </div>
+      </aside>
+    </section>
   );
 }
 
@@ -10316,6 +10305,8 @@ function DmPane({
   const stagedArticles: SessionArticle[] = payload?.staged_articles ?? [];
   const revealedArticles: SessionArticle[] = payload?.revealed_articles ?? [];
   const sessionLogs: SessionLogSummary[] = payload?.session_logs ?? [];
+  const passiveScores: SessionDmPassiveScoreRow[] = payload?.session_dm_passive_scores ?? [];
+  const shouldShowPassiveScores = Boolean(payload?.show_session_dm_passive_scores);
   const [mode, setMode] = useState<ArticleMode>("manual");
   const [manualDraft, setManualDraft] = useState<ManualArticleDraftState>(buildEmptyManualArticleDraft);
   const [uploadDraft, setUploadDraft] = useState({ filename: "", markdown: "", image: null as EmbeddedImageInput | null });
@@ -10543,74 +10534,67 @@ function DmPane({
   const statusText = startSessionMutation.isPending ? "Starting session..." : closeSessionMutation.isPending ? "Closing session..." : null;
 
   return (
-    <div className="session-pane-content">
-      <section className="panel">
-        <div className="panel-header">
-          <h2>DM controls</h2>
-          <span className="pill">{payload?.active_session ? `Session #${payload.active_session.id}` : "No active session"}</span>
-        </div>
-        <div className="status-row">
-          <article className="stat-card">
-            <h3>Session state</h3>
-            <p>{payload?.active_session ? payload.active_session.status : "inactive"}</p>
-          </article>
-          <article className="stat-card">
-            <h3>Controls</h3>
-            <div className="session-actions-row">
-              <button type="button" onClick={() => startSessionMutation.mutate()} disabled={startSessionMutation.isPending}>
-                {startSessionMutation.isPending ? "Starting..." : "Begin session"}
-              </button>
-              <button
-                type="button"
-                onClick={() => closeSessionMutation.mutate()}
-                disabled={closeSessionMutation.isPending || !payload?.active_session}
-              >
-                {closeSessionMutation.isPending ? "Closing..." : "Close session"}
-              </button>
-            </div>
-          </article>
-          <article className="stat-card">
-            <h3>Lifecycle</h3>
-            <p>{statusText || uiMessage || "Ready."}</p>
-          </article>
-        </div>
-        {startSessionMutation.error ? <p className="status status-error">{apiErrorMessage(startSessionMutation.error)}</p> : null}
-        {closeSessionMutation.error ? <p className="status status-error">{apiErrorMessage(closeSessionMutation.error)}</p> : null}
-        {paneError ? <p className="status status-error">{paneError}</p> : null}
-        {uiMessage ? <p className="status status-neutral">{uiMessage}</p> : null}
-      </section>
+    <section className="session-workspace-grid">
+      <section className="session-workspace-main">
+        <article className="panel panel-nested">
+          <div className="panel-header">
+            <h3>Live session</h3>
+            <span className="pill">{payload?.active_session ? "Active" : "Inactive"}</span>
+          </div>
+          <div className="status-row">
+            <article className="stat-card">
+              <h3>Session</h3>
+              <p>{payload?.active_session ? payload.active_session.status : "inactive"}</p>
+            </article>
+            <article className="stat-card">
+              <h3>Controls</h3>
+              <p>{statusText || uiMessage || "Ready."}</p>
+            </article>
+            <article className="stat-card">
+              <h3>Session ID</h3>
+              <p>{payload?.active_session?.id ?? "none"}</p>
+            </article>
+          </div>
+          {startSessionMutation.error ? <p className="status status-error">{apiErrorMessage(startSessionMutation.error)}</p> : null}
+          {closeSessionMutation.error ? <p className="status status-error">{apiErrorMessage(closeSessionMutation.error)}</p> : null}
+          {paneError ? <p className="status status-error">{paneError}</p> : null}
+          {uiMessage ? <p className="status status-neutral">{uiMessage}</p> : null}
+        </article>
 
-      <div className="split-grid">
-        <DmArticleCreator
-          mode={mode}
-          setMode={(next) => {
-            clearArticleStatus();
-            setMode(next);
-          }}
-          sourceQuery={sourceQuery}
-          setSourceQuery={setSourceQuery}
-          sourceStatus={sourceStatus}
-          setSourceStatus={setSourceStatus}
-          sourceResults={sourceResults}
-          selectedSourceRef={selectedSourceRef}
-          setSelectedSourceRef={(next) => {
-            setSelectedSourceRef(next);
-            setSourceStatus(null);
-          }}
-          manualDraft={manualDraft}
-          setManualDraft={(next) => {
-            clearArticleStatus();
-            setManualDraft(next);
-          }}
-          uploadDraft={uploadDraft}
-          setUploadDraft={(next) => {
-            clearArticleStatus();
-            setUploadDraft(next);
-          }}
-          onSearchSources={searchSources}
-          onCreate={createArticle}
-          isCreating={createArticleMutation.isPending}
-        />
+        {shouldShowPassiveScores ? (
+          <section className="panel panel-nested session-passive-scores-bar">
+            <div className="panel-header">
+              <h3>Passive scores</h3>
+              <span className="pill">{passiveScores.length}</span>
+            </div>
+            {passiveScores.length ? (
+              <div className="session-passive-score-list">
+                {passiveScores.map((row) => (
+                  <article className="session-passive-score-card" key={row.name}>
+                    <h4>{row.name}</h4>
+                    <div className="session-passive-score-grid">
+                      <p>
+                        <span className="session-passive-score-label">Passive Perception</span>
+                        <span className="session-passive-score-value">{row.passive_perception}</span>
+                      </p>
+                      <p>
+                        <span className="session-passive-score-label">Passive Insight</span>
+                        <span className="session-passive-score-value">{row.passive_insight}</span>
+                      </p>
+                      <p>
+                        <span className="session-passive-score-label">Passive Investigation</span>
+                        <span className="session-passive-score-value">{row.passive_investigation}</span>
+                      </p>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="status status-neutral">No visible DND-5E characters are currently available on the DM session surface.</p>
+            )}
+          </section>
+        ) : null}
+
         <section className="panel panel-nested">
           <div className="panel-header">
             <h3>Staged articles</h3>
@@ -10753,25 +10737,23 @@ function DmPane({
             <p className="status status-neutral">No staged articles.</p>
           )}
         </section>
-      </div>
 
-      <section className="split-grid">
-        <section className="panel panel-nested">
-          <div className="panel-header">
-            <h3>Revealed articles</h3>
-            <span className="pill">{revealedArticles.length}</span>
-          </div>
-          <div className="session-surface-subhead">
-            <button
-              type="button"
-              className="button-danger"
-              disabled={clearRevealedMutation.isPending || !revealedArticles.length}
-              onClick={() => clearRevealedMutation.mutate()}
-            >
-              {clearRevealedMutation.isPending ? "Clearing..." : "Clear all revealed"}
-            </button>
-          </div>
-          {revealedArticles.length ? (
+        {revealedArticles.length ? (
+          <section className="panel panel-nested">
+            <div className="panel-header">
+              <h3>Revealed articles</h3>
+              <span className="pill">{revealedArticles.length}</span>
+            </div>
+            <div className="session-surface-subhead">
+              <button
+                type="button"
+                className="button-danger"
+                disabled={clearRevealedMutation.isPending || !revealedArticles.length}
+                onClick={() => clearRevealedMutation.mutate()}
+              >
+                {clearRevealedMutation.isPending ? "Clearing..." : "Clear all revealed"}
+              </button>
+            </div>
             <div className="article-stack">
               {revealedArticles.map((article) => (
                 <details className="article-card" key={article.id}>
@@ -10798,10 +10780,9 @@ function DmPane({
                 </details>
               ))}
             </div>
-          ) : (
-            <p className="status status-neutral">No revealed articles.</p>
-          )}
-        </section>
+          </section>
+        ) : null}
+
         <section className="panel panel-nested">
           <div className="panel-header">
             <h3>Session logs</h3>
@@ -10860,7 +10841,62 @@ function DmPane({
           )}
         </section>
       </section>
-    </div>
+
+      <aside className="session-workspace-sidebar">
+        <section className="panel panel-nested">
+          <div className="panel-header">
+            <h3>Session controls</h3>
+            <span className="pill">{payload?.active_session ? `Session #${payload.active_session.id}` : "No active session"}</span>
+          </div>
+          <div className="session-actions-row">
+            <button type="button" onClick={() => startSessionMutation.mutate()} disabled={startSessionMutation.isPending}>
+              {startSessionMutation.isPending ? "Starting..." : "Begin session"}
+            </button>
+            <button
+              type="button"
+              onClick={() => closeSessionMutation.mutate()}
+              disabled={closeSessionMutation.isPending || !payload?.active_session}
+            >
+              {closeSessionMutation.isPending ? "Closing..." : "Close session"}
+            </button>
+          </div>
+        </section>
+
+        <section className="panel panel-nested">
+          <h3>Session article store</h3>
+          <DmArticleCreator
+            mode={mode}
+            setMode={(next) => {
+              clearArticleStatus();
+              setMode(next);
+            }}
+            sourceQuery={sourceQuery}
+            setSourceQuery={setSourceQuery}
+            sourceStatus={sourceStatus}
+            setSourceStatus={setSourceStatus}
+            sourceResults={sourceResults}
+            selectedSourceRef={selectedSourceRef}
+            setSelectedSourceRef={(next) => {
+              setSelectedSourceRef(next);
+              setSourceStatus(null);
+            }}
+            manualDraft={manualDraft}
+            setManualDraft={(next) => {
+              clearArticleStatus();
+              setManualDraft(next);
+            }}
+            uploadDraft={uploadDraft}
+            setUploadDraft={(next) => {
+              clearArticleStatus();
+              setUploadDraft(next);
+            }}
+            onSearchSources={searchSources}
+            onCreate={createArticle}
+            isCreating={createArticleMutation.isPending}
+          />
+        </section>
+      </aside>
+    </section>
   );
 }
 
@@ -14738,13 +14774,43 @@ function SessionPage() {
   const paneError = getApiErrorMessage(sessionQuery.error);
 
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <Link to="/" className="button button-secondary">
-          Back to list
-        </Link>
-        <h2>Session: {payload?.campaign.title ?? resolvedCampaignSlug}</h2>
+    <section className="session-page-shell">
+      <header className="session-page-hero">
+        <p className="eyebrow">Session workspace</p>
+        <h1>Session</h1>
+        <p className="lede">Live play workspace.</p>
+      </header>
+
+      <div className="session-page-toolbar">
         {canManage ? <span className="pill">DM+</span> : null}
+      </div>
+
+      <div className="session-page-tab-row">
+        <div className="session-tab-strip">
+          <button
+            type="button"
+            className={activePane === "session" ? "tab-button active" : "tab-button"}
+            onClick={() => setActivePane("session")}
+          >
+            Session
+          </button>
+          <button
+            type="button"
+            className={activePane === "character" ? "tab-button active" : "tab-button"}
+            onClick={() => setActivePane("character")}
+          >
+            Character
+          </button>
+          {canManage ? (
+            <button
+              type="button"
+              className={activePane === "dm" ? "tab-button active" : "tab-button"}
+              onClick={() => setActivePane("dm")}
+            >
+              DM
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <ApiErrorNotice
@@ -14752,32 +14818,6 @@ function SessionPage() {
         message={paneError}
         onAuth={() => setAuthRequired(true)}
       />
-
-      <div className="session-tab-strip">
-        <button
-          type="button"
-          className={activePane === "session" ? "tab-button active" : "tab-button"}
-          onClick={() => setActivePane("session")}
-        >
-          Session
-        </button>
-        <button
-          type="button"
-          className={activePane === "character" ? "tab-button active" : "tab-button"}
-          onClick={() => setActivePane("character")}
-        >
-          Character
-        </button>
-        {canManage ? (
-          <button
-            type="button"
-            className={activePane === "dm" ? "tab-button active" : "tab-button"}
-            onClick={() => setActivePane("dm")}
-          >
-            DM
-          </button>
-        ) : null}
-      </div>
 
       <div className="pane-stack">
         <div className={activePane === "session" ? "pane pane-visible" : "pane pane-hidden"}>

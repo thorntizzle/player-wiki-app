@@ -956,6 +956,8 @@ def test_api_session_endpoints_follow_permissions(client, app, users):
 
     assert dm_session_response.status_code == 200
     dm_session_payload = dm_session_response.get_json()
+    assert dm_session_payload["show_session_dm_passive_scores"] is True
+    assert isinstance(dm_session_payload["session_dm_passive_scores"], list)
     assert len(dm_session_payload["staged_articles"]) == 1
     assert dm_session_payload["staged_articles"][0]["title"] == "Sealed Orders"
 
@@ -972,6 +974,8 @@ def test_api_session_endpoints_follow_permissions(client, app, users):
 
     assert player_before_reveal.status_code == 200
     player_before_payload = player_before_reveal.get_json()
+    assert player_before_payload["show_session_dm_passive_scores"] is False
+    assert "session_dm_passive_scores" not in player_before_payload
     assert "staged_articles" not in player_before_payload
     assert all(message["article"] is None for message in player_before_payload["messages"])
 

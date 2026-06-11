@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 import markdown
 
+from .character_builder import CharacterBuildError
+from .character_presenter import present_character_detail
 from .models import Campaign
 from .auth import get_auth_store
 from .repository import build_alias_index, render_obsidian_links
@@ -14,6 +18,7 @@ from .session_models import (
     SESSION_ARTICLE_SOURCE_KIND_SYSTEMS,
     parse_session_article_source_ref,
 )
+from .system_policy import is_dnd_5e_system
 
 
 def format_session_timestamp(value) -> str:
@@ -170,3 +175,53 @@ def present_session_log_summaries(
         }
         for summary in summaries
     ]
+
+
+def _coerce_nonnegative_int(value: object) -> int:
+    try:
+        return max(0, int(float(value or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def present_session_dm_passive_score_rows(
+    campaign: Campaign,
+    records: list[Any],
+    *,
+    systems_service: object,
+    campaign_page_records: list[object],
+) -> list[dict[str, str]]:
+    if not is_dnd_5e_system(campaign.system):
+        return []
+
+    rows: list[dict[str, str]] = []
+    for record in records:
+        if not is_dnd_5e_system(record.definition.system):
+            continue
+        try:
+            character_detail = present_character_detail(
+                campaign,
+                record,
+                include_player_notes_section=False,
+                systems_service=systems_service,
+                campaign_page_records=campaign_page_records,
+            )
+        except (CharacterBuildError, TypeError, ValueError):
+            continue
+
+        overview_stats = list(character_detail.get("overview_stats") or [])
+        stat_values: dict[str, str] = {}
+        for item in overview_stats:
+            label = str(item.get("label") or "").strip().lower()
+            if label in {"passive perception", "passive insight", "passive investigation"}:
+                stat_values[label] = str(item.get("value") or 0).strip()
+
+        rows.append(
+            {
+                "name": record.definition.name,
+                "passive_perception": str(_coerce_nonnegative_int(stat_values.get("passive perception", 0))),
+                "passive_insight": str(_coerce_nonnegative_int(stat_values.get("passive insight", 0))),
+                "passive_investigation": str(_coerce_nonnegative_int(stat_values.get("passive investigation", 0))),
+            }
+        )
+    return rows

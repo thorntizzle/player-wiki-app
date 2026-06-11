@@ -174,10 +174,11 @@ a:hover {
   min-height: 100vh;
   display: grid;
   grid-template-rows: auto;
-  gap: 0.9rem;
+  align-content: start;
+  gap: 0.55rem;
   width: min(1200px, calc(100% - 2rem));
   margin: 0 auto;
-  padding: 1rem 0 3rem;
+  padding: 0.55rem 0 2rem;
 }
 
 .topbar {
@@ -186,7 +187,7 @@ a:hover {
   gap: 1rem;
   align-items: center;
   color: var(--ink);
-  padding: 0.75rem 0 0.25rem;
+  padding: 0.45rem 0 0.2rem;
 }
 
 .topbar--campaign {
@@ -218,7 +219,7 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.85rem;
+  gap: 0.6rem;
   flex-wrap: wrap;
   min-width: 0;
 }
@@ -267,15 +268,15 @@ a:hover {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem 1.25rem;
-  padding-top: 0.85rem;
+  gap: 0.72rem 1rem;
+  padding-top: 0.55rem;
   border-top: 1px solid var(--border-soft);
 }
 
 .campaign-nav-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.7rem;
+  gap: 0.55rem;
   align-items: center;
 }
 
@@ -283,13 +284,13 @@ a:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 2.5rem;
+  min-height: 2.25rem;
   color: var(--ink);
   text-decoration: none;
   font-weight: 700;
   line-height: 1.1;
   white-space: nowrap;
-  padding: 0.45rem 0.9rem;
+  padding: 0.34rem 0.72rem;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface-raised);
@@ -395,11 +396,11 @@ a:hover {
 .campaign-search-form {
   display: flex;
   align-items: end;
-  gap: 0.4rem;
+  gap: 0.35rem;
   margin-left: auto;
-  flex: 1 1 340px;
+  flex: 1 1 280px;
   justify-content: flex-end;
-  max-width: 540px;
+  max-width: min(440px, 100%);
 }
 
 .campaign-search-form label {
@@ -412,6 +413,46 @@ a:hover {
 
 .campaign-search-form input {
   width: min(18rem, 48vw);
+}
+
+.session-page-shell {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.session-page-hero {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.session-page-hero h1 {
+  margin: 0;
+  font-size: clamp(2rem, 4.2vw, 3rem);
+  line-height: 1.05;
+}
+
+.session-page-tab-row {
+  display: grid;
+  justify-items: start;
+}
+
+.session-page-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.session-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(270px, 0.85fr);
+  align-items: start;
+  gap: 1rem;
+}
+
+.session-workspace-main,
+.session-workspace-sidebar {
+  display: grid;
+  gap: 0.9rem;
+  min-width: 0;
 }
 
 .navigation-status {
@@ -432,10 +473,13 @@ a:hover {
 .api-token-details {
   position: relative;
   color: var(--muted);
-  font-size: 0.88rem;
+  font-size: 0.84rem;
 }
 
 .api-token-details summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   cursor: pointer;
   font-weight: 700;
   list-style: none;
@@ -447,6 +491,8 @@ a:hover {
 
 .api-token-details summary::after {
   content: " +";
+  font-weight: 400;
+  color: var(--muted);
 }
 
 .api-token-details[open] summary::after {
@@ -469,7 +515,7 @@ a:hover {
 .token-row {
   display: grid;
   gap: 0.25rem;
-  min-width: min(100%, 28rem);
+  min-width: min(100%, 16rem);
 }
 
 .token-row span,
@@ -511,6 +557,57 @@ a:hover {
 
 .panel + .panel {
   margin-top: 1rem;
+}
+
+.session-pane-content .panel,
+.session-workspace-sidebar .panel,
+.session-workspace-main .panel,
+.session-workspace-sidebar .panel-nested,
+.session-workspace-main .panel-nested {
+  min-width: 0;
+}
+
+.session-passive-scores-bar {
+  --panel-gap: 0.55rem;
+}
+
+.session-passive-score-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.session-passive-score-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-raised);
+  padding: 0.6rem 0.7rem;
+}
+
+.session-passive-score-card h4 {
+  margin: 0 0 0.4rem;
+}
+
+.session-passive-score-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.28rem;
+}
+
+.session-passive-score-grid p {
+  margin: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.session-passive-score-label {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.session-passive-score-value {
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .panel-nested {
@@ -3085,12 +3182,13 @@ textarea {
   .session-pilot,
   .session-shell {
     width: min(100% - 1rem, 1200px);
-    padding: 0.55rem 0 2rem;
+    padding: 0.35rem 0 1.6rem;
   }
 
   .topbar {
     grid-template-columns: 1fr;
-    padding: 0.55rem 0 0.25rem;
+    gap: 0.55rem;
+    padding: 0.35rem 0 0.15rem;
   }
 
   .topbar--campaign {
@@ -3103,6 +3201,7 @@ textarea {
 
   .topbar-controls {
     justify-content: flex-start;
+    gap: 0.45rem;
   }
 
   .api-token-details[open] .token-row {
@@ -3111,12 +3210,33 @@ textarea {
   }
 
   .campaign-nav-row {
+    padding-top: 0.45rem;
     align-items: stretch;
+    justify-content: flex-start;
   }
 
   .campaign-search-form {
     margin-left: 0;
     max-width: none;
+    width: 100%;
+    flex-direction: row;
+    align-items: end;
+    gap: 0.35rem;
+  }
+
+  .campaign-search-form input {
+    width: min(12rem, 52vw);
+  }
+
+  .session-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .session-page-shell {
+    gap: 0.6rem;
+  }
+
+  .session-page-tab-row {
     width: 100%;
   }
 
@@ -3149,11 +3269,6 @@ textarea {
   }
 
   .chat-actions,
-  .campaign-nav-row,
-  .campaign-nav-strip,
-  .campaign-search-form,
-  .topbar-controls,
-  .account-row,
   .split-grid,
   .session-log-row,
   .session-tab-strip,
@@ -3164,6 +3279,30 @@ textarea {
   .compact-card {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .topbar-controls,
+  .account-row,
+  .campaign-nav-row,
+  .campaign-nav-strip {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .topbar-controls {
+    justify-content: space-between;
+  }
+
+  .account-row {
+    justify-content: flex-start;
+  }
+
+  .campaign-nav-row {
+    align-items: flex-start;
+  }
+
+  .campaign-nav-strip {
+    gap: 0.45rem;
   }
 
   .systems-hero {
