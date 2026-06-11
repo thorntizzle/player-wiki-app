@@ -6129,10 +6129,10 @@ function SystemsEntryList({
   return (
     <ul className="plain-list systems-entry-list">
       {entries.map((entry) => (
-        <li key={entry.entry_key}>
+        <li className="systems-list-row" key={entry.entry_key}>
           <a href={systemsEntryHref(campaignSlug, entry.slug)}>{entry.title}</a>
           {showMeta ? (
-            <span className="meta">
+            <span className="meta systems-list-row__meta">
               {entry.source_id} | {entry.entry_type_label}
               {entry.source_page ? ` | p. ${entry.source_page}` : ""}
             </span>
@@ -6158,9 +6158,9 @@ function SystemsRulesReferenceList({
   return (
     <ul className="plain-list systems-entry-list">
       {results.map((entry) => (
-        <li key={`${entry.source_id}-${entry.slug}`}>
+        <li className="systems-list-row" key={`${entry.source_id}-${entry.slug}`}>
           <a href={systemsEntryHref(campaignSlug, entry.slug)}>{entry.title}</a>
-          <span className="meta">
+          <span className="meta systems-list-row__meta">
             {entry.source_id} | {entry.entry_type_label}
             {entry.reference_scope ? ` | ${entry.reference_scope}` : ""}
           </span>
@@ -6187,11 +6187,11 @@ function SystemsCategoryList({
   return (
     <ul className="plain-list systems-entry-list">
       {groups.map((group) => (
-        <li key={group.entry_type}>
+        <li className="systems-list-row" key={group.entry_type}>
           <a href={systemsSourceCategoryHref(campaignSlug, sourceId, group.entry_type)}>
             {group.entry_type_label}
           </a>
-          <span className="meta">
+          <span className="meta systems-list-row__meta">
             {group.count} entr{group.count === 1 ? "y" : "ies"}
           </span>
         </li>
@@ -6228,24 +6228,24 @@ function SystemsIndexPage() {
   const action = systemsIndexHref(resolvedCampaignSlug);
 
   return (
-    <section className="panel systems-browse-page">
-      <div className="panel-header">
+    <section className="systems-browse-page systems-browse-index-page">
+      <header className="systems-hero">
         <div>
-          <p className="meta">Systems wiki</p>
+          <p className="eyebrow">Systems wiki</p>
           <h1>Systems</h1>
           <p className="lede">Browse campaign-approved system sources and reference entries.</p>
         </div>
-        <div className="article-actions">
+        <div className="article-actions systems-hero-actions">
           <a className="button button-secondary" href={`/campaigns/${encodeURIComponent(resolvedCampaignSlug)}/systems`}>
             Flask view
           </a>
           <SystemsManageLink campaignSlug={resolvedCampaignSlug} canManage={Boolean(data?.permissions.can_manage_systems)} />
         </div>
-      </div>
+      </header>
       <ApiErrorNotice isLoading={systemsQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {data ? (
-        <div className="page-layout">
-          <section className="article card">
+        <div className="systems-browse-grid page-layout">
+          <section className="systems-search-band article card">
             <h2>Systems Search</h2>
             <form method="get" action={action} className="stack-form">
               {referenceQuery ? <input type="hidden" name="reference_q" value={referenceQuery} /> : null}
@@ -6316,13 +6316,13 @@ function SystemsIndexPage() {
               ) : null}
             </section>
           </section>
-          <aside className="sidebar">
-            <section className="card sidebar-card">
+          <aside className="sidebar systems-browse-sidebar">
+            <section className="card sidebar-card systems-source-card">
               <h2>Available Sources</h2>
               {data.sources.length ? (
                 <ul className="plain-list systems-entry-list">
                   {data.sources.map((source) => (
-                    <li key={source.source_id}>
+                    <li className="systems-list-row" key={source.source_id}>
                       <a href={systemsSourceHref(resolvedCampaignSlug, source.source_id)}>{source.title}</a>
                       <p className="meta">{source.source_id} | {source.license_class_label}</p>
                       <p className="meta">{source.default_visibility} visibility | {source.entry_count} available entries</p>
@@ -6367,25 +6367,25 @@ function SystemsSourcePage() {
   const action = systemsSourceHref(resolvedCampaignSlug, resolvedSourceId);
 
   return (
-    <section className="panel systems-browse-page">
-      <div className="panel-header">
+    <section className="systems-browse-page systems-source-page">
+      <header className="systems-hero">
         <div>
-          <p className="meta">Systems source</p>
+          <p className="eyebrow">Systems source</p>
           <h1>{data?.source.title ?? resolvedSourceId}</h1>
           {data ? <p className="lede">{data.source.source_id} | {data.source.license_class_label} | {data.source.default_visibility} visibility</p> : null}
         </div>
-        <div className="article-actions">
+        <div className="article-actions systems-hero-actions">
           <a className="button button-secondary" href={systemsIndexHref(resolvedCampaignSlug)}>Systems</a>
           <a className="button button-secondary" href={`/campaigns/${encodeURIComponent(resolvedCampaignSlug)}/systems/sources/${encodeURIComponent(resolvedSourceId)}`}>
             Flask view
           </a>
           <SystemsManageLink campaignSlug={resolvedCampaignSlug} canManage={Boolean(data?.permissions.can_manage_systems)} />
         </div>
-      </div>
+      </header>
       <ApiErrorNotice isLoading={sourceQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {data ? (
-        <div className="page-layout">
-          <section className="article card">
+        <div className="systems-browse-grid page-layout">
+          <section className="systems-source-band article card">
             <h2>Browse This Source</h2>
             {data.rules_reference_scope_note ? <p className="meta">{data.rules_reference_scope_note}</p> : null}
             {data.book_visibility_policy_note ? <p className="meta">{data.book_visibility_policy_note}</p> : null}
@@ -6440,7 +6440,7 @@ function SystemsSourcePage() {
               emptyText="No systems entries are currently available in this source for your access level."
             />
           </section>
-          <aside className="sidebar">
+          <aside className="sidebar systems-browse-sidebar">
             <section className="card sidebar-card">
               <h2>Source Details</h2>
               <p className="meta">Source ID: {data.source.source_id}</p>
@@ -6493,14 +6493,14 @@ function SystemsSourceCategoryPage() {
   const action = systemsSourceCategoryHref(resolvedCampaignSlug, resolvedSourceId, resolvedEntryType);
 
   return (
-    <section className="panel systems-browse-page">
-      <div className="panel-header">
+    <section className="systems-browse-page systems-source-category-page">
+      <header className="systems-hero">
         <div>
-          <p className="meta">Systems source category</p>
+          <p className="eyebrow">Systems source category</p>
           <h1>{data ? `${data.source.title}: ${data.entry_type_label}` : resolvedEntryType}</h1>
           {data ? <p className="lede">{data.source.source_id} | {data.source.license_class_label} | {data.source.default_visibility} visibility</p> : null}
         </div>
-        <div className="article-actions">
+        <div className="article-actions systems-hero-actions">
           <a className="button button-secondary" href={systemsSourceHref(resolvedCampaignSlug, resolvedSourceId)}>Source</a>
           <a
             className="button button-secondary"
@@ -6510,11 +6510,11 @@ function SystemsSourceCategoryPage() {
           </a>
           <SystemsManageLink campaignSlug={resolvedCampaignSlug} canManage={Boolean(data?.permissions.can_manage_systems)} />
         </div>
-      </div>
+      </header>
       <ApiErrorNotice isLoading={categoryQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {data ? (
-        <div className="page-layout">
-          <section className="article card">
+        <div className="systems-browse-grid page-layout">
+          <section className="systems-category-band article card">
             <h2>Browse {data.entry_type_label}</h2>
             <form method="get" action={action} className="stack-form">
               <label className="field" htmlFor="systems-category-search">
@@ -6536,7 +6536,7 @@ function SystemsSourceCategoryPage() {
               showMeta={false}
             />
           </section>
-          <aside className="sidebar">
+          <aside className="sidebar systems-browse-sidebar">
             <section className="card sidebar-card">
               <h2>Category Details</h2>
               <p className="meta">Source ID: {data.source.source_id}</p>
@@ -6577,11 +6577,11 @@ function SystemsEntryPage() {
   const sourceState = entry?.source_state;
 
   return (
-    <section className="systems-entry-shell">
+    <section className="systems-entry-shell systems-entry-page">
       <ApiErrorNotice isLoading={entryQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {entry ? (
         <div className="page-layout">
-          <article className="article card">
+          <article className="article card systems-entry-band">
             <p className="eyebrow">Systems entry</p>
             <h1>{entry.title}</h1>
             <p className="lede">
@@ -6597,17 +6597,17 @@ function SystemsEntryPage() {
               </>
             )}
           </article>
-          <aside className="sidebar">
-            <section className="card sidebar-card">
+          <aside className="sidebar systems-entry-sidebar">
+            <section className="card sidebar-card systems-sidebar-card">
               <h2>Entry Metadata</h2>
               <p className="meta">Type: {entry.entry_type_label}</p>
               <p className="meta">Source: {entry.source_id}</p>
               <p className="meta">Entry key: {entry.entry_key}</p>
               {entry.source_page ? <p className="meta">Source page: {entry.source_page}</p> : null}
             </section>
-            <section className="card sidebar-card">
+            <section className="card sidebar-card systems-sidebar-card">
               <h2>Navigation</h2>
-              <ul className="plain-list">
+              <ul className="plain-list systems-entry-navigation">
                 <li><a href={systemsIndexHref(resolvedCampaignSlug)}>Systems landing</a></li>
                 <li><a href={systemsSourceHref(resolvedCampaignSlug, entry.source_id)}>Source page</a></li>
                 <li><a href={systemsSourceCategoryHref(resolvedCampaignSlug, entry.source_id, entry.entry_type)}>Source category</a></li>
@@ -6615,7 +6615,7 @@ function SystemsEntryPage() {
               </ul>
             </section>
             {data?.permissions.can_manage_systems ? (
-              <section className="card sidebar-card">
+              <section className="card sidebar-card systems-sidebar-card">
                 <h2>Entry Management</h2>
                 {data.links.dm_content_systems_url ? (
                   <a className="button button-secondary" href={data.links.dm_content_systems_url}>Manage campaign override</a>

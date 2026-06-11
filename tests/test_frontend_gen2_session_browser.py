@@ -1457,20 +1457,155 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
             assert create_response.ok
             entry_slug = create_response.json()["entry"]["slug"]
 
-            page.goto(f"{base_url}/app-next/campaigns/linden-pass/systems?q=focus")
-            expect(page.get_by_role("heading", name="Systems")).to_be_visible(timeout=10000)
-            expect(page.locator(".campaign-nav-link").get_by_text("Systems")).to_be_visible()
-            expect(page.get_by_role("heading", name="Search Results")).to_be_visible()
-            page.get_by_role("link", name=entry_title).click()
-            expect(page).to_have_url(
-                re.compile(rf"/app-next/campaigns/linden-pass/systems/entries/{re.escape(entry_slug)}$"),
-                timeout=5000,
-            )
-            expect(page.get_by_role("heading", name=entry_title)).to_be_visible(timeout=10000)
-            expect(page.get_by_text(entry_body)).to_be_visible()
-            expect(page.get_by_role("heading", name="Entry Metadata")).to_be_visible()
-            expect(page.get_by_role("link", name="Source category")).to_be_visible()
-            expect(page.get_by_role("link", name="Manage campaign override")).to_be_visible()
+            for viewport in (
+                {"width": 1280, "height": 900},
+                {"width": 390, "height": 900},
+            ):
+                page.set_viewport_size(viewport)
+                page.goto(f"{base_url}/app-next/campaigns/linden-pass/systems?q=focus")
+
+                expect(page.locator("section.systems-browse-index-page")).to_be_visible(timeout=10_000)
+                expect(page.locator(".systems-hero")).to_be_visible()
+                expect(page.locator(".systems-browse-grid")).to_be_visible()
+                expect(page.locator(".systems-search-band")).to_be_visible()
+                expect(page.locator(".systems-browse-sidebar")).to_be_visible()
+                expect(page.get_by_role("heading", name="Systems", exact=True)).to_be_visible(timeout=10_000)
+                expect(page.get_by_role("heading", name="Search Results")).to_be_visible()
+                expect(page.locator(".campaign-nav-link").get_by_text("Systems")).to_be_visible()
+                assert page.evaluate(
+                    """() => {
+                        const selectors = [
+                            '.systems-browse-page',
+                            '.systems-hero',
+                            '.systems-browse-grid',
+                            '.systems-browse-sidebar',
+                        ];
+                        const viewportWidth = Math.ceil(document.documentElement.clientWidth);
+                        return selectors.every((selector) => {
+                            const node = document.querySelector(selector);
+                            if (!node) {
+                                return true;
+                            }
+                            return node.scrollWidth <= viewportWidth + 1;
+                        });
+                    }"""
+                )
+                layout_columns = page.evaluate(
+                    """() => {
+                        const grid = document.querySelector('.systems-browse-grid');
+                        if (!grid) {
+                            return 0;
+                        }
+                        return getComputedStyle(grid).gridTemplateColumns.trim().split(/\\s+/).length;
+                    }"""
+                )
+                if viewport["width"] >= 1024:
+                    assert layout_columns >= 2
+                else:
+                    assert layout_columns == 1
+
+                page.get_by_role("link", name=entry_title).click()
+                expect(page).to_have_url(
+                    re.compile(rf"/app-next/campaigns/linden-pass/systems/entries/{re.escape(entry_slug)}$"),
+                    timeout=5000,
+                )
+                expect(page.locator(".systems-entry-shell")).to_be_visible(timeout=10_000)
+                expect(page.locator(".systems-entry-band")).to_be_visible()
+                expect(page.locator(".systems-entry-sidebar")).to_be_visible()
+                expect(page.locator(".systems-sidebar-card").first).to_be_visible()
+                expect(page.locator(".systems-entry-navigation")).to_be_visible()
+                expect(page.get_by_role("heading", name=entry_title)).to_be_visible(timeout=10_000)
+                expect(page.get_by_role("heading", name="Entry Metadata")).to_be_visible()
+                expect(page.get_by_role("link", name="Source page")).to_be_visible()
+                expect(page.get_by_role("link", name="Source category")).to_be_visible()
+                expect(page.get_by_text(entry_body)).to_be_visible()
+                expect(page.get_by_role("link", name="Manage campaign override")).to_be_visible()
+
+                page.get_by_role("link", name="Source category").click()
+
+                expect(page.locator(".systems-source-category-page")).to_be_visible(timeout=10_000)
+                expect(page.locator(".systems-category-band")).to_be_visible()
+                expect(page.locator('.systems-hero .eyebrow', has_text="Systems source category")).to_be_visible()
+                expect(page.get_by_role("heading", name=re.compile(r"Browse", re.I))).to_be_visible()
+                expect(page.get_by_role("link", name=entry_title)).to_be_visible()
+                expect(page).to_have_url(
+                    re.compile(r"/app-next/campaigns/linden-pass/systems/sources/.+/types/.+$"),
+                    timeout=5_000,
+                )
+                expect(page.locator(".systems-browse-sidebar")).to_be_visible()
+                assert page.evaluate(
+                    """() => {
+                        const selectors = [
+                            '.systems-source-category-page',
+                            '.systems-category-band',
+                            '.systems-browse-sidebar',
+                        ];
+                        const viewportWidth = Math.ceil(document.documentElement.clientWidth);
+                        return selectors.every((selector) => {
+                            const node = document.querySelector(selector);
+                            if (!node) {
+                                return true;
+                            }
+                            return node.scrollWidth <= viewportWidth + 1;
+                        });
+                    }"""
+                )
+                category_layout_columns = page.evaluate(
+                    """() => {
+                        const grid = document.querySelector('.systems-browse-grid');
+                        if (!grid) {
+                            return 0;
+                        }
+                        return getComputedStyle(grid).gridTemplateColumns.trim().split(/\\s+/).length;
+                    }"""
+                )
+                if viewport["width"] >= 1024:
+                    assert category_layout_columns >= 2
+                else:
+                    assert category_layout_columns == 1
+
+                page.get_by_role("link", name="Source").click()
+
+                expect(page.locator(".systems-source-page")).to_be_visible(timeout=10_000)
+                expect(page.locator(".systems-source-band")).to_be_visible()
+                expect(page.locator('.systems-hero .eyebrow', has_text="Systems source")).to_be_visible()
+                expect(page.get_by_role("heading", name="Browse This Source")).to_be_visible()
+                expect(page).to_have_url(
+                    re.compile(r"/app-next/campaigns/linden-pass/systems/sources/.+$"),
+                    timeout=5_000,
+                )
+                expect(page.locator(".systems-browse-sidebar")).to_be_visible()
+                assert page.evaluate(
+                    """() => {
+                        const selectors = [
+                            '.systems-source-page',
+                            '.systems-source-band',
+                            '.systems-browse-sidebar',
+                        ];
+                        const viewportWidth = Math.ceil(document.documentElement.clientWidth);
+                        return selectors.every((selector) => {
+                            const node = document.querySelector(selector);
+                            if (!node) {
+                                return true;
+                            }
+                            return node.scrollWidth <= viewportWidth + 1;
+                        });
+                    }"""
+                )
+
+                source_layout_columns = page.evaluate(
+                    """() => {
+                        const grid = document.querySelector('.systems-browse-grid');
+                        if (!grid) {
+                            return 0;
+                        }
+                        return getComputedStyle(grid).gridTemplateColumns.trim().split(/\\s+/).length;
+                    }"""
+                )
+                if viewport["width"] >= 1024:
+                    assert source_layout_columns >= 2
+                else:
+                    assert source_layout_columns == 1
         finally:
             page.close()
             browser.close()

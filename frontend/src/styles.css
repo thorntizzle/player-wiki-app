@@ -1277,6 +1277,122 @@ a:hover {
   line-height: 1.6;
 }
 
+.systems-browse-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.systems-hero {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.systems-hero h1 {
+  margin: 0;
+  font-size: clamp(2.05rem, 4.8vw, 3.8rem);
+  line-height: 0.98;
+}
+
+.systems-hero-actions {
+  align-items: flex-start;
+}
+
+.systems-browse-grid {
+  align-items: start;
+}
+
+.systems-search-band,
+.systems-source-band,
+.systems-category-band,
+.systems-entry-band {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.systems-browse-sidebar {
+  gap: 0.75rem;
+}
+
+.systems-source-card {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.systems-entry-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.systems-entry-list li + li {
+  margin-top: 0;
+}
+
+.systems-list-row {
+  display: grid;
+  gap: 0.14rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-soft);
+  padding: 0.55rem 0.62rem;
+  min-width: 0;
+}
+
+.systems-list-row a {
+  overflow-wrap: anywhere;
+}
+
+.systems-list-row__meta {
+  color: var(--muted);
+}
+
+.systems-entry-shell .article {
+  background: linear-gradient(180deg, var(--surface-strong), var(--surface));
+}
+
+.systems-entry-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.systems-entry-shell .article h1 {
+  margin-top: 0;
+  font-size: clamp(2.1rem, 5vw, 4rem);
+  line-height: 0.98;
+}
+
+.systems-entry-band .article-body {
+  display: grid;
+  gap: 0.7rem;
+  line-height: 1.65;
+}
+
+.systems-sidebar-card {
+  display: grid;
+  gap: 0.55rem;
+  background: var(--surface-soft);
+}
+
+.systems-entry-navigation {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.systems-entry-navigation li + li {
+  margin-top: 0;
+}
+
+.systems-entry-navigation a {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.55rem 0.62rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-raised);
+}
+
 .wiki-article-shell .html-body,
 .wiki-overview-card .html-body {
   border: 0;
@@ -2829,7 +2945,8 @@ textarea {
 
   .page-layout,
   .account-settings-layout,
-  .character-authoring-layout {
+  .character-authoring-layout,
+  .systems-browse-grid {
     grid-template-columns: 1fr;
   }
 
@@ -2853,6 +2970,10 @@ textarea {
   .combat-condition-chip,
   .compact-card {
     flex-direction: column;
+    align-items: stretch;
+  }
+
+  .systems-hero {
     align-items: stretch;
   }
 
