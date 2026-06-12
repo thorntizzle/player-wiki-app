@@ -756,7 +756,14 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
                 "session_chat_order": "oldest_first",
                 "frontend_mode": "gen2",
             }
+            desktop_page.goto(f"{base_url}/app-next/")
+            expect(desktop_page.get_by_role("heading", name="Available Campaigns")).to_be_visible(timeout=10000)
+            expect(desktop_page.get_by_role("link", name="Open Campaign").first).to_have_attribute(
+                "href",
+                "/app-next/campaigns/linden-pass",
+            )
 
+            desktop_page.goto(f"{base_url}/app-next/account")
             desktop_page.locator("label[for='account-frontend-mode-flask']").click()
             with desktop_page.expect_response(
                 lambda response: response.url.endswith("/api/v1/me/settings") and response.request.method == "PATCH"
@@ -771,6 +778,16 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
                 "session_chat_order": "oldest_first",
                 "frontend_mode": "flask",
             }
+            desktop_page.goto(f"{base_url}/app-next/")
+            expect(desktop_page.get_by_role("heading", name="Available Campaigns")).to_be_visible(timeout=10000)
+            expect(desktop_page.get_by_role("link", name="Open Campaign").first).to_have_attribute(
+                "href",
+                "/campaigns/linden-pass",
+            )
+            expect(desktop_page.get_by_role("link", name="Open Session").first).to_have_attribute(
+                "href",
+                "/campaigns/linden-pass/session",
+            )
 
             mobile_page.goto(f"{base_url}/app-next/account")
             expect(mobile_page.get_by_role("heading", name="Party Player")).to_be_visible(timeout=10000)
@@ -1235,6 +1252,28 @@ def test_gen2_wiki_browser_exposes_home_section_page_and_assets(
             expect(page.get_by_role("link", name="Locations").first).to_be_visible()
             overview_link = page.locator(".wiki-overview-card h2 a")
             expect(overview_link).to_be_visible()
+            expect(overview_link).to_have_attribute(
+                "href",
+                re.compile(r"^/campaigns/linden-pass/pages/.+"),
+            )
+            overview_article_link = page.locator(".wiki-overview-card .article-body a", has_text="Operations Brief")
+            expect(overview_article_link).to_have_attribute(
+                "href",
+                "/campaigns/linden-pass/pages/notes/operations-brief",
+            )
+            expect(page.get_by_role("link", name="Locations").first).to_have_attribute(
+                "href",
+                "/campaigns/linden-pass/sections/locations",
+            )
+
+            frontend_toggle = page.request.post(
+                f"{base_url}/account/frontend-mode",
+                form={"frontend_mode": "gen2"},
+            )
+            assert frontend_toggle.ok
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass")
+            expect(page.get_by_role("heading", name="Campaign Home")).to_be_visible(timeout=10000)
+            overview_link = page.locator(".wiki-overview-card h2 a")
             expect(overview_link).to_have_attribute(
                 "href",
                 re.compile(r"^/app-next/campaigns/linden-pass/pages/.+"),

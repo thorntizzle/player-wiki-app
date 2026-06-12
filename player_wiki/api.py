@@ -968,21 +968,38 @@ def register_api(app) -> None:
             "is_pinned": page.is_pinned,
         }
 
+    def flask_campaign_href(campaign_slug: str, suffix: str = "") -> str:
+        suffix = suffix.strip("/")
+        if suffix:
+            return f"/campaigns/{campaign_slug}/{suffix}"
+        return f"/campaigns/{campaign_slug}"
+
     def gen2_campaign_href(campaign_slug: str, suffix: str = "") -> str:
         suffix = suffix.strip("/")
         if suffix:
             return f"/app-next/campaigns/{campaign_slug}/{suffix}"
         return f"/app-next/campaigns/{campaign_slug}"
 
-    def gen2_wiki_body_html(campaign_slug: str, body_html: str) -> str:
+    def preferred_campaign_href(campaign_slug: str, suffix: str = "", frontend_mode: str = "flask") -> str:
+        if normalize_frontend_mode(frontend_mode) == "gen2":
+            return gen2_campaign_href(campaign_slug, suffix)
+        return flask_campaign_href(campaign_slug, suffix)
+
+    def preferred_wiki_body_html(campaign_slug: str, body_html: str, frontend_mode: str = "flask") -> str:
+        normalized_frontend_mode = normalize_frontend_mode(frontend_mode)
+        base = "/app-next/campaigns" if normalized_frontend_mode == "gen2" else "/campaigns"
         rewritten = re.sub(
-            rf"(?<!/app-next)/campaigns/{re.escape(campaign_slug)}/(pages|sections)/",
-            rf"/app-next/campaigns/{campaign_slug}/\1/",
+            rf"(?:/app-next)?/campaigns/{re.escape(campaign_slug)}/(pages|sections)/",
+            rf"{base}/{campaign_slug}/\1/",
             body_html,
         )
         rewritten = rewritten.replace(
+            "/app-next/campaigns/{campaign_slug}/",
+            f"{base}/{campaign_slug}/",
+        )
+        rewritten = rewritten.replace(
             "/campaigns/{campaign_slug}/",
-            f"/app-next/campaigns/{campaign_slug}/",
+            f"{base}/{campaign_slug}/",
         )
         return rewritten
 
@@ -1003,15 +1020,29 @@ def register_api(app) -> None:
             "caption": page.image_caption,
         }
 
-    def serialize_public_wiki_page(campaign, page, *, include_image: bool = False) -> dict[str, Any]:
+    def serialize_public_wiki_page(
+        campaign,
+        page,
+        *,
+        include_image: bool = False,
+        frontend_mode: str = "flask",
+    ) -> dict[str, Any]:
         payload = {
             "page_ref": page.route_slug,
             "title": page.title,
             "route_slug": page.route_slug,
-            "href": gen2_campaign_href(campaign.slug, f"pages/{page.route_slug}"),
+            "href": preferred_campaign_href(
+                campaign.slug,
+                f"pages/{page.route_slug}",
+                frontend_mode=frontend_mode,
+            ),
             "section": page.section,
             "section_slug": slugify(page.section),
-            "section_href": gen2_campaign_href(campaign.slug, f"sections/{slugify(page.section)}"),
+            "section_href": preferred_campaign_href(
+                campaign.slug,
+                f"sections/{slugify(page.section)}",
+                frontend_mode=frontend_mode,
+            ),
             "subsection": page.subsection,
             "page_type": page.page_type,
             "display_type": page.display_type,
@@ -1024,22 +1055,52 @@ def register_api(app) -> None:
             payload["image"] = get_public_wiki_page_image(campaign, page)
         return payload
 
-    def serialize_public_wiki_page_with_body(campaign, page, body_html: str) -> dict[str, Any]:
+    def serialize_public_wiki_page_with_body(
+        campaign,
+        page,
+        body_html: str,
+        *,
+        frontend_mode: str = "flask",
+    ) -> dict[str, Any]:
         return {
-            **serialize_public_wiki_page(campaign, page, include_image=True),
-            "body_html": gen2_wiki_body_html(campaign.slug, body_html),
+            **serialize_public_wiki_page(
+                campaign,
+                page,
+                include_image=True,
+                frontend_mode=frontend_mode,
+            ),
+            "body_html": preferred_wiki_body_html(campaign.slug, body_html, frontend_mode=frontend_mode),
         }
 
-    def serialize_public_wiki_section_group(campaign, section_name: str, pages: list[Any]) -> dict[str, Any]:
+    def serialize_public_wiki_section_group(
+        campaign,
+        section_name: str,
+        pages: list[Any],
+        *,
+        frontend_mode: str = "flask",
+    ) -> dict[str, Any]:
         return {
             "section_name": section_name,
             "section_slug": slugify(section_name),
-            "href": gen2_campaign_href(campaign.slug, f"sections/{slugify(section_name)}"),
+            "href": preferred_campaign_href(
+                campaign.slug,
+                f"sections/{slugify(section_name)}",
+                frontend_mode=frontend_mode,
+            ),
             "page_count": len(pages),
-            "pages": [serialize_public_wiki_page(campaign, page) for page in pages],
+            "pages": [
+                serialize_public_wiki_page(campaign, page, frontend_mode=frontend_mode)
+                for page in pages
+            ],
         }
 
-    def split_public_wiki_pages_by_subsection(campaign, section_name: str, pages: list[Any]) -> dict[str, Any]:
+    def split_public_wiki_pages_by_subsection(
+        campaign,
+        section_name: str,
+        pages: list[Any],
+        *,
+        frontend_mode: str = "flask",
+    ) -> dict[str, Any]:
         top_level_pages = [page for page in pages if not page.subsection]
         subsection_groups: dict[str, list[Any]] = defaultdict(list)
         for page in pages:
@@ -1051,7 +1112,7 @@ def register_api(app) -> None:
                 "subsection_name": subsection_name,
                 "page_count": len(subsection_groups[subsection_name]),
                 "pages": [
-                    serialize_public_wiki_page(campaign, page)
+                    serialize_public_wiki_page(campaign, page, frontend_mode=frontend_mode)
                     for page in subsection_groups[subsection_name]
                 ],
             }
@@ -1061,7 +1122,10 @@ def register_api(app) -> None:
             )
         ]
         return {
-            "top_level_pages": [serialize_public_wiki_page(campaign, page) for page in top_level_pages],
+            "top_level_pages": [
+                serialize_public_wiki_page(campaign, page, frontend_mode=frontend_mode)
+                for page in top_level_pages
+            ],
             "subsection_groups": ordered_subsection_groups,
             "show_subsections": bool(ordered_subsection_groups),
         }
@@ -5947,6 +6011,7 @@ def register_api(app) -> None:
         wiki_visibility = get_effective_campaign_visibility(campaign_slug, "wiki")
         wiki_visibility_label = VISIBILITY_LABELS.get(wiki_visibility, wiki_visibility)
         can_view_wiki = can_access_campaign_scope(campaign_slug, "wiki")
+        frontend_mode = normalize_frontend_mode(get_current_user_preferences().frontend_mode)
         query = request.args.get("q", "").strip() if can_view_wiki else ""
         grouped_sections: list[dict[str, Any]] = []
         result_count = 0
@@ -5958,7 +6023,12 @@ def register_api(app) -> None:
             for page in pages:
                 grouped_pages_map[page.section].append(page)
             grouped_sections = [
-                serialize_public_wiki_section_group(campaign, section_name, grouped_pages_map[section_name])
+                serialize_public_wiki_section_group(
+                    campaign,
+                    section_name,
+                    grouped_pages_map[section_name],
+                    frontend_mode=frontend_mode,
+                )
                 for section_name in sorted(grouped_pages_map, key=section_sort_key)
             ]
             result_count = len(pages)
@@ -5971,12 +6041,14 @@ def register_api(app) -> None:
                             campaign,
                             overview_pages[0],
                             body_html,
+                            frontend_mode=frontend_mode,
                         )
 
         return jsonify(
             {
                 "ok": True,
                 "campaign": serialize_campaign(campaign),
+                "frontend_mode": frontend_mode,
                 "can_view_wiki": can_view_wiki,
                 "wiki_visibility_label": wiki_visibility_label,
                 "query": query,
@@ -5990,6 +6062,7 @@ def register_api(app) -> None:
                 ),
                 "links": {
                     "flask_campaign_url": url_for("campaign_view", campaign_slug=campaign.slug),
+                    "campaign_url": preferred_campaign_href(campaign.slug, frontend_mode=frontend_mode),
                     "gen2_campaign_url": gen2_campaign_href(campaign.slug),
                 },
             }
@@ -6007,16 +6080,26 @@ def register_api(app) -> None:
         if not pages:
             abort(404)
 
+        frontend_mode = normalize_frontend_mode(get_current_user_preferences().frontend_mode)
         section_name = pages[0].section
-        split_pages = split_public_wiki_pages_by_subsection(campaign, section_name, pages)
+        split_pages = split_public_wiki_pages_by_subsection(
+            campaign,
+            section_name,
+            pages,
+            frontend_mode=frontend_mode,
+        )
         return jsonify(
             {
                 "ok": True,
                 "campaign": serialize_campaign(campaign),
+                "frontend_mode": frontend_mode,
                 "section_name": section_name,
                 "section_slug": section_slug,
                 "page_count": len(pages),
-                "pages": [serialize_public_wiki_page(campaign, page) for page in pages],
+                "pages": [
+                    serialize_public_wiki_page(campaign, page, frontend_mode=frontend_mode)
+                    for page in pages
+                ],
                 **split_pages,
                 "links": {
                     "flask_section_url": url_for(
@@ -6024,6 +6107,7 @@ def register_api(app) -> None:
                         campaign_slug=campaign.slug,
                         section_slug=section_slug,
                     ),
+                    "campaign_url": preferred_campaign_href(campaign.slug, frontend_mode=frontend_mode),
                     "gen2_campaign_url": gen2_campaign_href(campaign.slug),
                 },
             }
@@ -6046,17 +6130,33 @@ def register_api(app) -> None:
             abort(404)
 
         backlinks = repository.get_backlinks(campaign_slug, page_slug)
+        frontend_mode = normalize_frontend_mode(get_current_user_preferences().frontend_mode)
         return jsonify(
             {
                 "ok": True,
                 "campaign": serialize_campaign(campaign),
-                "page": serialize_public_wiki_page_with_body(campaign, page, body_html),
-                "backlinks": [serialize_public_wiki_page(campaign, backlink) for backlink in backlinks],
+                "frontend_mode": frontend_mode,
+                "page": serialize_public_wiki_page_with_body(
+                    campaign,
+                    page,
+                    body_html,
+                    frontend_mode=frontend_mode,
+                ),
+                "backlinks": [
+                    serialize_public_wiki_page(campaign, backlink, frontend_mode=frontend_mode)
+                    for backlink in backlinks
+                ],
                 "links": {
                     "flask_page_url": url_for(
                         "page_view",
                         campaign_slug=campaign.slug,
                         page_slug=page.route_slug,
+                    ),
+                    "campaign_url": preferred_campaign_href(campaign.slug, frontend_mode=frontend_mode),
+                    "section_url": preferred_campaign_href(
+                        campaign.slug,
+                        f"sections/{slugify(page.section)}",
+                        frontend_mode=frontend_mode,
                     ),
                     "gen2_campaign_url": gen2_campaign_href(campaign.slug),
                     "gen2_section_url": gen2_campaign_href(campaign.slug, f"sections/{slugify(page.section)}"),

@@ -326,7 +326,10 @@ interface ApiClientContextValue {
   setApiToken: (token: string) => void;
   authRequired: boolean;
   setAuthRequired: (required: boolean) => void;
+  preferredFrontendMode: FrontendMode;
 }
+
+type FrontendMode = "flask" | "gen2";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -359,20 +362,35 @@ function parseCampaignSlugFromPath(pathname: string): string {
   return "";
 }
 
-function ensureGen2WikiLink(href: string, campaignSlug: string): string {
+function normalizeFrontendMode(value: string | null | undefined): FrontendMode {
+  return value === "gen2" ? "gen2" : "flask";
+}
+
+function campaignRouteHref(campaignSlug: string, suffix = "", frontendMode: FrontendMode = "flask"): string {
+  const normalizedCampaignSlug = encodeURIComponent(campaignSlug);
+  const base = frontendMode === "gen2" ? `/app-next/campaigns/${normalizedCampaignSlug}` : `/campaigns/${normalizedCampaignSlug}`;
+  const normalizedSuffix = suffix.replace(/^\/+/, "");
+  return normalizedSuffix ? `${base}/${normalizedSuffix}` : base;
+}
+
+function preferredCampaignLink(href: string, campaignSlug: string, frontendMode: FrontendMode): string {
   if (!href) {
     return href;
   }
   const normalizedCampaignSlug = encodeURIComponent(campaignSlug);
-  if (href.startsWith("/app-next/")) {
-    return href;
-  }
   const legacyPrefix = `/campaigns/${normalizedCampaignSlug}/`;
-  if (href.startsWith(legacyPrefix)) {
-    return `/app-next${href}`;
+  const legacyBase = `/campaigns/${normalizedCampaignSlug}`;
+  const gen2Prefix = `/app-next/campaigns/${normalizedCampaignSlug}/`;
+  const gen2Base = `/app-next/campaigns/${normalizedCampaignSlug}`;
+  const preferredBase = campaignRouteHref(campaignSlug, "", frontendMode);
+  if (href === legacyBase || href === gen2Base) {
+    return preferredBase;
   }
-  if (href === `/campaigns/${normalizedCampaignSlug}`) {
-    return `/app-next/campaigns/${normalizedCampaignSlug}`;
+  if (href.startsWith(legacyPrefix)) {
+    return `${preferredBase}/${href.slice(legacyPrefix.length)}`;
+  }
+  if (href.startsWith(gen2Prefix)) {
+    return `${preferredBase}/${href.slice(gen2Prefix.length)}`;
   }
   return href;
 }
@@ -4083,6 +4101,7 @@ function AppShell() {
   }, [meQuery.data?.preferences?.theme_key]);
 
   const user = meQuery.data?.user;
+  const preferredFrontendMode = normalizeFrontendMode(meQuery.data?.preferences?.frontend_mode);
   const campaign = campaignQuery.data?.campaign;
   const campaignPermissions = campaignQuery.data?.permissions;
   const campaignVisibility = campaignQuery.data?.visibility;
@@ -4091,54 +4110,54 @@ function AppShell() {
   const navItems = useMemo(
     () => [
       {
-        href: `/app-next/campaigns/${encodedCampaignSlug}`,
+        href: campaignRouteHref(campaignSlug, "", preferredFrontendMode),
         label: "Campaign Home",
-        isGen2: true,
+        isGen2: preferredFrontendMode === "gen2",
         show: campaignVisibilityCanAccess(campaignVisibility, "campaign"),
       },
       {
-        href: `/app-next/campaigns/${encodedCampaignSlug}/session`,
+        href: campaignRouteHref(campaignSlug, "session", preferredFrontendMode),
         label: "Session",
-        isGen2: true,
+        isGen2: preferredFrontendMode === "gen2",
         show: campaignVisibilityCanAccess(campaignVisibility, "session"),
       },
       {
-        href: `/app-next/campaigns/${encodedCampaignSlug}/combat`,
+        href: campaignRouteHref(campaignSlug, "combat", preferredFrontendMode),
         label: "Combat",
-        isGen2: true,
+        isGen2: preferredFrontendMode === "gen2",
         show: campaignVisibilityCanAccess(campaignVisibility, "combat"),
       },
       {
-        href: `/app-next/campaigns/${encodedCampaignSlug}/characters`,
+        href: campaignRouteHref(campaignSlug, "characters", preferredFrontendMode),
         label: "Characters",
-        isGen2: true,
+        isGen2: preferredFrontendMode === "gen2",
         show: campaignVisibilityCanAccess(campaignVisibility, "characters"),
       },
       {
-        href: `/app-next/campaigns/${encodedCampaignSlug}/systems`,
+        href: campaignRouteHref(campaignSlug, "systems", preferredFrontendMode),
         label: "Systems",
-        isGen2: true,
+        isGen2: preferredFrontendMode === "gen2",
         show: campaignVisibilityCanAccess(campaignVisibility, "systems"),
       },
       {
-        href: `/app-next/campaigns/${encodedCampaignSlug}/dm-content`,
+        href: campaignRouteHref(campaignSlug, "dm-content", preferredFrontendMode),
         label: "DM Content",
-        isGen2: true,
+        isGen2: preferredFrontendMode === "gen2",
         show:
           campaignVisibilityCanAccess(campaignVisibility, "dm_content")
           || campaignPermissions?.can_manage_dm_content === true
           || campaignPermissions?.can_manage_content === true,
       },
       {
-        href: `/app-next/campaigns/${encodedCampaignSlug}/control`,
+        href: campaignRouteHref(campaignSlug, "control", preferredFrontendMode),
         label: "Control",
-        isGen2: true,
+        isGen2: preferredFrontendMode === "gen2",
         show: campaignPermissions?.can_manage_visibility === true,
       },
       {
-        href: `/app-next/campaigns/${encodedCampaignSlug}/help`,
+        href: campaignRouteHref(campaignSlug, "help", preferredFrontendMode),
         label: "Help",
-        isGen2: true,
+        isGen2: preferredFrontendMode === "gen2",
         show: Boolean(campaignQuery.data),
       },
     ],
@@ -4148,7 +4167,8 @@ function AppShell() {
       campaignPermissions?.can_manage_visibility,
       campaignQuery.data,
       campaignVisibility,
-      encodedCampaignSlug,
+      campaignSlug,
+      preferredFrontendMode,
     ],
   );
 
@@ -4186,7 +4206,16 @@ function AppShell() {
   };
 
   return (
-    <ApiClientContext.Provider value={{ apiClient, apiToken, setApiToken: setStoredToken, authRequired, setAuthRequired }}>
+    <ApiClientContext.Provider
+      value={{
+        apiClient,
+        apiToken,
+        setApiToken: setStoredToken,
+        authRequired,
+        setAuthRequired,
+        preferredFrontendMode,
+      }}
+    >
       <div className="session-shell">
         <header className={campaign ? "topbar topbar--campaign" : "topbar"}>
           <div className="brand-block">
@@ -4279,7 +4308,7 @@ function AppShell() {
 }
 
 function CampaignListPage() {
-  const { apiClient, setAuthRequired } = useApiClient();
+  const { apiClient, setAuthRequired, preferredFrontendMode } = useApiClient();
 
   const appQuery = useQuery({
     queryKey: ["app"],
@@ -4332,12 +4361,12 @@ function CampaignListPage() {
               <strong>Role:</strong> {entry.role}
             </p>
             <div className="article-actions">
-              <a className="button" href={`/app-next/campaigns/${encodeURIComponent(entry.campaign.slug)}`}>
+              <a className="button" href={campaignRouteHref(entry.campaign.slug, "", preferredFrontendMode)}>
                 Open Campaign
               </a>
-              <Link to="/campaigns/$campaignSlug/session" params={{ campaignSlug: entry.campaign.slug }} className="button button-secondary">
+              <a className="button button-secondary" href={campaignRouteHref(entry.campaign.slug, "session", preferredFrontendMode)}>
                 Open Session
-              </Link>
+              </a>
             </div>
           </article>
         ))}
@@ -5747,10 +5776,12 @@ function WikiPageCard({
   page,
   featured = false,
   campaignSlug,
+  frontendMode,
 }: {
   page: WikiPageSummary;
   featured?: boolean;
   campaignSlug: string;
+  frontendMode: FrontendMode;
 }) {
   return (
     <article className={featured ? "card page-card page-card--featured" : "card page-card"}>
@@ -5759,7 +5790,7 @@ function WikiPageCard({
         {page.display_type}
       </p>
       <h3>
-        <a href={ensureGen2WikiLink(page.href, campaignSlug)}>{page.title}</a>
+        <a href={preferredCampaignLink(page.href, campaignSlug, frontendMode)}>{page.title}</a>
       </h3>
       {page.summary ? <p className={featured ? "page-card__summary" : ""}>{page.summary}</p> : null}
     </article>
@@ -5770,10 +5801,12 @@ function WikiPageGrid({
   pages,
   featured = false,
   campaignSlug,
+  frontendMode,
 }: {
   pages: WikiPageSummary[];
   featured?: boolean;
   campaignSlug: string;
+  frontendMode: FrontendMode;
 }) {
   if (!pages.length) {
     return null;
@@ -5786,6 +5819,7 @@ function WikiPageGrid({
           page={page}
           featured={featured}
           campaignSlug={campaignSlug}
+          frontendMode={frontendMode}
         />
       ))}
     </div>
@@ -5795,9 +5829,11 @@ function WikiPageGrid({
 function WikiSectionBrowse({
   data,
   campaignSlug,
+  frontendMode,
 }: {
   data: WikiHomeResponse;
   campaignSlug: string;
+  frontendMode: FrontendMode;
 }) {
   if (!data.grouped_sections.length) {
     return null;
@@ -5816,19 +5852,24 @@ function WikiSectionBrowse({
         {data.grouped_sections.map((section) =>
           data.query ? (
             section.pages.map((page) => (
-              <WikiPageCard key={page.page_ref} page={page} campaignSlug={campaignSlug} />
+              <WikiPageCard
+                key={page.page_ref}
+                page={page}
+                campaignSlug={campaignSlug}
+                frontendMode={frontendMode}
+              />
             ))
           ) : (
             <article className="card page-card section-card" key={section.section_slug}>
               <p className="card-kicker">Section</p>
               <h3>
-                <a href={ensureGen2WikiLink(section.href, campaignSlug)}>{section.section_name}</a>
+                <a href={preferredCampaignLink(section.href, campaignSlug, frontendMode)}>{section.section_name}</a>
               </h3>
               <p>
                 {section.page_count} page{section.page_count === 1 ? "" : "s"} available in this section.
               </p>
               <p>
-                <a href={ensureGen2WikiLink(section.href, campaignSlug)}>Open {section.section_name}</a>
+                <a href={preferredCampaignLink(section.href, campaignSlug, frontendMode)}>Open {section.section_name}</a>
               </p>
             </article>
           ),
@@ -5843,7 +5884,7 @@ function WikiHomePage() {
     from: "/campaigns/$campaignSlug",
   });
   const resolvedCampaignSlug = campaignSlug ?? "";
-  const { apiClient, setAuthRequired } = useApiClient();
+  const { apiClient, setAuthRequired, preferredFrontendMode } = useApiClient();
   const query = new URLSearchParams(window.location.search).get("q") || "";
 
   const wikiQuery = useQuery({
@@ -5861,6 +5902,7 @@ function WikiHomePage() {
 
   const error = getApiErrorMessage(wikiQuery.error);
   const data = wikiQuery.data;
+  const wikiFrontendMode = normalizeFrontendMode(data?.frontend_mode ?? preferredFrontendMode);
 
   return (
     <section className="panel wiki-home">
@@ -5899,13 +5941,13 @@ function WikiHomePage() {
                 <article className="article card wiki-overview-card">
                   <p className="eyebrow">{data.overview_page.display_type} in {data.overview_page.section}</p>
                   <h2>
-                    <a href={ensureGen2WikiLink(data.overview_page.href, resolvedCampaignSlug)}>{data.overview_page.title}</a>
+                    <a href={preferredCampaignLink(data.overview_page.href, resolvedCampaignSlug, wikiFrontendMode)}>{data.overview_page.title}</a>
                   </h2>
                   {data.overview_page.summary ? <p className="lede">{data.overview_page.summary}</p> : null}
                   <div className="article-body html-body" dangerouslySetInnerHTML={{ __html: data.overview_page.body_html }} />
                 </article>
               ) : null}
-              <WikiSectionBrowse data={data} campaignSlug={resolvedCampaignSlug} />
+              <WikiSectionBrowse data={data} campaignSlug={resolvedCampaignSlug} frontendMode={wikiFrontendMode} />
             </>
           ) : (
             <section className="card">
@@ -5934,7 +5976,7 @@ function WikiSectionPage() {
   });
   const resolvedCampaignSlug = campaignSlug ?? "";
   const resolvedSectionSlug = sectionSlug ?? "";
-  const { apiClient, setAuthRequired } = useApiClient();
+  const { apiClient, setAuthRequired, preferredFrontendMode } = useApiClient();
   const [collapsedSubsections, setCollapsedSubsections] = useState<Set<string>>(() => new Set());
 
   const sectionQuery = useQuery({
@@ -5956,6 +5998,7 @@ function WikiSectionPage() {
 
   const data = sectionQuery.data;
   const error = getApiErrorMessage(sectionQuery.error);
+  const wikiFrontendMode = normalizeFrontendMode(data?.frontend_mode ?? preferredFrontendMode);
   const topLevel = splitPinnedPages(data?.top_level_pages ?? []);
   const allPages = splitPinnedPages(data?.pages ?? []);
 
@@ -5985,7 +6028,10 @@ function WikiSectionPage() {
           <p className="lede">Published player-facing pages in this section.</p>
         </div>
         <div className="article-actions">
-          <a className="button button-secondary" href={`/app-next/campaigns/${encodeURIComponent(resolvedCampaignSlug)}`}>
+          <a
+            className="button button-secondary"
+            href={data?.links.campaign_url ?? campaignRouteHref(resolvedCampaignSlug, "", wikiFrontendMode)}
+          >
             Campaign Home
           </a>
           {data?.links.flask_section_url ? (
@@ -6007,8 +6053,17 @@ function WikiSectionPage() {
                 Expand all
               </button>
             </div>
-            <WikiPageGrid pages={topLevel.pinned} featured campaignSlug={resolvedCampaignSlug} />
-            <WikiPageGrid pages={topLevel.regular} campaignSlug={resolvedCampaignSlug} />
+            <WikiPageGrid
+              pages={topLevel.pinned}
+              featured
+              campaignSlug={resolvedCampaignSlug}
+              frontendMode={wikiFrontendMode}
+            />
+            <WikiPageGrid
+              pages={topLevel.regular}
+              campaignSlug={resolvedCampaignSlug}
+              frontendMode={wikiFrontendMode}
+            />
             <section className="section-list">
               {data.subsection_groups.map((group) => {
                 const split = splitPinnedPages(group.pages);
@@ -6030,8 +6085,17 @@ function WikiSectionPage() {
                       <span className="section-toggle-chevron" aria-hidden="true"></span>
                     </summary>
                     <div className="section-block__body">
-                      <WikiPageGrid pages={split.pinned} featured campaignSlug={resolvedCampaignSlug} />
-                      <WikiPageGrid pages={split.regular} campaignSlug={resolvedCampaignSlug} />
+                      <WikiPageGrid
+                        pages={split.pinned}
+                        featured
+                        campaignSlug={resolvedCampaignSlug}
+                        frontendMode={wikiFrontendMode}
+                      />
+                      <WikiPageGrid
+                        pages={split.regular}
+                        campaignSlug={resolvedCampaignSlug}
+                        frontendMode={wikiFrontendMode}
+                      />
                     </div>
                   </details>
                 );
@@ -6040,8 +6104,17 @@ function WikiSectionPage() {
           </>
         ) : (
           <>
-            <WikiPageGrid pages={allPages.pinned} featured campaignSlug={resolvedCampaignSlug} />
-            <WikiPageGrid pages={allPages.regular} campaignSlug={resolvedCampaignSlug} />
+            <WikiPageGrid
+              pages={allPages.pinned}
+              featured
+              campaignSlug={resolvedCampaignSlug}
+              frontendMode={wikiFrontendMode}
+            />
+            <WikiPageGrid
+              pages={allPages.regular}
+              campaignSlug={resolvedCampaignSlug}
+              frontendMode={wikiFrontendMode}
+            />
           </>
         )
       ) : null}
@@ -6055,7 +6128,7 @@ function WikiArticlePage() {
   });
   const campaignSlug = params.campaignSlug ?? "";
   const pageSlug = params._splat ?? "";
-  const { apiClient, setAuthRequired } = useApiClient();
+  const { apiClient, setAuthRequired, preferredFrontendMode } = useApiClient();
 
   const pageQuery = useQuery({
     queryKey: ["wiki-page", campaignSlug, pageSlug],
@@ -6073,6 +6146,7 @@ function WikiArticlePage() {
   const data: WikiPageResponse | undefined = pageQuery.data;
   const page: WikiPageDetail | undefined = data?.page;
   const error = getApiErrorMessage(pageQuery.error);
+  const wikiFrontendMode = normalizeFrontendMode(data?.frontend_mode ?? preferredFrontendMode);
   const showSummary = page?.summary && !["item", "spell", "mechanic"].includes(page.page_type);
 
   return (
@@ -6095,10 +6169,10 @@ function WikiArticlePage() {
             <section className="card sidebar-card">
               <h2>Context</h2>
               <p className="meta">
-                Campaign: <a href={data?.links.gen2_campaign_url}>{data?.campaign.title}</a>
+                Campaign: <a href={data?.links.campaign_url ?? data?.links.gen2_campaign_url}>{data?.campaign.title}</a>
               </p>
               <p className="meta">
-                Section: <a href={data?.links.gen2_section_url}>{page.section}</a>
+                Section: <a href={data?.links.section_url ?? data?.links.gen2_section_url}>{page.section}</a>
               </p>
               {data?.links.flask_page_url ? (
                 <p className="meta">
@@ -6112,7 +6186,7 @@ function WikiArticlePage() {
                 <ul className="plain-list">
                   {data.backlinks.map((backlink) => (
                     <li key={backlink.page_ref}>
-                      <a href={backlink.href}>{backlink.title}</a>
+                      <a href={preferredCampaignLink(backlink.href, campaignSlug, wikiFrontendMode)}>{backlink.title}</a>
                     </li>
                   ))}
                 </ul>

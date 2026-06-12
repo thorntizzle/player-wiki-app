@@ -345,6 +345,7 @@ export interface WikiSubsectionGroup {
 
 export interface WikiHomeLinks {
   flask_campaign_url: string;
+  campaign_url?: string;
   gen2_campaign_url: string;
 }
 
@@ -448,6 +449,7 @@ export interface CampaignHelpResponse extends ApiResponseBase {
 
 export interface WikiHomeResponse extends ApiResponseBase {
   campaign: CampaignRecord;
+  frontend_mode?: string | null;
   can_view_wiki: boolean;
   wiki_visibility_label: string;
   query: string;
@@ -460,6 +462,7 @@ export interface WikiHomeResponse extends ApiResponseBase {
 
 export interface WikiSectionResponse extends ApiResponseBase {
   campaign: CampaignRecord;
+  frontend_mode?: string | null;
   section_name: string;
   section_slug: string;
   page_count: number;
@@ -469,16 +472,20 @@ export interface WikiSectionResponse extends ApiResponseBase {
   show_subsections: boolean;
   links: {
     flask_section_url: string;
+    campaign_url?: string;
     gen2_campaign_url: string;
   };
 }
 
 export interface WikiPageResponse extends ApiResponseBase {
   campaign: CampaignRecord;
+  frontend_mode?: string | null;
   page: WikiPageDetail;
   backlinks: WikiPageSummary[];
   links: {
     flask_page_url: string;
+    campaign_url?: string;
+    section_url?: string;
     gen2_campaign_url: string;
     gen2_section_url: string;
   };

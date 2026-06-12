@@ -859,15 +859,18 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert home_response.status_code == 200
     home_payload = home_response.get_json()
     assert home_payload["ok"] is True
+    assert home_payload["frontend_mode"] == "flask"
     assert home_payload["can_view_wiki"] is True
     assert home_payload["overview_page"]["title"] == "Echoes of the Alloy Coast"
+    assert home_payload["overview_page"]["href"].startswith("/campaigns/linden-pass/pages/")
     overview_body = home_payload["overview_page"]["body_html"]
-    assert "/app-next/campaigns/linden-pass/pages/notes/operations-brief" in overview_body
-    assert 'href="/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale"' in overview_body
-    assert 'href="/app-next/campaigns/linden-pass/pages/locations/harbor-row"' in overview_body
+    assert "/campaigns/linden-pass/pages/notes/operations-brief" in overview_body
+    assert 'href="/campaigns/linden-pass/pages/npcs/captain-lyra-vale"' in overview_body
+    assert 'href="/campaigns/linden-pass/pages/locations/harbor-row"' in overview_body
     assert "/app-next/app-next/" not in overview_body
-    assert 'href="/campaigns/linden-pass/pages/' not in overview_body
-    assert any(section["section_name"] == "Locations" for section in home_payload["grouped_sections"])
+    assert 'href="/app-next/campaigns/linden-pass/pages/' not in overview_body
+    locations_group = next(section for section in home_payload["grouped_sections"] if section["section_name"] == "Locations")
+    assert locations_group["href"] == "/campaigns/linden-pass/sections/locations"
 
     search_response = client.get(
         "/api/v1/campaigns/linden-pass/wiki?q=capt",
@@ -884,7 +887,7 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
         for page in section["pages"]
     ]
     captain = next(page for page in search_pages if page["page_ref"] == "npcs/captain-lyra-vale")
-    assert captain["href"] == "/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
+    assert captain["href"] == "/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
     assert "source_ref" not in captain
     assert "aliases" not in captain
 
@@ -895,8 +898,10 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert section_response.status_code == 200
     section_payload = section_response.get_json()
     assert section_payload["section_name"] == "Locations"
+    assert section_payload["frontend_mode"] == "flask"
     assert section_payload["show_subsections"] is True
     assert section_payload["top_level_pages"][0]["title"] == "Port Meridian"
+    assert section_payload["top_level_pages"][0]["href"].startswith("/campaigns/linden-pass/pages/")
     subsection_names = [group["subsection_name"] for group in section_payload["subsection_groups"]]
     assert "Civic and Institutional Sites" in subsection_names
     assert "Venues and Residences" in subsection_names
@@ -912,6 +917,49 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert page_payload["page"]["image"]["caption"] == "Harbor watch captain and trusted ally of the crew."
     assert "Captain Lyra Vale coordinates inspections" in page_payload["page"]["body_html"]
     assert page_payload["links"]["flask_page_url"] == "/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
+    assert page_payload["links"]["campaign_url"] == "/campaigns/linden-pass"
+    assert page_payload["links"]["section_url"] == "/campaigns/linden-pass/sections/npcs"
+    assert page_payload["links"]["gen2_campaign_url"] == "/app-next/campaigns/linden-pass"
+
+    with app.app_context():
+        AuthStore().set_user_frontend_mode(users["party"]["id"], "gen2")
+
+    gen2_home_response = client.get("/api/v1/campaigns/linden-pass/wiki", headers=api_headers(player_token))
+    assert gen2_home_response.status_code == 200
+    gen2_home_payload = gen2_home_response.get_json()
+    assert gen2_home_payload["frontend_mode"] == "gen2"
+    assert gen2_home_payload["overview_page"]["href"].startswith("/app-next/campaigns/linden-pass/pages/")
+    gen2_overview_body = gen2_home_payload["overview_page"]["body_html"]
+    assert "/app-next/campaigns/linden-pass/pages/notes/operations-brief" in gen2_overview_body
+    assert 'href="/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale"' in gen2_overview_body
+    assert 'href="/app-next/campaigns/linden-pass/pages/locations/harbor-row"' in gen2_overview_body
+    assert "/app-next/app-next/" not in gen2_overview_body
+    assert 'href="/campaigns/linden-pass/pages/' not in gen2_overview_body
+    gen2_locations_group = next(section for section in gen2_home_payload["grouped_sections"] if section["section_name"] == "Locations")
+    assert gen2_locations_group["href"] == "/app-next/campaigns/linden-pass/sections/locations"
+
+    gen2_search_response = client.get(
+        "/api/v1/campaigns/linden-pass/wiki?q=capt",
+        headers=api_headers(player_token),
+    )
+    assert gen2_search_response.status_code == 200
+    gen2_search_pages = [
+        page
+        for section in gen2_search_response.get_json()["grouped_sections"]
+        for page in section["pages"]
+    ]
+    gen2_captain = next(page for page in gen2_search_pages if page["page_ref"] == "npcs/captain-lyra-vale")
+    assert gen2_captain["href"] == "/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
+
+    gen2_page_response = client.get(
+        "/api/v1/campaigns/linden-pass/wiki/pages/npcs/captain-lyra-vale",
+        headers=api_headers(player_token),
+    )
+    assert gen2_page_response.status_code == 200
+    gen2_page_payload = gen2_page_response.get_json()
+    assert gen2_page_payload["links"]["campaign_url"] == "/app-next/campaigns/linden-pass"
+    assert gen2_page_payload["links"]["section_url"] == "/app-next/campaigns/linden-pass/sections/npcs"
+    assert gen2_page_payload["links"]["flask_page_url"] == "/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
 
 
 def test_api_player_wiki_home_reports_restricted_wiki_scope(
