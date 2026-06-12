@@ -837,6 +837,23 @@ def test_api_campaign_control_visibility_requires_manager_and_updates_scopes(cli
 
 def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, app, users):
     player_token = issue_api_token(app, users["party"]["email"], label="player-wiki-api")
+    overview_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "overview"
+        / "index.md"
+    )
+    overview_path.write_text(
+        (
+            overview_path.read_text(encoding="utf-8")
+            + "\nLegacy route check: [Captain Lyra Vale](/campaigns/linden-pass/pages/npcs/captain-lyra-vale).\n"
+            + "Already Gen2 check: [Harbor Row](/app-next/campaigns/linden-pass/pages/locations/harbor-row).\n"
+        ),
+        encoding="utf-8",
+    )
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
 
     home_response = client.get("/api/v1/campaigns/linden-pass/wiki", headers=api_headers(player_token))
     assert home_response.status_code == 200
@@ -844,7 +861,12 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert home_payload["ok"] is True
     assert home_payload["can_view_wiki"] is True
     assert home_payload["overview_page"]["title"] == "Echoes of the Alloy Coast"
-    assert "/app-next/campaigns/linden-pass/pages/notes/operations-brief" in home_payload["overview_page"]["body_html"]
+    overview_body = home_payload["overview_page"]["body_html"]
+    assert "/app-next/campaigns/linden-pass/pages/notes/operations-brief" in overview_body
+    assert 'href="/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale"' in overview_body
+    assert 'href="/app-next/campaigns/linden-pass/pages/locations/harbor-row"' in overview_body
+    assert "/app-next/app-next/" not in overview_body
+    assert 'href="/campaigns/linden-pass/pages/' not in overview_body
     assert any(section["section_name"] == "Locations" for section in home_payload["grouped_sections"])
 
     search_response = client.get(

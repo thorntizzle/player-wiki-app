@@ -975,10 +975,16 @@ def register_api(app) -> None:
         return f"/app-next/campaigns/{campaign_slug}"
 
     def gen2_wiki_body_html(campaign_slug: str, body_html: str) -> str:
-        return body_html.replace(
+        rewritten = re.sub(
+            rf"(?<!/app-next)/campaigns/{re.escape(campaign_slug)}/(pages|sections)/",
+            rf"/app-next/campaigns/{campaign_slug}/\1/",
+            body_html,
+        )
+        rewritten = rewritten.replace(
             "/campaigns/{campaign_slug}/",
             f"/app-next/campaigns/{campaign_slug}/",
         )
+        return rewritten
 
     def get_public_wiki_page_image(campaign, page) -> dict[str, Any] | None:
         if not page.image_path:

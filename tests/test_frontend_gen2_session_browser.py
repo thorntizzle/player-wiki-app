@@ -1233,6 +1233,17 @@ def test_gen2_wiki_browser_exposes_home_section_page_and_assets(
             expect(page.get_by_text("Welcome to the shared player briefing")).to_be_visible()
             expect(page.get_by_role("heading", name="Browse By Section")).to_be_visible()
             expect(page.get_by_role("link", name="Locations").first).to_be_visible()
+            overview_link = page.locator(".wiki-overview-card h2 a")
+            expect(overview_link).to_be_visible()
+            expect(overview_link).to_have_attribute(
+                "href",
+                re.compile(r"^/app-next/campaigns/linden-pass/pages/.+"),
+            )
+            overview_article_link = page.locator(".wiki-overview-card .article-body a", has_text="Operations Brief")
+            expect(overview_article_link).to_have_attribute(
+                "href",
+                "/app-next/campaigns/linden-pass/pages/notes/operations-brief",
+            )
 
             page.get_by_label("Search", exact=True).fill("capt")
             page.get_by_role("button", name="Search").click()

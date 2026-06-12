@@ -359,6 +359,24 @@ function parseCampaignSlugFromPath(pathname: string): string {
   return "";
 }
 
+function ensureGen2WikiLink(href: string, campaignSlug: string): string {
+  if (!href) {
+    return href;
+  }
+  const normalizedCampaignSlug = encodeURIComponent(campaignSlug);
+  if (href.startsWith("/app-next/")) {
+    return href;
+  }
+  const legacyPrefix = `/campaigns/${normalizedCampaignSlug}/`;
+  if (href.startsWith(legacyPrefix)) {
+    return `/app-next${href}`;
+  }
+  if (href === `/campaigns/${normalizedCampaignSlug}`) {
+    return `/app-next/campaigns/${normalizedCampaignSlug}`;
+  }
+  return href;
+}
+
 function campaignVisibilityCanAccess(visibility: CampaignVisibilityMap | undefined, scope: string): boolean {
   return Boolean(visibility?.[scope]?.can_access);
 }
@@ -5728,9 +5746,11 @@ function splitPinnedPages(pages: WikiPageSummary[]): { pinned: WikiPageSummary[]
 function WikiPageCard({
   page,
   featured = false,
+  campaignSlug,
 }: {
   page: WikiPageSummary;
   featured?: boolean;
+  campaignSlug: string;
 }) {
   return (
     <article className={featured ? "card page-card page-card--featured" : "card page-card"}>
@@ -5739,7 +5759,7 @@ function WikiPageCard({
         {page.display_type}
       </p>
       <h3>
-        <a href={page.href}>{page.title}</a>
+        <a href={ensureGen2WikiLink(page.href, campaignSlug)}>{page.title}</a>
       </h3>
       {page.summary ? <p className={featured ? "page-card__summary" : ""}>{page.summary}</p> : null}
     </article>
@@ -5749,9 +5769,11 @@ function WikiPageCard({
 function WikiPageGrid({
   pages,
   featured = false,
+  campaignSlug,
 }: {
   pages: WikiPageSummary[];
   featured?: boolean;
+  campaignSlug: string;
 }) {
   if (!pages.length) {
     return null;
@@ -5759,7 +5781,12 @@ function WikiPageGrid({
   return (
     <div className={featured ? "page-stack page-stack--featured" : "grid"}>
       {pages.map((page) => (
-        <WikiPageCard key={page.page_ref} page={page} featured={featured} />
+        <WikiPageCard
+          key={page.page_ref}
+          page={page}
+          featured={featured}
+          campaignSlug={campaignSlug}
+        />
       ))}
     </div>
   );
@@ -5767,8 +5794,10 @@ function WikiPageGrid({
 
 function WikiSectionBrowse({
   data,
+  campaignSlug,
 }: {
   data: WikiHomeResponse;
+  campaignSlug: string;
 }) {
   if (!data.grouped_sections.length) {
     return null;
@@ -5786,18 +5815,20 @@ function WikiSectionBrowse({
       <div className="grid">
         {data.grouped_sections.map((section) =>
           data.query ? (
-            section.pages.map((page) => <WikiPageCard key={page.page_ref} page={page} />)
+            section.pages.map((page) => (
+              <WikiPageCard key={page.page_ref} page={page} campaignSlug={campaignSlug} />
+            ))
           ) : (
             <article className="card page-card section-card" key={section.section_slug}>
               <p className="card-kicker">Section</p>
               <h3>
-                <a href={section.href}>{section.section_name}</a>
+                <a href={ensureGen2WikiLink(section.href, campaignSlug)}>{section.section_name}</a>
               </h3>
               <p>
                 {section.page_count} page{section.page_count === 1 ? "" : "s"} available in this section.
               </p>
               <p>
-                <a href={section.href}>Open {section.section_name}</a>
+                <a href={ensureGen2WikiLink(section.href, campaignSlug)}>Open {section.section_name}</a>
               </p>
             </article>
           ),
@@ -5868,13 +5899,13 @@ function WikiHomePage() {
                 <article className="article card wiki-overview-card">
                   <p className="eyebrow">{data.overview_page.display_type} in {data.overview_page.section}</p>
                   <h2>
-                    <a href={data.overview_page.href}>{data.overview_page.title}</a>
+                    <a href={ensureGen2WikiLink(data.overview_page.href, resolvedCampaignSlug)}>{data.overview_page.title}</a>
                   </h2>
                   {data.overview_page.summary ? <p className="lede">{data.overview_page.summary}</p> : null}
                   <div className="article-body html-body" dangerouslySetInnerHTML={{ __html: data.overview_page.body_html }} />
                 </article>
               ) : null}
-              <WikiSectionBrowse data={data} />
+              <WikiSectionBrowse data={data} campaignSlug={resolvedCampaignSlug} />
             </>
           ) : (
             <section className="card">
@@ -5976,8 +6007,8 @@ function WikiSectionPage() {
                 Expand all
               </button>
             </div>
-            <WikiPageGrid pages={topLevel.pinned} featured />
-            <WikiPageGrid pages={topLevel.regular} />
+            <WikiPageGrid pages={topLevel.pinned} featured campaignSlug={resolvedCampaignSlug} />
+            <WikiPageGrid pages={topLevel.regular} campaignSlug={resolvedCampaignSlug} />
             <section className="section-list">
               {data.subsection_groups.map((group) => {
                 const split = splitPinnedPages(group.pages);
@@ -5999,8 +6030,8 @@ function WikiSectionPage() {
                       <span className="section-toggle-chevron" aria-hidden="true"></span>
                     </summary>
                     <div className="section-block__body">
-                      <WikiPageGrid pages={split.pinned} featured />
-                      <WikiPageGrid pages={split.regular} />
+                      <WikiPageGrid pages={split.pinned} featured campaignSlug={resolvedCampaignSlug} />
+                      <WikiPageGrid pages={split.regular} campaignSlug={resolvedCampaignSlug} />
                     </div>
                   </details>
                 );
@@ -6009,8 +6040,8 @@ function WikiSectionPage() {
           </>
         ) : (
           <>
-            <WikiPageGrid pages={allPages.pinned} featured />
-            <WikiPageGrid pages={allPages.regular} />
+            <WikiPageGrid pages={allPages.pinned} featured campaignSlug={resolvedCampaignSlug} />
+            <WikiPageGrid pages={allPages.regular} campaignSlug={resolvedCampaignSlug} />
           </>
         )
       ) : null}
