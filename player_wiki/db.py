@@ -514,7 +514,10 @@ class _InstrumentedCursor:
             self._cursor.execute(sql, parameters)
             return self
         finally:
-            _record_db_query((time.perf_counter() - started_at) * 1000)
+            _record_db_query(
+                (time.perf_counter() - started_at) * 1000,
+                is_write=_is_write_sql(sql),
+            )
 
     def executemany(self, sql: str, seq_of_parameters):
         started_at = time.perf_counter()
@@ -522,7 +525,10 @@ class _InstrumentedCursor:
             self._cursor.executemany(sql, seq_of_parameters)
             return self
         finally:
-            _record_db_query((time.perf_counter() - started_at) * 1000)
+            _record_db_query(
+                (time.perf_counter() - started_at) * 1000,
+                is_write=_is_write_sql(sql),
+            )
 
     def executescript(self, sql_script: str):
         started_at = time.perf_counter()
@@ -530,7 +536,10 @@ class _InstrumentedCursor:
             self._cursor.executescript(sql_script)
             return self
         finally:
-            _record_db_query((time.perf_counter() - started_at) * 1000)
+            _record_db_query(
+                (time.perf_counter() - started_at) * 1000,
+                is_write=_is_write_sql(sql_script),
+            )
 
 
 class _InstrumentedConnection:
@@ -545,7 +554,11 @@ class _InstrumentedConnection:
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        return self._connection.__exit__(exc_type, exc, tb)
+        if exc_type is None:
+            self.commit()
+        else:
+            self.rollback()
+        return False
 
     def cursor(self, *args, **kwargs) -> _InstrumentedCursor:
         return _InstrumentedCursor(self._connection.cursor(*args, **kwargs))
@@ -562,16 +575,48 @@ class _InstrumentedConnection:
     def close(self) -> None:
         self._connection.close()
 
+    def commit(self) -> None:
+        started_at = time.perf_counter()
+        try:
+            self._connection.commit()
+        finally:
+            _record_db_commit((time.perf_counter() - started_at) * 1000)
+
+    def rollback(self) -> None:
+        started_at = time.perf_counter()
+        try:
+            self._connection.rollback()
+        finally:
+            _record_db_rollback((time.perf_counter() - started_at) * 1000)
+
 
 def reset_db_query_metrics() -> None:
     if not has_app_context():
         return
-    g.db_query_metrics = {"query_count": 0, "query_time_ms": 0.0}
+    g.db_query_metrics = {
+        "query_count": 0,
+        "query_time_ms": 0.0,
+        "write_count": 0,
+        "write_time_ms": 0.0,
+        "commit_count": 0,
+        "commit_time_ms": 0.0,
+        "rollback_count": 0,
+        "rollback_time_ms": 0.0,
+    }
 
 
 def get_db_query_metrics() -> dict[str, float | int]:
     if not has_app_context():
-        return {"query_count": 0, "query_time_ms": 0.0}
+        return {
+            "query_count": 0,
+            "query_time_ms": 0.0,
+            "write_count": 0,
+            "write_time_ms": 0.0,
+            "commit_count": 0,
+            "commit_time_ms": 0.0,
+            "rollback_count": 0,
+            "rollback_time_ms": 0.0,
+        }
     metrics = getattr(g, "db_query_metrics", None)
     if not isinstance(metrics, dict):
         reset_db_query_metrics()
@@ -579,16 +624,65 @@ def get_db_query_metrics() -> dict[str, float | int]:
     return {
         "query_count": int(metrics.get("query_count", 0) or 0),
         "query_time_ms": float(metrics.get("query_time_ms", 0.0) or 0.0),
+        "write_count": int(metrics.get("write_count", 0) or 0),
+        "write_time_ms": float(metrics.get("write_time_ms", 0.0) or 0.0),
+        "commit_count": int(metrics.get("commit_count", 0) or 0),
+        "commit_time_ms": float(metrics.get("commit_time_ms", 0.0) or 0.0),
+        "rollback_count": int(metrics.get("rollback_count", 0) or 0),
+        "rollback_time_ms": float(metrics.get("rollback_time_ms", 0.0) or 0.0),
     }
 
 
-def _record_db_query(duration_ms: float) -> None:
+def _record_db_query(duration_ms: float, *, is_write: bool = False) -> None:
     if not has_app_context():
         return
     metrics = get_db_query_metrics()
     metrics["query_count"] = int(metrics["query_count"]) + 1
     metrics["query_time_ms"] = float(metrics["query_time_ms"]) + max(0.0, duration_ms)
+    if is_write:
+        metrics["write_count"] = int(metrics["write_count"]) + 1
+        metrics["write_time_ms"] = float(metrics["write_time_ms"]) + max(0.0, duration_ms)
     g.db_query_metrics = metrics
+
+
+def _record_db_commit(duration_ms: float) -> None:
+    if not has_app_context():
+        return
+    metrics = get_db_query_metrics()
+    metrics["commit_count"] = int(metrics["commit_count"]) + 1
+    metrics["commit_time_ms"] = float(metrics["commit_time_ms"]) + max(0.0, duration_ms)
+    g.db_query_metrics = metrics
+
+
+def _record_db_rollback(duration_ms: float) -> None:
+    if not has_app_context():
+        return
+    metrics = get_db_query_metrics()
+    metrics["rollback_count"] = int(metrics["rollback_count"]) + 1
+    metrics["rollback_time_ms"] = float(metrics["rollback_time_ms"]) + max(0.0, duration_ms)
+    g.db_query_metrics = metrics
+
+
+def _is_write_sql(sql: str) -> bool:
+    if not sql:
+        return False
+    first_token = str(sql).strip().split(None, 1)[0].lower()
+    if not first_token:
+        return False
+    return first_token in {
+        "alter",
+        "attach",
+        "create",
+        "delete",
+        "detach",
+        "drop",
+        "insert",
+        "reindex",
+        "replace",
+        "truncate",
+        "update",
+        "vacuum",
+    }
 
 
 def register_db(app: Flask) -> None:

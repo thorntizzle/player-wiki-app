@@ -1809,6 +1809,12 @@ def create_app() -> Flask:
             "endpoint": str(request.endpoint or ""),
             "query_count": int(query_metrics["query_count"] or 0),
             "query_time_ms": round(float(query_metrics["query_time_ms"] or 0.0), 2),
+            "write_count": int(query_metrics["write_count"] or 0),
+            "write_time_ms": round(float(query_metrics["write_time_ms"] or 0.0), 2),
+            "commit_count": int(query_metrics["commit_count"] or 0),
+            "commit_time_ms": round(float(query_metrics["commit_time_ms"] or 0.0), 2),
+            "rollback_count": int(query_metrics["rollback_count"] or 0),
+            "rollback_time_ms": round(float(query_metrics["rollback_time_ms"] or 0.0), 2),
             "remote_addr": resolve_request_remote_addr(),
         }
         if request.content_length is not None:
@@ -3192,6 +3198,12 @@ def create_app() -> Flask:
         query_metrics = get_db_query_metrics()
         query_count = int(query_metrics["query_count"] or 0)
         query_time_ms = float(query_metrics["query_time_ms"] or 0.0)
+        write_count = int(query_metrics["write_count"] or 0)
+        write_time_ms = float(query_metrics["write_time_ms"] or 0.0)
+        commit_count = int(query_metrics["commit_count"] or 0)
+        commit_time_ms = float(query_metrics["commit_time_ms"] or 0.0)
+        rollback_count = int(query_metrics["rollback_count"] or 0)
+        rollback_time_ms = float(query_metrics["rollback_time_ms"] or 0.0)
         request_started_at = getattr(g, "live_request_started_at", None)
         request_time_ms = (
             (time.perf_counter() - request_started_at) * 1000
@@ -3209,6 +3221,12 @@ def create_app() -> Flask:
             "request_time_ms": round(request_time_ms, 2),
             "state_check_ms": round(state_check_ms, 2),
             "render_ms": round(render_ms, 2),
+            "write_count": write_count,
+            "write_time_ms": round(write_time_ms, 2),
+            "commit_count": commit_count,
+            "commit_time_ms": round(commit_time_ms, 2),
+            "rollback_count": rollback_count,
+            "rollback_time_ms": round(rollback_time_ms, 2),
             "payload_bytes": payload_bytes,
         }
         if snapshot_sync_metrics is not None:
@@ -3230,6 +3248,10 @@ def create_app() -> Flask:
             response.headers["X-Live-Payload-Bytes"] = str(payload_bytes)
             response.headers["X-Live-Query-Count"] = str(query_count)
             response.headers["X-Live-Query-Time-Ms"] = f"{query_time_ms:.2f}"
+            response.headers["X-Live-Write-Count"] = str(write_count)
+            response.headers["X-Live-Write-Time-Ms"] = f"{write_time_ms:.2f}"
+            response.headers["X-Live-Commit-Count"] = str(commit_count)
+            response.headers["X-Live-Commit-Time-Ms"] = f"{commit_time_ms:.2f}"
             response.headers["X-Live-Request-Time-Ms"] = f"{request_time_ms:.2f}"
             response.headers["X-Live-View"] = view_name
             if snapshot_sync_metrics is not None:

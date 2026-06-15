@@ -76,6 +76,13 @@ def test_request_trail_logs_start_for_campaign_route_when_enabled(app, client, c
     assert payload["path"] == "/campaigns/linden-pass"
     assert payload["endpoint"] == "campaign_view"
     assert payload["request_id"]
+    assert payload["query_count"] >= 0
+    assert payload["write_count"] >= 0
+    assert payload["write_time_ms"] >= 0.0
+    assert payload["commit_count"] >= 0
+    assert payload["commit_time_ms"] >= 0.0
+    assert payload["rollback_count"] >= 0
+    assert payload["rollback_time_ms"] >= 0.0
 
 
 def test_request_trail_skips_healthz_when_enabled(app, client, caplog):
@@ -119,3 +126,4 @@ def test_request_trail_logs_slow_request_warning(app, client, caplog):
     assert payload["endpoint"] == "campaign_view"
     assert payload["status_code"] == 200
     assert payload["request_time_ms"] >= 0.01
+    assert "rollback_count" in payload

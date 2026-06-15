@@ -12,7 +12,7 @@ import player_wiki.app as app_module
 import player_wiki.campaign_combat_service as campaign_combat_service_module
 from player_wiki.app import create_app
 from player_wiki.config import Config
-from player_wiki.db import init_database
+from player_wiki.db import get_db_query_metrics, init_database, reset_db_query_metrics
 from player_wiki.systems_importer import Dnd5eSystemsImporter
 from tests.sample_data import TEST_CAMPAIGN_SLUG, build_test_campaigns_dir
 
@@ -39,6 +39,11 @@ def _assert_live_diagnostics_headers(response):
     assert response.headers["X-Live-Request-Time-Ms"]
     assert "db;dur=" in response.headers["Server-Timing"]
     assert "total;dur=" in response.headers["Server-Timing"]
+    if "X-Live-Write-Count" in response.headers:
+        assert response.headers["X-Live-Write-Count"]
+        assert response.headers["X-Live-Write-Time-Ms"]
+        assert response.headers["X-Live-Commit-Count"]
+        assert response.headers["X-Live-Commit-Time-Ms"]
 
 
 def _live_snapshot_sync_summary(response):
@@ -2005,6 +2010,32 @@ def test_dm_can_set_current_turn_and_advance_turn_refreshing_resources(app, clie
     tracker = _get_tracker(app)
     assert tracker.current_combatant_id == glenn.id
     assert tracker.round_number == 2
+
+
+def test_combat_set_current_turn_batches_resource_and_tracker_commit(app, users):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        combatant = service.add_npc_combatant(
+            TEST_CAMPAIGN_SLUG,
+            display_name="Commit Probe",
+            turn_value=12,
+            current_hp=9,
+            max_hp=9,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+
+        reset_db_query_metrics()
+        service.set_current_turn(
+            TEST_CAMPAIGN_SLUG,
+            combatant.id,
+            updated_by_user_id=users["dm"]["id"],
+        )
+        metrics = get_db_query_metrics()
+
+    assert metrics["write_count"] >= 2
+    assert metrics["commit_count"] == 1
+    assert metrics["rollback_count"] == 0
 
 
 def test_owner_player_can_update_own_pc_vitals_from_combat_tracker(

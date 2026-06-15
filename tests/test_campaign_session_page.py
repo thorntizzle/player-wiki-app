@@ -13,7 +13,7 @@ from werkzeug.security import generate_password_hash
 from player_wiki.app import create_app
 from player_wiki.auth_store import AuthStore
 from player_wiki.config import Config
-from player_wiki.db import init_database
+from player_wiki.db import get_db_query_metrics, init_database, reset_db_query_metrics
 from player_wiki.systems_importer import Dnd5eSystemsImporter
 from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 from tests.sample_data import ASSIGNED_CHARACTER_SLUG, TEST_CAMPAIGN_SLUG, build_test_campaigns_dir
@@ -76,6 +76,11 @@ def _assert_live_diagnostics_headers(response):
     assert response.headers["X-Live-Request-Time-Ms"]
     assert "db;dur=" in response.headers["Server-Timing"]
     assert "total;dur=" in response.headers["Server-Timing"]
+    if "X-Live-Write-Count" in response.headers:
+        assert response.headers["X-Live-Write-Count"]
+        assert response.headers["X-Live-Write-Time-Ms"]
+        assert response.headers["X-Live-Commit-Count"]
+        assert response.headers["X-Live-Commit-Time-Ms"]
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -1809,6 +1814,25 @@ def test_dm_can_start_session_and_player_can_post_messages(client, sign_in, user
     body = post_message.get_data(as_text=True)
     assert "Message posted." in body
     assert "We should check the contract before we sign anything." in body
+
+
+def test_session_message_batches_message_and_revision_commit(app, users):
+    with app.app_context():
+        service = app.extensions["campaign_session_service"]
+        service.begin_session(TEST_CAMPAIGN_SLUG, started_by_user_id=users["dm"]["id"])
+
+        reset_db_query_metrics()
+        service.post_message(
+            TEST_CAMPAIGN_SLUG,
+            body_text="One batched table update.",
+            author_display_name="Owner Player",
+            author_user_id=users["owner"]["id"],
+        )
+        metrics = get_db_query_metrics()
+
+    assert metrics["write_count"] >= 2
+    assert metrics["commit_count"] == 1
+    assert metrics["rollback_count"] == 0
 
 
 def test_session_start_and_message_support_async_partial_updates(client, sign_in, users):

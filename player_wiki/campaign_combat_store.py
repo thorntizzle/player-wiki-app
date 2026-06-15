@@ -36,6 +36,7 @@ class CampaignCombatStore:
         campaign_slug: str,
         *,
         updated_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignCombatTrackerRecord:
         tracker = self.get_tracker(campaign_slug)
         if tracker is not None:
@@ -56,7 +57,8 @@ class CampaignCombatStore:
             """,
             (campaign_slug, isoformat(utcnow()), updated_by_user_id),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
 
         tracker = self.get_tracker(campaign_slug)
         if tracker is None:
@@ -70,6 +72,7 @@ class CampaignCombatStore:
         round_number: int,
         current_combatant_id: int | None,
         updated_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignCombatTrackerRecord:
         connection = get_db()
         cursor = connection.execute(
@@ -90,7 +93,8 @@ class CampaignCombatStore:
                 campaign_slug,
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
         if cursor.rowcount != 1:
             raise CampaignCombatConflictError(f"Unable to update combat tracker for {campaign_slug}.")
 
@@ -104,8 +108,13 @@ class CampaignCombatStore:
         campaign_slug: str,
         *,
         updated_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignCombatTrackerRecord:
-        self.ensure_tracker(campaign_slug, updated_by_user_id=updated_by_user_id)
+        self.ensure_tracker(
+            campaign_slug,
+            updated_by_user_id=updated_by_user_id,
+            commit=commit,
+        )
         connection = get_db()
         cursor = connection.execute(
             """
@@ -121,7 +130,8 @@ class CampaignCombatStore:
                 campaign_slug,
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
         if cursor.rowcount != 1:
             raise CampaignCombatConflictError(f"Unable to bump combat tracker revision for {campaign_slug}.")
 
@@ -185,6 +195,7 @@ class CampaignCombatStore:
         has_bonus_action: bool = True,
         has_reaction: bool = True,
         created_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignCombatantRecord:
         connection = get_db()
         now = isoformat(utcnow())
@@ -248,7 +259,8 @@ class CampaignCombatStore:
             raise CampaignCombatConflictError(
                 f"Unable to create combatant for {campaign_slug}/{character_slug or display_name}."
             ) from exc
-        connection.commit()
+        if commit:
+            connection.commit()
 
         combatant = self.get_combatant(campaign_slug, int(cursor.lastrowid))
         if combatant is None:
@@ -278,6 +290,7 @@ class CampaignCombatStore:
         has_reaction: bool | None = None,
         expected_revision: int | None = None,
         updated_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignCombatantRecord:
         assignments: list[tuple[str, object]] = []
         if display_name is not None:
@@ -334,7 +347,8 @@ class CampaignCombatStore:
             """,
             parameters,
         )
-        connection.commit()
+        if commit:
+            connection.commit()
         if cursor.rowcount != 1:
             if expected_revision is not None:
                 raise CampaignCombatRevisionConflictError(
@@ -351,6 +365,8 @@ class CampaignCombatStore:
         self,
         campaign_slug: str,
         combatant_id: int,
+        *,
+        commit: bool = True,
     ) -> CampaignCombatantRecord | None:
         combatant = self.get_combatant(campaign_slug, combatant_id)
         if combatant is None:
@@ -364,7 +380,8 @@ class CampaignCombatStore:
             """,
             (campaign_slug, combatant_id),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
         return combatant
 
     def clear_tracker(
@@ -372,8 +389,13 @@ class CampaignCombatStore:
         campaign_slug: str,
         *,
         updated_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignCombatTrackerRecord:
-        tracker = self.ensure_tracker(campaign_slug, updated_by_user_id=updated_by_user_id)
+        tracker = self.ensure_tracker(
+            campaign_slug,
+            updated_by_user_id=updated_by_user_id,
+            commit=commit,
+        )
 
         connection = get_db()
         connection.execute(
@@ -399,7 +421,8 @@ class CampaignCombatStore:
                 campaign_slug,
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
 
         refreshed_tracker = self.get_tracker(campaign_slug)
         if refreshed_tracker is None:
@@ -469,6 +492,7 @@ class CampaignCombatStore:
         name: str,
         duration_text: str = "",
         created_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignCombatConditionRecord:
         connection = get_db()
         cursor = connection.execute(
@@ -490,7 +514,8 @@ class CampaignCombatStore:
                 created_by_user_id,
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
 
         row = get_db().execute(
             """
@@ -520,6 +545,7 @@ class CampaignCombatStore:
         *,
         name: str,
         duration_text: str = "",
+        commit: bool = True,
     ) -> CampaignCombatConditionRecord | None:
         condition = self.get_condition(campaign_slug, condition_id)
         if condition is None:
@@ -534,7 +560,8 @@ class CampaignCombatStore:
             """,
             (name, duration_text, condition_id),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
 
         return self.get_condition(campaign_slug, condition_id)
 
@@ -542,6 +569,7 @@ class CampaignCombatStore:
         self,
         campaign_slug: str,
         condition_id: int,
+        commit: bool = True,
     ) -> CampaignCombatConditionRecord | None:
         condition = self.get_condition(campaign_slug, condition_id)
         if condition is None:
@@ -555,7 +583,8 @@ class CampaignCombatStore:
             """,
             (condition_id,),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
         return condition
 
     def _map_tracker(self, row: sqlite3.Row | None) -> CampaignCombatTrackerRecord | None:

@@ -39,6 +39,7 @@ class CampaignSessionStore:
         campaign_slug: str,
         *,
         updated_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignSessionStateRecord:
         state = self.get_state(campaign_slug)
         if state is not None:
@@ -57,7 +58,8 @@ class CampaignSessionStore:
             """,
             (campaign_slug, isoformat(utcnow()), updated_by_user_id),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
 
         state = self.get_state(campaign_slug)
         if state is None:
@@ -69,10 +71,15 @@ class CampaignSessionStore:
         campaign_slug: str,
         *,
         updated_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignSessionStateRecord:
         state = self.get_state(campaign_slug)
         if state is None:
-            return self.ensure_state(campaign_slug, updated_by_user_id=updated_by_user_id)
+            return self.ensure_state(
+                campaign_slug,
+                updated_by_user_id=updated_by_user_id,
+                commit=commit,
+            )
 
         connection = get_db()
         cursor = connection.execute(
@@ -89,7 +96,8 @@ class CampaignSessionStore:
                 campaign_slug,
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
         if cursor.rowcount != 1:
             raise CampaignSessionConflictError(f"Unable to bump session state for {campaign_slug}.")
 
@@ -158,6 +166,7 @@ class CampaignSessionStore:
         campaign_slug: str,
         *,
         started_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignSessionRecord:
         connection = get_db()
         now = isoformat(utcnow())
@@ -180,7 +189,8 @@ class CampaignSessionStore:
             raise CampaignSessionConflictError(
                 f"An active session already exists for {campaign_slug}"
             ) from exc
-        connection.commit()
+        if commit:
+            connection.commit()
 
         session_record = self.get_session(campaign_slug, int(cursor.lastrowid))
         if session_record is None:
@@ -193,6 +203,7 @@ class CampaignSessionStore:
         session_id: int,
         *,
         ended_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignSessionRecord:
         connection = get_db()
         cursor = connection.execute(
@@ -210,7 +221,8 @@ class CampaignSessionStore:
                 session_id,
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
         if cursor.rowcount != 1:
             raise CampaignSessionConflictError(
                 f"Unable to close campaign session {campaign_slug}/{session_id}"
@@ -225,6 +237,8 @@ class CampaignSessionStore:
         self,
         campaign_slug: str,
         session_id: int,
+        *,
+        commit: bool = True,
     ) -> None:
         connection = get_db()
         session_record = self.get_session(campaign_slug, session_id)
@@ -255,7 +269,8 @@ class CampaignSessionStore:
             """,
             (campaign_slug, session_id),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
         if cursor.rowcount != 1:
             raise CampaignSessionConflictError(
                 f"Unable to delete campaign session {campaign_slug}/{session_id}"
@@ -307,6 +322,7 @@ class CampaignSessionStore:
         body_markdown: str,
         source_page_ref: str = "",
         created_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> SessionArticleRecord:
         connection = get_db()
         cursor = connection.execute(
@@ -334,7 +350,8 @@ class CampaignSessionStore:
                 created_by_user_id,
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
 
         article = self.get_article(int(cursor.lastrowid))
         if article is None:
@@ -348,6 +365,7 @@ class CampaignSessionStore:
         *,
         title: str,
         body_markdown: str,
+        commit: bool = True,
     ) -> SessionArticleRecord:
         connection = get_db()
         cursor = connection.execute(
@@ -364,7 +382,8 @@ class CampaignSessionStore:
                 campaign_slug,
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
         if cursor.rowcount != 1:
             raise CampaignSessionConflictError(
                 f"Unable to update session article {campaign_slug}/{article_id}"
@@ -375,7 +394,13 @@ class CampaignSessionStore:
             raise RuntimeError("Session article disappeared after update.")
         return article
 
-    def delete_article(self, campaign_slug: str, article_id: int) -> SessionArticleRecord:
+    def delete_article(
+        self,
+        campaign_slug: str,
+        article_id: int,
+        *,
+        commit: bool = True,
+    ) -> SessionArticleRecord:
         connection = get_db()
         article = self.get_article(article_id)
         if article is None or article.campaign_slug != campaign_slug:
@@ -397,7 +422,8 @@ class CampaignSessionStore:
             """,
             (article_id, campaign_slug),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
         if cursor.rowcount != 1:
             raise CampaignSessionConflictError(
                 f"Unable to delete session article {campaign_slug}/{article_id}"
@@ -445,6 +471,7 @@ class CampaignSessionStore:
         data_blob: bytes,
         alt_text: str = "",
         caption: str = "",
+        commit: bool = True,
     ) -> SessionArticleImageRecord:
         connection = get_db()
         connection.execute(
@@ -477,7 +504,8 @@ class CampaignSessionStore:
                 isoformat(utcnow()),
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
 
         image = self.get_article_image(article_id)
         if image is None:
@@ -490,6 +518,7 @@ class CampaignSessionStore:
         *,
         alt_text: str = "",
         caption: str = "",
+        commit: bool = True,
     ) -> SessionArticleImageRecord:
         connection = get_db()
         cursor = connection.execute(
@@ -507,7 +536,8 @@ class CampaignSessionStore:
                 article_id,
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
         if cursor.rowcount != 1:
             raise CampaignSessionConflictError(
                 f"Unable to update session article image {article_id}"
@@ -565,6 +595,7 @@ class CampaignSessionStore:
         article_id: int | None = None,
         recipient_scope: str = "global",
         recipient_user_id: int | None = None,
+        commit: bool = True,
     ) -> SessionMessageRecord:
         connection = get_db()
         cursor = connection.execute(
@@ -596,7 +627,8 @@ class CampaignSessionStore:
                 isoformat(utcnow()),
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
 
         message = self._get_message(int(cursor.lastrowid))
         if message is None:
@@ -611,6 +643,7 @@ class CampaignSessionStore:
         session_id: int,
         revealed_by_user_id: int | None,
         author_display_name: str,
+        commit: bool = True,
     ) -> tuple[SessionArticleRecord, SessionMessageRecord]:
         connection = get_db()
         revealed_at = isoformat(utcnow())
@@ -662,7 +695,8 @@ class CampaignSessionStore:
                 revealed_at,
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
 
         article = self.get_article(article_id)
         message = self._get_message(int(message_cursor.lastrowid))

@@ -12,6 +12,7 @@ from .campaign_combat_store import (
     CampaignCombatRevisionConflictError,
     CampaignCombatStore,
 )
+from .db import get_db
 from .character_repository import CharacterRepository
 from .character_state_service import CharacterStateService
 from .combat_models import (
@@ -149,27 +150,37 @@ class CampaignCombatService:
         )
 
         try:
-            self.store.ensure_tracker(campaign_slug, updated_by_user_id=created_by_user_id)
-            combatant = self.store.create_combatant(
-                campaign_slug,
-                combatant_type="player_character",
-                character_slug=record.definition.character_slug,
-                player_detail_visible=True,
-                source_kind=COMBAT_SOURCE_KIND_CHARACTER,
-                source_ref=record.definition.character_slug,
-                display_name=record.definition.name,
-                turn_value=normalized_turn_value,
-                initiative_bonus=snapshot["initiative_bonus"],
-                dexterity_modifier=snapshot["dexterity_modifier"],
-                initiative_priority=normalized_initiative_priority,
-                current_hp=snapshot["current_hp"],
-                max_hp=snapshot["max_hp"],
-                temp_hp=snapshot["temp_hp"],
-                movement_total=snapshot["movement_total"],
-                movement_remaining=snapshot["movement_total"],
-                created_by_user_id=created_by_user_id,
-            )
-            self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=created_by_user_id)
+            with get_db() as connection:
+                self.store.ensure_tracker(
+                    campaign_slug,
+                    updated_by_user_id=created_by_user_id,
+                    commit=False,
+                )
+                combatant = self.store.create_combatant(
+                    campaign_slug,
+                    combatant_type="player_character",
+                    character_slug=record.definition.character_slug,
+                    player_detail_visible=True,
+                    source_kind=COMBAT_SOURCE_KIND_CHARACTER,
+                    source_ref=record.definition.character_slug,
+                    display_name=record.definition.name,
+                    turn_value=normalized_turn_value,
+                    initiative_bonus=snapshot["initiative_bonus"],
+                    dexterity_modifier=snapshot["dexterity_modifier"],
+                    initiative_priority=normalized_initiative_priority,
+                    current_hp=snapshot["current_hp"],
+                    max_hp=snapshot["max_hp"],
+                    temp_hp=snapshot["temp_hp"],
+                    movement_total=snapshot["movement_total"],
+                    movement_remaining=snapshot["movement_total"],
+                    created_by_user_id=created_by_user_id,
+                    commit=False,
+                )
+                self.store.bump_tracker_revision(
+                    campaign_slug,
+                    updated_by_user_id=created_by_user_id,
+                    commit=False,
+                )
             return combatant
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError(
@@ -237,26 +248,36 @@ class CampaignCombatService:
         if normalized_current_hp > normalized_max_hp:
             raise CampaignCombatValidationError("Current HP cannot exceed max HP.")
 
-        self.store.ensure_tracker(campaign_slug, updated_by_user_id=created_by_user_id)
-        combatant = self.store.create_combatant(
-            campaign_slug,
-            combatant_type="npc",
-            player_detail_visible=False,
-            source_kind=normalized_source_kind,
-            source_ref=normalized_source_ref,
-            display_name=normalized_name,
-            turn_value=normalized_turn_value,
-            initiative_bonus=normalized_initiative_bonus,
-            dexterity_modifier=normalized_dexterity_modifier,
-            initiative_priority=normalized_initiative_priority,
-            current_hp=normalized_current_hp,
-            max_hp=normalized_max_hp,
-            temp_hp=normalized_temp_hp,
-            movement_total=normalized_movement_total,
-            movement_remaining=normalized_movement_total,
-            created_by_user_id=created_by_user_id,
-        )
-        self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=created_by_user_id)
+        with get_db() as connection:
+            self.store.ensure_tracker(
+                campaign_slug,
+                updated_by_user_id=created_by_user_id,
+                commit=False,
+            )
+            combatant = self.store.create_combatant(
+                campaign_slug,
+                combatant_type="npc",
+                player_detail_visible=False,
+                source_kind=normalized_source_kind,
+                source_ref=normalized_source_ref,
+                display_name=normalized_name,
+                turn_value=normalized_turn_value,
+                initiative_bonus=normalized_initiative_bonus,
+                dexterity_modifier=normalized_dexterity_modifier,
+                initiative_priority=normalized_initiative_priority,
+                current_hp=normalized_current_hp,
+                max_hp=normalized_max_hp,
+                temp_hp=normalized_temp_hp,
+                movement_total=normalized_movement_total,
+                movement_remaining=normalized_movement_total,
+                created_by_user_id=created_by_user_id,
+                commit=False,
+            )
+            self.store.bump_tracker_revision(
+                campaign_slug,
+                updated_by_user_id=created_by_user_id,
+                commit=False,
+            )
         return combatant
 
     def update_turn_value(
@@ -281,15 +302,21 @@ class CampaignCombatService:
             default=combatant.initiative_priority,
         )
         try:
-            combatant = self.store.update_combatant(
-                campaign_slug,
-                combatant_id,
-                turn_value=normalized_turn_value,
-                initiative_priority=normalized_initiative_priority,
-                expected_revision=expected_revision,
-                updated_by_user_id=updated_by_user_id,
-            )
-            self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+            with get_db() as connection:
+                combatant = self.store.update_combatant(
+                    campaign_slug,
+                    combatant_id,
+                    turn_value=normalized_turn_value,
+                    initiative_priority=normalized_initiative_priority,
+                    expected_revision=expected_revision,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
+                self.store.bump_tracker_revision(
+                    campaign_slug,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
             return combatant
         except CampaignCombatRevisionConflictError:
             raise
@@ -335,18 +362,24 @@ class CampaignCombatService:
             raise CampaignCombatValidationError("Current HP cannot exceed max HP.")
 
         try:
-            updated_combatant = self.store.update_combatant(
-                campaign_slug,
-                combatant_id,
-                current_hp=normalized_current_hp,
-                max_hp=normalized_max_hp,
-                temp_hp=normalized_temp_hp,
-                movement_total=normalized_movement_total,
-                movement_remaining=min(combatant.movement_remaining, normalized_movement_total),
-                expected_revision=expected_revision,
-                updated_by_user_id=updated_by_user_id,
-            )
-            self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+            with get_db() as connection:
+                updated_combatant = self.store.update_combatant(
+                    campaign_slug,
+                    combatant_id,
+                    current_hp=normalized_current_hp,
+                    max_hp=normalized_max_hp,
+                    temp_hp=normalized_temp_hp,
+                    movement_total=normalized_movement_total,
+                    movement_remaining=min(combatant.movement_remaining, normalized_movement_total),
+                    expected_revision=expected_revision,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
+                self.store.bump_tracker_revision(
+                    campaign_slug,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
             return updated_combatant
         except CampaignCombatRevisionConflictError:
             raise
@@ -384,20 +417,26 @@ class CampaignCombatService:
         movement_total = self._parse_movement_total(record.definition.stats.get("speed"))
         max_hp = int(record.definition.stats.get("max_hp") or 0)
         try:
-            updated_combatant = self.store.update_combatant(
-                campaign_slug,
-                combatant_id,
-                display_name=record.definition.name,
-                initiative_bonus=int(record.definition.stats.get("initiative_bonus") or 0),
-                dexterity_modifier=self._extract_dexterity_modifier(record.definition.stats),
-                current_hp=int((state_record.state.get("vitals") or {}).get("current_hp") or 0),
-                max_hp=max_hp,
-                temp_hp=int((state_record.state.get("vitals") or {}).get("temp_hp") or 0),
-                movement_total=movement_total,
-                movement_remaining=min(combatant.movement_remaining, movement_total),
-                updated_by_user_id=updated_by_user_id,
-            )
-            self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+            with get_db() as connection:
+                updated_combatant = self.store.update_combatant(
+                    campaign_slug,
+                    combatant_id,
+                    display_name=record.definition.name,
+                    initiative_bonus=int(record.definition.stats.get("initiative_bonus") or 0),
+                    dexterity_modifier=self._extract_dexterity_modifier(record.definition.stats),
+                    current_hp=int((state_record.state.get("vitals") or {}).get("current_hp") or 0),
+                    max_hp=max_hp,
+                    temp_hp=int((state_record.state.get("vitals") or {}).get("temp_hp") or 0),
+                    movement_total=movement_total,
+                    movement_remaining=min(combatant.movement_remaining, movement_total),
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
+                self.store.bump_tracker_revision(
+                    campaign_slug,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
             return updated_combatant
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("That combat tracker row could not be updated.") from exc
@@ -425,17 +464,23 @@ class CampaignCombatService:
             raise CampaignCombatValidationError("Remaining movement cannot exceed total movement.")
 
         try:
-            updated_combatant = self.store.update_combatant(
-                campaign_slug,
-                combatant_id,
-                has_action=has_action,
-                has_bonus_action=has_bonus_action,
-                has_reaction=has_reaction,
-                movement_remaining=normalized_movement_remaining,
-                expected_revision=expected_revision,
-                updated_by_user_id=updated_by_user_id,
-            )
-            self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+            with get_db() as connection:
+                updated_combatant = self.store.update_combatant(
+                    campaign_slug,
+                    combatant_id,
+                    has_action=has_action,
+                    has_bonus_action=has_bonus_action,
+                    has_reaction=has_reaction,
+                    movement_remaining=normalized_movement_remaining,
+                    expected_revision=expected_revision,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
+                self.store.bump_tracker_revision(
+                    campaign_slug,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
             return updated_combatant
         except CampaignCombatRevisionConflictError:
             raise
@@ -456,14 +501,20 @@ class CampaignCombatService:
             raise CampaignCombatValidationError("Only NPC combatants can toggle player-facing detail visibility.")
 
         try:
-            updated_combatant = self.store.update_combatant(
-                campaign_slug,
-                combatant_id,
-                player_detail_visible=player_detail_visible,
-                expected_revision=expected_revision,
-                updated_by_user_id=updated_by_user_id,
-            )
-            self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+            with get_db() as connection:
+                updated_combatant = self.store.update_combatant(
+                    campaign_slug,
+                    combatant_id,
+                    player_detail_visible=player_detail_visible,
+                    expected_revision=expected_revision,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
+                self.store.bump_tracker_revision(
+                    campaign_slug,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
             return updated_combatant
         except CampaignCombatRevisionConflictError:
             raise
@@ -490,13 +541,19 @@ class CampaignCombatService:
         if len(normalized_duration) > 120:
             raise CampaignCombatValidationError("Condition duration text must stay under 120 characters.")
 
-        condition = self.store.create_condition(
-            combatant_id,
-            name=normalized_name,
-            duration_text=normalized_duration,
-            created_by_user_id=created_by_user_id,
-        )
-        self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=created_by_user_id)
+        with get_db() as connection:
+            condition = self.store.create_condition(
+                combatant_id,
+                name=normalized_name,
+                duration_text=normalized_duration,
+                created_by_user_id=created_by_user_id,
+                commit=False,
+            )
+            self.store.bump_tracker_revision(
+                campaign_slug,
+                updated_by_user_id=created_by_user_id,
+                commit=False,
+            )
         return condition
 
     def delete_condition(
@@ -504,10 +561,14 @@ class CampaignCombatService:
         campaign_slug: str,
         condition_id: int,
     ) -> CampaignCombatConditionRecord:
-        condition = self.store.delete_condition(campaign_slug, condition_id)
-        if condition is None:
-            raise CampaignCombatValidationError("That condition could not be found.")
-        self.store.bump_tracker_revision(campaign_slug)
+        with get_db() as connection:
+            condition = self.store.delete_condition(campaign_slug, condition_id, commit=False)
+            if condition is None:
+                raise CampaignCombatValidationError("That condition could not be found.")
+            self.store.bump_tracker_revision(
+                campaign_slug,
+                commit=False,
+            )
         return condition
 
     def update_condition(
@@ -529,15 +590,21 @@ class CampaignCombatService:
         if len(normalized_duration) > 120:
             raise CampaignCombatValidationError("Condition duration text must stay under 120 characters.")
 
-        condition = self.store.update_condition(
-            campaign_slug,
-            condition_id,
-            name=normalized_name,
-            duration_text=normalized_duration,
-        )
-        if condition is None:
-            raise CampaignCombatValidationError("That condition could not be found.")
-        self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+        with get_db() as connection:
+            condition = self.store.update_condition(
+                campaign_slug,
+                condition_id,
+                name=normalized_name,
+                duration_text=normalized_duration,
+                commit=False,
+            )
+            if condition is None:
+                raise CampaignCombatValidationError("That condition could not be found.")
+            self.store.bump_tracker_revision(
+                campaign_slug,
+                updated_by_user_id=updated_by_user_id,
+                commit=False,
+            )
         return condition
 
     def mark_character_state_changed(
@@ -553,10 +620,11 @@ class CampaignCombatService:
         campaign_slug: str,
         combatant_id: int,
     ) -> CampaignCombatantRecord:
-        combatant = self.store.delete_combatant(campaign_slug, combatant_id)
-        if combatant is None:
-            raise CampaignCombatValidationError("That combatant could not be found.")
-        self.store.bump_tracker_revision(campaign_slug)
+        with get_db() as connection:
+            combatant = self.store.delete_combatant(campaign_slug, combatant_id, commit=False)
+            if combatant is None:
+                raise CampaignCombatValidationError("That combatant could not be found.")
+            self.store.bump_tracker_revision(campaign_slug, commit=False)
         return combatant
 
     def clear_tracker(
@@ -580,20 +648,27 @@ class CampaignCombatService:
         *,
         updated_by_user_id: int | None = None,
     ) -> CampaignCombatTrackerRecord:
-        tracker = self.store.ensure_tracker(campaign_slug, updated_by_user_id=updated_by_user_id)
-        combatant = self._require_combatant(campaign_slug, combatant_id)
-        self._refresh_combatant_turn_resources(
-            campaign_slug,
-            combatant.id,
-            updated_by_user_id=updated_by_user_id,
-        )
         try:
-            return self.store.update_tracker(
-                campaign_slug,
-                round_number=max(1, tracker.round_number),
-                current_combatant_id=combatant.id,
-                updated_by_user_id=updated_by_user_id,
-            )
+            with get_db() as connection:
+                tracker = self.store.ensure_tracker(
+                    campaign_slug,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
+                combatant = self._require_combatant(campaign_slug, combatant_id)
+                self._refresh_combatant_turn_resources(
+                    campaign_slug,
+                    combatant.id,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
+                return self.store.update_tracker(
+                    campaign_slug,
+                    round_number=max(1, tracker.round_number),
+                    current_combatant_id=combatant.id,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("The current turn could not be updated.") from exc
 
@@ -603,35 +678,46 @@ class CampaignCombatService:
         *,
         updated_by_user_id: int | None = None,
     ) -> CampaignCombatTrackerRecord:
-        tracker = self.store.ensure_tracker(campaign_slug, updated_by_user_id=updated_by_user_id)
-        combatants = self.store.list_combatants(campaign_slug)
-        if not combatants:
-            raise CampaignCombatValidationError("Add combatants before advancing turn order.")
-
-        current_index = next(
-            (index for index, combatant in enumerate(combatants) if combatant.id == tracker.current_combatant_id),
-            None,
-        )
-        if current_index is None:
-            next_index = 0
-            next_round = max(1, tracker.round_number)
-        else:
-            next_index = (current_index + 1) % len(combatants)
-            next_round = tracker.round_number + 1 if next_index == 0 else tracker.round_number
-
-        next_combatant = combatants[next_index]
-        self._refresh_combatant_turn_resources(
-            campaign_slug,
-            next_combatant.id,
-            updated_by_user_id=updated_by_user_id,
-        )
         try:
-            return self.store.update_tracker(
-                campaign_slug,
-                round_number=max(1, next_round),
-                current_combatant_id=next_combatant.id,
-                updated_by_user_id=updated_by_user_id,
-            )
+            with get_db() as connection:
+                tracker = self.store.ensure_tracker(
+                    campaign_slug,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
+                combatants = self.store.list_combatants(campaign_slug)
+                if not combatants:
+                    raise CampaignCombatValidationError("Add combatants before advancing turn order.")
+
+                current_index = next(
+                    (
+                        index
+                        for index, combatant in enumerate(combatants)
+                        if combatant.id == tracker.current_combatant_id
+                    ),
+                    None,
+                )
+                if current_index is None:
+                    next_index = 0
+                    next_round = max(1, tracker.round_number)
+                else:
+                    next_index = (current_index + 1) % len(combatants)
+                    next_round = tracker.round_number + 1 if next_index == 0 else tracker.round_number
+
+                next_combatant = combatants[next_index]
+                self._refresh_combatant_turn_resources(
+                    campaign_slug,
+                    next_combatant.id,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
+                return self.store.update_tracker(
+                    campaign_slug,
+                    round_number=max(1, next_round),
+                    current_combatant_id=next_combatant.id,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("The turn order could not be advanced.") from exc
 
@@ -688,7 +774,7 @@ class CampaignCombatService:
 
     def _sync_player_character_snapshots_now(self, campaign_slug: str) -> bool:
         combatants = self.store.list_combatants(campaign_slug)
-        any_changed = False
+        pending_updates: list[tuple[CampaignCombatantRecord, Any, dict[str, int], int]] = []
         for combatant in combatants:
             if not combatant.is_player_character or not combatant.character_slug:
                 continue
@@ -708,27 +794,31 @@ class CampaignCombatService:
                 and combatant.movement_remaining == movement_remaining
             ):
                 continue
-            try:
-                self.store.update_combatant(
-                    campaign_slug,
-                    combatant.id,
-                    display_name=record.definition.name,
-                    initiative_bonus=snapshot["initiative_bonus"],
-                    dexterity_modifier=snapshot["dexterity_modifier"],
-                    current_hp=snapshot["current_hp"],
-                    max_hp=snapshot["max_hp"],
-                    temp_hp=snapshot["temp_hp"],
-                    movement_total=snapshot["movement_total"],
-                    movement_remaining=movement_remaining,
-                )
-                any_changed = True
-            except CampaignCombatConflictError as exc:
-                raise CampaignCombatValidationError(
-                    f"Unable to refresh combat tracker data for {record.definition.name}."
-                ) from exc
-        if any_changed:
-            self.store.bump_tracker_revision(campaign_slug)
-        return any_changed
+            pending_updates.append((combatant, record, snapshot, movement_remaining))
+
+        if not pending_updates:
+            return False
+
+        try:
+            with get_db() as connection:
+                for combatant, record, snapshot, movement_remaining in pending_updates:
+                    self.store.update_combatant(
+                        campaign_slug,
+                        combatant.id,
+                        display_name=record.definition.name,
+                        initiative_bonus=snapshot["initiative_bonus"],
+                        dexterity_modifier=snapshot["dexterity_modifier"],
+                        current_hp=snapshot["current_hp"],
+                        max_hp=snapshot["max_hp"],
+                        temp_hp=snapshot["temp_hp"],
+                        movement_total=snapshot["movement_total"],
+                        movement_remaining=movement_remaining,
+                        commit=False,
+                    )
+                self.store.bump_tracker_revision(campaign_slug, commit=False)
+        except CampaignCombatConflictError as exc:
+            raise CampaignCombatValidationError("Unable to refresh combat tracker data.") from exc
+        return True
 
     def _refresh_combatant_turn_resources(
         self,
@@ -736,6 +826,7 @@ class CampaignCombatService:
         combatant_id: int,
         *,
         updated_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignCombatantRecord:
         combatant = self._require_combatant(campaign_slug, combatant_id)
         return self.store.update_combatant(
@@ -746,6 +837,7 @@ class CampaignCombatService:
             has_reaction=True,
             movement_remaining=combatant.movement_total,
             updated_by_user_id=updated_by_user_id,
+            commit=commit,
         )
 
     def _require_combatant(self, campaign_slug: str, combatant_id: int) -> CampaignCombatantRecord:
