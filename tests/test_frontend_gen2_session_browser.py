@@ -9,6 +9,9 @@ import yaml
 from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 
 
+pytestmark = pytest.mark.skip(reason="Gen2 frontend routes are suspended and closed.")
+
+
 @pytest.fixture
 def frontend_gen2_session_live_server(app):
     from werkzeug.serving import make_server

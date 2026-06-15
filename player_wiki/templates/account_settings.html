@@ -55,38 +55,6 @@
       </section>
 
       <section class="account-settings-group">
-        <h2>Preferred frontend</h2>
-        <p class="meta">
-          This controls which interface campaign cards open by default when you are signed in. Flask remains available for fallback testing.
-        </p>
-        <form method="post" action="{{ url_for('account_frontend_mode_update') }}" class="stack-form">
-          <div class="theme-grid">
-            {% for choice in frontend_mode_choices %}
-              <label class="theme-option{% if selected_frontend_mode == choice.value %} is-selected{% endif %}">
-                <input
-                  class="theme-option__input"
-                  type="radio"
-                  name="frontend_mode"
-                  value="{{ choice.value }}"
-                  {% if selected_frontend_mode == choice.value %}checked{% endif %}
-                >
-                <span class="theme-option__header">
-                  <span>
-                    <strong>{{ choice.label }}</strong>
-                    {% if selected_frontend_mode == choice.value %}
-                      <span class="meta theme-option__status">Current</span>
-                    {% endif %}
-                  </span>
-                </span>
-                <span class="meta">{{ choice.description }}</span>
-              </label>
-            {% endfor %}
-          </div>
-          <button type="submit">Save frontend</button>
-        </form>
-      </section>
-
-      <section class="account-settings-group">
         <h2>Live session chat order</h2>
         <p class="meta">
           This changes the order of the live Session chat window for your account only. Stored session logs stay chronological.
@@ -124,14 +92,9 @@
       <p><strong>{{ current_user.display_name }}</strong></p>
       <p class="meta">{{ current_user.email }}</p>
       <p class="meta">
-        Theme, frontend, and live-session chat preferences are stored in the auth database and applied on every signed-in request.
+        Theme and live-session chat preferences are stored in the auth database and applied on every signed-in request.
       </p>
-      {% if selected_frontend_mode == "gen2" %}
-        <a class="ghost-button" href="/app-next/">Back to campaigns</a>
-        <a class="ghost-button" href="{{ url_for('campaign_picker') }}">Open Flask campaigns</a>
-      {% else %}
-        <a class="ghost-button" href="{{ url_for('campaign_picker') }}">Back to campaigns</a>
-      {% endif %}
+      <a class="ghost-button" href="{{ url_for('campaign_picker') }}">Back to campaigns</a>
     </aside>
   </section>
 {% endblock %}

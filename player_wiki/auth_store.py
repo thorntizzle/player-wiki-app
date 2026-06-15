@@ -21,10 +21,6 @@ SESSION_CHAT_ORDER_LABELS = {
     SESSION_CHAT_ORDER_NEWEST_FIRST: "Newest first",
     SESSION_CHAT_ORDER_OLDEST_FIRST: "Oldest first",
 }
-FRONTEND_MODE_LABELS = {
-    FRONTEND_MODE_FLASK: "Stable Flask",
-    FRONTEND_MODE_GEN2: "Gen2 frontend",
-}
 SESSION_CHAT_ORDER_CHOICES = [
     {
         "value": SESSION_CHAT_ORDER_NEWEST_FIRST,
@@ -37,25 +33,13 @@ SESSION_CHAT_ORDER_CHOICES = [
         "description": "Keep the live Session chat window in chronological order from top to bottom.",
     },
 ]
-FRONTEND_MODE_CHOICES = [
-    {
-        "value": FRONTEND_MODE_FLASK,
-        "label": FRONTEND_MODE_LABELS[FRONTEND_MODE_FLASK],
-        "description": "Use the current Flask interface by default while Gen2 continues toward full visual parity.",
-    },
-    {
-        "value": FRONTEND_MODE_GEN2,
-        "label": FRONTEND_MODE_LABELS[FRONTEND_MODE_GEN2],
-        "description": "Open campaign cards in the Gen2 interface for local evaluation and feel testing.",
-    },
-]
 VALID_SESSION_CHAT_ORDERS = frozenset(
     {
         SESSION_CHAT_ORDER_NEWEST_FIRST,
         SESSION_CHAT_ORDER_OLDEST_FIRST,
     }
 )
-VALID_FRONTEND_MODES = frozenset({FRONTEND_MODE_FLASK, FRONTEND_MODE_GEN2})
+VALID_FRONTEND_MODES = frozenset({FRONTEND_MODE_FLASK})
 
 
 def utcnow() -> datetime:
@@ -104,10 +88,6 @@ def normalize_frontend_mode(value: str | None) -> str:
     if normalized in VALID_FRONTEND_MODES:
         return normalized
     return DEFAULT_FRONTEND_MODE
-
-
-def is_valid_frontend_mode(value: str | None) -> bool:
-    return str(value or "").strip().lower() in VALID_FRONTEND_MODES
 
 
 @dataclass(slots=True)

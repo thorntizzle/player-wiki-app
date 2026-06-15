@@ -1,8 +1,8 @@
 # Gen2 Frontend
 
-This React + TypeScript frontend is served alongside the existing Flask/Jinja UI under `/app-next/`.
+This React + TypeScript frontend is currently suspended. The source remains in place for possible future resumption, but Flask does not serve it: `/app-next` and `/app-next/...` intentionally return 404.
 
-It is a parity migration surface, not a full replacement yet. Route readiness and the current Flask-vs-Gen2 matrix live in:
+The suspension status and resumption checklist live in:
 
 - `docs/gen2-migration-readiness.md`
 
@@ -27,12 +27,12 @@ npm run dev
 ```
 
 - In a second terminal, start the Flask app as usual (`python run.py`).
-- Open `http://127.0.0.1:5173/app-next/` for hot-reload development, or `http://127.0.0.1:5000/app-next/` after building.
+- Open `http://127.0.0.1:5173/app-next/` only for isolated Vite development. Flask-hosted `http://127.0.0.1:5000/app-next/` is closed while Gen2 is suspended.
 - The Vite dev server proxies `/api/*` requests to `http://127.0.0.1:5000`.
 
-## Current Coverage
+## Historical Coverage
 
-The current Gen2 build covers:
+The suspended Gen2 build covered:
 
 - campaign list, campaign home, published wiki sections, and published wiki pages
 - Session player/character/DM panes
@@ -56,21 +56,18 @@ npm run build
 
 The build outputs to `frontend/dist`.
 
-For local development, run `npm run build` after installing dependencies.
-In the deployed Fly image, the frontend is now built during Docker image creation and shipped as `/app/frontend/dist`, so `/app-next/` works on Fly even without a prebuilt local `frontend/dist`.
-`frontend/dist` is still ignored for local Git/dirty-hosting hygiene and is still excluded from the Docker build context by `.dockerignore` on source builds.
+For local development, run `npm run build` after installing dependencies if you need to inspect the bundle directly. The Flask app currently ignores this build output for `/app-next` hosting.
+`frontend/dist` is still ignored for local Git hygiene and is still excluded from the Docker build context by `.dockerignore` on source builds.
 
 ## Flask integration
 
-- Flask serves the built Gen2 app at:
-  - `GET /app-next/` -> `index.html`
-  - `GET /app-next/<path>` -> static asset if present, otherwise SPA fallback to `index.html`.
-- The build directory can be changed with `APP_NEXT_DIST_DIR` in Flask config.
-- Flask remains the default browser app during migration. Signed-in users can opt into Gen2 from Account settings, which only changes campaign picker card destinations; Flask routes and fallback links remain directly available.
+- Flask returns 404 for `GET /app-next`, `GET /app-next/`, and `GET /app-next/<path>`.
+- Account settings no longer include a preferred-frontend selector.
+- Campaign picker cards always open Flask routes.
 
-## API Used By Gen2
+## Historical API Used By Gen2
 
-The full API reference is maintained in `docs/api-v1.md`. The list below is a quick orientation for the original Session pilot path and should not be treated as exhaustive for the current Gen2 app.
+The full API reference is maintained in `docs/api-v1.md`. The list below is historical orientation for the suspended Gen2 app and should not be treated as evidence that `/app-next` is currently hosted.
 
 - `GET /api/v1/app`
 - `GET /api/v1/me`

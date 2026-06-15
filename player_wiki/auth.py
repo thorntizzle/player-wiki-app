@@ -14,15 +14,11 @@ from .auth_store import (
     CampaignMembership,
     DEFAULT_FRONTEND_MODE,
     DEFAULT_SESSION_CHAT_ORDER,
-    FRONTEND_MODE_CHOICES,
-    FRONTEND_MODE_LABELS,
     SESSION_CHAT_ORDER_CHOICES,
     SESSION_CHAT_ORDER_LABELS,
     UserAccount,
     UserPreferences,
-    is_valid_frontend_mode,
     is_valid_session_chat_order,
-    normalize_frontend_mode,
     normalize_session_chat_order,
     utcnow,
 )
@@ -88,8 +84,6 @@ def register_auth(app: Flask) -> None:
             selected_theme_key=get_current_theme().key,
             session_chat_order_choices=SESSION_CHAT_ORDER_CHOICES,
             selected_session_chat_order=get_current_user_preferences().session_chat_order,
-            frontend_mode_choices=FRONTEND_MODE_CHOICES,
-            selected_frontend_mode=get_current_user_preferences().frontend_mode,
         )
         if status_code == 200:
             return rendered
@@ -296,29 +290,6 @@ def register_auth(app: Flask) -> None:
         )
         return redirect(url_for("account_settings_view"))
 
-    @app.post("/account/frontend-mode")
-    @login_required
-    def account_frontend_mode_update():
-        user = get_current_user()
-        if user is None:
-            abort(401)
-
-        requested_mode = request.form.get("frontend_mode", "")
-        if not is_valid_frontend_mode(requested_mode):
-            flash("Choose a valid preferred frontend.", "error")
-            return render_account_settings_page(status_code=400)
-
-        normalized_mode = normalize_frontend_mode(requested_mode)
-        current_preferences = get_auth_store().get_user_preferences(user.id)
-        if current_preferences.frontend_mode == normalized_mode:
-            flash(f"Preferred frontend already set to {FRONTEND_MODE_LABELS[normalized_mode]}.", "success")
-            return redirect(url_for("account_settings_view"))
-
-        updated_preferences = get_auth_store().set_user_frontend_mode(user.id, normalized_mode)
-        g.current_user_preferences = updated_preferences
-        flash(f"Preferred frontend updated to {FRONTEND_MODE_LABELS[normalized_mode]}.", "success")
-        return redirect(url_for("account_settings_view"))
-
     @app.route("/invite/<token>", methods=["GET", "POST"])
     def invite_setup(token: str) -> str | tuple[str, int]:
         resolved = get_auth_store().get_valid_invite(token)
@@ -456,7 +427,6 @@ def register_auth(app: Flask) -> None:
         return render_template(
             "campaign_picker.html",
             campaign_entries=entries,
-            frontend_mode=get_frontend_mode(),
         )
 
 
@@ -964,7 +934,3 @@ def resolve_next_url(next_url: str) -> str:
     if is_safe_next_url(next_url):
         return next_url
     return url_for("home")
-
-
-def get_frontend_mode() -> str:
-    return get_current_user_preferences().frontend_mode

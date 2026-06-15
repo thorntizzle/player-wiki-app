@@ -77,15 +77,16 @@ def test_campaign_picker_defaults_to_flask_without_preview_card(client):
     assert 'href="/app-next/campaigns/linden-pass"' not in body
 
 
-def test_signed_in_user_can_choose_gen2_frontend_from_account(app, client, sign_in, users):
+def test_gen2_frontend_account_setting_is_retired(app, client, sign_in, users):
     sign_in(users["party"]["email"], users["party"]["password"])
 
     account = client.get("/account")
     assert account.status_code == 200
     account_body = account.get_data(as_text=True)
-    assert "Preferred frontend" in account_body
-    assert "Stable Flask" in account_body
-    assert "Gen2 frontend" in account_body
+    assert "Preferred frontend" not in account_body
+    assert "Stable Flask" not in account_body
+    assert "Gen2 frontend" not in account_body
+    assert 'href="/app-next/' not in account_body
 
     picker = client.get("/campaigns")
     assert 'href="/campaigns/linden-pass"' in picker.get_data(as_text=True)
@@ -95,28 +96,7 @@ def test_signed_in_user_can_choose_gen2_frontend_from_account(app, client, sign_
         data={"frontend_mode": "gen2"},
         follow_redirects=True,
     )
-    assert enable_response.status_code == 200
-    enable_body = enable_response.get_data(as_text=True)
-    assert "Preferred frontend updated to Gen2 frontend." in enable_body
-    assert "Open Flask campaigns" in enable_body
-
-    with app.app_context():
-        preferences = AuthStore().get_user_preferences(users["party"]["id"])
-        assert preferences.frontend_mode == "gen2"
-
-    gen2_picker = client.get("/campaigns")
-    gen2_body = gen2_picker.get_data(as_text=True)
-    assert 'href="/app-next/campaigns/linden-pass"' in gen2_body
-    assert 'href="/campaigns/linden-pass"' not in gen2_body
-
-    disable_response = client.post(
-        "/account/frontend-mode",
-        data={"frontend_mode": "flask"},
-        follow_redirects=True,
-    )
-    assert disable_response.status_code == 200
-    disable_body = disable_response.get_data(as_text=True)
-    assert "Preferred frontend updated to Stable Flask." in disable_body
+    assert enable_response.status_code == 404
 
     with app.app_context():
         preferences = AuthStore().get_user_preferences(users["party"]["id"])
@@ -128,34 +108,35 @@ def test_signed_in_user_can_choose_gen2_frontend_from_account(app, client, sign_
     assert 'href="/app-next/campaigns/linden-pass"' not in flask_body
 
 
-def test_invalid_frontend_mode_preference_is_rejected(app, client, sign_in, users):
+def test_legacy_gen2_account_preference_does_not_change_campaign_picker(app, client, sign_in, users):
     sign_in(users["party"]["email"], users["party"]["password"])
 
-    response = client.post(
-        "/account/frontend-mode",
-        data={"frontend_mode": "sideways"},
-        follow_redirects=False,
-    )
-
-    assert response.status_code == 400
-    body = response.get_data(as_text=True)
-    assert "Choose a valid preferred frontend." in body
-    assert "Preferred frontend" in body
-
     with app.app_context():
+        connection = get_db()
+        connection.execute(
+            """
+            INSERT INTO user_preferences (
+                user_id,
+                theme_key,
+                session_chat_order,
+                frontend_mode,
+                updated_at
+            )
+            VALUES (?, 'parchment', 'newest_first', 'gen2', '2026-01-01T00:00:00+00:00')
+            ON CONFLICT(user_id) DO UPDATE SET
+                frontend_mode = 'gen2',
+                updated_at = excluded.updated_at
+            """,
+            (users["party"]["id"],),
+        )
+        connection.commit()
         preferences = AuthStore().get_user_preferences(users["party"]["id"])
         assert preferences.frontend_mode == "flask"
 
-
-def test_gen2_account_preference_does_not_change_anonymous_flask_default(client, sign_in, users):
-    sign_in(users["party"]["email"], users["party"]["password"])
-    client.post(
-        "/account/frontend-mode",
-        data={"frontend_mode": "gen2"},
-        follow_redirects=False,
-    )
     signed_in_picker = client.get("/campaigns")
-    assert 'href="/app-next/campaigns/linden-pass"' in signed_in_picker.get_data(as_text=True)
+    signed_in_body = signed_in_picker.get_data(as_text=True)
+    assert 'href="/campaigns/linden-pass"' in signed_in_body
+    assert 'href="/app-next/campaigns/linden-pass"' not in signed_in_body
 
     client.post("/sign-out", follow_redirects=False)
     anonymous_picker = client.get("/campaigns")
@@ -204,10 +185,11 @@ def test_signed_in_user_can_open_account_settings_with_default_theme(client, sig
     assert 'href="/account"' in body
     assert 'data-theme="parchment"' in body
     assert "Color theme" in body
-    assert "Preferred frontend" in body
     assert "Live session chat order" in body
     assert "Parchment" in body
-    assert "Stable Flask" in body
+    assert "Preferred frontend" not in body
+    assert "Stable Flask" not in body
+    assert "Gen2 frontend" not in body
     assert "Newest first" in body
 
 

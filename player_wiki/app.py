@@ -1647,49 +1647,18 @@ def create_app() -> Flask:
     register_auth(app)
     register_admin(app)
     register_api(app)
-    app.config["APP_NEXT_DIST_DIR"] = (
-        app.config.get("APP_NEXT_DIST_DIR")
-        or (Path(app.root_path).resolve().parent / "frontend" / "dist")
-    )
-
-    def _resolve_frontend_dist() -> Path | None:
-        raw_dist = app.config.get("APP_NEXT_DIST_DIR")
-        if raw_dist is None:
-            return None
-        dist_dir = Path(raw_dist)
-        if not dist_dir.is_absolute():
-            dist_dir = Path(app.root_path).resolve().parent / dist_dir
-        try:
-            dist_dir = dist_dir.resolve()
-        except FileNotFoundError:
-            return None
-        return dist_dir if dist_dir.is_dir() else None
 
     @app.get("/app-next")
-    def app_next_root_redirect():
-        return redirect("/app-next/")
+    def app_next_root_closed():
+        abort(404)
 
     @app.get("/app-next/")
-    def app_next_index():
-        dist_dir = _resolve_frontend_dist()
-        if dist_dir is None:
-            abort(404)
-        return send_from_directory(dist_dir, "index.html")
+    def app_next_index_closed():
+        abort(404)
 
     @app.get("/app-next/<path:asset_path>")
-    def app_next_assets(asset_path: str):
-        dist_dir = _resolve_frontend_dist()
-        if dist_dir is None:
-            abort(404)
-
-        normalized = (dist_dir / asset_path).resolve()
-        if not normalized.is_relative_to(dist_dir):
-            abort(404)
-        if normalized.is_file():
-            return send_from_directory(dist_dir, asset_path)
-        if asset_path.startswith("assets/") or Path(asset_path).suffix:
-            abort(404)
-        return send_from_directory(dist_dir, "index.html")
+    def app_next_path_closed(asset_path: str):
+        abort(404)
 
     if app.config["TRUST_PROXY"]:
         hops = app.config["PROXY_FIX_HOPS"]

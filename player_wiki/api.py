@@ -41,9 +41,7 @@ from .auth import (
     has_session_mode_access,
 )
 from .auth_store import (
-    FRONTEND_MODE_CHOICES,
     SESSION_CHAT_ORDER_CHOICES,
-    is_valid_frontend_mode,
     is_valid_session_chat_order,
     normalize_frontend_mode,
     normalize_session_chat_order,
@@ -5158,7 +5156,6 @@ def register_api(app) -> None:
                 "ok": True,
                 "theme_presets": [serialize_theme_preset(preset) for preset in list_theme_presets()],
                 "session_chat_order_choices": SESSION_CHAT_ORDER_CHOICES,
-                "frontend_mode_choices": FRONTEND_MODE_CHOICES,
                 "preferences": {
                     "theme_key": preferences.theme_key,
                     "session_chat_order": preferences.session_chat_order,
@@ -5182,12 +5179,17 @@ def register_api(app) -> None:
 
         requested_theme_key = payload.get("theme_key", "")
         requested_chat_order = payload.get("session_chat_order", "")
-        requested_frontend_mode = payload.get("frontend_mode", "")
         has_theme_update = bool(str(requested_theme_key).strip())
         has_chat_order_update = bool(str(requested_chat_order).strip())
-        has_frontend_mode_update = bool(str(requested_frontend_mode).strip())
 
-        if not has_theme_update and not has_chat_order_update and not has_frontend_mode_update:
+        if "frontend_mode" in payload:
+            return json_error(
+                "Preferred frontend selection is no longer available.",
+                400,
+                code="validation_error",
+            )
+
+        if not has_theme_update and not has_chat_order_update:
             return json_error("No account settings were provided.", 400, code="validation_error")
 
         if has_theme_update:
@@ -5198,15 +5200,10 @@ def register_api(app) -> None:
             if not is_valid_session_chat_order(requested_chat_order):
                 return json_error("Choose a valid live session chat order.", 400, code="validation_error")
 
-        if has_frontend_mode_update:
-            if not is_valid_frontend_mode(requested_frontend_mode):
-                return json_error("Choose a valid preferred frontend.", 400, code="validation_error")
-
         store = get_auth_store()
         current_preferences = store.get_user_preferences(user.id)
         normalized_theme_key = current_preferences.theme_key
         normalized_chat_order = current_preferences.session_chat_order
-        normalized_frontend_mode = current_preferences.frontend_mode
 
         if has_theme_update:
             normalized_theme_key = get_theme_preset(requested_theme_key).key
@@ -5217,11 +5214,6 @@ def register_api(app) -> None:
             normalized_chat_order = normalize_session_chat_order(requested_chat_order)
             if normalized_chat_order != current_preferences.session_chat_order:
                 store.set_user_session_chat_order(user.id, normalized_chat_order)
-
-        if has_frontend_mode_update:
-            normalized_frontend_mode = normalize_frontend_mode(requested_frontend_mode)
-            if normalized_frontend_mode != current_preferences.frontend_mode:
-                store.set_user_frontend_mode(user.id, normalized_frontend_mode)
 
         updated_preferences = store.get_user_preferences(user.id)
 
