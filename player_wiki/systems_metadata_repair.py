@@ -96,10 +96,6 @@ def repair_dnd5e_item_metadata(
 
 def repair_dnd5e_item_metadata_payload(entry: SystemsEntryRecord) -> tuple[dict[str, Any], list[str]]:
     metadata = dict(entry.metadata or {})
-    profile = _resolve_armor_profile_for_entry(entry, metadata)
-    if profile is None:
-        return metadata, []
-
     fields: list[str] = []
 
     def set_if_missing(key: str, value: Any) -> None:
@@ -108,29 +104,109 @@ def repair_dnd5e_item_metadata_payload(entry: SystemsEntryRecord) -> tuple[dict[
         metadata[key] = value
         fields.append(key)
 
+    def set_profile_value(key: str, value: Any) -> None:
+        if key in metadata and metadata.get(key) == value:
+            return
+        metadata[key] = value
+        fields.append(key)
+
+    profile = _resolve_armor_profile_for_entry(entry, metadata)
+    if profile is not None:
+        set_if_missing("type", profile["type"])
+        set_if_missing("ac", int(profile["base_ac"]))
+        if metadata.get("armor") is not True:
+            metadata["armor"] = True
+            fields.append("armor")
+
+        minimum_strength = profile.get("minimum_strength")
+        if minimum_strength not in (None, ""):
+            set_if_missing("strength", int(minimum_strength))
+
+        stealth_disadvantage = bool(profile.get("stealth_disadvantage"))
+        if metadata.get("stealth_disadvantage") != stealth_disadvantage:
+            metadata["stealth_disadvantage"] = stealth_disadvantage
+            fields.append("stealth_disadvantage")
+
+        parsed_bonus = int(profile.get("parsed_bonus") or 0)
+        if parsed_bonus > 0:
+            if _parse_optional_int_value(metadata.get("bonus_ac")) != parsed_bonus:
+                metadata["bonus_ac"] = f"+{parsed_bonus}"
+                fields.append("bonus_ac")
+            set_if_missing("base_item", f"{profile['title']}|PHB")
+        return metadata, fields
+
+    profile = _resolve_weapon_profile_for_entry(entry, metadata)
+    if profile is None:
+        return metadata, []
+
     set_if_missing("type", profile["type"])
-    set_if_missing("ac", int(profile["base_ac"]))
-    if metadata.get("armor") is not True:
-        metadata["armor"] = True
-        fields.append("armor")
+    set_profile_value("weapon_category", profile["weapon_category"])
+    set_profile_value("dmg1", profile["dmg1"])
+    set_profile_value("damage", profile["damage"])
+    set_profile_value("versatile_damage", profile["versatile_damage"])
+    set_profile_value("damage_type", profile["damage_type"])
+    set_profile_value("range", profile["range"])
+    set_profile_value("properties", profile["properties"])
 
-    minimum_strength = profile.get("minimum_strength")
-    if minimum_strength not in (None, ""):
-        set_if_missing("strength", int(minimum_strength))
-
-    stealth_disadvantage = bool(profile.get("stealth_disadvantage"))
-    if metadata.get("stealth_disadvantage") != stealth_disadvantage:
-        metadata["stealth_disadvantage"] = stealth_disadvantage
-        fields.append("stealth_disadvantage")
-
-    parsed_bonus = int(profile.get("parsed_bonus") or 0)
-    if parsed_bonus > 0:
-        if _parse_optional_int_value(metadata.get("bonus_ac")) != parsed_bonus:
-            metadata["bonus_ac"] = f"+{parsed_bonus}"
-            fields.append("bonus_ac")
-        set_if_missing("base_item", f"{profile['title']}|PHB")
+    bonus_weapon = int(profile.get("bonus_weapon") or 0)
+    if bonus_weapon > 0 and _parse_optional_int_value(metadata.get("bonus_weapon")) != bonus_weapon:
+        metadata["bonus_weapon"] = bonus_weapon
+        fields.append("bonus_weapon")
 
     return metadata, fields
+
+
+def _resolve_weapon_profile_for_entry(
+    entry: SystemsEntryRecord,
+    metadata: dict[str, Any],
+) -> dict[str, Any] | None:
+    profiles = _load_phb_weapon_profiles()
+    _, entry_title_bonus = _split_magic_item_name(str(entry.title or "").strip())
+    candidate_titles = [
+        str(metadata.get("base_item") or "").split("|", 1)[0].strip(),
+        str(entry.title or "").strip(),
+    ]
+    seen: set[str] = set()
+    for raw_title in candidate_titles:
+        if not raw_title:
+            continue
+        base_title, parsed_bonus = _split_magic_item_name(raw_title)
+        for candidate in _title_candidates(base_title):
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            profile = profiles.get(candidate)
+            if profile is None:
+                continue
+            base_damage = str(profile.get("damage") or "").strip()
+            damage_type = str(profile.get("damage_type") or "").strip()
+            return {
+                "title": str(profile.get("title") or base_title).strip(),
+                "type": str(profile.get("type") or "").strip(),
+                "weapon_category": str(profile.get("weapon_category") or "").strip(),
+                "dmg1": base_damage,
+                "damage": _format_weapon_profile_damage(base_damage, damage_type),
+                "versatile_damage": str(profile.get("versatile_damage") or "").strip(),
+                "damage_type": damage_type,
+                "range": str(profile.get("range") or "").strip(),
+                "properties": [str(item).strip() for item in list(profile.get("properties") or []) if str(item).strip()],
+                "bonus_weapon": parsed_bonus or entry_title_bonus,
+            }
+    return None
+
+
+def _format_weapon_profile_damage(raw_dmg: str, raw_damage_type: str) -> str:
+    damage_type = str(raw_damage_type or "").strip()
+    if not damage_type:
+        return str(raw_dmg or "").strip()
+    damage_type_key = damage_type.upper()
+    damage_type_text = {
+        "B": "bludgeoning",
+        "P": "piercing",
+        "S": "slashing",
+    }.get(damage_type_key, str(damage_type).lower())
+    parts = [str(raw_dmg or "").strip(), damage_type_text]
+    return " ".join(part for part in parts if part).strip()
 
 
 def _metadata_value_present(value: Any) -> bool:
@@ -212,6 +288,20 @@ def _split_magic_item_name(raw_name: Any) -> tuple[str, int]:
 
 def _load_phb_armor_profiles() -> dict[str, dict[str, Any]]:
     reference_path = Path(__file__).resolve().parent / "data" / "phb_armor_profiles.json"
+    if not reference_path.exists():
+        return {}
+    payload = json.loads(reference_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        normalize_lookup(str(title)): {"title": str(title).strip(), **dict(profile or {})}
+        for title, profile in payload.items()
+        if isinstance(profile, dict)
+    }
+
+
+def _load_phb_weapon_profiles() -> dict[str, dict[str, Any]]:
+    reference_path = Path(__file__).resolve().parent / "data" / "phb_weapon_profiles.json"
     if not reference_path.exists():
         return {}
     payload = json.loads(reference_path.read_text(encoding="utf-8"))

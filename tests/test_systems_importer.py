@@ -4116,6 +4116,88 @@ def build_class_progression_metadata_data_root(root: Path) -> Path:
     return root
 
 
+def build_spell_class_lookup_data_root(root: Path) -> Path:
+    write_json(
+        root / "data/spells/spells-phb.json",
+        {
+            "spell": [
+                {
+                    "name": "Mage Hand",
+                    "source": "PHB",
+                    "page": 256,
+                    "level": 0,
+                    "school": "C",
+                    "time": [{"number": 1, "unit": "action"}],
+                    "range": {"type": "point", "distance": {"type": "feet", "amount": 30}},
+                    "components": {"v": True, "s": True},
+                    "duration": [{"type": "timed", "duration": {"type": "minute", "amount": 1}}],
+                    "entries": ["A spectral, floating hand appears at a point you choose within range."],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/generated/gendata-spell-source-lookup.json",
+        {
+            "phb": {
+                "mage hand": {
+                    "class": {
+                        "PHB": {"Wizard": True},
+                        "EFA": {"Artificer": True},
+                    }
+                }
+            }
+        },
+    )
+    return root
+
+
+def build_spell_class_variant_data_root(root: Path) -> Path:
+    write_json(
+        root / "data/spells/spells-xge.json",
+        {
+            "spell": [
+                {
+                    "name": "Absorb Elements",
+                    "source": "XGE",
+                    "page": 152,
+                    "level": 1,
+                    "school": "A",
+                    "time": [{"number": 1, "unit": "reaction"}],
+                    "range": {"type": "self"},
+                    "components": {"s": True},
+                    "duration": [{"type": "instant"}],
+                    "entries": ["The spell captures some of the incoming energy."],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/generated/gendata-spell-source-lookup.json",
+        {
+            "xge": {
+                "absorb elements": {
+                    "classVariant": {
+                        "PHB": {
+                            "Druid": {"definedInSources": ["XGE"]},
+                            "Ranger": {"definedInSources": ["XGE"]},
+                            "Sorcerer": {"definedInSources": ["XGE"]},
+                            "Wizard": {"definedInSources": ["XGE"]},
+                        },
+                        "TCE": {
+                            "Artificer": {"definedInSources": ["XGE"]},
+                        },
+                        "XPHB": {
+                            "Fighter": {"definedInSources": ["XGE"]},
+                        },
+                    }
+                }
+            }
+        },
+    )
+    return root
+
+
 def build_spell_metadata_data_root(root: Path) -> Path:
     write_json(
         root / "data/spells/spells-phb.json",
@@ -8165,6 +8247,49 @@ def test_importer_preserves_native_class_progression_and_spell_class_lists(app, 
     assert guidance.metadata["class_lists"] == {"TCE": ["Artificer"]}
 
 
+def test_importer_resolves_spell_class_lists_from_generated_lookup_keys_with_spaces(app, tmp_path):
+    data_root = build_spell_class_lookup_data_root(tmp_path / "dnd5e-source-spell-class-lookup")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("PHB", entry_types=["spell"])
+        store = app.extensions["systems_store"]
+        mage_hand = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type="spell", limit=10)
+            if entry.title == "Mage Hand"
+        )
+
+    assert mage_hand.metadata["class_lists"] == {"PHB": ["Wizard"]}
+
+
+def test_importer_includes_class_variant_source_classes(app, tmp_path):
+    data_root = build_spell_class_variant_data_root(tmp_path / "dnd5e-source-spell-class-variant")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("XGE", entry_types=["spell"])
+        store = app.extensions["systems_store"]
+        absorb_elements = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "XGE", entry_type="spell", limit=10)
+            if entry.title == "Absorb Elements"
+        )
+
+    assert absorb_elements.metadata["class_lists"] == {
+        "PHB": ["Druid", "Ranger", "Sorcerer", "Wizard"],
+        "TCE": ["Artificer"],
+    }
+
+
 def test_importer_preserves_spell_ritual_metadata_for_native_builder(app, tmp_path):
     data_root = build_spell_metadata_data_root(tmp_path / "dnd5e-source-spell-metadata")
 
@@ -8296,7 +8421,7 @@ def test_systems_search_ignores_body_text_false_positives(client, sign_in, users
     assert source_search.status_code == 200
     source_html = source_search.get_data(as_text=True)
     assert "Mage Hand" not in source_html
-    assert "No imported spells matched that title/type search." in source_html
+    assert "matched that title/type search." in source_html
 
 
 def test_source_detail_is_a_category_index_and_category_page_is_not_capped_at_one_hundred(

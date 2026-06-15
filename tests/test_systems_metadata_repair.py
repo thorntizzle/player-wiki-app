@@ -220,3 +220,93 @@ def test_repair_dnd5e_item_metadata_backfills_magic_armor_for_character_math(app
         )
 
         assert normalized.stats["armor_class"] == 17
+
+
+def test_repair_dnd5e_item_metadata_backfills_phb_weapon_metadata(app):
+    with app.app_context():
+        store = app.extensions["systems_store"]
+        store.upsert_library(DND_5E_SYSTEM_CODE, title="DND 5E", system_code=DND_5E_SYSTEM_CODE)
+        store.upsert_source(
+            DND_5E_SYSTEM_CODE,
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        store.upsert_source(
+            DND_5E_SYSTEM_CODE,
+            "DMG",
+            title="Dungeon Master's Guide",
+            license_class="proprietary_private",
+            public_visibility_allowed=False,
+            requires_unofficial_notice=True,
+        )
+        store.upsert_entry(
+            DND_5E_SYSTEM_CODE,
+            "PHB",
+            entry_key="dnd-5e|item|phb|longsword",
+            entry_type="item",
+            slug="phb-item-longsword",
+            title="Longsword",
+            search_text="longsword",
+            player_safe_default=True,
+            metadata={"type": "", "rarity": "none"},
+            body={},
+            rendered_html="",
+        )
+        store.upsert_entry(
+            DND_5E_SYSTEM_CODE,
+            "DMG",
+            entry_key="dnd-5e|item|dmg|1longsword",
+            entry_type="item",
+            slug="dmg-item-1longsword",
+            title="+1 Longsword",
+            search_text="+1 longsword",
+            player_safe_default=False,
+            metadata={"base_item": "Longsword|PHB", "bonus_weapon": 0},
+            body={},
+            rendered_html="",
+        )
+
+        dry_run = repair_dnd5e_item_metadata(store, dry_run=True, source_ids=["phb", "dmg"])
+        unchanged_longsword = store.get_entry(DND_5E_SYSTEM_CODE, "dnd-5e|item|phb|longsword")
+        unchanged_magic = store.get_entry(DND_5E_SYSTEM_CODE, "dnd-5e|item|dmg|1longsword")
+        assert dry_run.scanned_count == 2
+        assert dry_run.repairable_count == 2
+        assert unchanged_longsword is not None
+        assert unchanged_magic is not None
+        assert unchanged_longsword.metadata["type"] == ""
+
+        result = repair_dnd5e_item_metadata(store, source_ids=["PHB", "DMG"])
+        repaired_longsword = store.get_entry(DND_5E_SYSTEM_CODE, "dnd-5e|item|phb|longsword")
+        repaired_magic = store.get_entry(DND_5E_SYSTEM_CODE, "dnd-5e|item|dmg|1longsword")
+
+        assert result.scanned_count == 2
+        assert result.repairable_count == 2
+        assert result.repaired_count == 2
+
+        assert repaired_longsword is not None
+        assert repaired_longsword.metadata["type"] == "M"
+        assert repaired_longsword.metadata["weapon_category"] == "martial"
+        assert repaired_longsword.metadata["dmg1"] == "1d8"
+        assert repaired_longsword.metadata["damage"] == "1d8 slashing"
+        assert repaired_longsword.metadata["versatile_damage"] == "1d10"
+        assert repaired_longsword.metadata["damage_type"] == "S"
+        assert repaired_longsword.metadata["range"] == ""
+        assert repaired_longsword.metadata["properties"] == ["V"]
+
+        assert repaired_magic is not None
+        assert repaired_magic.metadata["type"] == "M"
+        assert repaired_magic.metadata["weapon_category"] == "martial"
+        assert repaired_magic.metadata["dmg1"] == "1d8"
+        assert repaired_magic.metadata["damage"] == "1d8 slashing"
+        assert repaired_magic.metadata["versatile_damage"] == "1d10"
+        assert repaired_magic.metadata["damage_type"] == "S"
+        assert repaired_magic.metadata["range"] == ""
+        assert repaired_magic.metadata["properties"] == ["V"]
+        assert repaired_magic.metadata["bonus_weapon"] == 1
+
+        clean_second_pass = repair_dnd5e_item_metadata(store, source_ids=["PHB", "DMG"])
+        assert clean_second_pass.scanned_count == 2
+        assert clean_second_pass.repairable_count == 0

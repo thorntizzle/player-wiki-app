@@ -1876,10 +1876,23 @@ class Dnd5eSystemsImporter:
         class_lists: dict[str, list[str]] = {}
         generated_lookup = self._load_generated_spell_source_lookup()
         source_key = str(raw_entry.get("source") or "").strip().lower()
-        spell_key = normalize_lookup(raw_entry.get("name"))
-        generated_spell_lookup = dict(dict(generated_lookup.get(source_key) or {}).get(spell_key) or {})
+        normalized_source_key = source_key.upper()
+        source_spells = dict(generated_lookup.get(source_key) or {})
+        generated_spell_lookup: dict[str, Any] = {}
+        for spell_lookup_key in self._build_spell_lookup_keys(raw_entry):
+            lookup_value = source_spells.get(spell_lookup_key)
+            if (
+                isinstance(lookup_value, dict)
+                and (lookup_value.get("class") or lookup_value.get("classVariant"))
+            ):
+                generated_spell_lookup = lookup_value
+                break
+
         generated_class_lookup = dict(generated_spell_lookup.get("class") or {})
         for class_source_id, class_names in generated_class_lookup.items():
+            normalized_class_source_id = str(class_source_id).strip().upper()
+            if normalized_class_source_id in UNSUPPORTED_CLASS_VARIANT_SOURCE_IDS:
+                continue
             if isinstance(class_names, dict):
                 normalized_names = [
                     str(class_name).strip()
@@ -1887,7 +1900,41 @@ class Dnd5eSystemsImporter:
                     if is_present and str(class_name).strip()
                 ]
                 if normalized_names:
-                    class_lists[str(class_source_id).strip().upper()] = normalized_names
+                    class_lists[normalized_class_source_id] = normalized_names
+
+        generated_class_variant_lookup = dict(generated_spell_lookup.get("classVariant") or {})
+        for class_source_id, class_names in generated_class_variant_lookup.items():
+            normalized_class_source_id = str(class_source_id).strip().upper()
+            if normalized_class_source_id in UNSUPPORTED_CLASS_VARIANT_SOURCE_IDS:
+                continue
+            if not isinstance(class_names, dict):
+                continue
+            normalized_source_class_names: list[str] = []
+            for class_name, class_data in class_names.items():
+                if not isinstance(class_name, str):
+                    continue
+                name = class_name.strip()
+                if not name:
+                    continue
+                if isinstance(class_data, dict):
+                    defined_in_sources = class_data.get("definedInSources")
+                    if isinstance(defined_in_sources, list):
+                        normalized_defined_in_sources = {
+                            str(defined_source).strip().upper() for defined_source in defined_in_sources
+                        }
+                        if normalized_source_key and normalized_source_key not in normalized_defined_in_sources:
+                            continue
+                elif isinstance(class_data, bool):
+                    if not class_data:
+                        continue
+                else:
+                    continue
+                normalized_source_class_names.append(name)
+            if normalized_source_class_names:
+                bucket = class_lists.setdefault(normalized_class_source_id, [])
+                for class_name in normalized_source_class_names:
+                    if class_name not in bucket:
+                        bucket.append(class_name)
 
         raw_classes = self._clean_data(raw_entry.get("classes"))
         if isinstance(raw_classes, dict):
@@ -1904,6 +1951,23 @@ class Dnd5eSystemsImporter:
                     bucket.append(class_name)
 
         return class_lists
+
+    def _build_spell_lookup_keys(self, raw_entry: dict[str, Any]) -> list[str]:
+        raw_name = str(raw_entry.get("name") or "").strip()
+        lower_name = raw_name.lower().strip()
+        candidate_keys: list[str] = [
+            normalize_lookup(raw_name),
+            lower_name,
+            " ".join(lower_name.split()),
+        ]
+        seen = set()
+        deduped_keys: list[str] = []
+        for key in candidate_keys:
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped_keys.append(key)
+        return deduped_keys
 
     def _load_generated_spell_source_lookup(self) -> dict[str, Any]:
         if self._spell_source_lookup_cache is not None:
