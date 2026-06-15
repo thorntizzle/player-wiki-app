@@ -285,7 +285,7 @@ def test_campaign_member_can_open_combat_page_and_campaign_links_to_it(client, s
     assert "/campaigns/linden-pass/combat/status" not in combat_html
     assert "Add player character" not in combat_html
     assert "Add NPC from Systems" not in combat_html
-    assert "Add custom NPC combatant" not in combat_html
+    assert "Add custom combatant" not in combat_html
     assert 'data-live-active-interval-ms="500"' in combat_html
     assert 'data-live-idle-interval-ms="3000"' in combat_html
 
@@ -786,10 +786,10 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert 'class="page-layout combat-layout combat-layout--workspace"' in dm_controls_html
     assert "Add player character" not in dm_html
     assert "Add NPC from Systems" not in dm_html
-    assert "Add custom NPC combatant" not in dm_html
+    assert "Add custom combatant" not in dm_html
     assert "Add player character" in dm_controls_html
     assert "Add NPC from Systems" in dm_controls_html
-    assert "Add custom NPC combatant" in dm_controls_html
+    assert "Add custom combatant" in dm_controls_html
     _assert_form_has_priority_field(
         dm_controls_html,
         "/campaigns/linden-pass/combat/player-combatants",
@@ -827,6 +827,8 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
         dm_controls_html,
     )
     assert "captureSystemsMonsterSearchState" in dm_html
+    assert "captureControlsAddMode" in dm_html
+    assert "restoreControlsAddMode(controlsAddMode)" in dm_html
     assert 'liveRoot.dataset.loading = "1";' in dm_html
     assert "const findMatchingForm = (root, descriptor) =>" in dm_html
     assert 'focusState.form = describeForm(root, form);' in dm_html
@@ -862,6 +864,45 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert "window.__playerWikiCombatWorkspace" in status_html
     assert "window.__playerWikiLiveUiTools" in status_html
     assert "uiStateTools.captureViewportAnchor(liveRoot)" in status_html
+
+
+def test_dm_controls_uses_single_add_combatant_card_with_mode_selector(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    dm_controls_page = client.get("/campaigns/linden-pass/combat/dm?view=controls")
+    assert dm_controls_page.status_code == 200
+    dm_controls_html = dm_controls_page.get_data(as_text=True)
+
+    assert dm_controls_html.count('<section class="card sidebar-card">') == 2
+    assert '<h2>Add combatant</h2>' in dm_controls_html
+    assert "combat-add-combatant-mode-switcher" in dm_controls_html
+    assert 'role="radiogroup"' in dm_controls_html
+    assert 'aria-label="Add combatant type"' in dm_controls_html
+    assert 'name="combat-add-mode"' in dm_controls_html
+    assert 'id="combat-add-mode-player"' in dm_controls_html
+    assert 'id="combat-add-mode-systems"' in dm_controls_html
+    assert 'id="combat-add-mode-dm-content"' in dm_controls_html
+    assert 'id="combat-add-mode-custom"' in dm_controls_html
+    assert 'value="player"' in dm_controls_html
+    assert 'value="systems"' in dm_controls_html
+    assert 'value="dm-content"' in dm_controls_html
+    assert 'value="custom"' in dm_controls_html
+    assert "Add player character" in dm_controls_html
+    assert "Add NPC from Systems" in dm_controls_html
+    assert "Add NPC from DM Content" in dm_controls_html
+    assert "Add custom combatant" in dm_controls_html
+    assert dm_controls_html.count('id="combat-add-mode-player"') == 1
+    assert dm_controls_html.count('id="combat-add-mode-systems"') == 1
+    assert dm_controls_html.count('id="combat-add-mode-dm-content"') == 1
+    assert dm_controls_html.count('id="combat-add-mode-custom"') == 1
+    assert re.search(r'<div class="combat-add-combatant-mode-panel [^"]*combat-add-combatant-mode-panel--player[^"]*"', dm_controls_html)
+    assert re.search(r'<div class="combat-add-combatant-mode-panel [^"]*combat-add-combatant-mode-panel--systems[^"]*"', dm_controls_html)
+    assert re.search(r'<div class="combat-add-combatant-mode-panel [^"]*combat-add-combatant-mode-panel--dm-content[^"]*"', dm_controls_html)
+    assert re.search(r'<div class="combat-add-combatant-mode-panel [^"]*combat-add-combatant-mode-panel--custom[^"]*"', dm_controls_html)
+    assert '<h2>Add player character</h2>' not in dm_controls_html
+    assert '<h2>Add NPC from Systems</h2>' not in dm_controls_html
+    assert '<h2>Add NPC from DM Content</h2>' not in dm_controls_html
+    assert '<h2>Add custom combatant</h2>' not in dm_controls_html
 
 
 def test_combat_live_state_and_async_updates_return_partials(app, client, sign_in, users):

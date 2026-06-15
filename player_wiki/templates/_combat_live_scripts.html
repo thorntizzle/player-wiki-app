@@ -166,6 +166,27 @@
       });
     };
 
+    const captureControlsAddMode = () => {
+      if (!(controlsRoot instanceof HTMLElement)) {
+        return "";
+      }
+      const selectedMode = controlsRoot.querySelector('input[name="combat-add-mode"]:checked');
+      return selectedMode instanceof HTMLInputElement ? selectedMode.id : "";
+    };
+
+    const restoreControlsAddMode = (selectedModeId) => {
+      if (!(controlsRoot instanceof HTMLElement) || !selectedModeId) {
+        return;
+      }
+      const modeInputs = Array.from(controlsRoot.querySelectorAll('input[name="combat-add-mode"]'));
+      const selectedMode = modeInputs.find(
+        (input) => input instanceof HTMLInputElement && input.id === selectedModeId,
+      );
+      if (selectedMode instanceof HTMLInputElement) {
+        selectedMode.checked = true;
+      }
+    };
+
     const captureSystemsMonsterSearchState = () => {
       if (!(controlsRoot instanceof HTMLElement)) {
         return null;
@@ -934,6 +955,7 @@
       const workspaceSectionState = combatWorkspaceTools ? combatWorkspaceTools.capture(liveRoot) : "";
       const carouselState = captureCombatantCarouselState(liveRoot);
       const controlsFormState = captureControlsFormState();
+      const controlsAddMode = captureControlsAddMode();
       const systemsMonsterSearchState = captureSystemsMonsterSearchState();
       if (!force && nextToken === combatStateToken) {
         if (typeof payload.combatant_detail_state_token === "string") {
@@ -978,6 +1000,7 @@
         window.clearTimeout(monsterSearchTimerId);
         controlsRoot.innerHTML = payload.controls_html;
         initializeSystemsMonsterSearch(systemsMonsterSearchState);
+        restoreControlsAddMode(controlsAddMode);
         restoreControlsFormState(controlsFormState);
       }
       if (forceFlash && flashRoot && typeof payload.flash_html === "string") {

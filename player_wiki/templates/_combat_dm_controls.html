@@ -1,97 +1,55 @@
 <section class="card sidebar-card">
-  <h2>Add player character</h2>
-  {% if available_character_choices %}
-    <form
-      method="post"
-      action="{{ url_for('campaign_combat_add_player', campaign_slug=campaign.slug) }}"
-      class="stack-form"
-      data-combat-async
+  <h2>Add combatant</h2>
+  <div class="combat-add-combatant-mode-switcher" role="radiogroup" aria-label="Add combatant type">
+    <input
+      id="combat-add-mode-player"
+      name="combat-add-mode"
+      type="radio"
+      value="player"
+      class="combat-add-combatant-mode-radio combat-add-combatant-mode-radio--player"
+      checked
     >
-      <input type="hidden" name="combat_view" value="dm">
-      <input type="hidden" name="view" value="controls">
-      {% if requested_combatant_id %}
-        <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
-      {% endif %}
-      <label class="field">
-        <span>Character</span>
-        <select name="character_slug">
-          {% for choice in available_character_choices %}
-            <option value="{{ choice.slug }}">{{ choice.name }} - {{ choice.subtitle }} - Init {{ choice.initiative_bonus }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label class="field">
-        <span>Turn value</span>
-        <input type="number" name="turn_value" placeholder="Defaults to initiative bonus">
-      </label>
-      <label class="field">
-        <span>Priority</span>
-        <input type="number" name="initiative_priority" value="1" min="1">
-      </label>
-      <button type="submit">Add player character</button>
-    </form>
-  {% else %}
-    <p class="meta">All visible player characters are already in the tracker.</p>
-  {% endif %}
-</section>
-
-  {% if can_access_systems %}
-    <section class="card sidebar-card">
-      <h2>Add NPC from Systems</h2>
-      <form
-        method="post"
-        action="{{ url_for('campaign_combat_add_systems_monster', campaign_slug=campaign.slug) }}"
-        class="stack-form"
-        data-combat-async
-        data-systems-monster-search-form
-        data-systems-monster-search-url="{{ url_for('campaign_combat_search_systems_monsters', campaign_slug=campaign.slug) }}"
+    {% if can_access_systems %}
+      <input
+        id="combat-add-mode-systems"
+        name="combat-add-mode"
+        type="radio"
+        value="systems"
+        class="combat-add-combatant-mode-radio combat-add-combatant-mode-radio--systems"
       >
-        <input type="hidden" name="combat_view" value="dm">
-        <input type="hidden" name="view" value="controls">
-        {% if requested_combatant_id %}
-          <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
-        {% endif %}
-        <label class="field">
-          <span>Search monsters</span>
-          <input
-            type="search"
-            name="monster_query"
-            placeholder="Type at least 2 letters"
-            autocomplete="off"
-            data-systems-monster-query
-          >
-        </label>
-        <p class="meta" data-systems-monster-status>Type at least 2 letters to search the Systems monster list.</p>
-        <label class="field">
-          <span>Monster</span>
-          <select name="entry_key" data-systems-monster-results disabled>
-            <option value="">Search to load matching monsters</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>Display name</span>
-          <input type="text" name="display_name" placeholder="Defaults to monster name">
-        </label>
-        <label class="field">
-          <span>Turn value</span>
-          <input type="number" name="turn_value" placeholder="Defaults to initiative bonus">
-        </label>
-        <label class="field">
-          <span>Priority</span>
-          <input type="number" name="initiative_priority" value="1" min="1">
-        </label>
-        <button type="submit" data-systems-monster-submit disabled>Add from Systems</button>
-      </form>
-    </section>
-  {% endif %}
+    {% endif %}
+    {% if can_access_dm_content %}
+      <input
+        id="combat-add-mode-dm-content"
+        name="combat-add-mode"
+        type="radio"
+        value="dm-content"
+        class="combat-add-combatant-mode-radio combat-add-combatant-mode-radio--dm-content"
+      >
+    {% endif %}
+    <input
+      id="combat-add-mode-custom"
+      name="combat-add-mode"
+      type="radio"
+      value="custom"
+      class="combat-add-combatant-mode-radio combat-add-combatant-mode-radio--custom"
+    >
+    <div class="combat-add-combatant-mode-toggle">
+      <label class="ghost-button" for="combat-add-mode-player">Add player character</label>
+      {% if can_access_systems %}
+        <label class="ghost-button" for="combat-add-mode-systems">Add NPC from Systems</label>
+      {% endif %}
+      {% if can_access_dm_content %}
+        <label class="ghost-button" for="combat-add-mode-dm-content">Add NPC from DM Content</label>
+      {% endif %}
+      <label class="ghost-button" for="combat-add-mode-custom">Add custom combatant</label>
+    </div>
 
-  {% if can_access_dm_content %}
-    <section class="card sidebar-card">
-      <h2>Add NPC from DM Content</h2>
-      {% if available_statblock_choices %}
+    <div class="combat-add-combatant-mode-panel combat-add-combatant-mode-panel--player">
+      {% if available_character_choices %}
         <form
           method="post"
-          action="{{ url_for('campaign_combat_add_statblock_npc', campaign_slug=campaign.slug) }}"
+          action="{{ url_for('campaign_combat_add_player', campaign_slug=campaign.slug) }}"
           class="stack-form"
           data-combat-async
         >
@@ -101,80 +59,167 @@
             <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
           {% endif %}
           <label class="field">
-            <span>Statblock</span>
-            <select name="statblock_id">
-              {% for choice in available_statblock_choices %}
-                <option value="{{ choice.id }}">{{ choice.title }} - {{ choice.subtitle }} - Init {{ choice.initiative_bonus }}</option>
+            <span>Character</span>
+            <select name="character_slug">
+              {% for choice in available_character_choices %}
+                <option value="{{ choice.slug }}">{{ choice.name }} - {{ choice.subtitle }} - Init {{ choice.initiative_bonus }}</option>
               {% endfor %}
             </select>
           </label>
           <label class="field">
-            <span>Display name</span>
-            <input type="text" name="display_name" placeholder="Defaults to statblock title">
-          </label>
-          <label class="field">
             <span>Turn value</span>
-            <input type="number" name="turn_value" placeholder="Defaults to statblock initiative bonus">
+            <input type="number" name="turn_value" placeholder="Defaults to initiative bonus">
           </label>
           <label class="field">
             <span>Priority</span>
             <input type="number" name="initiative_priority" value="1" min="1">
           </label>
-          <button type="submit">Add from DM Content</button>
+          <button type="submit">Add player character</button>
         </form>
       {% else %}
-        <p class="meta">Upload statblocks on the DM Content page to use them here.</p>
+        <p class="meta">All visible player characters are already in the tracker.</p>
       {% endif %}
-    </section>
-  {% endif %}
+    </div>
 
-<section class="card sidebar-card">
-  <h2>Add custom NPC combatant</h2>
-  <form
-    method="post"
-    action="{{ url_for('campaign_combat_add_npc', campaign_slug=campaign.slug) }}"
-    class="stack-form"
-    data-combat-async
-  >
-    <input type="hidden" name="combat_view" value="dm">
-    <input type="hidden" name="view" value="controls">
-    {% if requested_combatant_id %}
-      <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+    {% if can_access_systems %}
+      <div class="combat-add-combatant-mode-panel combat-add-combatant-mode-panel--systems">
+        <form
+          method="post"
+          action="{{ url_for('campaign_combat_add_systems_monster', campaign_slug=campaign.slug) }}"
+          class="stack-form"
+          data-combat-async
+          data-systems-monster-search-form
+          data-systems-monster-search-url="{{ url_for('campaign_combat_search_systems_monsters', campaign_slug=campaign.slug) }}"
+        >
+          <input type="hidden" name="combat_view" value="dm">
+          <input type="hidden" name="view" value="controls">
+          {% if requested_combatant_id %}
+            <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+          {% endif %}
+          <label class="field">
+            <span>Search monsters</span>
+            <input
+              type="search"
+              name="monster_query"
+              placeholder="Type at least 2 letters"
+              autocomplete="off"
+              data-systems-monster-query
+            >
+          </label>
+          <p class="meta" data-systems-monster-status>Type at least 2 letters to search the Systems monster list.</p>
+          <label class="field">
+            <span>Monster</span>
+            <select name="entry_key" data-systems-monster-results disabled>
+              <option value="">Search to load matching monsters</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Display name</span>
+            <input type="text" name="display_name" placeholder="Defaults to monster name">
+          </label>
+          <label class="field">
+            <span>Turn value</span>
+            <input type="number" name="turn_value" placeholder="Defaults to initiative bonus">
+          </label>
+          <label class="field">
+            <span>Priority</span>
+            <input type="number" name="initiative_priority" value="1" min="1">
+          </label>
+          <button type="submit" data-systems-monster-submit disabled>Add from Systems</button>
+        </form>
+      </div>
     {% endif %}
-    <label class="field">
-      <span>Name</span>
-      <input type="text" name="display_name" placeholder="Clockwork Hound">
-    </label>
-    <label class="field">
-      <span>Turn value</span>
-      <input type="number" name="turn_value" value="0">
-    </label>
-    <label class="field">
-      <span>Priority</span>
-      <input type="number" name="initiative_priority" value="1" min="1">
-    </label>
-    <label class="field">
-      <span>Dex mod</span>
-      <input type="number" name="dexterity_modifier" value="0">
-    </label>
-    <label class="field">
-      <span>Current HP</span>
-      <input type="number" name="current_hp" value="0">
-    </label>
-    <label class="field">
-      <span>Max HP</span>
-      <input type="number" name="max_hp" value="0">
-    </label>
-    <label class="field">
-      <span>Temp HP</span>
-      <input type="number" name="temp_hp" value="0">
-    </label>
-    <label class="field">
-      <span>Movement</span>
-      <input type="number" name="movement_total" value="30">
-    </label>
-    <button type="submit">Add NPC combatant</button>
-  </form>
+
+    {% if can_access_dm_content %}
+      <div class="combat-add-combatant-mode-panel combat-add-combatant-mode-panel--dm-content">
+        {% if available_statblock_choices %}
+          <form
+            method="post"
+            action="{{ url_for('campaign_combat_add_statblock_npc', campaign_slug=campaign.slug) }}"
+            class="stack-form"
+            data-combat-async
+          >
+            <input type="hidden" name="combat_view" value="dm">
+            <input type="hidden" name="view" value="controls">
+            {% if requested_combatant_id %}
+              <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+            {% endif %}
+            <label class="field">
+              <span>Statblock</span>
+              <select name="statblock_id">
+                {% for choice in available_statblock_choices %}
+                  <option value="{{ choice.id }}">{{ choice.title }} - {{ choice.subtitle }} - Init {{ choice.initiative_bonus }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="field">
+              <span>Display name</span>
+              <input type="text" name="display_name" placeholder="Defaults to statblock title">
+            </label>
+            <label class="field">
+              <span>Turn value</span>
+              <input type="number" name="turn_value" placeholder="Defaults to statblock initiative bonus">
+            </label>
+            <label class="field">
+              <span>Priority</span>
+              <input type="number" name="initiative_priority" value="1" min="1">
+            </label>
+            <button type="submit">Add from DM Content</button>
+          </form>
+        {% else %}
+          <p class="meta">Upload statblocks on the DM Content page to use them here.</p>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    <div class="combat-add-combatant-mode-panel combat-add-combatant-mode-panel--custom">
+      <form
+        method="post"
+        action="{{ url_for('campaign_combat_add_npc', campaign_slug=campaign.slug) }}"
+        class="stack-form"
+        data-combat-async
+      >
+        <input type="hidden" name="combat_view" value="dm">
+        <input type="hidden" name="view" value="controls">
+        {% if requested_combatant_id %}
+          <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+        {% endif %}
+        <label class="field">
+          <span>Name</span>
+          <input type="text" name="display_name" placeholder="Clockwork Hound">
+        </label>
+        <label class="field">
+          <span>Turn value</span>
+          <input type="number" name="turn_value" value="0">
+        </label>
+        <label class="field">
+          <span>Priority</span>
+          <input type="number" name="initiative_priority" value="1" min="1">
+        </label>
+        <label class="field">
+          <span>Dex mod</span>
+          <input type="number" name="dexterity_modifier" value="0">
+        </label>
+        <label class="field">
+          <span>Current HP</span>
+          <input type="number" name="current_hp" value="0">
+        </label>
+        <label class="field">
+          <span>Max HP</span>
+          <input type="number" name="max_hp" value="0">
+        </label>
+        <label class="field">
+          <span>Temp HP</span>
+          <input type="number" name="temp_hp" value="0">
+        </label>
+        <label class="field">
+          <span>Movement</span>
+          <input type="number" name="movement_total" value="30">
+        </label>
+        <button type="submit">Add NPC combatant</button>
+      </form>
+    </div>
+  </div>
 </section>
 
 <section class="card sidebar-card">

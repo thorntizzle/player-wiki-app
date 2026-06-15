@@ -1316,6 +1316,59 @@ button {
   border: 0;
 }
 
+.combat-add-combatant-mode-switcher,
+.combat-add-combatant-mode-toggle,
+.combat-add-combatant-mode-panel {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.combat-add-combatant-mode-switcher {
+  gap: 1rem;
+}
+
+.combat-add-combatant-mode-radio {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.combat-add-combatant-mode-toggle {
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+}
+
+.combat-add-combatant-mode-toggle .ghost-button {
+  width: 100%;
+}
+
+.combat-add-combatant-mode-radio--player:focus-visible ~ .combat-add-combatant-mode-toggle label[for="combat-add-mode-player"],
+.combat-add-combatant-mode-radio--systems:focus-visible ~ .combat-add-combatant-mode-toggle label[for="combat-add-mode-systems"],
+.combat-add-combatant-mode-radio--dm-content:focus-visible ~ .combat-add-combatant-mode-toggle label[for="combat-add-mode-dm-content"],
+.combat-add-combatant-mode-radio--custom:focus-visible ~ .combat-add-combatant-mode-toggle label[for="combat-add-mode-custom"] {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.combat-add-combatant-mode-radio--player:checked ~ .combat-add-combatant-mode-toggle label[for="combat-add-mode-player"],
+.combat-add-combatant-mode-radio--systems:checked ~ .combat-add-combatant-mode-toggle label[for="combat-add-mode-systems"],
+.combat-add-combatant-mode-radio--dm-content:checked ~ .combat-add-combatant-mode-toggle label[for="combat-add-mode-dm-content"],
+.combat-add-combatant-mode-radio--custom:checked ~ .combat-add-combatant-mode-toggle label[for="combat-add-mode-custom"] {
+  border-color: var(--border-accent);
+  background: var(--surface-highlight);
+  box-shadow: inset 0 0 0 1px var(--overlay-accent);
+}
+
+.combat-add-combatant-mode-panel {
+  display: none;
+}
+
+.combat-add-combatant-mode-radio--player:checked ~ .combat-add-combatant-mode-panel--player,
+.combat-add-combatant-mode-radio--systems:checked ~ .combat-add-combatant-mode-panel--systems,
+.combat-add-combatant-mode-radio--dm-content:checked ~ .combat-add-combatant-mode-panel--dm-content,
+.combat-add-combatant-mode-radio--custom:checked ~ .combat-add-combatant-mode-panel--custom {
+  display: grid;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
