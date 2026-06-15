@@ -1,0 +1,243 @@
+<script>
+  (() => {
+    const root = document.querySelector("[data-campaign-global-search-root]");
+    if (!(root instanceof HTMLElement) || root.dataset.campaignGlobalSearchInitialized === "1") {
+      return;
+    }
+
+    const form = root.querySelector("[data-campaign-global-search-form]");
+    const queryInput = root.querySelector("[data-campaign-global-search-query]");
+    const resultsRoot = root.querySelector("[data-campaign-global-search-results]");
+    const status = root.querySelector("[data-campaign-global-search-status]");
+    const dialog = root.querySelector("[data-campaign-global-search-dialog]");
+    const previewRoot = root.querySelector("[data-campaign-global-search-preview]");
+    const closeButton = root.querySelector("[data-campaign-global-search-close]");
+    const searchUrl = root.dataset.campaignGlobalSearchUrl || "";
+    const previewUrl = root.dataset.campaignGlobalSearchPreviewUrl || "";
+
+    if (
+      !(form instanceof HTMLFormElement)
+      || !(queryInput instanceof HTMLInputElement)
+      || !(resultsRoot instanceof HTMLElement)
+      || !(status instanceof HTMLElement)
+      || !(dialog instanceof HTMLElement)
+      || dialog.tagName.toLowerCase() !== "dialog"
+      || !(previewRoot instanceof HTMLElement)
+      || !searchUrl
+      || !previewUrl
+    ) {
+      return;
+    }
+
+    let searchAbortController = null;
+    let previewAbortController = null;
+    let searchTimerId = 0;
+
+    const setStatus = (message) => {
+      status.textContent = message || "";
+    };
+
+    const setPreviewBusy = (isBusy) => {
+      previewRoot.setAttribute("aria-busy", isBusy ? "true" : "false");
+    };
+
+    const showResults = () => {
+      resultsRoot.hidden = false;
+    };
+
+    const hideResults = () => {
+      resultsRoot.hidden = true;
+    };
+
+    const resetResults = (message = "") => {
+      resultsRoot.innerHTML = "";
+      hideResults();
+      setStatus(message);
+    };
+
+    const closeDialog = () => {
+      if (typeof dialog.close === "function") {
+        dialog.close();
+        return;
+      }
+      dialog.removeAttribute("open");
+      dialog.dispatchEvent(new Event("close"));
+    };
+
+    const openDialog = (returnFocusTarget) => {
+      dialog.__campaignGlobalSearchReturnFocus = returnFocusTarget;
+      if (typeof dialog.showModal === "function") {
+        dialog.showModal();
+      } else {
+        dialog.setAttribute("open", "");
+      }
+      if (closeButton instanceof HTMLElement) {
+        closeButton.focus({ preventScroll: true });
+      }
+    };
+
+    const renderLoadingPreview = () => {
+      setPreviewBusy(true);
+      previewRoot.innerHTML = '<p class="meta">Loading reference preview...</p>';
+    };
+
+    const renderResults = (results, message) => {
+      if (!Array.isArray(results) || !results.length) {
+        resetResults(message || "No visible wiki pages or Systems entries matched that search.");
+        return;
+      }
+
+      resultsRoot.innerHTML = "";
+      const list = document.createElement("div");
+      list.className = "campaign-global-search-result-list";
+      for (const result of results) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "campaign-global-search-result";
+        button.dataset.campaignGlobalSearchResultId = String(result.result_id || "");
+
+        const title = document.createElement("span");
+        title.className = "campaign-global-search-result__title";
+        title.textContent = String(result.title || "");
+        button.append(title);
+
+        const meta = document.createElement("span");
+        meta.className = "campaign-global-search-result__meta";
+        const kind = String(result.kind_label || "");
+        const subtitle = String(result.subtitle || "");
+        meta.textContent = subtitle ? `${kind} | ${subtitle}` : kind;
+        button.append(meta);
+
+        list.append(button);
+      }
+      resultsRoot.append(list);
+      showResults();
+      setStatus(message || `Found ${results.length} matching references.`);
+    };
+
+    const runSearch = async () => {
+      const query = queryInput.value.trim();
+      if (searchAbortController) {
+        searchAbortController.abort();
+      }
+      if (query.length < 2) {
+        resetResults(query ? "Type at least 2 letters to search." : "");
+        return;
+      }
+
+      const controller = new AbortController();
+      searchAbortController = controller;
+      setStatus("Searching...");
+      try {
+        const response = await fetch(`${searchUrl}?q=${encodeURIComponent(query)}`, {
+          headers: {
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "application/json",
+          },
+          cache: "no-store",
+          credentials: "same-origin",
+          signal: controller.signal,
+        });
+        const payload = await response.json();
+        renderResults(payload.results || [], payload.message || "");
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        resetResults("Could not search campaign references right now.");
+      } finally {
+        if (searchAbortController === controller) {
+          searchAbortController = null;
+        }
+      }
+    };
+
+    const loadPreview = async (resultId, trigger) => {
+      if (!resultId) {
+        return;
+      }
+      if (previewAbortController) {
+        previewAbortController.abort();
+      }
+      renderLoadingPreview();
+      openDialog(trigger);
+
+      const controller = new AbortController();
+      previewAbortController = controller;
+      try {
+        const response = await fetch(`${previewUrl}?result_id=${encodeURIComponent(resultId)}`, {
+          headers: {
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "application/json",
+          },
+          cache: "no-store",
+          credentials: "same-origin",
+          signal: controller.signal,
+        });
+        const payload = await response.json();
+        previewRoot.innerHTML = typeof payload.preview_html === "string"
+          ? payload.preview_html
+          : '<p class="meta">Could not load that reference right now.</p>';
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        previewRoot.innerHTML = '<p class="meta">Could not load that reference right now.</p>';
+      } finally {
+        if (previewAbortController === controller) {
+          previewAbortController = null;
+          setPreviewBusy(false);
+        }
+      }
+    };
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      window.clearTimeout(searchTimerId);
+      runSearch();
+    });
+
+    queryInput.addEventListener("input", () => {
+      window.clearTimeout(searchTimerId);
+      searchTimerId = window.setTimeout(runSearch, 250);
+    });
+
+    queryInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        window.clearTimeout(searchTimerId);
+        runSearch();
+      }
+    });
+
+    resultsRoot.addEventListener("click", (event) => {
+      const button = event.target instanceof Element
+        ? event.target.closest("[data-campaign-global-search-result-id]")
+        : null;
+      if (!(button instanceof HTMLElement)) {
+        return;
+      }
+      loadPreview(button.dataset.campaignGlobalSearchResultId || "", button);
+    });
+
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) {
+        closeDialog();
+      }
+    });
+
+    dialog.addEventListener("close", () => {
+      const returnTarget = dialog.__campaignGlobalSearchReturnFocus;
+      if (returnTarget instanceof HTMLElement && document.contains(returnTarget)) {
+        returnTarget.focus({ preventScroll: true });
+      }
+      dialog.__campaignGlobalSearchReturnFocus = null;
+    });
+
+    if (closeButton instanceof HTMLElement) {
+      closeButton.addEventListener("click", closeDialog);
+    }
+
+    root.dataset.campaignGlobalSearchInitialized = "1";
+  })();
+</script>

@@ -2,21 +2,6 @@
 
 {% block title %}{{ campaign.title }} | Campaign Player Wiki{% endblock %}
 
-{% block header_secondary %}
-  {% if can_view_wiki %}
-    <form method="get" class="search-form site-search-form" action="{{ url_for('campaign_view', campaign_slug=campaign.slug) }}">
-      <input
-        type="search"
-        name="q"
-        value="{{ query }}"
-        placeholder="Search titles, alternate names, summaries, or body text"
-        aria-label="Search pages"
-      >
-      <button type="submit">Search</button>
-    </form>
-  {% endif %}
-{% endblock %}
-
 {% block content %}
   <section class="hero compact">
     <p class="eyebrow">Campaign</p>

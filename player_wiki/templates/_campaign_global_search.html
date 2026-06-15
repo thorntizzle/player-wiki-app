@@ -1,0 +1,47 @@
+<section
+  class="campaign-global-search"
+  aria-label="Global campaign search"
+  data-campaign-global-search-root
+  data-campaign-global-search-url="{{ url_for('campaign_global_search', campaign_slug=campaign.slug) }}"
+  data-campaign-global-search-preview-url="{{ url_for('campaign_global_search_preview', campaign_slug=campaign.slug) }}"
+>
+  <form class="campaign-global-search__form" data-campaign-global-search-form>
+    <label class="campaign-global-search__field">
+      <span class="visually-hidden">Search wiki pages and Systems entries</span>
+      <input
+        type="search"
+        autocomplete="off"
+        placeholder="Search wiki or Systems"
+        data-campaign-global-search-query
+      >
+    </label>
+    <button type="submit">Search</button>
+  </form>
+  <p class="meta campaign-global-search__status" aria-live="polite" data-campaign-global-search-status></p>
+  <div
+    class="campaign-global-search__results"
+    data-campaign-global-search-results
+    hidden
+  ></div>
+  <dialog
+    class="spell-detail-dialog campaign-global-search-dialog"
+    aria-labelledby="campaign-global-search-dialog-title"
+    data-campaign-global-search-dialog
+  >
+    <div class="spell-detail-dialog__panel campaign-global-search-dialog__panel">
+      <div class="spell-detail-dialog__header">
+        <div>
+          <p class="eyebrow">Reference preview</p>
+          <h2 id="campaign-global-search-dialog-title">Campaign Search</h2>
+        </div>
+        <button type="button" class="ghost-button" data-campaign-global-search-close>Close</button>
+      </div>
+      <div
+        class="campaign-global-search-dialog__body"
+        data-campaign-global-search-preview
+        aria-live="polite"
+        aria-busy="false"
+      ></div>
+    </div>
+  </dialog>
+</section>

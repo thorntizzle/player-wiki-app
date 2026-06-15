@@ -787,6 +787,7 @@
                 Help
               </a>
             </nav>
+            {% include "_campaign_global_search.html" %}
             {% if header_secondary_content | trim %}
               {{ header_secondary_content | safe }}
             {% endif %}
@@ -809,6 +810,9 @@
         <span class="meta">{{ app_metadata.instance_name }}</span>
       </footer>
     </div>
+    {% if campaign is defined %}
+      {% include "_campaign_global_search_scripts.html" %}
+    {% endif %}
     {% block scripts %}{% endblock %}
   </body>
 </html>

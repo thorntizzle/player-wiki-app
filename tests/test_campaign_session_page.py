@@ -342,25 +342,20 @@ def test_campaign_member_can_open_session_page_and_campaign_links_to_it(client, 
     assert "The chat composer unlocks as soon as the DM begins a session." in session_html
 
 
-def test_player_session_page_includes_lazy_wiki_lookup_widget(client, sign_in, users):
+def test_player_session_page_includes_global_search_widget(client, sign_in, users):
     sign_in(users["party"]["email"], users["party"]["password"])
 
     session_page = client.get("/campaigns/linden-pass/session")
 
     assert session_page.status_code == 200
     session_html = session_page.get_data(as_text=True)
-    assert "Wiki article lookup" in session_html
-    assert 'data-session-wiki-lookup-root' in session_html
-    assert 'data-session-wiki-lookup-query' in session_html
-    assert 'data-session-wiki-lookup-results' in session_html
-    assert 'data-session-wiki-lookup-preview' in session_html
-    assert 'data-loading="0"' in session_html
-    assert 'aria-busy="false"' in session_html
-    assert (
-        "Search player-visible wiki articles and read them here without leaving the live session page. "
-        "Type at least 2 letters to search."
-    ) in session_html
-    assert "Search and choose a player-visible wiki article to read it here." not in session_html
+    assert 'data-campaign-global-search-root' in session_html
+    assert 'data-campaign-global-search-query' in session_html
+    assert 'data-campaign-global-search-results' in session_html
+    assert 'data-campaign-global-search-dialog' in session_html
+    assert 'data-campaign-global-search-preview' in session_html
+    assert 'data-session-wiki-lookup-root' not in session_html
+    assert "Search player-visible wiki articles and read them here without leaving the live session page." not in session_html
 
 
 def test_player_cannot_open_dm_session_workspace(client, sign_in, users):
@@ -1615,7 +1610,7 @@ def test_session_character_full_page_link_uses_nearest_sheet_context(client, sig
     )
 
 
-def test_player_session_page_preserves_lookup_preview_during_article_load(client, sign_in, users):
+def test_player_session_page_mounts_global_search_outside_live_session_root(client, sign_in, users):
     sign_in(users["party"]["email"], users["party"]["password"])
 
     session_page = client.get("/campaigns/linden-pass/session")
@@ -1623,13 +1618,13 @@ def test_player_session_page_preserves_lookup_preview_during_article_load(client
     assert session_page.status_code == 200
     session_html = session_page.get_data(as_text=True)
     assert 'data-session-live-root' in session_html
+    assert 'data-campaign-global-search-root' in session_html
+    assert session_html.index('class="campaign-global-search"') < session_html.index('class="page-layout session-layout session-layout--single"')
+    assert 'data-session-wiki-lookup-root' not in session_html
     assert 'data-loading="0"' in session_html
     assert "window.__playerWikiLiveUiTools" in session_html
     assert "uiStateTools.captureViewportAnchor(liveRoot)" in session_html
-    assert 'const preserveExistingPreview = previewRoot.querySelector(".session-wiki-lookup-result") !== null;' in session_html
     assert 'liveRoot.dataset.loading = "1";' in session_html
-    assert 'previewRoot.dataset.loading = isBusy ? "1" : "0";' in session_html
-    assert 'previewRoot.setAttribute("aria-busy", isBusy ? "true" : "false");' in session_html
     assert 'data-live-active-interval-ms="3000"' in session_html
     assert 'data-live-idle-interval-ms="6000"' in session_html
 
@@ -2123,22 +2118,119 @@ def test_dm_session_article_lookup_does_not_eager_load_source_choices(app, clien
     assert "Captain Lyra Vale - Wiki" not in session_html
 
 
-def test_player_session_wiki_lookup_does_not_eager_load_article_choices(app, client, sign_in, users, monkeypatch):
+def test_global_search_does_not_eager_load_reference_choices(app, client, sign_in, users, monkeypatch):
     with app.app_context():
         page_store = app.extensions["campaign_page_store"]
+        systems_service = app.extensions["systems_service"]
 
     def fail_page_search(*args, **kwargs):
-        raise AssertionError("player session page should not eagerly load wiki lookup search results")
+        raise AssertionError("campaign pages should not eagerly load global wiki search results")
+
+    def fail_systems_search(*args, **kwargs):
+        raise AssertionError("campaign pages should not eagerly load global Systems search results")
 
     monkeypatch.setattr(page_store, "search_page_records", fail_page_search)
+    monkeypatch.setattr(systems_service, "search_entries_for_campaign", fail_systems_search)
 
     sign_in(users["party"]["email"], users["party"]["password"])
     session_page = client.get("/campaigns/linden-pass/session")
 
     assert session_page.status_code == 200
     session_html = session_page.get_data(as_text=True)
-    assert "Search to load matching articles" in session_html
+    assert 'data-campaign-global-search-root' in session_html
+    assert 'data-campaign-global-search-results' in session_html
     assert "Captain Lyra Vale - NPCs" not in session_html
+
+
+def test_campaign_global_search_finds_visible_wiki_pages_and_uses_preview_modal_contract(client, sign_in, users):
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    short_search = client.get(
+        "/campaigns/linden-pass/global-search?q=c",
+        headers=_async_headers(),
+    )
+    assert short_search.status_code == 200
+    assert short_search.get_json()["message"] == "Type at least 2 letters to search wiki pages and Systems entries."
+
+    search = client.get(
+        "/campaigns/linden-pass/global-search?q=capt",
+        headers=_async_headers(),
+    )
+    assert search.status_code == 200
+    payload = search.get_json()
+    assert payload["results"]
+    captain_result = next(
+        result for result in payload["results"] if result["result_id"] == "wiki:npcs/captain-lyra-vale"
+    )
+    assert captain_result["kind"] == "wiki"
+    assert captain_result["kind_label"] == "Wiki"
+    assert captain_result["title"] == "Captain Lyra Vale"
+    assert "href" not in captain_result
+
+    preview = client.get(
+        "/campaigns/linden-pass/global-search/preview?result_id=wiki:npcs/captain-lyra-vale",
+        headers=_async_headers(),
+    )
+    assert preview.status_code == 200
+    preview_html = preview.get_json()["preview_html"]
+    assert "Captain Lyra Vale" in preview_html
+    assert "Open dedicated page" in preview_html
+    assert "/campaigns/linden-pass/pages/npcs/captain-lyra-vale" in preview_html
+
+
+def test_campaign_global_search_finds_accessible_systems_entries_and_previews_them(
+    client,
+    sign_in,
+    users,
+    app,
+    tmp_path,
+):
+    goblin_slug = _import_systems_goblin(app, tmp_path)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    search = client.get(
+        "/campaigns/linden-pass/global-search?q=gob",
+        headers=_async_headers(),
+    )
+    assert search.status_code == 200
+    payload = search.get_json()
+    assert payload["results"]
+    goblin_result = next(result for result in payload["results"] if result["result_id"] == f"systems:{goblin_slug}")
+    assert goblin_result["kind"] == "systems"
+    assert goblin_result["kind_label"] == "Systems"
+    assert goblin_result["title"] == "Goblin"
+    assert goblin_result["subtitle"] == "Monsters / MM"
+    assert "href" not in goblin_result
+
+    preview = client.get(
+        f"/campaigns/linden-pass/global-search/preview?result_id=systems:{goblin_slug}",
+        headers=_async_headers(),
+    )
+    assert preview.status_code == 200
+    preview_html = preview.get_json()["preview_html"]
+    assert "Goblin" in preview_html
+    assert "Scimitar" in preview_html
+    assert "Open dedicated page" in preview_html
+    assert f"/campaigns/linden-pass/systems/entries/{goblin_slug}" in preview_html
+
+
+def test_campaign_global_search_preview_endpoint_contracts_when_unavailable(client, sign_in, users):
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    blank = client.get(
+        "/campaigns/linden-pass/global-search/preview",
+        headers=_async_headers(),
+    )
+    assert blank.status_code == 200
+    assert blank.get_json()["preview_html"] == ""
+
+    missing = client.get(
+        "/campaigns/linden-pass/global-search/preview?result_id=systems:does-not-exist",
+        headers=_async_headers(),
+    )
+    assert missing.status_code == 404
+    missing_html = missing.get_json()["preview_html"]
+    assert "That reference is not currently visible." in missing_html
 
 
 def test_dm_can_search_session_article_sources(client, sign_in, users, app, tmp_path):

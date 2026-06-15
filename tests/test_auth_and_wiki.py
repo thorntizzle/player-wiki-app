@@ -217,7 +217,12 @@ def test_campaign_member_can_browse_visible_wiki_content(client, sign_in, users)
     assert 'href="/campaigns/linden-pass/characters"' not in body
     assert "site-header__secondary" in body
     assert "site-header__main" in body
-    assert "site-search-form" in body
+    assert "data-campaign-global-search-root" in body
+    assert "data-campaign-global-search-query" in body
+    assert "data-campaign-global-search-results" in body
+    assert "data-campaign-global-search-dialog" in body
+    assert "site-search-form" not in body
+    assert "Search titles, alternate names, summaries, or body text" not in body
     assert "Visible through session" not in body
     assert "pages visible" not in body
     assert page.get_data(as_text=True).count("Echoes of the Alloy Coast") >= 1
@@ -239,7 +244,7 @@ def test_campaign_help_page_collects_surface_guidance_and_limits(client, sign_in
     assert "Combat" in body
     assert "DM Content" not in body
     assert "Characters" not in body
-    assert "Control" not in body
+    assert ">Control</a>" not in body
     assert "Cross-cutting limits" in body
     assert "Visibility by scope" in body
     assert "Session and Combat refresh with polling instead of websockets." in body

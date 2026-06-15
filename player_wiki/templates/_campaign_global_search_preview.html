@@ -1,0 +1,32 @@
+{% if result_unavailable_message %}
+  <div class="campaign-global-search-preview campaign-global-search-preview--empty">
+    <p class="meta">{{ result_unavailable_message }}</p>
+  </div>
+{% else %}
+  <article class="campaign-global-search-preview">
+    <header class="campaign-global-search-preview__header">
+      <p class="eyebrow">{{ result_kind_label }}</p>
+      <h3>{{ result_title }}</h3>
+      {% if result_meta %}
+        <p class="meta">{{ result_meta }}</p>
+      {% endif %}
+      {% if result_summary %}
+        <p class="lede">{{ result_summary }}</p>
+      {% endif %}
+      <p>
+        <a class="button-link" href="{{ result_url }}">Open dedicated page</a>
+      </p>
+    </header>
+    {% if result_image_url %}
+      <figure class="article-figure">
+        <img class="article-image" src="{{ result_image_url }}" alt="{{ result_image_alt }}">
+        {% if result_image_caption %}
+          <figcaption class="meta article-image__caption">{{ result_image_caption }}</figcaption>
+        {% endif %}
+      </figure>
+    {% endif %}
+    <div class="article-body article-body--compact">
+      {{ result_body_html | safe }}
+    </div>
+  </article>
+{% endif %}

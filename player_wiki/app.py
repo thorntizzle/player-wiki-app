@@ -2131,6 +2131,179 @@ def create_app() -> Flask:
 
         return results
 
+    def build_campaign_global_search_results(
+        campaign_slug: str,
+        query: str,
+        *,
+        limit: int = 30,
+    ) -> list[dict[str, str]]:
+        campaign = load_campaign_context(campaign_slug)
+        normalized_query = query.strip()
+        if len(normalized_query) < 2:
+            return []
+
+        results: list[dict[str, str]] = []
+        if can_access_campaign_scope(campaign_slug, "wiki"):
+            page_records = get_campaign_page_store().search_page_records(
+                campaign.slug,
+                normalized_query,
+                limit=max(limit, 1),
+                include_body=False,
+            )
+            for record in page_records:
+                if not campaign.is_page_visible(record.page):
+                    continue
+                context_parts = [record.page.section]
+                if record.page.subsection:
+                    context_parts.append(record.page.subsection)
+                subtitle = " / ".join(part for part in context_parts if part)
+                results.append(
+                    {
+                        "result_id": f"wiki:{record.page_ref}",
+                        "kind": "wiki",
+                        "kind_label": "Wiki",
+                        "title": record.page.title,
+                        "subtitle": subtitle,
+                        "select_label": (
+                            f"{record.page.title} - Wiki - {subtitle}"
+                            if subtitle
+                            else f"{record.page.title} - Wiki"
+                        ),
+                    }
+                )
+                if len(results) >= limit:
+                    return results
+
+        if can_access_campaign_scope(campaign_slug, "systems"):
+            systems_entries = get_systems_service().search_entries_for_campaign(
+                campaign_slug,
+                query=normalized_query,
+                limit=max(limit, 1),
+            )
+            for entry in systems_entries:
+                if not can_access_campaign_systems_entry(campaign_slug, entry.slug):
+                    continue
+                entry_type_label = SYSTEMS_ENTRY_TYPE_LABELS.get(
+                    entry.entry_type,
+                    entry.entry_type.replace("_", " ").title(),
+                )
+                results.append(
+                    {
+                        "result_id": f"systems:{entry.slug}",
+                        "kind": "systems",
+                        "kind_label": "Systems",
+                        "title": entry.title,
+                        "subtitle": f"{entry_type_label} / {entry.source_id}",
+                        "select_label": f"{entry.title} - Systems - {entry_type_label} - {entry.source_id}",
+                    }
+                )
+                if len(results) >= limit:
+                    break
+
+        return results
+
+    def build_campaign_global_search_preview_context(
+        campaign_slug: str,
+        result_id: str,
+    ) -> dict[str, object] | None:
+        campaign = load_campaign_context(campaign_slug)
+        kind, separator, raw_ref = result_id.partition(":")
+        ref = raw_ref.strip()
+        if not separator or not ref:
+            return None
+
+        if kind == "wiki":
+            if not can_access_campaign_scope(campaign_slug, "wiki"):
+                return None
+            page_record = get_campaign_page_store().get_page_record(
+                campaign.slug,
+                ref,
+                include_body=False,
+            )
+            if page_record is None or not campaign.is_page_visible(page_record.page):
+                return None
+            body_html = get_repository().get_page_body_html(campaign.slug, page_record.page.route_slug)
+            if body_html is None:
+                return None
+            body_html = body_html.replace(
+                "/campaigns/{campaign_slug}/",
+                f"/campaigns/{campaign.slug}/",
+            )
+            page_image_url = None
+            if (
+                page_record.page.image_path
+                and get_campaign_asset_file(campaign, page_record.page.image_path) is not None
+            ):
+                page_image_url = url_for(
+                    "campaign_asset",
+                    campaign_slug=campaign.slug,
+                    asset_path=page_record.page.image_path,
+                )
+            return {
+                "campaign": campaign,
+                "result_kind": "wiki",
+                "result_kind_label": "Wiki article",
+                "result_title": page_record.page.title,
+                "result_meta": " / ".join(
+                    part
+                    for part in [
+                        page_record.page.section,
+                        page_record.page.subsection,
+                        page_record.page.display_type.title(),
+                    ]
+                    if part
+                ),
+                "result_summary": (
+                    page_record.page.summary
+                    if page_record.page.page_type not in ["item", "spell", "mechanic"]
+                    else ""
+                ),
+                "result_body_html": body_html,
+                "result_url": url_for(
+                    "page_view",
+                    campaign_slug=campaign.slug,
+                    page_slug=page_record.page.route_slug,
+                ),
+                "result_image_url": page_image_url,
+                "result_image_alt": page_record.page.image_alt or page_record.page.title,
+                "result_image_caption": page_record.page.image_caption,
+            }
+
+        if kind == "systems":
+            if not can_access_campaign_scope(campaign_slug, "systems"):
+                return None
+            entry = get_systems_service().get_entry_by_slug_for_campaign(campaign_slug, ref)
+            if entry is None or not can_access_campaign_systems_entry(campaign_slug, entry.slug):
+                return None
+            entry_type_label = SYSTEMS_ENTRY_TYPE_LABELS.get(
+                entry.entry_type,
+                entry.entry_type.replace("_", " ").title(),
+            )
+            body_html = str(entry.rendered_html or "").strip()
+            if not body_html:
+                body_html = (
+                    "<p class=\"meta\">This Systems entry does not have rendered article content yet.</p>"
+                )
+            return {
+                "campaign": campaign,
+                "result_kind": "systems",
+                "result_kind_label": "Systems entry",
+                "result_title": entry.title,
+                "result_meta": f"{entry_type_label} / {entry.source_id}",
+                "result_summary": "",
+                "result_body_html": body_html,
+                "result_url": url_for(
+                    "campaign_systems_entry_detail",
+                    campaign_slug=campaign.slug,
+                    entry_slug=entry.slug,
+                ),
+                "result_image_url": "",
+                "result_image_alt": "",
+                "result_image_caption": "",
+            }
+
+        return None
+
     def load_character_context(campaign_slug: str, character_slug: str):
         repository = get_repository()
         campaign = repository.get_campaign(campaign_slug)
@@ -9362,6 +9535,60 @@ def create_app() -> Flask:
             can_view_wiki=can_view_wiki,
             wiki_visibility_label=VISIBILITY_LABELS[get_effective_campaign_visibility(campaign_slug, "wiki")],
             active_nav="wiki",
+        )
+
+    @app.get("/campaigns/<campaign_slug>/global-search")
+    @campaign_scope_access_required("campaign")
+    def campaign_global_search(campaign_slug: str):
+        query = request.args.get("q", "").strip()
+        if len(query) < 2:
+            return jsonify(
+                {
+                    "results": [],
+                    "message": "Type at least 2 letters to search wiki pages and Systems entries.",
+                }
+            )
+
+        results = build_campaign_global_search_results(campaign_slug, query, limit=30)
+        message = (
+            "Showing the first 30 matching references."
+            if len(results) == 30
+            else (
+                f"Found {len(results)} matching reference{'s' if len(results) != 1 else ''}."
+                if results
+                else "No visible wiki pages or Systems entries matched that search."
+            )
+        )
+        return jsonify({"results": results, "message": message})
+
+    @app.get("/campaigns/<campaign_slug>/global-search/preview")
+    @campaign_scope_access_required("campaign")
+    def campaign_global_search_preview(campaign_slug: str):
+        result_id = request.args.get("result_id", "").strip()
+        if not result_id:
+            return jsonify({"preview_html": ""})
+
+        preview_context = build_campaign_global_search_preview_context(campaign_slug, result_id)
+        if preview_context is None:
+            return (
+                jsonify(
+                    {
+                        "preview_html": render_template(
+                            "_campaign_global_search_preview.html",
+                            result_unavailable_message="That reference is not currently visible.",
+                        )
+                    }
+                ),
+                404,
+            )
+
+        return jsonify(
+            {
+                "preview_html": render_template(
+                    "_campaign_global_search_preview.html",
+                    **preview_context,
+                )
+            }
         )
 
     @app.get("/campaigns/<campaign_slug>/help")
