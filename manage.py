@@ -12,6 +12,7 @@ from player_wiki.auth import validate_password_inputs
 from player_wiki.auth_store import AuthStore, UserAccount, utcnow
 from player_wiki.db import init_database
 from player_wiki.systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
+from player_wiki.systems_metadata_repair import repair_dnd5e_item_metadata
 
 DEFAULT_DND5E_EXPORT_ROOT = Path.home() / "Documents" / "dnd5e-source-export"
 
@@ -92,6 +93,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional subset of mechanics entry types to import.",
     )
     import_systems.add_argument("--actor-email")
+
+    repair_item_metadata = subparsers.add_parser(
+        "repair-dnd5e-item-metadata",
+        help="Backfill stale DND 5E item metadata in the shared systems library.",
+    )
+    repair_item_metadata.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report repairable rows without writing changes.",
+    )
+    repair_item_metadata.add_argument(
+        "--source-ids",
+        nargs="+",
+        help="Optional source IDs to limit the repair, such as PHB DMG.",
+    )
 
     return parser
 
@@ -416,6 +432,21 @@ def main() -> None:
                 )
                 for entry_type, count in sorted(result.imported_by_type.items()):
                     print(f"  {entry_type}: {count}")
+            return
+
+        if args.command == "repair-dnd5e-item-metadata":
+            result = repair_dnd5e_item_metadata(
+                app.extensions["systems_store"],
+                dry_run=bool(args.dry_run),
+                source_ids=list(args.source_ids or []),
+            )
+            action = "Would repair" if args.dry_run else "Repaired"
+            affected_count = result.repairable_count if args.dry_run else result.repaired_count
+            print(f"Scanned {result.scanned_count} DND 5E item entries.")
+            print(f"{action} {affected_count} entries.")
+            for change in result.changes:
+                fields = ", ".join(change.fields)
+                print(f"  {change.source_id} {change.slug}: {change.title} ({fields})")
             return
 
     raise SystemExit(f"Unknown command: {args.command}")
