@@ -468,6 +468,7 @@
         <form
           class="session-vitals-form"
           data-character-sheet-edit-form="vitals"
+          {% if xianxia_read_form_mode == "session" %}data-character-autosubmit-mode="focus-blur"{% endif %}
           data-character-autosubmit
           method="post"
           action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"

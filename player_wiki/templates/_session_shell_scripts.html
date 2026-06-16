@@ -92,6 +92,210 @@
       return formData;
     };
 
+    const isRestorableField = (field) => {
+      if (field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement) {
+        return !!field.name;
+      }
+      if (!(field instanceof HTMLInputElement) || !field.name) {
+        return false;
+      }
+      const type = String(field.type || "text").toLowerCase();
+      return !["button", "file", "hidden", "image", "reset", "submit"].includes(type);
+    };
+
+    const getRestorableFields = (form) => (
+      Array.from(form.elements).filter((field) => isRestorableField(field))
+    );
+
+    const getFieldTypeKey = (field) => {
+      if (field instanceof HTMLInputElement) {
+        return String(field.type || "text").toLowerCase();
+      }
+      return field.tagName.toLowerCase();
+    };
+
+    const describeForm = (form) => {
+      if (!(form instanceof HTMLFormElement)) {
+        return null;
+      }
+      const fieldSignature = getRestorableFields(form)
+        .map((field) => `${field.name}:${getFieldTypeKey(field)}`)
+        .join("|");
+      const hiddenValue = (name) => {
+        const field = form.querySelector(`input[type="hidden"][name="${name}"]`);
+        return field instanceof HTMLInputElement ? field.value : "";
+      };
+      return {
+        action: form.getAttribute("action") || "",
+        method: String(form.method || "get").toLowerCase(),
+        editForm: form.dataset.characterSheetEditForm || "",
+        editRowId: form.dataset.characterSheetEditRowId || "",
+        mode: hiddenValue("mode"),
+        page: hiddenValue("page"),
+        returnView: hiddenValue("return_view"),
+        fieldSignature,
+      };
+    };
+
+    const describeField = (field, form) => {
+      if (!isRestorableField(field) || !(form instanceof HTMLFormElement)) {
+        return null;
+      }
+      const typeKey = getFieldTypeKey(field);
+      const matchingFields = getRestorableFields(form).filter((candidate) => (
+        candidate.name === field.name && getFieldTypeKey(candidate) === typeKey
+      ));
+      return {
+        name: field.name,
+        typeKey,
+        index: Math.max(0, matchingFields.indexOf(field)),
+      };
+    };
+
+    const captureFieldValue = (field, form) => {
+      const description = describeField(field, form);
+      if (!description) {
+        return null;
+      }
+      const value = field instanceof HTMLInputElement && ["checkbox", "radio"].includes(getFieldTypeKey(field))
+        ? field.checked
+        : field.value;
+      return {
+        ...description,
+        value,
+      };
+    };
+
+    const captureSelection = (field) => {
+      if (!(field instanceof HTMLInputElement) && !(field instanceof HTMLTextAreaElement)) {
+        return null;
+      }
+      try {
+        if (typeof field.selectionStart !== "number" || typeof field.selectionEnd !== "number") {
+          return null;
+        }
+        return {
+          start: field.selectionStart,
+          end: field.selectionEnd,
+          direction: field.selectionDirection || "none",
+        };
+      } catch (_error) {
+        return null;
+      }
+    };
+
+    const captureCharacterPaneRestoreState = (pane) => {
+      if (!(pane instanceof HTMLElement)) {
+        return null;
+      }
+      const activeField = document.activeElement;
+      if (!isRestorableField(activeField) || !pane.contains(activeField)) {
+        return null;
+      }
+      const form = activeField.form;
+      if (!(form instanceof HTMLFormElement) || !pane.contains(form)) {
+        return null;
+      }
+      const activeFieldDescription = describeField(activeField, form);
+      if (!activeFieldDescription) {
+        return null;
+      }
+      return {
+        form: describeForm(form),
+        activeField: activeFieldDescription,
+        values: getRestorableFields(form)
+          .map((field) => captureFieldValue(field, form))
+          .filter(Boolean),
+        selection: captureSelection(activeField),
+      };
+    };
+
+    const formsMatchDescription = (form, description) => {
+      const nextDescription = describeForm(form);
+      if (!nextDescription || !description) {
+        return false;
+      }
+      return (
+        nextDescription.action === description.action
+        && nextDescription.method === description.method
+        && nextDescription.editForm === description.editForm
+        && nextDescription.editRowId === description.editRowId
+        && nextDescription.mode === description.mode
+        && nextDescription.page === description.page
+        && nextDescription.returnView === description.returnView
+        && nextDescription.fieldSignature === description.fieldSignature
+      );
+    };
+
+    const findMatchingForm = (pane, description) => {
+      if (!(pane instanceof HTMLElement) || !description) {
+        return null;
+      }
+      return Array.from(pane.querySelectorAll("form")).find((form) => (
+        form instanceof HTMLFormElement && formsMatchDescription(form, description)
+      )) || null;
+    };
+
+    const findMatchingField = (form, description) => {
+      if (!(form instanceof HTMLFormElement) || !description) {
+        return null;
+      }
+      const matches = getRestorableFields(form).filter((field) => (
+        field.name === description.name && getFieldTypeKey(field) === description.typeKey
+      ));
+      return matches[description.index] || null;
+    };
+
+    const restoreFieldValue = (field, value) => {
+      if (field instanceof HTMLInputElement && ["checkbox", "radio"].includes(getFieldTypeKey(field))) {
+        field.checked = !!value;
+        return;
+      }
+      if (
+        field instanceof HTMLInputElement
+        || field instanceof HTMLSelectElement
+        || field instanceof HTMLTextAreaElement
+      ) {
+        field.value = String(value ?? "");
+      }
+    };
+
+    const restoreCharacterPaneState = (pane, state) => {
+      if (!(pane instanceof HTMLElement) || !state || !state.form) {
+        return;
+      }
+      const form = findMatchingForm(pane, state.form);
+      if (!(form instanceof HTMLFormElement)) {
+        return;
+      }
+      for (const fieldState of state.values || []) {
+        const field = findMatchingField(form, fieldState);
+        if (field) {
+          restoreFieldValue(field, fieldState.value);
+        }
+      }
+      const activeField = findMatchingField(form, state.activeField);
+      if (!activeField) {
+        return;
+      }
+      activeField.focus({ preventScroll: true });
+      if (
+        state.selection
+        && (activeField instanceof HTMLInputElement || activeField instanceof HTMLTextAreaElement)
+        && typeof activeField.setSelectionRange === "function"
+      ) {
+        try {
+          activeField.setSelectionRange(
+            state.selection.start,
+            state.selection.end,
+            state.selection.direction || "none",
+          );
+        } catch (_error) {
+          // Some input types, including number inputs in some browsers, do not support selection ranges.
+        }
+      }
+    };
+
     const isPaneLoaded = (target) => {
       const pane = panes.get(target);
       if (!pane) {
@@ -191,6 +395,7 @@
       }
 
       const html = await response.text();
+      const restoreState = captureCharacterPaneRestoreState(characterPane);
       updatePaneHtml("character", html);
       const nextUrl = fallbackUrlFromResponse(response.url);
       if (nextUrl) {
@@ -198,6 +403,7 @@
       }
       showOnlyPane("character");
       syncSwitchButtons("character");
+      restoreCharacterPaneState(panes.get("character"), restoreState);
     };
 
     const showShellView = async (target, { url = "", fromHistory = false } = {}) => {

@@ -290,8 +290,31 @@ def test_session_character_panel_switch_and_resource_submit_stay_no_reload(
             expect(page.locator("[data-session-shell-active='character']")).to_be_visible(timeout=5000)
             expect(page.locator("[data-combat-section-panel='overview']")).to_be_visible(timeout=5000)
             expect(page.locator(".glance-grid--quick-row-1")).to_be_visible(timeout=5000)
-            expect(page.locator("form[data-character-sheet-edit-form='vitals']")).to_have_count(2)
+            expect(page.locator("form[data-character-sheet-edit-form='vitals']")).to_have_count(3)
             page.evaluate("window.__sessionCharacterNoReloadMarker = 'alive'")
+
+            hp_field = page.locator(
+                "form[data-character-sheet-edit-form='vitals'][data-character-autosubmit-mode='focus-blur'] "
+                "input[name='current_hp']"
+            ).first
+            expect(hp_field).to_be_visible(timeout=5000)
+            hp_field.click()
+            hp_field.press("Control+A")
+            hp_field.press("Backspace")
+            page.wait_for_timeout(700)
+            expect(hp_field).to_have_value("")
+            assert hp_field.evaluate("element => document.activeElement === element")
+            hp_field.type("12", delay=75)
+            page.wait_for_timeout(700)
+            expect(hp_field).to_have_value("12")
+            assert hp_field.evaluate("element => document.activeElement === element")
+            hp_field.press("Enter")
+            expect(page.locator("[data-session-character-flash-stack] .flash-success")).to_contain_text(
+                "Vitals updated.",
+                timeout=5000,
+            )
+            expect(hp_field).to_have_value("12", timeout=5000)
+            assert hp_field.evaluate("element => document.activeElement === element")
 
             page.locator("[data-combat-section-toggle='resources']").click()
             expect(page.locator("[data-combat-section-panel='resources']")).to_be_visible(timeout=5000)

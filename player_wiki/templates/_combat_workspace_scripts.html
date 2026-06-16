@@ -104,6 +104,10 @@
       }
       return true;
     };
+    const formUsesFocusBlurAutosubmit = (form) => (
+      form instanceof HTMLFormElement
+      && String(form.dataset.characterAutosubmitMode || "") === "focus-blur"
+    );
     const queueAutosubmit = (form, field, delayMs = 350) => {
       if (!(form instanceof HTMLFormElement) || !fieldAllowsAutosubmit(field)) {
         return;
@@ -141,6 +145,9 @@
           if (!(field instanceof HTMLInputElement) || field.type !== "number") {
             return;
           }
+          if (formUsesFocusBlurAutosubmit(form)) {
+            return;
+          }
           queueAutosubmit(form, field, 450);
         });
         form.addEventListener("change", (event) => {
@@ -152,8 +159,33 @@
           ) {
             return;
           }
+          if (
+            formUsesFocusBlurAutosubmit(form)
+            && field instanceof HTMLInputElement
+            && field.type === "number"
+          ) {
+            return;
+          }
           queueAutosubmit(form, field, 0);
         });
+        form.addEventListener(
+          "focusout",
+          (event) => {
+            if (!formUsesFocusBlurAutosubmit(form)) {
+              return;
+            }
+            const field = event.target;
+            if (!fieldAllowsAutosubmit(field)) {
+              return;
+            }
+            const nextFocused = event.relatedTarget;
+            if (nextFocused instanceof HTMLElement && form.contains(nextFocused)) {
+              return;
+            }
+            queueAutosubmit(form, field, 0);
+          },
+          true,
+        );
         form.addEventListener("keydown", (event) => {
           const field = event.target;
           if (event.key !== "Enter" || !fieldAllowsAutosubmit(field)) {
