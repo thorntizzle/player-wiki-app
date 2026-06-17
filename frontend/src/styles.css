@@ -812,12 +812,6 @@ a:hover {
   margin-bottom: 0.6rem;
 }
 
-.campaign-grid {
-  display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-}
-
 .character-roster-grid {
   display: grid;
   gap: 1rem;
@@ -1640,7 +1634,8 @@ a:hover {
 
 .hero.compact.wiki-home,
 .hero.compact.wiki-section-page,
-.hero.compact.character-roster-hero {
+.hero.compact.character-roster-hero,
+.hero.compact.campaign-picker-hero {
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -1654,7 +1649,8 @@ a:hover {
 .wiki-home > h1,
 .wiki-section-page > h1,
 .character-roster-hero > h1,
-.character-roster-hero > h2 {
+.character-roster-hero > h2,
+.campaign-picker-hero > h1 {
   margin: 0;
   font-size: clamp(2.2rem, 5vw, 4.2rem);
   line-height: 0.98;
@@ -1663,7 +1659,9 @@ a:hover {
 .wiki-home > .meta,
 .wiki-section-page > .meta,
 .character-roster-hero > .meta,
-.character-roster-hero .meta {
+.character-roster-hero .meta,
+.campaign-picker-hero > .meta,
+.campaign-picker-hero .meta {
   margin: 0 0 0.25rem;
   text-transform: uppercase;
   font-size: 0.78rem;
@@ -1672,10 +1670,20 @@ a:hover {
 
 .wiki-home > .lede,
 .wiki-section-page > .lede,
-.character-roster-hero > .lede {
+.character-roster-hero > .lede,
+.campaign-picker-hero > .lede {
   max-width: 70ch;
   margin: 0;
   font-size: 1.08rem;
+}
+
+.campaign-picker-page {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.campaign-picker-empty {
+  max-width: 36rem;
 }
 
 .wiki-overview-card {

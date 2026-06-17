@@ -4596,6 +4596,14 @@ function AppShell() {
 function CampaignListPage() {
   const { apiClient, setAuthRequired, preferredFrontendMode } = useApiClient();
 
+  const campaignRoleLabel = (value: string) =>
+    value
+      .replace(/_/g, " ")
+      .split(" ")
+      .filter(Boolean)
+      .map((segment) => `${segment[0].toUpperCase()}${segment.slice(1)}`)
+      .join(" ");
+
   const appQuery = useQuery({
     queryKey: ["app"],
     queryFn: () => apiClient.getAppState(),
@@ -4619,33 +4627,29 @@ function CampaignListPage() {
   const campaigns: CampaignEntry[] = campaignsQuery.data?.campaigns ?? [];
 
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>Available Campaigns</h2>
-      </div>
+    <section className="campaign-picker-page">
+      <section className="hero compact campaign-picker-hero">
+        <p className="eyebrow">Campaign access</p>
+        <h1>Select a campaign.</h1>
+        <p className="lede">
+          Your account can see the campaigns listed here based on app-wide admin access, campaign membership, or public visibility.
+        </p>
+      </section>
       <ApiErrorNotice
         isLoading={appQuery.isLoading || campaignsQuery.isLoading}
         message={appError ?? campaignError}
         onAuth={() => setAuthRequired(true)}
       />
-      {appQuery.data?.app ? (
-        <p className="subtitle">
-          Runtime: {appQuery.data.app.runtime}
-          {appQuery.data.app.version ? ` - ${appQuery.data.app.version}` : ""}
-        </p>
-      ) : null}
-      <div className="campaign-grid">
+      <section className="grid campaign-picker-grid">
         {campaigns.map((entry) => (
-          <article className="card" key={entry.campaign.slug}>
-            <h3>{entry.campaign.title}</h3>
-            <p className="subtitle">{entry.campaign.slug}</p>
+          <article className="card campaign-card" key={entry.campaign.slug}>
+            <p className="card-kicker">{campaignRoleLabel(entry.role)}</p>
+            <h2>{entry.campaign.title}</h2>
             <p>{entry.campaign.summary}</p>
-            <p>
-              <strong>System:</strong> {entry.campaign.system}
-            </p>
-            <p>
-              <strong>Role:</strong> {entry.role}
-            </p>
+            {entry.campaign.system ? <p className="meta">System: {entry.campaign.system}</p> : null}
+            {entry.campaign.current_session !== null && entry.campaign.current_session !== undefined ? (
+              <p className="meta">Visible through session {entry.campaign.current_session}</p>
+            ) : null}
             <div className="article-actions">
               <a className="button" href={campaignRouteHref(entry.campaign.slug, "", preferredFrontendMode)}>
                 Open Campaign
@@ -4656,10 +4660,13 @@ function CampaignListPage() {
             </div>
           </article>
         ))}
-        {!appQuery.isLoading && !campaignsQuery.isLoading && !campaigns.length && !campaignError ? (
-          <p className="status status-neutral">No campaigns are visible to this account.</p>
-        ) : null}
-      </div>
+      </section>
+      {!appQuery.isLoading && !campaignsQuery.isLoading && !campaigns.length && !campaignError ? (
+        <section className="card auth-card campaign-picker-empty">
+          <h2>No campaign access assigned</h2>
+          <p>Your account is active, but it is not currently assigned to any campaigns.</p>
+        </section>
+      ) : null}
     </section>
   );
 }
