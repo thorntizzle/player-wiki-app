@@ -1025,14 +1025,12 @@ function CharacterCreatePage() {
   };
 
   return (
-    <section className="panel character-authoring-page">
-      <div className="panel-header">
-        <div>
-          <p className="meta">Character authoring</p>
-          <h1>{create?.lane === "xianxia" ? "Create Xianxia Character" : "Create Character"}</h1>
-          <p className="lede">Create native character records through the same campaign system lane used by the Flask builder.</p>
-        </div>
-        <div className="article-actions">
+    <section className="character-authoring-page character-authoring-create-page">
+      <section className="hero compact character-authoring-hero">
+        <p className="meta">Character authoring</p>
+        <h1>{create?.lane === "xianxia" ? "Create Xianxia Character" : "Create Character"}</h1>
+        <p className="lede">Create native character records through the same campaign system lane used by the Flask builder.</p>
+        <div className="article-actions character-authoring-hero-actions">
           {data?.links.gen2_roster_url ? (
             <a className="button button-secondary" href={data.links.gen2_roster_url}>
               Back to roster
@@ -1049,7 +1047,7 @@ function CharacterCreatePage() {
             </a>
           ) : null}
         </div>
-      </div>
+      </section>
       <ApiErrorNotice isLoading={createQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
 
@@ -1423,14 +1421,12 @@ function CharacterXianxiaManualImportPage() {
   };
 
   return (
-    <section className="panel character-authoring-page">
-      <div className="panel-header">
-        <div>
-          <p className="meta">Character importer</p>
-          <h1>Import Existing Xianxia Character</h1>
-          <p className="lede">Preview copied values, then create a normal native Xianxia sheet with SQLite-backed mutable state.</p>
-        </div>
-        <div className="article-actions">
+    <section className="character-authoring-page character-authoring-manual-import-page">
+      <section className="hero compact character-authoring-hero">
+        <p className="meta">Character importer</p>
+        <h1>Import Existing Xianxia Character</h1>
+        <p className="lede">Preview copied values, then create a normal native Xianxia sheet with SQLite-backed mutable state.</p>
+        <div className="article-actions character-authoring-hero-actions">
           {links?.gen2_roster_url ? (
             <a className="button button-secondary" href={links.gen2_roster_url}>
               Back to roster
@@ -1442,7 +1438,7 @@ function CharacterXianxiaManualImportPage() {
             </a>
           ) : null}
         </div>
-      </div>
+      </section>
       <ApiErrorNotice isLoading={importQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
       {context?.preview ? (

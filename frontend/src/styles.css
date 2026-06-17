@@ -854,6 +854,12 @@ a:hover {
   gap: 1rem;
 }
 
+.character-authoring-page.character-authoring-create-page,
+.character-authoring-page.character-authoring-manual-import-page {
+  display: grid;
+  gap: 1rem;
+}
+
 .character-authoring-layout {
   display: grid;
   gap: 1rem;
@@ -967,6 +973,43 @@ a:hover {
 .character-authoring-preview-card {
   display: grid;
   gap: 1rem;
+}
+
+.character-authoring-hero-actions {
+  margin-top: 0.1rem;
+}
+
+.hero.compact.character-authoring-hero {
+  margin: 0;
+  align-items: flex-start;
+  padding: 0.75rem 0 0.25rem;
+  display: grid;
+  gap: 0.35rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.character-authoring-hero > h1,
+.character-authoring-hero > h2 {
+  margin: 0.1rem 0 0.4rem;
+}
+
+.character-authoring-hero > .meta,
+.character-authoring-hero .meta {
+  margin: 0 0 0.25rem;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.character-authoring-hero > .lede,
+.character-authoring-hero .lede {
+  max-width: 70ch;
+  margin: 0;
+  font-size: 1.08rem;
 }
 
 .gen2-character-editor,
