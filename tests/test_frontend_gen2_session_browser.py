@@ -1618,13 +1618,14 @@ def test_gen2_character_visual_parity_smoke(
             _sign_in(desktop_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters")
             expect(desktop_page.get_by_role("heading", name="Characters")).to_be_visible(timeout=10000)
-            expect(desktop_page.locator(".character-roster-page > .panel-header")).to_be_visible()
+            expect(desktop_page.locator(".character-roster-page > .character-roster-hero")).to_be_visible()
+            expect(desktop_page.locator("main > .panel.character-roster-page")).to_have_count(0)
             expect(desktop_page.locator(".character-roster-tools")).to_be_visible()
             expect(desktop_page.locator(".character-roster-grid .character-card").first).to_be_visible()
             roster_metrics = desktop_page.evaluate(
                 """() => {
                     const route = document.querySelector(".character-roster-page");
-                    const hero = document.querySelector(".character-roster-page > .panel-header h1");
+                    const hero = document.querySelector(".character-roster-hero h1");
                     const tools = document.querySelector(".character-roster-tools");
                     const cardStat = document.querySelector(".character-card__stats article");
                     const portrait = document.querySelector(".character-card__portrait");

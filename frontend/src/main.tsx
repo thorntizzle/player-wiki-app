@@ -13724,14 +13724,12 @@ function CharacterRosterPage() {
   };
 
   return (
-    <section className="panel character-roster-page">
-      <div className="panel-header">
-        <div>
-          <p className="meta">Character roster</p>
-          <h1>Characters</h1>
-          <p className="lede">Open player sheets, use the shared inline state controls, and keep larger authoring workflows in Flask while Gen2 parity grows.</p>
-        </div>
-      </div>
+    <section className="character-roster-page">
+      <section className="hero compact character-roster-hero">
+        <p className="meta">Character roster</p>
+        <h1>Characters</h1>
+        <p className="lede">Open player sheets, use the shared inline state controls, and keep larger authoring workflows in Flask while Gen2 parity grows.</p>
+      </section>
       <ApiErrorNotice isLoading={rosterQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       <section className="card character-roster-tools">
         <div className="section-heading">
