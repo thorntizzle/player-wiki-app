@@ -6216,33 +6216,30 @@ function WikiHomePage() {
               <h2>Wiki visibility restricted</h2>
               <p>{data.message}</p>
             </section>
-          ) : data.grouped_sections.length ? (
-            <>
-              {!data.query && data.overview_page ? (
-                <article className="article card wiki-overview-card">
-                  <p className="eyebrow">{data.overview_page.display_type} in {data.overview_page.section}</p>
-                  <h2>
-                    <a href={preferredCampaignLink(data.overview_page.href, resolvedCampaignSlug, wikiFrontendMode)}>{data.overview_page.title}</a>
-                  </h2>
-                  {data.overview_page.summary ? <p className="lede">{data.overview_page.summary}</p> : null}
-                  <div className="article-body html-body" dangerouslySetInnerHTML={{ __html: data.overview_page.body_html }} />
-                </article>
-              ) : null}
+          ) : data.query ? (
+            data.grouped_sections.length ? (
               <WikiSectionBrowse data={data} campaignSlug={resolvedCampaignSlug} frontendMode={wikiFrontendMode} />
-            </>
+            ) : (
+              <section className="card">
+                <h2>No matching pages</h2>
+                <p>Try a broader search term or remove the query.</p>
+              </section>
+            )
+          ) : data.overview_page ? (
+            <article className="article card wiki-overview-card">
+              <p className="eyebrow">{data.overview_page.display_type} in {data.overview_page.section}</p>
+              <h2>
+                <a href={preferredCampaignLink(data.overview_page.href, resolvedCampaignSlug, wikiFrontendMode)}>{data.overview_page.title}</a>
+              </h2>
+              {data.overview_page.summary ? <p className="lede">{data.overview_page.summary}</p> : null}
+              <div className="article-body html-body" dangerouslySetInnerHTML={{ __html: data.overview_page.body_html }} />
+            </article>
+          ) : data.grouped_sections.length ? (
+            <WikiSectionBrowse data={data} campaignSlug={resolvedCampaignSlug} frontendMode={wikiFrontendMode} />
           ) : (
             <section className="card">
-              {data.query ? (
-                <>
-                  <h2>No matching pages</h2>
-                  <p>Try a broader search term or remove the query.</p>
-                </>
-              ) : (
-                <>
-                  <h2>No visible pages yet</h2>
-                  <p>This campaign does not currently have any published pages available to players.</p>
-                </>
-              )}
+              <h2>No visible pages yet</h2>
+              <p>This campaign does not currently have any published pages available to players.</p>
             </section>
           )}
         </>
