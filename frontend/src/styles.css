@@ -1489,6 +1489,14 @@ a:hover {
   margin-bottom: 0.75rem;
 }
 
+.wiki-section-browse .section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 0;
+}
+
 .section-heading h2 {
   margin: 0;
 }
@@ -1604,6 +1612,14 @@ a:hover {
   flex-wrap: wrap;
   gap: 0.65rem;
   margin-bottom: 0.35rem;
+}
+
+.wiki-section-page .section-list__controls {
+  margin-bottom: 1rem;
+}
+
+.wiki-section-page .section-list__control {
+  min-height: 2.4rem;
 }
 
 .ghost-button {
