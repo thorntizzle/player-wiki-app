@@ -1029,7 +1029,7 @@ function CharacterCreatePage() {
   };
 
   return (
-    <section className="character-authoring-page character-authoring-create-page">
+    <>
       <section className="hero compact character-authoring-hero">
         <p className="meta">Character authoring</p>
         <h1>{create?.lane === "xianxia" ? "Create Xianxia Character" : "Create Character"}</h1>
@@ -1327,7 +1327,7 @@ function CharacterCreatePage() {
           </aside>
         </div>
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -1425,7 +1425,7 @@ function CharacterXianxiaManualImportPage() {
   };
 
   return (
-    <section className="character-authoring-page character-authoring-manual-import-page">
+    <>
       <section className="hero compact character-authoring-hero">
         <p className="meta">Character importer</p>
         <h1>Import Existing Xianxia Character</h1>
@@ -1630,7 +1630,7 @@ function CharacterXianxiaManualImportPage() {
           </aside>
         </div>
       ) : null}
-    </section>
+    </>
   );
 }
 

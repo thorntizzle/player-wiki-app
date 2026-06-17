@@ -2036,10 +2036,8 @@ def test_gen2_xianxia_character_authoring_create_and_import(
 
             create_link.click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/characters/new$"))
-            expect(page.locator("main > .character-authoring-page.character-authoring-create-page > .character-authoring-hero")).to_be_visible(
-                timeout=10000
-            )
-            expect(page.locator("main > .panel.character-authoring-page")).to_have_count(0)
+            expect(page.locator("main > section.hero.compact.character-authoring-hero")).to_be_visible(timeout=10000)
+            expect(page.locator("main > .character-authoring-page.character-authoring-create-page")).to_have_count(0)
             expect(page.get_by_role("heading", name="Create Xianxia Character")).to_be_visible(timeout=10000)
             expect(page.get_by_role("link", name="Flask create")).to_be_visible()
             for field_name, value in create_values.items():
@@ -2130,10 +2128,8 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             assert player_page.get_by_role("button", name="Save Repair").count() == 0
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/import/xianxia-manual")
-            expect(page.locator("main > .character-authoring-page.character-authoring-manual-import-page > .character-authoring-hero")).to_be_visible(
-                timeout=10000
-            )
-            expect(page.locator("main > .panel.character-authoring-page")).to_have_count(0)
+            expect(page.locator("main > section.hero.compact.character-authoring-hero")).to_be_visible(timeout=10000)
+            expect(page.locator("main > .character-authoring-page.character-authoring-manual-import-page")).to_have_count(0)
             expect(page.get_by_role("heading", name="Import Existing Xianxia Character")).to_be_visible(timeout=10000)
             expect(page.get_by_role("link", name="Flask import")).to_be_visible()
             page.locator("[name='realm']").select_option("Immortal")

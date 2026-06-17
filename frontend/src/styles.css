@@ -843,17 +843,6 @@ a:hover {
   align-items: stretch;
 }
 
-.character-authoring-page {
-  display: grid;
-  gap: 1rem;
-}
-
-.character-authoring-page.character-authoring-create-page,
-.character-authoring-page.character-authoring-manual-import-page {
-  display: grid;
-  gap: 1rem;
-}
-
 .character-authoring-layout {
   display: grid;
   gap: 1rem;
