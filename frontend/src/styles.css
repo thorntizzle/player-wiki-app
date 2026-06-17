@@ -1220,6 +1220,19 @@ a:hover {
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
 }
 
+.admin-user-card {
+  min-width: 0;
+}
+
+.admin-user-card .card-kicker,
+.admin-user-card h3,
+.admin-user-card p,
+.admin-user-card a {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .admin-panel-form {
   max-width: 100%;
 }
