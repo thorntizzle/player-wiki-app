@@ -1486,23 +1486,14 @@ a:hover {
   gap: 0.35rem;
 }
 
-.campaign-help-page,
 .campaign-help-main,
 .campaign-help-sidebar,
 .campaign-help-surface,
-.campaign-help-current {
+.campaign-help-current,
+.session-column,
+.session-sidebar {
   display: grid;
   gap: 1rem;
-}
-
-.campaign-help-hero {
-  display: grid;
-  gap: 0.45rem;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
 }
 
 .campaign-help-layout {
@@ -1511,29 +1502,25 @@ a:hover {
 
 .campaign-help-main,
 .campaign-help-sidebar,
+.session-column,
+.session-sidebar,
 .campaign-help-current,
 .campaign-help-surface,
-.campaign-help-sidebar .sidebar-card {
+.campaign-help-sidebar .sidebar-card,
+.session-sidebar .sidebar-card,
+.session-sidebar .session-sidebar-card {
   min-width: 0;
 }
 
 .campaign-help-current,
 .campaign-help-surface,
-.campaign-help-sidebar .sidebar-card {
+.campaign-help-sidebar .sidebar-card,
+.session-sidebar .sidebar-card,
+.session-sidebar .session-sidebar-card {
   gap: 0.9rem;
 }
 
-.campaign-help-hero h1 {
-  margin: 0.1rem 0 0.4rem;
-}
-
-.help-anchor-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.4rem;
-}
-
+.hero-actions,
 .campaign-help-surface-actions,
 .campaign-help-account-actions {
   display: flex;
@@ -1542,7 +1529,12 @@ a:hover {
   align-items: center;
 }
 
-.help-detail-grid {
+.help-anchor-row {
+  margin-top: 0.4rem;
+}
+
+.help-detail-grid,
+.detail-grid.help-detail-grid {
   display: grid;
   gap: 0.85rem;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -1553,7 +1545,8 @@ a:hover {
   gap: 0.35rem;
 }
 
-.help-detail-card {
+.help-detail-card,
+.detail-card.help-detail-card {
   background: var(--surface-soft);
   border: 1px solid var(--border);
   border-radius: 18px;
@@ -1638,6 +1631,7 @@ a:hover {
 .hero.compact.character-roster-hero,
 .hero.compact.account-hero,
 .hero.compact.campaign-picker-hero,
+.hero.compact.campaign-help-hero,
 .hero.compact.systems-hero {
   border: 0;
   border-radius: 0;
@@ -1655,11 +1649,35 @@ a:hover {
 .character-roster-hero > h2,
 .account-hero > h1,
 .campaign-picker-hero > h1,
+.campaign-help-hero > h1,
 .systems-hero > h1,
 .systems-hero h1 {
   margin: 0;
   font-size: clamp(2.2rem, 5vw, 4.2rem);
   line-height: 0.98;
+}
+
+.button-link,
+.button-link:hover {
+  text-decoration: none;
+}
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+  padding: 0.55rem 0.95rem;
+  border-radius: 999px;
+  border: 1px solid var(--accent-deep);
+  background: linear-gradient(135deg, var(--accent), var(--accent-deep));
+  color: var(--button-ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.button-link:hover {
+  filter: brightness(0.95);
 }
 
 .wiki-home > .meta,

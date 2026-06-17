@@ -5848,8 +5848,8 @@ function CampaignHelpPage() {
   const error = getApiErrorMessage(helpQuery.error);
 
   return (
-    <section className="campaign-help-page">
-      <section className="campaign-help-hero">
+    <>
+      <section className="hero compact campaign-help-hero">
         <p className="eyebrow">Help</p>
         <h1>Help</h1>
         <p className="lede">
@@ -5857,9 +5857,9 @@ function CampaignHelpPage() {
           and which first-pass limits still shape the workflow.
         </p>
         {data?.surfaces.length ? (
-          <div className="help-anchor-row" aria-label="Help sections">
-            {data.surfaces.map((surface) => (
-              <a className="ghost-button" href={`#${surface.anchor}`} key={surface.anchor}>
+          <div className="hero-actions help-anchor-row" aria-label="Help sections">
+            {data.surfaces.map((surface, index) => (
+              <a className={index === 0 ? "button-link" : "ghost-button"} href={`#${surface.anchor}`} key={surface.anchor}>
                 {surface.label}
               </a>
             ))}
@@ -5871,7 +5871,7 @@ function CampaignHelpPage() {
 
       {data ? (
         <div className="page-layout campaign-help-layout">
-          <section className="campaign-help-main">
+          <section className="session-column campaign-help-main">
             <article className="card campaign-help-current">
               <div className="section-heading">
                 <div>
@@ -5879,18 +5879,18 @@ function CampaignHelpPage() {
                   <p className="meta">This page holds the broader workflow notes so the main UI can stay focused on actions.</p>
                 </div>
               </div>
-              <div className="help-detail-grid">
-                <article className="help-detail-card">
+              <div className="detail-grid help-detail-grid">
+                <article className="detail-card help-detail-card">
                   <h3>Viewer role</h3>
                   <p><strong>{data.viewer_role_label}</strong></p>
                   <p className="meta">{data.viewer_role_summary}</p>
                 </article>
-                <article className="help-detail-card">
+                <article className="detail-card help-detail-card">
                   <h3>Campaign system</h3>
                   <p><strong>{data.campaign_system_label}</strong></p>
                   <p className="meta">Some workflows below stay narrower when the campaign is not using DND-5E.</p>
                 </article>
-                <article className="help-detail-card">
+                <article className="detail-card help-detail-card">
                   <h3>Open now</h3>
                   {data.available_surface_labels.length ? (
                     <p>{data.available_surface_labels.join(", ")}</p>
@@ -5912,25 +5912,29 @@ function CampaignHelpPage() {
                 </div>
 
                 {surface.links.length ? (
-                  <div className="article-actions campaign-help-surface-actions">
+                  <div className="hero-actions campaign-help-surface-actions">
                     {surface.links.map((link, index) => (
-                      <a className={index === 0 ? "button" : "button button-secondary"} href={link.href} key={`${surface.anchor}-${link.href}`}>
+                      <a
+                        className={index === 0 ? "button-link" : "ghost-button"}
+                        href={link.href}
+                        key={`${surface.anchor}-${link.href}`}
+                      >
                         {link.label}
                       </a>
                     ))}
                   </div>
                 ) : null}
 
-                <div className="help-detail-grid">
-                  <article className="help-detail-card">
+                <div className="detail-grid help-detail-grid">
+                  <article className="detail-card help-detail-card">
                     <h3>Use it for</h3>
                     <HelpList items={surface.capabilities} emptyText="No capabilities are listed for this surface." />
                   </article>
-                  <article className="help-detail-card">
+                  <article className="detail-card help-detail-card">
                     <h3>Current limits</h3>
                     <HelpList items={surface.limits} emptyText="No limits are listed for this surface." />
                   </article>
-                  <article className="help-detail-card">
+                  <article className="detail-card help-detail-card">
                     <h3>Access</h3>
                     <p><strong>{surface.status_label}</strong></p>
                     <p className="meta">{surface.access_note}</p>
@@ -5938,9 +5942,9 @@ function CampaignHelpPage() {
                 </div>
 
                 {surface.guidance_cards.length ? (
-                  <div className="help-detail-grid">
+                  <div className="detail-grid help-detail-grid">
                     {surface.guidance_cards.map((card) => (
-                      <article className="help-detail-card" key={`${surface.anchor}-${card.title}`}>
+                      <article className="detail-card help-detail-card" key={`${surface.anchor}-${card.title}`}>
                         <h3>{card.title}</h3>
                         {card.body ? <p>{card.body}</p> : null}
                         <HelpList items={card.items} emptyText="" />
@@ -5953,8 +5957,8 @@ function CampaignHelpPage() {
             ))}
           </section>
 
-          <aside className="sidebar campaign-help-sidebar">
-            <article className="card sidebar-card">
+          <aside className="session-sidebar campaign-help-sidebar">
+            <article className="card sidebar-card session-sidebar-card">
               <div className="section-heading">
                 <div>
                   <h2>Visibility by scope</h2>
@@ -5963,7 +5967,7 @@ function CampaignHelpPage() {
               </div>
               <div className="reference-stack">
                 {data.visibility_rows.map((row) => (
-                  <article className="help-detail-card" key={row.label}>
+                  <article className="detail-card help-detail-card" key={row.label}>
                     <div className="section-heading">
                       <h3>{row.label}</h3>
                       <span className="meta-badge">{row.visibility_label}</span>
@@ -5978,7 +5982,7 @@ function CampaignHelpPage() {
               </div>
             </article>
 
-            <article className="card sidebar-card">
+            <article className="card sidebar-card session-sidebar-card">
               <div className="section-heading">
                 <div>
                   <h2>Cross-cutting limits</h2>
@@ -5988,26 +5992,26 @@ function CampaignHelpPage() {
               <HelpList items={data.cross_cutting_limits} emptyText="No cross-cutting limits are visible for this viewer." />
             </article>
 
-            <article className="card sidebar-card">
+            <article className="card sidebar-card session-sidebar-card">
               <div className="section-heading">
                 <div>
                   <h2>Account settings</h2>
                   <p className="meta">{data.account_note}</p>
                 </div>
               </div>
-              <div className="article-actions campaign-help-account-actions">
+              <div className="hero-actions campaign-help-account-actions">
                 {data.is_authenticated ? (
-                  <a className="button" href={data.links.account_url}>Open Account</a>
+                  <a className="button-link" href={data.links.account_url}>Open Account</a>
                 ) : (
-                  <a className="button" href={data.links.sign_in_url}>Sign in</a>
+                  <a className="button-link" href={data.links.sign_in_url}>Sign in</a>
                 )}
-                <a className="button button-secondary" href={data.links.flask_help_url}>Flask Help</a>
+                <a className="ghost-button" href={data.links.flask_help_url}>Flask Help</a>
               </div>
             </article>
           </aside>
         </div>
       ) : null}
-    </section>
+    </>
   );
 }
 

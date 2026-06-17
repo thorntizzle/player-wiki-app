@@ -339,6 +339,7 @@ def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
             expect(player_page.get_by_role("link", name="Flask Help")).to_be_visible()
             assert player_page.locator("#dm-content").count() == 0
             assert player_page.locator("#control").count() == 0
+            assert player_page.locator("main .campaign-help-page").count() == 0
             player_hero = player_page.locator(".campaign-help-hero")
             expect(player_hero.get_by_role("heading", name="Help")).to_be_visible()
             expect(player_hero.get_by_role("link", name="Systems")).to_be_visible()
@@ -372,26 +373,45 @@ def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
                         }
                         return count;
                     };
-                    const hero = document.querySelector(".campaign-help-hero");
-                    const layout = document.querySelector(".campaign-help-layout");
-                    const main = document.querySelector(".campaign-help-main");
-                    const sidebar = document.querySelector(".campaign-help-sidebar");
+                    const main = document.querySelector("main");
+                    const hero = main ? main.querySelector(".hero.compact.campaign-help-hero") : null;
+                    const layout = main ? main.querySelector(".page-layout.campaign-help-layout") : null;
+                    const mainArea = main ? main.querySelector(".session-column.campaign-help-main") : null;
+                    const sidebar = main ? main.querySelector(".session-sidebar.campaign-help-sidebar") : null;
+                    const detailGrids = main ? main.querySelectorAll(".detail-grid").length : 0;
+                    const sidebarCards = main ? main.querySelectorAll(".session-sidebar-card").length : 0;
                     const layoutColumns = layout ? window.getComputedStyle(layout).gridTemplateColumns : "";
                     return {
                         innerWidth: window.innerWidth,
                         scrollWidth: document.documentElement.scrollWidth,
                         heroRadius: hero ? Number.parseFloat(window.getComputedStyle(hero).borderRadius) : 0,
                         heroShadow: hero ? window.getComputedStyle(hero).boxShadow : "none",
+                        hasLegacyWrapper: !!(main && main.querySelector(".campaign-help-page")),
+                        heroIsDirect: !!(hero && hero.parentElement === main),
+                        layoutIsDirect: !!(layout && layout.parentElement === main),
+                        hasSessionColumnClass: !!(main && main.querySelector(".session-column")),
+                        hasSessionSidebarClass: !!(main && main.querySelector(".session-sidebar")),
+                        detailGridCount: detailGrids,
+                        sidebarCardCount: sidebarCards,
+                        mainAreaIsInLayout: !!(mainArea && mainArea.parentElement === layout),
                         layoutColumns,
                         layoutColumnsCount: countGridTracks(layoutColumns),
-                        mainTop: main ? main.getBoundingClientRect().top : 0,
-                        mainLeft: main ? main.getBoundingClientRect().left : 0,
+                        mainTop: mainArea ? mainArea.getBoundingClientRect().top : 0,
+                        mainLeft: mainArea ? mainArea.getBoundingClientRect().left : 0,
                         sidebarLeft: sidebar ? sidebar.getBoundingClientRect().left : 0,
-                        mainWidth: main ? main.getBoundingClientRect().width : 0,
+                        mainWidth: mainArea ? mainArea.getBoundingClientRect().width : 0,
                         sidebarWidth: sidebar ? sidebar.getBoundingClientRect().width : 0,
                     };
                 }"""
             )
+            assert hero_metrics["hasLegacyWrapper"] is False
+            assert hero_metrics["heroIsDirect"] is True
+            assert hero_metrics["layoutIsDirect"] is True
+            assert hero_metrics["mainAreaIsInLayout"] is True
+            assert hero_metrics["hasSessionColumnClass"] is True
+            assert hero_metrics["hasSessionSidebarClass"] is True
+            assert hero_metrics["detailGridCount"] >= 4
+            assert hero_metrics["sidebarCardCount"] >= 3
             assert hero_metrics["heroRadius"] == 0
             assert hero_metrics["heroShadow"] == "none"
             assert hero_metrics["scrollWidth"] <= hero_metrics["innerWidth"] + 1
@@ -405,9 +425,12 @@ def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
             expect(player_mobile_page.get_by_role("heading", name="Help")).to_be_visible(timeout=10000)
             mobile_metrics = player_mobile_page.evaluate(
                 """() => {
-                    const layout = document.querySelector(".campaign-help-layout");
-                    const main = document.querySelector(".campaign-help-main");
-                    const sidebar = document.querySelector(".campaign-help-sidebar");
+                    const main = document.querySelector("main");
+                    const layout = main ? main.querySelector(".page-layout.campaign-help-layout") : null;
+                    const mainArea = layout && layout.querySelector(".session-column.campaign-help-main");
+                    const sidebar = main ? main.querySelector(".session-sidebar.campaign-help-sidebar") : null;
+                    const detailGrids = main ? main.querySelectorAll(".detail-grid").length : 0;
+                    const sidebarCards = main ? main.querySelectorAll(".session-sidebar-card").length : 0;
                     const countGridTracks = (value) => {
                         let depth = 0;
                         let count = 0;
@@ -442,16 +465,24 @@ def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
                         scrollWidth: document.documentElement.scrollWidth,
                         layoutColumns,
                         layoutColumnsCount: countGridTracks(layoutColumns),
-                        mainTop: main ? main.getBoundingClientRect().top : 0,
-                        mainLeft: main ? main.getBoundingClientRect().left : 0,
+                        mainTop: mainArea ? mainArea.getBoundingClientRect().top : 0,
+                        mainLeft: mainArea ? mainArea.getBoundingClientRect().left : 0,
+                        hasSessionColumnClass: !!(main && main.querySelector(".session-column")),
+                        hasSessionSidebarClass: !!(main && main.querySelector(".session-sidebar")),
+                        detailGridCount: detailGrids,
+                        sidebarCardCount: sidebarCards,
                         sidebarTop: sidebar ? sidebar.getBoundingClientRect().top : 0,
-                        mainWidth: main ? main.getBoundingClientRect().width : 0,
+                        mainWidth: mainArea ? mainArea.getBoundingClientRect().width : 0,
                         sidebarWidth: sidebar ? sidebar.getBoundingClientRect().width : 0,
                     };
                 }"""
             )
             assert mobile_metrics["scrollWidth"] <= mobile_metrics["innerWidth"] + 1
             assert mobile_metrics["layoutColumnsCount"] == 1
+            assert mobile_metrics["hasSessionColumnClass"] is True
+            assert mobile_metrics["hasSessionSidebarClass"] is True
+            assert mobile_metrics["detailGridCount"] >= 4
+            assert mobile_metrics["sidebarCardCount"] >= 3
             assert mobile_metrics["sidebarTop"] > mobile_metrics["mainTop"]
             assert mobile_metrics["mainWidth"] <= mobile_metrics["innerWidth"]
             assert mobile_metrics["sidebarWidth"] <= mobile_metrics["innerWidth"]
