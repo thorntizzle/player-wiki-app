@@ -1946,6 +1946,10 @@ a:hover {
   margin-top: 0.35rem;
 }
 
+.wiki-article-shell .sidebar-card .plain-list li + li {
+  margin-top: 0.55rem;
+}
+
 .status {
   margin: 0.35rem 0;
   border-radius: 14px;
