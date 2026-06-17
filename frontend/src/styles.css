@@ -1753,6 +1753,63 @@ a:hover {
   line-height: 1.6;
 }
 
+.wiki-article-shell .article-body h1,
+.wiki-article-shell .article-body h2,
+.wiki-article-shell .article-body h3,
+.wiki-overview-card .article-body h1,
+.wiki-overview-card .article-body h2,
+.wiki-overview-card .article-body h3 {
+  margin-top: 1.5rem;
+}
+
+.wiki-article-shell .article-body p,
+.wiki-article-shell .article-body ul,
+.wiki-article-shell .article-body ol,
+.wiki-article-shell .article-body blockquote,
+.wiki-overview-card .article-body p,
+.wiki-overview-card .article-body ul,
+.wiki-overview-card .article-body ol,
+.wiki-overview-card .article-body blockquote {
+  max-width: 72ch;
+}
+
+.wiki-article-shell .article-body pre,
+.wiki-overview-card .article-body pre {
+  padding: 1rem;
+  overflow-x: auto;
+  border-radius: 16px;
+  background: var(--code-block-bg);
+  color: var(--code-block-ink);
+}
+
+.wiki-article-shell .article-body table,
+.wiki-overview-card .article-body table {
+  width: min(100%, 72ch);
+  margin: 1rem 0 1.25rem;
+  border-collapse: collapse;
+}
+
+.wiki-article-shell .article-body th,
+.wiki-article-shell .article-body td,
+.wiki-overview-card .article-body th,
+.wiki-overview-card .article-body td {
+  padding: 0.35rem 1.4rem 0.35rem 0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.wiki-article-shell .article-body th:last-child,
+.wiki-article-shell .article-body td:last-child,
+.wiki-overview-card .article-body th:last-child,
+.wiki-overview-card .article-body td:last-child {
+  padding-right: 0;
+}
+
+.wiki-article-shell .article-body thead th,
+.wiki-overview-card .article-body thead th {
+  border-bottom: 1px solid var(--border);
+}
+
 .systems-browse-page {
   display: grid;
   gap: 1rem;
