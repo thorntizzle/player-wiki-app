@@ -563,27 +563,6 @@ a:hover {
   gap: 0.7rem;
 }
 
-.session-page-hero {
-  display: grid;
-  gap: 0.35rem;
-}
-
-.session-page-hero h1 {
-  margin: 0;
-  font-size: clamp(2rem, 4.2vw, 3rem);
-  line-height: 1.05;
-}
-
-.session-page-tab-row {
-  display: grid;
-  justify-items: start;
-}
-
-.session-page-toolbar {
-  display: flex;
-  justify-content: flex-end;
-}
-
 .session-workspace-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(270px, 0.85fr);
@@ -1612,7 +1591,8 @@ a:hover {
 .hero.compact.campaign-picker-hero,
 .hero.compact.campaign-help-hero,
 .hero.compact.campaign-control-hero,
-.hero.compact.systems-hero {
+.hero.compact.systems-hero,
+.hero.compact.session-hero {
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -1632,7 +1612,9 @@ a:hover {
 .campaign-help-hero > h1,
 .campaign-control-hero > h1,
 .systems-hero > h1,
-.systems-hero h1 {
+.systems-hero h1,
+.session-hero > h1,
+.session-hero h1 {
   margin: 0;
   font-size: clamp(2.2rem, 5vw, 4.2rem);
   line-height: 0.98;
@@ -1678,7 +1660,9 @@ a:hover {
 .campaign-picker-hero .meta,
 .systems-hero > .meta,
 .campaign-control-hero > .meta,
-.systems-hero .meta {
+.systems-hero .meta,
+.session-hero > .meta,
+.session-hero .meta {
   margin: 0 0 0.25rem;
   text-transform: uppercase;
   font-size: 0.78rem;
@@ -1692,7 +1676,9 @@ a:hover {
 .systems-hero > .lede,
 .systems-hero .lede,
 .campaign-control-hero > .lede,
-.campaign-control-hero .lede {
+.campaign-control-hero .lede,
+.session-hero > .lede,
+.session-hero .lede {
   max-width: 70ch;
   margin: 0;
   font-size: 1.08rem;
@@ -2277,6 +2263,29 @@ a:hover {
   box-shadow: inset 0 0 0 1px var(--overlay-accent);
 }
 
+.hero-actions.session-tab-strip {
+  width: auto;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.session-tab-strip .tab-button.button-link {
+  border-color: var(--accent-deep);
+  background: linear-gradient(135deg, var(--accent), var(--accent-deep));
+  color: var(--button-ink);
+  box-shadow: none;
+}
+
+.session-tab-strip .tab-button.ghost-button {
+  border-color: var(--border);
+  background: var(--surface-raised);
+  color: var(--accent-deep);
+  box-shadow: none;
+}
+
 .pane-stack {
   position: relative;
 }
@@ -2599,7 +2608,6 @@ textarea {
 .session-character-form button,
 .session-log-detail-head button,
 .wiki-selection button,
-.session-tab-strip button,
 .segmented-button {
   border: 1px solid var(--accent-deep);
   border-radius: 999px;
@@ -2625,19 +2633,6 @@ textarea {
 .segmented-button:disabled,
 .session-message-form button:disabled {
   opacity: 0.55;
-}
-
-.session-tab-strip .tab-button {
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--accent-deep);
-}
-
-.session-tab-strip .tab-button.active {
-  background: var(--surface-highlight);
-  border-color: var(--border-accent);
-  color: var(--ink);
-  box-shadow: inset 0 0 0 1px var(--overlay-accent);
 }
 
 .session-surface-subhead {
@@ -3817,10 +3812,6 @@ textarea {
 
   .session-page-shell {
     gap: 0.6rem;
-  }
-
-  .session-page-tab-row {
-    width: 100%;
   }
 
   .session-tab-strip,

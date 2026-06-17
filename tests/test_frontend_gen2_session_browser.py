@@ -136,10 +136,12 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(page.locator(".campaign-nav-link").get_by_text("DM Content")).to_be_visible()
             expect(page.locator(".campaign-nav-link").get_by_text("Control")).to_be_visible()
             assert page.locator(".campaign-search-form").count() == 0
-            expect(page.locator(".session-page-hero").get_by_role("heading", name="Session")).to_be_visible()
-            expect(page.locator(".session-page-hero").get_by_text("Session workspace")).to_be_visible()
-            expect(page.locator(".session-page-hero").get_by_text("Live play workspace.")).to_be_visible()
-            expect(page.locator(".session-page-tab-row")).to_be_visible()
+            expect(page.locator(".session-hero").get_by_role("heading", name="Session")).to_be_visible()
+            expect(page.locator(".session-hero").get_by_text("Session Workspace")).to_be_visible()
+            expect(page.locator(".session-hero").get_by_text("Live play workspace.")).to_be_visible()
+            expect(page.locator(".session-hero > .hero-actions.session-tab-strip")).to_be_visible()
+            assert page.locator(".session-page-tab-row").count() == 0
+            assert page.locator(".session-page-toolbar").count() == 0
             assert page.locator("a", has_text="Sign in").count() == 0
             assert page.locator("text=Back to list").count() == 0
             assert page.locator("text=/Session:/").count() == 0
@@ -150,7 +152,7 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(session_tabs.get_by_role("button", name="DM", exact=True)).to_be_visible()
 
             page.reload()
-            expect(page.locator(".session-page-hero").get_by_role("heading", name="Session")).to_be_visible(timeout=10000)
+            expect(page.locator(".session-hero").get_by_role("heading", name="Session")).to_be_visible(timeout=10000)
             expect(page.locator(".campaign-nav-link").get_by_text("Session")).to_be_visible()
 
             session_tabs.get_by_role("button", name="DM", exact=True).click()
@@ -191,7 +193,7 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
 
             session_tabs.get_by_role("button", name="Session", exact=True).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))
-            expect(page.locator(".session-page-hero").get_by_role("heading", name="Session")).to_be_visible()
+            expect(page.locator(".session-hero").get_by_role("heading", name="Session")).to_be_visible()
             expect(page.get_by_role("heading", name="Session chat")).to_be_visible()
             expect(page.locator(".session-player-wiki-details-summary")).to_have_text("Player wiki lookup")
             expect(page.get_by_role("heading", name="Send message")).to_be_visible()
@@ -254,13 +256,13 @@ def test_gen2_shell_and_session_visual_parity_smoke(
                 "href",
                 re.compile(r"/app-next/campaigns/linden-pass/characters$"),
             )
-            expect(desktop_page.locator(".session-tab-strip .tab-button.active", has_text="Session")).to_be_visible()
+            expect(desktop_page.locator(".session-tab-strip .button-link", has_text="Session")).to_be_visible()
 
             desktop_metrics = desktop_page.evaluate(
                 """() => {
                     const bodyStyle = window.getComputedStyle(document.body);
                     const nav = document.querySelector(".campaign-nav-link");
-                    const hero = document.querySelector(".session-page-hero");
+                    const hero = document.querySelector(".session-hero");
                     const firstPanel = document.querySelector(".session-workspace-main .panel-nested");
                     const topbar = document.querySelector(".topbar");
                     const globalSearchForm = document.querySelector(".campaign-global-search__form");
@@ -300,8 +302,8 @@ def test_gen2_shell_and_session_visual_parity_smoke(
                     innerWidth: window.innerWidth,
                     scrollWidth: document.documentElement.scrollWidth,
                     tabWidth: document.querySelector(".session-tab-strip")?.getBoundingClientRect().width ?? 0,
-                    shellWidth: document.querySelector(".session-shell")?.getBoundingClientRect().width ?? 0,
-                    heroTop: document.querySelector(".session-page-hero")?.getBoundingClientRect().top ?? 0,
+                    shellWidth: document.querySelector(".session-page-shell")?.getBoundingClientRect().width ?? 0,
+                    heroTop: document.querySelector(".session-hero")?.getBoundingClientRect().top ?? 0,
                     firstPanelTop: document.querySelector(".session-workspace-main .panel-nested")?.getBoundingClientRect().top ?? 0,
                     topbarBottom: document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0,
                     globalSearchFormDirection: globalSearchForm

@@ -15289,28 +15289,21 @@ function SessionPage() {
 
   return (
     <section className="session-page-shell">
-      <header className="session-page-hero">
-        <p className="eyebrow">Session workspace</p>
+      <section className="hero compact session-hero">
+        <p className="eyebrow">Session Workspace</p>
         <h1>Session</h1>
         <p className="lede">Live play workspace.</p>
-      </header>
-
-      <div className="session-page-toolbar">
-        {canManage ? <span className="pill">DM+</span> : null}
-      </div>
-
-      <div className="session-page-tab-row">
-        <div className="session-tab-strip">
+        <div className="hero-actions session-tab-strip">
           <button
             type="button"
-            className={activePane === "session" ? "tab-button active" : "tab-button"}
+            className={activePane === "session" ? "tab-button button-link" : "tab-button ghost-button"}
             onClick={() => setActivePane("session")}
           >
             Session
           </button>
           <button
             type="button"
-            className={activePane === "character" ? "tab-button active" : "tab-button"}
+            className={activePane === "character" ? "tab-button button-link" : "tab-button ghost-button"}
             onClick={() => setActivePane("character")}
           >
             Character
@@ -15318,14 +15311,14 @@ function SessionPage() {
           {canManage ? (
             <button
               type="button"
-              className={activePane === "dm" ? "tab-button active" : "tab-button"}
+              className={activePane === "dm" ? "tab-button button-link" : "tab-button ghost-button"}
               onClick={() => setActivePane("dm")}
             >
               DM
             </button>
           ) : null}
         </div>
-      </div>
+      </section>
 
       <ApiErrorNotice
         isLoading={sessionQuery.isLoading}
