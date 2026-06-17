@@ -12516,6 +12516,13 @@ function DmContentPage() {
         : activeLane === "systems"
           ? "DM Content: Systems"
           : "DM Content: Staged Articles";
+  const canShowDmPlus = (activeLane === "statblocks" || activeLane === "conditions")
+    ? canManageDmContent
+    : activeLane === "staged-articles"
+      ? canManageSession
+      : activeLane === "player-wiki"
+        ? canManagePlayerWiki
+        : false;
   const pageIsLoading = activeLane === "staged-articles"
     ? sessionQuery.isLoading
     : activeLane === "player-wiki"
@@ -13076,16 +13083,20 @@ function DmContentPage() {
   };
 
   return (
-    <section className="panel dm-content-gen2-page">
-      <div className="panel-header">
+    <section className="dm-content-gen2-page">
+      <section className="hero compact dm-content-hero">
         <Link to="/" className="button button-secondary">
           Back to list
         </Link>
         <h2>{pageTitle}</h2>
-        {(activeLane === "statblocks" || activeLane === "conditions") && canManageDmContent ? <span className="pill">DM+</span> : null}
-        {activeLane === "staged-articles" && canManageSession ? <span className="pill">DM+</span> : null}
-        {activeLane === "player-wiki" && canManagePlayerWiki ? <span className="pill">DM+</span> : null}
-      </div>
+        {canShowDmPlus ? (
+          <div className="article-actions">
+            {(activeLane === "statblocks" || activeLane === "conditions") && canManageDmContent ? <span className="pill">DM+</span> : null}
+            {activeLane === "staged-articles" && canManageSession ? <span className="pill">DM+</span> : null}
+            {activeLane === "player-wiki" && canManagePlayerWiki ? <span className="pill">DM+</span> : null}
+          </div>
+        ) : null}
+      </section>
 
       <ApiErrorNotice
         isLoading={pageIsLoading}

@@ -457,7 +457,7 @@ a:hover {
   background: transparent;
 }
 
-.panel.dm-content-gen2-page {
+.dm-content-gen2-page {
   margin: 0;
   padding: 0;
   border: 0;
@@ -469,13 +469,15 @@ a:hover {
   gap: 0.75rem;
 }
 
-.panel.dm-content-gen2-page > .panel-header {
+.dm-content-gen2-page > .dm-content-hero {
   margin: 0;
   align-items: flex-start;
   padding: 0.75rem 0 0.25rem;
+  display: grid;
+  gap: 0.35rem;
 }
 
-.panel.dm-content-gen2-page > .panel-header h2 {
+.dm-content-gen2-page > .dm-content-hero h2 {
   margin: 0;
   font-size: clamp(2rem, 4.8vw, 3.6rem);
   line-height: 0.98;

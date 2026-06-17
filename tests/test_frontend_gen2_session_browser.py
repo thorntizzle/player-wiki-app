@@ -2263,9 +2263,12 @@ def test_gen2_dm_content_browser_visual_parity_smoke(
                 page.set_viewport_size(viewport)
                 page.goto(url)
 
-                page_section = page.locator("section.dm-content-gen2-page")
-                expect(page_section).to_be_visible(timeout=10000)
+                page_root = page.locator("main > section.dm-content-gen2-page")
+                page_hero = page.locator("section.dm-content-hero")
+                expect(page_root).to_be_visible(timeout=10000)
+                expect(page_hero).to_be_visible(timeout=10000)
                 expect(page.get_by_role("heading", name=heading)).to_be_visible(timeout=10000)
+                assert page.locator("main > .panel.dm-content-gen2-page").count() == 0
 
                 fallback_links = page.locator(".dm-content-gen2-links")
                 expect(fallback_links).to_be_visible()
@@ -2320,9 +2323,9 @@ def test_gen2_dm_content_browser_visual_parity_smoke(
                     """() => {
                         const viewportWidth = Math.ceil(document.documentElement.clientWidth);
                         const selectors = [
-                            '.dm-content-gen2-links',
+                            '.dm-content-hero',
                             '.dm-content-staged-grid',
-                            'section.dm-content-gen2-page',
+                            '.dm-content-gen2-links',
                         ];
                         return selectors.every((selector) => {
                             const node = document.querySelector(selector);
