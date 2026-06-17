@@ -6140,43 +6140,45 @@ function WikiSectionBrowse({
     return null;
   }
   return (
-    <section className="wiki-section-browse">
-      <div className="section-heading">
-        <h2>{data.query ? "Search Results" : "Browse By Section"}</h2>
-        <p className="meta">
-          {data.query
-            ? `${data.result_count} match${data.result_count === 1 ? "" : "es"}`
-            : `${data.grouped_sections.length} section${data.grouped_sections.length === 1 ? "" : "s"}`}
-        </p>
-      </div>
-      <div className="grid">
-        {data.grouped_sections.map((section) =>
-          data.query ? (
-            section.pages.map((page) => (
-              <WikiPageCard
-                key={page.page_ref}
-                page={page}
-                campaignSlug={campaignSlug}
-                frontendMode={frontendMode}
-                headingLevel="h3"
-                kickerMode="sectionAndDisplayType"
-              />
-            ))
-          ) : (
-            <article className="card page-card section-card" key={section.section_slug}>
-              <p className="card-kicker">Section</p>
-              <h3>
-                <a href={preferredCampaignLink(section.href, campaignSlug, frontendMode)}>{section.section_name}</a>
-              </h3>
-              <p>
-                {section.page_count} page{section.page_count === 1 ? "" : "s"} available in this section.
-              </p>
-              <p>
-                <a href={preferredCampaignLink(section.href, campaignSlug, frontendMode)}>Open {section.section_name}</a>
-              </p>
-            </article>
-          ),
-        )}
+    <section className="section-list wiki-section-browse">
+      <div className="section-block">
+        <div className="section-heading">
+          <h2>{data.query ? "Search Results" : "Browse By Section"}</h2>
+          <p className="meta">
+            {data.query
+              ? `${data.result_count} match${data.result_count === 1 ? "" : "es"}`
+              : `${data.grouped_sections.length} section${data.grouped_sections.length === 1 ? "" : "s"}`}
+          </p>
+        </div>
+        <div className="grid">
+          {data.grouped_sections.map((section) =>
+            data.query ? (
+              section.pages.map((page) => (
+                <WikiPageCard
+                  key={page.page_ref}
+                  page={page}
+                  campaignSlug={campaignSlug}
+                  frontendMode={frontendMode}
+                  headingLevel="h3"
+                  kickerMode="sectionAndDisplayType"
+                />
+              ))
+            ) : (
+              <article className="card page-card section-card" key={section.section_slug}>
+                <p className="card-kicker">Section</p>
+                <h3>
+                  <a href={preferredCampaignLink(section.href, campaignSlug, frontendMode)}>{section.section_name}</a>
+                </h3>
+                <p>
+                  {section.page_count} page{section.page_count === 1 ? "" : "s"} available in this section.
+                </p>
+                <p>
+                  <a href={preferredCampaignLink(section.href, campaignSlug, frontendMode)}>Open {section.section_name}</a>
+                </p>
+              </article>
+            ),
+          )}
+        </div>
       </div>
     </section>
   );
@@ -6234,14 +6236,27 @@ function WikiHomePage() {
               </section>
             )
           ) : data.overview_page ? (
-            <article className="article card wiki-overview-card">
-              <p className="eyebrow">{data.overview_page.display_type} in {data.overview_page.section}</p>
-              <h2>
-                <a href={preferredCampaignLink(data.overview_page.href, resolvedCampaignSlug, wikiFrontendMode)}>{data.overview_page.title}</a>
-              </h2>
-              {data.overview_page.summary ? <p className="lede">{data.overview_page.summary}</p> : null}
-              <div className="article-body html-body" dangerouslySetInnerHTML={{ __html: data.overview_page.body_html }} />
-            </article>
+            <section className="section-list">
+              <div className="section-block">
+                <article className="article card wiki-overview-card">
+                  <p className="eyebrow">
+                    {data.overview_page.display_type} in {data.overview_page.section}
+                  </p>
+                  <h2>
+                    <a
+                      href={preferredCampaignLink(data.overview_page.href, resolvedCampaignSlug, wikiFrontendMode)}
+                    >
+                      {data.overview_page.title}
+                    </a>
+                  </h2>
+                  {data.overview_page.summary ? <p className="lede">{data.overview_page.summary}</p> : null}
+                  <div
+                    className="article-body html-body"
+                    dangerouslySetInnerHTML={{ __html: data.overview_page.body_html }}
+                  />
+                </article>
+              </div>
+            </section>
           ) : data.grouped_sections.length ? (
             <WikiSectionBrowse data={data} campaignSlug={resolvedCampaignSlug} frontendMode={wikiFrontendMode} />
           ) : (
