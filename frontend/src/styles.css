@@ -15,6 +15,9 @@
   --session-bar-bg: linear-gradient(180deg, rgba(255, 248, 236, 0.98), rgba(247, 234, 210, 0.95));
   --input-bg: rgba(255, 252, 246, 0.92);
   --overlay-accent: rgba(140, 79, 49, 0.12);
+  --code-inline-bg: rgba(92, 55, 33, 0.08);
+  --code-block-bg: #2d2118;
+  --code-block-ink: #fff4e7;
   --ink: #2f241a;
   --muted: #6d5b48;
   --accent: #8c4f31;
@@ -53,6 +56,9 @@ html[data-theme="moonlit"] {
   --session-bar-bg: linear-gradient(180deg, rgba(35, 48, 66, 0.98), rgba(24, 33, 46, 0.95));
   --input-bg: rgba(24, 34, 48, 0.92);
   --overlay-accent: rgba(212, 177, 111, 0.18);
+  --code-inline-bg: rgba(190, 207, 232, 0.12);
+  --code-block-bg: #0b1018;
+  --code-block-ink: #eaf1ff;
   --ink: #eaf1ff;
   --muted: #9fb0c8;
   --accent: #ad8040;
@@ -89,6 +95,9 @@ html[data-theme="verdant"] {
   --session-bar-bg: linear-gradient(180deg, rgba(243, 249, 241, 0.98), rgba(226, 239, 227, 0.95));
   --input-bg: rgba(251, 254, 249, 0.92);
   --overlay-accent: rgba(74, 126, 96, 0.14);
+  --code-inline-bg: rgba(52, 88, 63, 0.08);
+  --code-block-bg: #1d2b22;
+  --code-block-ink: #f6fff8;
   --ink: #233126;
   --muted: #5d7060;
   --accent: #4a7e60;
@@ -120,6 +129,9 @@ html[data-theme="ember"] {
   --session-bar-bg: linear-gradient(180deg, rgba(255, 242, 236, 0.98), rgba(246, 223, 213, 0.95));
   --input-bg: rgba(255, 248, 244, 0.92);
   --overlay-accent: rgba(163, 76, 49, 0.14);
+  --code-inline-bg: rgba(105, 51, 35, 0.08);
+  --code-block-bg: #2e1914;
+  --code-block-ink: #fff1ea;
   --ink: #351d18;
   --muted: #7b554b;
   --accent: #a34c31;
@@ -1780,6 +1792,13 @@ a:hover {
   border-radius: 16px;
   background: var(--code-block-bg);
   color: var(--code-block-ink);
+}
+
+.wiki-article-shell .article-body code,
+.wiki-overview-card .article-body code {
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.35rem;
+  background: var(--code-inline-bg);
 }
 
 .wiki-article-shell .article-body table,
