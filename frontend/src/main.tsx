@@ -6212,17 +6212,15 @@ function WikiHomePage() {
   const wikiFrontendMode = normalizeFrontendMode(data?.frontend_mode ?? preferredFrontendMode);
 
   return (
-    <section className="panel wiki-home">
-      <div className="panel-header">
-        <div>
-          <p className="meta">Campaign</p>
-          <h1>Campaign Home</h1>
-        </div>
-      </div>
+    <>
+      <section className="hero compact wiki-home">
+        <p className="meta">Campaign</p>
+        <h1>Campaign Home</h1>
+        <p className="lede">{data?.campaign.summary}</p>
+      </section>
       <ApiErrorNotice isLoading={wikiQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {data ? (
         <>
-          <p className="lede">{data.campaign.summary}</p>
           {!data.can_view_wiki ? (
             <section className="card">
               <h2>Wiki visibility restricted</h2>
@@ -6269,7 +6267,7 @@ function WikiHomePage() {
           )}
         </>
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -6323,14 +6321,12 @@ function WikiSectionPage() {
   };
 
   return (
-    <section className="panel wiki-section-page">
-      <div className="panel-header">
-        <div>
-          <p className="meta">Section</p>
-          <h1>{data?.section_name ?? resolvedSectionSlug}</h1>
-          <p className="lede">Published player-facing pages in this section.</p>
-        </div>
-      </div>
+    <>
+      <section className="hero compact wiki-section-page">
+        <p className="meta">Section</p>
+        <h1>{data?.section_name ?? resolvedSectionSlug}</h1>
+        <p className="lede">Published player-facing pages in this section.</p>
+      </section>
       <ApiErrorNotice isLoading={sectionQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {data ? (
         data.show_subsections ? (
@@ -6420,7 +6416,7 @@ function WikiSectionPage() {
           </>
         )
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -6452,10 +6448,10 @@ function WikiArticlePage() {
   const showSummary = page?.summary && !["item", "spell", "mechanic"].includes(page.page_type);
 
   return (
-    <section className="wiki-article-shell">
+    <>
       <ApiErrorNotice isLoading={pageQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {page ? (
-        <div className="page-layout">
+        <section className="page-layout wiki-article-page">
           <article className="article card">
             <h1>{page.title}</h1>
             {showSummary ? <p className="lede">{page.summary}</p> : null}
@@ -6490,9 +6486,9 @@ function WikiArticlePage() {
               </section>
             ) : null}
           </aside>
-        </div>
+        </section>
       ) : null}
-    </section>
+    </>
   );
 }
 

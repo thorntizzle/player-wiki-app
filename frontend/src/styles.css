@@ -1612,38 +1612,33 @@ a:hover {
 
 .wiki-home .card,
 .wiki-section-page .card,
-.wiki-article-shell .card {
+.wiki-article-page .card {
   border-radius: 22px;
   padding: 1.25rem;
   box-shadow: var(--shadow);
 }
 
-.panel.wiki-home,
-.panel.wiki-section-page {
+.hero.compact.wiki-home,
+.hero.compact.wiki-section-page {
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-  padding: 0;
+  padding: 0.75rem 0 0;
   backdrop-filter: none;
+  display: grid;
+  gap: 0.35rem;
 }
 
-.wiki-home > .panel-header,
-.wiki-section-page > .panel-header {
-  align-items: flex-start;
-  padding: 0.75rem 0 0.5rem;
-  margin-bottom: 0;
-}
-
-.wiki-home > .panel-header h1,
-.wiki-section-page > .panel-header h1 {
+.wiki-home > h1,
+.wiki-section-page > h1 {
   margin: 0;
   font-size: clamp(2.2rem, 5vw, 4.2rem);
   line-height: 0.98;
 }
 
-.wiki-home > .panel-header .meta,
-.wiki-section-page > .panel-header .meta {
+.wiki-home > .meta,
+.wiki-section-page > .meta {
   margin: 0 0 0.25rem;
   text-transform: uppercase;
   font-size: 0.78rem;
@@ -1651,7 +1646,7 @@ a:hover {
 }
 
 .wiki-home > .lede,
-.wiki-section-page > .panel-header .lede {
+.wiki-section-page > .lede {
   max-width: 70ch;
   margin: 0;
   font-size: 1.08rem;
@@ -1834,49 +1829,49 @@ a:hover {
   grid-template-columns: minmax(0, 2fr) minmax(16rem, 0.8fr);
 }
 
-.wiki-article-shell .page-layout {
+.wiki-article-page {
   grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.7fr);
 }
 
-.wiki-article-shell .page-layout > * {
+.wiki-article-page > * {
   min-width: 0;
 }
 
-.wiki-article-shell .article {
+.wiki-article-page .article {
   background: linear-gradient(180deg, var(--surface-strong), var(--surface));
 }
 
-.wiki-article-shell .article h1 {
+.wiki-article-page .article h1 {
   margin-top: 0;
   font-size: clamp(2.2rem, 5vw, 4.2rem);
   line-height: 0.98;
 }
 
-.wiki-article-shell .article-body,
+.wiki-article-page .article-body,
 .wiki-overview-card .article-body {
   margin-top: 1.2rem;
 }
 
-.wiki-article-shell .article-body,
+.wiki-article-page .article-body,
 .wiki-overview-card .article-body,
 .systems-entry-shell .article-body {
   max-height: none;
   line-height: 1.6;
 }
 
-.wiki-article-shell .article-body h1,
-.wiki-article-shell .article-body h2,
-.wiki-article-shell .article-body h3,
+.wiki-article-page .article-body h1,
+.wiki-article-page .article-body h2,
+.wiki-article-page .article-body h3,
 .wiki-overview-card .article-body h1,
 .wiki-overview-card .article-body h2,
 .wiki-overview-card .article-body h3 {
   margin-top: 1.5rem;
 }
 
-.wiki-article-shell .article-body p,
-.wiki-article-shell .article-body ul,
-.wiki-article-shell .article-body ol,
-.wiki-article-shell .article-body blockquote,
+.wiki-article-page .article-body p,
+.wiki-article-page .article-body ul,
+.wiki-article-page .article-body ol,
+.wiki-article-page .article-body blockquote,
 .wiki-overview-card .article-body p,
 .wiki-overview-card .article-body ul,
 .wiki-overview-card .article-body ol,
@@ -1884,7 +1879,7 @@ a:hover {
   max-width: 72ch;
 }
 
-.wiki-article-shell .article-body pre,
+.wiki-article-page .article-body pre,
 .wiki-overview-card .article-body pre {
   padding: 1rem;
   overflow-x: auto;
@@ -1893,22 +1888,22 @@ a:hover {
   color: var(--code-block-ink);
 }
 
-.wiki-article-shell .article-body code,
+.wiki-article-page .article-body code,
 .wiki-overview-card .article-body code {
   padding: 0.1rem 0.35rem;
   border-radius: 0.35rem;
   background: var(--code-inline-bg);
 }
 
-.wiki-article-shell .article-body table,
+.wiki-article-page .article-body table,
 .wiki-overview-card .article-body table {
   width: min(100%, 72ch);
   margin: 1rem 0 1.25rem;
   border-collapse: collapse;
 }
 
-.wiki-article-shell .article-body th,
-.wiki-article-shell .article-body td,
+.wiki-article-page .article-body th,
+.wiki-article-page .article-body td,
 .wiki-overview-card .article-body th,
 .wiki-overview-card .article-body td {
   padding: 0.35rem 1.4rem 0.35rem 0;
@@ -1916,14 +1911,14 @@ a:hover {
   vertical-align: top;
 }
 
-.wiki-article-shell .article-body th:last-child,
-.wiki-article-shell .article-body td:last-child,
+.wiki-article-page .article-body th:last-child,
+.wiki-article-page .article-body td:last-child,
 .wiki-overview-card .article-body th:last-child,
 .wiki-overview-card .article-body td:last-child {
   padding-right: 0;
 }
 
-.wiki-article-shell .article-body thead th,
+.wiki-article-page .article-body thead th,
 .wiki-overview-card .article-body thead th {
   border-bottom: 1px solid var(--border);
 }
@@ -2044,7 +2039,7 @@ a:hover {
   background: var(--surface-raised);
 }
 
-.wiki-article-shell .html-body,
+.wiki-article-page .html-body,
 .wiki-overview-card .html-body {
   border: 0;
   border-radius: 0;
@@ -2052,7 +2047,7 @@ a:hover {
   padding: 0;
 }
 
-.wiki-article-shell .lede,
+.wiki-article-page .lede,
 .wiki-overview-card .lede {
   max-width: 70ch;
   font-size: 1.08rem;
@@ -2083,7 +2078,7 @@ a:hover {
   width: auto;
 }
 
-.wiki-article-shell .article-figure .article-image {
+.wiki-article-page .article-figure .article-image {
   display: block;
   width: min(100%, 420px);
   max-width: 100%;
@@ -2097,11 +2092,11 @@ a:hover {
   margin-top: 0.35rem;
 }
 
-.wiki-article-shell .article-image__caption {
+.wiki-article-page .article-image__caption {
   margin: 0.55rem 0 0;
 }
 
-.wiki-article-shell .sidebar-card h2 {
+.wiki-article-page .sidebar-card h2 {
   font-size: 1.15rem;
 }
 
@@ -2121,7 +2116,7 @@ a:hover {
   margin-top: 0.35rem;
 }
 
-.wiki-article-shell .sidebar-card .plain-list li + li {
+.wiki-article-page .sidebar-card .plain-list li + li {
   margin-top: 0.55rem;
 }
 
@@ -3775,7 +3770,7 @@ textarea {
   }
 
   .page-layout,
-  .wiki-article-shell .page-layout,
+  .wiki-article-page,
   .account-settings-layout,
   .character-authoring-layout,
   .character-layout,

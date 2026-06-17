@@ -1347,25 +1347,25 @@ def test_gen2_wiki_visual_parity_smoke(
             _sign_in(desktop_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass")
             expect(desktop_page.get_by_role("heading", name="Campaign Home")).to_be_visible(timeout=10000)
-            expect(desktop_page.locator(".wiki-home > .panel-header")).to_be_visible()
+            expect(desktop_page.locator(".wiki-home")).to_be_visible()
             expect(desktop_page.locator(".wiki-overview-card")).to_be_visible()
             expect(desktop_page.locator(".wiki-section-browse")).to_be_visible()
             home_metrics = desktop_page.evaluate(
                 """() => {
                     const route = document.querySelector(".wiki-home");
-                    const header = document.querySelector(".wiki-home > .panel-header");
+                    const hero = document.querySelector(".wiki-home");
                     const overviewBody = document.querySelector(".wiki-overview-card .html-body");
                     const browse = document.querySelector(".wiki-section-browse");
                     return {
                         routeShadow: route ? window.getComputedStyle(route).boxShadow : "",
-                        headerDisplay: header ? window.getComputedStyle(header).display : "",
+                        heroDisplay: hero ? window.getComputedStyle(hero).display : "",
                         overviewBorder: overviewBody ? window.getComputedStyle(overviewBody).borderTopWidth : "",
                         browseRadius: browse ? Number.parseFloat(window.getComputedStyle(browse).borderRadius) : 0,
                     };
                 }"""
             )
             assert home_metrics["routeShadow"] == "none"
-            assert home_metrics["headerDisplay"] == "flex"
+            assert home_metrics["heroDisplay"] == "grid"
             assert home_metrics["overviewBorder"] == "0px"
             assert home_metrics["browseRadius"] >= 20
 
@@ -1389,10 +1389,10 @@ def test_gen2_wiki_visual_parity_smoke(
 
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale")
             expect(desktop_page.get_by_role("heading", name="Captain Lyra Vale")).to_be_visible(timeout=10000)
-            expect(desktop_page.locator(".wiki-article-shell .sidebar-card").first).to_be_visible()
+            expect(desktop_page.locator(".wiki-article-page .sidebar-card").first).to_be_visible()
             article_metrics = desktop_page.evaluate(
                 """() => {
-                    const body = document.querySelector(".wiki-article-shell .html-body");
+                    const body = document.querySelector(".wiki-article-page .html-body");
                     const image = document.querySelector(".article-figure .article-image");
                     const layout = document.querySelector(".page-layout");
                     return {
