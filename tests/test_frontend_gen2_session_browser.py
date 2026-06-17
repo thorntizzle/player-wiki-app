@@ -2066,20 +2066,33 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             expect(page.get_by_role("heading", name="Insight", exact=True)).to_be_visible()
             expect(page.get_by_role("heading", name="Realm Ascension")).to_be_visible()
             expect(page.get_by_role("link", name="Flask Cultivation")).to_be_visible()
+            expect(page.locator("main > section.hero.compact.character-cultivation-hero.character-authoring-hero")).to_be_visible(
+                timeout=10000
+            )
+            expect(page.locator("main > .page.campaign-page.character-authoring-page")).to_have_count(0)
             page.get_by_label("Insight available").fill("2")
             page.get_by_label("Insight spent").fill("1")
             page.get_by_role("button", name="Save Insight").click()
             expect(page.get_by_text("Insight counters saved.")).to_be_visible(timeout=10000)
             expect(page.locator("#xianxia-cultivation-insight .glance-card", has_text="Available").get_by_text("2")).to_be_visible()
 
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/browser-gen2-crane/edit")
+            expect(page.get_by_role("heading", name="Edit Browser Gen2 Crane")).to_be_visible(timeout=10000)
+            expect(page.locator("main > section.hero.compact.character-authoring-hero")).to_be_visible(timeout=10000)
+            expect(page.locator("main > .page.campaign-page.character-authoring-page")).to_have_count(0)
+
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/browser-gen2-crane/level-up")
             expect(page.get_by_role("heading", name="Level Up Browser Gen2 Crane")).to_be_visible(timeout=10000)
             expect(page.get_by_role("heading", name="Level-Up Is Not Available In Gen2")).to_be_visible()
+            expect(page.locator("main > section.hero.compact.character-authoring-hero")).to_be_visible(timeout=10000)
+            expect(page.locator("main > .page.campaign-page.character-authoring-page")).to_have_count(0)
             expect(page.get_by_role("link", name="Cultivation")).to_be_visible()
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/browser-gen2-crane/retraining")
             expect(page.get_by_role("heading", name="Retrain Browser Gen2 Crane")).to_be_visible(timeout=10000)
             expect(page.get_by_role("heading", name="Retraining Is Not Available In Gen2")).to_be_visible()
+            expect(page.locator("main > section.hero.compact.character-authoring-hero")).to_be_visible(timeout=10000)
+            expect(page.locator("main > .page.campaign-page.character-authoring-page")).to_have_count(0)
             expect(page.get_by_role("link", name="Cultivation")).to_be_visible()
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/browser-gen2-crane/progression-repair")
@@ -2087,6 +2100,8 @@ def test_gen2_xianxia_character_authoring_create_and_import(
                 timeout=10000
             )
             expect(page.get_by_role("heading", name="Progression Repair Is Not Available In Gen2")).to_be_visible()
+            expect(page.locator("main > section.hero.compact.character-authoring-hero")).to_be_visible(timeout=10000)
+            expect(page.locator("main > .page.campaign-page.character-authoring-page")).to_have_count(0)
             expect(page.get_by_role("link", name="Cultivation")).to_be_visible()
 
             _sign_in(player_page, base_url, email=users["party"]["email"], password=users["party"]["password"])

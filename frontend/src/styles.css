@@ -1006,6 +1006,10 @@ a:hover {
   font-size: 1.08rem;
 }
 
+.main-shell > .character-authoring-hero ~ * {
+  margin-top: 1rem;
+}
+
 .gen2-character-editor,
 .gen2-character-editor .read-section,
 .character-edit-stack,

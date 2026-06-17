@@ -1901,14 +1901,12 @@ function CharacterAdvancedEditorPage() {
   const loadingError = getApiErrorMessage(editorQuery.error);
 
   return (
-    <section className="page campaign-page character-authoring-page">
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">Character editor</p>
-          <h1>Edit {characterName}</h1>
-          <p className="lede">Advanced campaign-time adjustments and durable reference text for this character are managed here.</p>
-        </div>
-        <div className="button-row">
+    <>
+      <section className="hero compact character-authoring-hero">
+        <p className="eyebrow">Character editor</p>
+        <h1>Edit {characterName}</h1>
+        <p className="lede">Advanced campaign-time adjustments and durable reference text for this character are managed here.</p>
+        <div className="hero-actions">
           {data?.links?.character_url ? (
             <a className="button button-secondary" href={data.links.character_url}>
               Back to sheet
@@ -1921,7 +1919,7 @@ function CharacterAdvancedEditorPage() {
           ) : null}
           {classLevelText ? <span className="meta">{classLevelText}</span> : null}
         </div>
-      </div>
+      </section>
 
       <ApiErrorNotice isLoading={editorQuery.isLoading} message={loadingError || errorMessage} onAuth={() => setAuthRequired(true)} />
       {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
@@ -2032,7 +2030,7 @@ function CharacterAdvancedEditorPage() {
           </div>
         </form>
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -2123,18 +2121,16 @@ function CharacterProgressionRepairPage() {
   const reasons = asStringArray(repair?.readiness?.reasons);
 
   return (
-    <section className="page campaign-page character-authoring-page">
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">Character progression</p>
-          <h1>Prepare {characterName} For Native Level-Up</h1>
-          <p className="lede">
-            Repair imported baseline links and missing DND-5E progression details before advancing this character
-            {repair?.current_level ? ` past level ${repair.current_level}` : ""}.
-          </p>
-          {classLevelText ? <p className="meta">{classLevelText}</p> : null}
-        </div>
-        <div className="button-row">
+    <>
+      <section className="hero compact character-authoring-hero">
+        <p className="eyebrow">Character progression</p>
+        <h1>Prepare {characterName} For Native Level-Up</h1>
+        <p className="lede">
+          Repair imported baseline links and missing DND-5E progression details before advancing this character
+          {repair?.current_level ? ` past level ${repair.current_level}` : ""}.
+        </p>
+        {classLevelText ? <p className="meta">{classLevelText}</p> : null}
+        <div className="hero-actions">
           {data?.links?.character_url ? (
             <a className="button button-secondary" href={data.links.character_url}>
               Back to sheet
@@ -2146,7 +2142,7 @@ function CharacterProgressionRepairPage() {
             </a>
           ) : null}
         </div>
-      </div>
+      </section>
 
       <ApiErrorNotice isLoading={repairQuery.isLoading} message={loadingError || errorMessage} onAuth={() => setAuthRequired(true)} />
       {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
@@ -2355,7 +2351,7 @@ function CharacterProgressionRepairPage() {
           </form>
         </article>
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -2444,14 +2440,12 @@ function CharacterRetrainingPage() {
   const classLevelText = classLevelTextFromRecord(data?.character);
 
   return (
-    <section className="page campaign-page character-authoring-page">
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">Character retraining</p>
-          <h1>Retrain {characterName}</h1>
-          {classLevelText ? <p className="lede">{classLevelText}</p> : null}
-        </div>
-        <div className="button-row">
+    <>
+      <section className="hero compact character-authoring-hero">
+        <p className="eyebrow">Character retraining</p>
+        <h1>Retrain {characterName}</h1>
+        {classLevelText ? <p className="lede">{classLevelText}</p> : null}
+        <div className="hero-actions">
           {data?.links?.character_url ? (
             <a className="button button-secondary" href={data.links.character_url}>
               Back to sheet
@@ -2468,7 +2462,7 @@ function CharacterRetrainingPage() {
             </a>
           ) : null}
         </div>
-      </div>
+      </section>
 
       <ApiErrorNotice isLoading={retrainingQuery.isLoading} message={loadingError || errorMessage} onAuth={() => setAuthRequired(true)} />
       {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
@@ -2571,7 +2565,7 @@ function CharacterRetrainingPage() {
           </form>
         </article>
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -2670,14 +2664,12 @@ function CharacterLevelUpPage() {
   const advancementMode = draftString(draftValues, "advancement_mode", levelUp?.advancement_mode || "advance_existing");
 
   return (
-    <section className="page campaign-page character-authoring-page">
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">Character level-up</p>
-          <h1>Level Up {characterName}</h1>
-          {classLevelText ? <p className="lede">{classLevelText}</p> : null}
-        </div>
-        <div className="button-row">
+    <>
+      <section className="hero compact character-authoring-hero">
+        <p className="eyebrow">Character level-up</p>
+        <h1>Level Up {characterName}</h1>
+        {classLevelText ? <p className="lede">{classLevelText}</p> : null}
+        <div className="hero-actions">
           {data?.links?.character_url ? (
             <a className="button button-secondary" href={data.links.character_url}>
               Back to sheet
@@ -2689,7 +2681,7 @@ function CharacterLevelUpPage() {
             </a>
           ) : null}
         </div>
-      </div>
+      </section>
 
       <ApiErrorNotice isLoading={levelUpQuery.isLoading} message={loadingError || errorMessage} onAuth={() => setAuthRequired(true)} />
       {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
@@ -2856,7 +2848,7 @@ function CharacterLevelUpPage() {
           <CharacterLevelUpPreviewList preview={levelUp.preview ?? {}} />
         </div>
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -3387,14 +3379,12 @@ function CharacterCultivationPage() {
   const classLevelText = classLevelTextFromRecord(data?.character);
 
   return (
-    <section className="page campaign-page character-authoring-page cultivation-page">
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">Character cultivation</p>
-          <h1>Cultivation: {characterName}</h1>
-          <p className="lede">Insight-based advancement for this Xianxia character.</p>
-        </div>
-        <div className="button-row">
+    <>
+      <section className="hero compact character-cultivation-hero character-authoring-hero">
+        <p className="eyebrow">Character cultivation</p>
+        <h1>Cultivation: {characterName}</h1>
+        <p className="lede">Insight-based advancement for this Xianxia character.</p>
+        <div className="hero-actions">
           {data?.links?.character_url ? (
             <a className="button button-secondary" href={data.links.character_url}>
               Back to sheet
@@ -3422,7 +3412,7 @@ function CharacterCultivationPage() {
           ) : null}
           {classLevelText ? <span className="meta">{classLevelText}</span> : null}
         </div>
-      </div>
+      </section>
 
       <ApiErrorNotice isLoading={cultivationQuery.isLoading} message={loadingError || errorMessage} onAuth={() => setAuthRequired(true)} />
       {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
@@ -3734,7 +3724,7 @@ function CharacterCultivationPage() {
           </section>
         </>
       ) : null}
-    </section>
+    </>
   );
 }
 
