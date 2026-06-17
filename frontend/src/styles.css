@@ -886,8 +886,10 @@ a:hover {
 
 .stack-form,
 .character-authoring-form,
+.character-builder-form,
 .builder-section,
 .builder-preview-list,
+.builder-feature-list,
 .manual-import-rows,
 .manual-import-row,
 .character-authoring-sidebar {
@@ -970,11 +972,6 @@ a:hover {
   background: #f9fbff;
 }
 
-.builder-feature-list {
-  display: grid;
-  gap: 1rem;
-}
-
 .builder-feature-list li {
   padding-bottom: 0.7rem;
   border-bottom: 1px solid var(--border-soft);
@@ -998,6 +995,7 @@ a:hover {
 .gen2-character-editor,
 .gen2-character-editor .read-section,
 .character-edit-stack,
+.character-edit-sheet,
 .character-edit-row {
   display: grid;
   gap: 1rem;
@@ -2250,6 +2248,10 @@ a:hover {
   gap: 1rem;
 }
 
+.character-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .split-grid {
   grid-template-columns: minmax(0, 1.45fr) minmax(18rem, 0.8fr);
   align-items: start;
@@ -2867,6 +2869,10 @@ textarea {
   border-radius: 18px;
   border: 1px solid var(--border);
   background: var(--surface-soft);
+}
+
+.session-card {
+  background: var(--surface);
 }
 
 .glance-card strong {
@@ -3759,6 +3765,7 @@ textarea {
   .wiki-article-shell .page-layout,
   .account-settings-layout,
   .character-authoring-layout,
+  .character-layout,
   .systems-browse-grid,
   .campaign-control-layout {
     grid-template-columns: 1fr;
