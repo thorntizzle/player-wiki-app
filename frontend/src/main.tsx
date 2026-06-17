@@ -7357,7 +7357,7 @@ function DmArticleCreator({
 
   return (
     <article className={mergedClassName} id={id}>
-      <h3>Stage an article</h3>
+      <h2>Stage session articles</h2>
       <div className="segmented">
         <button
           type="button"
@@ -11764,12 +11764,13 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
       {systemsMessage ? <p className="status status-neutral">{systemsMessage}</p> : null}
 
       <section className="card" id="systems-source-enablement">
-        <div className="panel-header">
+        <div className="section-heading">
           <div>
-            <h3>Source Enablement</h3>
-            <p className="meta">Library: {payload.systems_library || "Not configured"} | Systems scope: {payload.systems_scope_visibility_label}</p>
+            <h2>Source Enablement</h2>
+            <p className="meta">Systems Policy</p>
+            <p className="meta">Library: {payload.systems_library || "Not configured"}</p>
+            <p className="meta">Systems scope visibility: {payload.systems_scope_visibility_label}</p>
           </div>
-          <span className="pill">{payload.source_count}</span>
         </div>
         {payload.has_proprietary_sources ? (
           <p className="status status-neutral">
@@ -11860,11 +11861,9 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
       </section>
 
       <section className="card" id="systems-entry-overrides">
-        <div className="panel-header">
-          <div>
-            <h3>Entry Overrides</h3>
-            <p className="meta">{payload.entry_override_count} saved override{payload.entry_override_count === 1 ? "" : "s"}</p>
-          </div>
+        <div className="section-heading">
+          <h2>Entry Overrides</h2>
+          <p className="meta">{payload.entry_override_count} saved override{payload.entry_override_count === 1 ? "" : "s"}</p>
         </div>
         <form
           className="session-form"
@@ -11934,11 +11933,9 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
       </section>
 
       <section className="card" id="systems-custom-entries">
-        <div className="panel-header">
-          <div>
-            <h3>Custom Entries</h3>
-            <p className="meta">{payload.custom_entry_count} custom campaign entr{payload.custom_entry_count === 1 ? "y" : "ies"}</p>
-          </div>
+        <div className="section-heading">
+          <h2>Custom Entries</h2>
+          <p className="meta">{payload.custom_entry_count} custom campaign entr{payload.custom_entry_count === 1 ? "y" : "ies"}</p>
         </div>
         <form
           className="session-form"
@@ -12036,11 +12033,9 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
       </section>
 
       <section className="card" id="systems-shared-imports">
-        <div className="panel-header">
-          <div>
-            <h3>Shared Source Imports</h3>
-            <p className="meta">DND-5E ZIP import remains on the permission-gated Flask form for this slice.</p>
-          </div>
+        <div className="section-heading">
+          <h2>Shared Source Imports</h2>
+          <p className="meta">DND-5E ZIP import remains on the permission-gated Flask form for this slice.</p>
         </div>
         {payload.permissions.can_import_shared_systems && payload.supports_dnd5e_import ? (
           <a className="button button-secondary" href={`${payload.links.flask_systems_lane_url}#systems-shared-imports`}>
@@ -12054,11 +12049,9 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
       </section>
 
       <section className="card" id="systems-import-history">
-        <div className="panel-header">
-          <div>
-            <h3>Import-Run History</h3>
-            <p className="meta">{payload.import_run_count} recent shared-library run{payload.import_run_count === 1 ? "" : "s"}</p>
-          </div>
+        <div className="section-heading">
+          <h2>Import-Run History</h2>
+          <p className="meta">{payload.import_run_count} recent shared-library run{payload.import_run_count === 1 ? "" : "s"}</p>
         </div>
         {payload.import_run_rows.length ? (
           <div className="article-stack systems-import-history">
@@ -13267,9 +13260,9 @@ function DmContentPage() {
       {activeLane === "statblocks" ? (
         <div className="split-grid dm-content-staged-grid">
           <section className="card dm-statblock-create">
-            <div className="panel-header">
-              <h3>Create statblock</h3>
-              <span className="pill">Markdown</span>
+            <div className="section-heading">
+              <h2>Create statblock</h2>
+              <p className="meta">Upload or paste markdown for DM-side encounter prep.</p>
             </div>
             <form
               className="session-form"
@@ -13369,9 +13362,11 @@ function DmContentPage() {
           </section>
 
           <section className="card dm-statblock-library">
-            <div className="panel-header">
-              <h3>Statblock library</h3>
-              <span className="pill">{statblocks.length}</span>
+            <div className="section-heading">
+              <div>
+                <h2>Statblock library</h2>
+                <p className="meta">Uploaded here for DM-side encounter prep. Campaigns can pull these directly into Combat.</p>
+              </div>
             </div>
             <form
               className="search-form dm-statblock-search"
@@ -13418,9 +13413,9 @@ function DmContentPage() {
       ) : activeLane === "conditions" ? (
         <div className="split-grid dm-content-staged-grid">
           <section className="card dm-condition-create">
-            <div className="panel-header">
-              <h3>Create condition</h3>
-              <span className="pill">Custom</span>
+            <div className="section-heading">
+              <h2>Create condition</h2>
+              <p className="meta">Custom combat condition reminder.</p>
             </div>
             <form
               className="session-form"
@@ -13480,13 +13475,12 @@ function DmContentPage() {
           </section>
 
           <section className="card dm-condition-library">
-            <div className="panel-header">
-              <h3>Condition library</h3>
-              <span className="pill">{conditions.length}</span>
+            <div className="section-heading">
+              <div>
+                <h2>Custom conditions</h2>
+                <p className="meta">These names appear in the combat condition picker alongside the standard DND-5E condition list.</p>
+              </div>
             </div>
-            <p className="status status-neutral">
-              Custom conditions merge into the Combat condition picker alongside built-in DND-5E conditions.
-            </p>
             <form
               className="search-form dm-condition-search"
               onSubmit={(event: FormEvent<HTMLFormElement>) => event.preventDefault()}
@@ -13516,9 +13510,9 @@ function DmContentPage() {
       ) : activeLane === "player-wiki" ? (
         <div className="split-grid dm-content-staged-grid">
           <section className="card dm-player-wiki-create">
-            <div className="panel-header">
-              <h3>Create player wiki page</h3>
-              <span className="pill">Markdown</span>
+            <div className="section-heading">
+              <h2>Create player wiki page</h2>
+              <p className="meta">Direct authoring for durable player-facing reference pages.</p>
             </div>
             <form
               className="session-form"
@@ -13550,9 +13544,9 @@ function DmContentPage() {
           </section>
 
           <section className="card dm-player-wiki-library">
-            <div className="panel-header">
-              <h3>Player wiki pages</h3>
-              <span className="pill">{playerWikiPages.length}</span>
+            <div className="section-heading">
+              <h2>Player wiki pages</h2>
+              <p className="meta">{playerWikiPages.length} page{playerWikiPages.length === 1 ? "" : "s"}</p>
             </div>
             <form
               className="search-form dm-player-wiki-search"
@@ -13621,9 +13615,12 @@ function DmContentPage() {
           />
 
           <section className="card" id="dm-content-staged-articles-queue">
-            <div className="panel-header">
-              <h3>Staged articles</h3>
-              <span className="pill">{stagedArticles.length}</span>
+            <div className="section-heading">
+              <div>
+                <h2>Session reveal queue</h2>
+                <p className="meta">Articles created here go straight into the same staged queue used on Session DM.</p>
+              </div>
+              <p className="meta">{stagedArticles.length}</p>
             </div>
             {stagedArticles.length ? (
               <div className="article-stack">

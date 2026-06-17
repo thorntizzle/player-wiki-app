@@ -2716,6 +2716,26 @@ def test_gen2_dm_content_browser_visual_parity_smoke(
                 assert page.locator("main > .panel-nested").count() == 0
                 assert page.locator(".dm-content-staged-grid > .panel-nested").count() == 0
                 assert page.locator(".dm-content-systems-lane > .panel-nested").count() == 0
+                content_selector = ".dm-content-systems-lane" if lane == "systems" else ".dm-content-staged-grid"
+                assert page.locator(f"{content_selector} > .card .panel-header").count() == 0
+                if lane == "":
+                    expect(page.get_by_role("heading", name="Create statblock")).to_be_visible()
+                    expect(page.get_by_role("heading", name="Statblock library")).to_be_visible()
+                elif lane == "staged-articles":
+                    expect(page.get_by_role("heading", name="Stage session articles")).to_be_visible()
+                    expect(page.get_by_role("heading", name="Session reveal queue")).to_be_visible()
+                elif lane == "conditions":
+                    expect(page.get_by_role("heading", name="Create condition")).to_be_visible()
+                    expect(page.get_by_role("heading", name="Custom conditions")).to_be_visible()
+                elif lane == "player-wiki":
+                    expect(page.get_by_role("heading", name="Create player wiki page")).to_be_visible()
+                    expect(page.get_by_role("heading", name="Player wiki pages")).to_be_visible()
+                elif lane == "systems":
+                    expect(page.get_by_role("heading", name="Source Enablement")).to_be_visible(timeout=10000)
+                    expect(page.get_by_role("heading", name="Entry Overrides")).to_be_visible()
+                    expect(page.get_by_role("heading", name="Custom Entries")).to_be_visible()
+                    expect(page.get_by_role("heading", name="Shared Source Imports")).to_be_visible()
+                    expect(page.get_by_role("heading", name="Import-Run History")).to_be_visible()
 
                 fallback_links = page.locator(".dm-content-gen2-links")
                 expect(fallback_links).to_be_visible()
@@ -2953,7 +2973,7 @@ def test_gen2_dm_content_browser_condition_workflow(
             expect(page.get_by_text(f"Condition saved: {condition_name}.")).to_be_visible(timeout=10000)
 
             library = page.locator("section.card.dm-condition-library")
-            expect(library.get_by_text("Custom conditions merge into the Combat condition picker")).to_be_visible()
+            expect(library.get_by_text("These names appear in the combat condition picker")).to_be_visible()
             condition_card = library.locator("details.dm-condition-card", has_text=condition_name)
             expect(condition_card).to_be_visible(timeout=10000)
             condition_card.locator("summary").click()
@@ -3210,7 +3230,7 @@ def test_gen2_dm_content_browser_staged_article_workflow(
             expect(page.get_by_role("button", name="Upload")).to_be_visible()
             expect(page.get_by_role("button", name="Wiki / Systems")).to_be_visible()
 
-            creation_panel = page.locator("article", has_text="Stage an article").first
+            creation_panel = page.locator("article", has_text="Stage session articles").first
             creation_panel.get_by_label("Title").fill(article_title)
             creation_panel.get_by_label("Markdown body").fill(article_body)
             creation_panel.get_by_role("button", name="Create").click()
