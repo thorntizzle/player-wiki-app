@@ -12,6 +12,7 @@
   --surface-soft-muted: rgba(255, 252, 246, 0.56);
   --surface-highlight: rgba(247, 234, 210, 0.96);
   --surface-accent-strong: rgba(248, 239, 224, 0.84);
+  --surface-accent-soft: rgba(245, 234, 214, 0.76);
   --session-bar-bg: linear-gradient(180deg, rgba(255, 248, 236, 0.98), rgba(247, 234, 210, 0.95));
   --section-bg: linear-gradient(180deg, rgba(239, 225, 202, 0.97), rgba(220, 198, 165, 0.95));
   --section-bg-open: linear-gradient(180deg, rgba(244, 232, 212, 0.98), rgba(226, 205, 174, 0.95));
@@ -56,6 +57,7 @@ html[data-theme="moonlit"] {
   --surface-soft-muted: rgba(26, 37, 52, 0.64);
   --surface-highlight: rgba(56, 70, 89, 0.94);
   --surface-accent-strong: rgba(65, 54, 34, 0.72);
+  --surface-accent-soft: rgba(73, 61, 34, 0.52);
   --session-bar-bg: linear-gradient(180deg, rgba(35, 48, 66, 0.98), rgba(24, 33, 46, 0.95));
   --section-bg: linear-gradient(180deg, rgba(31, 44, 60, 0.98), rgba(23, 31, 43, 0.96));
   --section-bg-open: linear-gradient(180deg, rgba(38, 53, 72, 0.98), rgba(25, 34, 47, 0.96));
@@ -98,6 +100,7 @@ html[data-theme="verdant"] {
   --surface-soft-muted: rgba(241, 247, 238, 0.62);
   --surface-highlight: rgba(231, 240, 228, 0.96);
   --surface-accent-strong: rgba(219, 234, 221, 0.84);
+  --surface-accent-soft: rgba(223, 238, 226, 0.76);
   --session-bar-bg: linear-gradient(180deg, rgba(243, 249, 241, 0.98), rgba(226, 239, 227, 0.95));
   --section-bg: linear-gradient(180deg, rgba(227, 239, 228, 0.97), rgba(203, 224, 206, 0.95));
   --section-bg-open: linear-gradient(180deg, rgba(236, 245, 236, 0.98), rgba(211, 230, 213, 0.95));
@@ -135,6 +138,7 @@ html[data-theme="ember"] {
   --surface-soft-muted: rgba(255, 240, 234, 0.62);
   --surface-highlight: rgba(247, 224, 213, 0.96);
   --surface-accent-strong: rgba(239, 210, 196, 0.84);
+  --surface-accent-soft: rgba(244, 220, 208, 0.76);
   --session-bar-bg: linear-gradient(180deg, rgba(255, 242, 236, 0.98), rgba(246, 223, 213, 0.95));
   --section-bg: linear-gradient(180deg, rgba(244, 222, 212, 0.97), rgba(224, 190, 173, 0.95));
   --section-bg-open: linear-gradient(180deg, rgba(250, 231, 222, 0.98), rgba(232, 201, 187, 0.95));
@@ -2783,6 +2787,26 @@ textarea {
 .character-read-content {
   min-width: 0;
   max-width: 100%;
+}
+
+.skill-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.65rem;
+}
+
+.skill-pill {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft-muted);
+}
+
+.skill-pill--proficient {
+  border-color: var(--border-accent);
+  background: var(--surface-accent-soft);
 }
 
 .character-read-shell {
