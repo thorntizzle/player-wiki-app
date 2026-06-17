@@ -6067,21 +6067,26 @@ function WikiPageCard({
   featured = false,
   campaignSlug,
   frontendMode,
+  headingLevel = "h3",
+  kickerMode = "displayType",
 }: {
   page: WikiPageSummary;
   featured?: boolean;
   campaignSlug: string;
   frontendMode: FrontendMode;
+  headingLevel?: "h2" | "h3";
+  kickerMode?: "displayType" | "sectionAndDisplayType";
 }) {
+  const cardKicker =
+    kickerMode === "sectionAndDisplayType" ? `${page.section} / ${page.display_type}` : page.display_type;
+  const TitleElement = headingLevel;
+
   return (
     <article className={featured ? "card page-card page-card--featured" : "card page-card"}>
-      <p className="card-kicker">
-        {page.subsection ? `${page.subsection} / ` : ""}
-        {page.display_type}
-      </p>
-      <h3>
+      <p className="card-kicker">{cardKicker}</p>
+      <TitleElement>
         <a href={preferredCampaignLink(page.href, campaignSlug, frontendMode)}>{page.title}</a>
-      </h3>
+      </TitleElement>
       {page.summary ? <p className={featured ? "page-card__summary" : ""}>{page.summary}</p> : null}
     </article>
   );
@@ -6092,11 +6097,15 @@ function WikiPageGrid({
   featured = false,
   campaignSlug,
   frontendMode,
+  headingLevel,
+  kickerMode,
 }: {
   pages: WikiPageSummary[];
   featured?: boolean;
   campaignSlug: string;
   frontendMode: FrontendMode;
+  headingLevel?: "h2" | "h3";
+  kickerMode?: "displayType" | "sectionAndDisplayType";
 }) {
   if (!pages.length) {
     return null;
@@ -6110,6 +6119,8 @@ function WikiPageGrid({
           featured={featured}
           campaignSlug={campaignSlug}
           frontendMode={frontendMode}
+          headingLevel={headingLevel}
+          kickerMode={kickerMode}
         />
       ))}
     </div>
@@ -6147,6 +6158,8 @@ function WikiSectionBrowse({
                 page={page}
                 campaignSlug={campaignSlug}
                 frontendMode={frontendMode}
+                headingLevel="h3"
+                kickerMode="sectionAndDisplayType"
               />
             ))
           ) : (
@@ -6336,11 +6349,15 @@ function WikiSectionPage() {
               featured
               campaignSlug={resolvedCampaignSlug}
               frontendMode={wikiFrontendMode}
+              headingLevel="h2"
+              kickerMode="displayType"
             />
             <WikiPageGrid
               pages={topLevel.regular}
               campaignSlug={resolvedCampaignSlug}
               frontendMode={wikiFrontendMode}
+              headingLevel="h2"
+              kickerMode="displayType"
             />
             <section className="section-list">
               {data.subsection_groups.map((group) => {
@@ -6368,11 +6385,15 @@ function WikiSectionPage() {
                         featured
                         campaignSlug={resolvedCampaignSlug}
                         frontendMode={wikiFrontendMode}
+                        headingLevel="h3"
+                        kickerMode="displayType"
                       />
                       <WikiPageGrid
                         pages={split.regular}
                         campaignSlug={resolvedCampaignSlug}
                         frontendMode={wikiFrontendMode}
+                        headingLevel="h3"
+                        kickerMode="displayType"
                       />
                     </div>
                   </details>
@@ -6387,11 +6408,15 @@ function WikiSectionPage() {
               featured
               campaignSlug={resolvedCampaignSlug}
               frontendMode={wikiFrontendMode}
+              headingLevel="h2"
+              kickerMode="displayType"
             />
             <WikiPageGrid
               pages={allPages.regular}
               campaignSlug={resolvedCampaignSlug}
               frontendMode={wikiFrontendMode}
+              headingLevel="h2"
+              kickerMode="displayType"
             />
           </>
         )
