@@ -1066,34 +1066,28 @@ a:hover {
   margin-top: 0;
 }
 
-.account-settings-page {
-  display: grid;
-  gap: 1rem;
-}
-
-.account-hero {
-  display: grid;
-  gap: 0.45rem;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  border-radius: 0;
-}
-
-.account-hero h1 {
-  margin: 0.1rem 0 0.4rem;
-}
-
-.account-settings-layout {
+.page-layout.account-layout {
   display: grid;
   gap: 1rem;
   grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.85fr);
 }
 
-.account-settings-form,
-.account-settings-sidebar,
+.account-panel,
+.account-sidebar,
 .account-settings-group {
+  display: grid;
+  gap: 1rem;
+}
+
+.card.account-panel,
+.card.account-sidebar {
+  padding: 1.25rem;
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+}
+
+.account-panel > form {
   display: grid;
   gap: 1rem;
 }
@@ -1103,13 +1097,12 @@ a:hover {
   padding-top: 1rem;
 }
 
-.settings-option-grid {
+.theme-grid {
   display: grid;
   gap: 0.85rem;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
-.settings-option {
+.theme-option {
   position: relative;
   align-content: start;
   display: grid;
@@ -1120,57 +1113,56 @@ a:hover {
   background: var(--surface-soft);
   cursor: pointer;
   transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
-  min-height: 8.4rem;
 }
 
-.settings-option:hover,
-.settings-option:focus-within {
+.theme-option:hover,
+.theme-option:focus-within {
   border-color: var(--border-accent);
   transform: translateY(-1px);
 }
 
-.settings-option:focus-within {
+.theme-option:focus-within {
   box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
-.settings-option.is-selected {
+.theme-option.is-selected {
   border-color: var(--border-accent);
   background: var(--surface-highlight);
   box-shadow: inset 0 0 0 1px var(--overlay-accent);
 }
 
-.settings-option input {
+.theme-option input {
   position: absolute;
   opacity: 0;
   pointer-events: none;
 }
 
-.settings-option input[type="radio"] {
+.theme-option input[type="radio"] {
   width: 0.85rem;
   height: 0.85rem;
   margin: 0;
 }
 
-.settings-option__header {
+.theme-option__header {
   align-items: start;
   display: flex;
   gap: 0.75rem;
   justify-content: space-between;
 }
 
-.settings-option__status {
+.theme-option__status {
   margin-left: 0.45rem;
   display: block;
   margin-top: 0.15rem;
 }
 
-.settings-option__swatches {
+.theme-option__swatches {
   display: inline-flex;
   flex-shrink: 0;
   gap: 0.35rem;
 }
 
-.settings-option__swatch {
+.theme-option__swatch {
   border: 1px solid var(--border);
   width: 1rem;
   height: 1rem;
@@ -1187,14 +1179,14 @@ a:hover {
   padding-top: 1rem;
 }
 
-.account-settings-sidebar .ghost-button {
+.account-sidebar .ghost-button {
   justify-self: start;
   display: inline-flex;
   width: fit-content;
   align-items: center;
 }
 
-.account-settings-sidebar .meta {
+.account-sidebar .meta {
   margin-bottom: 0.25rem;
 }
 
@@ -1644,6 +1636,7 @@ a:hover {
 .hero.compact.wiki-home,
 .hero.compact.wiki-section-page,
 .hero.compact.character-roster-hero,
+.hero.compact.account-hero,
 .hero.compact.campaign-picker-hero,
 .hero.compact.systems-hero {
   border: 0;
@@ -1660,6 +1653,7 @@ a:hover {
 .wiki-section-page > h1,
 .character-roster-hero > h1,
 .character-roster-hero > h2,
+.account-hero > h1,
 .campaign-picker-hero > h1,
 .systems-hero > h1,
 .systems-hero h1 {
@@ -1672,6 +1666,8 @@ a:hover {
 .wiki-section-page > .meta,
 .character-roster-hero > .meta,
 .character-roster-hero .meta,
+.account-hero > .meta,
+.account-hero .meta,
 .campaign-picker-hero > .meta,
 .campaign-picker-hero .meta,
 .systems-hero > .meta,
@@ -3821,12 +3817,16 @@ textarea {
   }
 
   .page-layout,
+  .account-layout,
   .wiki-article-page,
-  .account-settings-layout,
   .character-authoring-layout,
   .character-layout,
   .systems-browse-grid,
   .campaign-control-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .page-layout.account-layout {
     grid-template-columns: 1fr;
   }
 

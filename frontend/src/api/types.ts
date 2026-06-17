@@ -95,12 +95,6 @@ export interface SessionChatOrderChoice {
   description: string;
 }
 
-export interface FrontendModeChoice {
-  value: string;
-  label: string;
-  description: string;
-}
-
 export interface MeResponse extends ApiResponseBase {
   app: AppMeta;
   auth_source: string;
@@ -114,13 +108,11 @@ export interface AccountSettingsResponse extends ApiResponseBase {
   preferences: UserPreferences;
   theme_presets: ThemePreset[];
   session_chat_order_choices: SessionChatOrderChoice[];
-  frontend_mode_choices: FrontendModeChoice[];
 }
 
 export interface AccountSettingsUpdatePayload {
   theme_key?: string;
   session_chat_order?: string;
-  frontend_mode?: string;
 }
 
 export interface AccountSettingsUpdateResponse extends ApiResponseBase {
