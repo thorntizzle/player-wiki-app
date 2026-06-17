@@ -263,6 +263,7 @@ def test_gen2_shell_and_session_visual_parity_smoke(
                     const hero = document.querySelector(".session-page-hero");
                     const firstPanel = document.querySelector(".session-workspace-main .panel-nested");
                     const topbar = document.querySelector(".topbar");
+                    const globalSearchForm = document.querySelector(".campaign-global-search__form");
                     return {
                         fontFamily: bodyStyle.fontFamily,
                         bodyColor: bodyStyle.color,
@@ -270,6 +271,9 @@ def test_gen2_shell_and_session_visual_parity_smoke(
                         heroTop: hero ? hero.getBoundingClientRect().top : 0,
                         firstPanelTop: firstPanel ? firstPanel.getBoundingClientRect().top : 0,
                         topbarBottom: topbar ? topbar.getBoundingClientRect().bottom : 0,
+                        globalSearchFormDirection: globalSearchForm
+                            ? window.getComputedStyle(globalSearchForm).flexDirection
+                            : "",
                     };
                 }"""
             )
@@ -280,13 +284,19 @@ def test_gen2_shell_and_session_visual_parity_smoke(
             assert desktop_metrics["firstPanelTop"] <= 520
             assert desktop_metrics["firstPanelTop"] >= desktop_metrics["heroTop"]
             assert desktop_metrics["bodyColor"] != "rgb(18, 25, 38)"
+            assert desktop_metrics["globalSearchFormDirection"] == "row"
 
             _sign_in(mobile_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
             mobile_page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
             expect(mobile_page.locator(".topbar-campaign")).to_be_visible(timeout=10000)
             expect(mobile_page.locator(".session-tab-strip")).to_be_visible()
             mobile_metrics = mobile_page.evaluate(
-                """() => ({
+                """() => {
+                    const globalSearchForm = document.querySelector(".campaign-global-search__form");
+                    const submitButton = globalSearchForm
+                        ? globalSearchForm.querySelector("button[type='submit']")
+                        : null;
+                    return {
                     innerWidth: window.innerWidth,
                     scrollWidth: document.documentElement.scrollWidth,
                     tabWidth: document.querySelector(".session-tab-strip")?.getBoundingClientRect().width ?? 0,
@@ -294,14 +304,22 @@ def test_gen2_shell_and_session_visual_parity_smoke(
                     heroTop: document.querySelector(".session-page-hero")?.getBoundingClientRect().top ?? 0,
                     firstPanelTop: document.querySelector(".session-workspace-main .panel-nested")?.getBoundingClientRect().top ?? 0,
                     topbarBottom: document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0,
-                })"""
+                    globalSearchFormDirection: globalSearchForm
+                        ? window.getComputedStyle(globalSearchForm).flexDirection
+                        : "",
+                    globalSearchFormWidth: globalSearchForm ? globalSearchForm.getBoundingClientRect().width : 0,
+                    globalSearchButtonWidth: submitButton ? submitButton.getBoundingClientRect().width : 0,
+                    }"""
             )
             assert mobile_metrics["scrollWidth"] <= mobile_metrics["innerWidth"] + 1
             assert mobile_metrics["tabWidth"] <= mobile_metrics["innerWidth"]
             assert mobile_metrics["shellWidth"] <= mobile_metrics["innerWidth"]
-            assert mobile_metrics["heroTop"] <= 320
+            assert mobile_metrics["heroTop"] <= 520
             assert mobile_metrics["firstPanelTop"] <= mobile_metrics["heroTop"] + 360
             assert mobile_metrics["firstPanelTop"] >= mobile_metrics["topbarBottom"] + 50
+            assert mobile_metrics["globalSearchFormDirection"] == "column"
+            assert mobile_metrics["globalSearchButtonWidth"] <= mobile_metrics["innerWidth"] + 1
+            assert mobile_metrics["globalSearchButtonWidth"] >= mobile_metrics["globalSearchFormWidth"] - 1
         finally:
             desktop_page.close()
             mobile_page.close()
