@@ -7021,14 +7021,18 @@ function SessionArticlesPanel({
   articles,
   title,
   emptyText,
+  className = "card session-articles-card",
 }: {
   campaignSlug: string;
   articles: SessionArticle[];
   title: string;
   emptyText: string;
+  className?: string;
 }) {
+  const mergedClassName = Array.from(new Set(`card ${className ?? ""}`.split(/\s+/).filter(Boolean))).join(" ");
+
   return (
-    <article className="panel panel-nested">
+    <article className={mergedClassName}>
       <div className="panel-header">
         <h3>{title}</h3>
         <span className="pill">{articles.length} article(s)</span>
@@ -7198,7 +7202,7 @@ function SessionPaneWikiLookup({
   previewHtml,
   previewError,
   clearStatus,
-  className = "",
+  className = "card",
   showHeader = true,
 }: {
   canShow: boolean;
@@ -7220,8 +7224,10 @@ function SessionPaneWikiLookup({
     return <p className="status status-neutral">This campaign does not expose wiki lookup.</p>;
   }
 
+  const mergedClassName = Array.from(new Set(`card ${className ?? ""}`.split(/\s+/).filter(Boolean))).join(" ");
+
   return (
-    <article className={["panel panel-nested", className].filter(Boolean).join(" ")}>
+    <article className={mergedClassName}>
       {showHeader ? <h3>Player wiki lookup</h3> : null}
       <form onSubmit={onSearch} className="wiki-search">
         <label htmlFor="wiki-search-query" className="chat-label">
@@ -7321,7 +7327,7 @@ function DmArticleCreator({
   onSearchSources,
   onCreate,
   isCreating,
-  className = "panel panel-nested",
+  className = "card",
   id,
 }: {
   mode: ArticleMode;
@@ -7349,9 +7355,10 @@ function DmArticleCreator({
       : mode === "upload"
         ? "Upload mode needs a filename and markdown body."
         : "Search and select a source, then pull into staged articles.";
+  const mergedClassName = Array.from(new Set(`card ${className ?? ""}`.split(/\s+/).filter(Boolean))).join(" ");
 
   return (
-    <article className={className} id={id}>
+    <article className={mergedClassName} id={id}>
       <h3>Stage an article</h3>
       <div className="segmented">
         <button
@@ -11053,40 +11060,47 @@ function DmPane({
     <section className="session-workspace-grid">
       <section className="session-workspace-main">
         {shouldShowPassiveScores ? (
-          <section className="panel panel-nested session-passive-scores-bar">
-            <div className="panel-header">
-              <h3>Passive scores</h3>
-              <span className="pill">{passiveScores.length}</span>
+          <details className="section-block section-block--collapsible session-passive-scores-bar" id="session-passive-scores" open>
+            <summary className="section-toggle-summary">
+              <span className="section-toggle-summary__content">
+                <span className="section-title">Passive scores</span>
+                <span className="meta">{passiveScores.length}</span>
+              </span>
+              <span className="section-toggle-chevron" aria-hidden="true"></span>
+            </summary>
+            <div className="section-block__body">
+              {passiveScores.length ? (
+                <div className="session-passive-score-list">
+                  {passiveScores.map((row) => (
+                    <article className="session-passive-score-card" key={row.name}>
+                      <h4>{row.name}</h4>
+                      <div className="session-passive-score-grid">
+                        <p>
+                          <span className="session-passive-score-label">Passive Perception</span>
+                          <span className="session-passive-score-value">{row.passive_perception}</span>
+                        </p>
+                        <p>
+                          <span className="session-passive-score-label">Passive Insight</span>
+                          <span className="session-passive-score-value">{row.passive_insight}</span>
+                        </p>
+                        <p>
+                          <span className="session-passive-score-label">Passive Investigation</span>
+                          <span className="session-passive-score-value">{row.passive_investigation}</span>
+                        </p>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="status status-neutral">
+                  No visible DND-5E characters are currently available on the DM session surface.
+                </p>
+              )}
             </div>
-            {passiveScores.length ? (
-              <div className="session-passive-score-list">
-                {passiveScores.map((row) => (
-                  <article className="session-passive-score-card" key={row.name}>
-                    <h4>{row.name}</h4>
-                    <div className="session-passive-score-grid">
-                      <p>
-                        <span className="session-passive-score-label">Passive Perception</span>
-                        <span className="session-passive-score-value">{row.passive_perception}</span>
-                      </p>
-                      <p>
-                        <span className="session-passive-score-label">Passive Insight</span>
-                        <span className="session-passive-score-value">{row.passive_insight}</span>
-                      </p>
-                      <p>
-                        <span className="session-passive-score-label">Passive Investigation</span>
-                        <span className="session-passive-score-value">{row.passive_investigation}</span>
-                      </p>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <p className="status status-neutral">No visible DND-5E characters are currently available on the DM session surface.</p>
-            )}
-          </section>
+          </details>
         ) : null}
 
-        <section className="panel panel-nested">
+        <article className="card session-sidebar-card" id="session-staged-articles">
           <div className="panel-header">
             <h3>Staged articles</h3>
             <span className="pill">{stagedArticles.length}</span>
@@ -11227,10 +11241,10 @@ function DmPane({
           ) : (
             <p className="status status-neutral">No staged articles.</p>
           )}
-        </section>
+        </article>
 
         {revealedArticles.length ? (
-          <section className="panel panel-nested">
+          <article className="card session-sidebar-card" id="session-revealed-articles">
             <div className="panel-header">
               <h3>Revealed articles</h3>
               <span className="pill">{revealedArticles.length}</span>
@@ -11271,10 +11285,10 @@ function DmPane({
                 </details>
               ))}
             </div>
-          </section>
+          </article>
         ) : null}
 
-        <section className="panel panel-nested">
+        <article className="card session-sidebar-card" id="session-chat-logs">
           <div className="panel-header">
             <h3>Session logs</h3>
             <span className="pill">{sessionLogs.length}</span>
@@ -11327,14 +11341,14 @@ function DmPane({
                 )}
               </div>
             </div>
-          ) : (
-            <p className="status status-neutral">No closed session logs.</p>
-          )}
-        </section>
+        ) : (
+          <p className="status status-neutral">No closed session logs.</p>
+        )}
+        </article>
       </section>
 
       <aside className="session-workspace-sidebar">
-        <section className="panel panel-nested">
+        <article className="card session-sidebar-card" id="session-controls">
           <div className="panel-header">
             <h3>Live session</h3>
             <span className="pill">{activeSession ? "Active" : "Inactive"}</span>
@@ -11377,41 +11391,39 @@ function DmPane({
               </button>
             )}
           </div>
-        </section>
-
-        <section className="panel panel-nested">
-          <h3>Session article store</h3>
-          <DmArticleCreator
-            mode={mode}
-            setMode={(next) => {
-              clearArticleStatus();
-              setMode(next);
-            }}
-            sourceQuery={sourceQuery}
-            setSourceQuery={setSourceQuery}
-            sourceStatus={sourceStatus}
-            setSourceStatus={setSourceStatus}
-            sourceResults={sourceResults}
-            selectedSourceRef={selectedSourceRef}
-            setSelectedSourceRef={(next) => {
-              setSelectedSourceRef(next);
-              setSourceStatus(null);
-            }}
-            manualDraft={manualDraft}
-            setManualDraft={(next) => {
-              clearArticleStatus();
-              setManualDraft(next);
-            }}
-            uploadDraft={uploadDraft}
-            setUploadDraft={(next) => {
-              clearArticleStatus();
-              setUploadDraft(next);
-            }}
-            onSearchSources={searchSources}
-            onCreate={createArticle}
-            isCreating={createArticleMutation.isPending}
-          />
-        </section>
+        </article>
+        <DmArticleCreator
+          className="card session-sidebar-card"
+          id="session-article-store"
+          mode={mode}
+          setMode={(next) => {
+            clearArticleStatus();
+            setMode(next);
+          }}
+          sourceQuery={sourceQuery}
+          setSourceQuery={setSourceQuery}
+          sourceStatus={sourceStatus}
+          setSourceStatus={setSourceStatus}
+          sourceResults={sourceResults}
+          selectedSourceRef={selectedSourceRef}
+          setSelectedSourceRef={(next) => {
+            setSelectedSourceRef(next);
+            setSourceStatus(null);
+          }}
+          manualDraft={manualDraft}
+          setManualDraft={(next) => {
+            clearArticleStatus();
+            setManualDraft(next);
+          }}
+          uploadDraft={uploadDraft}
+          setUploadDraft={(next) => {
+            clearArticleStatus();
+            setUploadDraft(next);
+          }}
+          onSearchSources={searchSources}
+          onCreate={createArticle}
+          isCreating={createArticleMutation.isPending}
+        />
       </aside>
     </section>
   );

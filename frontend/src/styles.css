@@ -768,12 +768,26 @@ a:hover {
 .session-workspace-sidebar .panel,
 .session-workspace-main .panel,
 .session-workspace-sidebar .panel-nested,
-.session-workspace-main .panel-nested {
+.session-workspace-main .panel-nested,
+.session-workspace-main .card.session-sidebar-card,
+.session-workspace-sidebar .card.session-sidebar-card {
   min-width: 0;
 }
 
 .session-passive-scores-bar {
   --panel-gap: 0.55rem;
+}
+
+.session-sidebar-card,
+.session-workspace-main .session-sidebar-card,
+.session-workspace-sidebar .session-sidebar-card {
+  display: grid;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+.session-sidebar-card textarea {
+  min-height: 9rem;
 }
 
 .session-passive-score-list {
@@ -2519,7 +2533,12 @@ a:hover {
 }
 
 .session-log-row {
-  grid-template-columns: minmax(15rem, 1fr) minmax(16rem, 2fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+}
+
+.session-log-list,
+.session-log-detail {
+  min-width: 0;
 }
 
 .session-log-list {
@@ -3831,6 +3850,10 @@ textarea {
 
   .session-workspace-grid {
     grid-template-columns: 1fr;
+  }
+
+  .session-log-row {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .session-page-shell {

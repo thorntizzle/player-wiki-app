@@ -163,14 +163,79 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             dm_card_texts = page.evaluate(
                 """() => {
                     const section = document.querySelector(".pane-visible .session-workspace-main");
-                    return Array.from(section ? section.querySelectorAll(":scope > .panel-nested .panel-header h3") : []).map(
-                        (node) => (node.textContent || "").trim(),
-                    );
+                    return Array.from(
+                        section
+                            ? section.querySelectorAll(
+                                ":scope > .session-passive-scores-bar .section-title,"
+                                + ":scope > .card.session-sidebar-card .panel-header > h3"
+                            )
+                            : [],
+                    ).map((node) => (node.textContent || "").trim());
                 }"""
             )
+            sidebar_ids = page.evaluate(
+                """() => {
+                    const sidebar = document.querySelector(".pane-visible .session-workspace-sidebar");
+                    const ids = sidebar
+                        ? {
+                            status: !!sidebar.querySelector("#session-controls"),
+                            articleStore: !!sidebar.querySelector("#session-article-store"),
+                          }
+                        : null;
+                    return ids;
+                }"""
+            )
+            main_ids = page.evaluate(
+                """() => {
+                    const main = document.querySelector(".pane-visible .session-workspace-main");
+                    const ids = main
+                        ? {
+                            passive: !!main.querySelector("#session-passive-scores"),
+                            staged: !!main.querySelector("#session-staged-articles"),
+                            revealed: !!main.querySelector("#session-revealed-articles"),
+                            logs: !!main.querySelector("#session-chat-logs"),
+                          }
+                        : null;
+                    return ids;
+                }"""
+            )
+            assert page.locator(".pane-visible .session-workspace-main .panel-nested").count() == 0
+            assert page.locator(".pane-visible .session-workspace-sidebar .panel-nested").count() == 0
+            assert page.locator(".pane-visible .session-workspace-main .card.session-sidebar-card").count() >= 2
+            assert page.locator(".pane-visible .session-workspace-sidebar .card.session-sidebar-card").count() >= 2
             assert "Live session" not in dm_card_texts
             assert dm_card_texts.index("Staged articles") != -1
             assert dm_card_texts.index("Session logs") != -1
+            assert sidebar_ids is not None
+            assert sidebar_ids["status"] is True
+            assert sidebar_ids["articleStore"] is True
+            assert main_ids is not None
+            assert main_ids["staged"] is True
+            assert main_ids["logs"] is True
+            assert main_ids["passive"] is True
+            if main_ids["revealed"]:
+                assert dm_card_texts.index("Revealed articles") != -1
+            for viewport in (
+                {"width": 1280, "height": 900},
+                {"width": 390, "height": 900},
+            ):
+                page.set_viewport_size(viewport)
+                assert page.evaluate(
+                    """(viewportWidth) => {
+                        const selectors = [
+                            ".session-workspace-main",
+                            ".session-workspace-sidebar",
+                            ".session-workspace-grid",
+                            ".session-workspace-main .card.session-sidebar-card",
+                            ".session-workspace-sidebar .card.session-sidebar-card",
+                        ];
+                        return selectors.every((selector) => {
+                            const node = document.querySelector(selector);
+                            return !node || node.scrollWidth <= viewportWidth + 1;
+                        });
+                    }""",
+                    viewport["width"],
+                )
             passive_index = dm_card_texts.index("Passive scores") if "Passive scores" in dm_card_texts else None
             staged_index = dm_card_texts.index("Staged articles")
             logs_index = dm_card_texts.index("Session logs")
