@@ -13839,7 +13839,7 @@ function CharacterRosterPage() {
   };
 
   return (
-    <section className="character-roster-page">
+    <>
       <section className="hero compact character-roster-hero">
         <p className="meta">Character roster</p>
         <h1>Characters</h1>
@@ -13949,7 +13949,7 @@ function CharacterRosterPage() {
           )}
         </>
       ) : null}
-    </section>
+    </>
   );
 }
 

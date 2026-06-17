@@ -1916,20 +1916,30 @@ def test_gen2_character_visual_parity_smoke(
             _sign_in(desktop_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters")
             expect(desktop_page.get_by_role("heading", name="Characters")).to_be_visible(timeout=10000)
-            expect(desktop_page.locator(".character-roster-page > .character-roster-hero")).to_be_visible()
-            expect(desktop_page.locator("main > .panel.character-roster-page")).to_have_count(0)
+            expect(desktop_page.locator("main > section.hero.compact.character-roster-hero")).to_be_visible()
+            assert desktop_page.locator(".character-roster-page").count() == 0
+            expect(desktop_page.locator("main > .panel, main > .panel-nested")).to_have_count(0)
             expect(desktop_page.locator(".character-roster-tools")).to_be_visible()
             expect(desktop_page.locator(".character-roster-grid .character-card").first).to_be_visible()
             roster_metrics = desktop_page.evaluate(
                 """() => {
-                    const route = document.querySelector(".character-roster-page");
+                    const main = document.querySelector("main");
                     const hero = document.querySelector(".character-roster-hero h1");
                     const tools = document.querySelector(".character-roster-tools");
                     const cardStat = document.querySelector(".character-card__stats article");
                     const portrait = document.querySelector(".character-card__portrait");
                     const search = document.querySelector(".character-roster-search");
+                    const nextAfterTools = tools ? tools.nextElementSibling : null;
+                    const children = main ? Array.from(main.children) : [];
+                    const heroIndex = children.indexOf(document.querySelector(".character-roster-hero") || null);
+                    const toolsIndex = children.indexOf(document.querySelector(".character-roster-tools") || null);
                     return {
-                        routeShadow: route ? window.getComputedStyle(route).boxShadow : "",
+                        heroIndex,
+                        toolsIndex,
+                        nextAfterToolsClassList: nextAfterTools ? Array.from(nextAfterTools.classList) : [],
+                        nextAfterToolsTag: nextAfterTools ? nextAfterTools.tagName.toLowerCase() : "",
+                        mainScrollWidth: main ? document.documentElement.scrollWidth : 0,
+                        mainInnerWidth: window.innerWidth,
                         heroSize: hero ? Number.parseFloat(window.getComputedStyle(hero).fontSize) : 0,
                         toolsRadius: tools ? Number.parseFloat(window.getComputedStyle(tools).borderRadius) : 0,
                         cardStatRadius: cardStat ? Number.parseFloat(window.getComputedStyle(cardStat).borderRadius) : 0,
@@ -1938,7 +1948,16 @@ def test_gen2_character_visual_parity_smoke(
                     };
                 }"""
             )
-            assert roster_metrics["routeShadow"] == "none"
+            assert roster_metrics["heroIndex"] == 0
+            assert roster_metrics["toolsIndex"] > roster_metrics["heroIndex"]
+            assert (
+                "character-roster-grid" in roster_metrics["nextAfterToolsClassList"]
+                or (
+                    "card" in roster_metrics["nextAfterToolsClassList"]
+                    and roster_metrics["nextAfterToolsTag"] == "section"
+                )
+            )
+            assert roster_metrics["mainScrollWidth"] <= roster_metrics["mainInnerWidth"] + 1
             assert roster_metrics["heroSize"] >= 32
             assert roster_metrics["toolsRadius"] >= 20
             assert roster_metrics["cardStatRadius"] >= 16
@@ -1989,7 +2008,7 @@ def test_gen2_character_visual_parity_smoke(
                 expect(mobile_page.get_by_role("link", name="Campaign Player Wiki")).to_be_visible(timeout=10000)
                 mobile_metrics = mobile_page.evaluate(
                     """() => {
-                        const route = document.querySelector(".character-roster-page, .character-read-shell");
+                        const route = document.querySelector(".character-roster-hero, .character-read-shell");
                         const tabs = document.querySelector(".section-tabs");
                         const selector = document.querySelector(".character-selector-card");
                         const search = document.querySelector(".character-roster-search");
