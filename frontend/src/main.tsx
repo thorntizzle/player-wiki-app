@@ -6871,6 +6871,8 @@ function SessionPaneWikiLookup({
   previewHtml,
   previewError,
   clearStatus,
+  className = "",
+  showHeader = true,
 }: {
   canShow: boolean;
   query: string;
@@ -6884,14 +6886,16 @@ function SessionPaneWikiLookup({
   previewHtml: string;
   previewError: string | null;
   clearStatus: () => void;
+  className?: string;
+  showHeader?: boolean;
 }) {
   if (!canShow) {
     return <p className="status status-neutral">This campaign does not expose wiki lookup.</p>;
   }
 
   return (
-    <article className="panel panel-nested">
-      <h3>Player wiki lookup</h3>
+    <article className={["panel panel-nested", className].filter(Boolean).join(" ")}>
+      {showHeader ? <h3>Player wiki lookup</h3> : null}
       <form onSubmit={onSearch} className="wiki-search">
         <label htmlFor="wiki-search-query" className="chat-label">
           Search published pages / systems
@@ -7248,6 +7252,7 @@ function SessionPane({
   const [wikiPreviewLoading, setWikiPreviewLoading] = useState(false);
   const [wikiPreviewHtml, setWikiPreviewHtml] = useState("");
   const [wikiPreviewError, setWikiPreviewError] = useState<string | null>(null);
+  const [wikiLookupOpen, setWikiLookupOpen] = useState(false);
 
   const postMessage = useMutation({
     mutationFn: (body: string) => apiClient.postSessionMessage(campaignSlug, body),
@@ -7327,10 +7332,15 @@ function SessionPane({
   };
 
   const canShowWikiLookup = payload?.permissions.can_access_wiki_lookup ?? true;
+  useEffect(() => {
+    if (!canShowWikiLookup) {
+      setWikiLookupOpen(true);
+    }
+  }, [canShowWikiLookup]);
 
   const revealedArticles = payload?.revealed_articles ?? [];
   return (
-    <section className="session-workspace-grid">
+    <section className="session-workspace-grid session-workspace-grid--single">
       <section className="session-workspace-main">
         <article className="panel panel-nested">
           <div className="panel-header">
@@ -7368,27 +7378,34 @@ function SessionPane({
             emptyText="No revealed articles yet."
           />
         ) : null}
+        <details
+          className="session-player-wiki-details"
+          open={wikiLookupOpen}
+          onToggle={(event) => setWikiLookupOpen(event.currentTarget.open)}
+        >
+          <summary className="session-player-wiki-details-summary">Player wiki lookup</summary>
+          <SessionPaneWikiLookup
+            canShow={canShowWikiLookup}
+            query={wikiQuery}
+            setQuery={setWikiQuery}
+            queryStatus={wikiStatus}
+            results={wikiResults}
+            onSearch={doSearch}
+            previewRef={wikiPreviewRef}
+            onSelectPreview={doPreview}
+            previewLoading={wikiPreviewLoading}
+            previewHtml={wikiPreviewHtml}
+            previewError={wikiPreviewError}
+            showHeader={false}
+            clearStatus={() => {
+              setWikiPreviewError(null);
+              setWikiStatus(null);
+            }}
+            className="session-player-wiki-details-panel"
+          />
+        </details>
       </section>
 
-      <aside className="session-workspace-sidebar">
-        <SessionPaneWikiLookup
-          canShow={canShowWikiLookup}
-          query={wikiQuery}
-          setQuery={setWikiQuery}
-          queryStatus={wikiStatus}
-          results={wikiResults}
-          onSearch={doSearch}
-          previewRef={wikiPreviewRef}
-          onSelectPreview={doPreview}
-          previewLoading={wikiPreviewLoading}
-          previewHtml={wikiPreviewHtml}
-          previewError={wikiPreviewError}
-          clearStatus={() => {
-            setWikiPreviewError(null);
-            setWikiStatus(null);
-          }}
-        />
-      </aside>
     </section>
   );
 }

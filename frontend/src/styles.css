@@ -448,11 +448,55 @@ a:hover {
   gap: 1rem;
 }
 
+.session-workspace-grid--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.session-workspace-grid--single .session-workspace-main {
+  max-width: 100%;
+}
+
 .session-workspace-main,
 .session-workspace-sidebar {
   display: grid;
   gap: 0.9rem;
   min-width: 0;
+}
+
+.session-player-wiki-details {
+  margin-top: 0.35rem;
+}
+
+.session-player-wiki-details-summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 0.58rem 0.75rem;
+  background: var(--surface-soft);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.session-player-wiki-details-summary::-webkit-details-marker {
+  display: none;
+}
+
+.session-player-wiki-details-summary::after {
+  content: "\25B8";
+  color: var(--muted);
+}
+
+.session-player-wiki-details[open] .session-player-wiki-details-summary::after {
+  content: "\25BE";
+}
+
+.session-player-wiki-details-panel {
+  margin-top: 0.45rem;
 }
 
 .navigation-status {
