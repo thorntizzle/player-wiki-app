@@ -270,21 +270,29 @@ def test_gen2_shell_and_session_visual_parity_smoke(
             desktop_metrics = desktop_page.evaluate(
                 """() => {
                     const bodyStyle = window.getComputedStyle(document.body);
+                    const root = document.querySelector(".campaign-global-search");
                     const nav = document.querySelector(".campaign-nav-link");
                     const hero = document.querySelector(".session-hero");
                     const firstPanel = document.querySelector(".session-workspace-main .session-status-card");
                     const topbar = document.querySelector(".topbar");
                     const globalSearchForm = document.querySelector(".campaign-global-search__form");
+                    const globalSearchResults = document.querySelector(".campaign-global-search__results");
+                    const remPx = parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
                     return {
                         fontFamily: bodyStyle.fontFamily,
                         bodyColor: bodyStyle.color,
+                        globalSearchRootWidth: root ? root.getBoundingClientRect().width : 0,
                         navRadius: nav ? Number.parseFloat(window.getComputedStyle(nav).borderRadius) : 0,
                         heroTop: hero ? hero.getBoundingClientRect().top : 0,
                         firstPanelTop: firstPanel ? firstPanel.getBoundingClientRect().top : 0,
                         topbarBottom: topbar ? topbar.getBoundingClientRect().bottom : 0,
+                        globalSearchFormWidth: globalSearchForm ? globalSearchForm.getBoundingClientRect().width : 0,
+                        globalSearchResultsWidth: globalSearchResults ? globalSearchResults.getBoundingClientRect().width : 0,
                         globalSearchFormDirection: globalSearchForm
                             ? window.getComputedStyle(globalSearchForm).flexDirection
                             : "",
+                        globalSearchRootCapPx: 58 * remPx,
+                        globalSearchResultsCapPx: 46 * remPx,
                     };
                 }"""
             )
@@ -296,11 +304,27 @@ def test_gen2_shell_and_session_visual_parity_smoke(
             assert desktop_metrics["firstPanelTop"] >= desktop_metrics["heroTop"]
             assert desktop_metrics["bodyColor"] != "rgb(18, 25, 38)"
             assert desktop_metrics["globalSearchFormDirection"] == "row"
+            assert desktop_metrics["globalSearchRootWidth"] <= desktop_metrics["globalSearchRootCapPx"] + 1
+            assert desktop_metrics["globalSearchFormWidth"] <= desktop_metrics["globalSearchRootCapPx"] + 1
+            assert desktop_metrics["globalSearchResultsWidth"] <= desktop_metrics["globalSearchResultsCapPx"] + 1
 
             desktop_page.locator(".campaign-global-search__field input").fill("capt")
             desktop_page.locator(".campaign-global-search__form button[type='submit']").click()
             search_result = desktop_page.locator(".campaign-global-search-result", has_text="Captain Lyra Vale")
             expect(search_result).to_be_visible(timeout=10_000)
+            search_results_metrics = desktop_page.evaluate(
+                """() => {
+                    const globalSearchResults = document.querySelector(".campaign-global-search__results");
+                    const remPx = parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
+                    const rect = globalSearchResults ? globalSearchResults.getBoundingClientRect() : { width: 0 };
+                    return {
+                        globalSearchResultsWidth: rect.width,
+                        globalSearchResultsCapPx: 46 * remPx,
+                    };
+                }"""
+            )
+            assert search_results_metrics["globalSearchResultsWidth"] > 0
+            assert search_results_metrics["globalSearchResultsWidth"] <= search_results_metrics["globalSearchResultsCapPx"] + 1
             search_result.click()
             expect(desktop_page.locator(".spell-detail-dialog.campaign-global-search-dialog")).to_be_visible(timeout=10_000)
             expect(desktop_page.locator(".campaign-global-search-dialog-panel")).to_have_count(0)

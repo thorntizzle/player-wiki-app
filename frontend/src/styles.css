@@ -360,7 +360,7 @@ a:hover {
   width: 100%;
   display: grid;
   gap: 0.4rem;
-  max-width: min(1200px, 100%);
+  max-width: 58rem;
   margin-top: 0.45rem;
 }
 
@@ -402,7 +402,7 @@ a:hover {
 
 .campaign-global-search__results {
   width: 100%;
-  overflow-x: hidden;
+  max-width: 46rem;
   padding: 0.35rem;
   border: 1px solid var(--border);
   border-radius: 8px;
