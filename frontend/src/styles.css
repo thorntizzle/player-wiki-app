@@ -1899,6 +1899,16 @@ a:hover {
   width: auto;
 }
 
+.wiki-article-shell .article-figure .article-image {
+  display: block;
+  width: min(100%, 420px);
+  max-width: 100%;
+  max-height: none;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+}
+
 .article-image__caption {
   margin-top: 0.35rem;
 }
