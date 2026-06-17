@@ -1343,6 +1343,24 @@ export interface SessionWikiLookupPreviewResponse extends ApiResponseBase {
   preview_html: string;
 }
 
+export interface CampaignReferenceSearchResult {
+  result_id: string;
+  kind: string;
+  kind_label: string;
+  title: string;
+  subtitle: string;
+  select_label: string;
+}
+
+export interface CampaignReferenceSearchResponse extends ApiResponseBase {
+  results: CampaignReferenceSearchResult[];
+  message: string;
+}
+
+export interface CampaignReferencePreviewResponse extends ApiResponseBase {
+  preview_html: string;
+}
+
 export interface CharacterSummary {
   slug: string;
   name: string;

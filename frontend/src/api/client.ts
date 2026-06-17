@@ -101,6 +101,8 @@ import type {
   SessionStartCloseResponse,
   SessionWikiLookupPreviewResponse,
   SessionWikiLookupSearchResponse,
+  CampaignReferenceSearchResponse,
+  CampaignReferencePreviewResponse,
   SystemsEntryResponse,
   CustomSystemsEntryPayload,
   CustomSystemsEntryResponse,
@@ -409,6 +411,23 @@ export class CampaignApiClient {
         .split("/")
         .map((part) => encodeURIComponent(part))
         .join("/")}`,
+    );
+  }
+
+  async searchCampaignReferences(slug: string, q: string, signal?: AbortSignal): Promise<CampaignReferenceSearchResponse> {
+    const query = q.trim();
+    const suffix = query ? `?q=${encodeURIComponent(query)}` : "";
+    return this.requestBrowserJson<CampaignReferenceSearchResponse>(
+      `/campaigns/${encodeURIComponent(slug)}/global-search${suffix}`,
+      { signal },
+    );
+  }
+
+  async previewCampaignReference(slug: string, resultId: string, signal?: AbortSignal): Promise<CampaignReferencePreviewResponse> {
+    const suffix = resultId.trim() ? `?result_id=${encodeURIComponent(resultId.trim())}` : "?result_id=";
+    return this.requestBrowserJson<CampaignReferencePreviewResponse>(
+      `/campaigns/${encodeURIComponent(slug)}/global-search/preview${suffix}`,
+      { signal },
     );
   }
 
