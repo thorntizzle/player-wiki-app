@@ -5416,10 +5416,8 @@ function AdminUserDetailPage() {
             </article>
 
             <article className="card admin-panel">
-              <div className="panel-header">
-                <h2>Recent activity for this user</h2>
-                <p className="meta">{data.pagination.total_events} matching events</p>
-              </div>
+              <h2>Recent activity for this user</h2>
+              <p className="meta">{data.pagination.total_events} matching events</p>
               <AdminActivityFilters action={data.links.gen2_user_url || `/app-next/admin/users/${userId}`} clearHref={data.links.gen2_user_url || `/app-next/admin/users/${userId}`} data={data} />
               <AdminActivityList events={data.recent_audit_events} />
               <AdminPagination pagination={data.pagination} />

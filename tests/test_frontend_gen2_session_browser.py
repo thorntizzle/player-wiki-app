@@ -1189,6 +1189,17 @@ def test_gen2_admin_user_management_route_and_permissions(
                     userDetailCardPanelCount: document.querySelectorAll("article.card.admin-panel").length,
                     legacyUserDetailPanelCount: document.querySelectorAll("article.panel.admin-panel").length,
                     legacyUserCardCount: document.querySelectorAll("article.panel.admin-user-card").length,
+                    recentActivityCardCount: Array.from(document.querySelectorAll("article.card.admin-panel"))
+                        .filter((node) => {
+                            const heading = node.querySelector("h2");
+                            return heading?.textContent?.trim() === "Recent activity for this user";
+                        }).length,
+                    recentActivityPanelHeaderCount: Array.from(document.querySelectorAll("article.card.admin-panel"))
+                        .filter((node) => {
+                            const heading = node.querySelector("h2");
+                            return heading?.textContent?.trim() === "Recent activity for this user";
+                        })
+                        .reduce((count, node) => count + node.querySelectorAll(".panel-header").length, 0),
                     hasAdminPageWrapper: !!document.querySelector("main.main-shell > .admin-page"),
                     directChildren: Array.from(document.querySelectorAll("main.main-shell > *")).map((node) => ({
                         tag: node.tagName.toLowerCase(),
@@ -1207,6 +1218,8 @@ def test_gen2_admin_user_management_route_and_permissions(
             assert admin_user_detail_metrics["userDetailCardPanelCount"] >= 4
             assert admin_user_detail_metrics["legacyUserDetailPanelCount"] == 0
             assert admin_user_detail_metrics["legacyUserCardCount"] == 0
+            assert admin_user_detail_metrics["recentActivityCardCount"] >= 1
+            assert admin_user_detail_metrics["recentActivityPanelHeaderCount"] == 0
             assert any(
                 (
                     node["tag"] == "section"
