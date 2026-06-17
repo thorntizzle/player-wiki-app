@@ -499,27 +499,24 @@ a:hover {
   margin: 0;
 }
 
-.dm-content-gen2-page {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  backdrop-filter: none;
-  display: grid;
-  gap: 0.75rem;
+.main-shell > .dm-content-hero ~ * {
+  margin-top: 0.75rem;
 }
 
-.dm-content-gen2-page > .dm-content-hero {
+.hero.compact.dm-content-hero {
   margin: 0;
   align-items: flex-start;
   padding: 0.75rem 0 0.25rem;
   display: grid;
   gap: 0.35rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
-.dm-content-gen2-page > .dm-content-hero h2 {
+.hero.compact.dm-content-hero h2 {
   margin: 0;
   font-size: clamp(2rem, 4.8vw, 3.6rem);
   line-height: 0.98;
@@ -2353,7 +2350,7 @@ a:hover {
   gap: 0.85rem;
 }
 
-.dm-content-gen2-page .card,
+.dm-content-staged-grid > .card,
 .dm-content-systems-lane .card {
   border-radius: 22px;
   background: linear-gradient(180deg, var(--surface-strong), var(--surface));
@@ -2362,11 +2359,8 @@ a:hover {
   backdrop-filter: blur(12px);
 }
 
-.dm-content-gen2-page > .status {
-  margin-top: 0;
-}
-
-.dm-content-gen2-page .article-card {
+.dm-content-staged-grid .article-card,
+.dm-content-systems-lane .article-card {
   border-color: var(--border);
   border-radius: 18px;
   padding: 0.58rem 0.62rem;
@@ -2374,13 +2368,15 @@ a:hover {
   gap: 0.42rem;
 }
 
-.dm-content-gen2-page .article-card > summary {
+.dm-content-staged-grid .article-card > summary,
+.dm-content-systems-lane .article-card > summary {
   gap: 0.4rem;
   align-items: center;
   line-height: 1.2;
 }
 
-.dm-content-gen2-page .article-card pre {
+.dm-content-staged-grid .article-card pre,
+.dm-content-systems-lane .article-card pre {
   margin: 0;
 }
 

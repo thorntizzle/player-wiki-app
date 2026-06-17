@@ -2625,15 +2625,13 @@ def test_gen2_dm_content_browser_visual_parity_smoke(
                 page.set_viewport_size(viewport)
                 page.goto(url)
 
-                page_root = page.locator("main > section.dm-content-gen2-page")
-                page_hero = page.locator("section.dm-content-hero")
-                expect(page_root).to_be_visible(timeout=10000)
+                page_hero = page.locator("main > section.hero.compact.dm-content-hero")
                 expect(page_hero).to_be_visible(timeout=10000)
                 expect(page.get_by_role("heading", name=heading)).to_be_visible(timeout=10000)
-                assert page.locator("main > .panel.dm-content-gen2-page").count() == 0
-                assert page.locator(".dm-content-gen2-page > .panel-nested").count() == 0
-                assert page.locator(".dm-content-gen2-page .dm-content-staged-grid > .panel-nested").count() == 0
-                assert page.locator(".dm-content-gen2-page .dm-content-systems-lane > .panel-nested").count() == 0
+                assert page.locator("main > .dm-content-gen2-page").count() == 0
+                assert page.locator("main > .panel-nested").count() == 0
+                assert page.locator(".dm-content-staged-grid > .panel-nested").count() == 0
+                assert page.locator(".dm-content-systems-lane > .panel-nested").count() == 0
 
                 fallback_links = page.locator(".dm-content-gen2-links")
                 expect(fallback_links).to_be_visible()
@@ -2642,20 +2640,39 @@ def test_gen2_dm_content_browser_visual_parity_smoke(
                 active_classes = fallback_links.get_by_role("link", name=active_label).first.get_attribute("class") or ""
                 assert "is-active" in active_classes
 
-                assert page.evaluate(
+                route_metrics = page.evaluate(
                     """() => {
-                        const pageNode = document.querySelector('.dm-content-gen2-page');
-                        if (!pageNode) {
+                        const main = document.querySelector('main.main-shell') || document.querySelector('main');
+                        if (!main) {
                             return false;
                         }
-                        const styles = getComputedStyle(pageNode);
-                        return (
-                            parseFloat(styles.borderWidth) === 0 &&
-                            parseFloat(styles.borderRadius) === 0 &&
-                            styles.boxShadow === 'none'
-                        );
+                        const directChildren = Array.from(main.querySelectorAll(':scope > *'));
+                        const hero = main.querySelector(':scope > section.hero.compact.dm-content-hero');
+                        const links = document.querySelector('.dm-content-gen2-links');
+                        const content = document.querySelector('.dm-content-staged-grid') || document.querySelector('.dm-content-systems-lane');
+                        const legacyRoutePresent = Boolean(main.querySelector(':scope > .dm-content-gen2-page'));
+                        if (!hero) {
+                            return false;
+                        }
+                        return {
+                            firstDirectChildIsHero: hero === directChildren[0],
+                            heroIndex: directChildren.indexOf(hero),
+                            linksIndex: links ? directChildren.indexOf(links) : -1,
+                            contentIndex: content ? directChildren.indexOf(content) : -1,
+                            maxDirectChildWidth: directChildren.length
+                                ? Math.ceil(Math.max(...directChildren.map((node) => node.getBoundingClientRect().width)))
+                                : 0,
+                            legacyRoutePresent,
+                        };
                     }""",
                 )
+                assert route_metrics is not False
+                assert route_metrics["firstDirectChildIsHero"] is True
+                assert route_metrics["heroIndex"] == 0
+                assert route_metrics["linksIndex"] > route_metrics["heroIndex"]
+                assert route_metrics["contentIndex"] > route_metrics["linksIndex"]
+                assert route_metrics["maxDirectChildWidth"] <= viewport["width"] + 1
+                assert route_metrics["legacyRoutePresent"] is False
 
                 if viewport["width"] >= 1024 and lane != "systems":
                     columns = page.evaluate(

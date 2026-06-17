@@ -13185,7 +13185,7 @@ function DmContentPage() {
   };
 
   return (
-    <section className="dm-content-gen2-page">
+    <>
       <section className="hero compact dm-content-hero">
         <Link to="/" className="button button-secondary">
           Back to list
@@ -13798,7 +13798,7 @@ function DmContentPage() {
         </section>
       </div>
       )}
-    </section>
+    </>
   );
 }
 
