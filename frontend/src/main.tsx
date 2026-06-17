@@ -6636,7 +6636,7 @@ function SystemsIndexPage() {
 
   return (
     <section className="systems-browse-page systems-browse-index-page">
-      <header className="systems-hero">
+      <section className="hero compact systems-hero">
         <div>
           <p className="eyebrow">Systems wiki</p>
           <h1>Systems</h1>
@@ -6648,7 +6648,7 @@ function SystemsIndexPage() {
           </a>
           <SystemsManageLink campaignSlug={resolvedCampaignSlug} canManage={Boolean(data?.permissions.can_manage_systems)} />
         </div>
-      </header>
+      </section>
       <ApiErrorNotice isLoading={systemsQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {data ? (
         <div className="systems-browse-grid page-layout">
@@ -6775,7 +6775,7 @@ function SystemsSourcePage() {
 
   return (
     <section className="systems-browse-page systems-source-page">
-      <header className="systems-hero">
+      <section className="hero compact systems-hero">
         <div>
           <p className="eyebrow">Systems source</p>
           <h1>{data?.source.title ?? resolvedSourceId}</h1>
@@ -6788,7 +6788,7 @@ function SystemsSourcePage() {
           </a>
           <SystemsManageLink campaignSlug={resolvedCampaignSlug} canManage={Boolean(data?.permissions.can_manage_systems)} />
         </div>
-      </header>
+      </section>
       <ApiErrorNotice isLoading={sourceQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {data ? (
         <div className="systems-browse-grid page-layout">
@@ -6901,7 +6901,7 @@ function SystemsSourceCategoryPage() {
 
   return (
     <section className="systems-browse-page systems-source-category-page">
-      <header className="systems-hero">
+      <section className="hero compact systems-hero">
         <div>
           <p className="eyebrow">Systems source category</p>
           <h1>{data ? `${data.source.title}: ${data.entry_type_label}` : resolvedEntryType}</h1>
@@ -6917,7 +6917,7 @@ function SystemsSourceCategoryPage() {
           </a>
           <SystemsManageLink campaignSlug={resolvedCampaignSlug} canManage={Boolean(data?.permissions.can_manage_systems)} />
         </div>
-      </header>
+      </section>
       <ApiErrorNotice isLoading={categoryQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {data ? (
         <div className="systems-browse-grid page-layout">
@@ -6985,16 +6985,20 @@ function SystemsEntryPage() {
 
   return (
     <section className="systems-entry-shell systems-entry-page">
+      {entry ? (
+        <section className="hero compact systems-hero">
+          <p className="eyebrow">Systems entry</p>
+          <h1>{entry.title}</h1>
+          <p className="lede">
+            {entry.entry_type_label} | {entry.source_id}
+            {sourceState?.license_class_label ? ` | ${sourceState.license_class_label}` : ""}
+          </p>
+        </section>
+      ) : null}
       <ApiErrorNotice isLoading={entryQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {entry ? (
         <div className="page-layout">
           <article className="article card systems-entry-band">
-            <p className="eyebrow">Systems entry</p>
-            <h1>{entry.title}</h1>
-            <p className="lede">
-              {entry.entry_type_label} | {entry.source_id}
-              {sourceState?.license_class_label ? ` | ${sourceState.license_class_label}` : ""}
-            </p>
             {entry.rendered_html ? (
               <div className="article-body html-body" dangerouslySetInnerHTML={{ __html: entry.rendered_html }} />
             ) : (

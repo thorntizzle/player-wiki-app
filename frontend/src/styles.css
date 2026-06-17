@@ -1635,7 +1635,8 @@ a:hover {
 .hero.compact.wiki-home,
 .hero.compact.wiki-section-page,
 .hero.compact.character-roster-hero,
-.hero.compact.campaign-picker-hero {
+.hero.compact.campaign-picker-hero,
+.hero.compact.systems-hero {
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -1650,7 +1651,9 @@ a:hover {
 .wiki-section-page > h1,
 .character-roster-hero > h1,
 .character-roster-hero > h2,
-.campaign-picker-hero > h1 {
+.campaign-picker-hero > h1,
+.systems-hero > h1,
+.systems-hero h1 {
   margin: 0;
   font-size: clamp(2.2rem, 5vw, 4.2rem);
   line-height: 0.98;
@@ -1661,7 +1664,9 @@ a:hover {
 .character-roster-hero > .meta,
 .character-roster-hero .meta,
 .campaign-picker-hero > .meta,
-.campaign-picker-hero .meta {
+.campaign-picker-hero .meta,
+.systems-hero > .meta,
+.systems-hero .meta {
   margin: 0 0 0.25rem;
   text-transform: uppercase;
   font-size: 0.78rem;
@@ -1671,7 +1676,9 @@ a:hover {
 .wiki-home > .lede,
 .wiki-section-page > .lede,
 .character-roster-hero > .lede,
-.campaign-picker-hero > .lede {
+.campaign-picker-hero > .lede,
+.systems-hero > .lede,
+.systems-hero .lede {
   max-width: 70ch;
   margin: 0;
   font-size: 1.08rem;
@@ -1962,20 +1969,6 @@ a:hover {
   gap: 1rem;
 }
 
-.systems-hero {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 0.75rem;
-}
-
-.systems-hero h1 {
-  margin: 0;
-  font-size: clamp(2.05rem, 4.8vw, 3.8rem);
-  line-height: 0.98;
-}
-
 .systems-hero-actions {
   align-items: flex-start;
 }
@@ -2035,12 +2028,6 @@ a:hover {
 .systems-entry-page {
   display: grid;
   gap: 1rem;
-}
-
-.systems-entry-shell .article h1 {
-  margin-top: 0;
-  font-size: clamp(2.1rem, 5vw, 4rem);
-  line-height: 0.98;
 }
 
 .systems-entry-band .article-body {

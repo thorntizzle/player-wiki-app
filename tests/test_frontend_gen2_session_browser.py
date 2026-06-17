@@ -1991,7 +1991,7 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                 page.goto(f"{base_url}/app-next/campaigns/linden-pass/systems?q=focus")
 
                 expect(page.locator("section.systems-browse-index-page")).to_be_visible(timeout=10_000)
-                expect(page.locator(".systems-hero")).to_be_visible()
+                expect(page.locator("section.hero.compact.systems-hero")).to_be_visible()
                 expect(page.locator(".systems-browse-grid")).to_be_visible()
                 expect(page.locator(".systems-search-band")).to_be_visible()
                 expect(page.locator(".systems-browse-sidebar")).to_be_visible()
@@ -2002,7 +2002,7 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                     """() => {
                         const selectors = [
                             '.systems-browse-page',
-                            '.systems-hero',
+                            'section.hero.compact.systems-hero',
                             '.systems-browse-grid',
                             '.systems-browse-sidebar',
                         ];
@@ -2036,22 +2036,41 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                     timeout=5000,
                 )
                 expect(page.locator(".systems-entry-shell")).to_be_visible(timeout=10_000)
+                expect(page.locator(".systems-entry-shell > section.hero.compact.systems-hero")).to_be_visible()
                 expect(page.locator(".systems-entry-band")).to_be_visible()
                 expect(page.locator(".systems-entry-sidebar")).to_be_visible()
                 expect(page.locator(".systems-sidebar-card").first).to_be_visible()
                 expect(page.locator(".systems-entry-navigation")).to_be_visible()
-                expect(page.get_by_role("heading", name=entry_title)).to_be_visible(timeout=10_000)
+                expect(page.locator(".systems-entry-shell > section.hero.compact.systems-hero h1")).to_have_text(entry_title, timeout=10_000)
+                expect(page.locator(".systems-entry-band > h1")).to_have_count(0)
                 expect(page.get_by_role("heading", name="Entry Metadata")).to_be_visible()
                 expect(page.get_by_role("link", name="Source page")).to_be_visible()
                 expect(page.get_by_role("link", name="Source category")).to_be_visible()
                 expect(page.get_by_text(entry_body)).to_be_visible()
                 expect(page.get_by_role("link", name="Manage campaign override")).to_be_visible()
 
+                hero_position_before_layout = page.evaluate(
+                    """() => {
+                        const shell = document.querySelector('.systems-entry-shell');
+                        if (!shell) {
+                            return false;
+                        }
+                        const hero = shell.querySelector(':scope > .hero.compact.systems-hero');
+                        const layout = shell.querySelector(':scope > .page-layout');
+                        if (!hero || !layout) {
+                            return false;
+                        }
+                        const children = Array.from(shell.children);
+                        return children.indexOf(hero) < children.indexOf(layout);
+                    }"""
+                )
+                assert hero_position_before_layout
+
                 page.get_by_role("link", name="Source category").click()
 
                 expect(page.locator(".systems-source-category-page")).to_be_visible(timeout=10_000)
                 expect(page.locator(".systems-category-band")).to_be_visible()
-                expect(page.locator('.systems-hero .eyebrow', has_text="Systems source category")).to_be_visible()
+                expect(page.locator('section.hero.compact.systems-hero .eyebrow', has_text="Systems source category")).to_be_visible()
                 expect(page.get_by_role("heading", name=re.compile(r"Browse", re.I))).to_be_visible()
                 expect(page.get_by_role("link", name=entry_title)).to_be_visible()
                 expect(page).to_have_url(
@@ -2064,6 +2083,7 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                         const selectors = [
                             '.systems-source-category-page',
                             '.systems-category-band',
+                            'section.hero.compact.systems-hero',
                             '.systems-browse-sidebar',
                         ];
                         const viewportWidth = Math.ceil(document.documentElement.clientWidth);
@@ -2094,7 +2114,7 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
 
                 expect(page.locator(".systems-source-page")).to_be_visible(timeout=10_000)
                 expect(page.locator(".systems-source-band")).to_be_visible()
-                expect(page.locator('.systems-hero .eyebrow', has_text="Systems source")).to_be_visible()
+                expect(page.locator('section.hero.compact.systems-hero .eyebrow', has_text="Systems source")).to_be_visible()
                 expect(page.get_by_role("heading", name="Browse This Source")).to_be_visible()
                 expect(page).to_have_url(
                     re.compile(r"/app-next/campaigns/linden-pass/systems/sources/.+$"),
@@ -2106,6 +2126,7 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                         const selectors = [
                             '.systems-source-page',
                             '.systems-source-band',
+                            'section.hero.compact.systems-hero',
                             '.systems-browse-sidebar',
                         ];
                         const viewportWidth = Math.ceil(document.documentElement.clientWidth);
