@@ -1126,7 +1126,8 @@ def test_gen2_combat_visual_parity_smoke(
             player_metrics = desktop_page.evaluate(
                 """() => {
                     const route = document.querySelector(".combat-page");
-                    const hero = document.querySelector(".combat-page > .panel-header h2");
+                    const hero = document.querySelector(".combat-hero h2");
+                    const legacyPanelRoute = document.querySelector("main > .panel.combat-page");
                     const summary = document.querySelector(".combat-summary-band");
                     const summaryCard = document.querySelector(".combat-summary-band article");
                     const carousel = document.querySelector(".combat-carousel");
@@ -1135,6 +1136,7 @@ def test_gen2_combat_visual_parity_smoke(
                     return {
                         routeShadow: route ? window.getComputedStyle(route).boxShadow : "",
                         heroSize: hero ? Number.parseFloat(window.getComputedStyle(hero).fontSize) : 0,
+                        legacyPanelRoutePresent: legacyPanelRoute ? true : false,
                         summaryRadius: summary ? Number.parseFloat(window.getComputedStyle(summary).borderRadius) : 0,
                         summaryCardRadius: summaryCard ? Number.parseFloat(window.getComputedStyle(summaryCard).borderRadius) : 0,
                         carouselRadius: carousel ? Number.parseFloat(window.getComputedStyle(carousel).borderRadius) : 0,
@@ -1144,6 +1146,7 @@ def test_gen2_combat_visual_parity_smoke(
                 }"""
             )
             assert player_metrics["routeShadow"] == "none"
+            assert player_metrics["legacyPanelRoutePresent"] is False
             assert player_metrics["heroSize"] >= 32
             assert player_metrics["summaryRadius"] >= 20
             assert player_metrics["summaryCardRadius"] >= 16

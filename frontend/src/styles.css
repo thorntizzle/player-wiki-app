@@ -3379,19 +3379,26 @@ textarea {
   backdrop-filter: none;
 }
 
-.combat-page > .panel-header {
+.combat-page > .combat-hero {
   align-items: flex-start;
   margin-bottom: 0;
   padding: 0.75rem 0 0.25rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  display: grid;
+  gap: 0.35rem;
 }
 
-.combat-page > .panel-header h2 {
+.combat-page > .combat-hero h2 {
   margin: 0;
   font-size: clamp(2.15rem, 5vw, 4rem);
   line-height: 0.98;
 }
 
-.combat-page > .panel-header .meta {
+.combat-page > .combat-hero .meta {
   margin: 0 0 0.25rem;
   text-transform: uppercase;
   font-size: 0.78rem;

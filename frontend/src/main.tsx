@@ -15010,12 +15010,10 @@ function CombatPage() {
   );
 
   return (
-    <section className="panel combat-page">
-      <div className="panel-header">
-        <div>
-          <p className="meta">Live play</p>
-          <h2>Combat: {payload?.campaign.title ?? campaignSlug}</h2>
-        </div>
+    <section className="combat-page">
+      <section className="hero compact combat-hero">
+        <p className="meta">Live play</p>
+        <h2>Combat: {payload?.campaign.title ?? campaignSlug}</h2>
         <div className="article-actions">
           {payload?.links?.flask_combat_url ? (
             <a className="button button-secondary" href={payload.links.flask_combat_url}>
@@ -15033,7 +15031,7 @@ function CombatPage() {
             </a>
           ) : null}
         </div>
-      </div>
+      </section>
       {renderCombatViewSwitch()}
 
       <ApiErrorNotice
