@@ -1723,6 +1723,10 @@ a:hover {
   grid-template-columns: minmax(0, 2fr) minmax(16rem, 0.8fr);
 }
 
+.wiki-article-shell .page-layout {
+  grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.7fr);
+}
+
 .wiki-article-shell .page-layout > * {
   min-width: 0;
 }
@@ -3453,6 +3457,7 @@ textarea {
   }
 
   .page-layout,
+  .wiki-article-shell .page-layout,
   .account-settings-layout,
   .character-authoring-layout,
   .systems-browse-grid,
