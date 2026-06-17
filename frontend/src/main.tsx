@@ -7315,6 +7315,8 @@ function DmArticleCreator({
   onSearchSources,
   onCreate,
   isCreating,
+  className = "panel panel-nested",
+  id,
 }: {
   mode: ArticleMode;
   setMode: (mode: ArticleMode) => void;
@@ -7332,6 +7334,8 @@ function DmArticleCreator({
   onSearchSources: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onCreate: (payload: SessionArticleCreatePayload) => void;
   isCreating: boolean;
+  className?: string;
+  id?: string;
 }) {
   const instructions =
     mode === "manual"
@@ -7341,7 +7345,7 @@ function DmArticleCreator({
         : "Search and select a source, then pull into staged articles.";
 
   return (
-    <article className="panel panel-nested">
+    <article className={className} id={id}>
       <h3>Stage an article</h3>
       <div className="segmented">
         <button
@@ -11744,7 +11748,7 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
       {systemsError ? <p className="status status-error">{systemsError}</p> : null}
       {systemsMessage ? <p className="status status-neutral">{systemsMessage}</p> : null}
 
-      <section className="panel panel-nested" id="systems-source-enablement">
+      <section className="card" id="systems-source-enablement">
         <div className="panel-header">
           <div>
             <h3>Source Enablement</h3>
@@ -11840,7 +11844,7 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
         </form>
       </section>
 
-      <section className="panel panel-nested" id="systems-entry-overrides">
+      <section className="card" id="systems-entry-overrides">
         <div className="panel-header">
           <div>
             <h3>Entry Overrides</h3>
@@ -11914,7 +11918,7 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
         )}
       </section>
 
-      <section className="panel panel-nested" id="systems-custom-entries">
+      <section className="card" id="systems-custom-entries">
         <div className="panel-header">
           <div>
             <h3>Custom Entries</h3>
@@ -12016,7 +12020,7 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
         )}
       </section>
 
-      <section className="panel panel-nested" id="systems-shared-imports">
+      <section className="card" id="systems-shared-imports">
         <div className="panel-header">
           <div>
             <h3>Shared Source Imports</h3>
@@ -12034,7 +12038,7 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
         )}
       </section>
 
-      <section className="panel panel-nested" id="systems-import-history">
+      <section className="card" id="systems-import-history">
         <div className="panel-header">
           <div>
             <h3>Import-Run History</h3>
@@ -13247,7 +13251,7 @@ function DmContentPage() {
 
       {activeLane === "statblocks" ? (
         <div className="split-grid dm-content-staged-grid">
-          <section className="panel panel-nested dm-statblock-create">
+          <section className="card dm-statblock-create">
             <div className="panel-header">
               <h3>Create statblock</h3>
               <span className="pill">Markdown</span>
@@ -13349,7 +13353,7 @@ function DmContentPage() {
             </form>
           </section>
 
-          <section className="panel panel-nested dm-statblock-library">
+          <section className="card dm-statblock-library">
             <div className="panel-header">
               <h3>Statblock library</h3>
               <span className="pill">{statblocks.length}</span>
@@ -13398,7 +13402,7 @@ function DmContentPage() {
         </div>
       ) : activeLane === "conditions" ? (
         <div className="split-grid dm-content-staged-grid">
-          <section className="panel panel-nested dm-condition-create">
+          <section className="card dm-condition-create">
             <div className="panel-header">
               <h3>Create condition</h3>
               <span className="pill">Custom</span>
@@ -13460,7 +13464,7 @@ function DmContentPage() {
             </form>
           </section>
 
-          <section className="panel panel-nested dm-condition-library">
+          <section className="card dm-condition-library">
             <div className="panel-header">
               <h3>Condition library</h3>
               <span className="pill">{conditions.length}</span>
@@ -13496,7 +13500,7 @@ function DmContentPage() {
         </div>
       ) : activeLane === "player-wiki" ? (
         <div className="split-grid dm-content-staged-grid">
-          <section className="panel panel-nested dm-player-wiki-create">
+          <section className="card dm-player-wiki-create">
             <div className="panel-header">
               <h3>Create player wiki page</h3>
               <span className="pill">Markdown</span>
@@ -13530,7 +13534,7 @@ function DmContentPage() {
             </form>
           </section>
 
-          <section className="panel panel-nested dm-player-wiki-library">
+          <section className="card dm-player-wiki-library">
             <div className="panel-header">
               <h3>Player wiki pages</h3>
               <span className="pill">{playerWikiPages.length}</span>
@@ -13566,6 +13570,8 @@ function DmContentPage() {
       ) : (
         <div className="split-grid dm-content-staged-grid">
           <DmArticleCreator
+            className="card"
+            id="dm-content-staged-article-store"
             mode={mode}
             setMode={(next) => {
               clearArticleStatus();
@@ -13599,23 +13605,23 @@ function DmContentPage() {
             isCreating={createArticleMutation.isPending}
           />
 
-        <section className="panel panel-nested">
-          <div className="panel-header">
-            <h3>Staged articles</h3>
-            <span className="pill">{stagedArticles.length}</span>
-          </div>
-          {stagedArticles.length ? (
-            <div className="article-stack">
-              {stagedArticles.map((article) => {
-                const draft = stagedDrafts[article.id] ?? {
-                  title: article.title,
-                  body: article.body_markdown,
-                  imageAltText: article.image?.alt_text || "",
-                  imageCaption: article.image?.caption || "",
-                  image: null,
-                };
-                return (
-                  <details className="article-card" key={article.id}>
+          <section className="card" id="dm-content-staged-articles-queue">
+            <div className="panel-header">
+              <h3>Staged articles</h3>
+              <span className="pill">{stagedArticles.length}</span>
+            </div>
+            {stagedArticles.length ? (
+              <div className="article-stack">
+                {stagedArticles.map((article) => {
+                  const draft = stagedDrafts[article.id] ?? {
+                    title: article.title,
+                    body: article.body_markdown,
+                    imageAltText: article.image?.alt_text || "",
+                    imageCaption: article.image?.caption || "",
+                    image: null,
+                  };
+                  return (
+                    <details className="article-card" key={article.id}>
                     <summary>
                       <strong>{article.title}</strong>
                       <span className="article-kind">{article.source_kind || "manual"}</span>

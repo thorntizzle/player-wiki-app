@@ -2316,11 +2316,13 @@ a:hover {
   gap: 0.85rem;
 }
 
-.dm-content-gen2-page .panel-nested,
-.dm-content-systems-lane .panel-nested {
-  border-radius: 18px;
-  background: linear-gradient(180deg, var(--surface-soft), var(--surface));
-  box-shadow: var(--shadow-soft);
+.dm-content-gen2-page .card,
+.dm-content-systems-lane .card {
+  border-radius: 22px;
+  background: linear-gradient(180deg, var(--surface-strong), var(--surface));
+  box-shadow: var(--shadow);
+  padding: 1.25rem;
+  backdrop-filter: blur(12px);
 }
 
 .dm-content-gen2-page > .status {
@@ -2345,9 +2347,9 @@ a:hover {
   margin: 0;
 }
 
-.dm-content-staged-grid > .panel-nested,
-.dm-content-staged-grid > article.panel-nested,
-.dm-content-staged-grid > section.panel-nested {
+.dm-content-staged-grid > .card,
+.dm-content-staged-grid > article.card,
+.dm-content-staged-grid > section.card {
   min-width: 0;
 }
 

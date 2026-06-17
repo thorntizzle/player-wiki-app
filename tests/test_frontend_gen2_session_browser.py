@@ -2533,6 +2533,9 @@ def test_gen2_dm_content_browser_visual_parity_smoke(
                 expect(page_hero).to_be_visible(timeout=10000)
                 expect(page.get_by_role("heading", name=heading)).to_be_visible(timeout=10000)
                 assert page.locator("main > .panel.dm-content-gen2-page").count() == 0
+                assert page.locator(".dm-content-gen2-page > .panel-nested").count() == 0
+                assert page.locator(".dm-content-gen2-page .dm-content-staged-grid > .panel-nested").count() == 0
+                assert page.locator(".dm-content-gen2-page .dm-content-systems-lane > .panel-nested").count() == 0
 
                 fallback_links = page.locator(".dm-content-gen2-links")
                 expect(fallback_links).to_be_visible()
@@ -2571,7 +2574,7 @@ def test_gen2_dm_content_browser_visual_parity_smoke(
                     systems_metrics = page.evaluate(
                         """() => {
                             const lane = document.querySelector('.dm-content-systems-lane');
-                            const panels = Array.from(document.querySelectorAll('.dm-content-systems-lane .panel-nested'));
+                            const panels = Array.from(document.querySelectorAll('.dm-content-systems-lane section.card'));
                             return {
                                 panelCount: panels.length,
                                 firstRadius: panels.length ? Number.parseFloat(getComputedStyle(panels[0]).borderRadius) : 0,
@@ -2657,7 +2660,7 @@ def test_gen2_dm_content_browser_statblock_workflow(
             expect(fallback_links.get_by_role("link", name="Systems")).to_be_visible()
             expect(fallback_links.get_by_role("link", name="Session DM")).to_be_visible()
 
-            create_panel = page.locator("section.dm-statblock-create")
+            create_panel = page.locator("section.card.dm-statblock-create")
             expect(create_panel.get_by_role("heading", name="Create statblock")).to_be_visible()
             page.locator("#dm-statblock-create-filename").fill("gen2-harbor-guard.md")
             page.locator("#dm-statblock-create-subsection").fill("Gen2 Harbor Crew")
@@ -2665,7 +2668,7 @@ def test_gen2_dm_content_browser_statblock_workflow(
             create_panel.get_by_role("button", name="Save statblock").click()
             expect(page.get_by_text("Statblock saved: Gen2 Harbor Guard.")).to_be_visible(timeout=10000)
 
-            library = page.locator("section.dm-statblock-library")
+            library = page.locator("section.card.dm-statblock-library")
             group = library.locator("details.section-block", has_text="Gen2 Harbor Crew")
             expect(group).to_be_visible(timeout=10000)
             statblock_card = library.locator("details.dm-statblock-card", has_text=statblock_title)
@@ -2743,14 +2746,14 @@ def test_gen2_dm_content_browser_condition_workflow(
             expect(fallback_links.get_by_role("link", name="Systems")).to_be_visible()
             expect(fallback_links.get_by_role("link", name="Session DM")).to_be_visible()
 
-            create_panel = page.locator("section.dm-condition-create")
+            create_panel = page.locator("section.card.dm-condition-create")
             expect(create_panel.get_by_role("heading", name="Create condition")).to_be_visible()
             page.locator("#dm-condition-create-name").fill(condition_name)
             page.locator("#dm-condition-create-description").fill(condition_description)
             create_panel.get_by_role("button", name="Save condition").click()
             expect(page.get_by_text(f"Condition saved: {condition_name}.")).to_be_visible(timeout=10000)
 
-            library = page.locator("section.dm-condition-library")
+            library = page.locator("section.card.dm-condition-library")
             expect(library.get_by_text("Custom conditions merge into the Combat condition picker")).to_be_visible()
             condition_card = library.locator("details.dm-condition-card", has_text=condition_name)
             expect(condition_card).to_be_visible(timeout=10000)
@@ -2827,7 +2830,7 @@ def test_gen2_dm_content_browser_player_wiki_workflow(
             expect(fallback_links.get_by_role("link", name="Systems")).to_be_visible()
             expect(fallback_links.get_by_role("link", name="Session DM")).to_be_visible()
 
-            create_panel = page.locator("section.dm-player-wiki-create")
+            create_panel = page.locator("section.card.dm-player-wiki-create")
             expect(create_panel.get_by_role("heading", name="Create player wiki page")).to_be_visible()
             page.locator("#dm-player-wiki-create-title").fill(page_title)
             page.locator("#dm-player-wiki-create-slug").fill("gen2-field-note")
@@ -2842,7 +2845,7 @@ def test_gen2_dm_content_browser_player_wiki_workflow(
             create_panel.get_by_role("button", name="Create wiki page").click()
             expect(page.get_by_text(f"Player Wiki page created: {page_title}.")).to_be_visible(timeout=10000)
 
-            library = page.locator("section.dm-player-wiki-library")
+            library = page.locator("section.card.dm-player-wiki-library")
             library.get_by_label("Search pages").fill("Gen2 Field")
             page_card = library.locator("details.dm-player-wiki-card", has_text=page_title)
             expect(page_card).to_be_visible(timeout=10000)
@@ -3014,7 +3017,8 @@ def test_gen2_dm_content_browser_staged_article_workflow(
             creation_panel.get_by_role("button", name="Create").click()
             expect(page.get_by_text("Article staged.")).to_be_visible(timeout=10000)
 
-            staged_panel = page.locator("section.panel.panel-nested", has=page.locator("h3", has_text="Staged articles"))
+            expect(page.locator("article.card#dm-content-staged-article-store")).to_be_visible()
+            staged_panel = page.locator("section.card#dm-content-staged-articles-queue")
             staged_card = staged_panel.locator("details.article-card", has_text=article_title)
             expect(staged_card).to_be_visible(timeout=10000)
             staged_card.locator("summary").click()
