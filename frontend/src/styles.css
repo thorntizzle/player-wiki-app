@@ -1742,6 +1742,11 @@ a:hover {
 }
 
 .wiki-article-shell .article-body,
+.wiki-overview-card .article-body {
+  margin-top: 1.2rem;
+}
+
+.wiki-article-shell .article-body,
 .wiki-overview-card .article-body,
 .systems-entry-shell .article-body {
   max-height: none;
@@ -1915,6 +1920,10 @@ a:hover {
 
 .article-image__caption {
   margin-top: 0.35rem;
+}
+
+.wiki-article-shell .article-image__caption {
+  margin: 0.55rem 0 0;
 }
 
 .wiki-article-shell .sidebar-card h2 {
