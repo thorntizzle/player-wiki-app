@@ -1456,8 +1456,13 @@ def test_gen2_wiki_visual_parity_smoke(
                     const hero = document.querySelector(".wiki-home");
                     const overviewCard = document.querySelector(".wiki-overview-card");
                     const overviewTitle = document.querySelector(".wiki-overview-card > h2");
-                    const overviewBody = document.querySelector(".wiki-overview-card .html-body");
+                    const overviewBody = document.querySelector(".wiki-overview-card .article-body");
                     const browse = document.querySelector(".wiki-section-browse");
+                    const overviewBodyFirstChild = overviewBody ? overviewBody.firstElementChild : null;
+                    const overviewBodyRect = overviewBody ? overviewBody.getBoundingClientRect() : null;
+                    const overviewBodyFirstChildRect = overviewBodyFirstChild
+                        ? overviewBodyFirstChild.getBoundingClientRect()
+                        : null;
                     return {
                         routeShadow: route ? window.getComputedStyle(route).boxShadow : "",
                         heroDisplay: hero ? window.getComputedStyle(hero).display : "",
@@ -1469,6 +1474,13 @@ def test_gen2_wiki_visual_parity_smoke(
                             ? Number.parseFloat(window.getComputedStyle(overviewTitle).marginBottom)
                             : -1,
                         overviewBorder: overviewBody ? window.getComputedStyle(overviewBody).borderTopWidth : "",
+                        overviewBodyFirstChildMarginTop: overviewBodyFirstChild
+                            ? Number.parseFloat(window.getComputedStyle(overviewBodyFirstChild).marginTop)
+                            : -1,
+                        overviewBodyFirstChildGap:
+                            overviewBodyRect && overviewBodyFirstChildRect
+                            ? Math.round((overviewBodyFirstChildRect.top - overviewBodyRect.top) * 100) / 100
+                            : -1,
                         browseRadius: browse ? Number.parseFloat(window.getComputedStyle(browse).borderRadius) : 0,
                     };
                 }"""
@@ -1479,6 +1491,8 @@ def test_gen2_wiki_visual_parity_smoke(
             assert home_metrics["overviewTitleMarginTop"] == 0
             assert home_metrics["overviewTitleMarginBottom"] == 0
             assert home_metrics["overviewBorder"] == "0px"
+            assert home_metrics["overviewBodyFirstChildMarginTop"] == 0
+            assert home_metrics["overviewBodyFirstChildGap"] == 0
             assert home_metrics["browseRadius"] >= 20
 
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/sections/locations")

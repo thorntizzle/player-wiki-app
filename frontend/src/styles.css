@@ -1727,6 +1727,10 @@ a:hover {
   margin: 0;
 }
 
+.wiki-overview-card .article-body > :first-child {
+  margin-top: 0;
+}
+
 .section-block {
   display: grid;
   gap: 0.85rem;
