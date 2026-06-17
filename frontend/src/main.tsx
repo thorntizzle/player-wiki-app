@@ -4884,7 +4884,7 @@ function AdminDashboardPage() {
       {data ? (
         <>
           <section className="page-layout admin-layout">
-            <article className="panel admin-panel">
+            <article className="card admin-panel">
               <h2>Invite user</h2>
               <form
                 className="stack-form admin-panel-form"
@@ -4969,7 +4969,7 @@ function AdminDashboardPage() {
               </form>
             </article>
 
-            <aside className="panel admin-panel">
+            <aside className="card admin-panel">
               <h2>Campaigns</h2>
               <ul className="plain-list">
                 {data.campaign_choices.map((campaign) => (
@@ -4988,7 +4988,7 @@ function AdminDashboardPage() {
             </div>
             <div className="grid admin-user-grid">
               {data.user_cards.map((user) => (
-                <article key={user.id} className="panel admin-user-card">
+                <article key={user.id} className="card admin-user-card">
                   <p className="card-kicker">
                     {user.status}
                     {user.is_admin ? " | Admin" : ""}
@@ -5009,7 +5009,7 @@ function AdminDashboardPage() {
               <h2>Recent activity</h2>
               <p className="meta">{data.pagination.total_events} matching events</p>
             </div>
-            <article className="panel admin-panel admin-activity-panel">
+            <article className="card admin-panel admin-activity-panel">
               <AdminActivityFilters action="/app-next/admin" clearHref="/app-next/admin" data={data} />
               <AdminActivityList events={data.recent_audit_events} />
               <AdminPagination pagination={data.pagination} />
@@ -5168,7 +5168,7 @@ function AdminUserDetailPage() {
       {data ? (
         <>
           <section className="page-layout admin-layout">
-            <article className="panel admin-panel">
+            <article className="card admin-panel">
               <h2>Campaign membership</h2>
               <form
                 className="stack-form admin-panel-form"
@@ -5238,7 +5238,7 @@ function AdminUserDetailPage() {
               </form>
             </article>
 
-            <article className="panel admin-panel">
+            <article className="card admin-panel">
               <h2>Character assignment</h2>
               <p className="meta">Assignments require an active player membership in the same campaign.</p>
               <form
@@ -5276,7 +5276,7 @@ function AdminUserDetailPage() {
           </section>
 
           <section className="page-layout admin-layout">
-            <article className="panel admin-panel">
+            <article className="card admin-panel">
               <h2>Current memberships</h2>
               {data.memberships.length ? (
                 <ul className="plain-list admin-item-list">
@@ -5304,7 +5304,7 @@ function AdminUserDetailPage() {
               )}
             </article>
 
-            <article className="panel admin-panel">
+            <article className="card admin-panel">
               <h2>Current assignments</h2>
               {data.assignments.length ? (
                 <ul className="plain-list admin-item-list">
@@ -5335,7 +5335,7 @@ function AdminUserDetailPage() {
           </section>
 
           <section className="page-layout admin-layout">
-            <article className="panel admin-panel">
+            <article className="card admin-panel">
               <h2>Account actions</h2>
               <div className="admin-action-stack admin-action-groups">
                 <div className="admin-action-group">
@@ -5401,7 +5401,7 @@ function AdminUserDetailPage() {
               </div>
             </article>
 
-            <article className="panel admin-panel">
+            <article className="card admin-panel">
               <div className="panel-header">
                 <h2>Recent activity for this user</h2>
                 <p className="meta">{data.pagination.total_events} matching events</p>

@@ -890,15 +890,22 @@ def test_gen2_admin_user_management_route_and_permissions(
                 """() => {
                     const countGridTracks = (value) => value.trim().split(/\\s+/).filter(Boolean).length;
                     const hero = document.querySelector(".admin-hero");
-                    const panel = document.querySelector(".admin-panel");
+                    const panel = document.querySelector("article.card.admin-panel, aside.card.admin-panel");
                     const layout = document.querySelector(".admin-layout");
                     const userGrid = document.querySelector(".admin-user-grid");
                     const actions = document.querySelector(".admin-filter-form__actions");
+                    const legacyPanelShells = document.querySelectorAll("article.panel.admin-panel, aside.panel.admin-panel");
+                    const dashboardUserCards = document.querySelectorAll("article.card.admin-user-card");
+                    const legacyUserCards = document.querySelectorAll("article.panel.admin-user-card");
                     return {
                         heroBorderTop: hero ? window.getComputedStyle(hero).borderTopWidth : "0px",
                         heroBoxShadow: hero ? window.getComputedStyle(hero).boxShadow : "none",
                         panelBorderTop: panel ? window.getComputedStyle(panel).borderTopWidth : "0px",
                         panelBoxShadow: panel ? window.getComputedStyle(panel).boxShadow : "none",
+                        dashboardCardPanelCount: document.querySelectorAll("article.card.admin-panel, aside.card.admin-panel").length,
+                        legacyPanelShellCount: legacyPanelShells.length,
+                        dashboardUserCardCount: dashboardUserCards.length,
+                        legacyUserCardCount: legacyUserCards.length,
                         layoutColumns: layout ? countGridTracks(window.getComputedStyle(layout).gridTemplateColumns) : 0,
                         userGridColumns: userGrid ? countGridTracks(window.getComputedStyle(userGrid).gridTemplateColumns) : 0,
                         actionsDisplay: actions ? window.getComputedStyle(actions).display : "",
@@ -909,6 +916,10 @@ def test_gen2_admin_user_management_route_and_permissions(
             assert admin_dashboard_metrics["heroBoxShadow"] == "none"
             assert float(admin_dashboard_metrics["panelBorderTop"][:-2]) > 0
             assert admin_dashboard_metrics["panelBoxShadow"] != "none"
+            assert admin_dashboard_metrics["dashboardCardPanelCount"] >= 3
+            assert admin_dashboard_metrics["legacyPanelShellCount"] == 0
+            assert admin_dashboard_metrics["dashboardUserCardCount"] >= 1
+            assert admin_dashboard_metrics["legacyUserCardCount"] == 0
             assert admin_dashboard_metrics["layoutColumns"] >= 2
             assert admin_dashboard_metrics["userGridColumns"] >= 2
             assert admin_dashboard_metrics["actionsDisplay"] == "flex"
@@ -933,7 +944,7 @@ def test_gen2_admin_user_management_route_and_permissions(
             expect(admin_page.get_by_text("Destructive actions")).to_be_visible()
             expect(admin_page.get_by_role("button", name="Delete user")).to_be_disabled()
 
-            membership_panel = admin_page.locator("article.admin-panel").filter(has_text="Campaign membership")
+            membership_panel = admin_page.locator("article.card.admin-panel").filter(has_text="Campaign membership")
             membership_panel.locator("#admin-membership-campaign-slug").select_option("linden-pass")
             membership_panel.locator("#admin-membership-role").select_option("player")
             membership_panel.locator("#admin-membership-status").select_option("active")
@@ -944,6 +955,17 @@ def test_gen2_admin_user_management_route_and_permissions(
             admin_page.get_by_role("button", name="Assign character").click()
             expect(admin_page.get_by_text("Assigned selene-brook in linden-pass")).to_be_visible(timeout=10000)
             expect(admin_page.get_by_text("selene-brook | owner")).to_be_visible()
+
+            admin_user_detail_metrics = admin_page.evaluate(
+                """() => ({
+                    userDetailCardPanelCount: document.querySelectorAll("article.card.admin-panel").length,
+                    legacyUserDetailPanelCount: document.querySelectorAll("article.panel.admin-panel").length,
+                    legacyUserCardCount: document.querySelectorAll("article.panel.admin-user-card").length,
+                })"""
+            )
+            assert admin_user_detail_metrics["userDetailCardPanelCount"] >= 4
+            assert admin_user_detail_metrics["legacyUserDetailPanelCount"] == 0
+            assert admin_user_detail_metrics["legacyUserCardCount"] == 0
 
             mobile_page.goto(f"{base_url}/app-next/admin")
             expect(mobile_page.get_by_role("heading", name="Admin dashboard")).to_be_visible(timeout=10000)

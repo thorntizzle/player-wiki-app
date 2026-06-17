@@ -1203,6 +1203,15 @@ a:hover {
   gap: 1rem;
 }
 
+.card.admin-panel,
+.card.admin-user-card {
+  padding: 1.25rem;
+  border-radius: 22px;
+  background: linear-gradient(180deg, var(--surface-strong), var(--surface));
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+}
+
 .admin-layout {
   display: grid;
   gap: 1rem;
