@@ -203,11 +203,20 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             player_card_texts = page.evaluate(
                 """() => {
                     const section = document.querySelector(".pane-visible .session-workspace-main");
-                    return Array.from(section ? section.querySelectorAll(":scope > .panel-nested > .panel-header h3") : []).map((node) => (node.textContent || "").trim());
+                    return Array.from(
+                        section
+                            ? section.querySelectorAll(
+                                ":scope > .session-status-card > .panel-header h3, :scope > .session-chat-card > .panel-header h3"
+                            )
+                            : [],
+                    ).map((node) => (node.textContent || "").trim());
                 }"""
             )
             assert player_card_texts[:2] == ["Live session", "Session chat"]
             assert "Revealed articles" not in player_card_texts[:2]
+            assert page.locator("article.card.session-status-card[data-session-status-card]").count() == 1
+            assert page.locator("article.card.session-chat-card#session-chat[data-session-chat-card]").count() == 1
+            assert page.locator("article.card.session-composer-card#session-chat-compose").count() == 1
 
             session_tabs.get_by_role("button", name="Character", exact=True).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))
@@ -263,7 +272,7 @@ def test_gen2_shell_and_session_visual_parity_smoke(
                     const bodyStyle = window.getComputedStyle(document.body);
                     const nav = document.querySelector(".campaign-nav-link");
                     const hero = document.querySelector(".session-hero");
-                    const firstPanel = document.querySelector(".session-workspace-main .panel-nested");
+                    const firstPanel = document.querySelector(".session-workspace-main .session-status-card");
                     const topbar = document.querySelector(".topbar");
                     const globalSearchForm = document.querySelector(".campaign-global-search__form");
                     return {
@@ -304,7 +313,7 @@ def test_gen2_shell_and_session_visual_parity_smoke(
                     tabWidth: document.querySelector(".session-tab-strip")?.getBoundingClientRect().width ?? 0,
                     shellWidth: document.querySelector(".session-page-shell")?.getBoundingClientRect().width ?? 0,
                     heroTop: document.querySelector(".session-hero")?.getBoundingClientRect().top ?? 0,
-                    firstPanelTop: document.querySelector(".session-workspace-main .panel-nested")?.getBoundingClientRect().top ?? 0,
+                    firstPanelTop: document.querySelector(".session-workspace-main .session-status-card")?.getBoundingClientRect().top ?? 0,
                     topbarBottom: document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0,
                     globalSearchFormDirection: globalSearchForm
                         ? window.getComputedStyle(globalSearchForm).flexDirection

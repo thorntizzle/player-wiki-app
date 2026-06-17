@@ -7068,7 +7068,7 @@ function SessionPaneChat({
   const messages: SessionMessage[] = payload?.messages ?? [];
 
   return (
-    <article className="panel panel-nested">
+    <article className="card session-chat-card" id="session-chat" data-session-chat-card>
       <div className="panel-header">
         <h3>Session chat</h3>
         <span className="pill">{payload?.active_session ? `Session #${payload.active_session.id}` : "No active session"}</span>
@@ -7117,7 +7117,7 @@ function SessionPaneMessageComposer({
   isSending: boolean;
 }) {
   return (
-    <article className="panel panel-nested">
+    <article className="card session-composer-card" id="session-chat-compose">
       <div className="panel-header">
         <h3>Send message</h3>
       </div>
@@ -7697,7 +7697,7 @@ function SessionPane({
   return (
     <section className="session-workspace-grid session-workspace-grid--single">
       <section className="session-workspace-main">
-        <article className="panel panel-nested">
+        <article className="card session-status-card" data-session-status-card>
           <div className="panel-header">
             <h3>Live session</h3>
             <span className="pill">{payload?.active_session ? "Active" : "Inactive"}</span>
