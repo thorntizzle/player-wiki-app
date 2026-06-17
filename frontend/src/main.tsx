@@ -15125,7 +15125,7 @@ function CombatPage() {
   );
 
   return (
-    <section className="combat-page">
+    <>
       <section className="hero compact combat-hero">
         <p className="meta">Live play</p>
         <h2>Combat: {payload?.campaign.title ?? campaignSlug}</h2>
@@ -15245,7 +15245,7 @@ function CombatPage() {
           {effectiveCombatView === "player" ? renderPlayerWorkspace() : null}
         </>
       ) : null}
-    </section>
+    </>
   );
 }
 
