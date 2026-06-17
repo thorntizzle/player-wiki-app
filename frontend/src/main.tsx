@@ -8848,39 +8848,58 @@ function CharacterPane({
     window.history.replaceState(null, "", nextUrl);
   };
 
-  return (
-    <div className={isReadSurface ? "session-pane-content character-read-content character-layout" : "session-pane-content"}>
-      <section className={isReadSurface ? "panel character-read-shell" : "panel"}>
-        <div className={isReadSurface ? "panel-header character-read-shell__header" : "panel-header"}>
-          <div>
-            <p className="meta">{surfaceMetaLabel}</p>
-            <h2>{surfaceHeading}</h2>
-          </div>
-          <div className={isReadSurface ? "article-actions character-read-shell__actions" : "article-actions"}>
-            {isReadSurface ? (
-              <a href={`/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters`} className="button button-secondary">
-                Roster
-              </a>
-            ) : isCombatSurface ? (
-              <a href={`/campaigns/${encodeURIComponent(campaignSlug)}/combat`} className="button button-secondary">
-                Flask Combat
-              </a>
-            ) : (
-              <a
-                href={
-                  selectedSlug
-                    ? `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters/${encodeURIComponent(selectedSlug)}`
-                    : `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters`
-                }
-                className="button button-secondary"
-              >
-                Character route
-              </a>
-            )}
-          </div>
-        </div>
+  const CharacterShell = isReadSurface ? "article" : "section";
 
-        <div className={isReadSurface ? "character-selector-card" : undefined}>
+  return (
+    <div className={isReadSurface ? "page-layout character-layout character-read-content" : "session-pane-content"}>
+      <CharacterShell
+        className={isReadSurface ? "article card character-sheet character-read-shell" : "panel"}
+        data-character-read-shell-root={isReadSurface ? "" : undefined}
+        data-character-read-shell-page={isReadSurface ? activeCharacterSection || "overview" : undefined}
+        data-character-read-shell-mode={isReadSurface ? "read" : undefined}
+      >
+        {isReadSurface ? (
+          <header className="character-header">
+            <div className="character-header__top">
+              <div className="character-header__identity">
+                <p className="eyebrow">Character sheet</p>
+                <h1>{selected?.name || surfaceHeading}</h1>
+              </div>
+              <div className="character-header__actions article-actions">
+                <a href={`/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters`} className="button button-secondary">
+                  Roster
+                </a>
+              </div>
+            </div>
+          </header>
+        ) : (
+          <div className="panel-header">
+            <div>
+              <p className="meta">{surfaceMetaLabel}</p>
+              <h2>{surfaceHeading}</h2>
+            </div>
+            <div className="article-actions">
+              {isCombatSurface ? (
+                <a href={`/campaigns/${encodeURIComponent(campaignSlug)}/combat`} className="button button-secondary">
+                  Flask Combat
+                </a>
+              ) : (
+                <a
+                  href={
+                    selectedSlug
+                      ? `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters/${encodeURIComponent(selectedSlug)}`
+                      : `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters`
+                  }
+                  className="button button-secondary"
+                >
+                  Character route
+                </a>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className={isReadSurface ? "character-subpage-nav-card character-selector-card" : undefined}>
           <label className="chat-label" htmlFor="character-selector">
             Character
           </label>
@@ -10394,7 +10413,7 @@ function CharacterPane({
 
         {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
         {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
-      </section>
+      </CharacterShell>
       <CharacterDetailDialog detail={detailDialog} onClose={() => setDetailDialog(null)} />
     </div>
   );

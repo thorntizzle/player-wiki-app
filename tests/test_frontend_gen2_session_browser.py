@@ -1505,7 +1505,10 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
                 re.compile(r"/app-next/campaigns/linden-pass/characters/arden-march$"),
                 timeout=5000,
             )
-            expect(page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("heading", level=1, name="Arden March", exact=True)).to_be_visible(timeout=10000)
+            expect(page.locator("article.character-read-shell.character-sheet.card")).to_be_visible()
+            expect(page.locator("header.character-header")).to_be_visible()
+            expect(page.locator("section.panel.character-read-shell")).to_have_count(0)
             expect(page.get_by_text("Shown on the Gen2 sheet.")).to_be_visible()
             expect(page.get_by_role("link", name="Flask sheet")).to_be_visible()
             expect(page.get_by_role("link", name="Advanced Editor")).to_be_visible()
@@ -1530,7 +1533,7 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
                 re.compile(r"/app-next/campaigns/linden-pass/characters/arden-march$"),
                 timeout=5000,
             )
-            expect(page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("heading", level=1, name="Arden March", exact=True)).to_be_visible(timeout=10000)
 
             page.locator(".section-tabs").get_by_role("button", name="Controls").click()
             expect(page).to_have_url(
@@ -1558,7 +1561,7 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
 
             _sign_in(player_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
             player_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/arden-march?page=controls")
-            expect(player_page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)
+            expect(player_page.get_by_role("heading", level=1, name="Arden March", exact=True)).to_be_visible(timeout=10000)
             expect(player_page.get_by_role("button", name="Overview")).to_be_visible()
             assert player_page.get_by_role("button", name="Controls").count() == 0
             assert player_page.get_by_role("heading", name="Controls", exact=True).count() == 0
@@ -1573,7 +1576,7 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             )
 
             page.reload()
-            expect(page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("heading", level=1, name="Arden March", exact=True)).to_be_visible(timeout=10000)
             expect(page.get_by_role("heading", name="Arden March (arden-march)")).to_be_visible()
 
             detail_response = page.request.get(f"{base_url}/api/v1/campaigns/linden-pass/characters/arden-march")
@@ -1665,7 +1668,10 @@ def test_gen2_character_visual_parity_smoke(
             assert roster_metrics["searchColumns"] >= 2
 
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/arden-march")
-            expect(desktop_page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)
+            expect(desktop_page.get_by_role("heading", level=1, name="Arden March", exact=True)).to_be_visible(timeout=10000)
+            expect(desktop_page.locator("article.character-read-shell.character-sheet.card")).to_be_visible()
+            expect(desktop_page.locator("header.character-header")).to_be_visible()
+            expect(desktop_page.locator("section.panel.character-read-shell")).to_have_count(0)
             expect(desktop_page.get_by_role("heading", name="Arden March (arden-march)")).to_be_visible()
             expect(desktop_page.locator(".character-read-shell")).to_be_visible()
             expect(desktop_page.locator(".character-selector-card")).to_be_visible()
@@ -1849,7 +1855,7 @@ def test_gen2_xianxia_character_authoring_create_and_import(
                 page.locator(f"[name='{field_name}']").select_option(value)
             page.get_by_role("button", name="Create character").click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/characters/browser-gen2-crane$"), timeout=10000)
-            expect(page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("heading", level=1, name="Browser Gen2 Crane", exact=True)).to_be_visible(timeout=10000)
             expect(page.get_by_role("heading", name=re.compile(r"Browser Gen2 Crane"))).to_be_visible()
             cultivation_link = page.get_by_role("link", name="Cultivation", exact=True)
             expect(cultivation_link).to_have_attribute(
@@ -1932,7 +1938,7 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             expect(page.get_by_text("Browser Imported Lotus")).to_be_visible()
             page.get_by_role("button", name="Confirm import").click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/characters/browser-imported-lotus$"), timeout=10000)
-            expect(page.get_by_role("heading", name="Character Sheet")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("heading", level=1, name="Browser Imported Lotus", exact=True)).to_be_visible(timeout=10000)
             expect(page.get_by_role("heading", name=re.compile(r"Browser Imported Lotus"))).to_be_visible()
         finally:
             page.close()
