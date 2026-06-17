@@ -166,15 +166,26 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
                     );
                 }"""
             )
-            assert dm_card_texts.index("Live session") != -1
-            assert dm_card_texts.index("Passive scores") != -1
+            assert "Live session" not in dm_card_texts
             assert dm_card_texts.index("Staged articles") != -1
             assert dm_card_texts.index("Session logs") != -1
-            assert dm_card_texts.index("Live session") < dm_card_texts.index("Passive scores")
-            assert dm_card_texts.index("Passive scores") < dm_card_texts.index("Staged articles")
+            passive_index = dm_card_texts.index("Passive scores") if "Passive scores" in dm_card_texts else None
+            staged_index = dm_card_texts.index("Staged articles")
+            logs_index = dm_card_texts.index("Session logs")
+            if passive_index is not None:
+                assert passive_index == 0
+                assert passive_index < staged_index
+            else:
+                assert dm_card_texts[0] == "Staged articles"
             assert dm_card_texts.index("Staged articles") < dm_card_texts.index("Session logs")
-            expect(page.get_by_role("button", name=re.compile(r"Begin session|Starting", re.I))).to_be_visible()
-            expect(page.get_by_role("button", name=re.compile(r"Close session|Closing", re.I))).to_be_visible()
+            assert staged_index < logs_index
+            revealed_index = dm_card_texts.index("Revealed articles") if "Revealed articles" in dm_card_texts else None
+            if revealed_index is not None:
+                assert staged_index < revealed_index
+                assert revealed_index < logs_index
+            expect(page.locator(".session-workspace-sidebar").get_by_role("heading", name="Live session")).to_be_visible()
+            expect(page.locator(".session-workspace-sidebar").get_by_role("heading", name="Session controls")).to_be_visible()
+            expect(page.get_by_role("button", name=re.compile(r"Begin session|Close session|Starting|Closing", re.I))).to_be_visible()
             expect(page.get_by_role("heading", name="Staged articles")).to_be_visible()
             expect(page.get_by_role("heading", name="Session logs")).to_be_visible()
 

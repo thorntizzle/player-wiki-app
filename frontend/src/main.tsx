@@ -10805,6 +10805,8 @@ function DmPane({
   const sessionLogs: SessionLogSummary[] = payload?.session_logs ?? [];
   const passiveScores: SessionDmPassiveScoreRow[] = payload?.session_dm_passive_scores ?? [];
   const shouldShowPassiveScores = Boolean(payload?.show_session_dm_passive_scores);
+  const activeSession = payload?.active_session;
+  const activeMessageCount = payload?.messages.length ?? 0;
   const [mode, setMode] = useState<ArticleMode>("manual");
   const [manualDraft, setManualDraft] = useState<ManualArticleDraftState>(buildEmptyManualArticleDraft);
   const [uploadDraft, setUploadDraft] = useState({ filename: "", markdown: "", image: null as EmbeddedImageInput | null });
@@ -11034,31 +11036,6 @@ function DmPane({
   return (
     <section className="session-workspace-grid">
       <section className="session-workspace-main">
-        <article className="panel panel-nested">
-          <div className="panel-header">
-            <h3>Live session</h3>
-            <span className="pill">{payload?.active_session ? "Active" : "Inactive"}</span>
-          </div>
-          <div className="status-row">
-            <article className="stat-card">
-              <h3>Session</h3>
-              <p>{payload?.active_session ? payload.active_session.status : "inactive"}</p>
-            </article>
-            <article className="stat-card">
-              <h3>Controls</h3>
-              <p>{statusText || uiMessage || "Ready."}</p>
-            </article>
-            <article className="stat-card">
-              <h3>Session ID</h3>
-              <p>{payload?.active_session?.id ?? "none"}</p>
-            </article>
-          </div>
-          {startSessionMutation.error ? <p className="status status-error">{apiErrorMessage(startSessionMutation.error)}</p> : null}
-          {closeSessionMutation.error ? <p className="status status-error">{apiErrorMessage(closeSessionMutation.error)}</p> : null}
-          {paneError ? <p className="status status-error">{paneError}</p> : null}
-          {uiMessage ? <p className="status status-neutral">{uiMessage}</p> : null}
-        </article>
-
         {shouldShowPassiveScores ? (
           <section className="panel panel-nested session-passive-scores-bar">
             <div className="panel-header">
@@ -11343,20 +11320,46 @@ function DmPane({
       <aside className="session-workspace-sidebar">
         <section className="panel panel-nested">
           <div className="panel-header">
+            <h3>Live session</h3>
+            <span className="pill">{activeSession ? "Active" : "Inactive"}</span>
+          </div>
+          <p>{activeSession ? "Chat open" : "Chat closed"}</p>
+          {activeSession ? (
+            <>
+              <p>The session is live for players and the DM.</p>
+              <p className="meta">Started {formatTimestamp(activeSession.started_at)}</p>
+              <p className="meta">
+                {activeMessageCount} chat entr{activeMessageCount === 1 ? "y" : "ies"}
+              </p>
+            </>
+          ) : (
+            <>
+              <p>No active session is running right now.</p>
+              <p className="meta">Start the session here to open chat on the player Session page.</p>
+            </>
+          )}
+          <div className="session-status-controls">
             <h3>Session controls</h3>
-            <span className="pill">{payload?.active_session ? `Session #${payload.active_session.id}` : "No active session"}</span>
+            {!activeSession ? (
+              <p>Start a session here to open chat on the player Session page and reveal staged handouts.</p>
+            ) : null}
+            {statusText || uiMessage ? <p className="meta">{statusText || uiMessage}</p> : null}
+            {startSessionMutation.error ? (
+              <p className="status status-error">{apiErrorMessage(startSessionMutation.error)}</p>
+            ) : null}
+            {closeSessionMutation.error ? <p className="status status-error">{apiErrorMessage(closeSessionMutation.error)}</p> : null}
+            {paneError ? <p className="status status-error">{paneError}</p> : null}
           </div>
           <div className="session-actions-row">
-            <button type="button" onClick={() => startSessionMutation.mutate()} disabled={startSessionMutation.isPending}>
-              {startSessionMutation.isPending ? "Starting..." : "Begin session"}
-            </button>
-            <button
-              type="button"
-              onClick={() => closeSessionMutation.mutate()}
-              disabled={closeSessionMutation.isPending || !payload?.active_session}
-            >
-              {closeSessionMutation.isPending ? "Closing..." : "Close session"}
-            </button>
+            {activeSession ? (
+              <button type="button" onClick={() => closeSessionMutation.mutate()} disabled={closeSessionMutation.isPending}>
+                {closeSessionMutation.isPending ? "Closing..." : "Close session"}
+              </button>
+            ) : (
+              <button type="button" onClick={() => startSessionMutation.mutate()} disabled={startSessionMutation.isPending}>
+                {startSessionMutation.isPending ? "Starting..." : "Begin session"}
+              </button>
+            )}
           </div>
         </section>
 
