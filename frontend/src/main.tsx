@@ -4245,29 +4245,35 @@ function CampaignGlobalSearch({ campaignSlug }: { campaignSlug: string }) {
       {isDialogOpen ? (
         <div className="detail-modal-backdrop" role="presentation" onMouseDown={closeDialog}>
           <section
-            className="detail-modal campaign-global-search-dialog-panel"
+            className="spell-detail-dialog campaign-global-search-dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="campaign-search-preview-title"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <header className="detail-modal-header">
-              <div>
-                <p className="meta">Reference preview</p>
-                <h3 id="campaign-search-preview-title">Campaign Search</h3>
+            <div className="spell-detail-dialog__panel campaign-global-search-dialog__panel">
+              <header className="spell-detail-dialog__header">
+                <div>
+                  <p className="eyebrow">Reference preview</p>
+                  <h2 id="campaign-search-preview-title">Campaign Search</h2>
+                </div>
+                <button type="button" className="ghost-button" ref={closeButtonRef} onClick={closeDialog}>
+                  Close
+                </button>
+              </header>
+              <div
+                className="campaign-global-search-dialog__body"
+                aria-live="polite"
+                aria-busy={previewLoading ? "true" : "false"}
+              >
+                {previewLoading ? <p className="status status-neutral">Loading reference preview...</p> : null}
+                {previewError ? <p className="status status-error">{previewError}</p> : null}
+                {previewHtml ? <div dangerouslySetInnerHTML={{ __html: previewHtml }} /> : null}
+                {!previewLoading && !previewError && !previewHtml ? (
+                  <p className="status status-neutral">No reference preview is available.</p>
+                ) : null}
               </div>
-              <button type="button" ref={closeButtonRef} onClick={closeDialog}>
-                Close
-              </button>
-            </header>
-            {previewLoading ? <p className="status status-neutral">Loading reference preview...</p> : null}
-            {previewError ? <p className="status status-error">{previewError}</p> : null}
-            {previewHtml ? (
-              <article className="wiki-preview-html campaign-global-search-preview" dangerouslySetInnerHTML={{ __html: previewHtml }} />
-            ) : null}
-            {!previewLoading && !previewError && !previewHtml ? (
-              <p className="status status-neutral">No reference preview is available.</p>
-            ) : null}
+            </div>
           </section>
         </div>
       ) : null}

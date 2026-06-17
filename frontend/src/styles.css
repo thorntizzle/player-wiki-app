@@ -445,16 +445,58 @@ a:hover {
   font-size: 0.9rem;
 }
 
-.campaign-global-search-dialog-panel .detail-modal-header h3 {
-  margin-top: 0.15rem;
+.spell-detail-dialog {
+  width: min(46rem, calc(100vw - 2rem));
+  max-height: min(42rem, calc(100vh - 2rem));
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-strong);
 }
 
-.campaign-global-search-preview {
-  border: 0;
-  padding: 0;
+.spell-detail-dialog__panel {
+  display: grid;
+  gap: 1rem;
+  max-height: min(42rem, calc(100vh - 2rem));
+  overflow: auto;
+  padding: 1.15rem;
+}
+
+.spell-detail-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.spell-detail-dialog__header h2,
+.spell-detail-dialog__header h3 {
   margin: 0;
-  border-radius: 0;
-  background: transparent;
+}
+
+.campaign-global-search-dialog {
+  width: min(56rem, calc(100vw - 2rem));
+}
+
+.campaign-global-search-dialog__panel {
+  max-height: min(46rem, calc(100vh - 2rem));
+}
+
+.campaign-global-search-dialog__body[aria-busy="true"] {
+  opacity: 0.75;
+}
+
+.campaign-global-search-preview,
+.campaign-global-search-preview__header {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.campaign-global-search-preview__header h3,
+.campaign-global-search-preview__header .lede {
+  margin: 0;
 }
 
 .dm-content-gen2-page {

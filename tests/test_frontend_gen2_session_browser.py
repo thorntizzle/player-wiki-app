@@ -297,6 +297,23 @@ def test_gen2_shell_and_session_visual_parity_smoke(
             assert desktop_metrics["bodyColor"] != "rgb(18, 25, 38)"
             assert desktop_metrics["globalSearchFormDirection"] == "row"
 
+            desktop_page.locator(".campaign-global-search__field input").fill("capt")
+            desktop_page.locator(".campaign-global-search__form button[type='submit']").click()
+            search_result = desktop_page.locator(".campaign-global-search-result", has_text="Captain Lyra Vale")
+            expect(search_result).to_be_visible(timeout=10_000)
+            search_result.click()
+            expect(desktop_page.locator(".spell-detail-dialog.campaign-global-search-dialog")).to_be_visible(timeout=10_000)
+            expect(desktop_page.locator(".campaign-global-search-dialog-panel")).to_have_count(0)
+            expect(desktop_page.locator(".campaign-global-search-dialog__panel")).to_be_visible()
+            expect(desktop_page.locator(".spell-detail-dialog__header h2")).to_have_text("Campaign Search")
+            expect(desktop_page.locator(".spell-detail-dialog__header .ghost-button", has_text="Close")).to_be_visible()
+            expect(desktop_page.locator(".campaign-global-search-dialog__body")).to_have_attribute("aria-live", "polite")
+            expect(desktop_page.locator(".campaign-global-search-dialog__body")).to_have_attribute("aria-busy", "false")
+            expect(desktop_page.locator(".campaign-global-search-dialog__body .campaign-global-search-preview")).to_be_visible()
+            expect(desktop_page.locator(".campaign-global-search-preview__header h3", has_text="Captain Lyra Vale")).to_be_visible()
+            desktop_page.locator(".spell-detail-dialog__header .ghost-button", has_text="Close").click()
+            expect(desktop_page.locator(".spell-detail-dialog.campaign-global-search-dialog")).to_have_count(0)
+
             _sign_in(mobile_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
             mobile_page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
             expect(mobile_page.locator(".topbar-campaign")).to_be_visible(timeout=10000)
