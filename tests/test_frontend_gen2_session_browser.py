@@ -924,6 +924,12 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
                         panelRadius: panel ? window.getComputedStyle(panel).borderRadius : "0px",
                         sidebarRadius: sidebar ? window.getComputedStyle(sidebar).borderRadius : "0px",
                         optionGridColumns: firstOptionGrid ? countGridTracks(window.getComputedStyle(firstOptionGrid).gridTemplateColumns) : 0,
+                        accountPanelHeaderCount: document.querySelectorAll(
+                            ".card.account-panel .account-settings-group .panel-header"
+                        ).length,
+                        hasAccountPanelHeader: Boolean(
+                            document.querySelector(".card.account-panel .account-settings-group .panel-header")
+                        ),
                         hasRouteWrapper: Boolean(document.querySelector("main > .account-settings-page")),
                         firstMainChild: mainChildren[0] || "",
                         secondMainChild: mainChildren[1] || "",
@@ -938,6 +944,8 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
             assert account_hero_styles["sidebarBoxShadow"] != "none"
             assert float(account_hero_styles["panelRadius"][:-2]) > 0
             assert float(account_hero_styles["sidebarRadius"][:-2]) > 0
+            assert account_hero_styles["accountPanelHeaderCount"] == 0
+            assert account_hero_styles["hasAccountPanelHeader"] is False
             assert account_hero_styles["hasSwatches"] is True
             assert account_hero_styles["hasLegacyFormShell"] is False
             assert account_hero_styles["hasLegacySidebarShell"] is False

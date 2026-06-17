@@ -5524,12 +5524,8 @@ function AccountSettingsPage() {
           <article className="card account-panel">
             <form onSubmit={handleSubmit}>
               <section className="account-settings-group">
-                <div className="panel-header">
-                  <div>
-                    <h2>Color theme</h2>
-                    <p className="meta">These presets restyle the shared app chrome, cards, forms, and reading surfaces.</p>
-                  </div>
-                </div>
+                <h2>Color theme</h2>
+                <p className="meta">These presets restyle the shared app chrome, cards, forms, and reading surfaces.</p>
                 <div className="theme-grid">
                   {themePresets.map((theme) => {
                     const inputId = `account-theme-${theme.key}`;
@@ -5564,14 +5560,10 @@ function AccountSettingsPage() {
               </section>
 
               <section className="account-settings-group">
-                <div className="panel-header">
-                  <div>
-                    <h2>Live session chat order</h2>
-                    <p className="meta">
-                      This changes the order of the live Session chat window for your account only. Stored session logs stay chronological.
-                    </p>
-                  </div>
-                </div>
+                <h2>Live session chat order</h2>
+                <p className="meta">
+                  This changes the order of the live Session chat window for your account only. Stored session logs stay chronological.
+                </p>
                 <div className="theme-grid">
                   {chatOrderChoices.map((choice) => {
                     const inputId = `account-chat-order-${choice.value}`;
