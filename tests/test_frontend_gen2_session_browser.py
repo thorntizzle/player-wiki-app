@@ -849,8 +849,10 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
                 "frontend_mode": "flask",
             }
             desktop_page.goto(f"{base_url}/app-next/")
-            expect(desktop_page.locator("main > .campaign-picker-page")).to_be_visible(timeout=10000)
-            expect(desktop_page.locator(".campaign-picker-hero")).to_be_visible()
+            expect(desktop_page.locator("main > .campaign-picker-page")).to_have_count(0)
+            expect(desktop_page.locator("main > .campaign-picker-hero")).to_be_visible(timeout=10000)
+            expect(desktop_page.locator("main > .campaign-picker-grid")).to_be_visible(timeout=10000)
+            expect(desktop_page.locator("main > .campaign-picker-hero + .campaign-picker-grid")).to_have_count(1)
             expect(desktop_page.get_by_role("heading", name="Select a campaign.")).to_be_visible()
             expect(desktop_page.locator(".campaign-picker-hero .eyebrow")).to_have_text("Campaign access")
             expect(desktop_page.locator(".campaign-picker-hero .lede")).to_have_text(

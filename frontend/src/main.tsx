@@ -4629,7 +4629,7 @@ function CampaignListPage() {
   const campaigns: CampaignEntry[] = campaignsQuery.data?.campaigns ?? [];
 
   return (
-    <section className="campaign-picker-page">
+    <>
       <section className="hero compact campaign-picker-hero">
         <p className="eyebrow">Campaign access</p>
         <h1>Select a campaign.</h1>
@@ -4669,7 +4669,7 @@ function CampaignListPage() {
           <p>Your account is active, but it is not currently assigned to any campaigns.</p>
         </section>
       ) : null}
-    </section>
+    </>
   );
 }
 
