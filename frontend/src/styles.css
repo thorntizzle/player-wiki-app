@@ -970,6 +970,21 @@ a:hover {
   background: #f9fbff;
 }
 
+.builder-feature-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.builder-feature-list li {
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.builder-feature-list li:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
 .character-authoring-preview-section {
   display: grid;
   gap: 0.4rem;
@@ -2787,6 +2802,108 @@ textarea {
 .character-read-content {
   min-width: 0;
   max-width: 100%;
+}
+
+.glance-grid,
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.85rem;
+}
+
+.glance-card,
+.detail-card,
+.feature-row {
+  padding: 1rem;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+}
+
+.glance-card strong {
+  font-size: 1.35rem;
+}
+
+.character-read-content .glance-card,
+.character-read-content .detail-card,
+.character-read-content .feature-row {
+  min-width: 0;
+}
+
+.character-read-content .glance-card strong,
+.character-read-content .glance-card h3,
+.character-read-content .glance-card p,
+.character-read-content .glance-card .meta,
+.character-read-content .detail-card h3,
+.character-read-content .detail-card p,
+.character-read-content .detail-card .meta,
+.character-read-content .feature-row h3,
+.character-read-content .feature-row p,
+.character-read-content .feature-row .meta {
+  overflow-wrap: anywhere;
+}
+
+.detail-card p {
+  margin: 0.2rem 0 0;
+}
+
+.feature-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.feature-row__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: baseline;
+}
+
+.slot-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: baseline;
+}
+
+.feature-detail {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface-soft-muted);
+  padding: 0.25rem 0.95rem 0.95rem;
+}
+
+.feature-detail summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+  padding: 0.85rem 0 0.45rem;
+  font-weight: 700;
+  list-style: none;
+}
+
+.feature-detail summary::-webkit-details-marker {
+  display: none;
+}
+
+.feature-detail summary::after {
+  content: "\25B8";
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 140ms ease, color 140ms ease;
+}
+
+.feature-detail[open] summary {
+  margin-bottom: 0.35rem;
+}
+
+.feature-detail[open] summary::after {
+  color: var(--ink);
+  transform: rotate(90deg);
 }
 
 .skill-grid {
