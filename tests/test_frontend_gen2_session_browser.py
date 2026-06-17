@@ -167,7 +167,7 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
                         section
                             ? section.querySelectorAll(
                                 ":scope > .session-passive-scores-bar .section-title,"
-                                + ":scope > .card.session-sidebar-card .panel-header > h3"
+                                + ":scope > .card.session-sidebar-card .section-heading > h2"
                             )
                             : [],
                     ).map((node) => (node.textContent || "").trim());
@@ -205,7 +205,7 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             assert page.locator(".pane-visible .session-workspace-sidebar .card.session-sidebar-card").count() >= 2
             assert "Live session" not in dm_card_texts
             assert dm_card_texts.index("Staged articles") != -1
-            assert dm_card_texts.index("Session logs") != -1
+            assert dm_card_texts.index("Chat logs") != -1
             assert sidebar_ids is not None
             assert sidebar_ids["status"] is True
             assert sidebar_ids["articleStore"] is True
@@ -238,13 +238,13 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
                 )
             passive_index = dm_card_texts.index("Passive scores") if "Passive scores" in dm_card_texts else None
             staged_index = dm_card_texts.index("Staged articles")
-            logs_index = dm_card_texts.index("Session logs")
+            logs_index = dm_card_texts.index("Chat logs")
             if passive_index is not None:
                 assert passive_index == 0
                 assert passive_index < staged_index
             else:
                 assert dm_card_texts[0] == "Staged articles"
-            assert dm_card_texts.index("Staged articles") < dm_card_texts.index("Session logs")
+            assert dm_card_texts.index("Staged articles") < dm_card_texts.index("Chat logs")
             assert staged_index < logs_index
             revealed_index = dm_card_texts.index("Revealed articles") if "Revealed articles" in dm_card_texts else None
             if revealed_index is not None:
@@ -254,12 +254,12 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(page.locator(".session-workspace-sidebar").get_by_role("heading", name="Session controls")).to_be_visible()
             expect(page.get_by_role("button", name=re.compile(r"Begin session|Close session|Starting|Closing", re.I))).to_be_visible()
             expect(page.get_by_role("heading", name="Staged articles")).to_be_visible()
-            expect(page.get_by_role("heading", name="Session logs")).to_be_visible()
+            expect(page.get_by_role("heading", name="Chat logs")).to_be_visible()
 
             session_tabs.get_by_role("button", name="Session", exact=True).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))
             expect(page.locator(".session-hero").get_by_role("heading", name="Session")).to_be_visible()
-            expect(page.get_by_role("heading", name="Session chat")).to_be_visible()
+            expect(page.get_by_role("heading", name="Chat window")).to_be_visible()
             expect(page.locator(".session-player-wiki-details-summary")).to_have_text("Player wiki lookup")
             expect(page.get_by_role("heading", name="Send message")).to_be_visible()
             expect(page.get_by_label("Audience")).to_be_visible()
@@ -271,13 +271,13 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
                     return Array.from(
                         section
                             ? section.querySelectorAll(
-                                ":scope > .session-status-card > .panel-header h3, :scope > .session-chat-card > .panel-header h3"
+                                ":scope > .session-status-card .section-heading h2, :scope > .session-chat-card .section-heading h2"
                             )
                             : [],
                     ).map((node) => (node.textContent || "").trim());
                 }"""
             )
-            assert player_card_texts[:2] == ["Live session", "Session chat"]
+            assert player_card_texts[:2] == ["Live session", "Chat window"]
             assert "Revealed articles" not in player_card_texts[:2]
             assert page.locator("article.card.session-status-card[data-session-status-card]").count() == 1
             assert page.locator("article.card.session-chat-card#session-chat[data-session-chat-card]").count() == 1

@@ -7033,9 +7033,9 @@ function SessionArticlesPanel({
 
   return (
     <article className={mergedClassName}>
-      <div className="panel-header">
-        <h3>{title}</h3>
-        <span className="pill">{articles.length} article(s)</span>
+      <div className="section-heading">
+        <h2>{title}</h2>
+        <p className="meta">{articles.length}</p>
       </div>
       {articles.length ? (
         <div className="article-stack">
@@ -7079,9 +7079,9 @@ function SessionPaneChat({
 
   return (
     <article className="card session-chat-card" id="session-chat" data-session-chat-card>
-      <div className="panel-header">
-        <h3>Session chat</h3>
-        <span className="pill">{payload?.active_session ? `Session #${payload.active_session.id}` : "No active session"}</span>
+      <div className="section-heading">
+        <h2>Chat window</h2>
+        <p className="meta">{payload?.active_session ? "Live feed" : "Waiting room"}</p>
       </div>
       <div className="chat-list">
         {messages.length ? (
@@ -7128,9 +7128,7 @@ function SessionPaneMessageComposer({
 }) {
   return (
     <article className="card session-composer-card" id="session-chat-compose">
-      <div className="panel-header">
-        <h3>Send message</h3>
-      </div>
+      <h2>Send message</h2>
       {payload?.permissions.can_post_messages ? (
         <form onSubmit={onSend} className="stack-form session-message-form">
           <label className="field">
@@ -7715,9 +7713,9 @@ function SessionPane({
     <section className="session-workspace-grid session-workspace-grid--single">
       <section className="session-workspace-main">
         <article className="card session-status-card" data-session-status-card>
-          <div className="panel-header">
-            <h3>Live session</h3>
-            <span className="pill">{payload?.active_session ? "Active" : "Inactive"}</span>
+          <div className="section-heading">
+            <h2>Live session</h2>
+            <p className="meta">{payload?.active_session ? "Chat open" : "Chat closed"}</p>
           </div>
           <div className="status-row">
             <article className="stat-card">
@@ -11101,9 +11099,9 @@ function DmPane({
         ) : null}
 
         <article className="card session-sidebar-card" id="session-staged-articles">
-          <div className="panel-header">
-            <h3>Staged articles</h3>
-            <span className="pill">{stagedArticles.length}</span>
+          <div className="section-heading">
+            <h2>Staged articles</h2>
+            <p className="meta">{stagedArticles.length}</p>
           </div>
           <p className="status status-neutral">Unrevealed staged articles are editable and ready for reveal.</p>
           {stagedArticles.length ? (
@@ -11245,9 +11243,9 @@ function DmPane({
 
         {revealedArticles.length ? (
           <article className="card session-sidebar-card" id="session-revealed-articles">
-            <div className="panel-header">
-              <h3>Revealed articles</h3>
-              <span className="pill">{revealedArticles.length}</span>
+            <div className="section-heading">
+              <h2>Revealed articles</h2>
+              <p className="meta">{revealedArticles.length}</p>
             </div>
             <div className="session-surface-subhead">
               <button
@@ -11289,9 +11287,9 @@ function DmPane({
         ) : null}
 
         <article className="card session-sidebar-card" id="session-chat-logs">
-          <div className="panel-header">
-            <h3>Session logs</h3>
-            <span className="pill">{sessionLogs.length}</span>
+          <div className="section-heading">
+            <h2>Chat logs</h2>
+            <p className="meta">{sessionLogs.length}</p>
           </div>
           {sessionLogs.length ? (
             <div className="session-log-row">
@@ -11349,11 +11347,10 @@ function DmPane({
 
       <aside className="session-workspace-sidebar">
         <article className="card session-sidebar-card" id="session-controls">
-          <div className="panel-header">
-            <h3>Live session</h3>
-            <span className="pill">{activeSession ? "Active" : "Inactive"}</span>
+          <div className="section-heading">
+            <h2>Live session</h2>
+            <p className="meta">{activeSession ? "Chat open" : "Chat closed"}</p>
           </div>
-          <p>{activeSession ? "Chat open" : "Chat closed"}</p>
           {activeSession ? (
             <>
               <p>The session is live for players and the DM.</p>
