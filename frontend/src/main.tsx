@@ -6078,7 +6078,9 @@ function WikiPageCard({
   kickerMode?: "displayType" | "sectionAndDisplayType";
 }) {
   const cardKicker =
-    kickerMode === "sectionAndDisplayType" ? `${page.section} / ${page.display_type}` : page.display_type;
+    kickerMode === "sectionAndDisplayType"
+      ? `${page.section} \u00b7 ${page.display_type}`
+      : page.display_type;
   const TitleElement = headingLevel;
 
   return (
