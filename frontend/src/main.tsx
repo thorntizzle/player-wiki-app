@@ -6214,11 +6214,6 @@ function WikiHomePage() {
           <p className="meta">Campaign</p>
           <h1>Campaign Home</h1>
         </div>
-        {data?.links.flask_campaign_url ? (
-          <a className="button button-secondary" href={data.links.flask_campaign_url}>
-            Flask view
-          </a>
-        ) : null}
       </div>
       <ApiErrorNotice isLoading={wikiQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {data ? (
@@ -6317,19 +6312,6 @@ function WikiSectionPage() {
           <p className="meta">Section</p>
           <h1>{data?.section_name ?? resolvedSectionSlug}</h1>
           <p className="lede">Published player-facing pages in this section.</p>
-        </div>
-        <div className="article-actions">
-          <a
-            className="button button-secondary"
-            href={data?.links.campaign_url ?? campaignRouteHref(resolvedCampaignSlug, "", wikiFrontendMode)}
-          >
-            Campaign Home
-          </a>
-          {data?.links.flask_section_url ? (
-            <a className="button button-secondary" href={data.links.flask_section_url}>
-              Flask view
-            </a>
-          ) : null}
         </div>
       </div>
       <ApiErrorNotice isLoading={sectionQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
@@ -6477,11 +6459,6 @@ function WikiArticlePage() {
               <p className="meta">
                 Section: <a href={data?.links.section_url ?? data?.links.gen2_section_url}>{page.section}</a>
               </p>
-              {data?.links.flask_page_url ? (
-                <p className="meta">
-                  Fallback: <a href={data.links.flask_page_url}>Open Flask page</a>
-                </p>
-              ) : null}
             </section>
             {data?.backlinks.length ? (
               <section className="card sidebar-card">
