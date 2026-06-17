@@ -113,6 +113,8 @@ import type {
   SessionLogSummary,
   SessionMessage,
   SessionPayload,
+  SessionMessagePostPayload,
+  SessionMessageRecipientPlayerChoice,
   CampaignReferenceSearchResult,
   SessionWikiLookupPreviewResponse,
   SessionWikiLookupSearchResult,
@@ -7054,18 +7056,8 @@ function SessionArticlesPanel({
 
 function SessionPaneChat({
   payload,
-  messageDraft,
-  setMessageDraft,
-  sendError,
-  onSend,
-  isSending,
 }: {
   payload: SessionPayload | undefined;
-  messageDraft: string;
-  setMessageDraft: (value: string) => void;
-  sendError: string | null;
-  onSend: (event: FormEvent<HTMLFormElement>) => void;
-  isSending: boolean;
 }) {
   const messages: SessionMessage[] = payload?.messages ?? [];
 
@@ -7089,26 +7081,89 @@ function SessionPaneChat({
           <p className="status status-neutral">No messages yet.</p>
         )}
       </div>
+    </article>
+  );
+}
+
+function SessionPaneMessageComposer({
+  payload,
+  messageDraft,
+  setMessageDraft,
+  recipientScope,
+  setRecipientScope,
+  recipientPlayerId,
+  setRecipientPlayerId,
+  recipientPlayerChoices,
+  sendError,
+  onSend,
+  isSending,
+}: {
+  payload: SessionPayload | undefined;
+  messageDraft: string;
+  setMessageDraft: (value: string) => void;
+  recipientScope: "global" | "dm_only" | "player";
+  setRecipientScope: (value: "global" | "dm_only" | "player") => void;
+  recipientPlayerId: string;
+  setRecipientPlayerId: (value: string) => void;
+  recipientPlayerChoices: SessionMessageRecipientPlayerChoice[];
+  sendError: string | null;
+  onSend: (event: FormEvent<HTMLFormElement>) => void;
+  isSending: boolean;
+}) {
+  return (
+    <article className="panel panel-nested">
+      <div className="panel-header">
+        <h3>Send message</h3>
+      </div>
       {payload?.permissions.can_post_messages ? (
-        <form onSubmit={onSend} className="chat-composer">
-          <label htmlFor="session-message-body" className="chat-label">
-            Post Session Message
+        <form onSubmit={onSend} className="stack-form session-message-form">
+          <label className="field">
+            <span>Audience</span>
+            <select
+              value={recipientScope}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                setRecipientScope(event.currentTarget.value as "global" | "dm_only" | "player");
+              }}
+            >
+              <option value="global">Global</option>
+              <option value="dm_only">DM only</option>
+              <option value="player">Specific player</option>
+            </select>
           </label>
-          <textarea
-            id="session-message-body"
-            rows={5}
-            value={messageDraft}
-            placeholder="Type chat text"
-            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-              setMessageDraft(event.currentTarget.value);
-            }}
-          />
-          <div className="chat-actions">
-            <button type="submit" disabled={isSending || payload?.active_session === null}>
-              {isSending ? "Sending..." : "Send"}
-            </button>
-            <span>{payload?.permissions.can_manage_session ? "DM view" : "Player view"}</span>
-          </div>
+          <label className="field">
+            <span>Player</span>
+            <select
+              value={recipientPlayerId}
+              disabled={recipientScope !== "player" || !recipientPlayerChoices.length}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                setRecipientPlayerId(event.currentTarget.value);
+              }}
+            >
+              {recipientPlayerChoices.length ? (
+                recipientPlayerChoices.map((choice) => (
+                  <option key={choice.user_id} value={String(choice.user_id)}>
+                    {choice.label}
+                  </option>
+                ))
+              ) : (
+                <option value="">No players available</option>
+              )}
+            </select>
+          </label>
+          <label className="field">
+            <span>Message</span>
+            <textarea
+              rows={5}
+              value={messageDraft}
+              placeholder="Type chat text"
+              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+                setMessageDraft(event.currentTarget.value);
+              }}
+            />
+          </label>
+          <button type="submit" className="session-message-form__submit" disabled={isSending || payload?.active_session === null}>
+            {isSending ? "Posting..." : "Post to chat"}
+          </button>
           {sendError ? <p className="status status-error">{sendError}</p> : null}
         </form>
       ) : (
@@ -7513,9 +7568,27 @@ function SessionPane({
   const [wikiPreviewHtml, setWikiPreviewHtml] = useState("");
   const [wikiPreviewError, setWikiPreviewError] = useState<string | null>(null);
   const [wikiLookupOpen, setWikiLookupOpen] = useState(false);
+  const [recipientScope, setRecipientScope] = useState<"global" | "dm_only" | "player">("global");
+  const [recipientPlayerId, setRecipientPlayerId] = useState("");
+  const recipientPlayerChoices = payload?.session_message_recipient_player_choices ?? [];
+
+  useEffect(() => {
+    if (recipientScope !== "player") {
+      setRecipientPlayerId("");
+      return;
+    }
+    if (recipientPlayerChoices.length === 0) {
+      setRecipientPlayerId("");
+      return;
+    }
+    const validIds = new Set(recipientPlayerChoices.map((choice) => String(choice.user_id)));
+    if (!validIds.has(recipientPlayerId)) {
+      setRecipientPlayerId(String(recipientPlayerChoices[0].user_id));
+    }
+  }, [recipientScope, recipientPlayerChoices, recipientPlayerId]);
 
   const postMessage = useMutation({
-    mutationFn: (body: string) => apiClient.postSessionMessage(campaignSlug, body),
+    mutationFn: (payload: SessionMessagePostPayload) => apiClient.postSessionMessage(campaignSlug, payload),
     onSuccess: () => {
       setMessageDraft("");
       setSendError(null);
@@ -7588,7 +7661,23 @@ function SessionPane({
       setSendError("No active session.");
       return;
     }
-    postMessage.mutate(body);
+    if (recipientScope === "player" && !recipientPlayerChoices.length) {
+      setSendError("No player recipients available.");
+      return;
+    }
+    if (recipientScope === "player" && !recipientPlayerId) {
+      setSendError("Choose a player recipient.");
+      return;
+    }
+
+    const messagePayload: SessionMessagePostPayload = {
+      body,
+      recipient_scope: recipientScope,
+    };
+    if (recipientScope === "player") {
+      messagePayload.recipient_user_id = Number(recipientPlayerId);
+    }
+    postMessage.mutate(messagePayload);
   };
 
   const canShowWikiLookup = payload?.permissions.can_access_wiki_lookup ?? true;
@@ -7624,8 +7713,16 @@ function SessionPane({
         </article>
         <SessionPaneChat
           payload={payload}
+        />
+        <SessionPaneMessageComposer
+          payload={payload}
           messageDraft={messageDraft}
           setMessageDraft={setMessageDraft}
+          recipientScope={recipientScope}
+          setRecipientScope={setRecipientScope}
+          recipientPlayerId={recipientPlayerId}
+          setRecipientPlayerId={setRecipientPlayerId}
+          recipientPlayerChoices={recipientPlayerChoices}
           sendError={sendError}
           onSend={sendMessage}
           isSending={postMessage.isPending}

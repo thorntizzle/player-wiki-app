@@ -2603,6 +2603,7 @@ textarea {
 }
 
 .chat-actions button,
+.session-message-form button,
 .session-actions-row button,
 .article-actions button,
 .inline-two-col button,
@@ -2619,6 +2620,12 @@ textarea {
   font-weight: 700;
 }
 
+.session-message-form button,
+.session-message-form button:disabled {
+  width: 100%;
+  justify-self: stretch;
+}
+
 .chat-actions button:disabled,
 .article-actions button:disabled,
 .session-actions-row button:disabled,
@@ -2626,7 +2633,8 @@ textarea {
 .session-character-form button:disabled,
 .session-log-detail-head button:disabled,
 .wiki-selection button:disabled,
-.segmented-button:disabled {
+.segmented-button:disabled,
+.session-message-form button:disabled {
   opacity: 0.55;
 }
 
@@ -3859,7 +3867,6 @@ textarea {
   .chat-actions,
   .split-grid,
   .session-log-row,
-  .session-tab-strip,
   .inline-two-col,
   .combat-carousel .compact-header,
   .combat-pc-workspace .compact-header,
@@ -3867,6 +3874,13 @@ textarea {
   .compact-card {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .session-tab-strip {
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
   }
 
   .topbar-controls,

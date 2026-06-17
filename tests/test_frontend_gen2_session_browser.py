@@ -182,8 +182,11 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))
             expect(page.locator(".session-page-hero").get_by_role("heading", name="Session")).to_be_visible()
             expect(page.get_by_role("heading", name="Session chat")).to_be_visible()
-            expect(page.locator(".session-workspace-sidebar").get_by_role("heading", name="Player wiki lookup")).to_be_visible()
-            expect(page.get_by_label("Post Session Message")).to_be_visible()
+            expect(page.locator(".session-player-wiki-details-summary")).to_have_text("Player wiki lookup")
+            expect(page.get_by_role("heading", name="Send message")).to_be_visible()
+            expect(page.get_by_label("Audience")).to_be_visible()
+            expect(page.get_by_label("Player")).to_be_visible()
+            expect(page.get_by_label("Message")).to_be_visible()
             player_card_texts = page.evaluate(
                 """() => {
                     const section = document.querySelector(".pane-visible .session-workspace-main");
@@ -2252,7 +2255,7 @@ def test_gen2_session_preserves_local_state_across_live_polling(
             expect(session_tabs.get_by_role("button", name="Session", exact=True)).to_be_visible(timeout=10000)
 
             chat_draft = "This chat draft should survive pane switches and live polling."
-            page.locator(".pane-visible").get_by_label("Post Session Message").fill(chat_draft)
+            page.locator(".pane-visible").get_by_label("Message").fill(chat_draft)
 
             wiki_lookup = page.locator(".pane-visible")
             wiki_lookup.get_by_label("Search published pages / systems").fill("harbor")
@@ -2303,7 +2306,7 @@ def test_gen2_session_preserves_local_state_across_live_polling(
 
             session_tabs.get_by_role("button", name="Session", exact=True).click()
             session_pane = page.locator(".pane-visible")
-            expect(session_pane.get_by_label("Post Session Message")).to_have_value(chat_draft)
+            expect(session_pane.get_by_label("Message")).to_have_value(chat_draft)
             expect(session_pane.get_by_text("Formal harbor duels")).to_be_visible()
 
             session_tabs.get_by_role("button", name="Character", exact=True).click()

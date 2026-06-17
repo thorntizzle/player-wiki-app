@@ -541,9 +541,23 @@ export interface SessionMessage {
   body_text: string;
   author_user_id: number | null;
   author_display_name: string;
+  recipient_scope?: string;
+  recipient_user_id?: number | null;
+  recipient_label?: string | null;
   article_id: number | null;
   created_at: string | null;
   article: SessionArticle | null;
+}
+
+export interface SessionMessageRecipientPlayerChoice {
+  user_id: number;
+  label: string;
+}
+
+export interface SessionMessagePostPayload {
+  body: string;
+  recipient_scope?: "global" | "dm_only" | "player";
+  recipient_user_id?: number | null;
 }
 
 export interface SessionRecord {
@@ -585,6 +599,7 @@ export interface SessionPayload extends ApiResponseBase {
   permissions: SessionPermissions;
   active_session: SessionRecord | null;
   messages: SessionMessage[];
+  session_message_recipient_player_choices?: SessionMessageRecipientPlayerChoice[];
   staged_articles?: SessionArticle[];
   revealed_articles?: SessionArticle[];
   session_logs?: SessionLogSummary[];

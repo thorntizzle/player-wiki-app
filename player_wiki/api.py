@@ -1636,6 +1636,26 @@ def register_api(app) -> None:
 
         return results
 
+    def build_session_message_recipient_player_choices(campaign_slug: str) -> list[dict[str, object]]:
+        store = get_auth_store()
+        choices: list[dict[str, object]] = []
+        for candidate in sorted(
+            store.list_users(),
+            key=lambda item: ((item.display_name or "").lower(), item.email.lower()),
+        ):
+            if not candidate.is_active:
+                continue
+            membership = store.get_membership(candidate.id, campaign_slug, statuses=("active",))
+            if membership is None or membership.role != "player":
+                continue
+            choices.append(
+                {
+                    "user_id": candidate.id,
+                    "label": f"{candidate.display_name} ({candidate.email})",
+                }
+            )
+        return choices
+
     def build_session_payload(campaign_slug: str) -> dict[str, Any]:
         campaign = get_repository().get_campaign(campaign_slug)
         if campaign is None:
@@ -1692,6 +1712,11 @@ def register_api(app) -> None:
             },
             "active_session": serialize_session_record(active_session) if active_session is not None else None,
             "messages": messages,
+            "session_message_recipient_player_choices": (
+                build_session_message_recipient_player_choices(campaign_slug)
+                if can_post_messages
+                else []
+            ),
         }
 
         if can_manage_session:

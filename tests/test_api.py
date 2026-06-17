@@ -1261,6 +1261,13 @@ def test_api_session_messages_support_private_audience_scope(client, app, users)
         "/api/v1/campaigns/linden-pass/session",
         headers=api_headers(owner_token),
     ).get_json()
+    recipient_choices = owner_payload.get("session_message_recipient_player_choices")
+    assert isinstance(recipient_choices, list)
+    recipient_ids = {int(choice["user_id"]) for choice in recipient_choices}
+    assert users["owner"]["id"] in recipient_ids
+    assert users["party"]["id"] in recipient_ids
+    assert all("label" in choice for choice in recipient_choices)
+
     owner_messages = {entry["body_text"]: entry for entry in owner_payload["messages"]}
     assert owner_messages[global_body]["recipient_scope"] == "global"
     assert owner_messages[owner_only_body]["recipient_scope"] == "player"

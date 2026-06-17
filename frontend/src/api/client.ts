@@ -97,6 +97,7 @@ import type {
   SessionLiveStatePayload,
   SessionLogDeleteResponse,
   SessionLogDetailResponse,
+  SessionMessagePostPayload,
   SessionPayload,
   SessionStartCloseResponse,
   SessionWikiLookupPreviewResponse,
@@ -872,10 +873,13 @@ export class CampaignApiClient {
     );
   }
 
-  async postSessionMessage(slug: string, body: string): Promise<MessagePostResponse> {
+  async postSessionMessage(
+    slug: string,
+    payload: SessionMessagePostPayload,
+  ): Promise<MessagePostResponse> {
     return this.requestJson<MessagePostResponse>(`/api/v1/campaigns/${encodeURIComponent(slug)}/session/messages`, {
       method: "POST",
-      body: JSON.stringify({ body }),
+      body: JSON.stringify(payload),
     });
   }
 
