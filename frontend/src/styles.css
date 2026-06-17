@@ -1190,11 +1190,6 @@ a:hover {
   margin-bottom: 0.25rem;
 }
 
-.admin-page {
-  display: grid;
-  gap: 1rem;
-}
-
 .card.admin-panel,
 .card.admin-user-card {
   padding: 1.25rem;

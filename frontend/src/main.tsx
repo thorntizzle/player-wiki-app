@@ -4881,8 +4881,8 @@ function AdminDashboardPage() {
   const data = dashboardQuery.data;
 
   return (
-    <section className="admin-page">
-      <header className="admin-hero">
+    <>
+      <section className="hero compact admin-hero">
         <p className="eyebrow">Admin</p>
         <h1>Admin dashboard</h1>
         <p className="lede">Use this screen for lighter operational work. The CLI remains the full-control path for bootstrap and recovery.</p>
@@ -4893,7 +4893,7 @@ function AdminDashboardPage() {
             </a>
           </div>
         ) : null}
-      </header>
+      </section>
 
       <ApiErrorNotice isLoading={dashboardQuery.isLoading} message={queryError} onAuth={() => setAuthRequired(true)} />
       {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
@@ -5035,7 +5035,7 @@ function AdminDashboardPage() {
           </section>
         </>
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -5156,8 +5156,8 @@ function AdminUserDetailPage() {
     || deleteUser.isPending;
 
   return (
-    <section className="admin-page admin-user-detail-page">
-      <header className="admin-hero">
+    <>
+      <section className="hero compact admin-hero">
         <p className="eyebrow">Admin user detail</p>
         <h1>{data?.managed_user.display_name || "Admin user"}</h1>
         {data ? (
@@ -5177,7 +5177,7 @@ function AdminUserDetailPage() {
             </div>
           </>
         ) : null}
-      </header>
+      </section>
 
       <ApiErrorNotice isLoading={userQuery.isLoading} message={queryError} onAuth={() => setAuthRequired(true)} />
       {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
@@ -5431,7 +5431,7 @@ function AdminUserDetailPage() {
           </section>
         </>
       ) : null}
-    </section>
+    </>
   );
 }
 

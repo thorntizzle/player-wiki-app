@@ -962,33 +962,63 @@ def test_gen2_admin_user_management_route_and_permissions(
             admin_dashboard_metrics = admin_page.evaluate(
                 """() => {
                     const countGridTracks = (value) => value.trim().split(/\\s+/).filter(Boolean).length;
-                    const hero = document.querySelector(".admin-hero");
+                    const main = document.querySelector("main.main-shell");
+                    const mainChildren = main ? Array.from(main.children) : [];
+                    const adminHero = mainChildren.find(
+                        (node) =>
+                            node.tagName.toLowerCase() === "section"
+                            && node.classList.contains("hero")
+                            && node.classList.contains("compact")
+                            && node.classList.contains("admin-hero"),
+                    );
+                    const adminHeroIndex = mainChildren.indexOf(adminHero);
                     const panel = document.querySelector("article.card.admin-panel, aside.card.admin-panel");
-                    const layout = document.querySelector(".admin-layout");
-                    const userGrid = document.querySelector(".admin-user-grid");
+                    const layouts = Array.from(document.querySelectorAll("main.main-shell > .admin-layout"));
+                    const userGrids = Array.from(document.querySelectorAll("main.main-shell > .section-list .admin-user-grid"));
+                    const firstLayout = layouts[0] || null;
                     const actions = document.querySelector(".admin-filter-form__actions");
                     const legacyPanelShells = document.querySelectorAll("article.panel.admin-panel, aside.panel.admin-panel");
                     const dashboardUserCards = document.querySelectorAll("article.card.admin-user-card");
                     const legacyUserCards = document.querySelectorAll("article.panel.admin-user-card");
+                    const siblingDataSections = adminHeroIndex >= 0
+                        ? mainChildren.slice(adminHeroIndex + 1).filter((node) => {
+                            return (
+                                node.tagName.toLowerCase() === "section"
+                                && (node.classList.contains("admin-layout") || node.classList.contains("section-list"))
+                            );
+                          }).length
+                        : 0;
                     return {
-                        heroBorderTop: hero ? window.getComputedStyle(hero).borderTopWidth : "0px",
-                        heroBoxShadow: hero ? window.getComputedStyle(hero).boxShadow : "none",
+                        hasAdminPageWrapper: !!(main ? main.querySelector(":scope > .admin-page") : null),
+                        hasDirectAdminHero: !!adminHero,
+                        heroIsFirstChild: adminHero && mainChildren.length > 0 ? adminHero === mainChildren[0] : false,
+                        mainChildCount: mainChildren.length,
+                        siblingDataSectionCount: siblingDataSections,
+                        heroTag: adminHero ? adminHero.tagName.toLowerCase() : "",
+                        heroBorderTop: adminHero ? window.getComputedStyle(adminHero).borderTopWidth : "0px",
+                        heroBoxShadow: adminHero ? window.getComputedStyle(adminHero).boxShadow : "none",
                         panelBorderTop: panel ? window.getComputedStyle(panel).borderTopWidth : "0px",
                         panelBoxShadow: panel ? window.getComputedStyle(panel).boxShadow : "none",
                         dashboardCardPanelCount: document.querySelectorAll("article.card.admin-panel, aside.card.admin-panel").length,
                         legacyPanelShellCount: legacyPanelShells.length,
                         dashboardUserCardCount: dashboardUserCards.length,
                         legacyUserCardCount: legacyUserCards.length,
-                        layoutColumns: layout ? countGridTracks(window.getComputedStyle(layout).gridTemplateColumns) : 0,
-                        userGridColumns: userGrid ? countGridTracks(window.getComputedStyle(userGrid).gridTemplateColumns) : 0,
+                        layoutColumns: firstLayout ? countGridTracks(window.getComputedStyle(firstLayout).gridTemplateColumns) : 0,
+                        userGridColumns: userGrids[0] ? countGridTracks(window.getComputedStyle(userGrids[0]).gridTemplateColumns) : 0,
                         actionsDisplay: actions ? window.getComputedStyle(actions).display : "",
                     };
                 }"""
             )
+            assert admin_dashboard_metrics["hasAdminPageWrapper"] is False
+            assert admin_dashboard_metrics["hasDirectAdminHero"] is True
+            assert admin_dashboard_metrics["heroIsFirstChild"] is True
+            assert admin_dashboard_metrics["mainChildCount"] >= 3
+            assert admin_dashboard_metrics["heroTag"] == "section"
             assert admin_dashboard_metrics["heroBorderTop"] == "0px"
             assert admin_dashboard_metrics["heroBoxShadow"] == "none"
             assert float(admin_dashboard_metrics["panelBorderTop"][:-2]) > 0
             assert admin_dashboard_metrics["panelBoxShadow"] != "none"
+            assert admin_dashboard_metrics["siblingDataSectionCount"] >= 2
             assert admin_dashboard_metrics["dashboardCardPanelCount"] >= 3
             assert admin_dashboard_metrics["legacyPanelShellCount"] == 0
             assert admin_dashboard_metrics["dashboardUserCardCount"] >= 1
@@ -1034,18 +1064,53 @@ def test_gen2_admin_user_management_route_and_permissions(
                     userDetailCardPanelCount: document.querySelectorAll("article.card.admin-panel").length,
                     legacyUserDetailPanelCount: document.querySelectorAll("article.panel.admin-panel").length,
                     legacyUserCardCount: document.querySelectorAll("article.panel.admin-user-card").length,
+                    hasAdminPageWrapper: !!document.querySelector("main.main-shell > .admin-page"),
+                    directChildren: Array.from(document.querySelectorAll("main.main-shell > *")).map((node) => ({
+                        tag: node.tagName.toLowerCase(),
+                        classes: node.className,
+                    })),
                 })"""
+            )
+            assert admin_user_detail_metrics["hasAdminPageWrapper"] is False
+            assert admin_user_detail_metrics["directChildren"]
+            assert (
+                admin_user_detail_metrics["directChildren"][0]["tag"] == "section"
+                and "hero" in admin_user_detail_metrics["directChildren"][0]["classes"].split()
+                and "compact" in admin_user_detail_metrics["directChildren"][0]["classes"].split()
+                and "admin-hero" in admin_user_detail_metrics["directChildren"][0]["classes"].split()
             )
             assert admin_user_detail_metrics["userDetailCardPanelCount"] >= 4
             assert admin_user_detail_metrics["legacyUserDetailPanelCount"] == 0
             assert admin_user_detail_metrics["legacyUserCardCount"] == 0
+            assert any(
+                (
+                    node["tag"] == "section"
+                    and "hero" in node["classes"].split()
+                    and "compact" in node["classes"].split()
+                    and "admin-hero" in node["classes"].split()
+                )
+                for node in admin_user_detail_metrics["directChildren"]
+            )
+            assert any(
+                (node["tag"] == "section" and "admin-layout" in node["classes"].split())
+                for node in admin_user_detail_metrics["directChildren"]
+            )
 
             mobile_page.goto(f"{base_url}/app-next/admin")
             expect(mobile_page.get_by_role("heading", name="Admin dashboard")).to_be_visible(timeout=10000)
             mobile_layout = mobile_page.evaluate(
                 """() => {
                     const countGridTracks = (value) => value.trim().split(/\\s+/).filter(Boolean).length;
-                    const layouts = Array.from(document.querySelectorAll(".admin-layout"));
+                    const main = document.querySelector("main.main-shell");
+                    const directChildren = main ? Array.from(main.children) : [];
+                    const hero = directChildren.find(
+                        (node) =>
+                            node.tagName.toLowerCase() === "section"
+                            && node.classList.contains("hero")
+                            && node.classList.contains("compact")
+                            && node.classList.contains("admin-hero"),
+                    );
+                    const layouts = Array.from(main ? main.querySelectorAll(":scope > .admin-layout") : []);
                     const firstLayout = layouts[0];
                     const items = firstLayout ? Array.from(firstLayout.children) : [];
                     const itemRects = items.map((item) => {
@@ -1055,18 +1120,25 @@ def test_gen2_admin_user_management_route_and_permissions(
                     const first = itemRects[0];
                     const second = itemRects[1];
                     const filter = document.querySelector(".admin-filter-form");
-                    const page = document.querySelector(".admin-page");
                     return {
                         innerWidth: window.innerWidth,
                         scrollWidth: document.documentElement.scrollWidth,
-                        pageWidth: page ? page.getBoundingClientRect().width : 0,
+                        pageWidth: main ? main.getBoundingClientRect().width : 0,
                         maxItemWidth: itemRects.reduce((max, item) => Math.max(max, item.width), 0),
                         layoutCount: layouts.length,
+                        heroIsFirstChild: hero && directChildren.length > 0 ? hero === directChildren[0] : false,
+                        hasDirectAdminHero: !!hero,
+                        hasAdminPageWrapper: !!(main ? main.querySelector(":scope > .admin-page") : null),
+                        directChildCount: directChildren.length,
                         firstLayoutStacked: !second || Math.abs((second.left || 0) - (first.left || 0)) <= 4,
                         filterColumns: filter ? countGridTracks(window.getComputedStyle(filter).gridTemplateColumns) : 0,
                     };
                 }"""
             )
+            assert mobile_layout["hasDirectAdminHero"] is True
+            assert mobile_layout["heroIsFirstChild"] is True
+            assert mobile_layout["hasAdminPageWrapper"] is False
+            assert mobile_layout["directChildCount"] >= 3
             assert mobile_layout["layoutCount"] >= 1
             assert mobile_layout["scrollWidth"] <= mobile_layout["innerWidth"] + 1
             assert mobile_layout["pageWidth"] <= mobile_layout["innerWidth"] + 1
