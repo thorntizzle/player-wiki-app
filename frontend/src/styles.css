@@ -1499,6 +1499,14 @@ a:hover {
   gap: 1rem;
 }
 
+.wiki-home .card,
+.wiki-section-page .card,
+.wiki-article-shell .card {
+  border-radius: 22px;
+  padding: 1.25rem;
+  box-shadow: var(--shadow);
+}
+
 .panel.wiki-home,
 .panel.wiki-section-page {
   border: 0;
@@ -1541,15 +1549,12 @@ a:hover {
 .wiki-overview-card {
   display: grid;
   gap: 0.75rem;
+  padding: 1.25rem;
 }
 
 .section-block {
   display: grid;
   gap: 0.75rem;
-}
-
-.wiki-overview-card {
-  padding: 1.45rem 1.55rem;
 }
 
 .page-card h3,
@@ -1700,6 +1705,10 @@ a:hover {
   display: grid;
   gap: 1rem;
   grid-template-columns: minmax(0, 2fr) minmax(16rem, 0.8fr);
+}
+
+.wiki-article-shell .page-layout > * {
+  min-width: 0;
 }
 
 .wiki-article-shell .article {
@@ -1876,10 +1885,6 @@ a:hover {
 
 .article-image__caption {
   margin-top: 0.35rem;
-}
-
-.wiki-article-shell .sidebar-card {
-  padding: 1rem;
 }
 
 .wiki-article-shell .sidebar-card h2 {
