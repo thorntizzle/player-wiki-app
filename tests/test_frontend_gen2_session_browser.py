@@ -2211,9 +2211,10 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                 page.set_viewport_size(viewport)
                 page.goto(f"{base_url}/app-next/campaigns/linden-pass/systems?q=focus")
 
-                expect(page.locator("section.systems-browse-index-page")).to_be_visible(timeout=10_000)
-                expect(page.locator("section.hero.compact.systems-hero")).to_be_visible()
-                expect(page.locator(".systems-browse-grid")).to_be_visible()
+                expect(page.locator("section.systems-browse-index-page")).to_have_count(0)
+                expect(page.locator(".systems-browse-page")).to_have_count(0)
+                expect(page.locator("main.main-shell > section.hero.compact.systems-hero")).to_be_visible(timeout=10_000)
+                expect(page.locator("main.main-shell > .systems-browse-grid.page-layout")).to_be_visible()
                 expect(page.locator(".systems-search-band")).to_be_visible()
                 expect(page.locator(".systems-browse-sidebar")).to_be_visible()
                 expect(page.get_by_role("heading", name="Systems", exact=True)).to_be_visible(timeout=10_000)
@@ -2222,9 +2223,8 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                 assert page.evaluate(
                     """() => {
                         const selectors = [
-                            '.systems-browse-page',
-                            'section.hero.compact.systems-hero',
-                            '.systems-browse-grid',
+                            'main.main-shell > section.hero.compact.systems-hero',
+                            'main.main-shell > .systems-browse-grid.page-layout',
                             '.systems-browse-sidebar',
                         ];
                         const viewportWidth = Math.ceil(document.documentElement.clientWidth);
@@ -2246,6 +2246,22 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                         return getComputedStyle(grid).gridTemplateColumns.trim().split(/\\s+/).length;
                     }"""
                 )
+                root_metrics = page.evaluate(
+                    """() => {
+                        const main = document.querySelector('main.main-shell');
+                        const hero = main ? main.querySelector(':scope > section.hero.compact.systems-hero') : null;
+                        const layout = main ? main.querySelector(':scope > .systems-browse-grid.page-layout') : null;
+                        const children = main ? Array.from(main.children) : [];
+                        const heroRect = hero ? hero.getBoundingClientRect() : null;
+                        const layoutRect = layout ? layout.getBoundingClientRect() : null;
+                        return {
+                            heroBeforeLayout: Boolean(hero && layout && children.indexOf(hero) < children.indexOf(layout)),
+                            heroLayoutGap: heroRect && layoutRect ? Math.round(layoutRect.top - heroRect.bottom) : -1,
+                        };
+                    }"""
+                )
+                assert root_metrics["heroBeforeLayout"] is True
+                assert root_metrics["heroLayoutGap"] >= 12
                 if viewport["width"] >= 1024:
                     assert layout_columns >= 2
                 else:
@@ -2256,13 +2272,15 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                     re.compile(rf"/app-next/campaigns/linden-pass/systems/entries/{re.escape(entry_slug)}$"),
                     timeout=5000,
                 )
-                expect(page.locator(".systems-entry-shell")).to_be_visible(timeout=10_000)
-                expect(page.locator(".systems-entry-shell > section.hero.compact.systems-hero")).to_be_visible()
+                expect(page.locator(".systems-entry-shell")).to_have_count(0)
+                expect(page.locator(".systems-entry-page")).to_have_count(0)
+                expect(page.locator("main.main-shell > section.hero.compact.systems-hero")).to_be_visible(timeout=10_000)
+                expect(page.locator("main.main-shell > .page-layout")).to_be_visible()
                 expect(page.locator(".systems-entry-band")).to_be_visible()
                 expect(page.locator(".systems-entry-sidebar")).to_be_visible()
                 expect(page.locator(".systems-sidebar-card").first).to_be_visible()
                 expect(page.locator(".systems-entry-navigation")).to_be_visible()
-                expect(page.locator(".systems-entry-shell > section.hero.compact.systems-hero h1")).to_have_text(entry_title, timeout=10_000)
+                expect(page.locator("main.main-shell > section.hero.compact.systems-hero h1")).to_have_text(entry_title, timeout=10_000)
                 expect(page.locator(".systems-entry-band > h1")).to_have_count(0)
                 expect(page.get_by_role("heading", name="Entry Metadata")).to_be_visible()
                 expect(page.get_by_role("link", name="Source page")).to_be_visible()
@@ -2272,16 +2290,16 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
 
                 hero_position_before_layout = page.evaluate(
                     """() => {
-                        const shell = document.querySelector('.systems-entry-shell');
-                        if (!shell) {
+                        const main = document.querySelector('main.main-shell');
+                        if (!main) {
                             return false;
                         }
-                        const hero = shell.querySelector(':scope > .hero.compact.systems-hero');
-                        const layout = shell.querySelector(':scope > .page-layout');
+                        const hero = main.querySelector(':scope > .hero.compact.systems-hero');
+                        const layout = main.querySelector(':scope > .page-layout');
                         if (!hero || !layout) {
                             return false;
                         }
-                        const children = Array.from(shell.children);
+                        const children = Array.from(main.children);
                         return children.indexOf(hero) < children.indexOf(layout);
                     }"""
                 )
@@ -2289,7 +2307,10 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
 
                 page.get_by_role("link", name="Source category").click()
 
-                expect(page.locator(".systems-source-category-page")).to_be_visible(timeout=10_000)
+                expect(page.locator(".systems-source-category-page")).to_have_count(0)
+                expect(page.locator(".systems-browse-page")).to_have_count(0)
+                expect(page.locator("main.main-shell > section.hero.compact.systems-hero")).to_be_visible(timeout=10_000)
+                expect(page.locator("main.main-shell > .systems-browse-grid.page-layout")).to_be_visible()
                 expect(page.locator(".systems-category-band")).to_be_visible()
                 expect(page.locator('section.hero.compact.systems-hero .eyebrow', has_text="Systems source category")).to_be_visible()
                 expect(page.get_by_role("heading", name=re.compile(r"Browse", re.I))).to_be_visible()
@@ -2302,9 +2323,9 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                 assert page.evaluate(
                     """() => {
                         const selectors = [
-                            '.systems-source-category-page',
+                            'main.main-shell > section.hero.compact.systems-hero',
+                            'main.main-shell > .systems-browse-grid.page-layout',
                             '.systems-category-band',
-                            'section.hero.compact.systems-hero',
                             '.systems-browse-sidebar',
                         ];
                         const viewportWidth = Math.ceil(document.documentElement.clientWidth);
@@ -2333,7 +2354,10 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
 
                 page.get_by_role("link", name="Source").click()
 
-                expect(page.locator(".systems-source-page")).to_be_visible(timeout=10_000)
+                expect(page.locator(".systems-source-page")).to_have_count(0)
+                expect(page.locator(".systems-browse-page")).to_have_count(0)
+                expect(page.locator("main.main-shell > section.hero.compact.systems-hero")).to_be_visible(timeout=10_000)
+                expect(page.locator("main.main-shell > .systems-browse-grid.page-layout")).to_be_visible()
                 expect(page.locator(".systems-source-band")).to_be_visible()
                 expect(page.locator('section.hero.compact.systems-hero .eyebrow', has_text="Systems source")).to_be_visible()
                 expect(page.get_by_role("heading", name="Browse This Source")).to_be_visible()
@@ -2345,9 +2369,9 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                 assert page.evaluate(
                     """() => {
                         const selectors = [
-                            '.systems-source-page',
+                            'main.main-shell > section.hero.compact.systems-hero',
+                            'main.main-shell > .systems-browse-grid.page-layout',
                             '.systems-source-band',
-                            'section.hero.compact.systems-hero',
                             '.systems-browse-sidebar',
                         ];
                         const viewportWidth = Math.ceil(document.documentElement.clientWidth);

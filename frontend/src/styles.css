@@ -1896,7 +1896,7 @@ a:hover {
 
 .wiki-article-page .article-body,
 .wiki-overview-card .article-body,
-.systems-entry-shell .article-body {
+.systems-entry-band .article-body {
   max-height: none;
   line-height: 1.6;
 }
@@ -1965,13 +1965,13 @@ a:hover {
   border-bottom: 1px solid var(--border);
 }
 
-.systems-browse-page {
-  display: grid;
-  gap: 1rem;
-}
-
 .systems-hero-actions {
   align-items: flex-start;
+}
+
+.main-shell > .systems-hero ~ .systems-browse-grid,
+.main-shell > .systems-hero ~ .page-layout {
+  margin-top: 1rem;
 }
 
 .systems-browse-grid {
@@ -2022,13 +2022,8 @@ a:hover {
   color: var(--muted);
 }
 
-.systems-entry-shell .article {
+.systems-entry-band {
   background: linear-gradient(180deg, var(--surface-strong), var(--surface));
-}
-
-.systems-entry-page {
-  display: grid;
-  gap: 1rem;
 }
 
 .systems-entry-band .article-body {
@@ -2075,7 +2070,7 @@ a:hover {
   font-size: 1.08rem;
 }
 
-.systems-entry-shell .article-body table {
+.systems-entry-band .article-body table {
   display: block;
   max-width: 100%;
   overflow-x: auto;

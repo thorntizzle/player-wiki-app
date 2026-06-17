@@ -6603,7 +6603,7 @@ function SystemsIndexPage() {
   const action = systemsIndexHref(resolvedCampaignSlug);
 
   return (
-    <section className="systems-browse-page systems-browse-index-page">
+    <>
       <section className="hero compact systems-hero">
         <div>
           <p className="eyebrow">Systems wiki</p>
@@ -6711,7 +6711,7 @@ function SystemsIndexPage() {
           </aside>
         </div>
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -6742,7 +6742,7 @@ function SystemsSourcePage() {
   const action = systemsSourceHref(resolvedCampaignSlug, resolvedSourceId);
 
   return (
-    <section className="systems-browse-page systems-source-page">
+    <>
       <section className="hero compact systems-hero">
         <div>
           <p className="eyebrow">Systems source</p>
@@ -6836,7 +6836,7 @@ function SystemsSourcePage() {
           </aside>
         </div>
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -6868,7 +6868,7 @@ function SystemsSourceCategoryPage() {
   const action = systemsSourceCategoryHref(resolvedCampaignSlug, resolvedSourceId, resolvedEntryType);
 
   return (
-    <section className="systems-browse-page systems-source-category-page">
+    <>
       <section className="hero compact systems-hero">
         <div>
           <p className="eyebrow">Systems source category</p>
@@ -6921,7 +6921,7 @@ function SystemsSourceCategoryPage() {
           </aside>
         </div>
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -6952,7 +6952,7 @@ function SystemsEntryPage() {
   const sourceState = entry?.source_state;
 
   return (
-    <section className="systems-entry-shell systems-entry-page">
+    <>
       {entry ? (
         <section className="hero compact systems-hero">
           <p className="eyebrow">Systems entry</p>
@@ -7006,7 +7006,7 @@ function SystemsEntryPage() {
           </aside>
         </div>
       ) : null}
-    </section>
+    </>
   );
 }
 
