@@ -1720,9 +1720,11 @@ a:hover {
 }
 
 .wiki-overview-card {
-  display: grid;
-  gap: 0.75rem;
   padding: 1.25rem;
+}
+
+.wiki-overview-card > h2 {
+  margin: 0;
 }
 
 .section-block {

@@ -1454,11 +1454,20 @@ def test_gen2_wiki_visual_parity_smoke(
                 """() => {
                     const route = document.querySelector(".wiki-home");
                     const hero = document.querySelector(".wiki-home");
+                    const overviewCard = document.querySelector(".wiki-overview-card");
+                    const overviewTitle = document.querySelector(".wiki-overview-card > h2");
                     const overviewBody = document.querySelector(".wiki-overview-card .html-body");
                     const browse = document.querySelector(".wiki-section-browse");
                     return {
                         routeShadow: route ? window.getComputedStyle(route).boxShadow : "",
                         heroDisplay: hero ? window.getComputedStyle(hero).display : "",
+                        overviewDisplay: overviewCard ? window.getComputedStyle(overviewCard).display : "",
+                        overviewTitleMarginTop: overviewTitle
+                            ? Number.parseFloat(window.getComputedStyle(overviewTitle).marginTop)
+                            : -1,
+                        overviewTitleMarginBottom: overviewTitle
+                            ? Number.parseFloat(window.getComputedStyle(overviewTitle).marginBottom)
+                            : -1,
                         overviewBorder: overviewBody ? window.getComputedStyle(overviewBody).borderTopWidth : "",
                         browseRadius: browse ? Number.parseFloat(window.getComputedStyle(browse).borderRadius) : 0,
                     };
@@ -1466,6 +1475,9 @@ def test_gen2_wiki_visual_parity_smoke(
             )
             assert home_metrics["routeShadow"] == "none"
             assert home_metrics["heroDisplay"] == "grid"
+            assert home_metrics["overviewDisplay"] == "block"
+            assert home_metrics["overviewTitleMarginTop"] == 0
+            assert home_metrics["overviewTitleMarginBottom"] == 0
             assert home_metrics["overviewBorder"] == "0px"
             assert home_metrics["browseRadius"] >= 20
 
