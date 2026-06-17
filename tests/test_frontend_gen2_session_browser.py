@@ -540,6 +540,10 @@ def test_gen2_campaign_control_updates_visibility_and_blocks_players(
             expect(dm_page.get_by_role("heading", name="Visibility settings")).to_be_visible()
             expect(dm_page.get_by_role("heading", name="Visibility rules")).to_be_visible()
             expect(dm_page.get_by_role("link", name="Flask Control")).to_be_visible()
+            expect(dm_page.locator("main.main-shell > .campaign-control-page")).to_have_count(0)
+            expect(dm_page.locator("main.main-shell > .campaign-control-hero")).to_be_visible()
+            expect(dm_page.locator("main.main-shell > .campaign-control-layout")).to_be_visible()
+            expect(dm_page.locator(".campaign-control-form .hero-actions", has_text="Save visibility")).to_be_visible()
 
             dm_page.locator("#campaign-control-campaign").select_option("players")
             dm_page.locator("#campaign-control-wiki").select_option("dm")
@@ -547,8 +551,8 @@ def test_gen2_campaign_control_updates_visibility_and_blocks_players(
             expect(dm_page.get_by_text(re.compile(r"Updated visibility for .*Campaign", re.I))).to_be_visible(timeout=5000)
             expect(dm_page.locator("#campaign-control-campaign")).to_have_value("players")
             expect(dm_page.locator("#campaign-control-wiki")).to_have_value("dm")
-            expect(dm_page.locator(".campaign-control-form .article-actions + .status")).to_be_visible()
-            expect(dm_page.locator(".campaign-control-form .article-actions", has_text="Save visibility")).to_be_visible()
+            expect(dm_page.locator(".campaign-control-form .hero-actions + .status")).to_be_visible()
+            expect(dm_page.locator(".campaign-control-form .hero-actions", has_text="Save visibility")).to_be_visible()
 
             dm_control_metrics = dm_page.evaluate(
                 """() => {
@@ -627,6 +631,9 @@ def test_gen2_campaign_control_updates_visibility_and_blocks_players(
             _sign_in(dm_mobile_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
             dm_mobile_page.goto(f"{base_url}/app-next/campaigns/linden-pass/control")
             expect(dm_mobile_page.get_by_role("heading", name="Visibility", exact=True)).to_be_visible(timeout=10000)
+            expect(dm_mobile_page.locator("main.main-shell > .campaign-control-page")).to_have_count(0)
+            expect(dm_mobile_page.locator("main.main-shell > .campaign-control-hero")).to_be_visible()
+            expect(dm_mobile_page.locator("main.main-shell > .campaign-control-layout")).to_be_visible()
             mobile_metrics = dm_mobile_page.evaluate(
                 """() => {
                     const countGridTracks = (value) => {
