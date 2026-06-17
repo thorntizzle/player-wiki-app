@@ -67,6 +67,7 @@ import type {
   CharacterXianxiaInventoryItemPayload,
   CharacterXianxiaManualImportContext,
   CharacterXianxiaManualImportRow,
+  UserProfile,
   CharacterXianxiaNamedRecord,
   CharacterNotesPatchPayload,
   CharacterResourcePatchPayload,
@@ -330,6 +331,7 @@ interface ApiClientContextValue {
   authRequired: boolean;
   setAuthRequired: (required: boolean) => void;
   preferredFrontendMode: FrontendMode;
+  user: UserProfile | null;
 }
 
 type FrontendMode = "flask" | "gen2";
@@ -4387,7 +4389,7 @@ function AppShell() {
     }
   }, [meQuery.data?.preferences?.theme_key]);
 
-  const user = meQuery.data?.user;
+  const user = meQuery.data?.user ?? null;
   const preferredFrontendMode = normalizeFrontendMode(meQuery.data?.preferences?.frontend_mode);
   const campaign = campaignQuery.data?.campaign;
   const campaignPermissions = campaignQuery.data?.permissions;
@@ -4501,6 +4503,7 @@ function AppShell() {
         authRequired,
         setAuthRequired,
         preferredFrontendMode,
+        user,
       }}
     >
       <div className="session-shell">
@@ -4596,7 +4599,7 @@ function AppShell() {
 }
 
 function CampaignListPage() {
-  const { apiClient, setAuthRequired, preferredFrontendMode } = useApiClient();
+  const { apiClient, setAuthRequired, preferredFrontendMode, user } = useApiClient();
 
   const campaignRoleLabel = (value: string) =>
     value
@@ -4627,14 +4630,27 @@ function CampaignListPage() {
   const appError = getApiErrorMessage(appQuery.error);
   const campaignError = getApiErrorMessage(campaignsQuery.error);
   const campaigns: CampaignEntry[] = campaignsQuery.data?.campaigns ?? [];
+  const campaignPickerHeroEyebrow = user
+    ? "Campaign access"
+    : "Campaign wiki";
+  const campaignPickerHeadline = user
+    ? "Select a campaign."
+    : "Browse available campaigns.";
+  const campaignPickerLede = user
+    ? "Your account can see the campaigns listed here based on app-wide admin access, campaign membership, or public visibility."
+    : "Public campaign wiki pages are available without signing in. Use an account only when you need admin or character access.";
+  const emptyHeading = user ? "No campaign access assigned" : "No public campaigns available";
+  const emptyLede = user
+    ? "Your account is active, but it is not currently assigned to any campaigns."
+    : "There are currently no public campaign wiki pages to browse.";
 
   return (
     <>
       <section className="hero compact campaign-picker-hero">
-        <p className="eyebrow">Campaign access</p>
-        <h1>Select a campaign.</h1>
+        <p className="eyebrow">{campaignPickerHeroEyebrow}</p>
+        <h1>{campaignPickerHeadline}</h1>
         <p className="lede">
-          Your account can see the campaigns listed here based on app-wide admin access, campaign membership, or public visibility.
+          {campaignPickerLede}
         </p>
       </section>
       <ApiErrorNotice
@@ -4665,8 +4681,8 @@ function CampaignListPage() {
       </section>
       {!appQuery.isLoading && !campaignsQuery.isLoading && !campaigns.length && !campaignError ? (
         <section className="card auth-card campaign-picker-empty">
-          <h2>No campaign access assigned</h2>
-          <p>Your account is active, but it is not currently assigned to any campaigns.</p>
+          <h2>{emptyHeading}</h2>
+          <p>{emptyLede}</p>
         </section>
       ) : null}
     </>

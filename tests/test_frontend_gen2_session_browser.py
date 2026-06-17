@@ -752,8 +752,10 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
             browser = playwright.chromium.launch(headless=True)
             desktop_context = browser.new_context(viewport={"width": 1280, "height": 900})
             mobile_context = browser.new_context(viewport={"width": 390, "height": 800})
+            public_context = browser.new_context(viewport={"width": 1280, "height": 900})
             desktop_page = desktop_context.new_page()
             mobile_page = mobile_context.new_page()
+            public_page = public_context.new_page()
         except Exception as exc:
             pytest.skip(f"Playwright browser unavailable: {exc}")
 
@@ -858,6 +860,12 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
             expect(desktop_page.locator(".campaign-picker-hero .lede")).to_have_text(
                 "Your account can see the campaigns listed here based on app-wide admin access, campaign membership, or public visibility."
             )
+            public_page.goto(f"{base_url}/app-next/")
+            expect(public_page.locator(".campaign-picker-hero .eyebrow")).to_have_text("Campaign wiki")
+            expect(public_page.get_by_role("heading", name="Browse available campaigns.")).to_be_visible()
+            expect(public_page.locator(".campaign-picker-hero .lede")).to_have_text(
+                "Public campaign wiki pages are available without signing in. Use an account only when you need admin or character access."
+            )
             expect(desktop_page.locator("main > .panel")).to_have_count(0)
             expect(desktop_page.get_by_role("link", name="Open Campaign").first).to_have_attribute(
                 "href",
@@ -905,8 +913,10 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
         finally:
             desktop_page.close()
             mobile_page.close()
+            public_page.close()
             desktop_context.close()
             mobile_context.close()
+            public_context.close()
             browser.close()
 
 
