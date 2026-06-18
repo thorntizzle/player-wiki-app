@@ -1290,6 +1290,25 @@ def test_character_dnd_equipment_section_uses_flask_style_row_form_chrome() -> N
     section_end = source.index('{isDnd && activeCharacterSection === "inventory" ? (', section_start)
     section_markup = source[section_start:section_end]
 
+    summary_end = section_markup.index('className="detail-card character-edit-row"')
+    summary_markup = section_markup[:summary_end]
+
+    assert 'className="detail-grid"' in summary_markup
+    assert 'className="detail-card"' in summary_markup
+    assert 'className="stat-grid"' not in section_markup
+    assert '<h3>Attuned items</h3>' in summary_markup
+    assert '<h3>Equipped items</h3>' in summary_markup
+    assert '{equipmentState.attuned_count} / {equipmentState.max_attuned_items}' in summary_markup
+    assert '<strong>{equipmentState.equipped_count}</strong>' in summary_markup
+    assert (
+        'Attunement is separate from equipped state and usually has room for up to {equipmentState.max_attuned_items} items.'
+        in summary_markup
+    )
+    assert (
+        'Armor and magic items use equipped state; weapons also track an applicable wielding mode.'
+        in summary_markup
+    )
+
     assert 'className="equipment-state-grid"' in section_markup
     assert 'id={isCombatSurface ? "combat-character-equipment-state" : "character-equipment-state"}' in section_markup
     assert 'className="detail-card character-edit-row"' in section_markup

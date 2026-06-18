@@ -11018,19 +11018,29 @@ function CharacterPane({
                   <h2>Equipment</h2>
                 </div>
                 {equipmentState ? (
-                  <div className="stat-grid">
-                    <article>
-                      <strong>Attuned items</strong>
-                      <span>
-                        {equipmentState.attuned_count} / {equipmentState.max_attuned_items}
-                      </span>
+                  <div className="detail-grid">
+                    <article className="detail-card">
+                      <h3>Attuned items</h3>
+                      <p>
+                        <strong>
+                          {equipmentState.attuned_count} / {equipmentState.max_attuned_items}
+                        </strong>
+                      </p>
+                      <p className="meta">
+                        Attunement is separate from equipped state and usually has room for up to {equipmentState.max_attuned_items} items.
+                      </p>
                       {equipmentState.over_attunement_limit ? (
                         <p className="meta">This sheet is currently over the normal attunement limit.</p>
                       ) : null}
                     </article>
-                    <article>
-                      <strong>Equipped items</strong>
-                      <span>{equipmentState.equipped_count}</span>
+                    <article className="detail-card">
+                      <h3>Equipped items</h3>
+                      <p>
+                        <strong>{equipmentState.equipped_count}</strong>
+                      </p>
+                      <p className="meta">
+                        Armor and magic items use equipped state; weapons also track an applicable wielding mode.
+                      </p>
                     </article>
                   </div>
                 ) : null}
