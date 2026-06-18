@@ -563,6 +563,60 @@ def test_character_supported_form_action_chrome_in_source() -> None:
     assert "className=\"button button-secondary\"" not in level_up_markup
 
 
+def test_character_supported_hero_links_preserve_supported_nav_while_hiding_flask_fallbacks() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+
+    def component_source(component_name: str) -> str:
+        start = source.index(f"function {component_name}() {{")
+        end = source.find("\nfunction ", start + len(component_name) + 10)
+        if end == -1:
+            end = len(source)
+        return source[start:end]
+
+    def hero_section(component_name: str) -> str:
+        component = component_source(component_name)
+        hero_start = component.index('<section className="hero')
+        hero_end = component.index("</section>", hero_start) + len("</section>")
+        return component[hero_start:hero_end]
+
+    create_hero = hero_section("CharacterCreatePage")
+    assert "Flask create" not in create_hero
+    assert "Back to roster" in create_hero
+    assert "Import existing" in create_hero
+
+    manual_hero = hero_section("CharacterXianxiaManualImportPage")
+    assert "Flask import" not in manual_hero
+    assert "Back to roster" in manual_hero
+    assert "Import existing" not in manual_hero
+
+    editor_hero = hero_section("CharacterAdvancedEditorPage")
+    assert "Flask editor" not in editor_hero
+    assert re.search(r">\s*Back to sheet\s*</a>", editor_hero) is not None
+    assert '<span className="meta">' in editor_hero
+
+    progression_hero = hero_section("CharacterProgressionRepairPage")
+    assert "Flask repair" not in progression_hero
+    assert "Back to sheet" in progression_hero
+    assert '<p className="meta">' in progression_hero
+
+    retraining_hero = hero_section("CharacterRetrainingPage")
+    assert "Flask retraining" not in retraining_hero
+    assert "Back to sheet" in retraining_hero
+    assert "Advanced Editor" in retraining_hero
+
+    level_up_hero = hero_section("CharacterLevelUpPage")
+    assert "Flask level-up" not in level_up_hero
+    assert "Back to sheet" in level_up_hero
+
+    cultivation_hero = hero_section("CharacterCultivationPage")
+    assert "Flask Cultivation" not in cultivation_hero
+    assert "Back to sheet" in cultivation_hero
+    assert "Martial Arts" in cultivation_hero
+    assert "Techniques" in cultivation_hero
+    assert "Resources" in cultivation_hero
+    assert "Realm Ascension" in cultivation_hero
+
+
 def test_character_form_actions_do_not_convert_non_targeted_builder_rows() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
 

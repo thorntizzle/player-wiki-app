@@ -1044,11 +1044,6 @@ function CharacterCreatePage() {
               Back to roster
             </a>
           ) : null}
-          {data?.links.flask_create_url ? (
-            <a className="ghost-button" href={data.links.flask_create_url}>
-              Flask create
-            </a>
-          ) : null}
           {data?.links.gen2_import_xianxia_url ? (
             <a className="ghost-button" href={data.links.gen2_import_xianxia_url}>
               Import existing
@@ -1440,11 +1435,6 @@ function CharacterXianxiaManualImportPage() {
           {links?.gen2_roster_url ? (
             <a className="ghost-button" href={links.gen2_roster_url}>
               Back to roster
-            </a>
-          ) : null}
-          {links?.flask_import_xianxia_url ? (
-            <a className="ghost-button" href={links.flask_import_xianxia_url}>
-              Flask import
             </a>
           ) : null}
         </div>
@@ -1920,11 +1910,6 @@ function CharacterAdvancedEditorPage() {
               Back to sheet
             </a>
           ) : null}
-          {data?.links?.flask_advanced_editor_url ? (
-            <a className="ghost-button" href={data.links.flask_advanced_editor_url}>
-              Flask editor
-            </a>
-          ) : null}
           {classLevelText ? <span className="meta">{classLevelText}</span> : null}
         </div>
       </section>
@@ -2137,11 +2122,6 @@ function CharacterProgressionRepairPage() {
           {data?.links?.character_url ? (
             <a className="ghost-button" href={data.links.character_url}>
               Back to sheet
-            </a>
-          ) : null}
-          {data?.links?.flask_progression_repair_url ? (
-            <a className="ghost-button" href={data.links.flask_progression_repair_url}>
-              Flask repair
             </a>
           ) : null}
         </div>
@@ -2454,11 +2434,6 @@ function CharacterRetrainingPage() {
               Advanced Editor
             </a>
           ) : null}
-          {data?.links?.flask_retraining_url ? (
-            <a className="ghost-button" href={data.links.flask_retraining_url}>
-              Flask retraining
-            </a>
-          ) : null}
         </div>
       </section>
 
@@ -2662,11 +2637,6 @@ function CharacterLevelUpPage() {
           {data?.links?.character_url ? (
             <a className="ghost-button" href={data.links.character_url}>
               Back to sheet
-            </a>
-          ) : null}
-          {data?.links?.flask_level_up_url ? (
-            <a className="ghost-button" href={data.links.flask_level_up_url}>
-              Flask level-up
             </a>
           ) : null}
         </div>
@@ -3388,11 +3358,6 @@ function CharacterCultivationPage() {
           <a className="ghost-button" href="#xianxia-cultivation-realm-ascension">
             Realm Ascension
           </a>
-          {data?.links?.flask_cultivation_url ? (
-            <a className="ghost-button" href={data.links.flask_cultivation_url}>
-              Flask Cultivation
-            </a>
-          ) : null}
           {classLevelText ? <span className="meta">{classLevelText}</span> : null}
         </div>
       </section>
