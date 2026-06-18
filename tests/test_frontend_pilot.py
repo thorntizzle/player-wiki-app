@@ -820,6 +820,36 @@ def test_character_roster_page_copy_and_grid_class_parity_in_source() -> None:
     assert 'className="character-roster-grid"' not in roster_source
 
 
+def test_character_roster_heading_visibility_is_gated_by_create_or_unsupported_system_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+
+    roster_start = source.index("function CharacterRosterPage() {")
+    roster_end = source.index("function CharacterDetailPage()", roster_start)
+    roster_source = source[roster_start:roster_end]
+
+    assert re.search(
+        r"const shouldShowRosterToolsHeading\s*=\s*hasCreateCharacterLink \|\| data\?\.tools\?\.native_character_create_supported === false;",
+        roster_source,
+    ) is not None
+    assert re.search(
+        r"\{shouldShowRosterToolsHeading \? \(\s*<div className=\"section-heading\">",
+        roster_source,
+        re.S,
+    ) is not None
+    assert (
+        "Native character creation and progression stay hidden here for campaigns outside the current DND-5E in-app toolset."
+        in roster_source
+    )
+    assert (
+        "hasCreateCharacterLink ? \"Roster tools\" : \"Roster\"" in roster_source
+    )
+    assert re.search(
+        r'<section className="card search-card character-roster-tools">\s*<div className="section-heading">',
+        roster_source,
+        re.S,
+    ) is None
+
+
 def test_character_roster_card_meta_join_and_stats_divs_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
 

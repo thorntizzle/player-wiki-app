@@ -14874,6 +14874,8 @@ function CharacterRosterPage() {
     setSubmittedQuery(nextQuery);
   };
   const hasCreateCharacterLink = Boolean(data?.links?.create_character_url);
+  const shouldShowRosterToolsHeading =
+    hasCreateCharacterLink || data?.tools?.native_character_create_supported === false;
   const characterCreateLane = data?.tools?.character_create_lane;
   const rosterMeta = hasCreateCharacterLink
     ? characterCreateLane === "xianxia"
@@ -14896,22 +14898,24 @@ function CharacterRosterPage() {
       </section>
       <ApiErrorNotice isLoading={rosterQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       <section className="card search-card character-roster-tools">
-        <div className="section-heading">
-          <div>
-            <h2>{hasCreateCharacterLink ? "Roster tools" : "Roster"}</h2>
-            <p className="meta">{rosterMeta}</p>
+        {shouldShowRosterToolsHeading ? (
+          <div className="section-heading">
+            <div>
+              <h2>{hasCreateCharacterLink ? "Roster tools" : "Roster"}</h2>
+              <p className="meta">{rosterMeta}</p>
+            </div>
+            {data?.links?.create_character_url ? (
+              <a className="button-link" href={data.links.create_character_url}>
+                Create character
+              </a>
+            ) : null}
+            {data?.links?.import_xianxia_url ? (
+              <a className="button-link" href={data.links.import_xianxia_url}>
+                Import existing character
+              </a>
+            ) : null}
           </div>
-          {data?.links?.create_character_url ? (
-            <a className="button-link" href={data.links.create_character_url}>
-              Create character
-            </a>
-          ) : null}
-          {data?.links?.import_xianxia_url ? (
-            <a className="button-link" href={data.links.import_xianxia_url}>
-              Import existing character
-            </a>
-          ) : null}
-        </div>
+        ) : null}
         <form className="search-form character-roster-search" onSubmit={submitSearch}>
           <input
             type="search"
