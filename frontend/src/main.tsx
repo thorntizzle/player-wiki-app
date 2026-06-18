@@ -9308,31 +9308,42 @@ function CharacterPane({
             </section>
 
             {isDnd && !isReadSurface ? (
-              <div className="section-tabs" role="tablist" aria-label="Session character sections">
-                {dndVisibleCharacterSections.map((section) => (
-                  <button
-                    key={section.id}
-                    type="button"
-                    className={activeCharacterSection === section.id ? "active" : ""}
-                    onClick={() => selectCharacterSection(section.id)}
-                  >
-                    {section.label}
-                  </button>
-                ))}
-              </div>
+              <nav className="combat-workspace-nav session-character-section-nav" aria-label="Session character sections">
+                {dndVisibleCharacterSections.map((section) => {
+                  const isActive = activeCharacterSection === section.id;
+                  return (
+                    <button
+                      key={section.id}
+                      type="button"
+                      className={`ghost-button combat-workspace-button${isActive ? " combat-workspace-button--active" : ""}`}
+                      aria-pressed={isActive}
+                      aria-current={isActive ? "page" : undefined}
+                      onClick={() => selectCharacterSection(section.id)}
+                    >
+                      {section.label}
+                    </button>
+                  );
+                })}
+              </nav>
             ) : null}
             {isXianxia && !isReadSurface ? (
-              <div className="section-tabs" role="tablist" aria-label="Xianxia session character sections">
-                {xianxiaVisibleCharacterSections.map((section) => (
-                  <button
-                    key={section.id}
-                    type="button"
-                    className={activeCharacterSection === section.id ? "active" : ""}
-                    onClick={() => selectCharacterSection(section.id)}
-                  >
-                    {section.label}
-                  </button>
-                ))}
+              <div className="character-subpage-nav-card">
+                <nav className="character-subpage-nav" aria-label="Character subpages">
+                  {xianxiaVisibleCharacterSections.map((section) => {
+                    const isActive = activeCharacterSection === section.id;
+                    return (
+                      <button
+                        key={section.id}
+                        type="button"
+                        className={isActive ? "button-link" : "ghost-button"}
+                        aria-current={isActive ? "page" : undefined}
+                        onClick={() => selectCharacterSection(section.id)}
+                      >
+                        {section.label}
+                      </button>
+                    );
+                  })}
+                </nav>
               </div>
             ) : null}
 

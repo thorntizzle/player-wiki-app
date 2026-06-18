@@ -464,13 +464,31 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(embedded_character_shell.locator("section.card.session-card > .panel-header")).to_have_count(0)
             expect(embedded_character_shell.locator("ul.rest-preview-list")).to_have_count(1)
             expect(embedded_character_shell.locator("section.card.session-card .hero-actions .ghost-button")).to_have_count(2)
-            character_nav = embedded_character_shell.locator("nav.character-subpage-nav[aria-label='Character subpages']")
+            expect(embedded_character_shell.locator(".section-tabs")).to_have_count(0)
+            character_nav = embedded_character_shell.locator("nav.combat-workspace-nav.session-character-section-nav")
+            expect(character_nav).to_be_visible()
+            expect(character_nav.locator("button[aria-current='page']")).to_have_count(1)
+            expect(character_nav.get_by_role("button", name="Overview")).to_have_class(
+                re.compile(r"\bcombat-workspace-button--active\b")
+            )
+            expect(character_nav.get_by_role("button", name="Overview")).to_have_attribute("aria-pressed", "true")
+            expect(character_nav.get_by_role("button", name="Overview")).to_have_attribute("aria-current", "page")
+            expect(character_nav.get_by_role("button", name="Spells")).to_have_class(re.compile(r"\bcombat-workspace-button\b"))
+            expect(character_nav.get_by_role("button", name="Spells")).to_have_class(re.compile(r"\bghost-button\b"))
+            xianxia_character_nav = embedded_character_shell.locator("div.character-subpage-nav-card > nav.character-subpage-nav")
+            if xianxia_character_nav.count() > 0:
+                expect(embedded_character_shell.locator("div.character-subpage-nav-card")).to_be_visible()
+                expect(xianxia_character_nav).to_have_attribute("aria-label", "Character subpages")
+                quick_ref_button = xianxia_character_nav.get_by_role("button", name="Quick Reference")
+                assert quick_ref_button.count() == 1
+                expect(quick_ref_button).to_have_class(re.compile(r"\bbutton-link\b"))
+                expect(quick_ref_button).to_have_attribute("aria-current", "page")
             for section_name, section_id in (
                 ("Spells", "session-spell-slots"),
                 ("Equipment", "character-equipment"),
                 ("Inventory", "session-inventory"),
             ):
-                section_link = character_nav.get_by_role("link", name=section_name)
+                section_link = character_nav.get_by_role("button", name=section_name)
                 if section_link.count() > 0:
                     section_link.click()
                     expect(embedded_character_shell.locator(f"section#{section_id}")).to_be_visible(timeout=10000)
@@ -1570,6 +1588,18 @@ def test_gen2_combat_browser_opens_player_workspace_and_preserves_focused_draft(
             expect(combat_character_header.get_by_role("link", name="Open full sheet")).to_be_visible()
             expect(combat_character_header.locator(".article-actions")).to_have_count(0)
             expect(combat_character_header.locator(".button.button-secondary")).to_have_count(0)
+            expect(workspace.locator(".section-tabs")).to_have_count(0)
+            combat_character_nav = workspace.locator("nav.combat-workspace-nav.session-character-section-nav")
+            expect(combat_character_nav).to_be_visible()
+            expect(combat_character_nav.locator("button[aria-current='page']")).to_have_count(1)
+            expect(combat_character_nav.get_by_role("button", name="Overview")).to_have_attribute("aria-current", "page")
+            expect(combat_character_nav.get_by_role("button", name="Overview")).to_have_class(re.compile(r"\bcombat-workspace-button--active\b"))
+            expect(combat_character_nav.get_by_role("button", name="Overview")).to_have_attribute("aria-pressed", "true")
+            expect(combat_character_nav.get_by_role("button", name="Spells")).to_have_class(re.compile(r"\bcombat-workspace-button\b"))
+            expect(combat_character_nav.get_by_role("button", name="Spells")).to_have_class(re.compile(r"\bghost-button\b"))
+            if combat_character_nav.get_by_role("button", name="Equipment").count() > 0:
+                combat_character_nav.get_by_role("button", name="Equipment").click()
+                expect(combat_character_nav.get_by_role("button", name="Equipment")).to_have_attribute("aria-current", "page")
             _assert_character_detail_trigger_classes(workspace.locator("article.card.character-sheet.session-character-sheet"))
 
             carousel.get_by_role("button", name=re.compile(r"Clockwork Hound", re.I)).click()
