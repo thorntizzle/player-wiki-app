@@ -8097,6 +8097,9 @@ function CharacterPane({
   const canManagePortrait = isReadSurface && canEdit;
   const surfaceMetaLabel = isReadSurface ? "Character sheet" : isCombatSurface ? "Combat Character" : "Session Character";
   const surfaceHeading = isReadSurface ? "Character Sheet" : isCombatSurface ? "Combat Character" : "Session Character";
+  const embeddedHeaderDetails = selected
+    ? [selected.class_level_text, selected.species, selected.background].filter((value) => Boolean(value))
+    : [];
 
   useEffect(() => {
     if (isXianxia && activeCharacterSection === "overview") {
@@ -8916,12 +8919,16 @@ function CharacterPane({
     window.history.replaceState(null, "", nextUrl);
   };
 
-  const CharacterShell = isReadSurface ? "article" : "section";
+  const CharacterShell = "article";
 
   return (
     <div className={isReadSurface ? "page-layout character-layout character-read-content" : "session-pane-content"}>
       <CharacterShell
-        className={isReadSurface ? "article card character-sheet character-read-shell" : "panel"}
+        className={
+          isReadSurface
+            ? "article card character-sheet character-read-shell"
+            : "article card character-sheet session-character-sheet"
+        }
         data-character-read-shell-root={isReadSurface ? "" : undefined}
         data-character-read-shell-page={isReadSurface ? activeCharacterSection || "overview" : undefined}
         data-character-read-shell-mode={isReadSurface ? "read" : undefined}
@@ -8941,30 +8948,33 @@ function CharacterPane({
             </div>
           </header>
         ) : (
-          <div className="panel-header">
-            <div>
-              <p className="meta">{surfaceMetaLabel}</p>
-              <h2>{surfaceHeading}</h2>
+          <header className="character-header">
+            <div className="character-header__top">
+              <div className="character-header__identity">
+                <p className="eyebrow">{surfaceMetaLabel}</p>
+                <h2>{selected?.name || surfaceHeading}</h2>
+                {embeddedHeaderDetails.length ? <p className="lede">{embeddedHeaderDetails.join(" | ")}</p> : null}
+              </div>
+              <div className="character-header__actions article-actions">
+                {isCombatSurface ? (
+                  <a href={`/campaigns/${encodeURIComponent(campaignSlug)}/combat`} className="button button-secondary">
+                    Flask Combat
+                  </a>
+                ) : (
+                  <a
+                    href={
+                      selectedSlug
+                        ? `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters/${encodeURIComponent(selectedSlug)}`
+                        : `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters`
+                    }
+                    className="button button-secondary"
+                  >
+                    Character route
+                  </a>
+                )}
+              </div>
             </div>
-            <div className="article-actions">
-              {isCombatSurface ? (
-                <a href={`/campaigns/${encodeURIComponent(campaignSlug)}/combat`} className="button button-secondary">
-                  Flask Combat
-                </a>
-              ) : (
-                <a
-                  href={
-                    selectedSlug
-                      ? `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters/${encodeURIComponent(selectedSlug)}`
-                      : `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters`
-                  }
-                  className="button button-secondary"
-                >
-                  Character route
-                </a>
-              )}
-            </div>
-          </div>
+          </header>
         )}
 
         <div className={isReadSurface ? "character-subpage-nav-card character-selector-card" : undefined}>

@@ -287,6 +287,13 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))
             expect(page.get_by_role("heading", name="Session Character")).to_be_visible(timeout=10000)
             expect(page.get_by_label("Character", exact=True)).to_be_visible()
+            embedded_character_shell = page.locator(".session-pane-content > article.card.character-sheet.session-character-sheet")
+            expect(embedded_character_shell).to_be_visible()
+            expect(embedded_character_shell.locator("> header.character-header h2")).to_be_visible()
+            expect(embedded_character_shell.locator("> header.character-header h1")).to_have_count(0)
+            expect(embedded_character_shell.locator("> .panel-header")).to_have_count(0)
+            assert page.locator(".session-pane-content > .panel").count() == 0
+            expect(page.locator(".session-pane-content > .panel-header")).to_have_count(0)
         finally:
             page.close()
             browser.close()
