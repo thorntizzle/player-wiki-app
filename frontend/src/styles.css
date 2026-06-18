@@ -3803,6 +3803,11 @@ textarea {
   margin-bottom: 0;
 }
 
+.combat-target-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
 .combat-selected-snapshot__stats {
   grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
 }

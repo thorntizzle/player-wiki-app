@@ -15334,16 +15334,18 @@ function CombatPage() {
           <h2>{selectedPlayerCharacter?.name ?? "No tracked PC in combat"}</h2>
         </div>
         {payload?.player_character_targets.length ? (
-          <div className="button-row">
+          <div className="combat-target-list">
             {payload.player_character_targets.map((target) => (
-              <button
-                type="button"
-                key={target.combatant_id}
-                className={target.is_selected ? "tab-button active" : "tab-button"}
-                onClick={() => selectCombatant(target.combatant_id)}
-              >
-                {target.name}
-              </button>
+              <React.Fragment key={target.combatant_id}>
+                <button
+                  type="button"
+                  className={target.is_selected ? "button-link" : "ghost-button"}
+                  onClick={() => selectCombatant(target.combatant_id)}
+                >
+                  {target.name}
+                </button>
+                {target.subtitle ? <p className="meta">{target.subtitle}</p> : null}
+              </React.Fragment>
             ))}
           </div>
         ) : null}
@@ -15356,14 +15358,13 @@ function CombatPage() {
           onSelectedCharacterChange={selectCharacterTarget}
         />
       ) : (
-        <article className="card">
-          <p>No assigned player character is currently available in this tracker.</p>
-          {payload?.links?.flask_combat_url ? (
-            <a className="button button-secondary" href={payload.links.flask_combat_url}>
-              Open Flask Combat
-            </a>
-          ) : null}
-        </article>
+        <section className="card auth-card">
+          <h2>No tracked player character available</h2>
+          <p>
+            There is not currently a tracked player character you can open from combat.
+            Once a DM adds your character to the tracker, it will appear here.
+          </p>
+        </section>
       )}
     </section>
   );

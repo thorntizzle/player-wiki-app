@@ -195,6 +195,32 @@ def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
     assert '<div className="button-row">' not in turn_focus_markup
 
 
+def test_combat_player_workspace_target_chrome_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    workspace_match = re.search(
+        r"const renderPlayerWorkspace = \(\) => \([\s\S]*?\n  \);(?=\n\n  return \()",
+        source,
+    )
+    assert workspace_match is not None
+    workspace_markup = workspace_match.group(0)
+
+    assert 'className="combat-target-list"' in workspace_markup
+    assert 'className={target.is_selected ? "button-link" : "ghost-button"}' in workspace_markup
+    assert 'onClick={() => selectCombatant(target.combatant_id)}' in workspace_markup
+    assert '<p className="meta">{target.subtitle}' in workspace_markup
+
+    assert 'className="tab-button' not in workspace_markup
+    assert 'className="button-row"' not in workspace_markup
+    assert "Open Flask Combat" not in workspace_markup
+    assert 'className="button button-secondary"' not in workspace_markup
+    assert '<section className="card auth-card">' in workspace_markup
+    assert "<h2>No tracked player character available</h2>" in workspace_markup
+    assert (
+        "There is not currently a tracked player character you can open from combat."
+        in workspace_markup
+    )
+
+
 def test_combat_conditions_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     combat_page_start = source.index("function CombatPage() {")
