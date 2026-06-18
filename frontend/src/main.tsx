@@ -7197,23 +7197,29 @@ function SessionPaneWikiLookup({
 
   return (
     <article className={mergedClassName}>
-      {showHeader ? <h3>Player wiki lookup</h3> : null}
-      <form onSubmit={onSearch} className="wiki-search">
-        <label htmlFor="wiki-search-query" className="chat-label">
-          Search published pages / systems
-        </label>
-        <div className="search-row">
+      {showHeader ? <h3>Wiki article lookup</h3> : null}
+      {showHeader ? (
+        <p className="meta">
+          Search player-visible wiki articles and read them here without leaving the live session page. Type at least 2 letters to
+          search.
+        </p>
+      ) : null}
+      <form onSubmit={onSearch} className="stack-form">
+        <label className="field">
+          <span>Search</span>
           <input
+            type="search"
+            autoComplete="off"
             id="wiki-search-query"
             value={query}
             onChange={(event: ChangeEvent<HTMLInputElement>) => {
               setQuery(event.currentTarget.value);
               clearStatus();
             }}
-            placeholder="harbor, rules, artifact"
+            placeholder="title, section, or keyword"
           />
-          <button type="submit">Search</button>
-        </div>
+        </label>
+        <button type="submit">Search</button>
       </form>
       {queryStatus ? <p className="status status-neutral">{queryStatus}</p> : null}
       {results.length ? (
@@ -9077,7 +9083,10 @@ function CharacterPane({
           </header>
         )}
 
-        <div className={isReadSurface ? "character-subpage-nav-card" : undefined} data-character-subpage-nav-card={isReadSurface ? "" : undefined}>
+        <div
+          className={isReadSurface ? "character-subpage-nav-card" : "character-selector-card"}
+          data-character-subpage-nav-card={isReadSurface ? "" : undefined}
+        >
           {isReadSurface ? (
             <nav className="character-subpage-nav" aria-label="Character subpages">
               {visibleCharacterSections.map((section) => (
@@ -9095,22 +9104,22 @@ function CharacterPane({
             </nav>
           ) : (
             <>
-              <label className="chat-label" htmlFor="character-selector">
-                Character
+              <label className="field" htmlFor="character-selector">
+                <span>Character</span>
+                <select
+                  id="character-selector"
+                  value={selectedSlug || ""}
+                  onChange={(event) => {
+                    selectCharacter(event.currentTarget.value || null);
+                  }}
+                >
+                  {characterList.map((item) => (
+                    <option key={item.slug} value={item.slug}>
+                      {item.name} ({item.slug})
+                    </option>
+                  ))}
+                </select>
               </label>
-              <select
-                id="character-selector"
-                value={selectedSlug || ""}
-                onChange={(event) => {
-                  selectCharacter(event.currentTarget.value || null);
-                }}
-              >
-                {characterList.map((item) => (
-                  <option key={item.slug} value={item.slug}>
-                    {item.name} ({item.slug})
-                  </option>
-                ))}
-              </select>
             </>
           )}
         </div>

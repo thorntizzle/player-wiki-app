@@ -2,6 +2,12 @@ from pathlib import Path
 import re
 
 
+def _extract_component_source(source: str, start_marker: str, end_marker: str) -> str:
+    start = source.index(start_marker)
+    end = source.index(end_marker, start)
+    return source[start:end]
+
+
 def test_gen2_topbar_account_controls_use_flask_chrome_classes_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     account_row = re.search(r'<div className="account-row">([\s\S]*?)</div>', source)
@@ -101,6 +107,52 @@ def test_frontend_pilot_without_build_returns_not_found(client, app, tmp_path):
     app.config["APP_NEXT_DIST_DIR"] = tmp_path / "missing-frontend-dist"
     response = client.get("/app-next/")
     assert response.status_code == 404
+
+
+def test_session_pane_wiki_lookup_uses_flask_style_stack_form_chrome_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    wiki_lookup_source = _extract_component_source(
+        source,
+        "function SessionPaneWikiLookup({",
+        "function readBinaryAsBase64",
+    )
+
+    assert 'className="stack-form"' in wiki_lookup_source
+    assert "<span>Search</span>" in wiki_lookup_source
+    assert '<label className="field">' in wiki_lookup_source
+    assert 'type="search"' in wiki_lookup_source
+    assert 'autoComplete="off"' in wiki_lookup_source
+    assert 'placeholder="title, section, or keyword"' in wiki_lookup_source
+    assert "Wiki article lookup" in wiki_lookup_source
+    assert (
+        "Search player-visible wiki articles and read them here without leaving the live session page." in wiki_lookup_source
+    )
+    assert re.search(r"Type at least 2 letters to\s*search\.", wiki_lookup_source) is not None
+    assert "Search published pages / systems" not in wiki_lookup_source
+    assert 'className="wiki-search"' not in wiki_lookup_source
+    assert 'className="search-row"' not in wiki_lookup_source
+    assert "className=\"chat-label\"" not in wiki_lookup_source
+
+
+def test_character_pane_non_read_selector_uses_flask_style_field_chrome_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    character_pane_source = _extract_component_source(
+        source,
+        "function CharacterPane({",
+        "function DmPane({",
+    )
+    selector_class_start = character_pane_source.index('className={isReadSurface ? "character-subpage-nav-card" : "character-selector-card"}')
+    selector_start = character_pane_source.rfind("<div", 0, selector_class_start)
+    selector_end = character_pane_source.index("{listQuery.isLoading ? <p className=\"status status-neutral\">Loading characters...</p> : null}", selector_start)
+    selector_markup = character_pane_source[selector_start:selector_end]
+
+    assert 'className={isReadSurface ? "character-subpage-nav-card" : "character-selector-card"}' in selector_markup
+    assert "data-character-subpage-nav-card={isReadSurface ? \"\" : undefined}" in selector_markup
+    assert '<label className="field" htmlFor="character-selector">' in selector_markup
+    assert "<span>Character</span>" in selector_markup
+    assert "id=\"character-selector\"" in selector_markup
+    assert "selectCharacter(event.currentTarget.value || null)" in selector_markup
+    assert "className=\"chat-label\"" not in selector_markup
 
 
 def test_admin_user_detail_action_button_chrome_in_source() -> None:
