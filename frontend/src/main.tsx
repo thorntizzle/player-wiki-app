@@ -5680,91 +5680,76 @@ function CampaignControlPage() {
       <ApiErrorNotice isLoading={controlQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
 
       {data ? (
-        <div className="page-layout campaign-control-layout">
-          <article className="card campaign-control-panel">
-            <div className="section-heading">
-              <div>
-                <h2>Visibility settings</h2>
-                <p className="meta">
-                  The campaign setting acts as the floor; each section can only become as open as that floor allows.
-                </p>
-              </div>
-            </div>
-            <form className="stack-form campaign-control-form" onSubmit={handleSubmit}>
-              <div className="campaign-control-grid">
-                {data.visibility_rows.map((row) => {
-                  const fieldId = `campaign-control-${row.scope}`;
-                  return (
-                    <article className="campaign-control-row" key={row.scope}>
-                      <div className="campaign-control-row__header">
-                        <label className="campaign-control-row__label" htmlFor={fieldId}>
-                          {row.label}
-                        </label>
-                        <select
-                          id={fieldId}
-                          value={draftVisibility[row.scope] || row.selected_visibility}
-                          onChange={(event: ChangeEvent<HTMLSelectElement>) => handleVisibilityChange(row.scope, event.currentTarget.value)}
-                        >
-                          {row.choices.map((choice) => (
-                            <option value={choice.value} key={`${row.scope}-${choice.value}`}>
-                              {choice.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="campaign-control-row__meta">
-                        <p className="meta">Effective visibility: {row.effective_visibility_label}</p>
-                        <p className="meta">
-                          Configured visibility:{" "}
-                          {row.configured_visibility_label ? row.configured_visibility_label : "Not configured"}
-                        </p>
-                        <p className="meta">Default visibility: {row.default_visibility_label}</p>
-                      </div>
-                      {row.is_overridden_by_campaign ? (
-                        <p className="meta">The campaign-level visibility is currently more private than this section setting.</p>
-                      ) : null}
-                    </article>
-                  );
-                })}
-              </div>
-
-              <div className="hero-actions">
-                <button type="submit" className="button-link" disabled={saveVisibility.isPending || isUnchanged}>
-                  {saveVisibility.isPending ? "Saving..." : "Save visibility"}
-                </button>
-              </div>
+        <div className="page-layout">
+          <section className="article card">
+            <h2>Visibility settings</h2>
+            <form className="stack-form" onSubmit={handleSubmit}>
+              {data.visibility_rows.map((row) => {
+                const fieldId = `campaign-control-${row.scope}`;
+                return (
+                  <React.Fragment key={row.scope}>
+                    <label className="field" htmlFor={fieldId}>
+                      <span>{row.label}</span>
+                      <select
+                        id={fieldId}
+                        name={`${row.scope}_visibility`}
+                        value={draftVisibility[row.scope] || row.selected_visibility}
+                        onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                          handleVisibilityChange(row.scope, event.currentTarget.value)
+                        }
+                      >
+                        {row.choices.map((choice) => (
+                          <option value={choice.value} key={`${row.scope}-${choice.value}`}>
+                            {choice.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <p className="meta">
+                      {row.configured_visibility_label ? (
+                        <>
+                          Effective visibility: {row.effective_visibility_label} | configured: {row.configured_visibility_label}
+                        </>
+                      ) : (
+                        <>Effective visibility: {row.effective_visibility_label} | using default visibility</>
+                      )}
+                    </p>
+                    {row.is_overridden_by_campaign ? (
+                      <p className="meta">The campaign-level visibility is currently more private than this section setting.</p>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })}
+              <button type="submit" disabled={saveVisibility.isPending || isUnchanged}>
+                {saveVisibility.isPending ? "Saving..." : "Save visibility"}
+              </button>
               {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
               {saveError ? <p className="status status-error">{saveError}</p> : null}
             </form>
-          </article>
+          </section>
 
-          <aside className="sidebar campaign-control-sidebar">
-            <article className="card sidebar-card session-sidebar-card">
-              <div className="section-heading">
-                <div>
-                  <h2>Visibility rules</h2>
-                  <p className="meta">These labels match the Campaign Control panel and campaign access checks.</p>
-                </div>
-              </div>
-              <div className="reference-stack">
-                {data.rules.map((rule) => (
-                  <article className="detail-card help-detail-card" key={rule.label}>
-                    <h3>{rule.label}</h3>
-                    <p className="meta">{rule.description}</p>
-                  </article>
-                ))}
-              </div>
-            </article>
+          <aside className="sidebar">
+            <section className="card sidebar-card">
+              <h2>Visibility rules</h2>
+              {data.rules.map((rule) => (
+                <p className="meta" key={rule.label}>
+                  {rule.label}: {rule.description}
+                </p>
+              ))}
+            </section>
 
-            <article className="card sidebar-card session-sidebar-card">
-              <div className="section-heading">
-                <div>
-                  <h2>Notes</h2>
-                  <p className="meta">Changing visibility does not rewrite content; it only changes who can see routes.</p>
-                </div>
-              </div>
-              <HelpList items={data.notes} emptyText="No additional visibility notes are available." />
-            </article>
+            <section className="card sidebar-card">
+              <h2>Notes</h2>
+              {data.notes.length ? (
+                data.notes.map((note) => (
+                  <p className="meta" key={note}>
+                    {note}
+                  </p>
+                ))
+              ) : (
+                <p className="meta">No additional visibility notes are available.</p>
+              )}
+            </section>
           </aside>
         </div>
       ) : null}

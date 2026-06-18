@@ -1432,62 +1432,6 @@ a:hover {
   border-top: 1px solid var(--border);
 }
 
-.campaign-control-form,
-.campaign-control-sidebar {
-  display: grid;
-  gap: 1rem;
-}
-
-.campaign-control-panel {
-  display: grid;
-  gap: 1rem;
-}
-
-.campaign-control-layout {
-  display: grid;
-  gap: 1rem;
-  grid-template-columns: minmax(0, 2fr) minmax(16rem, 0.8fr);
-  align-items: start;
-}
-
-.campaign-control-grid {
-  display: grid;
-  gap: 0.6rem;
-}
-
-.campaign-control-row {
-  background: var(--surface-soft);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  display: grid;
-  gap: 0.5rem;
-  padding: 0.7rem 0.8rem;
-}
-
-.campaign-control-row__header {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  justify-content: space-between;
-}
-
-.campaign-control-row__header select {
-  min-width: 10rem;
-  width: 10.5rem;
-}
-
-.campaign-control-row__label {
-  font-size: 0.875rem;
-  color: var(--muted);
-  font-weight: 700;
-  margin: 0;
-}
-
-.campaign-control-row__meta {
-  display: grid;
-  gap: 0.35rem;
-}
-
 .campaign-help-main,
 .campaign-help-sidebar,
 .campaign-help-surface,
@@ -1535,12 +1479,6 @@ a:hover {
   display: grid;
   gap: 0.85rem;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-}
-
-.campaign-control-sidebar .help-detail-card,
-.campaign-control-sidebar .detail-card.help-detail-card {
-  padding: 0.72rem;
-  gap: 0.35rem;
 }
 
 .help-detail-card,
@@ -4145,8 +4083,7 @@ textarea {
   .wiki-article-page,
   .character-authoring-layout,
   .character-layout,
-  .systems-browse-grid,
-  .campaign-control-layout {
+  .systems-browse-grid {
     grid-template-columns: 1fr;
   }
 
@@ -4242,15 +4179,6 @@ textarea {
 
   .combat-carousel-track {
     grid-auto-columns: minmax(190px, 82vw);
-  }
-
-  .campaign-control-row__header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .campaign-control-row__header select {
-    width: 100%;
   }
 
   .admin-layout {

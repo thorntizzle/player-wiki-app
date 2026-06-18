@@ -408,11 +408,52 @@ def test_campaign_control_page_cleanup_removes_flask_control_fallback_link() -> 
     control_markup = source[control_start:control_end]
 
     assert "Flask Control" not in control_markup
+    assert "Flask Control panel" not in control_markup
+    assert "className=\"page-layout\"" in control_markup
+    assert "className=\"article card\"" in control_markup
+    assert "className=\"stack-form\"" in control_markup
+    assert "className=\"field\"" in control_markup
+    assert 'name={`${row.scope}_visibility`}' in control_markup
     assert "Save visibility" in control_markup
+    assert "using default visibility" in control_markup
     assert "statusMessage ? <p className=\"status status-neutral\">{statusMessage}</p> : null" in control_markup
     assert "saveError ? <p className=\"status status-error\">{saveError}</p> : null" in control_markup
-    assert "These labels match the Campaign Control panel and campaign access checks." in control_markup
+    assert "className=\"button-link\"" not in control_markup
+    assert "className=\"hero-actions\"" not in control_markup
+    assert "campaign-control-layout" not in control_markup
+    assert "campaign-control-form" not in control_markup
+    assert "campaign-control-grid" not in control_markup
+    assert "campaign-control-row" not in control_markup
+    assert "campaign-control-sidebar" not in control_markup
+    assert "session-sidebar-card" not in control_markup
+    assert "reference-stack" not in control_markup
+    assert "help-detail-card" not in control_markup
     assert "Flask Control panel" not in control_markup
+    assert "configured: {row.configured_visibility_label}" in control_markup
+    assert "using default visibility" in control_markup
+    assert re.search(
+        r'\{row\.configured_visibility_label \?\s*\(\s*<>\s*Effective visibility: \{row\.effective_visibility_label\} \| configured: \{row\.configured_visibility_label\}',
+        control_markup,
+        flags=re.MULTILINE | re.DOTALL,
+    ) is not None
+    assert re.search(
+        r'\(\s*<>\s*Effective visibility: \{row\.effective_visibility_label\} \| using default visibility</>\s*\)',
+        control_markup,
+        flags=re.MULTILINE | re.DOTALL,
+    ) is not None
+    assert "{rule.label}: {rule.description}" in control_markup
+
+    source_css = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+    assert ".campaign-control-layout" not in source_css
+    assert ".campaign-control-panel" not in source_css
+    assert ".campaign-control-form" not in source_css
+    assert ".campaign-control-sidebar" not in source_css
+    assert ".campaign-control-grid" not in source_css
+    assert ".campaign-control-row" not in source_css
+    assert ".campaign-control-row__header" not in source_css
+    assert ".campaign-control-row__label" not in source_css
+    assert ".campaign-control-row__meta" not in source_css
+    assert ".campaign-control-hero" in source_css
 
 
 def test_account_settings_page_removes_flask_account_fallback_link() -> None:
