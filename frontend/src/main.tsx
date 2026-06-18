@@ -8131,6 +8131,24 @@ function CharacterPane({
   const xianxiaVisibleCharacterSections = canUseControls
     ? [...xianxiaCharacterSections, { id: "controls" as CharacterSection, label: "Controls" }]
     : xianxiaCharacterSections;
+  const visibleCharacterSections = isDnd ? dndVisibleCharacterSections : xianxiaVisibleCharacterSections;
+  const readSurfaceSectionBaseUrl = selectedSlug
+    ? `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters/${encodeURIComponent(selectedSlug)}`
+    : "";
+  const readSurfaceDefaultSection = isXianxia ? "quick-reference" : "overview";
+  const readSurfaceSectionUrl = (section: CharacterSection) => {
+    if (section === readSurfaceDefaultSection) {
+      return readSurfaceSectionBaseUrl;
+    }
+    return `${readSurfaceSectionBaseUrl}?page=${encodeURIComponent(section)}`;
+  };
+  const handleReadSurfaceSectionNavClick = (section: CharacterSection) => (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!selectedSlug) {
+      return;
+    }
+    event.preventDefault();
+    selectCharacterSection(section);
+  };
 
   const handleMutationSuccess = (response: { character: CharacterRecord }, message: string) => {
     if (selectedSlug) {
@@ -9021,23 +9039,42 @@ function CharacterPane({
           </header>
         )}
 
-        <div className={isReadSurface ? "character-subpage-nav-card character-selector-card" : undefined}>
-          <label className="chat-label" htmlFor="character-selector">
-            Character
-          </label>
-          <select
-            id="character-selector"
-            value={selectedSlug || ""}
-            onChange={(event) => {
-              selectCharacter(event.currentTarget.value || null);
-            }}
-          >
-            {characterList.map((item) => (
-              <option key={item.slug} value={item.slug}>
-                {item.name} ({item.slug})
-              </option>
-            ))}
-          </select>
+        <div className={isReadSurface ? "character-subpage-nav-card" : undefined} data-character-subpage-nav-card={isReadSurface ? "" : undefined}>
+          {isReadSurface ? (
+            <nav className="character-subpage-nav" aria-label="Character subpages">
+              {visibleCharacterSections.map((section) => (
+                <a
+                  key={section.id}
+                  href={readSurfaceSectionUrl(section.id)}
+                  className={activeCharacterSection === section.id ? "button-link" : "ghost-button"}
+                  data-character-read-subpage-link
+                  data-character-read-target-subpage={section.id}
+                  onClick={handleReadSurfaceSectionNavClick(section.id)}
+                >
+                  {section.label}
+                </a>
+              ))}
+            </nav>
+          ) : (
+            <>
+              <label className="chat-label" htmlFor="character-selector">
+                Character
+              </label>
+              <select
+                id="character-selector"
+                value={selectedSlug || ""}
+                onChange={(event) => {
+                  selectCharacter(event.currentTarget.value || null);
+                }}
+              >
+                {characterList.map((item) => (
+                  <option key={item.slug} value={item.slug}>
+                    {item.name} ({item.slug})
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
         </div>
 
         {listQuery.isLoading ? <p className="status status-neutral">Loading characters...</p> : null}
@@ -9266,7 +9303,7 @@ function CharacterPane({
               ) : null}
             </section>
 
-            {isDnd ? (
+            {isDnd && !isReadSurface ? (
               <div className="section-tabs" role="tablist" aria-label="Session character sections">
                 {dndVisibleCharacterSections.map((section) => (
                   <button
@@ -9280,7 +9317,7 @@ function CharacterPane({
                 ))}
               </div>
             ) : null}
-            {isXianxia ? (
+            {isXianxia && !isReadSurface ? (
               <div className="section-tabs" role="tablist" aria-label="Xianxia session character sections">
                 {xianxiaVisibleCharacterSections.map((section) => (
                   <button

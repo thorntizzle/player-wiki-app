@@ -3170,6 +3170,11 @@ textarea {
   box-shadow: none;
 }
 
+.character-read-content .character-subpage-nav-card {
+  max-width: 100%;
+  width: 100%;
+}
+
 .character-read-content .character-summary h3 {
   margin: 0.1rem 0 0.35rem;
   font-size: clamp(1.7rem, 3vw, 2.6rem);

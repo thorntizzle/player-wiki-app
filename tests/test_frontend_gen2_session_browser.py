@@ -2142,7 +2142,7 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             )
             expect(page.get_by_role("heading", level=1, name="Arden March", exact=True)).to_be_visible(timeout=10000)
 
-            page.locator(".section-tabs").get_by_role("button", name="Controls").click()
+            page.locator("nav.character-subpage-nav[aria-label='Character subpages']").get_by_role("link", name="Controls").click()
             expect(page).to_have_url(
                 re.compile(r"/app-next/campaigns/linden-pass/characters/arden-march\?page=controls$"),
                 timeout=5000,
@@ -2169,14 +2169,14 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             _sign_in(player_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
             player_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/arden-march?page=controls")
             expect(player_page.get_by_role("heading", level=1, name="Arden March", exact=True)).to_be_visible(timeout=10000)
-            expect(player_page.get_by_role("button", name="Overview")).to_be_visible()
-            assert player_page.get_by_role("button", name="Controls").count() == 0
+            expect(player_page.get_by_role("link", name="Overview")).to_be_visible()
+            assert player_page.get_by_role("link", name="Controls").count() == 0
             assert player_page.get_by_role("heading", name="Controls", exact=True).count() == 0
             player_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/arden-march/edit")
             expect(player_page.get_by_text("You do not have permission to edit this character.")).to_be_visible(timeout=10000)
             assert player_page.get_by_role("button", name="Save character edits").count() == 0
 
-            page.locator(".section-tabs").get_by_role("button", name="Overview").click()
+            page.locator("nav.character-subpage-nav[aria-label='Character subpages']").get_by_role("link", name="Overview").click()
             expect(page).to_have_url(
                 re.compile(r"/app-next/campaigns/linden-pass/characters/arden-march$"),
                 timeout=5000,
@@ -2199,7 +2199,7 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             )
             assert external_update_response.status == 200
 
-            page.locator(".section-tabs").get_by_role("button", name="Notes").click()
+            page.locator("nav.character-subpage-nav[aria-label='Character subpages']").get_by_role("link", name="Notes").click()
             page.get_by_label("Player notes").fill("This stale browser draft should conflict.")
             page.get_by_role("button", name="Save notes").click()
             expect(page.get_by_text(re.compile(r"changed in another session|Refresh and try again", re.I))).to_be_visible(
@@ -2321,11 +2321,18 @@ def test_gen2_character_visual_parity_smoke(
             expect(desktop_page.locator("section.panel.character-read-shell")).to_have_count(0)
             expect(desktop_page.get_by_role("heading", name="Arden March (arden-march)")).to_be_visible()
             expect(desktop_page.locator(".character-read-shell")).to_be_visible()
-            expect(desktop_page.locator(".character-selector-card")).to_be_visible()
+            expect(desktop_page.locator("div.character-subpage-nav-card[data-character-subpage-nav-card]")).to_be_visible()
+            expect(desktop_page.locator("nav.character-subpage-nav[aria-label='Character subpages']")).to_be_visible()
             expect(desktop_page.locator(".character-summary")).to_be_visible()
             expect(desktop_page.locator(".character-summary .character-action-row")).to_have_count(0)
             expect(desktop_page.locator(".character-summary .button.button-secondary")).to_have_count(0)
-            expect(desktop_page.locator(".section-tabs")).to_be_visible()
+            expect(desktop_page.locator(".character-read-content .section-tabs")).to_have_count(0)
+            expect(desktop_page.locator("nav.character-subpage-nav[aria-label='Character subpages']").get_by_role("link", name="Overview")).to_have_class(
+                re.compile(r"\bbutton-link\b")
+            )
+            expect(desktop_page.locator("nav.character-subpage-nav[aria-label='Character subpages']").get_by_role("link", name="Notes")).to_have_class(
+                re.compile(r"\bghost-button\b")
+            )
             character_read_header = desktop_page.locator("article.character-read-shell.character-sheet.card > header.character-header")
             expect(character_read_header.locator(".article-actions")).to_have_count(0)
             expect(character_read_header.locator(".button.button-secondary")).to_have_count(0)
@@ -2335,26 +2342,26 @@ def test_gen2_character_visual_parity_smoke(
             detail_metrics = desktop_page.evaluate(
                 """() => {
                     const shell = document.querySelector(".character-read-shell");
-                    const selector = document.querySelector(".character-selector-card");
+                    const navCard = document.querySelector("div.character-subpage-nav-card[data-character-subpage-nav-card]");
                     const summary = document.querySelector(".character-summary");
                     const summaryHeading = document.querySelector(".character-summary h3");
-                    const tabs = document.querySelector(".section-tabs");
+                    const subpageNav = document.querySelector(".character-subpage-nav");
                     const stateCard = document.querySelector(".stat-grid article, .character-state-card");
                     return {
                         shellRadius: shell ? Number.parseFloat(window.getComputedStyle(shell).borderRadius) : 0,
-                        selectorRadius: selector ? Number.parseFloat(window.getComputedStyle(selector).borderRadius) : 0,
+                        navCardRadius: navCard ? Number.parseFloat(window.getComputedStyle(navCard).borderRadius) : 0,
                         summaryRadius: summary ? Number.parseFloat(window.getComputedStyle(summary).borderRadius) : 0,
                         summaryHeadingSize: summaryHeading ? Number.parseFloat(window.getComputedStyle(summaryHeading).fontSize) : 0,
-                        tabsRadius: tabs ? Number.parseFloat(window.getComputedStyle(tabs).borderRadius) : 0,
+                        subpageNavWidth: subpageNav ? subpageNav.getBoundingClientRect().width : 0,
                         stateCardRadius: stateCard ? Number.parseFloat(window.getComputedStyle(stateCard).borderRadius) : 0,
                     };
                 }"""
             )
             assert detail_metrics["shellRadius"] >= 20
-            assert detail_metrics["selectorRadius"] >= 16
+            assert detail_metrics["navCardRadius"] >= 16
             assert detail_metrics["summaryRadius"] >= 16
             assert detail_metrics["summaryHeadingSize"] >= 24
-            assert detail_metrics["tabsRadius"] >= 16
+            assert detail_metrics["subpageNavWidth"] > 0
             assert detail_metrics["stateCardRadius"] >= 16
 
             _sign_in(mobile_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
@@ -2367,23 +2374,23 @@ def test_gen2_character_visual_parity_smoke(
                 mobile_metrics = mobile_page.evaluate(
                     """() => {
                         const route = document.querySelector(".character-roster-hero, .character-read-shell");
-                        const tabs = document.querySelector(".section-tabs");
-                        const selector = document.querySelector(".character-selector-card");
+                        const navCard = document.querySelector("div.character-subpage-nav-card[data-character-subpage-nav-card]");
+                        const nav = document.querySelector(".character-subpage-nav");
                         const search = document.querySelector(".character-roster-search");
                         return {
                             innerWidth: window.innerWidth,
                             scrollWidth: document.documentElement.scrollWidth,
                             routeWidth: route ? route.getBoundingClientRect().width : 0,
-                            tabsWidth: tabs ? tabs.getBoundingClientRect().width : 0,
-                            selectorWidth: selector ? selector.getBoundingClientRect().width : 0,
+                            navCardWidth: navCard ? navCard.getBoundingClientRect().width : 0,
+                            navWidth: nav ? nav.getBoundingClientRect().width : 0,
                             searchColumns: search ? window.getComputedStyle(search).gridTemplateColumns.split(" ").length : 1,
                         };
                     }"""
                 )
                 assert mobile_metrics["scrollWidth"] <= mobile_metrics["innerWidth"] + 1
                 assert mobile_metrics["routeWidth"] <= mobile_metrics["innerWidth"]
-                assert mobile_metrics["tabsWidth"] <= mobile_metrics["innerWidth"]
-                assert mobile_metrics["selectorWidth"] <= mobile_metrics["innerWidth"]
+                assert mobile_metrics["navCardWidth"] <= mobile_metrics["innerWidth"]
+                assert mobile_metrics["navWidth"] <= mobile_metrics["innerWidth"]
                 assert mobile_metrics["searchColumns"] == 1
         finally:
             desktop_page.close()
