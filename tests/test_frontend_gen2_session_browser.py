@@ -2089,7 +2089,7 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters")
             expect(page.get_by_role("heading", name="Characters")).to_be_visible(timeout=10000)
-            expect(page.get_by_role("link", name="Flask roster")).to_be_visible()
+            expect(page.get_by_role("link", name="Flask roster")).to_have_count(0)
             expect(page.get_by_role("link", name="Create character")).to_be_visible()
 
             roster_search = page.locator("form.character-roster-search")
@@ -2246,9 +2246,30 @@ def test_gen2_character_visual_parity_smoke(
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters")
             expect(desktop_page.get_by_role("heading", name="Characters")).to_be_visible(timeout=10000)
             expect(desktop_page.locator("main > section.hero.compact.character-roster-hero")).to_be_visible()
+            expect(desktop_page.locator("main > section.hero.compact.character-roster-hero > p.eyebrow")).to_be_visible()
             assert desktop_page.locator(".character-roster-page").count() == 0
             expect(desktop_page.locator("main > .panel, main > .panel-nested")).to_have_count(0)
-            expect(desktop_page.locator(".character-roster-tools")).to_be_visible()
+            expect(desktop_page.locator("section.card.search-card.character-roster-tools")).to_be_visible()
+            expect(desktop_page.locator("section.card.search-card.character-roster-tools .article-actions")).to_have_count(0)
+            expect(desktop_page.locator("section.card.search-card.character-roster-tools .button.button-secondary")).to_have_count(0)
+            expect(
+                desktop_page.locator("section.card.search-card.character-roster-tools a", has_text="Create character")
+            ).to_have_class(re.compile(r"\bbutton-link\b"))
+            if (
+                desktop_page.locator("section.card.search-card.character-roster-tools")
+                .get_by_role("link", name="Import existing character")
+                .count()
+                > 0
+            ):
+                expect(
+                    desktop_page.locator("section.card.search-card.character-roster-tools").get_by_role(
+                        "link", name="Import existing character"
+                    )
+                ).to_have_class(re.compile(r"\bbutton-link\b"))
+            expect(desktop_page.locator(".character-roster-grid .character-card").first.get_by_role("link", name="Open sheet")).to_have_class(
+                re.compile(r"\bbutton-link\b")
+            )
+            expect(desktop_page.locator(".character-roster-grid .character-card .button.button-secondary")).to_have_count(0)
             expect(desktop_page.locator(".character-roster-grid .character-card").first).to_be_visible()
             roster_metrics = desktop_page.evaluate(
                 """() => {
@@ -2469,7 +2490,7 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters")
             expect(page.get_by_role("heading", name="Characters")).to_be_visible(timeout=10000)
             create_link = page.get_by_role("link", name="Create character")
-            import_link = page.get_by_role("link", name="Import existing")
+            import_link = page.get_by_role("link", name="Import existing character")
             expect(create_link).to_have_attribute("href", re.compile(r"/app-next/campaigns/linden-pass/characters/new$"))
             expect(import_link).to_have_attribute("href", re.compile(r"/app-next/campaigns/linden-pass/characters/import/xianxia-manual$"))
 

@@ -13950,37 +13950,38 @@ function CharacterRosterPage() {
     window.history.pushState(null, "", nextUrl);
     setSubmittedQuery(nextQuery);
   };
+  const hasCreateCharacterLink = Boolean(data?.links?.create_character_url);
+  const characterCreateLane = data?.tools?.character_create_lane;
+  const rosterMeta = hasCreateCharacterLink
+    ? characterCreateLane === "xianxia"
+      ? "Use the Xianxia character creator to start new native character records directly in the app."
+      : "Use the current PHB level 1 builder to create new characters directly in the app."
+    : "Native character creation and progression stay hidden here for campaigns outside the current DND-5E in-app toolset.";
 
   return (
     <>
       <section className="hero compact character-roster-hero">
-        <p className="meta">Character roster</p>
+        <p className="eyebrow">Character roster</p>
         <h1>Characters</h1>
         <p className="lede">Open player sheets, use the shared inline state controls, and keep larger authoring workflows in Flask while Gen2 parity grows.</p>
       </section>
       <ApiErrorNotice isLoading={rosterQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
-      <section className="card character-roster-tools">
+      <section className="card search-card character-roster-tools">
         <div className="section-heading">
           <div>
-            <h2>Roster tools</h2>
+            <h2>{hasCreateCharacterLink ? "Roster tools" : "Roster"}</h2>
+            <p className="meta">{rosterMeta}</p>
           </div>
-          <div className="article-actions">
-            {data?.links?.flask_roster_url ? (
-              <a className="button button-secondary" href={data.links.flask_roster_url}>
-                Flask roster
-              </a>
-            ) : null}
-            {data?.links?.create_character_url ? (
-              <a className="button button-secondary" href={data.links.create_character_url}>
-                Create character
-              </a>
-            ) : null}
-            {data?.links?.import_xianxia_url ? (
-              <a className="button button-secondary" href={data.links.import_xianxia_url}>
-                Import existing
-              </a>
-            ) : null}
-          </div>
+          {data?.links?.create_character_url ? (
+            <a className="button-link" href={data.links.create_character_url}>
+              Create character
+            </a>
+          ) : null}
+          {data?.links?.import_xianxia_url ? (
+            <a className="button-link" href={data.links.import_xianxia_url}>
+              Import existing character
+            </a>
+          ) : null}
         </div>
         <form className="search-form character-roster-search" onSubmit={submitSearch}>
           <input
@@ -14048,7 +14049,12 @@ function CharacterRosterPage() {
                       ))}
                     </ul>
                   ) : null}
-                  <a className="button button-secondary" href={character.href || `/app-next/campaigns/${encodeURIComponent(resolvedCampaignSlug)}/characters/${encodeURIComponent(character.slug)}`}>
+                  <a
+                    className="button-link"
+                    href={
+                      character.href || `/app-next/campaigns/${encodeURIComponent(resolvedCampaignSlug)}/characters/${encodeURIComponent(character.slug)}`
+                    }
+                  >
                     Open sheet
                   </a>
                 </article>
