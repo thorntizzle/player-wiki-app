@@ -10876,18 +10876,12 @@ function CharacterPane({
                 <div className="section-heading">
                   <h2>Spells</h2>
                 </div>
-                <div className="stat-grid">
-                  <article>
-                    <strong>Ability</strong>
-                    <span>{String(spellcasting.spellcasting_ability ?? "--")}</span>
-                  </article>
-                  <article>
-                    <strong>Save DC</strong>
-                    <span>{String(spellcasting.spell_save_dc ?? "--")}</span>
-                  </article>
-                  <article>
-                    <strong>Attack</strong>
-                    <span>{String(spellcasting.spell_attack_bonus ?? "--")}</span>
+                <div className="detail-grid spellcasting-summary-grid">
+                  <article className="detail-card spellcasting-class-card">
+                    <h3>Spellcasting</h3>
+                    <p className="meta">Ability: {String(spellcasting.spellcasting_ability ?? "--")}</p>
+                    <p className="meta">Save DC: {String(spellcasting.spell_save_dc ?? "--")}</p>
+                    <p className="meta">Attack: {String(spellcasting.spell_attack_bonus ?? "--")}</p>
                   </article>
                 </div>
                 {spellSlots.length ? (
@@ -10952,47 +10946,71 @@ function CharacterPane({
                   </div>
                 ) : null}
                 {presentedSpells.length ? (
-                  <div className="spell-card-list">
-                    {presentedSpells.map((spell) => (
-                      <article className="character-state-card" key={draftKey(spell.class_row_id, spell.name, spell.level_label)}>
-                        <p className="meta">
-                          {[spell.level_label, spell.school].filter(Boolean).join(" | ") || "Spell"}
-                        </p>
-                        <h4>{spell.name || "Spell"}</h4>
-                        {spell.badges?.length ? (
-                          <div className="badge-list">
-                            {spell.badges.map((badge) => (
-                              <span className="meta-badge" key={badge}>
-                                {badge}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                        <p className="meta">
-                          {[spell.casting_time, spell.range].filter((value) => value && value !== "--").join(" | ")}
-                        </p>
-                        {spell.description_html || spell.href ? (
-                          <button type="button" className="ghost-button item-detail-button" onClick={() => openSpellDetail(spell)}>
-                            Details
-                          </button>
-                        ) : null}
-                      </article>
-                    ))}
+                  <div className="spell-card-grid">
+                    {presentedSpells.map((spell) => {
+                      const spellCardContent = (
+                        <>
+                          <span className="spell-card__eyebrow">
+                            {[spell.level_label, spell.school].filter(Boolean).join(" | ") || "Spell"}
+                          </span>
+                          <span className="spell-card__name">{spell.name || "Spell"}</span>
+                          {spell.badges?.length ? (
+                            <span className="badge-list spell-card__badges">
+                              {spell.badges.map((badge) => (
+                                <span className="meta-badge" key={badge}>
+                                  {badge}
+                                </span>
+                              ))}
+                            </span>
+                          ) : null}
+                          <span className="spell-card__meta">
+                            {[spell.casting_time, spell.range].filter((value) => value && value !== "--").join(" | ")}
+                          </span>
+                        </>
+                      );
+                      return (
+                        <article className="spell-card" key={draftKey(spell.class_row_id, spell.name, spell.level_label)}>
+                          {spell.description_html || spell.href ? (
+                            <button
+                              type="button"
+                              className="spell-card__main"
+                              aria-haspopup="dialog"
+                              onClick={() => openSpellDetail(spell)}
+                            >
+                              {spellCardContent}
+                            </button>
+                          ) : (
+                            <span className="spell-card__main">{spellCardContent}</span>
+                          )}
+                        </article>
+                      );
+                    })}
                   </div>
                 ) : spells.length ? (
-                  <div className="spell-card-list">
+                  <div className="spell-card-grid">
                     {spells.map((spell) => (
-                      <article className="character-state-card" key={readString(spell.id, readString(spell.name))}>
-                        <h4>{readString(spell.name, "Spell")}</h4>
-                        <p className="meta">
-                          {[spell.mark, spell.casting_time, spell.range].map((value) => readString(value)).filter(Boolean).join(" | ")}
-                        </p>
+                      <article className="spell-card" key={readString(spell.id, readString(spell.name))}>
+                        <span className="spell-card__main">
+                          {[spell.level_label, spell.school].filter(Boolean).length ? (
+                            <span className="spell-card__eyebrow">
+                              {[spell.level_label, spell.school].filter(Boolean).join(" | ")}
+                            </span>
+                          ) : null}
+                          <span className="spell-card__name">{readString(spell.name, "Spell")}</span>
+                          <span className="spell-card__meta">
+                            {[spell.mark, spell.casting_time, spell.range]
+                              .map((value) => readString(value))
+                              .filter((value) => value && value !== "--")
+                              .join(" | ")}
+                          </span>
+                        </span>
                       </article>
                     ))}
                   </div>
                 ) : null}
               </section>
             ) : null}
+
 
             {isDnd && activeCharacterSection === "equipment" ? (
               <section className="read-section" id="character-equipment">

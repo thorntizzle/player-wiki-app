@@ -1355,6 +1355,9 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
     controls_start = section_markup.index('{spellSlots.length ? (')
     controls_end = section_markup.index('{presentedSpells.length ? (', controls_start)
     slot_controls_markup = section_markup[controls_start:controls_end]
+    presented_start = section_markup.index('{presentedSpells.length ? (')
+    presented_fallback_start = section_markup.index(') : spells.length ? (', presented_start)
+    presented_markup = section_markup[presented_start:presented_fallback_start]
 
     assert 'className="spell-slot-editor-list spell-slot-editor-list--compact"' in slot_controls_markup
     assert '<article className="detail-card"' in slot_controls_markup
@@ -1386,6 +1389,52 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
     assert 'className="character-state-card"' not in slot_controls_markup
     assert 'className="chat-label"' not in slot_controls_markup
     assert 'Save' not in slot_controls_markup
+
+    assert 'className="detail-grid spellcasting-summary-grid"' in section_markup
+    assert "spellcasting-class-card" in section_markup
+    assert "<h3>Spellcasting</h3>" in section_markup
+    assert "Ability:" in section_markup
+    assert "Save DC:" in section_markup
+    assert "Attack:" in section_markup
+
+    assert 'className="spell-card-grid"' in section_markup
+    assert 'className="spell-card"' in section_markup
+    assert 'className="spell-card__main"' in section_markup
+    assert 'className="spell-card__eyebrow"' in section_markup
+    assert 'className="spell-card__name"' in section_markup
+    assert 'className="spell-card__meta"' in section_markup
+    assert 'className="badge-list spell-card__badges"' in section_markup
+    assert "openSpellDetail(spell)" in section_markup
+    assert (
+        re.search(
+            r'presentedSpells\.map\(\(spell\) => \{\s*const spellCardContent = \(\s*<>\s*<span className="spell-card__eyebrow"',
+            presented_markup,
+            re.S,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'presentedSpells\.map\(\(spell\) => \{\s*const spellCardContent = \(\s*<>\s*<span className="spell-card__eyebrow"[\s\S]*?<span className="spell-card__meta"',
+            presented_markup,
+            re.S,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r':\s*\(\s*<span className="spell-card__main">{spellCardContent}</span>',
+            presented_markup,
+            re.S,
+        )
+        is not None
+    )
+    assert 'className="stat-grid"' not in section_markup
+    assert 'className="spell-card-list"' not in section_markup
+    assert 'className="character-state-card"' not in section_markup
+    assert 'className="ghost-button item-detail-button"' not in section_markup
+    assert 'className="chat-label"' not in section_markup
+    assert 'className="inline-two-col"' not in section_markup
 
 
 def test_player_session_revealed_articles_panel_uses_session_article_row_chrome_in_source() -> None:
