@@ -117,8 +117,6 @@ import type {
   SessionMessagePostPayload,
   SessionMessageRecipientPlayerChoice,
   CampaignReferenceSearchResult,
-  SessionWikiLookupPreviewResponse,
-  SessionWikiLookupSearchResult,
   SystemsEntryResponse,
   SystemsEntrySummary,
   SystemsIndexResponse,
@@ -7115,101 +7113,6 @@ function SessionPaneMessageComposer({
   );
 }
 
-function SessionPaneWikiLookup({
-  canShow,
-  query,
-  setQuery,
-  queryStatus,
-  results,
-  onSearch,
-  previewRef,
-  onSelectPreview,
-  previewLoading,
-  previewHtml,
-  previewError,
-  clearStatus,
-  className = "card",
-  showHeader = true,
-}: {
-  canShow: boolean;
-  query: string;
-  setQuery: (value: string) => void;
-  queryStatus: string | null;
-  results: SessionWikiLookupSearchResult[];
-  onSearch: (event: FormEvent<HTMLFormElement>) => void;
-  previewRef: string | null;
-  onSelectPreview: (pageRef: string) => void;
-  previewLoading: boolean;
-  previewHtml: string;
-  previewError: string | null;
-  clearStatus: () => void;
-  className?: string;
-  showHeader?: boolean;
-}) {
-  if (!canShow) {
-    return <p className="status status-neutral">This campaign does not expose wiki lookup.</p>;
-  }
-
-  const mergedClassName = Array.from(new Set(`card ${className ?? ""}`.split(/\s+/).filter(Boolean))).join(" ");
-
-  return (
-    <article className={mergedClassName}>
-      {showHeader ? <h3>Wiki article lookup</h3> : null}
-      {showHeader ? (
-        <p className="meta">
-          Search player-visible wiki articles and read them here without leaving the live session page. Type at least 2 letters to
-          search.
-        </p>
-      ) : null}
-      <form onSubmit={onSearch} className="stack-form">
-        <label className="field">
-          <span>Search</span>
-          <input
-            type="search"
-            autoComplete="off"
-            id="wiki-search-query"
-            value={query}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => {
-              setQuery(event.currentTarget.value);
-              clearStatus();
-            }}
-            placeholder="title, section, or keyword"
-          />
-        </label>
-        <button type="submit">Search</button>
-      </form>
-      {queryStatus ? <p className="status status-neutral">{queryStatus}</p> : null}
-      {results.length ? (
-        <div className="wiki-result-stack">
-          {results.map((result) => {
-            const pageRef = result.page_ref || result.source_ref || "";
-            return (
-              <button
-                className="wiki-result-row"
-                type="button"
-                key={pageRef}
-                onClick={() => onSelectPreview(pageRef)}
-                disabled={!pageRef}
-              >
-                <strong>{result.title}</strong>
-                <p>{result.subtitle}</p>
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-      {previewRef ? (
-        <div className="wiki-preview">
-          <div className="preview-title">Preview: {previewRef}</div>
-          {previewLoading ? <p className="status status-neutral">Loading preview ...</p> : null}
-          {previewError ? <p className="status status-error">{previewError}</p> : null}
-          {previewHtml ? <div className="wiki-preview-html" dangerouslySetInnerHTML={{ __html: previewHtml }} /> : null}
-        </div>
-      ) : null}
-    </article>
-  );
-}
-
 function readBinaryAsBase64(file: File, callback: (payload: EmbeddedImageInput | null) => void): void {
   const reader = new FileReader();
   reader.addEventListener("load", () => {
@@ -7597,15 +7500,6 @@ function SessionPane({
   const { apiClient } = useApiClient();
   const [messageDraft, setMessageDraft] = useState("");
   const [sendError, setSendError] = useState<string | null>(null);
-
-  const [wikiQuery, setWikiQuery] = useState("");
-  const [wikiStatus, setWikiStatus] = useState<string | null>(null);
-  const [wikiResults, setWikiResults] = useState<SessionWikiLookupSearchResult[]>([]);
-  const [wikiPreviewRef, setWikiPreviewRef] = useState<string | null>(null);
-  const [wikiPreviewLoading, setWikiPreviewLoading] = useState(false);
-  const [wikiPreviewHtml, setWikiPreviewHtml] = useState("");
-  const [wikiPreviewError, setWikiPreviewError] = useState<string | null>(null);
-  const [wikiLookupOpen, setWikiLookupOpen] = useState(false);
   const [recipientScope, setRecipientScope] = useState<"global" | "dm_only" | "player">("global");
   const [recipientPlayerId, setRecipientPlayerId] = useState("");
   const recipientPlayerChoices = payload?.session_message_recipient_player_choices ?? [];
@@ -7640,50 +7534,6 @@ function SessionPane({
     },
   });
 
-  const doSearch = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const query = wikiQuery.trim();
-    if (!query) {
-      setWikiStatus("Enter a search query first.");
-      return;
-    }
-    setWikiStatus("Searching ...");
-    try {
-      const result = await apiClient.searchPlayerSessionWiki(campaignSlug, query);
-      setWikiResults(result.results);
-      setWikiStatus(result.message || "Search complete.");
-      if (!result.results.length) {
-        setWikiPreviewRef(null);
-        setWikiPreviewHtml("");
-      }
-    } catch (error) {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setWikiResults([]);
-      setWikiStatus(null);
-      setWikiPreviewError(apiErrorMessage(error));
-    }
-  };
-
-  const doPreview = async (pageRef: string) => {
-    setWikiPreviewRef(pageRef);
-    setWikiPreviewLoading(true);
-    setWikiPreviewError(null);
-    try {
-      const response: SessionWikiLookupPreviewResponse = await apiClient.previewPlayerSessionWiki(campaignSlug, pageRef);
-      setWikiPreviewHtml(response.preview_html || "");
-    } catch (error) {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setWikiPreviewHtml("");
-      setWikiPreviewError(apiErrorMessage(error));
-    } finally {
-      setWikiPreviewLoading(false);
-    }
-  };
-
   const sendMessage = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const body = messageDraft.trim();
@@ -7717,13 +7567,6 @@ function SessionPane({
     }
     postMessage.mutate(messagePayload);
   };
-
-  const canShowWikiLookup = payload?.permissions.can_access_wiki_lookup ?? true;
-  useEffect(() => {
-    if (!canShowWikiLookup) {
-      setWikiLookupOpen(true);
-    }
-  }, [canShowWikiLookup]);
 
   const revealedArticles = payload?.revealed_articles ?? [];
   return (
@@ -7773,32 +7616,6 @@ function SessionPane({
             emptyText="No revealed articles yet."
           />
         ) : null}
-        <details
-          className="session-player-wiki-details"
-          open={wikiLookupOpen}
-          onToggle={(event) => setWikiLookupOpen(event.currentTarget.open)}
-        >
-          <summary className="session-player-wiki-details-summary">Player wiki lookup</summary>
-          <SessionPaneWikiLookup
-            canShow={canShowWikiLookup}
-            query={wikiQuery}
-            setQuery={setWikiQuery}
-            queryStatus={wikiStatus}
-            results={wikiResults}
-            onSearch={doSearch}
-            previewRef={wikiPreviewRef}
-            onSelectPreview={doPreview}
-            previewLoading={wikiPreviewLoading}
-            previewHtml={wikiPreviewHtml}
-            previewError={wikiPreviewError}
-            showHeader={false}
-            clearStatus={() => {
-              setWikiPreviewError(null);
-              setWikiStatus(null);
-            }}
-            className="session-player-wiki-details-panel"
-          />
-        </details>
       </section>
 
     </div>

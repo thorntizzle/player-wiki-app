@@ -109,29 +109,24 @@ def test_frontend_pilot_without_build_returns_not_found(client, app, tmp_path):
     assert response.status_code == 404
 
 
-def test_session_pane_wiki_lookup_uses_flask_style_stack_form_chrome_in_source() -> None:
+def test_session_pane_no_player_wiki_lookup_widget_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    wiki_lookup_source = _extract_component_source(
+    session_pane_source = _extract_component_source(
         source,
-        "function SessionPaneWikiLookup({",
-        "function readBinaryAsBase64",
+        "function SessionPane({",
+        "function CharacterPane({",
     )
 
-    assert 'className="stack-form"' in wiki_lookup_source
-    assert "<span>Search</span>" in wiki_lookup_source
-    assert '<label className="field">' in wiki_lookup_source
-    assert 'type="search"' in wiki_lookup_source
-    assert 'autoComplete="off"' in wiki_lookup_source
-    assert 'placeholder="title, section, or keyword"' in wiki_lookup_source
-    assert "Wiki article lookup" in wiki_lookup_source
-    assert (
-        "Search player-visible wiki articles and read them here without leaving the live session page." in wiki_lookup_source
-    )
-    assert re.search(r"Type at least 2 letters to\s*search\.", wiki_lookup_source) is not None
-    assert "Search published pages / systems" not in wiki_lookup_source
-    assert 'className="wiki-search"' not in wiki_lookup_source
-    assert 'className="search-row"' not in wiki_lookup_source
-    assert "className=\"chat-label\"" not in wiki_lookup_source
+    assert "SessionPaneWikiLookup" not in session_pane_source
+    assert "wikiQuery" not in session_pane_source
+    assert "session-player-wiki-details" not in session_pane_source
+    assert "Player wiki lookup" not in session_pane_source
+    assert "Search player-visible wiki articles and read them here without leaving the live session page." not in session_pane_source
+    assert "Type at least 2 letters to search." not in session_pane_source
+    assert "Search published pages / systems" not in session_pane_source
+    assert "className=\"wiki-result-stack\"" not in session_pane_source
+    assert "className=\"wiki-preview\"" not in session_pane_source
+    assert 'className="campaign-global-search__form"' in source
 
 
 def test_character_pane_non_read_selector_uses_flask_style_field_chrome_in_source() -> None:

@@ -409,7 +409,9 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))
             expect(page.locator(".session-hero").get_by_role("heading", name="Session")).to_be_visible()
             expect(page.get_by_role("heading", name="Chat window")).to_be_visible()
-            expect(page.locator(".session-player-wiki-details-summary")).to_have_text("Player wiki lookup")
+            assert page.locator(".session-player-wiki-details-summary").count() == 0
+            assert page.locator(".session-player-wiki-details").count() == 0
+            expect(page.locator(".campaign-global-search")).to_be_visible()
             expect(page.get_by_role("heading", name="Send message")).to_be_visible()
             expect(page.get_by_label("Audience")).to_be_visible()
             expect(page.get_by_label("Player")).to_be_visible()
