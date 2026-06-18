@@ -3691,12 +3691,18 @@ def test_gen2_dm_content_browser_staged_article_workflow(
             expect(page.get_by_text("Article staged.")).to_be_visible(timeout=10000)
 
             expect(page.locator("article.card#dm-content-staged-article-store")).to_be_visible()
-            staged_panel = page.locator("section.card#dm-content-staged-articles-queue")
-            staged_card = staged_panel.locator("details.article-card", has_text=article_title)
+            staged_panel = page.locator("article.card#dm-content-staged-articles-queue")
+            staged_card = staged_panel.locator("details.feature-detail.session-article-detail", has_text=article_title)
             expect(staged_card).to_be_visible(timeout=10000)
-            staged_card.locator("summary").click()
+            expect(staged_card.locator(".article-actions")).to_have_count(0)
+            expect(staged_card.locator(".button-danger")).to_have_count(0)
+            expect(staged_card.locator("div.session-article-detail__actions")).to_have_count(1)
+            expect(staged_card.get_by_role("button", name="Delete article")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(staged_card.locator(".article-body.article-body--compact")).to_have_count(1)
+            staged_card.locator("summary").first.click()
+            staged_card.locator("details.session-article-edit-detail > summary").click()
             staged_card.get_by_label("Body").fill(article_updated_body)
-            staged_card.get_by_role("button", name="Save draft").click()
+            staged_card.get_by_role("button", name="Update prep draft").click()
             expect(page.get_by_text("Article updated.")).to_be_visible(timeout=10000)
 
             page.get_by_role("button", name="Upload").click()
@@ -3714,17 +3720,27 @@ def test_gen2_dm_content_browser_staged_article_workflow(
             creation_panel.get_by_role("button", name="Pull source").click()
             expect(page.get_by_text("Article staged.")).to_be_visible(timeout=10000)
 
-            assert staged_panel.locator("details.article-card").count() >= 2
+            for _ in range(20):
+                if staged_panel.locator("div.session-article-stack > details.feature-detail.session-article-detail").count() >= 2:
+                    break
+                page.wait_for_timeout(250)
+            else:
+                assert False, "Expected at least 2 staged article rows after staged article pull."
 
             deleted_count = 0
             for target_title in [article_title, "Captain Lyra Vale"]:
-                target_card = staged_panel.locator("details.article-card", has_text=target_title)
+                target_card = staged_panel.locator("details.feature-detail.session-article-detail", has_text=target_title)
                 if not target_card.count():
                     continue
                 if not target_card.first.evaluate("element => element.open"):
                     target_card.first.locator("summary").click()
-                target_card.first.get_by_role("button", name="Delete").click()
-                expect(staged_panel.locator("details.article-card", has_text=target_title)).to_have_count(0, timeout=10000)
+                expect(target_card.first.locator("div.session-article-detail__actions").locator(".article-actions")).to_have_count(0)
+                expect(target_card.first.locator("div.session-article-detail__actions").locator(".button-danger")).to_have_count(0)
+                expect(target_card.first.locator("div.session-article-detail__actions").get_by_role("button", name="Delete article")).to_have_class(
+                    re.compile(r"\bghost-button\b")
+                )
+                target_card.first.get_by_role("button", name="Delete article").click()
+                expect(staged_panel.locator("details.feature-detail.session-article-detail", has_text=target_title)).to_have_count(0, timeout=10000)
                 deleted_count += 1
 
             assert deleted_count == 2

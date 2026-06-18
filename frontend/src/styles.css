@@ -2397,6 +2397,23 @@ a:hover {
   min-width: 0;
 }
 
+.session-article-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.session-article-detail form {
+  margin-top: 1rem;
+}
+
+.session-article-detail__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-top: 1rem;
+}
+
 .dm-content-systems-lane {
   display: grid;
   gap: 0.9rem;
