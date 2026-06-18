@@ -2338,6 +2338,9 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             expect(page.locator("main > .character-authoring-page.character-authoring-create-page")).to_have_count(0)
             expect(page.get_by_role("heading", name="Create Xianxia Character")).to_be_visible(timeout=10000)
             expect(page.get_by_role("link", name="Flask create")).to_be_visible()
+            expect(page.locator("main .character-authoring-layout > .sidebar.character-authoring-sidebar")).to_be_visible()
+            assert page.locator("main .character-authoring-sidebar > .card.sidebar-card").count() >= 1
+            assert page.locator("aside.panel.character-authoring-sidebar").count() == 0
             for field_name, value in create_values.items():
                 page.locator(f"[name='{field_name}']").fill(value)
             for field_name, value in create_selects.items():
@@ -2430,6 +2433,9 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             expect(page.locator("main > .character-authoring-page.character-authoring-manual-import-page")).to_have_count(0)
             expect(page.get_by_role("heading", name="Import Existing Xianxia Character")).to_be_visible(timeout=10000)
             expect(page.get_by_role("link", name="Flask import")).to_be_visible()
+            expect(page.locator("main .character-authoring-layout > .sidebar.character-authoring-sidebar")).to_be_visible()
+            assert page.locator("main .character-authoring-sidebar > .card.sidebar-card").count() >= 1
+            assert page.locator("aside.panel.character-authoring-sidebar").count() == 0
             page.locator("[name='realm']").select_option("Immortal")
             page.locator("[name='honor']").select_option("Majestic")
             page.locator("[name='martial_art_1_slug']").select_option("heavenly-palm")

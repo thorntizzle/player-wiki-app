@@ -762,25 +762,27 @@ function CharacterPreviewList({ preview }: { preview: Record<string, unknown> })
   ] as Array<[string, string[]]>).filter(([, values]) => Array.isArray(values) && values.length);
 
   return (
-    <aside className="panel character-authoring-sidebar">
-      <h2>Preview</h2>
-      {facts.length ? (
-        <div className="builder-preview-list">
-          {facts.map(([label, value]) => (
-            <div key={label}>
-              <span className="meta">{label}</span>
-              <strong>{stringFromUnknown(value, "Not set")}</strong>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="meta">Choose core options to populate the preview.</p>
-      )}
+    <aside className="sidebar character-authoring-sidebar">
+      <section className="card sidebar-card">
+        <h2>Preview</h2>
+        {facts.length ? (
+          <div className="builder-preview-list">
+            {facts.map(([label, value]) => (
+              <div key={label}>
+                <span className="meta">{label}</span>
+                <strong>{stringFromUnknown(value, "Not set")}</strong>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="meta">Choose core options to populate the preview.</p>
+        )}
+      </section>
       {listSections.map(([label, values]) => (
-        <section className="character-authoring-preview-section" key={String(label)}>
+        <section className="card sidebar-card character-authoring-preview-section" key={String(label)}>
           <h3>{label}</h3>
           <ul className="plain-list resource-preview-list">
-            {(values as string[]).map((item) => (
+            {values.map((item) => (
               <li key={`${label}-${item}`}>
                 <span>{item}</span>
               </li>
@@ -883,20 +885,22 @@ function CharacterLevelUpPreviewList({ preview }: { preview: Record<string, unkn
   ] as Array<[string, string[]]>).filter(([, values]) => values.length);
 
   return (
-    <aside className="panel character-authoring-sidebar">
-      <h2>Preview</h2>
-      {facts.length ? (
-        <div className="builder-preview-list">
-          {facts.map(([label, value]) => (
-            <div key={label}>
-              <span className="meta">{label}</span>
-              <strong>{stringFromUnknown(value, "Not set")}</strong>
-            </div>
-          ))}
-        </div>
-      ) : null}
+    <aside className="sidebar character-authoring-sidebar">
+      <section className="card sidebar-card">
+        <h2>Preview</h2>
+        {facts.length ? (
+          <div className="builder-preview-list">
+            {facts.map(([label, value]) => (
+              <div key={label}>
+                <span className="meta">{label}</span>
+                <strong>{stringFromUnknown(value, "Not set")}</strong>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </section>
       {listSections.map(([label, values]) => (
-        <section className="character-authoring-preview-section" key={label}>
+        <section className="card sidebar-card character-authoring-preview-section" key={label}>
           <h3>{label}</h3>
           <ul className="plain-list resource-preview-list">
             {values.map((item) => (
@@ -1314,16 +1318,18 @@ function CharacterCreatePage() {
               </button>
             </div>
           </form>
-          <aside className="panel character-authoring-sidebar">
-            <h2>Starting Defaults</h2>
-            <div className="builder-preview-list">
-              {Object.entries(create.defaults).map(([key, value]) => (
-                <div key={key}>
-                  <span className="meta">{key.replace(/_/g, " ")}</span>
-                  <strong>{stringFromUnknown(value)}</strong>
-                </div>
-              ))}
-            </div>
+          <aside className="sidebar character-authoring-sidebar">
+            <section className="card sidebar-card">
+              <h2>Starting Defaults</h2>
+              <div className="builder-preview-list">
+                {Object.entries(create.defaults).map(([key, value]) => (
+                  <div key={key}>
+                    <span className="meta">{key.replace(/_/g, " ")}</span>
+                    <strong>{stringFromUnknown(value)}</strong>
+                  </div>
+                ))}
+              </div>
+            </section>
           </aside>
         </div>
       ) : null}
@@ -1613,20 +1619,22 @@ function CharacterXianxiaManualImportPage() {
               </button>
             </div>
           </form>
-          <aside className="panel character-authoring-sidebar">
-            <h2>Available Martial Arts</h2>
-            {context.martial_art_options.length ? (
-              <ul className="plain-list resource-preview-list">
-                {context.martial_art_options.map((option) => (
-                  <li key={optionValue(option)}>
-                    <span>{optionLabel(option)}</span>
-                    <strong>{option.available_rank_labels?.join(", ") || option.martial_art_style || optionValue(option)}</strong>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="meta">No enabled Martial Art Systems entries are available.</p>
-            )}
+          <aside className="sidebar character-authoring-sidebar">
+            <section className="card sidebar-card">
+              <h2>Available Martial Arts</h2>
+              {context.martial_art_options.length ? (
+                <ul className="plain-list resource-preview-list">
+                  {context.martial_art_options.map((option) => (
+                    <li key={optionValue(option)}>
+                      <span>{optionLabel(option)}</span>
+                      <strong>{option.available_rank_labels?.join(", ") || option.martial_art_style || optionValue(option)}</strong>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="meta">No enabled Martial Art Systems entries are available.</p>
+              )}
+            </section>
           </aside>
         </div>
       ) : null}
