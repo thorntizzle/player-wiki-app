@@ -12965,97 +12965,101 @@ function DmContentPage() {
   const renderStatblockCard = (statblock: DmContentStatblock) => {
     const draft = statblockDrafts[statblock.id] ?? buildInitialStatblockDraft(statblock);
     return (
-      <details className="article-card dm-statblock-card" key={statblock.id}>
-        <summary className="dm-statblock-summary">
-          <strong>{statblock.title}</strong>
-          <span className="article-kind">{statblock.subsection || "top level"}</span>
-        </summary>
-        <div className="badge-list dm-statblock-badges">
-          {statblock.armor_class !== null ? <span className="meta-badge">AC {statblock.armor_class}</span> : null}
-          <span className="meta-badge">HP {statblock.max_hp}</span>
-          <span className="meta-badge">Speed {statblock.speed_text}</span>
-          <span className="meta-badge">Init {formatInitiativeBonus(statblock.initiative_bonus)}</span>
-          <span className="meta-badge">Move {statblock.movement_total} ft.</span>
+      <article className="dm-content-item dm-statblock-card" id={`dm-statblock-${statblock.id}`} key={statblock.id}>
+        <div className="dm-content-item__header">
+          <div>
+            <h3>{statblock.title}</h3>
+            <p className="meta">Source file: {statblock.source_filename}</p>
+          </div>
+          <div className="badge-list dm-statblock-badges">
+            {statblock.armor_class !== null ? <span className="meta-badge">AC {statblock.armor_class}</span> : null}
+            <span className="meta-badge">HP {statblock.max_hp}</span>
+            <span className="meta-badge">Speed {statblock.speed_text}</span>
+            <span className="meta-badge">Init {formatInitiativeBonus(statblock.initiative_bonus)}</span>
+          </div>
         </div>
         <p className="status status-neutral">{statblock.parser_feedback.summary}</p>
-        <p className="meta">
-          Source file: {statblock.source_filename}. Combat seed source: dm_statblock:{statblock.id}.
-        </p>
+        <p className="meta">Combat seed source: dm_statblock:{statblock.id}.</p>
         <details className="feature-detail">
-          <summary>View source markdown</summary>
+          <summary>View statblock text</summary>
           <pre className="dm-content-preview">{statblock.body_markdown}</pre>
         </details>
         {canManageDmContent ? (
-          <form
-            className="session-form"
-            onSubmit={(event: FormEvent<HTMLFormElement>) => {
-              event.preventDefault();
-              const formData = new FormData(event.currentTarget);
-              updateStatblockMutation.mutate({
-                id: statblock.id,
-                payload: {
-                  subsection: String(formData.get("subsection") || ""),
-                  markdown_text: String(formData.get("markdown_text") || ""),
-                },
-              });
-            }}
-          >
-            <label htmlFor={`dm-statblock-subsection-${statblock.id}`} className="chat-label">
-              Subsection
-            </label>
-            <input
-              id={`dm-statblock-subsection-${statblock.id}`}
-              name="subsection"
-              value={draft.subsection}
-              disabled={!canManageDmContent}
-              maxLength={80}
-              onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                const subsection = event.currentTarget.value;
-                setStatblockDrafts((current) => ({
-                  ...current,
-                  [statblock.id]: {
-                    ...(current[statblock.id] ?? draft),
-                    subsection,
-                  },
-                }));
-              }}
-            />
-            <label htmlFor={`dm-statblock-markdown-${statblock.id}`} className="chat-label">
-              Source markdown body
-            </label>
-            <textarea
-              id={`dm-statblock-markdown-${statblock.id}`}
-              name="markdown_text"
-              rows={12}
-              value={draft.markdown}
-              disabled={!canManageDmContent}
-              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-                const markdown = event.currentTarget.value;
-                setStatblockDrafts((current) => ({
-                  ...current,
-                  [statblock.id]: {
-                    ...(current[statblock.id] ?? draft),
-                    markdown,
-                  },
-                }));
-              }}
-            />
-            <div className="article-actions">
-              <button type="submit" disabled={!canManageDmContent || updateStatblockMutation.isPending}>
-                {updateStatblockMutation.isPending ? "Saving..." : "Save statblock"}
-              </button>
+          <>
+            <details className="feature-detail">
+              <summary>Edit statblock source</summary>
+              <form
+                className="stack-form"
+                onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                  event.preventDefault();
+                  const formData = new FormData(event.currentTarget);
+                  updateStatblockMutation.mutate({
+                    id: statblock.id,
+                    payload: {
+                      subsection: String(formData.get("subsection") || ""),
+                      markdown_text: String(formData.get("markdown_text") || ""),
+                    },
+                  });
+                }}
+              >
+                <label htmlFor={`dm-statblock-subsection-${statblock.id}`} className="chat-label">
+                  Subsection
+                </label>
+                <input
+                  id={`dm-statblock-subsection-${statblock.id}`}
+                  name="subsection"
+                  value={draft.subsection}
+                  disabled={!canManageDmContent}
+                  maxLength={80}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                    const subsection = event.currentTarget.value;
+                    setStatblockDrafts((current) => ({
+                      ...current,
+                      [statblock.id]: {
+                        ...(current[statblock.id] ?? draft),
+                        subsection,
+                      },
+                    }));
+                  }}
+                />
+                <label htmlFor={`dm-statblock-markdown-${statblock.id}`} className="chat-label">
+                  Source markdown body
+                </label>
+                <textarea
+                  id={`dm-statblock-markdown-${statblock.id}`}
+                  name="markdown_text"
+                  rows={12}
+                  value={draft.markdown}
+                  disabled={!canManageDmContent}
+                  onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+                    const markdown = event.currentTarget.value;
+                    setStatblockDrafts((current) => ({
+                      ...current,
+                      [statblock.id]: {
+                        ...(current[statblock.id] ?? draft),
+                        markdown,
+                      },
+                    }));
+                  }}
+                />
+                <button type="submit" disabled={!canManageDmContent || updateStatblockMutation.isPending}>
+                  {updateStatblockMutation.isPending ? "Saving..." : "Save statblock"}
+                </button>
+              </form>
+            </details>
+            <div className="dm-content-item__actions">
               <button
                 type="button"
-                className="button-danger"
+                className="ghost-button"
                 disabled={!canManageDmContent || deleteStatblockMutation.isPending}
                 onClick={() => deleteStatblockMutation.mutate(statblock.id)}
               >
                 {deleteStatblockMutation.isPending ? "Deleting..." : "Delete statblock"}
               </button>
             </div>
-          </form>
+          </>
         ) : null}
-      </details>
+      </article>
     );
   };
 
@@ -13485,7 +13489,7 @@ function DmContentPage() {
             </form>
             {dmContentQuery.isLoading ? <p className="status status-neutral">Loading statblocks ...</p> : null}
             {!dmContentQuery.isLoading && filteredStatblocks.length ? (
-              <div className="article-stack dm-statblock-groups">
+              <div className="dm-content-list dm-statblock-groups">
                 {topLevelStatblocks.map(renderStatblockCard)}
                 {statblockSubsectionGroups.map((group) => (
                   <details className="section-block section-block--collapsible" key={group.name} open>
@@ -13497,7 +13501,7 @@ function DmContentPage() {
                       <span className="section-toggle-chevron" aria-hidden="true" />
                     </summary>
                     <div className="section-block__body">
-                      <div className="article-stack">
+                      <div className="dm-content-list">
                         {group.statblocks.map(renderStatblockCard)}
                       </div>
                     </div>

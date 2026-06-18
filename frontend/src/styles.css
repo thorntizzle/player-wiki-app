@@ -2553,8 +2553,8 @@ a:hover {
   gap: 0.5rem;
 }
 
-.dm-statblock-badges {
-  margin: 0.75rem 0;
+.dm-content-item__header .dm-statblock-badges {
+  margin: 0;
 }
 
 .dm-statblock-groups .section-block {

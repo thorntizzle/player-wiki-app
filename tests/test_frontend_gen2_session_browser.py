@@ -3316,21 +3316,32 @@ def test_gen2_dm_content_browser_statblock_workflow(
             library = page.locator("section.card.dm-statblock-library")
             group = library.locator("details.section-block", has_text="Gen2 Harbor Crew")
             expect(group).to_be_visible(timeout=10000)
-            statblock_card = library.locator("details.dm-statblock-card", has_text=statblock_title)
+            statblock_card = library.locator("article.dm-content-item.dm-statblock-card", has_text=statblock_title)
             expect(statblock_card).to_be_visible(timeout=10000)
-            statblock_card.locator("summary.dm-statblock-summary").click()
+            expect(statblock_card.locator(".dm-content-item__header")).to_be_visible()
+            view_detail = statblock_card.locator("details.feature-detail", has_text="View statblock text")
+            expect(view_detail).to_be_visible()
+            if not view_detail.evaluate("element => element.open"):
+                view_detail.locator("summary").click()
+            expect(view_detail.locator("pre.dm-content-preview")).to_be_visible()
             expect(statblock_card.locator(".meta-badge", has_text="AC 14")).to_be_visible()
             expect(statblock_card.locator(".meta-badge", has_text="HP 28")).to_be_visible()
             expect(statblock_card.locator(".meta-badge", has_text="Init +2")).to_be_visible()
             expect(statblock_card.get_by_text(re.compile(r"Combat seed source: dm_statblock:\d+"))).to_be_visible()
             expect(statblock_card.get_by_text("Parsed combat fields: AC 14")).to_be_visible()
+            expect(statblock_card.locator(".dm-content-item__actions")).to_be_visible()
+            expect(statblock_card.locator(".article-actions")).to_have_count(0)
+            expect(statblock_card.get_by_role("button", name="Delete statblock")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(statblock_card.get_by_role("button", name="Delete statblock")).not_to_have_class(re.compile(r"\bbutton-danger\b"))
 
             library.get_by_label("Search statblocks").fill("not-here")
             expect(library.get_by_text("No statblocks matched that search.")).to_be_visible()
             library.get_by_label("Search statblocks").fill("")
             expect(statblock_card).to_be_visible()
-            if not statblock_card.evaluate("element => element.open"):
-                statblock_card.locator("summary.dm-statblock-summary").click()
+            edit_detail = statblock_card.locator("details.feature-detail", has_text="Edit statblock source")
+            expect(edit_detail.locator("summary")).to_be_visible()
+            if not edit_detail.evaluate("element => element.open"):
+                edit_detail.locator("summary").click()
 
             statblock_card.locator("input[name='subsection']").fill("Gen2 Officers")
             statblock_card.locator("textarea[name='markdown_text']").fill(statblock_updated_markdown)
@@ -3339,10 +3350,11 @@ def test_gen2_dm_content_browser_statblock_workflow(
 
             updated_group = library.locator("details.section-block", has_text="Gen2 Officers")
             expect(updated_group).to_be_visible(timeout=10000)
-            updated_card = library.locator("details.dm-statblock-card", has_text=statblock_updated_title)
+            updated_card = library.locator("article.dm-content-item.dm-statblock-card", has_text=statblock_updated_title)
             expect(updated_card).to_be_visible(timeout=10000)
-            if not updated_card.evaluate("element => element.open"):
-                updated_card.locator("summary.dm-statblock-summary").click()
+            updated_view_detail = updated_card.locator("details.feature-detail", has_text="View statblock text")
+            if not updated_view_detail.evaluate("element => element.open"):
+                updated_view_detail.locator("summary").click()
             expect(updated_card.locator(".meta-badge", has_text="HP 44")).to_be_visible()
             expect(updated_card.locator(".meta-badge", has_text="Init +3")).to_be_visible()
 
@@ -3350,7 +3362,7 @@ def test_gen2_dm_content_browser_statblock_workflow(
             expect(updated_card).to_be_visible()
             updated_card.get_by_role("button", name="Delete statblock").click()
             expect(page.get_by_text("Statblock deleted: Gen2 Harbor Sergeant.")).to_be_visible(timeout=10000)
-            expect(library.locator("details.dm-statblock-card", has_text=statblock_updated_title)).to_have_count(0, timeout=10000)
+            expect(library.locator("article.dm-content-item.dm-statblock-card", has_text=statblock_updated_title)).to_have_count(0, timeout=10000)
         finally:
             page.close()
             browser.close()
