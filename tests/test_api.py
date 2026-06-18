@@ -2824,6 +2824,41 @@ def test_api_character_roster_exposes_gen2_links_search_and_portraits(client, ap
     assert detail_payload["links"]["flask_advanced_editor_url"] == "/campaigns/linden-pass/characters/arden-march/edit"
 
 
+def test_api_character_detail_serializer_exposes_presenter_parity_payload_fields(client, app, users, set_campaign_visibility):
+    set_campaign_visibility("linden-pass", characters="players")
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-character-detail-parity-api")
+
+    response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(owner_token),
+    )
+
+    assert response.status_code == 200
+    character = response.get_json()["character"]
+
+    assert isinstance(character["overview_stat_rows"], list)
+    assert character["overview_stat_rows"]
+    assert all(isinstance(row, list) for row in character["overview_stat_rows"])
+    assert any(
+        isinstance(stat, dict) and "label" in stat and "value" in stat for row in character["overview_stat_rows"] for stat in row
+    )
+    assert isinstance(character["overview_stats"], list)
+    assert all(isinstance(stat, dict) for stat in character["overview_stats"])
+
+    assert "player_notes_markdown" in character
+    assert "player_notes_html" in character
+    assert isinstance(character["player_notes_markdown"], str)
+    assert isinstance(character["player_notes_html"], str)
+    assert isinstance(character["reference_sections"], list)
+    assert isinstance(character["physical_description_markdown"], str)
+    assert isinstance(character["physical_description_html"], str)
+    assert isinstance(character["personal_background_markdown"], str)
+    assert isinstance(character["personal_background_html"], str)
+    assert isinstance(character["abilities"], list)
+    assert isinstance(character["skills"], list)
+    assert isinstance(character["proficiency_groups"], list)
+
+
 def test_api_character_advanced_editor_context_save_and_access(client, app, users, set_campaign_visibility):
     set_campaign_visibility("linden-pass", characters="players")
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-editor-api")

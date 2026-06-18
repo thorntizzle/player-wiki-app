@@ -1711,6 +1711,10 @@ export interface CharacterRecord {
   player_notes_markdown?: string;
   player_notes_html?: string;
   reference_sections?: CharacterReferenceSection[];
+  physical_description_markdown?: string;
+  physical_description_html?: string;
+  personal_background_markdown?: string;
+  personal_background_html?: string;
   equipment_state?: CharacterEquipmentState;
   arcane_armor_state?: CharacterArcaneArmorState;
   presented_spellcasting?: CharacterPresentedSpellcasting;

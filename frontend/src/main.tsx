@@ -8125,7 +8125,6 @@ function CharacterPane({
   const isDnd = isDndCharacter(detailRecord);
   const isXianxia = isXianxiaCharacter(detailRecord);
   const definition = asRecord(detailRecord?.definition);
-  const profile = asRecord(definition.profile);
   const stats = asRecord(definition.stats);
   const spellcasting = asRecord(definition.spellcasting);
   const state = asRecord(detailRecord?.state_record.state);
@@ -8142,6 +8141,8 @@ function CharacterPane({
   const currency = isXianxia ? asRecord(xianxiaState.currency) : asRecord(state.currency);
   const notes = asRecord(state.notes);
   const playerNotesHtml = readString(detailRecord?.player_notes_html);
+  const physicalDescriptionHtml = readString(detailRecord?.physical_description_html);
+  const personalBackgroundHtml = readString(detailRecord?.personal_background_html);
   const referenceSections = asRecordArray(detailRecord?.reference_sections);
   const dndAbilities = asRecordArray(detailRecord?.abilities);
   const dndSkills = asRecordArray(detailRecord?.skills);
@@ -10772,18 +10773,41 @@ function CharacterPane({
                 <div className="section-heading">
                   <h2>Personal</h2>
                 </div>
-                <div className="stat-grid">
-                  <article>
-                    <strong>Species</strong>
-                    <span>{readString(profile.species, selected.species || "--")}</span>
-                  </article>
-                  <article>
-                    <strong>Background</strong>
-                    <span>{readString(profile.background, selected.background || "--")}</span>
-                  </article>
+                <div className="reference-stack">
+                  {detailRecord?.portrait ? (
+                    <article className="detail-card" id="character-personal-portrait">
+                      <figure>
+                        <img
+                          className="article-image"
+                          src={detailRecord.portrait.url}
+                          alt={detailRecord.portrait.alt_text || "Character portrait"}
+                        />
+                        {detailRecord.portrait.caption ? (
+                          <figcaption className="meta article-image__caption">
+                            {detailRecord.portrait.caption}
+                          </figcaption>
+                        ) : null}
+                      </figure>
+                    </article>
+                  ) : null}
+                  {physicalDescriptionHtml ? (
+                    <article className="detail-card">
+                      <h3>Physical Description</h3>
+                      <div className="article-body article-body--compact" dangerouslySetInnerHTML={{ __html: physicalDescriptionHtml }} />
+                    </article>
+                  ) : null}
+                  {personalBackgroundHtml ? (
+                    <article className="detail-card">
+                      <h3>Background</h3>
+                      <div className="article-body article-body--compact" dangerouslySetInnerHTML={{ __html: personalBackgroundHtml }} />
+                    </article>
+                  ) : null}
+                  {!detailRecord?.portrait && !physicalDescriptionHtml && !personalBackgroundHtml ? (
+                    <article className="detail-card">
+                      <p className="meta">No personal details yet.</p>
+                    </article>
+                  ) : null}
                 </div>
-                {readString(profile.biography_markdown) ? <pre className="article-body markdown-body">{readString(profile.biography_markdown)}</pre> : null}
-                {readString(profile.personality_markdown) ? <pre className="article-body markdown-body">{readString(profile.personality_markdown)}</pre> : null}
               </section>
             ) : null}
 
@@ -11572,14 +11596,14 @@ function CharacterPane({
                 <div className="section-heading">
                   <h2>{characterSystem(detailRecord)}</h2>
                 </div>
-                <div className="stat-grid">
-                  <article>
-                    <strong>Current HP</strong>
-                    <span>{String(vitals.current_hp ?? "--")}</span>
+                <div className="detail-grid">
+                  <article className="detail-card">
+                    <h3>Current HP</h3>
+                    <strong>{String(vitals.current_hp ?? "--")}</strong>
                   </article>
-                  <article>
-                    <strong>Temp HP</strong>
-                    <span>{String(vitals.temp_hp ?? "--")}</span>
+                  <article className="detail-card">
+                    <h3>Temp HP</h3>
+                    <strong>{String(vitals.temp_hp ?? "--")}</strong>
                   </article>
                 </div>
               </section>

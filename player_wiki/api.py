@@ -5117,6 +5117,26 @@ def register_api(app) -> None:
             "presented_spellcasting": dict(presented_character.get("spellcasting") or {}),
             "presented_inventory": list(presented_character.get("inventory") or []),
             "presented_xianxia": dict(presented_character.get("xianxia_read") or {}),
+            "overview_stats": [dict(stat) for stat in list(presented_character.get("overview_stats") or []) if isinstance(stat, dict)],
+            "overview_stat_rows": [
+                [dict(stat) for stat in list(row) if isinstance(stat, dict)]
+                for row in list(presented_character.get("overview_stat_rows") or [])
+                if isinstance(row, list)
+            ],
+            "player_notes_markdown": str(presented_character.get("player_notes_markdown") or ""),
+            "player_notes_html": str(presented_character.get("player_notes_html") or ""),
+            "reference_sections": [
+                dict(section) for section in list(presented_character.get("reference_sections") or []) if isinstance(section, dict)
+            ],
+            "physical_description_markdown": str(presented_character.get("physical_description_markdown") or ""),
+            "physical_description_html": str(presented_character.get("physical_description_html") or ""),
+            "personal_background_markdown": str(presented_character.get("personal_background_markdown") or ""),
+            "personal_background_html": str(presented_character.get("personal_background_html") or ""),
+            "abilities": [dict(ability) for ability in list(presented_character.get("abilities") or []) if isinstance(ability, dict)],
+            "skills": [dict(skill) for skill in list(presented_character.get("skills") or []) if isinstance(skill, dict)],
+            "proficiency_groups": [
+                dict(group) for group in list(presented_character.get("proficiency_groups") or []) if isinstance(group, dict)
+            ],
             "portrait": build_character_portrait_payload(campaign, record) if campaign is not None else None,
             "controls": serialize_character_controls(campaign_slug, campaign, record) if campaign is not None else None,
             "permissions": {

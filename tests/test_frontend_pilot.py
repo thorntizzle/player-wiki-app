@@ -1213,6 +1213,49 @@ def test_character_xianxia_techniques_section_uses_flask_chrome_parity() -> None
     assert 'className="chat-label"' not in section_markup
 
 
+def test_character_xianxia_personal_section_uses_flask_style_reference_stack_and_detail_cards() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    personal_section_start = source.index('{isXianxia && activeCharacterSection === "personal" ? (')
+    personal_section_end = source.index('{isDnd && activeCharacterSection === "overview" ? (', personal_section_start)
+    personal_section_markup = source[personal_section_start:personal_section_end]
+
+    assert 'className="read-section" id="xianxia-personal"' in personal_section_markup
+    assert "<h2>Personal</h2>" in personal_section_markup
+    assert 'className="reference-stack"' in personal_section_markup
+    assert 'id="character-personal-portrait"' in personal_section_markup
+    assert "Physical Description" in personal_section_markup
+    assert "Background" in personal_section_markup
+    assert 'className="detail-card"' in personal_section_markup
+    assert 'className="article-body article-body--compact"' in personal_section_markup
+    assert "dangerouslySetInnerHTML" in personal_section_markup
+    assert "No personal details yet." in personal_section_markup
+    assert 'id="character-personal-portrait-manager"' not in personal_section_markup
+
+    assert 'className="stat-grid"' not in personal_section_markup
+    assert 'className="character-state-card"' not in personal_section_markup
+    assert 'className="inline-two-col"' not in personal_section_markup
+    assert 'className="chat-label"' not in personal_section_markup
+    assert 'profile.species' not in personal_section_markup
+    assert 'profile.background' not in personal_section_markup
+
+
+def test_character_generic_system_summary_section_uses_detail_grid_cards() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    summary_section_start = source.index('<section className="read-section" id="character-system-summary">')
+    generic_summary_end = source.index("</section>", summary_section_start)
+    generic_summary_markup = source[summary_section_start:generic_summary_end]
+
+    assert '<section className="read-section" id="character-system-summary">' in generic_summary_markup
+    assert 'className="detail-grid"' in generic_summary_markup
+    assert '<article className="detail-card">' in generic_summary_markup
+    assert "<h3>Current HP</h3>" in generic_summary_markup
+    assert "<h3>Temp HP</h3>" in generic_summary_markup
+    assert '<strong>{String(vitals.current_hp ?? "--")}</strong>' in generic_summary_markup
+    assert '<strong>{String(vitals.temp_hp ?? "--")}</strong>' in generic_summary_markup
+
+    assert 'className="stat-grid"' not in generic_summary_markup
+
+
 def test_character_dnd_overview_section_uses_flask_style_glance_rows() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "overview" ? (')
