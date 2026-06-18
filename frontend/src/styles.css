@@ -278,9 +278,8 @@ a:hover {
 }
 
 .account-row .button,
-.topbar .button,
-.topbar .sign-in-link,
-.topbar .button-secondary {
+.account-row .ghost-button,
+.account-row .header-link {
   white-space: nowrap;
 }
 
@@ -298,9 +297,16 @@ a:hover {
   white-space: nowrap;
 }
 
-.user-badge__role {
+.user-badge .meta {
   color: var(--muted);
   font-size: 0.82rem;
+  line-height: 1.15;
+}
+
+.header-link {
+  text-decoration: none;
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .campaign-nav-row {
@@ -2244,10 +2250,6 @@ a:hover {
 
 .link-like-button:hover {
   color: var(--accent);
-}
-
-.sign-in-link {
-  white-space: nowrap;
 }
 
 .auth-notice {

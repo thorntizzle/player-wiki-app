@@ -4550,25 +4550,25 @@ function AppShell() {
               {user ? (
                 <>
                   {user.is_admin ? (
-                    <a className="button button-secondary" href="/app-next/admin">
+                    <a className="header-link" href="/app-next/admin">
                       Admin
                     </a>
                   ) : null}
-                  <a className="button button-secondary" href="/app-next/account">
+                  <a className="header-link" href="/app-next/account">
                     Account
                   </a>
                   <span className="user-badge">
                     {user.display_name}
-                    {user.is_admin ? <span className="user-badge__role">Admin</span> : null}
+                    {user.is_admin ? <span className="meta">Admin</span> : null}
                   </span>
                   <form method="post" action="/sign-out">
-                    <button type="submit" className="button button-secondary">
+                    <button type="submit" className="ghost-button">
                       Sign out
                     </button>
                   </form>
                 </>
               ) : (
-                <a className="button button-secondary sign-in-link" href={signInHref}>
+                <a className="ghost-button" href={signInHref}>
                   Sign in
                 </a>
               )}

@@ -1,3 +1,21 @@
+from pathlib import Path
+import re
+
+
+def test_gen2_topbar_account_controls_use_flask_chrome_classes_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    account_row = re.search(r'<div className="account-row">([\s\S]*?)</div>', source)
+    assert account_row is not None
+
+    account_controls_markup = account_row.group(1)
+    assert 'className="header-link" href="/app-next/admin"' in account_controls_markup
+    assert 'className="header-link" href="/app-next/account"' in account_controls_markup
+    assert '<span className="meta">Admin</span>' in account_controls_markup
+    assert re.search(r'<button type="submit" className="ghost-button">\s*Sign out\s*</button>', account_controls_markup) is not None
+    assert re.search(r'<a className="ghost-button" href=\{signInHref\}>\s*Sign in\s*</a>', account_controls_markup) is not None
+    assert "button button-secondary" not in account_controls_markup
+
+
 def test_frontend_pilot_routes_are_closed(client, app, tmp_path):
     dist_dir = tmp_path / "frontend-dist"
     assets_dir = dist_dir / "assets"
