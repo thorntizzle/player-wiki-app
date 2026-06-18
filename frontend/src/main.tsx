@@ -8923,121 +8923,17 @@ function CharacterPane({
     });
   };
 
-  const openXianxiaRecordDetail = (record: CharacterXianxiaNamedRecord, eyebrow: string) => {
-    setDetailDialog({
-      eyebrow,
-      title: record.name || "Xianxia record",
-      html: readString(record.body_html, readString(record.description_html)),
-      notes: joinDisplay([record.notes, record.prepared_record_notes, record.use_notes]),
-      href: readString(record.href),
-      facts: [
-        { label: "Rank", value: readString(record.current_rank_label) },
-        { label: "Status", value: readString(record.status_label, readString(record.status)) },
-        { label: "Type", value: readString(record.type_label, readString(record.type)) },
-        { label: "Source", value: readString(record.source_label) },
-        { label: "Prepared", value: readString(record.prepared_record_name) },
-        { label: "Approval timestamp", value: readString(record.approval_timestamp) },
-        { label: "Insight cost", value: record.insight_cost ? String(record.insight_cost) : "" },
-        { label: "Insight spent", value: record.insight_spent ? String(record.insight_spent) : "" },
-        { label: "One-use status", value: readString(record.one_use_status_label, readString(record.one_use_status)) },
-        { label: "Base ability ref", value: readString(record.base_ability_ref) },
-        { label: "Base ability kind", value: readString(record.base_ability_kind) },
-        { label: "Technique anchor", value: readString(record.technique_anchor_label) },
-      ].filter((fact) => fact.value),
-    });
+  const renderXianxiaRecordBody = (record: unknown): string => {
+    const source = asRecord(record);
+    return readString(source.body_html, readString(source.description_html));
   };
 
-  const renderXianxiaRecordCard = (record: CharacterXianxiaNamedRecord, eyebrow: string) => (
-    <article className="character-state-card" key={draftKey(eyebrow, record.name, record.href)}>
-      <p className="meta">
-        {joinDisplay([
-          record.current_rank_label,
-          record.status_label || record.status,
-          record.type_label || record.type,
-          record.source_label,
-        ]) || eyebrow}
-      </p>
-      <h4>{record.name || "Unnamed record"}</h4>
-      {record.reason ? <p className="meta">{record.reason}</p> : null}
-      {record.rank_progress_label ? <p className="meta">{record.rank_progress_label}</p> : null}
-      {record.body_html || record.description_html || record.notes || record.href || record.prepared_record_notes || record.use_notes ? (
-        <button type="button" className="ghost-button item-detail-button" onClick={() => openXianxiaRecordDetail(record, eyebrow)}>
-          Details
-        </button>
-      ) : null}
-    </article>
-  );
-
-  const renderXianxiaApprovalRecordCard = (
-    record: CharacterXianxiaNamedRecord,
-    groupTitle: string,
-    groupKey: string,
-  ) => {
-    const isDaoUseRecord = groupKey === "dao_immolating_use_records";
-    const useRecordDraftKey = xianxiaDaoUseRecordDraftKey(record);
-    const insightCost = record.insight_cost ?? (isDaoUseRecord ? 10 : 0);
-    const insightAvailable = xianxiaInsight?.available ?? 0;
-    const canRecordThisDaoUse =
-      isDaoUseRecord &&
-      canRecordXianxiaDaoUse &&
-      record.status_key === "approved" &&
-      !record.used &&
-      record.use_record_index !== undefined;
-    const spendDisabled = insightCost > 0 && insightAvailable < insightCost;
-
-    return (
-      <article className="character-state-card" key={draftKey(groupKey, record.name, record.use_record_index, record.approval_timestamp)}>
-        <p className="meta">
-          {joinDisplay([
-            record.status_label || record.status,
-            record.type_label || record.type,
-            record.source_label,
-            insightCost ? `${insightCost} Insight` : "",
-            record.used ? "Used" : record.one_use_status_label,
-          ]) || groupTitle}
-        </p>
-        <h4>{record.name || "Unnamed record"}</h4>
-        {record.notes ? <p>{record.notes}</p> : null}
-        {record.prepared_record_name ? <p className="meta">Prepared note: {record.prepared_record_name}</p> : null}
-        {record.approval_timestamp ? <p className="meta">Approval timestamp: {record.approval_timestamp}</p> : null}
-        {record.use_notes ? <p className="meta">Use notes: {record.use_notes}</p> : null}
-        {record.technique_anchor_warning ? <p className="status status-error">{record.technique_anchor_warning}</p> : null}
-        {record.body_html ||
-        record.description_html ||
-        record.notes ||
-        record.href ||
-        record.prepared_record_notes ||
-        record.use_notes ||
-        record.technique_anchor_warning ? (
-          <button type="button" className="ghost-button item-detail-button" onClick={() => openXianxiaRecordDetail(record, groupTitle)}>
-            Details
-          </button>
-        ) : null}
-        {canRecordThisDaoUse ? (
-          <form onSubmit={(event) => submitXianxiaDaoUseRecord(event, record)} className="inline-two-col">
-            <label htmlFor={`xianxia-dao-use-notes-${useRecordDraftKey}`} className="chat-label">
-              Use notes
-            </label>
-            <textarea
-              id={`xianxia-dao-use-notes-${useRecordDraftKey}`}
-              rows={2}
-              value={xianxiaDaoUseNotesDrafts[useRecordDraftKey] ?? ""}
-              onChange={(event) =>
-                setXianxiaDaoUseNotesDrafts({
-                  ...xianxiaDaoUseNotesDrafts,
-                  [useRecordDraftKey]: event.currentTarget.value,
-                })
-              }
-            />
-            <div />
-            <button type="submit" disabled={postXianxiaDaoUseRecord.isPending || spendDisabled}>
-              {postXianxiaDaoUseRecord.isPending ? "Saving..." : "Record one-use spend"}
-            </button>
-            {spendDisabled ? <p className="status status-error">Needs {insightCost} Insight.</p> : null}
-          </form>
-        ) : null}
-      </article>
-    );
+  const renderXianxiaRecordHtml = (record: unknown): JSX.Element | null => {
+    const bodyHtml = renderXianxiaRecordBody(record);
+    if (!bodyHtml) {
+      return null;
+    }
+    return <div className="article-body article-body--compact" dangerouslySetInnerHTML={{ __html: bodyHtml }} />;
   };
 
   const renderXianxiaPoolCards = (
@@ -10049,115 +9945,331 @@ function CharacterPane({
                 <div className="section-heading">
                   <h2>Techniques</h2>
                 </div>
-                {presentedXianxia.generic_techniques?.length ? (
-                  <div className="character-card-grid">
-                    {presentedXianxia.generic_techniques.map((record) => renderXianxiaRecordCard(record, "Generic Technique"))}
-                  </div>
-                ) : (
-                  <p className="status status-neutral">No generic techniques recorded.</p>
-                )}
-                {presentedXianxia.basic_actions?.length ? (
-                  <>
-                    <h4>Basic actions</h4>
-                    <div className="character-card-grid">
-                      {presentedXianxia.basic_actions.map((record) => renderXianxiaRecordCard(record, "Basic Action"))}
-                    </div>
-                  </>
-                ) : null}
-                {presentedXianxia.approval?.status_groups?.length ? (
-                  <>
-                    <h4>Approvals</h4>
-                    {presentedXianxia.approval.status_groups.map((group) => (
-                      <section className="xianxia-approval-group" key={group.key}>
-                        <h5>{group.title}</h5>
-                        {group.records.length ? (
-                          <div className="character-card-grid">
-                            {group.records.map((record) =>
-                              renderXianxiaApprovalRecordCard(record, group.title, group.key),
-                            )}
-                          </div>
+                <div className="detail-grid">
+                  <article className="detail-card">
+                    <h3>Known Generic Techniques</h3>
+                    {asRecordArray(presentedXianxia.generic_techniques).length ? (
+                      <ul className="plain-list slot-list">
+                        {asRecordArray(presentedXianxia.generic_techniques).map((data, index) => {
+                          const techniqueName = readString(data.name, "Unnamed technique");
+                          const techniqueHref = readString(data.href);
+                          const techniqueBody = renderXianxiaRecordBody(data);
+                          const supportLabel = readString(data.support_label);
+                          const insightCost = readNumber(data.insight_cost);
+                          const prerequisites = readString(data.prerequisites);
+                          const resourceCosts = readString(data.resource_costs);
+                          const rangeTags = readString(data.range_tags);
+                          const effortTags = readString(data.effort_tags);
+                          const resetCadence = readString(data.reset_cadence);
+                          const learnableWithoutMaster = boolFromUnknown(data.learnable_without_master);
+                          const requiresMaster = boolFromUnknown(data.requires_master);
+                          const metaLine = [
+                            rangeTags ? `Range: ${rangeTags}` : "",
+                            effortTags ? `Effort: ${effortTags}` : "",
+                            resetCadence ? `Reset: ${resetCadence}` : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" | ");
+
+                          const detailsKey = draftKey("xianxia-generic-technique", techniqueName, techniqueHref);
+                          return (
+                            <React.Fragment key={`${detailsKey}-${index}`}>
+                              <li>
+                                {techniqueHref ? (
+                                  <a href={techniqueHref}>{techniqueName}</a>
+                                ) : (
+                                  <span>{techniqueName}</span>
+                                )}
+                                {supportLabel ? <strong>{supportLabel}</strong> : null}
+                                {insightCost ? <span className="meta">Insight {insightCost}</span> : null}
+                              </li>
+                              {techniqueBody ? (
+                                <li>
+                                  <details className="detail-card">
+                                    <summary>Technique details</summary>
+                                    <article>{renderXianxiaRecordHtml(data)}</article>
+                                  </details>
+                                </li>
+                              ) : null}
+                              {prerequisites ? <li className="meta">Prerequisites: {prerequisites}</li> : null}
+                              {resourceCosts ? <li className="meta">Resource Costs: {resourceCosts}</li> : null}
+                              {metaLine ? <li className="meta">{metaLine}</li> : null}
+                              {learnableWithoutMaster || requiresMaster ? (
+                                <li className="meta">
+                                  {learnableWithoutMaster ? "Learnable without a Master" : requiresMaster ? "Master required" : null}
+                                </li>
+                              ) : null}
+                            </React.Fragment>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <p className="meta">No Generic Techniques are recorded on this sheet yet.</p>
+                    )}
+                  </article>
+                  <article className="detail-card">
+                    <h3>Basic Actions</h3>
+                    {asRecordArray(presentedXianxia.basic_actions).length ? (
+                      <ul className="plain-list slot-list">
+                        {asRecordArray(presentedXianxia.basic_actions).map((data, index) => {
+                          const actionName = readString(data.title, readString(data.name, "Unnamed action"));
+                          const actionHref = readString(data.href);
+                          const supportLabel = readString(data.support_label);
+                          const actionBody = renderXianxiaRecordBody(data);
+                          const rangeTags = readString(data.range_tags);
+                          const timingTags = readString(data.timing_tags);
+                          const metaLine = [rangeTags ? `Range: ${rangeTags}` : "", timingTags ? `Timing: ${timingTags}` : ""]
+                            .filter(Boolean)
+                            .join(" | ");
+                          const detailKey = draftKey("xianxia-basic-action", actionName, actionHref);
+
+                          return (
+                            <React.Fragment key={`${detailKey}-${index}`}>
+                              <li>
+                                {actionHref ? <a href={actionHref}>{actionName}</a> : <span>{actionName}</span>}
+                                {supportLabel ? <strong>{supportLabel}</strong> : null}
+                              </li>
+                              {actionBody ? (
+                                <li>
+                                  <details className="detail-card">
+                                    <summary>Action details</summary>
+                                    <article>{renderXianxiaRecordHtml(data)}</article>
+                                  </details>
+                                </li>
+                              ) : null}
+                              {metaLine ? <li className="meta">{metaLine}</li> : null}
+                            </React.Fragment>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <p className="meta">No Basic Action Systems entries are available for this campaign.</p>
+                    )}
+                  </article>
+                  {asRecordArray(presentedXianxia.approval?.status_groups).map((group, groupIndex) => {
+                    const groupKey = readString(group.key);
+                    const groupTitle = readString(group.title, "Approval records");
+                    const groupId = groupKey ? `xianxia-approval-${groupKey.replace(/_/g, "-")}` : undefined;
+                    const approvalRecords = asRecordArray(group.records);
+                    const isDaoImmolatingUseRecords = groupKey === "dao_immolating_use_records";
+                    const canRecordThisDaoUse =
+                      isDaoImmolatingUseRecords &&
+                      canRecordXianxiaDaoUse &&
+                      approvalRecords.some(
+                        (record) =>
+                          readString(record.status_key) === "approved" &&
+                          !boolFromUnknown(record.used) &&
+                          record.use_record_index !== undefined,
+                      );
+
+                    return (
+                      <article className="detail-card" key={groupKey || draftKey("xianxia-approval-group", groupIndex)} id={groupId}>
+                        <h3>{groupTitle}</h3>
+                        {approvalRecords.length ? (
+                          <ul className="plain-list slot-list">
+                            {approvalRecords.map((record, recordIndex) => {
+                              const data = asRecord(record) as CharacterXianxiaNamedRecord;
+                              const recordName = readString(data.name, "Unnamed record");
+                              const statusLabel = readString(data.status_label, readString(data.status, "Unknown"));
+                              const statusKey = readString(data.status_key, "unknown");
+                              const typeLabel = readString(data.type_label, readString(data.type));
+                              const sourceLabel = readString(data.source_label);
+                              const approvalTimestamp = readString(data.approval_timestamp);
+                              const notes = readString(data.notes);
+                              const baseAbilityRef = readString(data.base_ability_ref);
+                              const baseAbilityKind = readString(data.base_ability_kind);
+                              const techniqueAnchor = readString(data.technique_anchor_label);
+                              const techniqueAnchorWarning = readString(data.technique_anchor_warning);
+                              const insightCost = isDaoImmolatingUseRecords
+                                ? readNumber(data.insight_cost, 10)
+                                : readNumber(data.insight_cost);
+                              const preparedRecordName = readString(data.prepared_record_name);
+                              const preparedRecordIndex = readNumber(data.prepared_record_index, 0);
+                              const preparedRecordNotes = readString(data.prepared_record_notes);
+                              const oneUseUsed = boolFromUnknown(data.used);
+                              const insightSpent = readNumber(data.insight_spent);
+                              const useRecordDraftKey = xianxiaDaoUseRecordDraftKey(data);
+                              const useNotes = xianxiaDaoUseNotesDrafts[useRecordDraftKey] ?? "";
+                              const spendDisabled = insightCost > (xianxiaInsight?.available ?? 0);
+                              const canRecordThisRecord =
+                                isDaoImmolatingUseRecords &&
+                                canRecordThisDaoUse &&
+                                readString(data.status_key) === "approved" &&
+                                !boolFromUnknown(data.used) &&
+                                data.use_record_index !== undefined;
+
+                              return (
+                                <React.Fragment
+                                  key={`${groupKey ?? "approval"}-${recordName}-${data.use_record_index ?? recordIndex}-${recordIndex}`}
+                                >
+                                  <li className="approval-record__heading">
+                                    <span>{recordName}</span>
+                                    <span className={`meta-badge approval-state-badge approval-state-badge--${statusKey}`}>
+                                      Approval state: {statusLabel}
+                                    </span>
+                                  </li>
+                                  {(typeLabel || sourceLabel) ? (
+                                    <li className="meta">{joinDisplay([typeLabel, sourceLabel], " | ")}</li>
+                                  ) : null}
+                                  {notes ? <li className="meta">{notes}</li> : null}
+                                  {approvalTimestamp ? <li className="meta">Approval timestamp: {approvalTimestamp}</li> : null}
+                                  {groupKey && ["karmic_constraints", "ascendant_arts"].includes(groupKey) ? (
+                                    <>
+                                      {baseAbilityRef ? <li className="meta">Base ability ref: {baseAbilityRef}</li> : null}
+                                      {baseAbilityKind ? <li className="meta">Base ability kind: {baseAbilityKind}</li> : null}
+                                      {techniqueAnchor ? <li className="meta">Technique anchor: {techniqueAnchor}</li> : null}
+                                      {techniqueAnchorWarning ? <li className="meta">{techniqueAnchorWarning}</li> : null}
+                                    </>
+                                  ) : null}
+                                  {isDaoImmolatingUseRecords ? (
+                                    <>
+                                      <li className="meta">Insight cost: {insightCost}</li>
+                                      {(preparedRecordName || preparedRecordNotes || data.prepared_record_index !== undefined) ? (
+                                        <li className="meta">
+                                          Prepared support: {preparedRecordName || `Prepared note #${preparedRecordIndex + 1}`}
+                                        </li>
+                                      ) : null}
+                                      {preparedRecordNotes ? <li className="meta">{preparedRecordNotes}</li> : null}
+                                      {oneUseUsed ? (
+                                        <li className="meta">One-use history: used; Insight spent {insightSpent}</li>
+                                      ) : (
+                                        <li className="meta">One-use history: not recorded yet</li>
+                                      )}
+                                      {data.use_notes && oneUseUsed ? <li className="meta">{data.use_notes}</li> : null}
+                                      {canRecordThisRecord ? (
+                                        <li>
+                                          <form
+                                            onSubmit={(event) => submitXianxiaDaoUseRecord(event, data)}
+                                            className="session-vitals-form"
+                                          >
+                                            <label
+                                              htmlFor={`xianxia-dao-use-notes-${useRecordDraftKey}`}
+                                              className="session-field"
+                                            >
+                                              <span>Use notes</span>
+                                              <textarea
+                                                id={`xianxia-dao-use-notes-${useRecordDraftKey}`}
+                                                rows={2}
+                                                value={useNotes}
+                                                onChange={(event) =>
+                                                  setXianxiaDaoUseNotesDrafts({
+                                                    ...xianxiaDaoUseNotesDrafts,
+                                                    [useRecordDraftKey]: event.currentTarget.value,
+                                                  })
+                                                }
+                                              />
+                                            </label>
+                                            {spendDisabled ? <p className="meta">Needs {insightCost} Insight.</p> : null}
+                                            <button
+                                              type="submit"
+                                              className="button-link"
+                                              disabled={postXianxiaDaoUseRecord.isPending || spendDisabled}
+                                            >
+                                              {postXianxiaDaoUseRecord.isPending ? "Saving..." : "Record one-use spend"}
+                                            </button>
+                                          </form>
+                                        </li>
+                                      ) : null}
+                                    </>
+                                  ) : null}
+                                </React.Fragment>
+                              );
+                            })}
+                          </ul>
                         ) : (
-                          <p className="meta">{group.empty_message}</p>
+                          <p className="meta">{readString(group.empty_message)}</p>
                         )}
-                      </section>
-                    ))}
-                  </>
-                ) : null}
-                {presentedXianxia.approval?.dao_immolating_prepared?.length ? (
-                  <>
-                    <h4>Prepared Dao Immolating Techniques</h4>
-                    <div className="character-card-grid">
-                      {presentedXianxia.approval.dao_immolating_prepared.map((record, index) =>
-                        renderXianxiaRecordCard(
-                          { ...record, source_label: joinDisplay([record.source_label, `Note ${index + 1}`]) },
-                          "Prepared Dao Immolating Technique",
-                        ),
-                      )}
-                    </div>
-                  </>
-                ) : null}
-                {canEdit ? (
-                  <form onSubmit={submitXianxiaDaoUseRequest} className="inline-two-col">
-                    <label htmlFor="xianxia-dao-request-name" className="chat-label">
-                      Dao Immolating request
-                    </label>
-                    <input
-                      id="xianxia-dao-request-name"
-                      value={xianxiaDaoRequestDraft.requestName}
-                      disabled={postXianxiaDaoUseRequest.isPending}
-                      onChange={(event) =>
-                        setXianxiaDaoRequestDraft({
-                          ...xianxiaDaoRequestDraft,
-                          requestName: event.currentTarget.value,
-                        })
-                      }
-                    />
-                    {presentedXianxia.approval?.dao_immolating_prepared?.length ? (
-                      <>
-                        <label htmlFor="xianxia-dao-prepared-record" className="chat-label">
-                          Prepared note
+                      </article>
+                    );
+                  })}
+                  <article className="detail-card">
+                    <h3>Prepared Dao Immolating Techniques</h3>
+                    {asRecordArray(presentedXianxia.approval?.dao_immolating_prepared).length ? (
+                      <ul className="plain-list slot-list">
+                        {asRecordArray(presentedXianxia.approval?.dao_immolating_prepared).map((data, index) => {
+                          const recordName = readString(data.name, `Prepared note ${index + 1}`);
+                          const supportLabel = readString(data.status, readString(data.type));
+                          return (
+                            <React.Fragment key={`xianxia-dao-immolating-prepared-${recordName}-${index}`}>
+                              <li>
+                                <span>{recordName}</span>
+                                {supportLabel ? <strong>{supportLabel}</strong> : null}
+                              </li>
+                              {readString(data.notes) ? <li className="meta">{readString(data.notes)}</li> : null}
+                            </React.Fragment>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <p className="meta">No prepared Dao Immolating Technique notes yet.</p>
+                    )}
+                  </article>
+                  {canEdit ? (
+                    <article className="detail-card" id="xianxia-dao-immolating-use-request">
+                      <h3>Ad Hoc Dao Immolating Use Request</h3>
+                      <form onSubmit={submitXianxiaDaoUseRequest} className="session-vitals-form">
+                        <label className="session-field" htmlFor="xianxia-dao-request-name">
+                          <span>Request name</span>
+                          <input
+                            id="xianxia-dao-request-name"
+                            value={xianxiaDaoRequestDraft.requestName}
+                            required={!(asRecordArray(presentedXianxia.approval?.dao_immolating_prepared).length > 0)}
+                            disabled={postXianxiaDaoUseRequest.isPending}
+                            onChange={(event) =>
+                              setXianxiaDaoRequestDraft({
+                                ...xianxiaDaoRequestDraft,
+                                requestName: event.currentTarget.value,
+                              })
+                            }
+                          />
                         </label>
-                        <select
-                          id="xianxia-dao-prepared-record"
-                          value={xianxiaDaoRequestDraft.preparedRecordIndex}
-                          disabled={postXianxiaDaoUseRequest.isPending}
-                          onChange={(event) =>
-                            setXianxiaDaoRequestDraft({
-                              ...xianxiaDaoRequestDraft,
-                              preparedRecordIndex: event.currentTarget.value,
-                            })
-                          }
-                        >
-                          <option value="">None</option>
-                          {presentedXianxia.approval.dao_immolating_prepared.map((record, index) => (
-                            <option key={draftKey(record.name, index)} value={String(index)}>
-                              {record.name || `Prepared note ${index + 1}`}
-                            </option>
-                          ))}
-                        </select>
-                      </>
-                    ) : null}
-                    <label htmlFor="xianxia-dao-request-notes" className="chat-label">
-                      Request notes
-                    </label>
-                    <textarea
-                      id="xianxia-dao-request-notes"
-                      rows={3}
-                      value={xianxiaDaoRequestDraft.notes}
-                      disabled={postXianxiaDaoUseRequest.isPending}
-                      onChange={(event) =>
-                        setXianxiaDaoRequestDraft({
-                          ...xianxiaDaoRequestDraft,
-                          notes: event.currentTarget.value,
-                        })
-                      }
-                    />
-                    <div />
-                    <button type="submit" disabled={postXianxiaDaoUseRequest.isPending}>
-                      {postXianxiaDaoUseRequest.isPending ? "Saving..." : "Record use request"}
-                    </button>
-                  </form>
-                ) : null}
+                        {asRecordArray(presentedXianxia.approval?.dao_immolating_prepared).length ? (
+                          <>
+                            <label className="session-field" htmlFor="xianxia-dao-prepared-record">
+                              <span>Prepared note</span>
+                              <select
+                                id="xianxia-dao-prepared-record"
+                                value={xianxiaDaoRequestDraft.preparedRecordIndex}
+                                disabled={postXianxiaDaoUseRequest.isPending}
+                                onChange={(event) =>
+                                  setXianxiaDaoRequestDraft({
+                                    ...xianxiaDaoRequestDraft,
+                                    preparedRecordIndex: event.currentTarget.value,
+                                  })
+                                }
+                              >
+                                <option value="">No prepared note</option>
+                                {asRecordArray(presentedXianxia.approval?.dao_immolating_prepared).map((record, index) => (
+                                  <option key={draftKey(record.name, index)} value={String(index)}>
+                                    {record.name || `Prepared note ${index + 1}`}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </>
+                        ) : null}
+                        <label className="session-field" htmlFor="xianxia-dao-request-notes">
+                          <span>Request notes</span>
+                          <textarea
+                            id="xianxia-dao-request-notes"
+                            rows={3}
+                            value={xianxiaDaoRequestDraft.notes}
+                            disabled={postXianxiaDaoUseRequest.isPending}
+                            onChange={(event) =>
+                              setXianxiaDaoRequestDraft({
+                                ...xianxiaDaoRequestDraft,
+                                notes: event.currentTarget.value,
+                              })
+                            }
+                          />
+                        </label>
+                        <button type="submit" className="button-link" disabled={postXianxiaDaoUseRequest.isPending}>
+                          {postXianxiaDaoUseRequest.isPending ? "Saving..." : "Record use request"}
+                        </button>
+                      </form>
+                    </article>
+                  ) : null}
+                </div>
               </section>
             ) : null}
 

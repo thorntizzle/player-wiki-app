@@ -1132,6 +1132,87 @@ def test_character_xianxia_martial_arts_section_uses_flask_feature_row_chrome() 
     assert 'className="chat-label"' not in section_markup
 
 
+def test_character_xianxia_techniques_section_uses_flask_chrome_parity() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    section_start = source.index('{isXianxia && activeCharacterSection === "techniques" ? (')
+    section_end = source.index('{isXianxia && activeCharacterSection === "resources" ? (', section_start)
+    section_markup = source[section_start:section_end]
+
+    assert 'id="xianxia-techniques"' in section_markup
+    assert "<h2>Techniques</h2>" in section_markup
+    assert 'className="detail-grid"' in section_markup
+
+    assert "Known Generic Techniques" in section_markup
+    assert "No Generic Techniques are recorded on this sheet yet." in section_markup
+    assert "Technique details" in section_markup
+
+    assert "Basic Actions" in section_markup
+    assert "No Basic Action Systems entries are available for this campaign." in section_markup
+    assert "Action details" in section_markup
+    assert "No Basic Action Systems entries are available for this campaign." in section_markup
+
+    assert "approval-record__heading" in section_markup
+    assert "Approval state" in section_markup
+    assert "xianxia-approval-" in section_markup
+    assert 'id={groupId}' in section_markup
+
+    assert "Prepared Dao Immolating Techniques" in section_markup
+    assert "No prepared Dao Immolating Technique notes yet." in section_markup
+    assert (
+        re.search(
+            r'const insightCost = isDaoImmolatingUseRecords\s*\?\s*readNumber\(data\.insight_cost, 10\)',
+            section_markup,
+        )
+        is not None
+    )
+    assert "readNumber(data.insight_cost, 0)" not in section_markup
+
+    assert 'id="xianxia-dao-immolating-use-request"' in section_markup
+    assert "Ad Hoc Dao Immolating Use Request" in section_markup
+    assert 'className="session-field" htmlFor="xianxia-dao-request-name"' in section_markup
+    assert 'className="session-field" htmlFor="xianxia-dao-prepared-record"' in section_markup
+    assert 'className="session-field" htmlFor="xianxia-dao-request-notes"' in section_markup
+    assert (
+        re.search(
+            r'<label[^>]*htmlFor={`xianxia-dao-use-notes-\$\{useRecordDraftKey\}`}[^>]*>\s*<span>Use notes</span>\s*<textarea',
+            section_markup,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'<label[^>]*htmlFor="xianxia-dao-prepared-record"[^>]*>\s*<span>Prepared note</span>\s*<select',
+            section_markup,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'<label[^>]*htmlFor="xianxia-dao-request-notes"[^>]*>\s*<span>Request notes</span>\s*<textarea',
+            section_markup,
+        )
+        is not None
+    )
+    assert re.search(
+        r'<label className="session-field" htmlFor="xianxia-dao-prepared-record">\s*<span>Prepared note</span>\s*</label>\s*<select',
+        section_markup,
+    ) is None
+    assert re.search(
+        r'<label className="session-field" htmlFor="xianxia-dao-request-notes">\s*<span>Request notes</span>\s*</label>\s*<textarea',
+        section_markup,
+    ) is None
+    assert 'className="button-link"' in section_markup
+
+    assert 'className="renderXianxiaRecordCard"' not in section_markup
+    assert 'renderXianxiaRecordCard(record, "Generic Technique")' not in section_markup
+    assert 'renderXianxiaRecordCard(record, "Basic Action")' not in section_markup
+    assert "renderXianxiaApprovalRecordCard" not in section_markup
+    assert 'className="character-card-grid"' not in section_markup
+    assert 'className="status status-neutral"' not in section_markup
+    assert 'className="inline-two-col"' not in section_markup
+    assert 'className="chat-label"' not in section_markup
+
+
 def test_character_dnd_inventory_currency_section_uses_flask_style_row_form_chrome() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "inventory" ? (')
