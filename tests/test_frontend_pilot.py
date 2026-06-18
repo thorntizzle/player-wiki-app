@@ -820,6 +820,60 @@ def test_character_roster_page_copy_and_grid_class_parity_in_source() -> None:
     assert 'className="character-roster-grid"' not in roster_source
 
 
+def test_character_roster_card_meta_join_and_stats_divs_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+
+    roster_start = source.index("function CharacterRosterPage() {")
+    roster_end = source.index("function CharacterDetailPage()", roster_start)
+    roster_source = source[roster_start:roster_end]
+
+    card_start = roster_source.index('<article className="card character-card"')
+    card_end = roster_source.index("</article>", card_start) + len("</article>")
+    card_markup = roster_source[card_start:card_end]
+    stats_markup = card_markup[card_markup.index('<div className="character-card__stats">'): card_markup.index("</a>", card_markup.index("className=\"button-link\""))]
+
+    assert 'className="character-card__meta"' in card_markup
+    assert 'join(" · ")' in card_markup
+    assert 'join(" | ")' not in card_markup
+
+    assert "<article>" not in stats_markup
+    assert '<div className="character-card__stats">' in stats_markup
+    assert card_markup.count("className=\"character-card__top\"") == 1
+    assert 'className="button-link"' in card_markup
+
+
+def test_character_roster_empty_state_copy_is_exact_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    assert (
+        "This campaign does not currently have any active player sheets available in the app."
+        in source
+    )
+    assert "This campaign does not currently have active player sheets available in the app." not in source
+
+
+def test_character_roster_card_css_hooks_match_flask_targets() -> None:
+    source = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+
+    def css_block(selector: str) -> str:
+        selector_start = source.index(f"{selector} {{")
+        selector_end = source.index("}", selector_start)
+        return source[selector_start:selector_end]
+
+    assert "display: grid;" in css_block(".character-card")
+    assert "gap: 1rem;" in css_block(".character-card")
+    assert ".character-card__meta {" in source
+    assert "margin: 0;" in css_block(".character-card__meta")
+    assert "color: var(--muted);" in css_block(".character-card__meta")
+
+    character_card_stats_block = css_block(".character-card__stats")
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in character_card_stats_block
+    assert "gap: 0.75rem;" in character_card_stats_block
+    assert ".character-card__stats article" not in source
+    assert "padding: 0.8rem 0.9rem;" in css_block(".character-card__stats div")
+    assert "border: 1px solid var(--border);" in css_block(".character-card__stats div")
+    assert "border-radius: 16px;" in css_block(".character-card__stats div")
+
+
 def test_grid_minimum_card_size_is_flask_260px_and_character_roster_grid_selector_is_removed() -> None:
     source = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     assert "grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));" in source

@@ -14945,27 +14945,27 @@ function CharacterRosterPage() {
                           {character.name}
                         </a>
                       </h2>
-                      <p className="meta">
-                        {[character.species, character.background].filter(Boolean).join(" | ") || character.status}
+                      <p className="character-card__meta">
+                        {[character.species, character.background].filter(Boolean).join(" · ") || character.status}
                       </p>
                     </div>
                   </div>
                   <div className="character-card__stats">
-                    <article>
+                    <div>
                       <span className="meta">HP</span>
                       <strong>
                         {character.current_hp} / {character.max_hp}
                       </strong>
-                    </article>
-                    <article>
+                    </div>
+                    <div>
                       <span className="meta">Temp HP</span>
                       <strong>{character.temp_hp}</strong>
-                    </article>
+                    </div>
                     {character.hit_dice?.value ? (
-                      <article>
+                      <div>
                         <span className="meta">Hit Dice</span>
                         <strong>{character.hit_dice.value}</strong>
-                      </article>
+                      </div>
                     ) : null}
                   </div>
                   {character.resource_preview?.length ? (
@@ -14992,7 +14992,7 @@ function CharacterRosterPage() {
           ) : (
             <section className="card">
               <h2>{submittedQuery ? "No matching characters" : "No visible characters yet"}</h2>
-              <p>{submittedQuery ? "Try a broader search term or clear the current filter." : "This campaign does not currently have active player sheets available in the app."}</p>
+              <p>{submittedQuery ? "Try a broader search term or clear the current filter." : "This campaign does not currently have any active player sheets available in the app."}</p>
             </section>
           )}
         </>
