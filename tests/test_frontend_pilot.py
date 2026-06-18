@@ -381,6 +381,73 @@ def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
     assert "Back to sheet" in cultivation_markup
 
 
+def test_character_supported_form_action_chrome_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+
+    def component_source(component_name: str) -> str:
+        start = source.index(f"function {component_name}() {{")
+        end = source.find("\nfunction ", start + len(component_name) + 10)
+        if end == -1:
+            end = len(source)
+        return source[start:end]
+
+    def supported_component(component_name: str) -> str:
+        component = component_source(component_name)
+        unsupported_marker = "{data && !data.supported ? ("
+        if unsupported_marker in component:
+            return component.split(unsupported_marker, 1)[1].split(") : null}", 1)[1]
+        return component
+
+    create_markup = component_source("CharacterCreatePage")
+    assert (
+        re.search(
+            r'<button\s+type="button"\s+className="ghost-button"\s+onClick=\{\(\) => refreshContext\(\)\}>\s*'
+            r"Refresh options\s*</button>",
+            create_markup,
+        )
+        is not None
+    )
+    assert "className=\"button button-secondary\"" not in create_markup
+
+    manual_markup = component_source("CharacterXianxiaManualImportPage")
+    assert (
+        re.search(
+            r'<button\s+type="button"\s+className="ghost-button"\s+onClick=\{\(\) => setRowCount\(\(current\) => current \+ 1\)\}>\s*'
+            r"Add Martial Art\s*</button>",
+            manual_markup,
+        )
+        is not None
+    )
+    assert "className=\"button button-secondary\"" not in manual_markup
+
+    editor_markup = supported_component("CharacterAdvancedEditorPage")
+    assert 'className="ghost-button" href={data.links.character_url}>' in editor_markup
+    assert re.search(r">\s*Back to sheet\s*</a>", editor_markup) is not None
+    assert "className=\"button button-secondary\"" not in editor_markup
+
+    progression_markup = supported_component("CharacterProgressionRepairPage")
+    assert 'className="ghost-button" href={data.links.character_url}>' in progression_markup
+    assert "Save Repair" in progression_markup
+    assert "Cancel" in progression_markup
+    assert "className=\"button button-secondary\"" not in progression_markup
+
+    retraining_markup = supported_component("CharacterRetrainingPage")
+    assert 'href={`${data.links.character_url}?page=features`}' in retraining_markup
+    assert re.search(r'className="ghost-button"[^>]*>\s*Cancel\s*</a>', retraining_markup) is not None
+    assert "className=\"button button-secondary\"" not in retraining_markup
+
+    level_up_markup = supported_component("CharacterLevelUpPage")
+    assert (
+        re.search(
+            r'<button\s+type="button"\s+className="ghost-button"\s+onClick=\{\(\) => refreshContext\(\)\}>\s*'
+            r"Refresh preview\s*</button>",
+            level_up_markup,
+        )
+        is not None
+    )
+    assert "className=\"button button-secondary\"" not in level_up_markup
+
+
 def test_combat_unsupported_system_fallback_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     combat_page_start = source.index("function CombatPage() {")

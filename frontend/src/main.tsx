@@ -1184,7 +1184,7 @@ function CharacterCreatePage() {
             ))}
 
             <div className="builder-actions">
-              <button type="button" className="button button-secondary" onClick={() => refreshContext()}>
+              <button type="button" className="ghost-button" onClick={() => refreshContext()}>
                 Refresh options
               </button>
               <button type="submit" disabled={!create.builder_ready || createMutation.isPending}>
@@ -1592,7 +1592,7 @@ function CharacterXianxiaManualImportPage() {
                   </article>
                 ))}
               </div>
-              <button type="button" className="button button-secondary" onClick={() => setRowCount((current) => current + 1)}>
+              <button type="button" className="ghost-button" onClick={() => setRowCount((current) => current + 1)}>
                 Add Martial Art
               </button>
             </section>
@@ -2026,7 +2026,7 @@ function CharacterAdvancedEditorPage() {
               {saveEditor.isPending ? "Saving..." : "Save character edits"}
             </button>
             {data?.links?.character_url ? (
-              <a className="button button-secondary" href={data.links.character_url}>
+              <a className="ghost-button" href={data.links.character_url}>
                 Back to sheet
               </a>
             ) : null}
@@ -2341,7 +2341,7 @@ function CharacterProgressionRepairPage() {
                 {submitRepair.isPending ? "Saving..." : "Save Repair"}
               </button>
               {data?.links?.character_url ? (
-                <a className="button button-secondary" href={data.links.character_url}>
+                <a className="ghost-button" href={data.links.character_url}>
                   Cancel
                 </a>
               ) : null}
@@ -2546,7 +2546,7 @@ function CharacterRetrainingPage() {
                 {submitRetraining.isPending ? "Saving..." : "Save retraining"}
               </button>
               {data?.links?.character_url ? (
-                <a className="button button-secondary" href={`${data.links.character_url}?page=features`}>
+                <a className="ghost-button" href={`${data.links.character_url}?page=features`}>
                   Cancel
                 </a>
               ) : null}
@@ -2817,7 +2817,7 @@ function CharacterLevelUpPage() {
             ) : null}
 
             <div className="builder-actions">
-              <button type="button" className="button button-secondary" onClick={() => refreshContext()}>
+              <button type="button" className="ghost-button" onClick={() => refreshContext()}>
                 Refresh preview
               </button>
               <button type="submit" disabled={submitLevelUp.isPending}>
