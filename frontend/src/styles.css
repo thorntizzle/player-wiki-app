@@ -1267,8 +1267,8 @@ a:hover {
   align-items: end;
 }
 
-.admin-filter-form__actions,
-.admin-pagination__actions {
+.audit-filter-form__actions,
+.pagination-bar__actions {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
@@ -4134,9 +4134,9 @@ textarea {
   }
 
   .admin-filter-form,
-  .admin-filter-form__actions,
+  .audit-filter-form__actions,
   .admin-pagination,
-  .admin-pagination__actions,
+  .pagination-bar__actions,
   .admin-item-row {
     flex-direction: column;
     align-items: flex-start;

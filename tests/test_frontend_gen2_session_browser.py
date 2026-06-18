@@ -1174,7 +1174,8 @@ def test_gen2_admin_user_management_route_and_permissions(
             expect(admin_page.get_by_role("heading", name="Invite user")).to_be_visible()
             expect(admin_page.get_by_role("heading", name="Users")).to_be_visible()
             expect(admin_page.get_by_role("heading", name="Recent activity")).to_be_visible()
-            expect(admin_page.get_by_role("link", name="Flask admin")).to_be_visible()
+            expect(admin_page.get_by_role("link", name="Flask admin")).to_have_count(0)
+            expect(admin_page.locator("section.hero.admin-hero .hero-actions")).to_have_count(0)
 
             admin_dashboard_metrics = admin_page.evaluate(
                 """() => {
@@ -1193,7 +1194,7 @@ def test_gen2_admin_user_management_route_and_permissions(
                     const layouts = Array.from(document.querySelectorAll("main.main-shell > .admin-layout"));
                     const userGrids = Array.from(document.querySelectorAll("main.main-shell > .section-list .admin-user-grid"));
                     const firstLayout = layouts[0] || null;
-                    const actions = document.querySelector(".admin-filter-form__actions");
+                    const actions = document.querySelector(".audit-filter-form__actions");
                     const legacyPanelShells = document.querySelectorAll("article.panel.admin-panel, aside.panel.admin-panel");
                     const dashboardUserCards = document.querySelectorAll("article.card.admin-user-card");
                     const legacyUserCards = document.querySelectorAll("article.panel.admin-user-card");
@@ -1223,6 +1224,11 @@ def test_gen2_admin_user_management_route_and_permissions(
                         layoutColumns: firstLayout ? countGridTracks(window.getComputedStyle(firstLayout).gridTemplateColumns) : 0,
                         userGridColumns: userGrids[0] ? countGridTracks(window.getComputedStyle(userGrids[0]).gridTemplateColumns) : 0,
                         actionsDisplay: actions ? window.getComputedStyle(actions).display : "",
+                        filterGhostActionCount: document.querySelectorAll(".audit-filter-form__actions .ghost-button").length,
+                        filterSecondaryActionCount: document.querySelectorAll(".audit-filter-form__actions .button.button-secondary").length,
+                        paginationAnchorCount: document.querySelectorAll(".pagination-bar__actions a").length,
+                        paginationGhostActionCount: document.querySelectorAll(".pagination-bar__actions .ghost-button").length,
+                        paginationSecondaryActionCount: document.querySelectorAll(".pagination-bar__actions .button.button-secondary").length,
                     };
                 }"""
             )
@@ -1243,6 +1249,10 @@ def test_gen2_admin_user_management_route_and_permissions(
             assert admin_dashboard_metrics["layoutColumns"] >= 2
             assert admin_dashboard_metrics["userGridColumns"] >= 2
             assert admin_dashboard_metrics["actionsDisplay"] == "flex"
+            assert admin_dashboard_metrics["filterGhostActionCount"] == 2
+            assert admin_dashboard_metrics["filterSecondaryActionCount"] == 0
+            assert admin_dashboard_metrics["paginationGhostActionCount"] == admin_dashboard_metrics["paginationAnchorCount"]
+            assert admin_dashboard_metrics["paginationSecondaryActionCount"] == 0
 
             admin_page.locator("#admin-invite-email").fill("gen2-browser-admin@example.com")
             admin_page.locator("#admin-invite-display-name").fill("Gen2 Browser Admin")
@@ -1255,14 +1265,30 @@ def test_gen2_admin_user_management_route_and_permissions(
             created_user_link.click()
             expect(admin_page).to_have_url(re.compile(r"/app-next/admin/users/\d+"))
             expect(admin_page.get_by_role("heading", name="Gen2 Browser Admin")).to_be_visible(timeout=10000)
+            expect(admin_page.locator("section.hero.admin-hero .hero-actions")).to_have_count(1)
+            expect(admin_page.get_by_role("link", name="Back to admin dashboard")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(admin_page.get_by_role("link", name="Flask user record")).to_have_count(0)
             expect(admin_page.get_by_role("heading", name="Campaign membership")).to_be_visible()
             expect(admin_page.get_by_role("heading", name="Character assignment")).to_be_visible()
-            expect(admin_page.get_by_role("link", name="Flask user record")).to_be_visible()
             expect(admin_page.get_by_role("heading", name="Account actions")).to_be_visible()
             expect(admin_page.get_by_text("Credential actions")).to_be_visible()
             expect(admin_page.get_by_text("Account state")).to_be_visible()
             expect(admin_page.get_by_text("Destructive actions")).to_be_visible()
             expect(admin_page.get_by_role("button", name="Delete user")).to_be_disabled()
+
+            admin_user_detail_metrics = admin_page.evaluate(
+                """() => ({
+                    auditFilterGhostCount: document.querySelectorAll(".audit-filter-form__actions .ghost-button").length,
+                    auditFilterSecondaryCount: document.querySelectorAll(".audit-filter-form__actions .button.button-secondary").length,
+                    paginationAnchorCount: document.querySelectorAll(".pagination-bar__actions a").length,
+                    paginationGhostCount: document.querySelectorAll(".pagination-bar__actions .ghost-button").length,
+                    paginationSecondaryCount: document.querySelectorAll(".pagination-bar__actions .button.button-secondary").length,
+                })"""
+            )
+            assert admin_user_detail_metrics["auditFilterGhostCount"] == 2
+            assert admin_user_detail_metrics["auditFilterSecondaryCount"] == 0
+            assert admin_user_detail_metrics["paginationAnchorCount"] == admin_user_detail_metrics["paginationGhostCount"] + admin_user_detail_metrics["paginationSecondaryCount"]
+            assert admin_user_detail_metrics["paginationSecondaryCount"] == 0
 
             membership_panel = admin_page.locator("article.card.admin-panel").filter(has_text="Campaign membership")
             membership_panel.locator("#admin-membership-campaign-slug").select_option("linden-pass")
@@ -1293,6 +1319,11 @@ def test_gen2_admin_user_management_route_and_permissions(
                         })
                         .reduce((count, node) => count + node.querySelectorAll(".panel-header").length, 0),
                     hasAdminPageWrapper: !!document.querySelector("main.main-shell > .admin-page"),
+                    adminItemActionButtonRowCount: document.querySelectorAll(".admin-item-row .admin-item-actions.button-row").length,
+                    editLinkClasses: Array.from(document.querySelectorAll(".admin-item-row .admin-item-actions a")).map((el) => ({
+                        text: (el.textContent || "").trim(),
+                        classes: el.className,
+                    })),
                     directChildren: Array.from(document.querySelectorAll("main.main-shell > *")).map((node) => ({
                         tag: node.tagName.toLowerCase(),
                         classes: node.className,
@@ -1312,6 +1343,12 @@ def test_gen2_admin_user_management_route_and_permissions(
             assert admin_user_detail_metrics["legacyUserCardCount"] == 0
             assert admin_user_detail_metrics["recentActivityCardCount"] >= 1
             assert admin_user_detail_metrics["recentActivityPanelHeaderCount"] == 0
+            assert admin_user_detail_metrics["adminItemActionButtonRowCount"] == 0
+            assert len(admin_user_detail_metrics["editLinkClasses"]) >= 2
+            assert all(
+                item["text"] != "Edit" or re.search(r"\bghost-button\b", item["classes"])
+                for item in admin_user_detail_metrics["editLinkClasses"]
+            )
             assert any(
                 (
                     node["tag"] == "section"

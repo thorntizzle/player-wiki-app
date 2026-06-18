@@ -4740,14 +4740,14 @@ function AdminActivityFilters({
           ))}
         </select>
       </label>
-      <div className="admin-filter-form__actions button-row">
+      <div className="audit-filter-form__actions">
         <button type="submit" className="button">
           Filter activity
         </button>
-        <a className="button button-secondary" href={clearHref}>
+        <a className="ghost-button" href={clearHref}>
           Clear
         </a>
-        <a className="button button-secondary" href={data.export_url}>
+        <a className="ghost-button" href={data.export_url}>
           Export CSV
         </a>
       </div>
@@ -4807,14 +4807,14 @@ function AdminPagination({ pagination }: Pick<AdminDashboardResponse, "paginatio
       <p className="meta">
         Page {pagination.current_page} of {pagination.total_pages}
       </p>
-      <div className="admin-pagination__actions button-row">
+      <div className="pagination-bar__actions">
         {pagination.has_previous ? (
-          <a className="button button-secondary" href={pagination.previous_url}>
+          <a className="ghost-button" href={pagination.previous_url}>
             Previous
           </a>
         ) : null}
         {pagination.has_next ? (
-          <a className="button button-secondary" href={pagination.next_url}>
+          <a className="ghost-button" href={pagination.next_url}>
             Next
           </a>
         ) : null}
@@ -4891,13 +4891,6 @@ function AdminDashboardPage() {
         <p className="eyebrow">Admin</p>
         <h1>Admin dashboard</h1>
         <p className="lede">Use this screen for lighter operational work. The CLI remains the full-control path for bootstrap and recovery.</p>
-        {data ? (
-          <div className="button-row">
-            <a className="button button-secondary" href={data.links.flask_admin_url}>
-              Flask admin
-            </a>
-          </div>
-        ) : null}
       </section>
 
       <ApiErrorNotice isLoading={dashboardQuery.isLoading} message={queryError} onAuth={() => setAuthRequired(true)} />
@@ -5172,12 +5165,9 @@ function AdminUserDetailPage() {
               Status: {data.managed_user.status}
               {data.managed_user.is_admin ? " | App admin" : ""}
             </p>
-            <div className="button-row">
-              <a className="button button-secondary" href={data.links.gen2_admin_url}>
+            <div className="hero-actions">
+              <a className="ghost-button" href={data.links.gen2_admin_url}>
                 Back to admin dashboard
-              </a>
-              <a className="button button-secondary" href={data.links.flask_user_url}>
-                Flask user record
               </a>
             </div>
           </>
@@ -5309,8 +5299,8 @@ function AdminUserDetailPage() {
                         <strong>{membership.campaign_title}</strong>
                         <span className="meta"> {membership.role} | {membership.status}</span>
                       </div>
-                      <div className="admin-item-actions button-row">
-                        <a className="button button-secondary" href={`${data.links.gen2_user_url}?edit_membership_campaign_slug=${encodeURIComponent(membership.campaign_slug)}`}>
+                      <div className="admin-item-actions">
+                        <a className="ghost-button" href={`${data.links.gen2_user_url}?edit_membership_campaign_slug=${encodeURIComponent(membership.campaign_slug)}`}>
                           Edit
                         </a>
                         {membership.status !== "removed" ? (
@@ -5337,9 +5327,9 @@ function AdminUserDetailPage() {
                         <strong>{assignment.campaign_title}</strong>
                         <span className="meta"> {assignment.character_slug} | {assignment.assignment_type}</span>
                       </div>
-                      <div className="admin-item-actions button-row">
+                      <div className="admin-item-actions">
                         <a
-                          className="button button-secondary"
+                          className="ghost-button"
                           href={`${data.links.gen2_user_url}?edit_assignment_campaign_slug=${encodeURIComponent(assignment.campaign_slug)}&edit_assignment_character_slug=${encodeURIComponent(assignment.character_slug)}`}
                         >
                           Edit
