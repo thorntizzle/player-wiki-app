@@ -9119,50 +9119,48 @@ function CharacterPane({
               </ul>
             ) : null}
             {canManagePortrait ? (
-              <form className="character-portrait-manager" onSubmit={submitPortrait}>
-                <div className="character-portrait-manager__fields">
-                  <label htmlFor="character-portrait-file">
-                    Portrait image
-                    <input
-                      id="character-portrait-file"
-                      ref={portraitFileInputRef}
-                      type="file"
-                      accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp"
-                      disabled={portraitMutationPending}
-                      onChange={handlePortraitFileChange}
-                    />
-                  </label>
-                  <label htmlFor="character-portrait-alt">
-                    Alt text
-                    <input
-                      id="character-portrait-alt"
-                      type="text"
-                      maxLength={200}
-                      value={portraitDraft.altText}
-                      disabled={portraitMutationPending}
-                      onChange={(event) => setPortraitDraft((current) => ({ ...current, altText: event.currentTarget.value }))}
-                    />
-                  </label>
-                  <label htmlFor="character-portrait-caption">
-                    Caption
-                    <input
-                      id="character-portrait-caption"
-                      type="text"
-                      maxLength={300}
-                      value={portraitDraft.caption}
-                      disabled={portraitMutationPending}
-                      onChange={(event) => setPortraitDraft((current) => ({ ...current, caption: event.currentTarget.value }))}
-                    />
-                  </label>
-                </div>
-                <div className="button-row character-portrait-manager__actions">
+              <form className="stack-form character-portrait-manager" onSubmit={submitPortrait}>
+                <label className="field" htmlFor="character-portrait-file">
+                  <span>Portrait image</span>
+                  <input
+                    id="character-portrait-file"
+                    ref={portraitFileInputRef}
+                    type="file"
+                    accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp"
+                    disabled={portraitMutationPending}
+                    onChange={handlePortraitFileChange}
+                  />
+                </label>
+                <label className="field" htmlFor="character-portrait-alt">
+                  <span>Alt text</span>
+                  <input
+                    id="character-portrait-alt"
+                    type="text"
+                    maxLength={200}
+                    value={portraitDraft.altText}
+                    disabled={portraitMutationPending}
+                    onChange={(event) => setPortraitDraft((current) => ({ ...current, altText: event.currentTarget.value }))}
+                  />
+                </label>
+                <label className="field" htmlFor="character-portrait-caption">
+                  <span>Caption</span>
+                  <input
+                    id="character-portrait-caption"
+                    type="text"
+                    maxLength={300}
+                    value={portraitDraft.caption}
+                    disabled={portraitMutationPending}
+                    onChange={(event) => setPortraitDraft((current) => ({ ...current, caption: event.currentTarget.value }))}
+                  />
+                </label>
+                <div className="hero-actions character-portrait-manager__actions">
                   <button className="button" type="submit" disabled={portraitMutationPending || !portraitDraft.file}>
                     Save portrait
                   </button>
                   {selectedPortrait ? (
                     <button
                       type="button"
-                      className="button button-secondary"
+                      className="ghost-button"
                       disabled={portraitMutationPending}
                       onClick={removePortrait}
                     >

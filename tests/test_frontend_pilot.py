@@ -130,3 +130,28 @@ def test_admin_user_detail_action_button_chrome_in_source() -> None:
     disable_button_block = admin_user_detail_source[disable_start:disable_end]
     assert "className=\"button\"" in disable_button_block
     assert "className=\"button button-secondary\"" not in disable_button_block
+
+
+def test_character_portrait_manager_action_chrome_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    section_start = source.index('<form className="stack-form character-portrait-manager"')
+    section_end = source.index("</form>", section_start) + len("</form>")
+    section_markup = source[section_start:section_end]
+
+    assert 'className="stack-form character-portrait-manager"' in section_markup
+    assert 'className="field" htmlFor="character-portrait-file"' in section_markup
+    assert "<span>Portrait image</span>" in section_markup
+    assert 'className="field" htmlFor="character-portrait-alt"' in section_markup
+    assert "<span>Alt text</span>" in section_markup
+    assert 'className="field" htmlFor="character-portrait-caption"' in section_markup
+    assert "<span>Caption</span>" in section_markup
+    assert "className=\"hero-actions character-portrait-manager__actions\"" in section_markup
+    assert '<button className="button" type="submit" disabled={portraitMutationPending || !portraitDraft.file}>' in section_markup
+    remove_button = re.search(
+        r'<button\s+type="button"\s+className="ghost-button"\s+disabled={portraitMutationPending}\s+onClick={removePortrait}\s*>\s*Remove portrait\s*</button>',
+        section_markup,
+    )
+    assert remove_button is not None
+    assert 'className="button button-secondary"' not in section_markup
+    assert 'className="button-row character-portrait-manager__actions"' not in section_markup
+    assert "character-portrait-manager__fields" not in section_markup
