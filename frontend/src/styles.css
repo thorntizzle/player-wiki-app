@@ -1523,16 +1523,11 @@ a:hover {
 }
 
 .hero-actions,
-.campaign-help-surface-actions,
-.campaign-help-account-actions {
+.campaign-help-surface-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
-}
-
-.help-anchor-row {
-  margin-top: 0.4rem;
 }
 
 .help-detail-grid,

@@ -475,9 +475,26 @@ def test_campaign_help_page_removes_flask_help_fallback() -> None:
     help_markup = source[help_start:help_end]
 
     assert "Flask Help" not in help_markup
+    assert "help-anchor-row" not in help_markup
+    assert "campaign-help-account-actions" not in help_markup
     assert 'href={data.links.account_url}>Open Account</a>' in help_markup
     assert "href={data.links.sign_in_url}>Sign in</a>" in help_markup
-    assert "campaign-help-account-actions" in help_markup
+
+    top_help_row_match = re.search(
+        r'<div className="hero-actions" aria-label="Help sections">([\s\S]*?)</div>',
+        help_markup,
+    )
+    assert top_help_row_match is not None
+    top_help_row_markup = top_help_row_match.group(1)
+
+    top_help_anchor_tags = [
+        tag for tag in re.findall(r"<a[^>]*>", top_help_row_markup) if "${surface.anchor}" in tag
+    ]
+    assert len(top_help_anchor_tags) >= 1
+    for tag in top_help_anchor_tags:
+        class_match = re.search(r'className="([^"]+)"', tag)
+        assert class_match is not None
+        assert class_match.group(1) == "ghost-button"
 
 
 def test_systems_entry_navigation_removes_open_flask_entry_link() -> None:

@@ -5821,9 +5821,9 @@ function CampaignHelpPage() {
           and which first-pass limits still shape the workflow.
         </p>
         {data?.surfaces.length ? (
-          <div className="hero-actions help-anchor-row" aria-label="Help sections">
-            {data.surfaces.map((surface, index) => (
-              <a className={index === 0 ? "button-link" : "ghost-button"} href={`#${surface.anchor}`} key={surface.anchor}>
+          <div className="hero-actions" aria-label="Help sections">
+            {data.surfaces.map((surface) => (
+              <a className="ghost-button" href={`#${surface.anchor}`} key={surface.anchor}>
                 {surface.label}
               </a>
             ))}
@@ -5963,7 +5963,7 @@ function CampaignHelpPage() {
                   <p className="meta">{data.account_note}</p>
                 </div>
               </div>
-              <div className="hero-actions campaign-help-account-actions">
+              <div className="hero-actions">
                 {data.is_authenticated ? (
                   <a className="button-link" href={data.links.account_url}>Open Account</a>
                 ) : (
