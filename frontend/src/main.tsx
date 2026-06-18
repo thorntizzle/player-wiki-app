@@ -8043,7 +8043,6 @@ function CharacterPane({
   const detailRecord = detail?.character;
   const detailLinks = detail?.links ?? {};
   const detailProgressionRepairUrl = detailLinks.progression_repair_url || detailLinks.flask_progression_repair_url;
-  const detailProgressionRepairLabel = detailLinks.progression_repair_url ? "Progression repair" : "Flask repair";
   const selectedCharacterSheetUrl = selectedSlug
     ? `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters/${encodeURIComponent(selectedSlug)}`
     : "";
@@ -9077,63 +9076,6 @@ function CharacterPane({
                   </li>
                 ))}
               </ul>
-            ) : null}
-            {isReadSurface && detailRecord ? (
-              <div className="button-row character-action-row">
-                {detailLinks.flask_character_url ? (
-                  <a className="button button-secondary" href={detailLinks.flask_character_url}>
-                    Flask sheet
-                  </a>
-                ) : null}
-                {detailLinks.advanced_editor_url ? (
-                  <a className="button button-secondary" href={detailLinks.advanced_editor_url}>
-                    Advanced Editor
-                  </a>
-                ) : null}
-                {detailLinks.flask_advanced_editor_url ? (
-                  <a className="button button-secondary" href={detailLinks.flask_advanced_editor_url}>
-                    Flask editor
-                  </a>
-                ) : null}
-                {detailLinks.level_up_url ? (
-                  <a className="button button-secondary" href={detailLinks.level_up_url}>
-                    Level Up
-                  </a>
-                ) : null}
-                {detailLinks.flask_level_up_url ? (
-                  <a className="button button-secondary" href={detailLinks.flask_level_up_url}>
-                    Flask level-up
-                  </a>
-                ) : null}
-                {detailLinks.retraining_url ? (
-                  <a className="button button-secondary" href={detailLinks.retraining_url}>
-                    Retraining
-                  </a>
-                ) : null}
-                {detailLinks.flask_retraining_url ? (
-                  <a className="button button-secondary" href={detailLinks.flask_retraining_url}>
-                    Flask retraining
-                  </a>
-                ) : null}
-                {detailProgressionRepairUrl ? (
-                  <a className="button button-secondary" href={detailProgressionRepairUrl}>
-                    {detailProgressionRepairLabel}
-                  </a>
-                ) : null}
-                {detailLinks.cultivation_url ? (
-                  <a className="button button-secondary" href={detailLinks.cultivation_url}>
-                    Cultivation
-                  </a>
-                ) : null}
-                {detailLinks.flask_cultivation_url ? (
-                  <a className="button button-secondary" href={detailLinks.flask_cultivation_url}>
-                    Flask Cultivation
-                  </a>
-                ) : null}
-                {!detailProgressionRepairUrl ? (
-                  <span className="meta">Progression repair appears when an imported DND-5E sheet needs it.</span>
-                ) : null}
-              </div>
             ) : null}
             {canManagePortrait ? (
               <form className="character-portrait-manager" onSubmit={submitPortrait}>

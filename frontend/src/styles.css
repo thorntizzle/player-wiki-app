@@ -3256,11 +3256,6 @@ textarea {
   gap: 0.75rem;
 }
 
-.character-action-row {
-  align-items: center;
-  margin-top: 0.75rem;
-}
-
 .character-portrait-manager {
   border-top: 1px solid var(--border-soft);
   display: grid;

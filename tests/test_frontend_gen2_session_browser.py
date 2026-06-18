@@ -2117,10 +2117,10 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             expect(page.locator("header.character-header")).to_be_visible()
             expect(page.locator("section.panel.character-read-shell")).to_have_count(0)
             expect(page.get_by_text("Shown on the Gen2 sheet.")).to_be_visible()
-            expect(page.get_by_role("link", name="Flask sheet")).to_be_visible()
             expect(page.get_by_role("link", name="Advanced Editor")).to_be_visible()
-            expect(page.get_by_role("link", name="Flask editor")).to_be_visible()
-            expect(page.get_by_text("Progression repair appears when an imported DND-5E sheet needs it.")).to_be_visible()
+            expect(page.locator(".character-action-row")).to_have_count(0)
+            expect(page.get_by_role("link", name="Flask sheet")).to_have_count(0)
+            expect(page.get_by_role("link", name="Flask editor")).to_have_count(0)
 
             page.get_by_role("link", name="Advanced Editor").click()
             expect(page).to_have_url(
@@ -2323,6 +2323,8 @@ def test_gen2_character_visual_parity_smoke(
             expect(desktop_page.locator(".character-read-shell")).to_be_visible()
             expect(desktop_page.locator(".character-selector-card")).to_be_visible()
             expect(desktop_page.locator(".character-summary")).to_be_visible()
+            expect(desktop_page.locator(".character-summary .character-action-row")).to_have_count(0)
+            expect(desktop_page.locator(".character-summary .button.button-secondary")).to_have_count(0)
             expect(desktop_page.locator(".section-tabs")).to_be_visible()
             character_read_header = desktop_page.locator("article.character-read-shell.character-sheet.card > header.character-header")
             expect(character_read_header.locator(".article-actions")).to_have_count(0)
@@ -2524,7 +2526,7 @@ def test_gen2_xianxia_character_authoring_create_and_import(
                 "href",
                 re.compile(r"/app-next/campaigns/linden-pass/characters/browser-gen2-crane/cultivation$"),
             )
-            expect(page.get_by_role("link", name="Flask Cultivation")).to_be_visible()
+            expect(page.get_by_role("link", name="Flask Cultivation")).to_have_count(0)
 
             cultivation_link.click()
             expect(page).to_have_url(
