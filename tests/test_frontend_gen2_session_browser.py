@@ -96,6 +96,53 @@ def _configure_xianxia_campaign(app) -> None:
         app.extensions["repository_store"].refresh()
 
 
+def test_gen2_session_page_auth_notice_card_shape(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
+            expect(page.locator(".session-hero").get_by_role("heading", name="Session")).to_be_visible(timeout=10000)
+
+            page.evaluate("() => localStorage.setItem('cpw-pilot-api-token', 'invalid-auth-token')")
+            page.reload()
+
+            auth_notice = page.locator(".auth-notice.card")
+            expect(auth_notice).to_be_visible(timeout=10000)
+            expect(auth_notice.get_by_role("heading", name="Authentication required")).to_be_visible()
+            expect(auth_notice.locator(".hero-actions")).to_be_visible()
+            expect(auth_notice.get_by_role("link", name="Sign in")).to_be_visible()
+            expect(auth_notice.get_by_role("button", name="Continue without token")).to_be_visible()
+            expect(auth_notice.locator(".button-link")).to_be_visible()
+            expect(auth_notice.locator(".ghost-button")).to_be_visible()
+            expect(auth_notice.get_by_role("button", name="Continue without token")).to_have_class(re.compile(r"\bghost-button\b"))
+            assert page.locator(".panel.auth-notice").count() == 0
+            expect(page.locator(".auth-notice .hero-actions")).to_be_visible()
+            expect(page.locator(".auth-notice .button-link")).to_have_attribute(
+                "href",
+                re.compile(r"^/sign-in\?next="),
+            )
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_gen2_session_browser_exposes_flask_session_capabilities(
     frontend_gen2_session_live_server,
     users,

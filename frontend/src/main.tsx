@@ -4298,17 +4298,23 @@ function AuthNotice() {
   }
 
   return (
-    <section className="panel auth-notice">
-      <h3>Authentication required</h3>
-      <p className="status status-error">
-        Your cookie or API token did not authenticate this request. Sign in to restore session.
-      </p>
-      <a className="button button-secondary" href={signInHref}>
-        Sign in
-      </a>
-      <button type="button" className="button" onClick={() => setApiToken("")}>
-        Continue without token
-      </button>
+    <section className="card auth-notice">
+      <div className="section-heading">
+        <div>
+          <h2>Authentication required</h2>
+          <p className="status status-error">
+            Your cookie or API token did not authenticate this request. Sign in to restore session.
+          </p>
+        </div>
+      </div>
+      <div className="hero-actions">
+        <a className="button-link" href={signInHref}>
+          Sign in
+        </a>
+        <button type="button" className="ghost-button" onClick={() => setApiToken("")}>
+          Continue without token
+        </button>
+      </div>
     </section>
   );
 }

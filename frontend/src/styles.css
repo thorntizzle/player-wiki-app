@@ -2267,9 +2267,21 @@ a:hover {
 }
 
 .auth-notice {
-  margin-top: 0.5rem;
   display: grid;
-  gap: 0.45rem;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.auth-notice h2 {
+  margin: 0;
+}
+
+.auth-notice .hero-actions {
+  margin-top: 0.15rem;
+}
+
+.auth-notice .section-heading {
+  margin: 0;
 }
 
 .status-row,
