@@ -1034,6 +1034,39 @@ def test_character_xianxia_equipment_section_uses_flask_style_read_section_shape
     assert 'className="inline-two-col"' not in section_markup
 
 
+def test_character_xianxia_quick_reference_section_uses_flask_style_read_chrome() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    section_start = source.index('{isXianxia && activeCharacterSection === "quick-reference" ? (')
+    section_end = source.index('{isXianxia && activeCharacterSection === "martial-arts" ? (', section_start)
+    section_markup = source[section_start:section_end]
+
+    assert 'id: "xianxia-quick-reference"' in section_markup
+    assert 'className="glance-grid"' in section_markup
+    assert 'className="glance-card"' in section_markup
+    assert 'id="xianxia-check-formula"' in section_markup
+    assert 'id="xianxia-difficulty-states"' in section_markup
+    assert 'id="xianxia-action-count"' in section_markup
+    assert 'id="xianxia-defense-derivation"' in section_markup
+    assert 'id="xianxia-effort-damage"' in section_markup
+    assert 'id="xianxia-active-state-reminders"' in section_markup
+    assert 'className="detail-grid"' in section_markup
+    assert 'className="detail-card"' in section_markup
+    assert "Check formula" in section_markup
+    assert "Difficulty states" in section_markup
+    assert "Action count" in section_markup
+    assert "Defense calculation" in section_markup
+    assert "Effort damage" in section_markup
+    assert "Active Stance and Aura" in section_markup
+
+    assert 'className="stat-grid"' not in section_markup
+    assert 'className="character-card-grid"' not in section_markup
+    assert 'className="character-state-card"' not in section_markup
+    assert 'className="plain-list compact-list"' not in section_markup
+    assert 'className="status status-neutral"' not in section_markup
+    assert 'className="inline-two-col"' not in section_markup
+    assert 'className="chat-label"' not in section_markup
+
+
 def test_character_dnd_inventory_currency_section_uses_flask_style_row_form_chrome() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "inventory" ? (')

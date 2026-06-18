@@ -8150,6 +8150,7 @@ function CharacterPane({
   const xianxiaYinYang = presentedXianxia.resources?.yin_yang ?? [];
   const xianxiaDao = presentedXianxia.resources?.dao;
   const xianxiaInsight = presentedXianxia.resources?.insight;
+  const xianxiaActionReference = asRecord(presentedXianxia.quick_reference?.actions);
   const xianxiaDefenseReference = asRecord(presentedXianxia.quick_reference?.defense);
   const skillUseGuardrails = asRecord(presentedXianxia.quick_reference?.skill_use_guardrails);
   const skillUseGuardrailRuleHref = readString(skillUseGuardrails.rule_href);
@@ -9453,80 +9454,203 @@ function CharacterPane({
                 title: "Quick Reference",
                 children: (
                   <>
-                    <div className="stat-grid">
-                      <article>
-                        <strong>Realm</strong>
-                        <span>{String(presentedXianxia.identity?.realm ?? "--")}</span>
+                    <div className="glance-grid">
+                      <article className="glance-card">
+                        <span className="meta">Realm</span>
+                        <strong>{readString(xianxiaActionReference.realm, readString(presentedXianxia.identity?.realm, "--"))}</strong>
                       </article>
-                      <article>
-                        <strong>Actions per turn</strong>
-                        <span>{String(presentedXianxia.identity?.actions_per_turn ?? "--")}</span>
-                        {asRecord(presentedXianxia.quick_reference?.actions).formula ? (
-                          <p className="meta">{readString(asRecord(presentedXianxia.quick_reference?.actions).formula)}</p>
-                        ) : null}
+                      <article className="glance-card">
+                        <span className="meta">Actions per turn</span>
+                        <strong>
+                          {readString(
+                            xianxiaActionReference.actions_per_turn,
+                            stringFromUnknown(presentedXianxia.identity?.actions_per_turn, "--"),
+                          )}
+                        </strong>
                       </article>
-                      <article>
-                        <strong>Defense</strong>
-                        <span>{String(asRecord(presentedXianxia.quick_reference?.defense).value ?? presentedXianxia.equipment?.defense ?? "--")}</span>
-                        {asRecord(presentedXianxia.quick_reference?.defense).formula ? (
-                          <p className="meta">Defense = {readString(asRecord(presentedXianxia.quick_reference?.defense).formula)}</p>
-                        ) : null}
+                      <article className="glance-card">
+                        <span className="meta">Defense</span>
+                        <strong>
+                          {stringFromUnknown(
+                            xianxiaDefenseReference.value,
+                            stringFromUnknown(presentedXianxia.equipment?.defense, "--"),
+                          )}
+                        </strong>
                       </article>
-                      <article>
-                        <strong>Honor</strong>
-                        <span>{String(presentedXianxia.identity?.honor ?? "--")}</span>
+                      <article className="glance-card">
+                        <span className="meta">Honor</span>
+                        <strong>{readString(presentedXianxia.identity?.honor, "--")}</strong>
                       </article>
-                      <article>
-                        <strong>Reputation</strong>
-                        <span>{String(presentedXianxia.identity?.reputation ?? "--")}</span>
+                      <article className="glance-card">
+                        <span className="meta">Reputation</span>
+                        <strong>{readString(presentedXianxia.identity?.reputation, "--")}</strong>
                       </article>
-                      <article>
-                        <strong>Insight</strong>
-                        <span>
-                          {xianxiaInsight ? `${xianxiaInsight.available} available / ${xianxiaInsight.spent} spent` : "--"}
-                        </span>
+                      <article className="glance-card">
+                        <span className="meta">Insight</span>
+                        <strong>{xianxiaInsight ? `${xianxiaInsight.available} available / ${xianxiaInsight.spent} spent` : "--"}</strong>
                       </article>
                     </div>
-                    {asRecord(presentedXianxia.quick_reference?.check_formula).summary ? (
-                      <article className="character-state-card">
-                        <h4>Check formula</h4>
-                        <p>{readString(asRecord(presentedXianxia.quick_reference?.check_formula).summary)}</p>
-                      </article>
+                    <section className="read-section" id="xianxia-action-count">
+                      <div className="section-heading">
+                        <h2>Action count</h2>
+                      </div>
+                      <div className="glance-grid">
+                        <article className="glance-card">
+                          <span className="meta">Realm</span>
+                          <strong>{readString(xianxiaActionReference.realm, readString(presentedXianxia.identity?.realm, "--"))}</strong>
+                        </article>
+                        <article className="glance-card">
+                          <span className="meta">Actions per turn</span>
+                          <strong>
+                            {readString(
+                              xianxiaActionReference.actions_per_turn,
+                              stringFromUnknown(presentedXianxia.identity?.actions_per_turn, "--"),
+                            )}
+                          </strong>
+                        </article>
+                      </div>
+                      {readString(xianxiaActionReference.formula) ? (
+                        <p className="meta">Actions per turn = {readString(xianxiaActionReference.formula)}</p>
+                      ) : null}
+                    </section>
+                    <section className="read-section" id="xianxia-defense-derivation">
+                      <div className="section-heading">
+                        <h2>Defense calculation</h2>
+                      </div>
+                      <div className="glance-grid">
+                        <article className="glance-card">
+                          <span className="meta">Base</span>
+                          <strong>{stringFromUnknown(xianxiaDefenseReference.base, "--")}</strong>
+                        </article>
+                        <article className="glance-card">
+                          <span className="meta">Manual armor bonus</span>
+                          <strong>{stringFromUnknown(xianxiaDefenseReference.manual_armor_bonus, "--")}</strong>
+                        </article>
+                        <article className="glance-card">
+                          <span className="meta">Constitution</span>
+                          <strong>{stringFromUnknown(xianxiaDefenseReference.constitution, "--")}</strong>
+                        </article>
+                        <article className="glance-card">
+                          <span className="meta">Defense</span>
+                          <strong>
+                            {stringFromUnknown(xianxiaDefenseReference.value, stringFromUnknown(presentedXianxia.equipment?.defense, "--"))}
+                          </strong>
+                        </article>
+                      </div>
+                      {readString(xianxiaDefenseReference.formula) ? (
+                        <p className="meta">Defense = {readString(xianxiaDefenseReference.formula)}</p>
+                      ) : null}
+                    </section>
+                    {(
+                      readString(asRecord(presentedXianxia.quick_reference?.check_formula).formula) ||
+                      readString(asRecord(presentedXianxia.quick_reference?.check_formula).spend_bonus) ||
+                      readString(asRecord(presentedXianxia.quick_reference?.check_formula).summary)
+                    ) ? (
+                      <section className="read-section" id="xianxia-check-formula">
+                        <div className="section-heading">
+                          <h2>Check formula</h2>
+                        </div>
+                        <div className="glance-grid">
+                          {readString(asRecord(presentedXianxia.quick_reference?.check_formula).formula) ? (
+                            <article className="glance-card">
+                              <span className="meta">Check</span>
+                              <strong>{readString(asRecord(presentedXianxia.quick_reference?.check_formula).formula)}</strong>
+                            </article>
+                          ) : null}
+                          {(readString(asRecord(presentedXianxia.quick_reference?.check_formula).spend_bonus) ||
+                          readString(asRecord(presentedXianxia.quick_reference?.check_formula).spend_bonus_detail)) ? (
+                            <article className="glance-card">
+                              <span className="meta">Spend bonus</span>
+                              <strong>{readString(asRecord(presentedXianxia.quick_reference?.check_formula).spend_bonus, "--")}</strong>
+                              {readString(asRecord(presentedXianxia.quick_reference?.check_formula).spend_bonus_detail) ? (
+                                <span className="meta">
+                                  {readString(asRecord(presentedXianxia.quick_reference?.check_formula).spend_bonus_detail)}
+                                </span>
+                              ) : null}
+                            </article>
+                          ) : null}
+                        </div>
+                        {readString(asRecord(presentedXianxia.quick_reference?.check_formula).summary) ? (
+                          <p className="meta">
+                            Check formula = {readString(asRecord(presentedXianxia.quick_reference?.check_formula).summary)}
+                          </p>
+                        ) : null}
+                      </section>
                     ) : null}
-                    {asRecord(presentedXianxia.quick_reference?.difficulty_states).summary ? (
-                      <article className="character-state-card">
-                        <h4>Difficulty states</h4>
-                        <p>{readString(asRecord(presentedXianxia.quick_reference?.difficulty_states).summary)}</p>
-                        <p className="meta">{readString(asRecord(presentedXianxia.quick_reference?.difficulty_states).resolution_note)}</p>
-                      </article>
+                    {(
+                      asRecordArray(asRecord(presentedXianxia.quick_reference?.difficulty_states).states).length ||
+                      readString(asRecord(presentedXianxia.quick_reference?.difficulty_states).summary)
+                    ) ? (
+                      <section className="read-section" id="xianxia-difficulty-states">
+                        <div className="section-heading">
+                          <h2>Difficulty states</h2>
+                        </div>
+                        <div className="glance-grid">
+                          {asRecordArray(asRecord(presentedXianxia.quick_reference?.difficulty_states).states).map((state) => (
+                            <article className="glance-card" key={readString(state.key, readString(state.label))}>
+                              <span className="meta">{readString(state.label)}</span>
+                              <strong>{readString(state.adjustment_label)}</strong>
+                              <span className="meta">Final DC adjustment</span>
+                            </article>
+                          ))}
+                        </div>
+                        {readString(asRecord(presentedXianxia.quick_reference?.difficulty_states).summary) ? (
+                          <p className="meta">
+                            Difficulty states = {readString(asRecord(presentedXianxia.quick_reference?.difficulty_states).summary)}.
+                          </p>
+                        ) : null}
+                        {readString(asRecord(presentedXianxia.quick_reference?.difficulty_states).resolution_note) ? (
+                          <p className="meta">
+                            {readString(asRecord(presentedXianxia.quick_reference?.difficulty_states).resolution_note)}
+                          </p>
+                        ) : null}
+                      </section>
                     ) : null}
                     {asRecordArray(asRecord(presentedXianxia.quick_reference?.effort_damage).entries).length ? (
-                      <div className="character-card-grid">
-                        {asRecordArray(asRecord(presentedXianxia.quick_reference?.effort_damage).entries).map((entry) => (
-                          <article className="character-state-card" key={readString(entry.key, readString(entry.label))}>
-                            <h4>{readString(entry.label, "Effort")}</h4>
-                            <p>{readString(entry.damage, "--")}</p>
-                            <p className="meta">Score {String(entry.score ?? "--")}</p>
-                          </article>
-                        ))}
-                      </div>
+                      <section className="read-section" id="xianxia-effort-damage">
+                        <div className="section-heading">
+                          <h2>Effort damage</h2>
+                        </div>
+                        <div className="glance-grid">
+                          {asRecordArray(asRecord(presentedXianxia.quick_reference?.effort_damage).entries).map((entry) => (
+                            <article className="glance-card" key={readString(entry.key, readString(entry.label))}>
+                              <span className="meta">{readString(entry.label, "Effort")}</span>
+                              <strong>{readString(entry.damage, "--")}</strong>
+                              <span className="meta">Score {stringFromUnknown(entry.score, "--")}</span>
+                            </article>
+                          ))}
+                        </div>
+                      </section>
                     ) : null}
                     {asRecordArray(presentedXianxia.quick_reference?.active_state_reminders).length ? (
-                      <div className="character-card-grid">
-                        {asRecordArray(presentedXianxia.quick_reference?.active_state_reminders).map((reminder) => (
-                          <article className="character-state-card" key={readString(reminder.label)}>
-                            <h4>{readString(reminder.title, readString(reminder.label))}</h4>
-                            <p>{readString(reminder.status_label)}</p>
-                            {asStringArray(reminder.reference_lines).length ? (
-                              <ul className="plain-list compact-list">
-                                {asStringArray(reminder.reference_lines).map((line, index) => (
-                                  <li key={`${readString(reminder.label)}-${index}`}>{line}</li>
-                                ))}
-                              </ul>
-                            ) : null}
-                          </article>
-                        ))}
-                      </div>
+                      <section className="read-section" id="xianxia-active-state-reminders">
+                        <div className="section-heading">
+                          <h2>Active Stance and Aura</h2>
+                        </div>
+                        <div className="detail-grid">
+                          {asRecordArray(presentedXianxia.quick_reference?.active_state_reminders).map((reminder) => (
+                            <article className="detail-card" key={readString(reminder.label, readString(reminder.title))}>
+                              <div className="section-heading">
+                                <h3>{readString(reminder.title, readString(reminder.label))}</h3>
+                                {readString(reminder.status_label) ? (
+                                  <span className="meta">{readString(reminder.status_label)}</span>
+                                ) : null}
+                              </div>
+                              {readString(reminder.rule_href) ? (
+                                <p>
+                                  <a href={readString(reminder.rule_href)}>{`${readString(reminder.title, "Active stance and aura")} rule`}</a>
+                                </p>
+                              ) : null}
+                              {readString(reminder.support_label) ? (
+                                <p className="meta">{readString(reminder.support_label)}</p>
+                              ) : null}
+                              {asStringArray(reminder.reference_lines).map((line, index) => (
+                                <p key={`${readString(reminder.label)}-${index}`}>{line}</p>
+                              ))}
+                            </article>
+                          ))}
+                        </div>
+                      </section>
                     ) : null}
                   </>
                 ),
