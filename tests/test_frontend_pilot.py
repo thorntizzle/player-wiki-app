@@ -956,6 +956,33 @@ def test_character_xianxia_inventory_section_uses_flask_style_row_form_chrome() 
     assert 'Save currency' not in currency_controls_markup
 
 
+def test_character_dnd_inventory_currency_section_uses_flask_style_row_form_chrome() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    section_start = source.index('{isDnd && activeCharacterSection === "inventory" ? (')
+    section_end = source.index('{isDnd && activeCharacterSection === "abilities" ? (', section_start)
+    section_markup = source[section_start:section_end]
+
+    controls_end = section_markup.index('<div className="detail-grid">')
+    currency_controls_markup = section_markup[controls_end:]
+
+    assert 'className="detail-grid"' in currency_controls_markup
+    assert '<article className="detail-card">' in currency_controls_markup
+    assert "<h3>Currency</h3>" in currency_controls_markup
+    assert 'className="currency-grid" id="session-currency"' in currency_controls_markup
+    assert 'className="currency-form currency-box"' in currency_controls_markup
+    assert 'className="currency-box__header"' in currency_controls_markup
+    assert 'className="currency-box__amount"' in currency_controls_markup
+    assert "onBlur={submitCurrencyOnBlur}" in currency_controls_markup
+    assert 'className="visually-hidden"' in currency_controls_markup
+    assert 'Update {key.toUpperCase()}' in currency_controls_markup
+    assert '["cp", "sp", "ep", "gp", "pp"].map((key) =>' in currency_controls_markup
+    assert re.search(r'<button type="submit" className="visually-hidden" disabled=\{patchCurrency\.isPending \|\| !canEdit\}>\s*Update \{key\.toUpperCase\(\)\}\s*</button>', currency_controls_markup) is not None
+
+    assert 'className="chat-label"' not in currency_controls_markup
+    assert 'form onSubmit={submitCurrency} className="currency-grid"' not in currency_controls_markup
+    assert 'Save currency' not in currency_controls_markup
+
+
 def test_player_session_revealed_articles_panel_uses_session_article_row_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     panel_start = source.index("function SessionArticlesPanel({")

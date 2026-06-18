@@ -10469,24 +10469,33 @@ function CharacterPane({
                     })}
                   </div>
                 ) : null}
-                <form onSubmit={submitCurrency} className="currency-grid">
-                  {["cp", "sp", "ep", "gp", "pp"].map((key) => (
-                    <label key={key} className="chat-label" htmlFor={`currency-${key}`}>
-                      {key.toUpperCase()}
-                      <input
-                        id={`currency-${key}`}
-                        type="number"
-                        min="0"
-                        value={currencyDraft[key] ?? "0"}
-                        disabled={!canEdit}
-                        onChange={(event) => setCurrencyDraft({ ...currencyDraft, [key]: event.currentTarget.value })}
-                      />
-                    </label>
-                  ))}
-                  <button type="submit" disabled={patchCurrency.isPending || !canEdit}>
-                    {patchCurrency.isPending ? "Saving..." : "Save currency"}
-                  </button>
-                </form>
+                <div className="detail-grid">
+                  <article className="detail-card">
+                    <h3>Currency</h3>
+                    <div className="currency-grid" id="session-currency">
+                      {["cp", "sp", "ep", "gp", "pp"].map((key) => (
+                        <form key={key} onSubmit={submitCurrency} className="currency-form currency-box">
+                          <div className="currency-box__header">
+                            <span>{key.toUpperCase()}</span>
+                          </div>
+                          <input
+                            className="currency-box__amount"
+                            id={`currency-${key}`}
+                            type="number"
+                            min="0"
+                            value={currencyDraft[key] ?? "0"}
+                            disabled={!canEdit}
+                            onChange={(event) => setCurrencyDraft({ ...currencyDraft, [key]: event.currentTarget.value })}
+                            onBlur={submitCurrencyOnBlur}
+                          />
+                          <button type="submit" className="visually-hidden" disabled={patchCurrency.isPending || !canEdit}>
+                            Update {key.toUpperCase()}
+                          </button>
+                        </form>
+                      ))}
+                    </div>
+                  </article>
+                </div>
               </section>
             ) : null}
 
