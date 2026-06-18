@@ -8157,6 +8157,30 @@ function CharacterPane({
   const skillUseGuardrailRuleTitle = readString(skillUseGuardrails.rule_title, "Skills");
   const skillUseGuardrailReferenceLines = asStringArray(skillUseGuardrails.reference_lines);
   const hasSkillUseGuardrail = Boolean(skillUseGuardrailRuleHref) || skillUseGuardrailReferenceLines.length > 0;
+  const xianxiaHonorInteractions = asRecord(presentedXianxia.quick_reference?.honor_interactions);
+  const xianxiaHonorContexts = asRecordArray(xianxiaHonorInteractions.contexts);
+  const xianxiaHonorReferenceLines = asStringArray(xianxiaHonorInteractions.reference_lines);
+  const hasXianxiaHonorInteractions = Boolean(
+    xianxiaHonorContexts.length ||
+      xianxiaHonorReferenceLines.length ||
+      readString(xianxiaHonorInteractions.summary) ||
+      readString(xianxiaHonorInteractions.rule_href) ||
+      readString(xianxiaHonorInteractions.status_label) ||
+      readString(xianxiaHonorInteractions.status) ||
+      readString(xianxiaHonorInteractions.support) ||
+      readString(xianxiaHonorInteractions.support_label),
+  );
+  const xianxiaRuleTextReferences = asRecordArray(presentedXianxia.quick_reference?.rule_text_references);
+  const xianxiaStanceBreak = asRecord(presentedXianxia.quick_reference?.stance_break);
+  const xianxiaStanceBreakReferenceLines = asStringArray(xianxiaStanceBreak.reference_lines);
+  const xianxiaStanceBreakRecoveryLines = asStringArray(xianxiaStanceBreak.recovery_lines);
+  const hasXianxiaStanceBreak = Boolean(
+    xianxiaStanceBreakReferenceLines.length ||
+      xianxiaStanceBreakRecoveryLines.length ||
+      readString(xianxiaStanceBreak.status_label) ||
+      readString(xianxiaStanceBreak.status) ||
+      readString(xianxiaStanceBreak.rule_href),
+  );
   const xianxiaActiveStateStatus = joinDisplay([
     readString(presentedXianxia.active_state?.stance?.status_label),
     readString(presentedXianxia.active_state?.aura?.status_label),
@@ -9604,6 +9628,126 @@ function CharacterPane({
                             {readString(asRecord(presentedXianxia.quick_reference?.difficulty_states).resolution_note)}
                           </p>
                         ) : null}
+                      </section>
+                    ) : null}
+                    {hasXianxiaHonorInteractions ? (
+                      <section className="read-section" id="xianxia-honor-interactions">
+                        <div className="section-heading">
+                          <h2>Honor interactions</h2>
+                          {readString(xianxiaHonorInteractions.rule_href) ? (
+                            <a className="button-link subtle" href={readString(xianxiaHonorInteractions.rule_href)}>
+                              {`${readString(xianxiaHonorInteractions.rule_title, "Honor")} rule`}
+                            </a>
+                          ) : null}
+                        </div>
+                        {xianxiaHonorContexts.length ? (
+                          <div className="glance-grid">
+                            {xianxiaHonorContexts.map((context) => (
+                              <article className="glance-card" key={readString(context.key, readString(context.label))}>
+                                <span className="meta">{readString(context.label)}</span>
+                                <strong>{readString(context.modifier_label, "--")}</strong>
+                                <span className="meta">Interaction modifier</span>
+                              </article>
+                            ))}
+                          </div>
+                        ) : null}
+                        <article className="detail-card">
+                          <div className="section-heading">
+                            <h3>Honor context</h3>
+                            {readString(xianxiaHonorInteractions.status_label, readString(xianxiaHonorInteractions.status)) ? (
+                              <span className="meta">
+                                {readString(xianxiaHonorInteractions.status_label, readString(xianxiaHonorInteractions.status))}
+                              </span>
+                            ) : null}
+                          </div>
+                          {(readString(xianxiaHonorInteractions.support) || readString(xianxiaHonorInteractions.support_label)) ? (
+                            <p className="meta">
+                              {readString(xianxiaHonorInteractions.support, readString(xianxiaHonorInteractions.support_label))}
+                            </p>
+                          ) : null}
+                          {xianxiaHonorReferenceLines.map((line, index) => (
+                            <p key={`${line}-${index}`}>{line}</p>
+                          ))}
+                          {readString(xianxiaHonorInteractions.summary) ? (
+                            <p className="meta">Honor interactions = {readString(xianxiaHonorInteractions.summary)}.</p>
+                          ) : null}
+                        </article>
+                      </section>
+                    ) : null}
+                    {hasSkillUseGuardrail ? (
+                      <section className="read-section" id="xianxia-skill-use-guardrails">
+                        <div className="section-heading">
+                          <h2>Skill use guardrails</h2>
+                          {skillUseGuardrailRuleHref ? (
+                            <a className="button-link subtle" href={skillUseGuardrailRuleHref}>
+                              {`${skillUseGuardrailRuleTitle} rule`}
+                            </a>
+                          ) : null}
+                        </div>
+                        <article className="detail-card">
+                          {skillUseGuardrailReferenceLines.map((line, index) => (
+                            <p key={`${line}-${index}`}>{line}</p>
+                          ))}
+                        </article>
+                      </section>
+                    ) : null}
+                    {xianxiaRuleTextReferences.length ? (
+                      <section className="read-section" id="xianxia-rule-text-references">
+                        <div className="section-heading">
+                          <h2>Rules text references</h2>
+                        </div>
+                        <div className="detail-grid">
+                          {xianxiaRuleTextReferences.map((reference) => (
+                            <article className="detail-card" key={readString(reference.key, readString(reference.title))}>
+                              <div className="section-heading">
+                                <h3>{readString(reference.title, "Rule text reference")}</h3>
+                                {readString(reference.support) || readString(reference.support_label) ? (
+                                  <span className="meta">
+                                    {readString(reference.support, readString(reference.support_label))}
+                                  </span>
+                                ) : null}
+                              </div>
+                              {readString(reference.rule_href) ? (
+                                <p>
+                                  <a href={readString(reference.rule_href)}>{`${readString(reference.title, "Rule")} rule`}</a>
+                                </p>
+                              ) : null}
+                              {asStringArray(reference.reference_lines).map((line, index) => (
+                                <p key={`${readString(reference.title, "Rule")}-${index}`}>{line}</p>
+                              ))}
+                            </article>
+                          ))}
+                        </div>
+                      </section>
+                    ) : null}
+                    {hasXianxiaStanceBreak ? (
+                      <section className="read-section" id="xianxia-stance-break">
+                        <div className="section-heading">
+                          <h2>Stance Break</h2>
+                          {readString(xianxiaStanceBreak.rule_href) ? (
+                            <a className="button-link subtle" href={readString(xianxiaStanceBreak.rule_href)}>
+                              {`${readString(xianxiaStanceBreak.rule_title, "Stance Break")} rule`}
+                            </a>
+                          ) : null}
+                        </div>
+                        <article className="detail-card">
+                          <div className="section-heading">
+                            <h3>Current Stance</h3>
+                            {readString(xianxiaStanceBreak.status_label, readString(xianxiaStanceBreak.status)) ? (
+                              <span className="meta">
+                                {readString(xianxiaStanceBreak.status_label, readString(xianxiaStanceBreak.status))}
+                              </span>
+                            ) : null}
+                          </div>
+                          {xianxiaStanceBreakReferenceLines.map((line, index) => (
+                            <p key={`${line}-${index}`}>{line}</p>
+                          ))}
+                          {xianxiaStanceBreakRecoveryLines.map((line, index) => (
+                            <p key={`${line}-${index}`} className="meta">
+                              {line}
+                            </p>
+                          ))}
+                        </article>
                       </section>
                     ) : null}
                     {asRecordArray(asRecord(presentedXianxia.quick_reference?.effort_damage).entries).length ? (

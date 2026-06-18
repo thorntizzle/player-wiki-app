@@ -1067,6 +1067,40 @@ def test_character_xianxia_quick_reference_section_uses_flask_style_read_chrome(
     assert 'className="chat-label"' not in section_markup
 
 
+def test_character_xianxia_quick_reference_section_renders_flask_rule_reference_subsections() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    section_start = source.index('{isXianxia && activeCharacterSection === "quick-reference" ? (')
+    section_end = source.index('{isXianxia && activeCharacterSection === "martial-arts" ? (', section_start)
+    section_markup = source[section_start:section_end]
+
+    assert 'id="xianxia-honor-interactions"' in section_markup
+    assert "Honor interactions" in section_markup
+    assert "Interaction modifier" in section_markup
+    assert "Honor context" in section_markup
+    assert "Honor interactions = " in section_markup
+    assert "xianxiaHonorInteractions.status_label" in section_markup
+
+    assert 'id="xianxia-skill-use-guardrails"' in section_markup
+    assert "Skill use guardrails" in section_markup
+    assert 'className="button-link subtle"' in section_markup
+
+    assert 'id="xianxia-rule-text-references"' in section_markup
+    assert "Rules text references" in section_markup
+    assert "xianxiaRuleTextReferences" in section_markup
+
+    assert 'id="xianxia-stance-break"' in section_markup
+    assert "Stance Break" in section_markup
+    assert "Current Stance" in section_markup
+    assert "xianxiaStanceBreak" in section_markup
+    assert "xianxiaStanceBreak.status_label" in section_markup
+
+    assert 'className="character-state-card"' not in section_markup
+    assert 'className="plain-list compact-list"' not in section_markup
+    assert 'className="status status-neutral"' not in section_markup
+    assert 'className="inline-two-col"' not in section_markup
+    assert 'className="chat-label"' not in section_markup
+
+
 def test_character_dnd_inventory_currency_section_uses_flask_style_row_form_chrome() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "inventory" ? (')
