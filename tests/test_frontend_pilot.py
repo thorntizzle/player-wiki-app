@@ -421,17 +421,52 @@ def test_character_supported_form_action_chrome_in_source() -> None:
     assert "className=\"button button-secondary\"" not in manual_markup
 
     editor_markup = supported_component("CharacterAdvancedEditorPage")
+    assert (
+        re.search(
+            r'<div className="hero-actions">\s*<button\s+type="submit"\s+disabled={saveEditor\.isPending}>',
+            editor_markup,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'<div className="builder-actions">\s*<button\s+type="submit"\s+disabled={saveEditor\.isPending}>',
+            editor_markup,
+        )
+        is None
+    )
     assert 'className="ghost-button" href={data.links.character_url}>' in editor_markup
     assert re.search(r">\s*Back to sheet\s*</a>", editor_markup) is not None
     assert "className=\"button button-secondary\"" not in editor_markup
 
     progression_markup = supported_component("CharacterProgressionRepairPage")
+    assert (
+        re.search(
+            r'<div className="builder-actions">\s*<button\s+className="ghost-button"\s+type="submit"\s+disabled={submitRepair\.isPending}>\s*{submitRepair\.isPending \? "Saving\.\.\." : "Save Repair"}\s*</button>',
+            progression_markup,
+        )
+        is not None
+    )
     assert 'className="ghost-button" href={data.links.character_url}>' in progression_markup
     assert "Save Repair" in progression_markup
     assert "Cancel" in progression_markup
     assert "className=\"button button-secondary\"" not in progression_markup
 
     retraining_markup = supported_component("CharacterRetrainingPage")
+    assert (
+        re.search(
+            r'<div className="hero-actions">\s*<button\s+type="submit"\s+disabled={submitRetraining\.isPending}>',
+            retraining_markup,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'<div className="builder-actions">\s*<button\s+type="submit"\s+disabled={submitRetraining\.isPending}>',
+            retraining_markup,
+        )
+        is None
+    )
     assert 'href={`${data.links.character_url}?page=features`}' in retraining_markup
     assert re.search(r'className="ghost-button"[^>]*>\s*Cancel\s*</a>', retraining_markup) is not None
     assert "className=\"button button-secondary\"" not in retraining_markup
@@ -446,6 +481,47 @@ def test_character_supported_form_action_chrome_in_source() -> None:
         is not None
     )
     assert "className=\"button button-secondary\"" not in level_up_markup
+
+
+def test_character_form_actions_do_not_convert_non_targeted_builder_rows() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+
+    def component_source(component_name: str) -> str:
+        start = source.index(f"function {component_name}() {{")
+        end = source.find("\nfunction ", start + len(component_name) + 10)
+        if end == -1:
+            end = len(source)
+        return source[start:end]
+
+    create_markup = component_source("CharacterCreatePage")
+    assert re.search(r'<div className="builder-actions">[\s\S]*?<button\s+type="submit"\s+disabled={!create\.builder_ready \|\| createMutation\.isPending}>', create_markup) is not None
+    assert (
+        re.search(
+            r'<button\s+type="button"\s+className="ghost-button"\s+onClick=\{\(\) => refreshContext\(\)\}>\s*'
+            r"Refresh options\s*</button>",
+            create_markup,
+        )
+        is not None
+    )
+
+    manual_markup = component_source("CharacterXianxiaManualImportPage")
+    assert (
+        re.search(
+            r'<div className="builder-actions">\s*<button\s+type="submit"\s+disabled={importMutation\.isPending}>',
+            manual_markup,
+        )
+        is not None
+    )
+
+    level_up_markup = component_source("CharacterLevelUpPage")
+    assert (
+        re.search(
+            r'<div className="builder-actions">\s*<button\s+type="button"\s+className="ghost-button"\s+onClick=\{\(\) => refreshContext\(\)\}>\s*'
+            r"Refresh preview\s*</button>\s*<button\s+type=\"submit\" disabled={submitLevelUp\.isPending}>",
+            level_up_markup,
+        )
+        is not None
+    )
 
 
 def test_combat_unsupported_system_fallback_chrome_in_source() -> None:

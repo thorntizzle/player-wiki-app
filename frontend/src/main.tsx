@@ -2021,7 +2021,7 @@ function CharacterAdvancedEditorPage() {
             <div className="character-edit-stack">{editor.equipment_rows.map(renderEquipmentRow)}</div>
           </section>
 
-          <div className="builder-actions">
+          <div className="hero-actions">
             <button type="submit" disabled={saveEditor.isPending}>
               {saveEditor.isPending ? "Saving..." : "Save character edits"}
             </button>
@@ -2337,7 +2337,7 @@ function CharacterProgressionRepairPage() {
             ) : null}
 
             <div className="builder-actions">
-              <button type="submit" disabled={submitRepair.isPending}>
+              <button className="ghost-button" type="submit" disabled={submitRepair.isPending}>
                 {submitRepair.isPending ? "Saving..." : "Save Repair"}
               </button>
               {data?.links?.character_url ? (
@@ -2541,7 +2541,7 @@ function CharacterRetrainingPage() {
               </div>
             </section>
 
-            <div className="builder-actions">
+            <div className="hero-actions">
               <button type="submit" disabled={submitRetraining.isPending}>
                 {submitRetraining.isPending ? "Saving..." : "Save retraining"}
               </button>
