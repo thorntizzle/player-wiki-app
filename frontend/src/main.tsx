@@ -1038,19 +1038,19 @@ function CharacterCreatePage() {
         <p className="meta">Character authoring</p>
         <h1>{create?.lane === "xianxia" ? "Create Xianxia Character" : "Create Character"}</h1>
         <p className="lede">Create native character records through the same campaign system lane used by the Flask builder.</p>
-        <div className="article-actions character-authoring-hero-actions">
+        <div className="hero-actions character-authoring-hero-actions">
           {data?.links.gen2_roster_url ? (
-            <a className="button button-secondary" href={data.links.gen2_roster_url}>
+            <a className="ghost-button" href={data.links.gen2_roster_url}>
               Back to roster
             </a>
           ) : null}
           {data?.links.flask_create_url ? (
-            <a className="button button-secondary" href={data.links.flask_create_url}>
+            <a className="ghost-button" href={data.links.flask_create_url}>
               Flask create
             </a>
           ) : null}
           {data?.links.gen2_import_xianxia_url ? (
-            <a className="button button-secondary" href={data.links.gen2_import_xianxia_url}>
+            <a className="ghost-button" href={data.links.gen2_import_xianxia_url}>
               Import existing
             </a>
           ) : null}
@@ -1436,14 +1436,14 @@ function CharacterXianxiaManualImportPage() {
         <p className="meta">Character importer</p>
         <h1>Import Existing Xianxia Character</h1>
         <p className="lede">Preview copied values, then create a normal native Xianxia sheet with SQLite-backed mutable state.</p>
-        <div className="article-actions character-authoring-hero-actions">
+        <div className="hero-actions character-authoring-hero-actions">
           {links?.gen2_roster_url ? (
-            <a className="button button-secondary" href={links.gen2_roster_url}>
+            <a className="ghost-button" href={links.gen2_roster_url}>
               Back to roster
             </a>
           ) : null}
           {links?.flask_import_xianxia_url ? (
-            <a className="button button-secondary" href={links.flask_import_xianxia_url}>
+            <a className="ghost-button" href={links.flask_import_xianxia_url}>
               Flask import
             </a>
           ) : null}
@@ -1916,12 +1916,12 @@ function CharacterAdvancedEditorPage() {
         <p className="lede">Advanced campaign-time adjustments and durable reference text for this character are managed here.</p>
         <div className="hero-actions">
           {data?.links?.character_url ? (
-            <a className="button button-secondary" href={data.links.character_url}>
+            <a className="ghost-button" href={data.links.character_url}>
               Back to sheet
             </a>
           ) : null}
           {data?.links?.flask_advanced_editor_url ? (
-            <a className="button button-secondary" href={data.links.flask_advanced_editor_url}>
+            <a className="ghost-button" href={data.links.flask_advanced_editor_url}>
               Flask editor
             </a>
           ) : null}
@@ -2140,12 +2140,12 @@ function CharacterProgressionRepairPage() {
         {classLevelText ? <p className="meta">{classLevelText}</p> : null}
         <div className="hero-actions">
           {data?.links?.character_url ? (
-            <a className="button button-secondary" href={data.links.character_url}>
+            <a className="ghost-button" href={data.links.character_url}>
               Back to sheet
             </a>
           ) : null}
           {data?.links?.flask_progression_repair_url ? (
-            <a className="button button-secondary" href={data.links.flask_progression_repair_url}>
+            <a className="ghost-button" href={data.links.flask_progression_repair_url}>
               Flask repair
             </a>
           ) : null}
@@ -2455,17 +2455,17 @@ function CharacterRetrainingPage() {
         {classLevelText ? <p className="lede">{classLevelText}</p> : null}
         <div className="hero-actions">
           {data?.links?.character_url ? (
-            <a className="button button-secondary" href={data.links.character_url}>
+            <a className="ghost-button" href={data.links.character_url}>
               Back to sheet
             </a>
           ) : null}
           {data?.links?.advanced_editor_url ? (
-            <a className="button button-secondary" href={data.links.advanced_editor_url}>
+            <a className="ghost-button" href={data.links.advanced_editor_url}>
               Advanced Editor
             </a>
           ) : null}
           {data?.links?.flask_retraining_url ? (
-            <a className="button button-secondary" href={data.links.flask_retraining_url}>
+            <a className="ghost-button" href={data.links.flask_retraining_url}>
               Flask retraining
             </a>
           ) : null}
@@ -2679,12 +2679,12 @@ function CharacterLevelUpPage() {
         {classLevelText ? <p className="lede">{classLevelText}</p> : null}
         <div className="hero-actions">
           {data?.links?.character_url ? (
-            <a className="button button-secondary" href={data.links.character_url}>
+            <a className="ghost-button" href={data.links.character_url}>
               Back to sheet
             </a>
           ) : null}
           {data?.links?.flask_level_up_url ? (
-            <a className="button button-secondary" href={data.links.flask_level_up_url}>
+            <a className="ghost-button" href={data.links.flask_level_up_url}>
               Flask level-up
             </a>
           ) : null}
@@ -3394,27 +3394,30 @@ function CharacterCultivationPage() {
         <p className="lede">Insight-based advancement for this Xianxia character.</p>
         <div className="hero-actions">
           {data?.links?.character_url ? (
-            <a className="button button-secondary" href={data.links.character_url}>
+            <a className="ghost-button" href={data.links.character_url}>
               Back to sheet
             </a>
           ) : null}
           {data?.links?.character_url ? (
-            <a className="button button-secondary" href={`${data.links.character_url}?page=martial_arts`}>
+            <a className="ghost-button" href={`${data.links.character_url}?page=martial_arts`}>
               Martial Arts
             </a>
           ) : null}
           {data?.links?.character_url ? (
-            <a className="button button-secondary" href={`${data.links.character_url}?page=techniques`}>
+            <a className="ghost-button" href={`${data.links.character_url}?page=techniques`}>
               Techniques
             </a>
           ) : null}
           {data?.links?.character_url ? (
-            <a className="button button-secondary" href={`${data.links.character_url}?page=resources`}>
+            <a className="ghost-button" href={`${data.links.character_url}?page=resources`}>
               Resources
             </a>
           ) : null}
+          <a className="ghost-button" href="#xianxia-cultivation-realm-ascension">
+            Realm Ascension
+          </a>
           {data?.links?.flask_cultivation_url ? (
-            <a className="button button-secondary" href={data.links.flask_cultivation_url}>
+            <a className="ghost-button" href={data.links.flask_cultivation_url}>
               Flask Cultivation
             </a>
           ) : null}
