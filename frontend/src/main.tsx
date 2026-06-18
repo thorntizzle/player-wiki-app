@@ -8044,6 +8044,16 @@ function CharacterPane({
   const detailLinks = detail?.links ?? {};
   const detailProgressionRepairUrl = detailLinks.progression_repair_url || detailLinks.flask_progression_repair_url;
   const detailProgressionRepairLabel = detailLinks.progression_repair_url ? "Progression repair" : "Flask repair";
+  const selectedCharacterSheetUrl = selectedSlug
+    ? `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters/${encodeURIComponent(selectedSlug)}`
+    : "";
+  const hasReadHeaderManagementActions = Boolean(
+    detailLinks.advanced_editor_url ||
+      detailLinks.level_up_url ||
+      detailLinks.retraining_url ||
+      detailProgressionRepairUrl ||
+      detailLinks.cultivation_url,
+  );
   const selected = characterList.find((item) => item.slug === selectedSlug);
   const selectedPortrait = detailRecord?.portrait ?? selected?.portrait ?? null;
   const permissions = detailRecord?.permissions;
@@ -8962,11 +8972,35 @@ function CharacterPane({
                 <p className="eyebrow">Character sheet</p>
                 <h1>{selected?.name || surfaceHeading}</h1>
               </div>
-              <div className="character-header__actions article-actions">
-                <a href={`/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters`} className="button button-secondary">
-                  Roster
-                </a>
-              </div>
+              {hasReadHeaderManagementActions ? (
+                <div className="character-header__actions">
+                  {detailLinks.advanced_editor_url ? (
+                    <a className="ghost-button" href={detailLinks.advanced_editor_url}>
+                      Advanced Editor
+                    </a>
+                  ) : null}
+                  {detailLinks.retraining_url ? (
+                    <a className="ghost-button" href={detailLinks.retraining_url}>
+                      Retraining
+                    </a>
+                  ) : null}
+                  {detailLinks.level_up_url ? (
+                    <a className="ghost-button" href={detailLinks.level_up_url}>
+                      Level up
+                    </a>
+                  ) : null}
+                  {detailProgressionRepairUrl ? (
+                    <a className="ghost-button" href={detailProgressionRepairUrl}>
+                      {detailLinks.progression_repair_url ? "Progression repair" : "Prepare for level-up"}
+                    </a>
+                  ) : null}
+                  {detailLinks.cultivation_url ? (
+                    <a className="ghost-button" href={detailLinks.cultivation_url}>
+                      Cultivation
+                    </a>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </header>
         ) : (
@@ -8977,24 +9011,13 @@ function CharacterPane({
                 <h2>{selected?.name || surfaceHeading}</h2>
                 {embeddedHeaderDetails.length ? <p className="lede">{embeddedHeaderDetails.join(" | ")}</p> : null}
               </div>
-              <div className="character-header__actions article-actions">
-                {isCombatSurface ? (
-                  <a href={`/campaigns/${encodeURIComponent(campaignSlug)}/combat`} className="button button-secondary">
-                    Flask Combat
+              {selectedCharacterSheetUrl ? (
+                <div className="hero-actions">
+                  <a href={selectedCharacterSheetUrl} className="ghost-button">
+                    {isCombatSurface ? "Open full sheet" : "Open full character page"}
                   </a>
-                ) : (
-                  <a
-                    href={
-                      selectedSlug
-                        ? `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters/${encodeURIComponent(selectedSlug)}`
-                        : `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters`
-                    }
-                    className="button button-secondary"
-                  >
-                    Character route
-                  </a>
-                )}
-              </div>
+                </div>
+              ) : null}
             </div>
           </header>
         )}

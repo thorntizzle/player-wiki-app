@@ -360,6 +360,11 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(embedded_character_shell).to_be_visible()
             expect(embedded_character_shell.locator("> header.character-header h2")).to_be_visible()
             expect(embedded_character_shell.locator("> header.character-header h1")).to_have_count(0)
+            embedded_character_header = embedded_character_shell.locator("> header.character-header")
+            expect(embedded_character_header.locator(".hero-actions")).to_be_visible()
+            expect(embedded_character_header.get_by_role("link", name="Open full character page")).to_be_visible()
+            expect(embedded_character_header.locator(".article-actions")).to_have_count(0)
+            expect(embedded_character_header.locator(".button.button-secondary")).to_have_count(0)
             vitals_bar = embedded_character_shell.locator("section#session-vitals.session-bar")
             expect(vitals_bar).to_be_visible()
             expect(vitals_bar.locator("> .panel-header")).to_have_count(0)
@@ -1468,6 +1473,11 @@ def test_gen2_combat_browser_opens_player_workspace_and_preserves_focused_draft(
             expect(page.get_by_role("heading", name="Combat Character")).to_be_visible(timeout=10000)
             workspace = page.locator(".combat-pc-workspace")
             expect(workspace.locator("> .section-heading h2")).to_be_visible()
+            combat_character_header = workspace.locator("article.card.character-sheet.session-character-sheet > header.character-header")
+            expect(combat_character_header.locator(".hero-actions")).to_be_visible()
+            expect(combat_character_header.get_by_role("link", name="Open full sheet")).to_be_visible()
+            expect(combat_character_header.locator(".article-actions")).to_have_count(0)
+            expect(combat_character_header.locator(".button.button-secondary")).to_have_count(0)
 
             carousel.get_by_role("button", name=re.compile(r"Clockwork Hound", re.I)).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?combatant=\d+"))
@@ -2293,6 +2303,12 @@ def test_gen2_character_visual_parity_smoke(
             expect(desktop_page.locator(".character-selector-card")).to_be_visible()
             expect(desktop_page.locator(".character-summary")).to_be_visible()
             expect(desktop_page.locator(".section-tabs")).to_be_visible()
+            character_read_header = desktop_page.locator("article.character-read-shell.character-sheet.card > header.character-header")
+            expect(character_read_header.locator(".article-actions")).to_have_count(0)
+            expect(character_read_header.locator(".button.button-secondary")).to_have_count(0)
+            assert character_read_header.locator(".character-header__actions .ghost-button").count() >= 1
+            if character_read_header.get_by_role("link", name="Advanced Editor").count() > 0:
+                expect(character_read_header.get_by_role("link", name="Advanced Editor")).to_be_visible()
             detail_metrics = desktop_page.evaluate(
                 """() => {
                     const shell = document.querySelector(".character-read-shell");
