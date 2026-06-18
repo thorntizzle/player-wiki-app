@@ -156,6 +156,36 @@ def test_combat_action_chrome_in_source() -> None:
     assert "onClick={() => clearCombatMutation.mutate()}" in clear_button_block
 
 
+def test_combat_conditions_chrome_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    combat_page_start = source.index("function CombatPage() {")
+    campaign_combat_route_start = source.index("const campaignCombatRoute", combat_page_start)
+    combat_page_source = source[combat_page_start:campaign_combat_route_start]
+
+    condition_section_match = re.search(
+        r'<section className="combat-conditions combat-conditions--compact combat-status-conditions">([\s\S]*?)</section>',
+        combat_page_source,
+    )
+    assert condition_section_match is not None
+    condition_section_markup = condition_section_match.group(0)
+
+    assert 'className="section-heading"' in condition_section_markup
+    assert "<h3>Conditions</h3>" in condition_section_markup
+    assert 'className="combat-condition-editor combat-condition-editor--add"' in condition_section_markup
+    assert "<summary>Add condition</summary>" in condition_section_markup
+    assert 'className="combat-condition-editor__form"' in condition_section_markup
+    assert re.search(r'className="field">\s*<span>Condition</span>', condition_section_markup) is not None
+    assert re.search(r'className="field">\s*<span>Duration</span>', condition_section_markup) is not None
+    assert 'className="combat-condition-list"' in condition_section_markup
+    assert 'className="combat-condition-item"' in condition_section_markup
+    assert 'className="combat-condition-actions"' in condition_section_markup
+    assert re.search(
+        r'<button\s+type="button"\s+className="ghost-button"[^>]*onClick=\{\(\) => deleteConditionMutation\.mutate\(condition\)\}[^>]*>\s*Remove\s*</button>',
+        condition_section_markup,
+    ) is not None
+    assert "className=\"button button-secondary\"" not in condition_section_markup
+
+
 def test_character_portrait_manager_action_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     section_start = source.index('<form className="stack-form character-portrait-manager"')

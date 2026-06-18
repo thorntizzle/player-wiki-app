@@ -14881,67 +14881,73 @@ function CombatPage() {
           </article>
 
           <article className="card combat-control-card">
-            <div>
-              <p className="meta">Tactical state</p>
-              <h3>Conditions</h3>
-            </div>
             <datalist id="gen2-combat-condition-options">
               {conditionOptions.map((option) => (
                 <option key={option} value={option} />
               ))}
             </datalist>
-            {selectedCombatant.conditions.length ? (
-              <div className="combat-condition-stack">
-                {selectedCombatant.conditions.map((condition) => (
-                  <div className="combat-condition-chip" key={condition.id}>
-                    <span>
-                      <strong>{condition.name}</strong>
-                      {condition.duration_text ? <small>{condition.duration_text}</small> : null}
-                    </span>
-                    <button
-                      type="button"
-                      className="button button-secondary"
-                      onClick={() => deleteConditionMutation.mutate(condition)}
-                      disabled={deleteConditionMutation.isPending}
-                    >
-                      Remove
+            <section className="combat-conditions combat-conditions--compact combat-status-conditions">
+              <div className="section-heading">
+                <h3>Conditions</h3>
+                <details className="combat-condition-editor combat-condition-editor--add">
+                  <summary>Add condition</summary>
+                  <form
+                    className="combat-condition-editor__form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      addConditionMutation.mutate(conditionDraft);
+                    }}
+                  >
+                    <label className="field">
+                      <span>Condition</span>
+                      <input
+                        type="text"
+                        list="gen2-combat-condition-options"
+                        value={conditionDraft.name}
+                        onChange={(event) => setConditionDraft({ ...conditionDraft, name: event.currentTarget.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Duration</span>
+                      <input
+                        type="text"
+                        value={conditionDraft.durationText}
+                        onChange={(event) =>
+                          setConditionDraft({ ...conditionDraft, durationText: event.currentTarget.value })
+                        }
+                      />
+                    </label>
+                    <button type="submit" disabled={addConditionMutation.isPending}>
+                      {addConditionMutation.isPending ? "Adding..." : "Add condition"}
                     </button>
-                  </div>
-                ))}
+                  </form>
+                </details>
               </div>
-            ) : (
-              <p className="meta">No conditions are active on this combatant.</p>
-            )}
-            <form
-              className="combat-inline-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                addConditionMutation.mutate(conditionDraft);
-              }}
-            >
-              <label className="chat-label">
-                Condition
-                <input
-                  type="text"
-                  list="gen2-combat-condition-options"
-                  value={conditionDraft.name}
-                  onChange={(event) => setConditionDraft({ ...conditionDraft, name: event.currentTarget.value })}
-                />
-              </label>
-              <label className="chat-label">
-                Duration
-                <input
-                  type="text"
-                  value={conditionDraft.durationText}
-                  onChange={(event) =>
-                    setConditionDraft({ ...conditionDraft, durationText: event.currentTarget.value })
-                  }
-                />
-              </label>
-              <button type="submit" disabled={addConditionMutation.isPending}>
-                {addConditionMutation.isPending ? "Adding..." : "Add condition"}
-              </button>
-            </form>
+              {selectedCombatant.conditions.length ? (
+                <div className="combat-condition-list">
+                  {selectedCombatant.conditions.map((condition) => (
+                    <div className="combat-condition-item" key={condition.id}>
+                      <div>
+                        <strong>{condition.name}</strong>
+                        {condition.duration_text ? <p className="meta">{condition.duration_text}</p> : null}
+                      </div>
+                      <div className="combat-condition-actions">
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() => deleteConditionMutation.mutate(condition)}
+                          disabled={deleteConditionMutation.isPending}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="meta">No conditions are active on this combatant.</p>
+              )}
+            </section>
           </article>
         </section>
 
