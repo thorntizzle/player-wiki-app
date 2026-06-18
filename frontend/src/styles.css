@@ -3784,6 +3784,15 @@ textarea {
   padding: 1rem;
 }
 
+.combat-character-snapshot {
+  display: grid;
+  gap: 1rem;
+}
+
+.combat-character-snapshot > .section-heading {
+  margin-bottom: 0;
+}
+
 .combat-selected-snapshot__stats {
   grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
 }
@@ -3794,6 +3803,35 @@ textarea {
   background: var(--surface-soft);
   padding: 0.65rem 0.75rem;
   font-weight: 700;
+}
+
+.combatant-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.combat-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.combat-badge--muted {
+  background: var(--surface-accent-soft);
+}
+
+.combat-badge--active {
+  border-color: var(--border-accent);
+  background: var(--overlay-accent);
+  color: var(--accent-deep);
 }
 
 .combat-pc-workspace {
@@ -4017,6 +4055,8 @@ textarea {
   .session-log-row,
   .inline-two-col,
   .combat-carousel > .section-heading,
+  .combat-selected-snapshot > .section-heading,
+  .combat-character-snapshot > .section-heading,
   .combat-pc-workspace > .section-heading,
   .combat-condition-chip,
   .compact-card {

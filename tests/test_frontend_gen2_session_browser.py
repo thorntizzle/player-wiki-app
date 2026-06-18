@@ -1497,6 +1497,11 @@ def test_gen2_combat_visual_parity_smoke(
                     const carousel = document.querySelector(".combat-carousel");
                     const combatant = document.querySelector(".combatant-card");
                     const snapshot = document.querySelector(".combat-selected-snapshot");
+                    const snapshotHeading = snapshot?.querySelector(":scope > .section-heading > div > h2") || null;
+                    const snapshotKicker = snapshot?.querySelector(":scope > .section-heading > div > .card-kicker") || null;
+                    const snapshotBadges = snapshot
+                        ? Array.from(snapshot.querySelectorAll(":scope > .section-heading .combatant-badges .combat-badge"))
+                        : [];
                     const heroIndex = hero ? directChildren.indexOf(hero) : -1;
                     const summaryIndex = summary ? directChildren.indexOf(summary) : -1;
                     const carouselIndex = carousel ? directChildren.indexOf(carousel) : -1;
@@ -1520,6 +1525,13 @@ def test_gen2_combat_visual_parity_smoke(
                         carouselRadius: carousel ? Number.parseFloat(window.getComputedStyle(carousel).borderRadius) : 0,
                         combatantRadius: combatant ? Number.parseFloat(window.getComputedStyle(combatant).borderRadius) : 0,
                         snapshotRadius: snapshot ? Number.parseFloat(window.getComputedStyle(snapshot).borderRadius) : 0,
+                        snapshotHeadingText: snapshotHeading ? snapshotHeading.textContent.trim() : "",
+                        snapshotKickerText: snapshotKicker ? snapshotKicker.textContent.trim() : "",
+                        snapshotBadgeCount: snapshotBadges.length,
+                        snapshotBadgeTexts: snapshotBadges.map((badge) => badge.textContent.trim()),
+                        snapshotBareHeadingCount: snapshot
+                            ? snapshot.querySelectorAll(":scope > .section-heading > div > h3").length
+                            : 0,
                     };
                 }"""
             )
@@ -1538,6 +1550,12 @@ def test_gen2_combat_visual_parity_smoke(
             assert player_metrics["carouselRadius"] >= 20
             assert player_metrics["combatantRadius"] >= 16
             assert player_metrics["snapshotRadius"] >= 20
+            assert player_metrics["snapshotHeadingText"]
+            assert player_metrics["snapshotKickerText"] in {"Combat workspace", "Combat snapshot"}
+            assert player_metrics["snapshotBadgeCount"] >= 2
+            assert any(text.startswith("Round ") for text in player_metrics["snapshotBadgeTexts"])
+            assert any(text.startswith("Turn ") for text in player_metrics["snapshotBadgeTexts"])
+            assert player_metrics["snapshotBareHeadingCount"] == 0
 
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=status")
             expect(desktop_page.get_by_role("heading", name=re.compile(r"Combat:", re.I))).to_be_visible(timeout=10000)
@@ -1620,6 +1638,54 @@ def test_gen2_combat_visual_parity_smoke(
             mobile_page.close()
             desktop_context.close()
             mobile_context.close()
+            browser.close()
+
+
+@pytest.mark.skip(reason="Combat snapshot heading-shell parity assertions are currently suspended with Gen2 snapshot parity work.")
+def test_gen2_combat_selected_snapshot_heading_shell_smoke(
+    app,
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    _seed_gen2_combat(app, users)
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=player")
+
+            expect(page.locator(".combat-selected-snapshot")).to_be_visible(timeout=10000)
+            expect(page.locator(".combat-selected-snapshot > .section-heading > div > .card-kicker")).to_be_visible()
+            expect(page.locator(".combat-selected-snapshot > .section-heading > div > .card-kicker")).to_have_text(
+                re.compile(r"Combat (workspace|snapshot)")
+            )
+            expect(page.locator(".combat-selected-snapshot > .section-heading > div > h2")).to_be_visible()
+            expect(page.locator(".combat-selected-snapshot > .section-heading > .combatant-badges")).to_be_visible()
+
+            badge_count = page.locator(".combat-selected-snapshot .combatant-badges .combat-badge").count()
+            assert badge_count >= 2
+            badge_texts = page.locator(".combat-selected-snapshot .combatant-badges .combat-badge").all_inner_texts()
+            badge_class_names = page.locator(".combat-selected-snapshot .combatant-badges .combat-badge").evaluate_all(
+                "(nodes) => nodes.map((node) => node.className)"
+            )
+            assert any(text.strip().startswith("Round ") for text in badge_texts)
+            assert any(text.strip().startswith("Turn ") for text in badge_texts)
+            assert all("combat-badge" in classes for classes in badge_class_names)
+            assert page.locator(".combat-selected-snapshot > .section-heading > div > h3").count() == 0
+        finally:
+            page.close()
             browser.close()
 
 

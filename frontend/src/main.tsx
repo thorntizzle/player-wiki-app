@@ -14178,8 +14178,15 @@ function CombatPage() {
   const payload = combatQuery.data;
   const tracker = payload?.tracker;
   const selectedCombatant = payload?.selected_combatant ?? null;
+  const selectedCombatantMeta = selectedCombatant
+    ? selectedCombatant.subtitle || selectedCombatant.source_label || selectedCombatant.type_label
+    : "";
   const selectedPlayerCharacter = payload?.selected_player_character ?? null;
   const selectedCharacterSlug = selectedPlayerCharacter?.character_slug || null;
+  const selectedCombatantKicker =
+    selectedCombatant?.character_slug && selectedCombatant.character_slug === selectedCharacterSlug
+      ? "Combat workspace"
+      : "Combat snapshot";
   const canManageCombat = Boolean(payload?.permissions.can_manage_combat);
   const canAccessDmContent = Boolean(payload?.permissions.can_access_dm_content);
   const canAccessSystems = Boolean(payload?.permissions.can_access_systems);
@@ -15313,11 +15320,25 @@ function CombatPage() {
           )}
 
           {selectedCombatant ? (
-            <section className="combat-selected-snapshot">
-              <div>
-                <p className="meta">Inspected combatant</p>
-                <h3>{selectedCombatant.name}</h3>
-                <p>{selectedCombatant.subtitle || selectedCombatant.source_label || selectedCombatant.type_label}</p>
+            <section className="combat-selected-snapshot card combat-character-snapshot">
+              <div className="section-heading">
+                <div>
+                  <p className="card-kicker">{selectedCombatantKicker}</p>
+                  <h2>{selectedCombatant.name}</h2>
+                  {selectedCombatantMeta ? (
+                    <p className="meta">{selectedCombatantMeta}</p>
+                  ) : null}
+                </div>
+                <div className="combatant-badges">
+                  <span className="combat-badge">Round {tracker?.round_number ?? 1}</span>
+                  <span className="combat-badge">Turn {selectedCombatant.turn_value}</span>
+                  {selectedCombatant.initiative_bonus_label !== "0" ? (
+                    <span className="combat-badge combat-badge--muted">Init {selectedCombatant.initiative_bonus_label}</span>
+                  ) : null}
+                  {selectedCombatant.is_current_turn ? (
+                    <span className="combat-badge combat-badge--active">Current turn</span>
+                  ) : null}
+                </div>
               </div>
               {selectedCombatant.show_detail ? (
                 <div className="combat-selected-snapshot__stats">
