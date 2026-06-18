@@ -13294,6 +13294,38 @@ function DmContentPage() {
             {activeLane === "player-wiki" && canManagePlayerWiki ? <span className="pill">DM+</span> : null}
           </div>
         ) : null}
+        <nav className="character-subpage-nav dm-content-subpage-nav" aria-label="DM Content subpages">
+          <a
+            className={activeLane === "statblocks" ? "button-link" : "ghost-button"}
+            href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content`}
+          >
+            Statblocks
+          </a>
+          <a
+            className={activeLane === "staged-articles" ? "button-link" : "ghost-button"}
+            href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=staged-articles`}
+          >
+            Staged Articles
+          </a>
+          <a
+            className={activeLane === "conditions" ? "button-link" : "ghost-button"}
+            href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=conditions`}
+          >
+            Conditions
+          </a>
+          <a
+            className={activeLane === "player-wiki" ? "button-link" : "ghost-button"}
+            href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=player-wiki`}
+          >
+            Player Wiki
+          </a>
+          <a
+            className={activeLane === "systems" ? "button-link" : "ghost-button"}
+            href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=systems`}
+          >
+            Systems
+          </a>
+        </nav>
       </section>
 
       <ApiErrorNotice
@@ -13301,40 +13333,6 @@ function DmContentPage() {
         message={pageError}
         onAuth={() => setAuthRequired(true)}
       />
-
-      <div className="dm-content-gen2-links">
-        <a
-          className={activeLane === "statblocks" ? "is-active" : ""}
-          href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content`}
-        >
-          Statblocks
-        </a>
-        <a
-          className={activeLane === "staged-articles" ? "is-active" : ""}
-          href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=staged-articles`}
-        >
-          Staged Articles
-        </a>
-        <a
-          className={activeLane === "conditions" ? "is-active" : ""}
-          href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=conditions`}
-        >
-          Conditions
-        </a>
-        <a
-          className={activeLane === "player-wiki" ? "is-active" : ""}
-          href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=player-wiki`}
-        >
-          Player Wiki
-        </a>
-        <a
-          className={activeLane === "systems" ? "is-active" : ""}
-          href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=systems`}
-        >
-          Systems
-        </a>
-        <a href={`/campaigns/${encodedCampaignSlug}/session/dm`}>Session DM</a>
-      </div>
 
       {paneError ? <p className="status status-error">{paneError}</p> : null}
       {uiMessage ? <p className="status status-neutral">{uiMessage}</p> : null}

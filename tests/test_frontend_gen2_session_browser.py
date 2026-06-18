@@ -2916,6 +2916,9 @@ def test_gen2_dm_content_browser_visual_parity_smoke(
                 page_hero = page.locator("main > section.hero.compact.dm-content-hero")
                 expect(page_hero).to_be_visible(timeout=10000)
                 expect(page.get_by_role("heading", name=heading)).to_be_visible(timeout=10000)
+                dm_content_nav = page.locator(".dm-content-subpage-nav")
+                expect(dm_content_nav).to_be_visible()
+                expect(page.locator(".dm-content-gen2-links")).to_have_count(0)
                 assert page.locator("main > .dm-content-gen2-page").count() == 0
                 assert page.locator("main > .panel-nested").count() == 0
                 assert page.locator(".dm-content-staged-grid > .panel-nested").count() == 0
@@ -2941,12 +2944,21 @@ def test_gen2_dm_content_browser_visual_parity_smoke(
                     expect(page.get_by_role("heading", name="Shared Source Imports")).to_be_visible()
                     expect(page.get_by_role("heading", name="Import-Run History")).to_be_visible()
 
-                fallback_links = page.locator(".dm-content-gen2-links")
-                expect(fallback_links).to_be_visible()
-                expect(fallback_links.get_by_role("link", name=active_label)).to_be_visible()
-                expect(fallback_links.get_by_role("link", name="Session DM")).to_be_visible()
-                active_classes = fallback_links.get_by_role("link", name=active_label).first.get_attribute("class") or ""
-                assert "is-active" in active_classes
+                expect(dm_content_nav.get_by_role("link", name="Statblocks")).to_be_visible()
+                expect(dm_content_nav.get_by_role("link", name="Staged Articles")).to_be_visible()
+                expect(dm_content_nav.get_by_role("link", name="Conditions")).to_be_visible()
+                expect(dm_content_nav.get_by_role("link", name="Player Wiki", exact=True)).to_be_visible()
+                expect(dm_content_nav.get_by_role("link", name="Systems")).to_be_visible()
+                expect(dm_content_nav.get_by_role("link", name="Session DM")).to_have_count(0)
+                expect(dm_content_nav.get_by_role("link", name=active_label, exact=(active_label == "Player Wiki"))).to_have_class(
+                    re.compile(r"\bbutton-link\b")
+                )
+                for label in ("Statblocks", "Staged Articles", "Conditions", "Player Wiki", "Systems"):
+                    if label == active_label:
+                        continue
+                    expect(dm_content_nav.get_by_role("link", name=label, exact=(label == "Player Wiki"))).to_have_class(
+                        re.compile(r"\bghost-button\b")
+                    )
 
                 route_metrics = page.evaluate(
                     """() => {
@@ -2956,7 +2968,7 @@ def test_gen2_dm_content_browser_visual_parity_smoke(
                         }
                         const directChildren = Array.from(main.querySelectorAll(':scope > *'));
                         const hero = main.querySelector(':scope > section.hero.compact.dm-content-hero');
-                        const links = document.querySelector('.dm-content-gen2-links');
+                        const nav = hero ? hero.querySelector('.dm-content-subpage-nav') : null;
                         const content = document.querySelector('.dm-content-staged-grid') || document.querySelector('.dm-content-systems-lane');
                         const legacyRoutePresent = Boolean(main.querySelector(':scope > .dm-content-gen2-page'));
                         if (!hero) {
@@ -2965,7 +2977,7 @@ def test_gen2_dm_content_browser_visual_parity_smoke(
                         return {
                             firstDirectChildIsHero: hero === directChildren[0],
                             heroIndex: directChildren.indexOf(hero),
-                            linksIndex: links ? directChildren.indexOf(links) : -1,
+                            navInsideHero: Boolean(hero && nav),
                             contentIndex: content ? directChildren.indexOf(content) : -1,
                             maxDirectChildWidth: directChildren.length
                                 ? Math.ceil(Math.max(...directChildren.map((node) => node.getBoundingClientRect().width)))
@@ -2977,8 +2989,8 @@ def test_gen2_dm_content_browser_visual_parity_smoke(
                 assert route_metrics is not False
                 assert route_metrics["firstDirectChildIsHero"] is True
                 assert route_metrics["heroIndex"] == 0
-                assert route_metrics["linksIndex"] > route_metrics["heroIndex"]
-                assert route_metrics["contentIndex"] > route_metrics["linksIndex"]
+                assert route_metrics["navInsideHero"] is True
+                assert route_metrics["contentIndex"] > route_metrics["heroIndex"]
                 assert route_metrics["maxDirectChildWidth"] <= viewport["width"] + 1
                 assert route_metrics["legacyRoutePresent"] is False
 
@@ -3015,7 +3027,7 @@ def test_gen2_dm_content_browser_visual_parity_smoke(
                         const selectors = [
                             '.dm-content-hero',
                             '.dm-content-staged-grid',
-                            '.dm-content-gen2-links',
+                            '.dm-content-subpage-nav',
                         ];
                         return selectors.every((selector) => {
                             const node = document.querySelector(selector);
@@ -3075,13 +3087,14 @@ def test_gen2_dm_content_browser_statblock_workflow(
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/dm-content")
             expect(page.get_by_role("heading", name="DM Content: Statblocks")).to_be_visible(timeout=10000)
-            fallback_links = page.locator(".dm-content-gen2-links")
-            expect(fallback_links.get_by_role("link", name="Statblocks")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Staged Articles")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Conditions")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Player Wiki", exact=True)).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Systems")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Session DM")).to_be_visible()
+            dm_content_nav = page.locator(".dm-content-subpage-nav")
+            expect(dm_content_nav).to_be_visible()
+            expect(page.locator(".dm-content-gen2-links")).to_have_count(0)
+            expect(dm_content_nav.get_by_role("link", name="Statblocks")).to_have_class(re.compile(r"\bbutton-link\b"))
+            expect(dm_content_nav.get_by_role("link", name="Staged Articles")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(dm_content_nav.get_by_role("link", name="Conditions")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(dm_content_nav.get_by_role("link", name="Player Wiki", exact=True)).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(dm_content_nav.get_by_role("link", name="Systems")).to_have_class(re.compile(r"\bghost-button\b"))
 
             create_panel = page.locator("section.card.dm-statblock-create")
             expect(create_panel.get_by_role("heading", name="Create statblock")).to_be_visible()
@@ -3161,13 +3174,14 @@ def test_gen2_dm_content_browser_condition_workflow(
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/dm-content?lane=conditions")
             expect(page.get_by_role("heading", name="DM Content: Conditions")).to_be_visible(timeout=10000)
-            fallback_links = page.locator(".dm-content-gen2-links")
-            expect(fallback_links.get_by_role("link", name="Statblocks")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Staged Articles")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Conditions")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Player Wiki", exact=True)).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Systems")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Session DM")).to_be_visible()
+            dm_content_nav = page.locator(".dm-content-subpage-nav")
+            expect(dm_content_nav).to_be_visible()
+            expect(page.locator(".dm-content-gen2-links")).to_have_count(0)
+            expect(dm_content_nav.get_by_role("link", name="Statblocks")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(dm_content_nav.get_by_role("link", name="Staged Articles")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(dm_content_nav.get_by_role("link", name="Conditions")).to_have_class(re.compile(r"\bbutton-link\b"))
+            expect(dm_content_nav.get_by_role("link", name="Player Wiki", exact=True)).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(dm_content_nav.get_by_role("link", name="Systems")).to_have_class(re.compile(r"\bghost-button\b"))
 
             create_panel = page.locator("section.card.dm-condition-create")
             expect(create_panel.get_by_role("heading", name="Create condition")).to_be_visible()
@@ -3245,13 +3259,14 @@ def test_gen2_dm_content_browser_player_wiki_workflow(
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/dm-content?lane=player-wiki")
             expect(page.get_by_role("heading", name="DM Content: Player Wiki")).to_be_visible(timeout=10000)
-            fallback_links = page.locator(".dm-content-gen2-links")
-            expect(fallback_links.get_by_role("link", name="Statblocks")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Staged Articles")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Conditions")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Player Wiki", exact=True)).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Systems")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Session DM")).to_be_visible()
+            dm_content_nav = page.locator(".dm-content-subpage-nav")
+            expect(dm_content_nav).to_be_visible()
+            expect(page.locator(".dm-content-gen2-links")).to_have_count(0)
+            expect(dm_content_nav.get_by_role("link", name="Statblocks")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(dm_content_nav.get_by_role("link", name="Staged Articles")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(dm_content_nav.get_by_role("link", name="Conditions")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(dm_content_nav.get_by_role("link", name="Player Wiki", exact=True)).to_have_class(re.compile(r"\bbutton-link\b"))
+            expect(dm_content_nav.get_by_role("link", name="Systems")).to_have_class(re.compile(r"\bghost-button\b"))
 
             create_panel = page.locator("section.card.dm-player-wiki-create")
             expect(create_panel.get_by_role("heading", name="Create player wiki page")).to_be_visible()
@@ -3331,17 +3346,18 @@ def test_gen2_dm_content_browser_systems_custom_entry_workflow(
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/dm-content?lane=systems")
             expect(page.get_by_role("heading", name="DM Content: Systems")).to_be_visible(timeout=10000)
-            fallback_links = page.locator(".dm-content-gen2-links")
-            expect(fallback_links.get_by_role("link", name="Statblocks")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Staged Articles")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Conditions")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Player Wiki", exact=True)).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Systems")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Systems")).to_have_attribute(
+            dm_content_nav = page.locator(".dm-content-subpage-nav")
+            expect(dm_content_nav).to_be_visible()
+            expect(page.locator(".dm-content-gen2-links")).to_have_count(0)
+            expect(dm_content_nav.get_by_role("link", name="Statblocks")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(dm_content_nav.get_by_role("link", name="Staged Articles")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(dm_content_nav.get_by_role("link", name="Conditions")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(dm_content_nav.get_by_role("link", name="Player Wiki", exact=True)).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(dm_content_nav.get_by_role("link", name="Systems")).to_have_class(re.compile(r"\bbutton-link\b"))
+            expect(dm_content_nav.get_by_role("link", name="Systems")).to_have_attribute(
                 "href",
                 "/app-next/campaigns/linden-pass/dm-content?lane=systems",
             )
-            expect(fallback_links.get_by_role("link", name="Session DM")).to_be_visible()
 
             expect(page.get_by_role("heading", name="Source Enablement")).to_be_visible(timeout=10000)
             expect(page.get_by_role("heading", name="Entry Overrides")).to_be_visible()
@@ -3422,13 +3438,14 @@ def test_gen2_dm_content_browser_staged_article_workflow(
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/dm-content?lane=staged-articles")
             expect(page.get_by_role("heading", name="DM Content: Staged Articles")).to_be_visible(timeout=10000)
-            fallback_links = page.locator(".dm-content-gen2-links")
-            expect(fallback_links.get_by_role("link", name="Statblocks")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Staged Articles")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Conditions")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Player Wiki", exact=True)).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Systems")).to_be_visible()
-            expect(fallback_links.get_by_role("link", name="Session DM")).to_be_visible()
+            dm_content_nav = page.locator(".dm-content-subpage-nav")
+            expect(dm_content_nav).to_be_visible()
+            expect(page.locator(".dm-content-gen2-links")).to_have_count(0)
+            expect(dm_content_nav.get_by_role("link", name="Statblocks")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(dm_content_nav.get_by_role("link", name="Staged Articles")).to_have_class(re.compile(r"\bbutton-link\b"))
+            expect(dm_content_nav.get_by_role("link", name="Conditions")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(dm_content_nav.get_by_role("link", name="Player Wiki", exact=True)).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(dm_content_nav.get_by_role("link", name="Systems")).to_have_class(re.compile(r"\bghost-button\b"))
 
             expect(page.get_by_role("button", name="Manual")).to_be_visible()
             expect(page.get_by_role("button", name="Upload")).to_be_visible()
