@@ -3898,13 +3898,13 @@ def test_gen2_dm_content_browser_staged_article_workflow(
             expect(dm_content_nav.get_by_role("link", name="Player Wiki")).to_have_class(re.compile(r"\bghost-button\b"))
             expect(dm_content_nav.get_by_role("link", name="Systems")).to_have_class(re.compile(r"\bghost-button\b"))
 
-            expect(page.get_by_role("button", name="Manual")).to_be_visible()
-            expect(page.get_by_role("button", name="Upload")).to_be_visible()
-            expect(page.get_by_role("button", name="Wiki / Systems")).to_be_visible()
+            expect(page.locator('label[for="dm-content-article-mode-manual"]')).to_be_visible()
+            expect(page.locator('label[for="dm-content-article-mode-upload"]')).to_be_visible()
+            expect(page.locator('label[for="dm-content-article-mode-wiki"]')).to_be_visible()
 
             creation_panel = page.locator("article", has_text="Stage session articles").first
             creation_panel.get_by_label("Title").fill(article_title)
-            creation_panel.get_by_label("Markdown body").fill(article_body)
+            creation_panel.get_by_label("Body").fill(article_body)
             creation_panel.get_by_role("button", name="Create").click()
             expect(page.get_by_text("Article staged.")).to_be_visible(timeout=10000)
 
@@ -3923,17 +3923,21 @@ def test_gen2_dm_content_browser_staged_article_workflow(
             staged_card.get_by_role("button", name="Update prep draft").click()
             expect(page.get_by_text("Article updated.")).to_be_visible(timeout=10000)
 
-            page.get_by_role("button", name="Upload").click()
+            page.locator('label[for="dm-content-article-mode-upload"]').click()
             expect(creation_panel.get_by_label("Source filename", exact=True)).to_be_visible()
             expect(creation_panel.get_by_label("Markdown text", exact=True)).to_be_visible()
 
-            page.get_by_role("button", name="Wiki / Systems").click()
-            expect(creation_panel.get_by_label("Search wiki / systems")).to_be_visible()
-            creation_panel.get_by_label("Search wiki / systems").fill("capt")
+            page.locator('label[for="dm-content-article-mode-wiki"]').click()
+            expect(creation_panel.get_by_label("Search")).to_be_visible()
+            creation_panel.get_by_label("Search").fill("capt")
             creation_panel.get_by_role("button", name="Search").click()
-            captain = creation_panel.get_by_role("button", name=re.compile(r"Captain Lyra Vale", re.I)).first
+            captain = creation_panel.locator("select")
             expect(captain).to_be_visible(timeout=5000)
-            captain.click()
+            captain_option = captain.locator("option", has_text=re.compile(r"Captain Lyra Vale", re.I)).first
+            expect(captain_option).to_be_attached(timeout=5000)
+            captain_value = captain_option.get_attribute("value")
+            assert captain_value
+            captain.select_option(value=captain_value)
             expect(creation_panel.get_by_text(re.compile(r"Source selected:", re.I))).to_be_visible()
             creation_panel.get_by_role("button", name="Pull source").click()
             expect(page.get_by_text("Article staged.")).to_be_visible(timeout=10000)

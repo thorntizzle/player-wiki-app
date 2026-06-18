@@ -926,6 +926,112 @@ a:hover {
   font-weight: 500;
 }
 
+.session-form-mode-toggle,
+.session-article-mode-panel {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.session-form-mode-toggle {
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+}
+
+.session-form-mode-radio {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.session-form-mode-toggle .ghost-button {
+  width: 100%;
+}
+
+.session-form-mode-radio--manual:focus-visible ~ .session-form-mode-toggle label[for$="-manual"],
+.session-form-mode-radio--upload:focus-visible ~ .session-form-mode-toggle label[for$="-upload"],
+.session-form-mode-radio--wiki:focus-visible ~ .session-form-mode-toggle label[for$="-wiki"] {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.session-form-mode-radio--manual:checked ~ .session-form-mode-toggle label[for$="-manual"],
+.session-form-mode-radio--upload:checked ~ .session-form-mode-toggle label[for$="-upload"],
+.session-form-mode-radio--wiki:checked ~ .session-form-mode-toggle label[for$="-wiki"] {
+  border-color: var(--border-accent);
+  background: var(--surface-highlight);
+  box-shadow: inset 0 0 0 1px var(--overlay-accent);
+}
+
+.session-article-mode-panel {
+  display: none;
+}
+
+.session-form-mode-radio--manual:checked ~ .session-article-mode-panel--manual,
+.session-form-mode-radio--upload:checked ~ .session-article-mode-panel--upload,
+.session-form-mode-radio--wiki:checked ~ .session-article-mode-panel--wiki {
+  display: grid;
+}
+
+.session-file-field {
+  gap: 0.55rem;
+}
+
+.session-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.session-file-dropzone {
+  display: grid;
+  justify-items: start;
+  gap: 0.45rem;
+  padding: 1rem;
+  border-radius: 18px;
+  border: 1px dashed var(--border-accent);
+  background: var(--surface-soft);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.session-file-dropzone:hover,
+.session-file-dropzone:focus-visible,
+.session-file-dropzone.is-dragging {
+  border-color: var(--focus-ring);
+  background: var(--surface-soft-muted);
+}
+
+.session-file-dropzone:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.session-file-dropzone.is-dragging {
+  transform: translateY(-1px);
+}
+
+.session-file-dropzone__browse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.35rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.session-file-dropzone__name {
+  overflow-wrap: anywhere;
+}
+
 .builder-actions {
   display: flex;
   flex-wrap: wrap;

@@ -614,6 +614,32 @@ def test_character_portrait_manager_action_chrome_in_source() -> None:
     assert "character-portrait-manager__fields" not in section_markup
 
 
+def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    component_start = source.index("function DmArticleCreator({")
+    component_end = source.index("function SessionPane({", component_start)
+    creator_markup = source[component_start:component_end]
+
+    assert 'className="stack-form"' in creator_markup
+    assert 'className="session-form-mode-radio session-form-mode-radio--manual"' in creator_markup
+    assert 'className="session-form-mode-radio session-form-mode-radio--upload"' in creator_markup
+    assert 'className="session-form-mode-radio session-form-mode-radio--wiki"' in creator_markup
+    assert 'className="session-form-mode-toggle"' in creator_markup
+    assert 'className="session-article-mode-panel session-article-mode-panel--manual"' in creator_markup
+    assert 'className="session-article-mode-panel session-article-mode-panel--upload"' in creator_markup
+    assert 'className="session-article-mode-panel session-article-mode-panel--wiki"' in creator_markup
+    assert 'className="field"' in creator_markup
+    assert 'className="field session-file-field"' in creator_markup
+    assert 'className="session-file-input"' in creator_markup
+    assert 'className="session-file-dropzone"' in creator_markup
+    assert "className=\"session-form\"" not in creator_markup
+    assert 'className="segmented"' not in creator_markup
+    assert "className=\"segmented-button\"" not in creator_markup
+    assert 'className="chat-label"' not in creator_markup
+    assert "Search wiki / systems" not in creator_markup
+    assert "Lookup" in creator_markup
+
+
 def test_player_session_revealed_articles_panel_uses_session_article_row_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     panel_start = source.index("function SessionArticlesPanel({")
