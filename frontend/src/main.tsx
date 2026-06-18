@@ -9150,92 +9150,112 @@ function CharacterPane({
 
         {selected && detailRecord ? (
           <>
-            <section className="session-character-form">
-              <div className="panel-header compact-header">
-                <h3>Vitals</h3>
-                <div className="button-row">
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    disabled={previewRest.isPending || !canEdit}
-                    onClick={() => previewRest.mutate("short")}
-                  >
-                    Short rest
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    disabled={previewRest.isPending || !canEdit}
-                    onClick={() => previewRest.mutate("long")}
-                  >
-                    Long rest
-                  </button>
-                </div>
+            <section className="session-bar session-bar--compact" id="session-vitals">
+              <div className="session-bar__summary">
+                <p className="eyebrow">{surfaceMetaLabel}</p>
+                <h2>Vitals</h2>
+              </div>
+              <div className="session-bar__actions" id="session-rest">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  disabled={previewRest.isPending || !canEdit}
+                  onClick={() => previewRest.mutate("short")}
+                >
+                  Short rest
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  disabled={previewRest.isPending || !canEdit}
+                  onClick={() => previewRest.mutate("long")}
+                >
+                  Long rest
+                </button>
               </div>
               {isXianxia ? (
-                <form onSubmit={submitXianxiaVitals} className="inline-two-col">
+                <form onSubmit={submitXianxiaVitals} className="session-vitals-form session-vitals-form--compact">
                   {xianxiaVitalsFields.map((field) => (
-                    <React.Fragment key={field.key}>
-                      <label htmlFor={`xianxia-${field.key}`} className="chat-label">
-                        {field.label}
+                    <div className="session-vitals-form__group" key={field.key}>
+                      <label htmlFor={`xianxia-${field.key}`} className="session-field">
+                        <span>{field.label}</span>
+                        <input
+                          id={`xianxia-${field.key}`}
+                          type="number"
+                          value={xianxiaVitalsDraft[field.key]}
+                          disabled={!canEdit}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            setXianxiaVitalsDraft({
+                              ...xianxiaVitalsDraft,
+                              [field.key]: event.currentTarget.value,
+                            })
+                          }
+                        />
                       </label>
-                      <input
-                        id={`xianxia-${field.key}`}
-                        type="number"
-                        value={xianxiaVitalsDraft[field.key]}
-                        disabled={!canEdit}
-                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                          setXianxiaVitalsDraft({
-                            ...xianxiaVitalsDraft,
-                            [field.key]: event.currentTarget.value,
-                          })
-                        }
-                      />
-                    </React.Fragment>
+                    </div>
                   ))}
-                  <div />
                   <button type="submit" disabled={patchVitals.isPending || !canEdit}>
                     {patchVitals.isPending ? "Saving..." : "Save Xianxia pools"}
                   </button>
                 </form>
               ) : (
-                <form onSubmit={submitVitals} className="inline-two-col">
-                  <label htmlFor="character-current-hp" className="chat-label">
-                    Current HP
-                  </label>
-                  <input
-                    id="character-current-hp"
-                    type="number"
-                    value={vitalsDraft.currentHp}
-                    disabled={!canEdit}
-                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                      setVitalsDraft({ ...vitalsDraft, currentHp: event.currentTarget.value })
-                    }
-                  />
-                  <label htmlFor="character-temp-hp" className="chat-label">
-                    Temp HP
-                  </label>
-                  <input
-                    id="character-temp-hp"
-                    type="number"
-                    value={vitalsDraft.tempHp}
-                    disabled={!canEdit}
-                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                      setVitalsDraft({ ...vitalsDraft, tempHp: event.currentTarget.value })
-                    }
-                  />
-                  <div />
+                <form onSubmit={submitVitals} className="session-vitals-form session-vitals-form--compact">
+                  <div className="session-vitals-form__group">
+                    <label htmlFor="character-current-hp" className="session-field">
+                      <span>Current HP</span>
+                      <div className="session-number-inline">
+                        <input
+                          id="character-current-hp"
+                          type="number"
+                          value={vitalsDraft.currentHp}
+                          disabled={!canEdit}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            setVitalsDraft({ ...vitalsDraft, currentHp: event.currentTarget.value })
+                          }
+                        />
+                        <span> / {readNumber(stats.max_hp, selected?.max_hp)}</span>
+                      </div>
+                    </label>
+                  </div>
+                  <div className="session-vitals-form__group">
+                    <label htmlFor="character-temp-hp" className="session-field">
+                      <span>Temp HP</span>
+                      <input
+                        id="character-temp-hp"
+                        type="number"
+                        value={vitalsDraft.tempHp}
+                        disabled={!canEdit}
+                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                          setVitalsDraft({ ...vitalsDraft, tempHp: event.currentTarget.value })
+                        }
+                      />
+                    </label>
+                  </div>
                   <button type="submit" disabled={patchVitals.isPending || !canEdit}>
                     {patchVitals.isPending ? "Saving..." : "Save vitals"}
                   </button>
                 </form>
               )}
               {restPreview ? (
-                <div className="rest-preview">
-                  <div className="panel-header compact-header">
-                    <h4>{restPreview.label}</h4>
+                <section className="card session-card">
+                  <div className="section-heading">
+                    <h2>{restPreview.label} confirmation</h2>
+                  </div>
+                  <ul className="plain-list rest-preview-list">
+                    {restPreview.changes.length ? (
+                      restPreview.changes.map((change) => (
+                        <li key={`${change.label}-${change.from_value}-${change.to_value}`}>
+                          <strong>{change.label}</strong>: <span>{change.from_value} {"->"} {change.to_value}</span>
+                        </li>
+                      ))
+                    ) : (
+                      <li>No modeled state changes will be applied by this {restPreview.label.toLowerCase()}.</li>
+                    )}
+                  </ul>
+                  <div className="hero-actions">
                     <button
                       type="button"
+                      className="ghost-button"
                       disabled={applyRest.isPending || !canEdit}
                       onClick={() =>
                         applyRest.mutate({
@@ -9246,15 +9266,16 @@ function CharacterPane({
                     >
                       {applyRest.isPending ? "Applying..." : "Apply"}
                     </button>
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={() => setRestPreview(null)}
+                      disabled={applyRest.isPending}
+                    >
+                      Cancel
+                    </button>
                   </div>
-                  <ul className="plain-list compact-list">
-                    {restPreview.changes.map((change) => (
-                      <li key={`${change.label}-${change.from_value}-${change.to_value}`}>
-                        <strong>{change.label}</strong>: {change.from_value} {"->"} {change.to_value}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                </section>
               ) : null}
             </section>
 

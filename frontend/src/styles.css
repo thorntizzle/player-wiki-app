@@ -2654,6 +2654,7 @@ textarea {
 .article-actions button,
 .inline-two-col button,
 .session-character-form button,
+.session-vitals-form button,
 .session-log-detail-head button,
 .wiki-selection button,
 .segmented-button {
@@ -2676,6 +2677,7 @@ textarea {
 .session-actions-row button:disabled,
 .inline-two-col button:disabled,
 .session-character-form button:disabled,
+.session-vitals-form button:disabled,
 .session-log-detail-head button:disabled,
 .wiki-selection button:disabled,
 .segmented-button:disabled,
@@ -3280,6 +3282,91 @@ textarea {
   padding: 0.75rem;
   display: grid;
   gap: 0.45rem;
+}
+
+.session-bar {
+  margin-top: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--session-bar-bg);
+  box-shadow: var(--shadow-soft);
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.session-bar--compact {
+  gap: 0.65rem;
+}
+
+.session-bar__summary {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.session-bar__summary h2,
+.session-bar__summary h3 {
+  margin: 0;
+}
+
+.session-bar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.session-vitals-form {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.session-vitals-form--compact {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: end;
+}
+
+.session-vitals-form--compact > button {
+  justify-self: start;
+}
+
+.session-vitals-form__group {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.session-field {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.session-field input {
+  min-width: 0;
+}
+
+.session-number-inline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.session-number-inline input {
+  min-width: 8ch;
+  max-width: 12ch;
+}
+
+.rest-preview-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.rest-preview-list li:last-child {
+  border-bottom: 0;
 }
 
 .compact-header {
