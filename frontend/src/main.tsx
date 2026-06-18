@@ -13945,116 +13945,121 @@ function DmContentPage() {
                             });
                           }}
                         >
-                          <label htmlFor={`dm-content-stage-title-${article.id}`} className="chat-label">
-                            Title
+                          <label className="field">
+                            <span>Title</span>
+                            <input
+                              id={`dm-content-stage-title-${article.id}`}
+                              name="title"
+                              value={draft.title}
+                              disabled={!canManageSession}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                                const title = event.currentTarget.value;
+                                setStagedDrafts((current) => ({
+                                  ...current,
+                                  [article.id]: {
+                                    ...(current[article.id] ?? draft),
+                                    title,
+                                  },
+                                }));
+                              }}
+                            />
                           </label>
-                          <input
-                            id={`dm-content-stage-title-${article.id}`}
-                            name="title"
-                            value={draft.title}
-                            disabled={!canManageSession}
-                            onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                              const title = event.currentTarget.value;
-                              setStagedDrafts((current) => ({
-                                ...current,
-                                [article.id]: {
-                                  ...(current[article.id] ?? draft),
-                                  title,
-                                },
-                              }));
-                            }}
-                          />
-                          <label htmlFor={`dm-content-stage-body-${article.id}`} className="chat-label">
-                            Body
+                          <label className="field">
+                            <span>Body</span>
+                            <textarea
+                              id={`dm-content-stage-body-${article.id}`}
+                              name="body_markdown"
+                              rows={8}
+                              value={draft.body}
+                              disabled={!canManageSession}
+                              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+                                const body = event.currentTarget.value;
+                                setStagedDrafts((current) => ({
+                                  ...current,
+                                  [article.id]: {
+                                    ...(current[article.id] ?? draft),
+                                    body,
+                                  },
+                                }));
+                              }}
+                            />
                           </label>
-                          <textarea
-                            id={`dm-content-stage-body-${article.id}`}
-                            name="body_markdown"
-                            rows={8}
-                            value={draft.body}
-                            disabled={!canManageSession}
-                            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-                              const body = event.currentTarget.value;
-                              setStagedDrafts((current) => ({
-                                ...current,
-                                [article.id]: {
-                                  ...(current[article.id] ?? draft),
-                                  body,
-                                },
-                              }));
-                            }}
-                          />
-                          <div className="dm-content-image-edit-row">
-                            <label htmlFor={`dm-content-stage-alt-${article.id}`} className="chat-label">
-                              Image alt text
-                              <input
-                                id={`dm-content-stage-alt-${article.id}`}
-                                name="image_alt_text"
-                                value={draft.imageAltText}
-                                disabled={!canManageSession}
-                                onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                                  const imageAltText = event.currentTarget.value;
+                          <div className="field session-file-field">
+                            <span>{article.image ? "Replace image" : "Image"}</span>
+                            <input
+                              id={`dm-content-stage-image-${article.id}`}
+                              className="session-file-input"
+                              type="file"
+                              accept=".png,.jpg,.jpeg,.webp,.gif"
+                              disabled={!canManageSession}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                                const file = event.currentTarget.files?.item(0);
+                                if (!file) {
                                   setStagedDrafts((current) => ({
                                     ...current,
                                     [article.id]: {
                                       ...(current[article.id] ?? draft),
-                                      imageAltText,
+                                      image: null,
                                     },
                                   }));
-                                }}
-                              />
-                            </label>
-                            <label htmlFor={`dm-content-stage-caption-${article.id}`} className="chat-label">
-                              Image caption
-                              <input
-                                id={`dm-content-stage-caption-${article.id}`}
-                                name="image_caption"
-                                value={draft.imageCaption}
-                                disabled={!canManageSession}
-                                onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                                  const imageCaption = event.currentTarget.value;
+                                  return;
+                                }
+                                readBinaryAsBase64(file, (payload) => {
                                   setStagedDrafts((current) => ({
                                     ...current,
                                     [article.id]: {
                                       ...(current[article.id] ?? draft),
-                                      imageCaption,
+                                      image: payload,
                                     },
                                   }));
-                                }}
-                              />
+                                });
+                              }}
+                            />
+                            <label className="session-file-dropzone" htmlFor={`dm-content-stage-image-${article.id}`} tabIndex={0}>
+                              <span>Drag and drop a file here</span>
+                              <span className="meta">or use Browse to choose one</span>
+                              <span className="session-file-dropzone__browse">Browse</span>
+                              <span className="meta session-file-dropzone__name">No file selected.</span>
                             </label>
                           </div>
-                          <label htmlFor={`dm-content-stage-image-${article.id}`} className="chat-label">
-                            Replacement image
+                          <label className="field">
+                            <span>Image alt text</span>
+                            <input
+                              id={`dm-content-stage-alt-${article.id}`}
+                              name="image_alt_text"
+                              value={draft.imageAltText}
+                              disabled={!canManageSession}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                                const imageAltText = event.currentTarget.value;
+                                setStagedDrafts((current) => ({
+                                  ...current,
+                                  [article.id]: {
+                                    ...(current[article.id] ?? draft),
+                                    imageAltText,
+                                  },
+                                }));
+                              }}
+                            />
                           </label>
-                          <input
-                            id={`dm-content-stage-image-${article.id}`}
-                            type="file"
-                            accept=".png,.jpg,.jpeg,.webp,.gif"
-                            disabled={!canManageSession}
-                            onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                              const file = event.currentTarget.files?.item(0);
-                              if (!file) {
+                          <label className="field">
+                            <span>Image caption</span>
+                            <input
+                              id={`dm-content-stage-caption-${article.id}`}
+                              name="image_caption"
+                              value={draft.imageCaption}
+                              disabled={!canManageSession}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                                const imageCaption = event.currentTarget.value;
                                 setStagedDrafts((current) => ({
                                   ...current,
                                   [article.id]: {
                                     ...(current[article.id] ?? draft),
-                                    image: null,
+                                    imageCaption,
                                   },
                                 }));
-                                return;
-                              }
-                              readBinaryAsBase64(file, (payload) => {
-                                setStagedDrafts((current) => ({
-                                  ...current,
-                                  [article.id]: {
-                                    ...(current[article.id] ?? draft),
-                                    image: payload,
-                                  },
-                                }));
-                              });
-                            }}
-                          />
+                              }}
+                            />
+                          </label>
                           {draft.image ? <p className="status status-neutral">Selected image: {draft.image.filename}</p> : null}
                           <button
                             type="submit"

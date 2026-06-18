@@ -871,3 +871,42 @@ def test_player_session_revealed_articles_panel_uses_session_article_row_chrome_
     assert 'className="article-card"' not in panel_markup
     assert 'className="article-kind"' not in panel_markup
     assert 'className="article-actions"' not in panel_markup
+
+
+def test_dm_content_staged_articles_edit_form_uses_flask_style_file_field_markup() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    queue_start = source.index('<article className="card" id="dm-content-staged-articles-queue">')
+    queue_end = source.index("</article>", queue_start) + len("</article>")
+    queue_markup = source[queue_start:queue_end]
+
+    assert 'className="session-article-stack"' in queue_markup
+    assert 'className="feature-detail session-article-detail"' in queue_markup
+    assert 'className="session-article-edit-detail"' in queue_markup
+    assert 'className="stack-form session-article-edit-form"' in queue_markup
+
+    form_match = re.search(
+        r'<form\s+className="stack-form session-article-edit-form"[\s\S]*?>',
+        queue_markup,
+    )
+    assert form_match is not None
+    form_start = form_match.start()
+    form_end = queue_markup.index("</form>", form_start) + len("</form>")
+    form_markup = queue_markup[form_start:form_end]
+
+    assert 'className="field session-file-field"' in form_markup
+    assert 'className="session-file-input"' in form_markup
+    assert 'className="session-file-dropzone"' in form_markup
+    assert 'className="session-file-dropzone__browse"' in form_markup
+    assert 'session-file-dropzone__name' in form_markup
+    assert 'label className="field">' in form_markup
+    assert re.search(r'<label className="field">\s*<span>Title</span>', form_markup) is not None
+    assert re.search(r'<label className="field">\s*<span>Body</span>', form_markup) is not None
+    assert re.search(r'<label className="field">\s*<span>Image alt text</span>', form_markup) is not None
+    assert re.search(r'<label className="field">\s*<span>Image caption</span>', form_markup) is not None
+    assert 'className="chat-label"' not in queue_markup
+    assert "dm-content-image-edit-row" not in queue_markup
+
+    assert (
+        re.search(r'<span>\{article\.image \? "Replace image" : "Image"\}</span>', queue_markup)
+        is not None
+    )
