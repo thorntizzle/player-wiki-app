@@ -6486,7 +6486,10 @@ function systemsEntryHref(campaignSlug: string, entrySlug: string): string {
 
 function SystemsManageLink({ campaignSlug, canManage }: { campaignSlug: string; canManage: boolean }) {
   return canManage ? (
-    <a className="button button-secondary" href={`/app-next/campaigns/${encodeURIComponent(campaignSlug)}/dm-content?lane=systems`}>
+    <a
+      className="ghost-button"
+      href={`/app-next/campaigns/${encodeURIComponent(campaignSlug)}/dm-content?lane=systems`}
+    >
       Systems settings
     </a>
   ) : null;
@@ -6615,12 +6618,13 @@ function SystemsIndexPage() {
           <h1>Systems</h1>
           <p className="lede">Browse campaign-approved system sources and reference entries.</p>
         </div>
-        <div className="article-actions systems-hero-actions">
-          <a className="button button-secondary" href={`/campaigns/${encodeURIComponent(resolvedCampaignSlug)}/systems`}>
-            Flask view
-          </a>
-          <SystemsManageLink campaignSlug={resolvedCampaignSlug} canManage={Boolean(data?.permissions.can_manage_systems)} />
-        </div>
+        {data ? (
+          data.permissions.can_manage_systems ? (
+            <div className="hero-actions systems-hero-actions">
+              <SystemsManageLink campaignSlug={resolvedCampaignSlug} canManage />
+            </div>
+          ) : null
+        ) : null}
       </section>
       <ApiErrorNotice isLoading={systemsQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {data ? (
@@ -6754,13 +6758,13 @@ function SystemsSourcePage() {
           <h1>{data?.source.title ?? resolvedSourceId}</h1>
           {data ? <p className="lede">{data.source.source_id} | {data.source.license_class_label} | {data.source.default_visibility} visibility</p> : null}
         </div>
-        <div className="article-actions systems-hero-actions">
-          <a className="button button-secondary" href={systemsIndexHref(resolvedCampaignSlug)}>Systems</a>
-          <a className="button button-secondary" href={`/campaigns/${encodeURIComponent(resolvedCampaignSlug)}/systems/sources/${encodeURIComponent(resolvedSourceId)}`}>
-            Flask view
-          </a>
-          <SystemsManageLink campaignSlug={resolvedCampaignSlug} canManage={Boolean(data?.permissions.can_manage_systems)} />
-        </div>
+        {data ? (
+          data.permissions.can_manage_systems ? (
+            <div className="hero-actions systems-hero-actions">
+              <SystemsManageLink campaignSlug={resolvedCampaignSlug} canManage />
+            </div>
+          ) : null
+        ) : null}
       </section>
       <ApiErrorNotice isLoading={sourceQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {data ? (
@@ -6880,16 +6884,13 @@ function SystemsSourceCategoryPage() {
           <h1>{data ? `${data.source.title}: ${data.entry_type_label}` : resolvedEntryType}</h1>
           {data ? <p className="lede">{data.source.source_id} | {data.source.license_class_label} | {data.source.default_visibility} visibility</p> : null}
         </div>
-        <div className="article-actions systems-hero-actions">
-          <a className="button button-secondary" href={systemsSourceHref(resolvedCampaignSlug, resolvedSourceId)}>Source</a>
-          <a
-            className="button button-secondary"
-            href={`/campaigns/${encodeURIComponent(resolvedCampaignSlug)}/systems/sources/${encodeURIComponent(resolvedSourceId)}/types/${encodeURIComponent(resolvedEntryType)}`}
-          >
-            Flask view
-          </a>
-          <SystemsManageLink campaignSlug={resolvedCampaignSlug} canManage={Boolean(data?.permissions.can_manage_systems)} />
-        </div>
+        {data ? (
+          data.permissions.can_manage_systems ? (
+            <div className="hero-actions systems-hero-actions">
+              <SystemsManageLink campaignSlug={resolvedCampaignSlug} canManage />
+            </div>
+          ) : null
+        ) : null}
       </section>
       <ApiErrorNotice isLoading={categoryQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {data ? (

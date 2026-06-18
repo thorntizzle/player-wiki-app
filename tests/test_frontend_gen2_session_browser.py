@@ -2582,6 +2582,17 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                 expect(page.get_by_role("heading", name="Systems", exact=True)).to_be_visible(timeout=10_000)
                 expect(page.get_by_role("heading", name="Search Results")).to_be_visible()
                 expect(page.locator(".campaign-nav-link").get_by_text("Systems")).to_be_visible()
+                expect(page.locator("main.main-shell > section.hero.compact.systems-hero .article-actions")).to_have_count(0)
+                index_hero_actions = page.locator(
+                    "main.main-shell > section.hero.compact.systems-hero .hero-actions.systems-hero-actions"
+                )
+                expect(index_hero_actions).to_have_count(1)
+                expect(index_hero_actions).to_have_class(re.compile(r"\bhero-actions\b.*\bsystems-hero-actions\b"))
+                expect(index_hero_actions.get_by_role("link", name="Systems settings")).to_be_visible()
+                expect(index_hero_actions.get_by_role("link", name="Systems settings")).to_have_class(re.compile(r"\bghost-button\b"))
+                expect(
+                    page.locator("main.main-shell > section.hero.compact.systems-hero").get_by_role("link", name="Flask view")
+                ).to_have_count(0)
                 assert page.evaluate(
                     """() => {
                         const selectors = [
@@ -2675,6 +2686,20 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                 expect(page.locator("main.main-shell > .systems-browse-grid.page-layout")).to_be_visible()
                 expect(page.locator(".systems-category-band")).to_be_visible()
                 expect(page.locator('section.hero.compact.systems-hero .eyebrow', has_text="Systems source category")).to_be_visible()
+                expect(page.locator("main.main-shell > section.hero.compact.systems-hero .article-actions")).to_have_count(0)
+                category_hero_actions = page.locator(
+                    "main.main-shell > section.hero.compact.systems-hero .hero-actions.systems-hero-actions"
+                )
+                expect(category_hero_actions).to_have_count(1)
+                expect(category_hero_actions).to_have_class(re.compile(r"\bhero-actions\b.*\bsystems-hero-actions\b"))
+                expect(category_hero_actions.get_by_role("link", name="Systems settings")).to_be_visible()
+                expect(category_hero_actions.get_by_role("link", name="Systems settings")).to_have_class(re.compile(r"\bghost-button\b"))
+                expect(
+                    page.locator("main.main-shell > section.hero.compact.systems-hero").get_by_role("link", name="Flask view")
+                ).to_have_count(0)
+                expect(
+                    page.locator("main.main-shell > section.hero.compact.systems-hero").get_by_role("link", name="Source")
+                ).to_have_count(0)
                 expect(page.get_by_role("heading", name=re.compile(r"Browse", re.I))).to_be_visible()
                 expect(page.get_by_role("link", name=entry_title)).to_be_visible()
                 expect(page).to_have_url(
@@ -2714,7 +2739,11 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                 else:
                     assert category_layout_columns == 1
 
-                page.get_by_role("link", name="Source").click()
+                category_url = page.url
+                source_match = re.search(r"/systems/sources/(?P<source_id>.+?)/types/", category_url)
+                assert source_match
+                source_slug = source_match.group("source_id")
+                page.goto(f"{base_url}/app-next/campaigns/linden-pass/systems/sources/{source_slug}")
 
                 expect(page.locator(".systems-source-page")).to_have_count(0)
                 expect(page.locator(".systems-browse-page")).to_have_count(0)
@@ -2722,6 +2751,20 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                 expect(page.locator("main.main-shell > .systems-browse-grid.page-layout")).to_be_visible()
                 expect(page.locator(".systems-source-band")).to_be_visible()
                 expect(page.locator('section.hero.compact.systems-hero .eyebrow', has_text="Systems source")).to_be_visible()
+                expect(page.locator("main.main-shell > section.hero.compact.systems-hero .article-actions")).to_have_count(0)
+                source_hero_actions = page.locator(
+                    "main.main-shell > section.hero.compact.systems-hero .hero-actions.systems-hero-actions"
+                )
+                expect(source_hero_actions).to_have_count(1)
+                expect(source_hero_actions).to_have_class(re.compile(r"\bhero-actions\b.*\bsystems-hero-actions\b"))
+                expect(source_hero_actions.get_by_role("link", name="Systems settings")).to_be_visible()
+                expect(source_hero_actions.get_by_role("link", name="Systems settings")).to_have_class(re.compile(r"\bghost-button\b"))
+                expect(
+                    page.locator("main.main-shell > section.hero.compact.systems-hero").get_by_role("link", name="Flask view")
+                ).to_have_count(0)
+                expect(
+                    page.locator("main.main-shell > section.hero.compact.systems-hero").get_by_role("link", name="Systems")
+                ).to_have_count(0)
                 expect(page.get_by_role("heading", name="Browse This Source")).to_be_visible()
                 expect(page).to_have_url(
                     re.compile(r"/app-next/campaigns/linden-pass/systems/sources/.+$"),
