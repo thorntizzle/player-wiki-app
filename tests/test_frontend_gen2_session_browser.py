@@ -1450,7 +1450,12 @@ def test_gen2_combat_browser_opens_player_workspace_and_preserves_focused_draft(
             _sign_in(page, base_url, email=users["owner"]["email"], password=users["owner"]["password"])
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat")
-            expect(page.get_by_role("heading", name=re.compile(r"Combat:", re.I))).to_be_visible(timeout=10000)
+            hero = page.locator("section.hero.compact.combat-hero")
+            expect(hero.get_by_role("heading", name="Combat")).to_be_visible(timeout=10000)
+            expect(hero.locator(".article-actions")).to_have_count(0)
+            expect(hero.locator(".hero-actions")).to_have_count(0)
+            expect(hero.locator('nav[aria-label="DM encounter subview"]')).to_have_count(0)
+            expect(hero.locator("a.button.button-secondary")).to_have_count(0)
             expect(page.get_by_role("heading", name="Turn Order")).to_be_visible()
             expect(page.locator(".combat-carousel .compact-header")).to_have_count(0)
             expect(page.locator(".combat-pc-workspace .compact-header")).to_have_count(0)
@@ -1504,10 +1509,13 @@ def test_gen2_combat_browser_exposes_dm_status_and_controls(
             _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=status")
-            expect(page.get_by_role("heading", name=re.compile(r"Combat:", re.I))).to_be_visible(timeout=10000)
-            combat_nav = page.get_by_role("navigation", name="Combat view")
-            expect(combat_nav.get_by_role("button", name="DM Status")).to_be_visible()
-            expect(combat_nav.get_by_role("button", name="DM Controls")).to_be_visible()
+            expect(page.get_by_role("heading", name="DM status")).to_be_visible(timeout=10000)
+            combat_nav = page.get_by_role("navigation", name="DM encounter subview")
+            expect(combat_nav.get_by_role("button", name="DM status")).to_be_visible()
+            expect(combat_nav.get_by_role("button", name="DM status")).to_have_class(re.compile(r"\bbutton-link\b"))
+            expect(combat_nav.get_by_role("button", name="Controls")).to_be_visible()
+            expect(combat_nav.get_by_role("button", name="Controls")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(page.locator(".combat-view-switch")).to_have_count(0)
             expect(page.locator(".combat-carousel .compact-header")).to_have_count(0)
             expect(page.locator(".combat-pc-workspace .compact-header")).to_have_count(0)
 
@@ -1535,7 +1543,7 @@ def test_gen2_combat_browser_exposes_dm_status_and_controls(
             expect(page.get_by_text("Condition added.")).to_be_visible(timeout=5000)
             expect(page.locator(".combat-condition-chip", has_text="Restrained")).to_be_visible()
 
-            combat_nav.get_by_role("button", name="DM Controls").click()
+            combat_nav.get_by_role("button", name="Controls").click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?view=controls&combatant=\d+"))
             expect(page.get_by_role("heading", name="Add NPC")).to_be_visible(timeout=5000)
             name_input = page.get_by_label("Name", exact=True)
@@ -1580,7 +1588,7 @@ def test_gen2_combat_visual_parity_smoke(
         try:
             _sign_in(desktop_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=player")
-            expect(desktop_page.get_by_role("heading", name=re.compile(r"Combat:", re.I))).to_be_visible(timeout=10000)
+            expect(desktop_page.get_by_role("heading", name="Combat")).to_be_visible(timeout=10000)
             expect(desktop_page.locator(".combat-summary-band")).to_be_visible()
             expect(desktop_page.locator(".combat-carousel")).to_be_visible()
             expect(desktop_page.locator(".combat-selected-snapshot")).to_be_visible()
@@ -1595,7 +1603,7 @@ def test_gen2_combat_visual_parity_smoke(
                     const main = document.querySelector("main.main-shell") || document.querySelector("main");
                     const directChildren = main ? Array.from(main.querySelectorAll(":scope > *")) : [];
                     const hero = main ? main.querySelector(":scope > section.hero.compact.combat-hero") : null;
-                    const heroHeading = hero?.querySelector("h2") || null;
+                    const heroHeading = hero?.querySelector("h1") || null;
                     const legacyRoute = main ? main.querySelector(":scope > .combat-page") : null;
                     const legacyPanelRoute = main ? main.querySelector(":scope > .panel.combat-page") : null;
                     const summary = document.querySelector(".combat-summary-band");
@@ -1662,26 +1670,35 @@ def test_gen2_combat_visual_parity_smoke(
             assert any(text.startswith("Round ") for text in player_metrics["snapshotBadgeTexts"])
             assert any(text.startswith("Turn ") for text in player_metrics["snapshotBadgeTexts"])
             assert player_metrics["snapshotBareHeadingCount"] == 0
+            expect(desktop_page.locator(".combat-view-switch")).to_have_count(0)
 
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=status")
-            expect(desktop_page.get_by_role("heading", name=re.compile(r"Combat:", re.I))).to_be_visible(timeout=10000)
-            expect(desktop_page.locator(".combat-view-switch")).to_be_visible()
+            expect(desktop_page.get_by_role("heading", name="DM status")).to_be_visible(timeout=10000)
+            expect(desktop_page.get_by_role("navigation", name="DM encounter subview")).to_be_visible()
             expect(desktop_page.locator(".combat-dm-grid .combat-control-card").first).to_be_visible()
             status_metrics = desktop_page.evaluate(
                 """() => {
-                    const switcher = document.querySelector(".combat-view-switch");
+                    const switcher = document.querySelector('nav[aria-label="DM encounter subview"]');
+                    const dmStatus = Array.from(switcher?.querySelectorAll("button") || []).find(
+                      (button) => button.textContent?.trim() === "DM status"
+                    );
+                    const controls = Array.from(switcher?.querySelectorAll("button") || []).find(
+                      (button) => button.textContent?.trim() === "Controls"
+                    );
                     const controlCard = document.querySelector(".combat-dm-grid .combat-control-card");
                     const condition = document.querySelector(".combat-condition-chip");
                     const grid = document.querySelector(".combat-dm-grid");
                     return {
-                        switchRadius: switcher ? Number.parseFloat(window.getComputedStyle(switcher).borderRadius) : 0,
+                        dmStatusClass: dmStatus ? dmStatus.className : "",
+                        controlsClass: controls ? controls.className : "",
                         controlRadius: controlCard ? Number.parseFloat(window.getComputedStyle(controlCard).borderRadius) : 0,
                         conditionRadius: condition ? Number.parseFloat(window.getComputedStyle(condition).borderRadius) : 16,
                         dmGridColumns: grid ? window.getComputedStyle(grid).gridTemplateColumns.split(" ").length : 0,
                     };
                 }"""
             )
-            assert status_metrics["switchRadius"] >= 20
+            assert "button-link" in status_metrics["dmStatusClass"].split(" ")
+            assert "ghost-button" in status_metrics["controlsClass"].split(" ")
             assert status_metrics["controlRadius"] >= 16
             assert status_metrics["conditionRadius"] >= 16
             assert status_metrics["dmGridColumns"] >= 2
@@ -1714,7 +1731,9 @@ def test_gen2_combat_visual_parity_smoke(
                         const main = document.querySelector("main.main-shell") || document.querySelector("main");
                         const directChildren = main ? Array.from(main.querySelectorAll(":scope > *")) : [];
                         const hero = main ? main.querySelector(":scope > section.hero.compact.combat-hero") : null;
-                        const switcher = document.querySelector(".combat-view-switch");
+                        const switcher = hero
+                          ? hero.querySelector('nav[aria-label="DM encounter subview"]')
+                          : null;
                         const carousel = document.querySelector(".combat-carousel");
                         const carouselTrack = document.querySelector(".combat-carousel-track");
                         const directChildWidths = directChildren.length

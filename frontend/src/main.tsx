@@ -14526,16 +14526,15 @@ function CombatPage() {
       return null;
     }
     return (
-      <nav className="combat-view-switch" aria-label="Combat view">
+      <nav aria-label="DM encounter subview">
         {[
-          { id: "status" as CombatView, label: "DM Status" },
-          { id: "controls" as CombatView, label: "DM Controls" },
-          { id: "player" as CombatView, label: "Player View" },
+          { id: "status" as CombatView, label: "DM status", activeClass: "button-link", inactiveClass: "ghost-button" },
+          { id: "controls" as CombatView, label: "Controls", activeClass: "button-link", inactiveClass: "ghost-button" },
         ].map((view) => (
           <button
             type="button"
             key={view.id}
-            className={effectiveCombatView === view.id ? "tab-button active" : "tab-button"}
+            className={effectiveCombatView === view.id ? view.activeClass : view.inactiveClass}
             onClick={() => selectCombatView(view.id)}
           >
             {view.label}
@@ -15224,27 +15223,29 @@ function CombatPage() {
   return (
     <>
       <section className="hero compact combat-hero">
-        <p className="meta">Live play</p>
-        <h2>Combat: {payload?.campaign.title ?? campaignSlug}</h2>
-        <div className="article-actions">
-          {payload?.links?.flask_combat_url ? (
-            <a className="button button-secondary" href={payload.links.flask_combat_url}>
-              Flask Combat
-            </a>
-          ) : null}
-          {canManageCombat && payload?.links?.flask_dm_status_url ? (
-            <a className="button button-secondary" href={payload.links.flask_dm_status_url}>
-              DM Status
-            </a>
-          ) : null}
-          {canManageCombat && payload?.links?.flask_dm_controls_url ? (
-            <a className="button button-secondary" href={payload.links.flask_dm_controls_url}>
-              DM Controls
-            </a>
-          ) : null}
-        </div>
+        <p className="eyebrow">
+          {effectiveCombatView === "status"
+            ? "DM status"
+            : effectiveCombatView === "controls"
+              ? "Encounter controls"
+              : "Combat tracker"}
+        </p>
+        <h1>
+          {effectiveCombatView === "status"
+            ? "DM status"
+            : effectiveCombatView === "controls"
+              ? "Encounter controls"
+              : "Combat"}
+        </h1>
+        <p className="lede">
+          {effectiveCombatView === "status" || effectiveCombatView === "controls"
+            ? "Encounter setup, seeding, cleanup, and authority changes."
+            : selectedPlayerCharacter
+              ? "Keep your tracked character open as your in-combat workspace."
+              : "Live encounter tracker."}
+        </p>
+        {canManageCombat && effectiveCombatView !== "player" ? renderCombatViewSwitch() : null}
       </section>
-      {renderCombatViewSwitch()}
 
       <ApiErrorNotice
         isLoading={combatQuery.isLoading}
