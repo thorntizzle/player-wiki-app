@@ -8807,13 +8807,24 @@ function CharacterPane({
     });
   };
 
-  const submitEquipmentState = (event: FormEvent<HTMLFormElement>, item: CharacterEquipmentRow) => {
-    event.preventDefault();
-    const draft = equipmentDrafts[item.id] ?? {
-      isEquipped: Boolean(item.is_equipped),
-      isAttuned: Boolean(item.is_attuned),
-      weaponWieldMode: item.weapon_wield_mode || "",
-    };
+  const submitArcaneArmorState = (event?: FormEvent<HTMLFormElement>, enabled = arcaneArmorDraft) => {
+    event?.preventDefault();
+    const featureKey = readString(arcaneArmorState?.feature_key, "arcane_armor");
+    if (!selected || !canEdit) {
+      setErrorMessage("No character selected or permission denied.");
+      return;
+    }
+    setStatusMessage("Saving...");
+    patchFeatureState.mutate({
+      featureKey,
+      payload: {
+        expected_revision: revision,
+        enabled,
+      },
+    });
+  };
+
+  const submitEquipmentStatePatch = (item: CharacterEquipmentRow, draft: CharacterEquipmentDraft) => {
     if (!selected || !canEdit) {
       setErrorMessage("No character selected or permission denied.");
       return;
@@ -8830,21 +8841,14 @@ function CharacterPane({
     });
   };
 
-  const submitArcaneArmorState = (event: FormEvent<HTMLFormElement>) => {
+  const submitEquipmentState = (event: FormEvent<HTMLFormElement>, item: CharacterEquipmentRow) => {
     event.preventDefault();
-    const featureKey = readString(arcaneArmorState?.feature_key, "arcane_armor");
-    if (!selected || !canEdit) {
-      setErrorMessage("No character selected or permission denied.");
-      return;
-    }
-    setStatusMessage("Saving...");
-    patchFeatureState.mutate({
-      featureKey,
-      payload: {
-        expected_revision: revision,
-        enabled: arcaneArmorDraft,
-      },
-    });
+    const draft = equipmentDrafts[item.id] ?? {
+      isEquipped: Boolean(item.is_equipped),
+      isAttuned: Boolean(item.is_attuned),
+      weaponWieldMode: item.weapon_wield_mode || "",
+    };
+    submitEquipmentStatePatch(item, draft);
   };
 
   const submitCurrency = (event: FormEvent<HTMLFormElement>) => {
@@ -10350,30 +10354,41 @@ function CharacterPane({
                   </div>
                 ) : null}
                 {arcaneArmorState?.available ? (
-                  <article className="character-state-card">
-                    <h4>{readString(arcaneArmorState.label, "Arcane Armor")}</h4>
-                    <p className="meta">
-                      {[arcaneArmorState.status_label, arcaneArmorState.hands_label].map((value) => readString(value)).filter(Boolean).join(" | ")}
-                    </p>
+                  <article className="detail-card character-edit-row" id="character-arcane-armor-state">
+                    <div className="section-heading">
+                      <h3>{readString(arcaneArmorState.label, "Arcane Armor")}</h3>
+                      <span className="meta">
+                        {[
+                          readString(arcaneArmorState.status_label),
+                          arcaneArmorState.enabled ? readString(arcaneArmorState.hands_label) : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" | ")}
+                      </span>
+                    </div>
                     {canEdit ? (
-                      <form onSubmit={submitArcaneArmorState} className="equipment-state-form">
-                        <label className="toggle-row">
+                      <form onSubmit={submitArcaneArmorState} className="stack-form" data-character-autosubmit>
+                        <label className="checkbox-label">
                           <input
                             type="checkbox"
+                            name="enabled"
+                            value="1"
                             checked={arcaneArmorDraft}
-                            onChange={(event) => setArcaneArmorDraft(event.currentTarget.checked)}
+                            disabled={patchFeatureState.isPending || !canEdit}
+                            onChange={(event) => {
+                              const nextArcaneArmorState = event.currentTarget.checked;
+                              setArcaneArmorDraft(nextArcaneArmorState);
+                              submitArcaneArmorState(undefined, nextArcaneArmorState);
+                            }}
                           />
-                          Enabled
+                          Arcane Armor enabled
                         </label>
-                        <button type="submit" disabled={patchFeatureState.isPending}>
-                          {patchFeatureState.isPending ? "Saving..." : "Save feature state"}
-                        </button>
                       </form>
                     ) : null}
                   </article>
                 ) : null}
                 {equipmentRows.length ? (
-                  <div className="character-card-grid">
+                  <div className="equipment-state-grid" id={isCombatSurface ? "combat-character-equipment-state" : "character-equipment-state"}>
                     {equipmentRows.map((item) => {
                       const draft = equipmentDrafts[item.id] ?? {
                         isEquipped: Boolean(item.is_equipped),
@@ -10381,10 +10396,15 @@ function CharacterPane({
                         weaponWieldMode: item.weapon_wield_mode || "",
                       };
                       return (
-                        <article className="character-state-card" key={item.id || item.name}>
-                          <h4>{item.name || "Item"}</h4>
+                        <article className="detail-card character-edit-row" key={item.id || item.name}>
+                          <div className="section-heading">
+                            <h3>
+                              {item.href ? <a href={item.href}>{readString(item.name, "Item")}</a> : readString(item.name, "Item")}
+                            </h3>
+                            <span className="meta">{readString(item.source_label)}</span>
+                          </div>
                           <p className="meta">
-                            {[item.equipped_label, item.is_attuned ? "Attuned" : item.requires_attunement ? "Not attuned" : "", item.source_label]
+                            {[readString(item.equipped_label), item.requires_attunement ? (item.is_attuned ? "Attuned" : "Not attuned") : ""]
                               .filter(Boolean)
                               .join(" | ")}
                           </p>
@@ -10395,64 +10415,82 @@ function CharacterPane({
                             </button>
                           ) : null}
                           {canEdit ? (
-                            <form onSubmit={(event) => submitEquipmentState(event, item)} className="equipment-state-form">
-                              {item.supports_weapon_wield_mode ? (
-                                <label className="chat-label" htmlFor={`equipment-wield-${item.id}`}>
-                                  Wielding
-                                  <select
-                                    id={`equipment-wield-${item.id}`}
-                                    value={draft.weaponWieldMode}
-                                    onChange={(event) =>
-                                      setEquipmentDrafts({
-                                        ...equipmentDrafts,
-                                        [item.id]: { ...draft, weaponWieldMode: event.currentTarget.value },
-                                      })
-                                    }
-                                  >
-                                    <option value="">Not equipped</option>
-                                    {item.weapon_wield_options.map((option) => (
-                                      <option value={option.value} key={option.value}>
-                                        {option.label}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </label>
-                              ) : (
-                                <label className="toggle-row">
-                                  <input
-                                    type="checkbox"
-                                    checked={draft.isEquipped}
-                                    onChange={(event) =>
-                                      setEquipmentDrafts({
-                                        ...equipmentDrafts,
-                                        [item.id]: { ...draft, isEquipped: event.currentTarget.checked },
-                                      })
-                                    }
-                                  />
-                                  Equipped
-                                </label>
-                              )}
-                              {item.requires_attunement ? (
-                                <label className="toggle-row">
-                                  <input
-                                    type="checkbox"
-                                    checked={draft.isAttuned}
-                                    onChange={(event) =>
-                                      setEquipmentDrafts({
-                                        ...equipmentDrafts,
-                                        [item.id]: { ...draft, isAttuned: event.currentTarget.checked },
-                                      })
-                                    }
-                                  />
-                                  Attuned
-                                </label>
-                              ) : null}
+                            <form
+                              onSubmit={(event) => submitEquipmentState(event, item)}
+                              className="stack-form"
+                              data-character-autosubmit
+                              data-character-sheet-edit-form="equipment-state"
+                            >
+                              <div className="detail-grid">
+                                {item.supports_weapon_wield_mode ? (
+                                  <label>
+                                    Wielding
+                                    <select
+                                      id={`equipment-wield-${item.id}`}
+                                      name="weapon_wield_mode"
+                                      value={draft.weaponWieldMode}
+                                      disabled={patchEquipmentState.isPending || !canEdit}
+                                      onChange={(event) => {
+                                        const nextDraft = { ...draft, weaponWieldMode: event.currentTarget.value };
+                                        setEquipmentDrafts({
+                                          ...equipmentDrafts,
+                                          [item.id]: nextDraft,
+                                        });
+                                        submitEquipmentStatePatch(item, nextDraft);
+                                      }}
+                                    >
+                                      <option value="">Not equipped</option>
+                                      {item.weapon_wield_options.map((option) => (
+                                        <option value={option.value} key={option.value}>
+                                          {option.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                ) : (
+                                  <label className="checkbox-label">
+                                    <input
+                                      type="checkbox"
+                                      name="is_equipped"
+                                      value="1"
+                                      checked={draft.isEquipped}
+                                      disabled={patchEquipmentState.isPending || !canEdit}
+                                      onChange={(event) => {
+                                        const nextDraft = { ...draft, isEquipped: event.currentTarget.checked };
+                                        setEquipmentDrafts({
+                                          ...equipmentDrafts,
+                                          [item.id]: nextDraft,
+                                        });
+                                        submitEquipmentStatePatch(item, nextDraft);
+                                      }}
+                                    />
+                                    Equipped
+                                  </label>
+                                )}
+                                {item.requires_attunement ? (
+                                  <label className="checkbox-label">
+                                    <input
+                                      type="checkbox"
+                                      name="is_attuned"
+                                      value="1"
+                                      checked={draft.isAttuned}
+                                      disabled={patchEquipmentState.isPending || !canEdit}
+                                      onChange={(event) => {
+                                        const nextDraft = { ...draft, isAttuned: event.currentTarget.checked };
+                                        setEquipmentDrafts({
+                                          ...equipmentDrafts,
+                                          [item.id]: nextDraft,
+                                        });
+                                        submitEquipmentStatePatch(item, nextDraft);
+                                      }}
+                                    />
+                                    Attuned
+                                  </label>
+                                ) : null}
+                              </div>
                               {item.attunement_hint && item.attunement_hint !== "Requires attunement" ? (
                                 <p className="meta">{item.attunement_hint}</p>
                               ) : null}
-                              <button type="submit" disabled={patchEquipmentState.isPending}>
-                                {patchEquipmentState.isPending ? "Saving..." : "Save equipment state"}
-                              </button>
                             </form>
                           ) : null}
                         </article>

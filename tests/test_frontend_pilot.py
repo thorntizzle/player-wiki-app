@@ -1027,6 +1027,37 @@ def test_character_dnd_inventory_section_uses_flask_style_row_form_chrome() -> N
     assert '>Save<' not in inventory_controls_markup
 
 
+def test_character_dnd_equipment_section_uses_flask_style_row_form_chrome() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    section_start = source.index('{isDnd && activeCharacterSection === "equipment" ? (')
+    section_end = source.index('{isDnd && activeCharacterSection === "inventory" ? (', section_start)
+    section_markup = source[section_start:section_end]
+
+    assert 'className="equipment-state-grid"' in section_markup
+    assert 'id={isCombatSurface ? "combat-character-equipment-state" : "character-equipment-state"}' in section_markup
+    assert 'className="detail-card character-edit-row"' in section_markup
+    assert 'className="section-heading"' in section_markup
+    assert 'className="stack-form"' in section_markup
+    assert 'data-character-autosubmit' in section_markup
+    assert 'data-character-sheet-edit-form="equipment-state"' in section_markup
+    assert 'className="detail-grid"' in section_markup
+    assert 'className="checkbox-label"' in section_markup
+    assert 'Arcane Armor enabled' in section_markup
+    assert 'name="enabled"' in section_markup
+    assert 'name="weapon_wield_mode"' in section_markup
+    assert 'name="is_equipped"' in section_markup
+    assert 'name="is_attuned"' in section_markup
+    assert 'className="ghost-button item-detail-button"' in section_markup
+    assert 'className="character-card-grid"' not in section_markup
+    assert 'className="character-state-card"' not in section_markup
+    assert 'className="equipment-state-form"' not in section_markup
+    assert 'className="chat-label"' not in section_markup
+    assert 'Save equipment state' not in section_markup
+    assert 'Save feature state' not in section_markup
+    assert '<p className="meta">Requires attunement</p>' not in section_markup
+    assert 'item.attunement_hint !== "Requires attunement"' in section_markup
+
+
 def test_character_dnd_resources_section_uses_flask_style_row_form_chrome() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     resources_start = source.index('{isDnd && activeCharacterSection === "resources" ? (')
