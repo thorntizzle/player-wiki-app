@@ -3593,10 +3593,28 @@ def test_gen2_dm_content_browser_systems_custom_entry_workflow(
             )
 
             expect(page.get_by_role("heading", name="Source Enablement")).to_be_visible(timeout=10000)
+            expect(page.get_by_role("heading", name="Shared/Core Editing")).to_be_visible()
             expect(page.get_by_role("heading", name="Entry Overrides")).to_be_visible()
             expect(page.get_by_role("heading", name="Custom Entries")).to_be_visible()
             expect(page.get_by_role("heading", name="Shared Source Imports")).to_be_visible()
             expect(page.get_by_role("heading", name="Import-Run History")).to_be_visible()
+
+            source_panel = page.locator("#systems-source-enablement")
+            expect(source_panel.locator("form.session-form")).to_have_count(0)
+            expect(source_panel.locator(".systems-source-grid")).to_have_count(0)
+            expect(source_panel.locator(".systems-source-card")).to_have_count(0)
+            assert source_panel.locator("div.field").count() >= 1
+            expect(source_panel.locator(".article-card")).to_have_count(0)
+            expect(source_panel.locator(".article-actions")).to_have_count(0)
+            expect(source_panel.locator(".button-danger")).to_have_count(0)
+            expect(source_panel.locator("form.stack-form")).to_have_count(1)
+
+            shared_core_panel = page.locator("section#systems-shared-core-permission.card")
+            expect(shared_core_panel).to_have_count(1)
+            expect(shared_core_panel.locator(".article-card")).to_have_count(0)
+            expect(shared_core_panel.locator(".article-actions")).to_have_count(0)
+            expect(shared_core_panel.locator(".article-kind")).to_have_count(0)
+            expect(shared_core_panel.locator(".button-danger")).to_have_count(0)
 
             entry_overrides = page.locator("#systems-entry-overrides")
             custom_panel = page.locator("#systems-custom-entries")

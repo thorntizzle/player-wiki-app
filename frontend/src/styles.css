@@ -2419,32 +2419,6 @@ a:hover {
   gap: 0.9rem;
 }
 
-.dm-content-systems-lane .systems-source-grid {
-  display: grid;
-  gap: 0.65rem;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  align-items: start;
-}
-
-.dm-content-systems-lane .systems-source-card {
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: var(--surface-soft);
-  padding: 0.72rem 0.78rem;
-  display: grid;
-  gap: 0.45rem;
-  min-width: 0;
-}
-
-.dm-content-systems-lane .systems-source-card .meta-badge,
-.dm-content-systems-lane .systems-source-card .meta {
-  margin: 0;
-}
-
-.dm-content-systems-lane .systems-source-card .checkbox-label {
-  gap: 0.45rem;
-}
-
 .dm-content-systems-lane .systems-override-list,
 .dm-content-systems-lane .systems-custom-list,
 .dm-content-systems-lane .systems-import-history {

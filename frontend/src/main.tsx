@@ -11859,91 +11859,114 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
           </div>
         </div>
         {payload.has_proprietary_sources ? (
-          <p className="status status-neutral">
-            Proprietary-source acknowledgement: {payload.policy.proprietary_acknowledged ? "recorded" : "not yet recorded"}
+          <p className="meta">
+            Proprietary-source acknowledgement: {payload.policy.proprietary_acknowledged ? "recorded" : "not yet recorded in the systems policy"}
           </p>
         ) : null}
         <form
-          className="session-form"
+          className="stack-form"
           onSubmit={(event: FormEvent<HTMLFormElement>) => {
             event.preventDefault();
             updateSourcesMutation.mutate();
           }}
         >
-          <div className="systems-source-grid">
-            {payload.source_rows.map((source: SystemsSourceRow) => {
-              const draft = sourceDrafts[source.source_id] ?? {
-                isEnabled: source.is_enabled,
-                defaultVisibility: source.default_visibility,
-              };
-              return (
-                <article className="systems-source-card" key={source.source_id}>
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={draft.isEnabled}
-                      disabled={!canManageSystems}
-                      onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                        const checked = event.currentTarget.checked;
-                        setSourceDrafts((current) => ({
-                          ...current,
-                          [source.source_id]: {
-                            ...(current[source.source_id] ?? draft),
-                            isEnabled: checked,
-                          },
-                        }));
-                      }}
-                    />
-                    {source.title} ({source.source_id})
-                  </label>
-                  <p className="meta">{source.license_class_label}</p>
-                  <p className="meta">{source.entry_count} imported entr{source.entry_count === 1 ? "y" : "ies"}</p>
-                  <label htmlFor={`systems-source-${source.source_id}-visibility`} className="chat-label">
-                    Default visibility
-                    <select
-                      id={`systems-source-${source.source_id}-visibility`}
-                      value={draft.defaultVisibility}
-                      disabled={!canManageSystems}
-                      onChange={(event: ChangeEvent<HTMLSelectElement>) => {
-                        const visibility = event.currentTarget.value;
-                        setSourceDrafts((current) => ({
-                          ...current,
-                          [source.source_id]: {
-                            ...(current[source.source_id] ?? draft),
-                            defaultVisibility: visibility,
-                          },
-                        }));
-                      }}
-                    >
-                      {(source.choices ?? []).map((choice) => (
-                        <option key={choice.value} value={choice.value} disabled={choice.disabled}>
-                          {choice.label}{choice.disabled ? " (not allowed)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  {!source.public_visibility_allowed ? (
-                    <p className="meta">This source is restricted from public visibility by policy.</p>
-                  ) : null}
-                </article>
-              );
-            })}
-          </div>
+          {payload.source_rows.map((source: SystemsSourceRow) => {
+            const draft = sourceDrafts[source.source_id] ?? {
+              isEnabled: source.is_enabled,
+              defaultVisibility: source.default_visibility,
+            };
+            return (
+              <div className="field" key={source.source_id}>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={draft.isEnabled}
+                    disabled={!canManageSystems}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                      const checked = event.currentTarget.checked;
+                      setSourceDrafts((current) => ({
+                        ...current,
+                        [source.source_id]: {
+                          ...(current[source.source_id] ?? draft),
+                          isEnabled: checked,
+                        },
+                      }));
+                    }}
+                  />
+                  {source.title} ({source.source_id})
+                </label>
+                <p className="meta">{source.license_class_label}</p>
+                <p className="meta">{source.entry_count} imported entr{source.entry_count === 1 ? "y" : "ies"}</p>
+                <label htmlFor={`systems-source-${source.source_id}-visibility`} className="field">
+                  <span>Default visibility</span>
+                  <select
+                    id={`systems-source-${source.source_id}-visibility`}
+                    value={draft.defaultVisibility}
+                    disabled={!canManageSystems}
+                    onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                      const visibility = event.currentTarget.value;
+                      setSourceDrafts((current) => ({
+                        ...current,
+                        [source.source_id]: {
+                          ...(current[source.source_id] ?? draft),
+                          defaultVisibility: visibility,
+                        },
+                      }));
+                    }}
+                  >
+                    {(source.choices ?? []).map((choice) => (
+                      <option key={choice.value} value={choice.value} disabled={choice.disabled}>
+                        {choice.label}{choice.disabled ? " (not allowed)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {!source.public_visibility_allowed ? (
+                  <p className="meta">This source is restricted from public visibility by policy.</p>
+                ) : null}
+              </div>
+            );
+          })}
           {payload.has_proprietary_sources && !payload.policy.proprietary_acknowledged ? (
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={acknowledgeProprietary}
-                disabled={!canManageSystems}
-                onChange={(event: ChangeEvent<HTMLInputElement>) => setAcknowledgeProprietary(event.currentTarget.checked)}
-              />
-              I understand proprietary systems sources are for private campaign use only.
+            <label className="field">
+              <span>Proprietary-source acknowledgement</span>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={acknowledgeProprietary}
+                  disabled={!canManageSystems}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setAcknowledgeProprietary(event.currentTarget.checked)}
+                />
+                I understand proprietary systems sources are for private campaign use only and must not be made public or redistributed.
+              </label>
             </label>
           ) : null}
           <button type="submit" disabled={!canManageSystems || updateSourcesMutation.isPending}>
             {updateSourcesMutation.isPending ? "Saving..." : "Save systems sources"}
           </button>
         </form>
+      </section>
+
+      <section className="card" id="systems-shared-core-permission">
+        <div className="section-heading">
+          <div>
+            <h2>Shared/Core Editing</h2>
+            <p className="meta">
+              Campaign DM editing is {payload.policy.allow_dm_shared_core_entry_edits ? "enabled" : "disabled"} for shared-library Systems entries.
+            </p>
+          </div>
+        </div>
+        <p className="meta">
+          When enabled by an app admin, DMs for this campaign can use the same shared/core editor as app admins.
+          This changes the shared library row itself, not only this campaign's override.
+        </p>
+        {payload.permissions.can_manage_shared_core_entry_edit_permission ? (
+          <a className="ghost-button" href={`${payload.links.flask_systems_control_url}#systems-shared-core-permission`}>
+            Open shared/core permission form
+          </a>
+        ) : (
+          <p className="meta">Only app admins can change whether campaign DMs may edit shared/core Systems entries.</p>
+        )}
       </section>
 
       <section className="card" id="systems-entry-overrides">
