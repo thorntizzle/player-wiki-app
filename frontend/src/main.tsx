@@ -13061,85 +13061,96 @@ function DmContentPage() {
 
   const renderConditionCard = (condition: DmContentConditionDefinition) => {
     const draft = conditionDrafts[condition.id] ?? buildInitialConditionDraft(condition);
+    const hasDescription = condition.description_markdown.trim().length > 0;
     return (
-      <details className="article-card dm-condition-card" key={condition.id}>
-        <summary>
-          <strong>{condition.name}</strong>
-          <span className="article-kind">condition</span>
-        </summary>
-        <pre className="dm-content-preview">{condition.description_markdown}</pre>
+      <article className="dm-content-item dm-condition-card" id={`dm-condition-${condition.id}`} key={condition.id}>
+        <div className="dm-content-item__header">
+          <div>
+            <h3>{condition.name}</h3>
+          </div>
+        </div>
+        {hasDescription ? (
+          <pre className="dm-content-preview dm-content-preview--compact">{condition.description_markdown}</pre>
+        ) : (
+          <p className="meta">No description saved.</p>
+        )}
         {canManageDmContent ? (
-          <form
-            className="session-form"
-            onSubmit={(event: FormEvent<HTMLFormElement>) => {
-              event.preventDefault();
-              const formData = new FormData(event.currentTarget);
-              const updatedName = String(formData.get("name") || "").trim();
-              const description = String(formData.get("description_markdown") || "");
-              updateConditionMutation.mutate({
-                id: condition.id,
-                payload: {
-                  name: updatedName || condition.name,
-                  description_markdown: description,
-                },
-              });
-            }}
-          >
-            <label htmlFor={`dm-condition-name-${condition.id}`} className="chat-label">
-              Name
-            </label>
-            <input
-              id={`dm-condition-name-${condition.id}`}
-              name="name"
-              value={draft.name}
-              disabled={!canManageDmContent}
-              onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                const name = event.currentTarget.value;
-                setConditionDrafts((current) => ({
-                  ...current,
-                  [condition.id]: {
-                    ...(current[condition.id] ?? draft),
-                    name,
+          <details className="feature-detail">
+            <summary>Edit condition</summary>
+            <form
+              className="stack-form"
+              onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                event.preventDefault();
+                const formData = new FormData(event.currentTarget);
+                const updatedName = String(formData.get("name") || "").trim();
+                const description = String(formData.get("description_markdown") || "");
+                updateConditionMutation.mutate({
+                  id: condition.id,
+                  payload: {
+                    name: updatedName || condition.name,
+                    description_markdown: description,
                   },
-                }));
+                });
               }}
-            />
-            <label htmlFor={`dm-condition-description-${condition.id}`} className="chat-label">
-              Description (markdown)
-            </label>
-            <textarea
-              id={`dm-condition-description-${condition.id}`}
-              name="description_markdown"
-              rows={8}
-              value={draft.description}
-              disabled={!canManageDmContent}
-              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-                const description = event.currentTarget.value;
-                setConditionDrafts((current) => ({
-                  ...current,
-                  [condition.id]: {
-                    ...(current[condition.id] ?? draft),
-                    description,
-                  },
-                }));
-              }}
-            />
-            <div className="article-actions">
+            >
+              <label htmlFor={`dm-condition-name-${condition.id}`} className="chat-label">
+                Name
+              </label>
+              <input
+                id={`dm-condition-name-${condition.id}`}
+                name="name"
+                value={draft.name}
+                disabled={!canManageDmContent}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const name = event.currentTarget.value;
+                  setConditionDrafts((current) => ({
+                    ...current,
+                    [condition.id]: {
+                      ...(current[condition.id] ?? draft),
+                      name,
+                    },
+                  }));
+                }}
+              />
+              <label htmlFor={`dm-condition-description-${condition.id}`} className="chat-label">
+                Description (markdown)
+              </label>
+              <textarea
+                id={`dm-condition-description-${condition.id}`}
+                name="description_markdown"
+                rows={8}
+                value={draft.description}
+                disabled={!canManageDmContent}
+                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+                  const description = event.currentTarget.value;
+                  setConditionDrafts((current) => ({
+                    ...current,
+                    [condition.id]: {
+                      ...(current[condition.id] ?? draft),
+                      description,
+                    },
+                  }));
+                }}
+              />
               <button type="submit" disabled={!canManageDmContent || updateConditionMutation.isPending}>
                 {updateConditionMutation.isPending ? "Saving..." : "Save condition"}
               </button>
-              <button
-                type="button"
-                className="button-danger"
-                disabled={!canManageDmContent || deleteConditionMutation.isPending}
-                onClick={() => deleteConditionMutation.mutate(condition.id)}
-              >
-                {deleteConditionMutation.isPending ? "Deleting..." : "Delete condition"}
-              </button>
-            </div>
-          </form>
+            </form>
+          </details>
         ) : null}
-      </details>
+        {canManageDmContent ? (
+          <div className="dm-content-item__actions">
+            <button
+              type="button"
+              className="ghost-button"
+              disabled={!canManageDmContent || deleteConditionMutation.isPending}
+              onClick={() => deleteConditionMutation.mutate(condition.id)}
+            >
+              {deleteConditionMutation.isPending ? "Deleting..." : "Delete condition"}
+            </button>
+          </div>
+        ) : null}
+      </article>
     );
   };
 
@@ -13587,7 +13598,7 @@ function DmContentPage() {
             </form>
             {dmContentQuery.isLoading ? <p className="status status-neutral">Loading conditions ...</p> : null}
             {!dmContentQuery.isLoading && filteredConditions.length ? (
-              <div className="article-stack dm-condition-list">
+              <div className="dm-content-list dm-condition-list">
                 {filteredConditions.map(renderConditionCard)}
               </div>
             ) : null}

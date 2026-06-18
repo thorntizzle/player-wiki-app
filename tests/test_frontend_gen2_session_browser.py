@@ -3401,35 +3401,42 @@ def test_gen2_dm_content_browser_condition_workflow(
 
             library = page.locator("section.card.dm-condition-library")
             expect(library.get_by_text("These names appear in the combat condition picker")).to_be_visible()
-            condition_card = library.locator("details.dm-condition-card", has_text=condition_name)
+            condition_card = library.locator("article.dm-content-item.dm-condition-card", has_text=condition_name)
             expect(condition_card).to_be_visible(timeout=10000)
-            condition_card.locator("summary").click()
+            expect(condition_card.locator(".dm-content-item__header")).to_be_visible()
+            edit_detail = condition_card.locator("details.feature-detail", has_text="Edit condition")
+            expect(edit_detail.locator("summary")).to_be_visible()
+            expect(condition_card.locator(".dm-content-item__actions")).to_be_visible()
+            expect(condition_card.locator(".article-actions")).to_have_count(0)
+            expect(condition_card.get_by_role("button", name="Delete condition")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(condition_card.get_by_role("button", name="Delete condition")).not_to_have_class(re.compile(r"\bbutton-danger\b"))
+            edit_detail.locator("summary").click()
             expect(condition_card.locator("pre.dm-content-preview", has_text=condition_description)).to_be_visible()
 
             library.get_by_label("Search conditions").fill("not-here")
             expect(library.get_by_text("No conditions matched that search.")).to_be_visible()
             library.get_by_label("Search conditions").fill("")
-            condition_card = library.locator("details.dm-condition-card", has_text=condition_name)
+            condition_card = library.locator("article.dm-content-item.dm-condition-card", has_text=condition_name)
             expect(condition_card).to_be_visible()
-            if not condition_card.evaluate("element => element.open"):
-                condition_card.locator("summary").click()
+            if not condition_card.locator("details.feature-detail").evaluate("element => element.open"):
+                condition_card.locator("details.feature-detail").locator("summary").click()
 
             condition_card.locator("input[name='name']").fill(updated_condition_name)
             condition_card.locator("textarea[name='description_markdown']").fill(updated_condition_description)
             condition_card.get_by_role("button", name="Save condition").click()
             expect(page.get_by_text(f"Condition updated: {updated_condition_name}.")).to_be_visible(timeout=10000)
 
-            updated_card = library.locator("details.dm-condition-card", has_text=updated_condition_name)
+            updated_card = library.locator("article.dm-content-item.dm-condition-card", has_text=updated_condition_name)
             expect(updated_card).to_be_visible(timeout=10000)
-            if not updated_card.evaluate("element => element.open"):
-                updated_card.locator("summary").click()
+            if not updated_card.locator("details.feature-detail").evaluate("element => element.open"):
+                updated_card.locator("details.feature-detail").locator("summary").click()
             expect(updated_card.locator("pre.dm-content-preview", has_text=updated_condition_description)).to_be_visible()
 
             library.get_by_label("Search conditions").fill("Gen2 Staggered")
             expect(updated_card).to_be_visible()
             updated_card.get_by_role("button", name="Delete condition").click()
             expect(page.get_by_text(f"Condition deleted: {updated_condition_name}.")).to_be_visible(timeout=10000)
-            expect(library.locator("details.dm-condition-card", has_text=updated_condition_name)).to_have_count(0, timeout=10000)
+            expect(library.locator("article.dm-content-item.dm-condition-card", has_text=updated_condition_name)).to_have_count(0, timeout=10000)
         finally:
             page.close()
             browser.close()
