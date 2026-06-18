@@ -1213,6 +1213,24 @@ def test_character_xianxia_techniques_section_uses_flask_chrome_parity() -> None
     assert 'className="chat-label"' not in section_markup
 
 
+def test_character_dnd_overview_section_uses_flask_style_glance_rows() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    section_start = source.index('{isDnd && activeCharacterSection === "overview" ? (')
+    section_end = source.index('{isDnd && activeCharacterSection === "resources" ? (', section_start)
+    section_markup = source[section_start:section_end]
+
+    assert '<h2>At a glance</h2>' in section_markup
+    assert 'className={`glance-grid glance-grid--row glance-grid--quick-row-${rowIndex + 1}`}' in section_markup
+    assert 'className="glance-card"' in section_markup
+    assert 'className="meta"' in section_markup
+    assert "readString(stat.value, \"--\")" in section_markup
+    assert '<h2>Overview</h2>' not in section_markup
+    assert 'className="stat-grid"' not in section_markup
+    assert "rawOverviewStatRows.length > 0" in source
+    assert "hasOverviewStatRows ? (" in section_markup
+    assert 'className="glance-grid">' in section_markup
+
+
 def test_character_dnd_inventory_currency_section_uses_flask_style_row_form_chrome() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "inventory" ? (')

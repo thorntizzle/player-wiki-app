@@ -1633,6 +1633,13 @@ export interface CharacterXianxiaInventoryItem {
   systems_ref?: Record<string, unknown> | null;
 }
 
+export interface CharacterOverviewStat {
+  label: string;
+  value: string;
+}
+
+export type CharacterOverviewStatRows = CharacterOverviewStat[][];
+
 export interface CharacterPresentedXianxia {
   system_label?: string;
   subpages?: Array<{ slug: string; label: string }>;
@@ -1699,6 +1706,8 @@ export interface CharacterRecord {
   definition: Record<string, unknown>;
   import_metadata: Record<string, unknown>;
   state_record: CharacterStateRecord;
+  overview_stat_rows?: CharacterOverviewStatRows;
+  overview_stats?: CharacterOverviewStat[];
   player_notes_markdown?: string;
   player_notes_html?: string;
   reference_sections?: CharacterReferenceSection[];

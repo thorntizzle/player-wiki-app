@@ -8129,6 +8129,11 @@ function CharacterPane({
   const stats = asRecord(definition.stats);
   const spellcasting = asRecord(definition.spellcasting);
   const state = asRecord(detailRecord?.state_record.state);
+  const overviewStatRowPayload = detailRecord?.overview_stat_rows;
+  const rawOverviewStatRows = Array.isArray(overviewStatRowPayload) ? overviewStatRowPayload : [];
+  const hasOverviewStatRows = rawOverviewStatRows.length > 0;
+  const overviewStatRows = rawOverviewStatRows.map((row) => asRecordArray(row));
+  const overviewStats = asRecordArray(detailRecord?.overview_stats);
   const xianxiaState = asRecord(state.xianxia);
   const vitals = asRecord(state.vitals);
   const resources = asRecordArray(state.resources);
@@ -10785,34 +10790,31 @@ function CharacterPane({
             {isDnd && activeCharacterSection === "overview" ? (
               <section className="read-section" id="character-overview">
                 <div className="section-heading">
-                  <h2>Overview</h2>
+                  <h2>At a glance</h2>
                 </div>
-                <div className="stat-grid">
-                  <article>
-                    <strong>Armor Class</strong>
-                    <span>{String(stats.armor_class ?? "--")}</span>
-                  </article>
-                  <article>
-                    <strong>Initiative</strong>
-                    <span>{String(stats.initiative_bonus ?? "--")}</span>
-                  </article>
-                  <article>
-                    <strong>Speed</strong>
-                    <span>{String(stats.speed ?? "--")}</span>
-                  </article>
-                  <article>
-                    <strong>Proficiency</strong>
-                    <span>{String(stats.proficiency_bonus ?? "--")}</span>
-                  </article>
-                  <article>
-                    <strong>Species</strong>
-                    <span>{readString(profile.species, selected.species || "--")}</span>
-                  </article>
-                  <article>
-                    <strong>Background</strong>
-                    <span>{readString(profile.background, selected.background || "--")}</span>
-                  </article>
-                </div>
+                {hasOverviewStatRows ? (
+                  <>
+                    {overviewStatRows.map((row, rowIndex) => (
+                      <div className={`glance-grid glance-grid--row glance-grid--quick-row-${rowIndex + 1}`} key={`glance-row-${rowIndex}`}>
+                        {row.map((stat) => (
+                          <div className="glance-card" key={`${rowIndex}-${readString(stat.label)}`}>
+                            <span className="meta">{readString(stat.label, "--")}</span>
+                            <strong>{readString(stat.value, "--")}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <div className="glance-grid">
+                    {overviewStats.map((stat) => (
+                      <div className="glance-card" key={readString(stat.label, "overview-stat")}>
+                        <span className="meta">{readString(stat.label, "--")}</span>
+                        <strong>{readString(stat.value, "--")}</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </section>
             ) : null}
 
