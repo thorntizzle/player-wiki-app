@@ -423,10 +423,49 @@ def test_account_settings_page_removes_flask_account_fallback_link() -> None:
 
     assert "Flask account" not in account_settings_markup
     assert 'className="ghost-button" href="/campaigns">' in account_settings_markup
-    assert "Save account settings" in account_settings_markup
-    assert "<button type=\"submit\" className=\"button\" disabled={saveSettings.isPending || !hasDraft || isUnchanged}>" in account_settings_markup
-    assert "statusMessage ? <p className=\"status status-neutral\">{statusMessage}</p> : null" in account_settings_markup
-    assert "saveError ? <p className=\"status status-error\">{saveError}</p> : null" in account_settings_markup
+    assert "className=\"stack-form\" onSubmit={handleThemeSubmit}>" in account_settings_markup
+    assert "className=\"stack-form\" onSubmit={handleChatOrderSubmit}>" in account_settings_markup
+    assert "Save theme" in account_settings_markup
+    assert "Save chat order" in account_settings_markup
+    assert "Save account settings" not in account_settings_markup
+    assert "account-settings-actions" not in account_settings_markup
+    theme_submit_match = re.search(
+        r"const handleThemeSubmit[\s\S]*?saveThemeSettings\.mutate\((\{[\s\S]*?\})\);",
+        account_settings_markup,
+    )
+    assert theme_submit_match is not None
+    theme_payload = theme_submit_match.group(1)
+    assert "theme_key: draftThemeKey" in theme_payload
+    assert "session_chat_order" not in theme_payload
+    chat_submit_match = re.search(
+        r"const handleChatOrderSubmit[\s\S]*?saveChatSettings\.mutate\((\{[\s\S]*?\})\);",
+        account_settings_markup,
+    )
+    assert chat_submit_match is not None
+    chat_payload = chat_submit_match.group(1)
+    assert "session_chat_order: draftChatOrder" in chat_payload
+    assert "theme_key" not in chat_payload
+
+
+def test_account_option_css_matches_flask_parity() -> None:
+    source = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+
+    def css_block(selector: str) -> str:
+        selector_start = source.index(f"{selector} {{")
+        selector_end = source.index("}", selector_start)
+        return source[selector_start:selector_end]
+
+    theme_option_block = css_block(".theme-option")
+    assert "align-content: start;" not in theme_option_block
+
+    theme_header_block = css_block(".theme-option__header")
+    assert "align-items: center;" in theme_header_block
+    assert "gap: 1rem;" in theme_header_block
+
+    theme_status_block = css_block(".theme-option__status")
+    assert "margin-left: 0.45rem;" in theme_status_block
+    assert "display: block;" not in theme_status_block
+    assert "margin-top" not in theme_status_block
 
 
 def test_campaign_help_page_removes_flask_help_fallback() -> None:

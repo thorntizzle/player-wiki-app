@@ -27,6 +27,7 @@ import type {
   AdminUserDetailResponse,
   CampaignEntry,
   AccountSettingsUpdatePayload,
+  AccountSettingsUpdateResponse,
   CampaignControlResponse,
   CampaignControlVisibilityRow,
   CharacterAdvancedEditorContext,
@@ -5351,7 +5352,10 @@ function AccountSettingsPage() {
   const { apiClient, setAuthRequired } = useApiClient();
   const [draftThemeKey, setDraftThemeKey] = useState("");
   const [draftChatOrder, setDraftChatOrder] = useState("");
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [themeStatusMessage, setThemeStatusMessage] = useState<string | null>(null);
+  const [themeErrorMessage, setThemeErrorMessage] = useState<string | null>(null);
+  const [chatStatusMessage, setChatStatusMessage] = useState<string | null>(null);
+  const [chatErrorMessage, setChatErrorMessage] = useState<string | null>(null);
 
   const settingsQuery = useQuery({
     queryKey: ["account-settings"],
@@ -5377,20 +5381,40 @@ function AccountSettingsPage() {
     settingsQuery.data?.preferences?.session_chat_order,
   ]);
 
-  const saveSettings = useMutation({
+  const applySavedSettings = (response: AccountSettingsUpdateResponse) => {
+    setDraftThemeKey(response.preferences.theme_key || "");
+    setDraftChatOrder(response.preferences.session_chat_order || "");
+    if (response.preferences.theme_key) {
+      document.documentElement.dataset.theme = response.preferences.theme_key;
+    }
+    void queryClient.invalidateQueries({ queryKey: ["me"] });
+    void queryClient.invalidateQueries({ queryKey: ["account-settings"] });
+  };
+
+  const saveThemeSettings = useMutation({
     mutationFn: (payload: AccountSettingsUpdatePayload) => apiClient.patchAccountSettings(payload),
     onSuccess: (response) => {
-      setStatusMessage("Account settings saved.");
-      setDraftThemeKey(response.preferences.theme_key || "");
-      setDraftChatOrder(response.preferences.session_chat_order || "");
-      if (response.preferences.theme_key) {
-        document.documentElement.dataset.theme = response.preferences.theme_key;
-      }
-      void queryClient.invalidateQueries({ queryKey: ["me"] });
-      void queryClient.invalidateQueries({ queryKey: ["account-settings"] });
+      setThemeStatusMessage("Theme saved.");
+      setThemeErrorMessage(null);
+      applySavedSettings(response);
     },
     onError: (error) => {
-      setStatusMessage(null);
+      setThemeStatusMessage(null);
+      if (isAuthError(error)) {
+        setAuthRequired(true);
+      }
+    },
+  });
+
+  const saveChatSettings = useMutation({
+    mutationFn: (payload: AccountSettingsUpdatePayload) => apiClient.patchAccountSettings(payload),
+    onSuccess: (response) => {
+      setChatStatusMessage("Chat order saved.");
+      setChatErrorMessage(null);
+      applySavedSettings(response);
+    },
+    onError: (error) => {
+      setChatStatusMessage(null);
       if (isAuthError(error)) {
         setAuthRequired(true);
       }
@@ -5398,25 +5422,38 @@ function AccountSettingsPage() {
   });
 
   const error = getApiErrorMessage(settingsQuery.error);
-  const saveError = saveSettings.error ? apiErrorMessage(saveSettings.error) : null;
+  const themeSaveError = themeErrorMessage ?? (saveThemeSettings.error ? apiErrorMessage(saveThemeSettings.error) : null);
+  const chatSaveError = chatErrorMessage ?? (saveChatSettings.error ? apiErrorMessage(saveChatSettings.error) : null);
   const preferences = settingsQuery.data?.preferences;
   const themePresets = settingsQuery.data?.theme_presets ?? [];
   const chatOrderChoices = settingsQuery.data?.session_chat_order_choices ?? [];
   const user = settingsQuery.data?.user;
   const selectedTheme = themePresets.find((theme) => theme.key === (preferences?.theme_key || draftThemeKey));
-  const hasDraft = Boolean(draftThemeKey || draftChatOrder);
-  const isUnchanged =
-    draftThemeKey === (preferences?.theme_key || "") &&
+  const isThemeUnchanged =
+    draftThemeKey === (preferences?.theme_key || "");
+  const isChatOrderUnchanged =
     draftChatOrder === (preferences?.session_chat_order || "");
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleThemeSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!hasDraft) {
+    if (isThemeUnchanged) {
       return;
     }
-    setStatusMessage(null);
-    saveSettings.mutate({
+    setThemeStatusMessage(null);
+    setThemeErrorMessage(null);
+    saveThemeSettings.mutate({
       theme_key: draftThemeKey,
+    });
+  };
+
+  const handleChatOrderSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isChatOrderUnchanged) {
+      return;
+    }
+    setChatStatusMessage(null);
+    setChatErrorMessage(null);
+    saveChatSettings.mutate({
       session_chat_order: draftChatOrder,
     });
   };
@@ -5438,10 +5475,10 @@ function AccountSettingsPage() {
       {settingsQuery.data ? (
         <section className="page-layout account-layout">
           <article className="card account-panel">
-            <form onSubmit={handleSubmit}>
-              <section className="account-settings-group">
-                <h2>Color theme</h2>
-                <p className="meta">These presets restyle the shared app chrome, cards, forms, and reading surfaces.</p>
+            <section className="account-settings-group">
+              <h2>Color theme</h2>
+              <p className="meta">These presets restyle the shared app chrome, cards, forms, and reading surfaces.</p>
+              <form className="stack-form" onSubmit={handleThemeSubmit}>
                 <div className="theme-grid">
                   {themePresets.map((theme) => {
                     const inputId = `account-theme-${theme.key}`;
@@ -5473,13 +5510,20 @@ function AccountSettingsPage() {
                     );
                   })}
                 </div>
-              </section>
+                <button type="submit" className="button" disabled={saveThemeSettings.isPending || isThemeUnchanged}>
+                  {saveThemeSettings.isPending ? "Saving..." : "Save theme"}
+                </button>
+                {themeStatusMessage ? <p className="status status-neutral">{themeStatusMessage}</p> : null}
+                {themeSaveError ? <p className="status status-error">{themeSaveError}</p> : null}
+              </form>
+            </section>
 
-              <section className="account-settings-group">
-                <h2>Live session chat order</h2>
-                <p className="meta">
-                  This changes the order of the live Session chat window for your account only. Stored session logs stay chronological.
-                </p>
+            <section className="account-settings-group">
+              <h2>Live session chat order</h2>
+              <p className="meta">
+                This changes the order of the live Session chat window for your account only. Stored session logs stay chronological.
+              </p>
+              <form className="stack-form" onSubmit={handleChatOrderSubmit}>
                 <div className="theme-grid">
                   {chatOrderChoices.map((choice) => {
                     const inputId = `account-chat-order-${choice.value}`;
@@ -5508,16 +5552,17 @@ function AccountSettingsPage() {
                     );
                   })}
                 </div>
-              </section>
-
-              <div className="account-settings-actions">
-                <button type="submit" className="button" disabled={saveSettings.isPending || !hasDraft || isUnchanged}>
-                  {saveSettings.isPending ? "Saving..." : "Save account settings"}
+                <button
+                  type="submit"
+                  className="button"
+                  disabled={saveChatSettings.isPending || isChatOrderUnchanged}
+                >
+                  {saveChatSettings.isPending ? "Saving..." : "Save chat order"}
                 </button>
-                {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
-                {saveError ? <p className="status status-error">{saveError}</p> : null}
-              </div>
-            </form>
+                {chatStatusMessage ? <p className="status status-neutral">{chatStatusMessage}</p> : null}
+                {chatSaveError ? <p className="status status-error">{chatSaveError}</p> : null}
+              </form>
+            </section>
           </article>
 
           <aside className="card account-sidebar">
