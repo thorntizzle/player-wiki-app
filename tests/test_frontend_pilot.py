@@ -1014,6 +1014,48 @@ def test_character_dnd_resources_section_uses_flask_style_row_form_chrome() -> N
     assert 'Save' not in resources_markup
 
 
+def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    section_start = source.index('{isDnd && activeCharacterSection === "spells" ? (')
+    section_end = source.index('{isDnd && activeCharacterSection === "equipment" ? (', section_start)
+    section_markup = source[section_start:section_end]
+
+    controls_start = section_markup.index('{spellSlots.length ? (')
+    controls_end = section_markup.index('{presentedSpells.length ? (', controls_start)
+    slot_controls_markup = section_markup[controls_start:controls_end]
+
+    assert 'className="spell-slot-editor-list spell-slot-editor-list--compact"' in slot_controls_markup
+    assert '<article className="detail-card"' in slot_controls_markup
+    assert 'onSubmit={(event) => submitSpellSlot(event, slot)}' in slot_controls_markup
+    assert 'className="session-inline-form"' in slot_controls_markup
+    assert 'data-character-autosubmit' in slot_controls_markup
+    assert 'data-character-sheet-edit-form="spell-slot"' in slot_controls_markup
+    assert 'data-character-sheet-edit-level={level}' in slot_controls_markup
+    assert 'data-character-sheet-edit-slot-lane-id={slotLaneId}' in slot_controls_markup
+    assert 'className="session-field" htmlFor={`spell-slot-${key}`}' in slot_controls_markup
+    assert 'onBlur={submitSpellSlotOnBlur}' in slot_controls_markup
+    assert (
+        re.search(
+            r'<button type="submit" className="visually-hidden" disabled=\{patchSpellSlot\.isPending \|\| !canEdit\}>\s*Update \{slotLabel\}\s*</button>',
+            slot_controls_markup,
+        )
+        is not None
+    )
+    assert 'className="visually-hidden"' in slot_controls_markup
+    assert 'Update {slotLabel}' in slot_controls_markup
+    assert 'className="section-heading"' in slot_controls_markup
+    assert '<h3>{slotLabel}</h3>' in slot_controls_markup
+    assert (
+        re.search(r'className="meta">\s*\{available\} available / \{max\}\s*</span>', slot_controls_markup) is not None
+    )
+
+    assert 'className="character-card-grid"' not in slot_controls_markup
+    assert 'className="compact-state-form"' not in slot_controls_markup
+    assert 'className="character-state-card"' not in slot_controls_markup
+    assert 'className="chat-label"' not in slot_controls_markup
+    assert 'Save' not in slot_controls_markup
+
+
 def test_player_session_revealed_articles_panel_uses_session_article_row_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     panel_start = source.index("function SessionArticlesPanel({")

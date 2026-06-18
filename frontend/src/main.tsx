@@ -8709,6 +8709,13 @@ function CharacterPane({
     });
   };
 
+  const submitSpellSlotOnBlur = (event: FocusEvent<HTMLInputElement>) => {
+    if (!canEdit || patchSpellSlot.isPending) {
+      return;
+    }
+    event.currentTarget.form?.requestSubmit();
+  };
+
   const submitInventory = (event: FormEvent<HTMLFormElement>, itemId: string) => {
     event.preventDefault();
     const quantity = parseNumberInput(inventoryDrafts[itemId] ?? "", "quantity");
@@ -10210,37 +10217,61 @@ function CharacterPane({
                   </article>
                 </div>
                 {spellSlots.length ? (
-                  <div className="character-card-grid">
+                  <div className="spell-slot-editor-list spell-slot-editor-list--compact">
                     {spellSlots.map((slot) => {
                       const level = readNumber(slot.level);
                       const slotLaneId = readString(slot.slot_lane_id);
                       const key = draftKey(level, slotLaneId);
+                      const used = readNumber(slot.used);
+                      const max = readNumber(slot.max);
+                      const available = readNumber(slot.available, Math.max(0, max - used));
+                      const slotLabel = readString(slot.label, `Level ${level}`);
                       return (
-                        <article className="character-state-card" key={key}>
-                          <h4>Level {level}</h4>
-                          <p>
-                            Used {readNumber(slot.used)} / {readNumber(slot.max)}
-                          </p>
+                        <article className="detail-card" key={key}>
                           {canEdit ? (
-                            <form onSubmit={(event) => submitSpellSlot(event, slot)} className="compact-state-form">
-                              <label className="chat-label" htmlFor={`spell-slot-${key}`}>
-                                Used
+                            <form
+                              onSubmit={(event) => submitSpellSlot(event, slot)}
+                              className="session-inline-form"
+                              data-character-sheet-edit-form="spell-slot"
+                              data-character-sheet-edit-level={level}
+                              data-character-sheet-edit-slot-lane-id={slotLaneId}
+                              data-character-autosubmit
+                            >
+                              <div className="section-heading">
+                                <h3>{slotLabel}</h3>
+                                <span className="meta">
+                                  {available} available / {max}
+                                </span>
+                              </div>
+                              <label className="session-field" htmlFor={`spell-slot-${key}`}>
+                                <span>Used</span>
+                                <input
+                                  id={`spell-slot-${key}`}
+                                  type="number"
+                                  min="0"
+                                  max={max}
+                                  value={spellSlotDrafts[key] ?? ""}
+                                  onChange={(event) =>
+                                    setSpellSlotDrafts({ ...spellSlotDrafts, [key]: event.currentTarget.value })
+                                  }
+                                  onBlur={submitSpellSlotOnBlur}
+                                />
                               </label>
-                              <input
-                                id={`spell-slot-${key}`}
-                                type="number"
-                                min="0"
-                                max={readNumber(slot.max)}
-                                value={spellSlotDrafts[key] ?? ""}
-                                onChange={(event) =>
-                                  setSpellSlotDrafts({ ...spellSlotDrafts, [key]: event.currentTarget.value })
-                                }
-                              />
-                              <button type="submit" disabled={patchSpellSlot.isPending}>
-                                Save
+                              <button type="submit" className="visually-hidden" disabled={patchSpellSlot.isPending || !canEdit}>
+                                Update {slotLabel}
                               </button>
                             </form>
-                          ) : null}
+                          ) : (
+                            <>
+                              <div className="section-heading">
+                                <h3>{slotLabel}</h3>
+                                <span className="meta">
+                                  {available} available / {max}
+                                </span>
+                              </div>
+                              <p>Used {used} / {max}</p>
+                            </>
+                          )}
                         </article>
                       );
                     })}
