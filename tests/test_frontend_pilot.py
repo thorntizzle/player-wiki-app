@@ -225,6 +225,71 @@ def test_combat_conditions_chrome_in_source() -> None:
     assert "className=\"button button-secondary\"" not in condition_section_markup
 
 
+def test_combat_unsupported_system_fallback_chrome_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    combat_page_start = source.index("function CombatPage() {")
+    campaign_combat_route_start = source.index("const campaignCombatRoute", combat_page_start)
+    combat_page_source = source[combat_page_start:campaign_combat_route_start]
+
+    unsupported_match = re.search(
+        r'\{payload && !payload\.combat_system_supported \? \([\s\S]*?<section className="card auth-card"[\s\S]*?</section>[\s\S]*?\) : null\}',
+        combat_page_source,
+    )
+    assert unsupported_match is not None
+    unsupported_markup = unsupported_match.group(0)
+
+    assert 'className="card auth-card"' in unsupported_markup
+    assert (
+        '<h2>Combat tracker not configured for {payload.campaign.system || "this system"} yet</h2>'
+        in unsupported_markup
+    )
+    assert (
+        re.search(
+            r"This route is a placeholder for the campaign system lane\.\s*The current combat tracker is\s*"
+            r"DND-5E-only, so no encounter automation is available here for {payload\.campaign\.system \|\| \"this system\"} yet\.",
+            unsupported_markup,
+        )
+        is not None
+    )
+    assert 'className="hero-actions"' in unsupported_markup
+    assert (
+        re.search(
+            r'<a className="button-link" href=\{payload\.links\?\.flask_campaign_url[^}]*\}',
+            unsupported_markup,
+        ) is not None
+        and "Open Campaign Home" in unsupported_markup
+    )
+    assert (
+        re.search(
+            r'<a className="ghost-button" href=\{payload\.links\.flask_characters_url\}\>Open Characters</a>',
+            unsupported_markup,
+        )
+        is not None
+        or re.search(
+            r'<a className="ghost-button" href=\{payload\.links\.flask_characters_url\}\>\s*Open Characters\s*</a>',
+            unsupported_markup,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'<a className="ghost-button" href=\{payload\.links\.flask_session_url\}\>Open Session</a>',
+            unsupported_markup,
+        )
+        is not None
+        or re.search(
+            r'<a className="ghost-button" href=\{payload\.links\.flask_session_url\}\>\s*Open Session\s*</a>',
+            unsupported_markup,
+        )
+        is not None
+    )
+    assert "Open Flask Combat" not in unsupported_markup
+    assert "button button-secondary" not in unsupported_markup
+
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+    assert re.search(r"\.auth-card\s*\{\s*max-width:\s*36rem;\s*\}", styles) is not None
+
+
 def test_character_portrait_manager_action_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     section_start = source.index('<form className="stack-form character-portrait-manager"')

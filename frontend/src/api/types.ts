@@ -726,6 +726,9 @@ export interface CombatPayload extends ApiResponseBase {
   };
   links?: {
     flask_combat_url?: string;
+    flask_campaign_url?: string;
+    flask_characters_url?: string;
+    flask_session_url?: string;
     flask_dm_status_url?: string;
     flask_dm_controls_url?: string;
     flask_status_url?: string;

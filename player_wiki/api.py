@@ -2509,6 +2509,8 @@ def register_api(app) -> None:
         can_manage_combat = can_manage_campaign_combat(campaign_slug)
         can_access_dm_content = can_access_campaign_scope(campaign_slug, "dm_content")
         can_access_systems = can_access_campaign_scope(campaign_slug, "systems")
+        can_access_characters = can_access_campaign_scope(campaign_slug, "characters")
+        can_access_session = can_access_campaign_scope(campaign_slug, "session")
         combat_system_supported = supports_combat_tracker(campaign.system)
 
         tracker_view: dict[str, Any] = {
@@ -2696,6 +2698,17 @@ def register_api(app) -> None:
             },
             "links": {
                 "flask_combat_url": url_for("campaign_combat_view", campaign_slug=campaign_slug),
+                "flask_campaign_url": url_for("campaign_view", campaign_slug=campaign_slug),
+                "flask_characters_url": (
+                    url_for("character_roster_view", campaign_slug=campaign_slug)
+                    if can_access_characters
+                    else ""
+                ),
+                "flask_session_url": (
+                    url_for("campaign_session_view", campaign_slug=campaign_slug)
+                    if can_access_session
+                    else ""
+                ),
                 "flask_dm_status_url": (
                     url_for("campaign_combat_dm_view", campaign_slug=campaign_slug)
                     if can_manage_combat

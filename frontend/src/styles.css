@@ -1069,6 +1069,10 @@ a:hover {
   box-shadow: var(--shadow-soft);
 }
 
+.auth-card {
+  max-width: 36rem;
+}
+
 .card h3 {
   margin-top: 0;
 }

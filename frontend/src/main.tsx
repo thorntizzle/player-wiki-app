@@ -15397,14 +15397,27 @@ function CombatPage() {
       {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
 
       {payload && !payload.combat_system_supported ? (
-        <section className="card">
-          <h3>Combat tracker unavailable</h3>
-          <p>This campaign system does not use the DND-5E combat tracker yet.</p>
-          {payload.links?.flask_combat_url ? (
-            <a className="button button-secondary" href={payload.links.flask_combat_url}>
-              Open Flask Combat
+        <section className="card auth-card">
+          <h2>Combat tracker not configured for {payload.campaign.system || "this system"} yet</h2>
+          <p>
+            This route is a placeholder for the campaign system lane. The current combat tracker is
+            DND-5E-only, so no encounter automation is available here for {payload.campaign.system || "this system"} yet.
+          </p>
+          <div className="hero-actions">
+            <a className="button-link" href={payload.links?.flask_campaign_url || `/campaigns/${encodeURIComponent(campaignSlug)}`}>
+              Open Campaign Home
             </a>
-          ) : null}
+            {payload.links?.flask_characters_url ? (
+              <a className="ghost-button" href={payload.links.flask_characters_url}>
+                Open Characters
+              </a>
+            ) : null}
+            {payload.links?.flask_session_url ? (
+              <a className="ghost-button" href={payload.links.flask_session_url}>
+                Open Session
+              </a>
+            ) : null}
+          </div>
         </section>
       ) : null}
 

@@ -5162,9 +5162,9 @@ def test_api_combat_read_exposes_gen2_live_selection_and_fallback_links(client, 
 
 def test_api_combat_read_reports_unsupported_system_without_live_poll_targets(client, app, users):
     _configure_xianxia_campaign(app)
-    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-combat-gen2-xianxia-api")
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-combat-gen2-xianxia-api")
 
-    response = client.get("/api/v1/campaigns/linden-pass/combat", headers=api_headers(owner_token))
+    response = client.get("/api/v1/campaigns/linden-pass/combat", headers=api_headers(dm_token))
     assert response.status_code == 200
     payload = response.get_json()
 
@@ -5175,6 +5175,9 @@ def test_api_combat_read_reports_unsupported_system_without_live_poll_targets(cl
     assert payload["selected_player_character"] is None
     assert payload["player_character_targets"] == []
     assert payload["links"]["flask_combat_url"] == "/campaigns/linden-pass/combat"
+    assert payload["links"]["flask_campaign_url"] == "/campaigns/linden-pass"
+    assert payload["links"]["flask_characters_url"] == "/campaigns/linden-pass/characters"
+    assert payload["links"]["flask_session_url"] == "/campaigns/linden-pass/session"
 
 
 def test_api_combat_statblock_seed_uses_dex_modifier_for_tie_breaker(client, app, users):
