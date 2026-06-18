@@ -640,6 +640,45 @@ def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
     assert "Lookup" in creator_markup
 
 
+def test_dm_content_player_wiki_editor_fields_use_flask_style_labels_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    helper_start = source.index("const renderPlayerWikiDraftFields = ({")
+    helper_end = source.index("const renderStatblockCard =", helper_start)
+    helper_markup = source[helper_start:helper_end]
+
+    assert "className=\"chat-label\"" not in helper_markup
+    assert "dm-content-image-edit-row" not in helper_markup
+    assert '<label className="checkbox-label">' in helper_markup
+
+    expected_player_wiki_fields = [
+        ("title", "Title"),
+        ("slug", "Slug"),
+        ("section", "Section"),
+        ("type", "Page type"),
+        ("subsection", "Subsection"),
+        ("summary", "Summary"),
+        ("aliases", "Aliases"),
+        ("reveal-after-session", "Reveal after session"),
+        ("display-order", "Display order"),
+        ("source-ref", "Source reference"),
+        ("image", "Image path"),
+        ("image-upload", "Upload image"),
+        ("image-alt", "Image alt text"),
+        ("image-caption", "Image caption"),
+        ("body", "Markdown body"),
+    ]
+
+    for suffix, label in expected_player_wiki_fields:
+        label_open = '<label htmlFor={`$' + '{idPrefix}-' + suffix + '`} className="field">'
+        assert label_open in helper_markup
+        assert f"<span>{label}</span>" in helper_markup
+
+    player_wiki_form_class = 'className="stack-form dm-content-wiki-form"'
+    form_class_matches = re.findall(rf"<form\s+{player_wiki_form_class}", source)
+    assert len(form_class_matches) >= 2
+    assert "dm-player-wiki-edit-form" not in source
+
+
 def test_player_session_revealed_articles_panel_uses_session_article_row_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     panel_start = source.index("function SessionArticlesPanel({")
