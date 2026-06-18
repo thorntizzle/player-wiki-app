@@ -3853,20 +3853,20 @@ function SessionArticleReferenceActions({
   const sourceKind = article.source_kind?.trim() || "";
   if (sourceUrl) {
     return (
-      <a className="button button-secondary" href={sourceUrl}>
+      <a className="ghost-button" href={sourceUrl}>
         {article.source?.action_label || "View source"}
       </a>
     );
   }
 
   if (sourceKind) {
-    return article.source?.missing_message ? <span className="article-action-note">{article.source.missing_message}</span> : null;
+    return article.source?.missing_message ? <span className="meta">{article.source.missing_message}</span> : null;
   }
 
   const publishedPageUrl = getArticleUrl(article.links?.published_page_url);
   if (publishedPageUrl) {
     return (
-      <a className="button button-secondary" href={publishedPageUrl}>
+      <a className="ghost-button" href={publishedPageUrl}>
         View published page
       </a>
     );
@@ -3874,13 +3874,11 @@ function SessionArticleReferenceActions({
 
   const convertedTitle = article.converted_page?.title?.trim() || "";
   if (convertedTitle) {
+    const revealAfterSession = article.converted_page?.reveal_after_session;
     return (
-      <span className="article-action-note">
+      <span className="meta">
         Converted to {convertedTitle}
-        {article.converted_page?.reveal_after_session !== null && article.converted_page?.reveal_after_session !== undefined
-          ? `; visible after session ${article.converted_page.reveal_after_session}`
-          : ""}
-        .
+        {revealAfterSession !== null && revealAfterSession !== undefined ? `; visible after session ${revealAfterSession}` : ""}.
       </span>
     );
   }
@@ -3895,12 +3893,12 @@ function SessionArticleReferenceActions({
   return (
     <>
       {editorUrl ? (
-        <a className="button button-secondary" href={editorUrl}>
+        <a className="ghost-button" href={editorUrl}>
           Open in Player Wiki editor
         </a>
       ) : null}
       {convertUrl ? (
-        <a className="button button-secondary" href={convertUrl}>
+        <a className="ghost-button" href={convertUrl}>
           Convert to wiki page
         </a>
       ) : null}
@@ -11194,10 +11192,10 @@ function DmPane({
             <h2>Staged articles</h2>
             <p className="meta">{stagedArticles.length}</p>
           </div>
-          <p className="status status-neutral">Unrevealed staged articles are editable and ready for reveal.</p>
           {stagedArticles.length ? (
-            <div className="article-stack">
+            <div className="session-article-stack">
               {stagedArticles.map((article) => {
+                const savedLabel = article.created_at ? `Saved ${formatTimestamp(article.created_at)}` : null;
                 const draft = stagedDrafts[article.id] ?? {
                   title: article.title,
                   body: article.body_markdown,
@@ -11206,85 +11204,25 @@ function DmPane({
                 };
 
                 return (
-                  <details className="article-card" key={article.id}>
+                  <details className="feature-detail session-article-detail" data-session-article-id={article.id} key={article.id}>
                     <summary>
-                      <strong>{article.title}</strong>
+                      <span>{article.title}</span>
+                      {savedLabel ? <span className="meta">{savedLabel}</span> : null}
                     </summary>
                     {article.image ? (
-                      <img className="article-image" src={resolveArticleImage(campaignSlug, article)} alt={article.image.alt_text || "Article image"} />
+                      <figure className="article-figure">
+                        <img className="article-image" src={resolveArticleImage(campaignSlug, article)} alt={article.image.alt_text || "Article image"} />
+                        {article.image.caption ? <figcaption className="meta article-image__caption">{article.image.caption}</figcaption> : null}
+                      </figure>
                     ) : null}
                     <SessionArticleSourceLine article={article} />
-                    <label htmlFor={`dm-stage-title-${article.id}`} className="chat-label">
-                      Title
-                    </label>
-                    <input
-                      id={`dm-stage-title-${article.id}`}
-                      value={draft.title}
-                      onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                        setStagedDrafts({
-                          ...stagedDrafts,
-                          [article.id]: {
-                            ...draft,
-                            title: event.currentTarget.value,
-                          },
-                        });
-                      }}
-                    />
-                    <label htmlFor={`dm-stage-body-${article.id}`} className="chat-label">
-                      Body (markdown or html)
-                    </label>
-                    <textarea
-                      id={`dm-stage-body-${article.id}`}
-                      rows={6}
-                      value={draft.body}
-                      onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-                        setStagedDrafts({
-                          ...stagedDrafts,
-                          [article.id]: {
-                            ...draft,
-                            body: event.currentTarget.value,
-                          },
-                        });
-                      }}
-                    />
-                    <label htmlFor={`dm-stage-alt-${article.id}`} className="chat-label">
-                      Image alt text (optional)
-                    </label>
-                    <input
-                      id={`dm-stage-alt-${article.id}`}
-                      value={draft.imageAltText}
-                      onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                        setStagedDrafts({
-                          ...stagedDrafts,
-                          [article.id]: {
-                            ...draft,
-                            imageAltText: event.currentTarget.value,
-                          },
-                        });
-                      }}
-                    />
-                    <label htmlFor={`dm-stage-caption-${article.id}`} className="chat-label">
-                      Image caption (optional)
-                    </label>
-                    <input
-                      id={`dm-stage-caption-${article.id}`}
-                      value={draft.imageCaption}
-                      onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                        setStagedDrafts({
-                          ...stagedDrafts,
-                          [article.id]: {
-                            ...draft,
-                            imageCaption: event.currentTarget.value,
-                          },
-                        });
-                      }}
-                    />
-                    <div className="article-actions">
-                      <SessionArticleReferenceActions article={article} includePromotionLinks />
-                      <button
-                        type="button"
-                        disabled={updateArticleMutation.isPending}
-                        onClick={() => {
+                    {renderArticleBody(article, "article-body--compact")}
+                    <details className="session-article-edit-detail">
+                      <summary>Edit prep draft</summary>
+                      <form
+                        className="stack-form session-article-edit-form"
+                        onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                          event.preventDefault();
                           const articlePayload: {
                             title: string;
                             body_markdown: string;
@@ -11304,23 +11242,101 @@ function DmPane({
                           });
                         }}
                       >
-                        {updateArticleMutation.isPending ? "Saving..." : "Save draft"}
-                      </button>
+                        <label className="field" htmlFor={`dm-stage-title-${article.id}`}>
+                          <span>Title</span>
+                          <input
+                            id={`dm-stage-title-${article.id}`}
+                            value={draft.title}
+                            onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                              setStagedDrafts({
+                                ...stagedDrafts,
+                                [article.id]: {
+                                  ...draft,
+                                  title: event.currentTarget.value,
+                                },
+                              });
+                            }}
+                          />
+                        </label>
+                        <label className="field" htmlFor={`dm-stage-body-${article.id}`}>
+                          <span>Body (markdown or html)</span>
+                          <textarea
+                            id={`dm-stage-body-${article.id}`}
+                            rows={6}
+                            value={draft.body}
+                            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+                              setStagedDrafts({
+                                ...stagedDrafts,
+                                [article.id]: {
+                                  ...draft,
+                                  body: event.currentTarget.value,
+                                },
+                              });
+                            }}
+                          />
+                        </label>
+                        <label className="field" htmlFor={`dm-stage-alt-${article.id}`}>
+                          <span>Image alt text (optional)</span>
+                          <input
+                            id={`dm-stage-alt-${article.id}`}
+                            value={draft.imageAltText}
+                            onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                              setStagedDrafts({
+                                ...stagedDrafts,
+                                [article.id]: {
+                                  ...draft,
+                                  imageAltText: event.currentTarget.value,
+                                },
+                              });
+                            }}
+                          />
+                        </label>
+                        <label className="field" htmlFor={`dm-stage-caption-${article.id}`}>
+                          <span>Image caption (optional)</span>
+                          <input
+                            id={`dm-stage-caption-${article.id}`}
+                            value={draft.imageCaption}
+                            onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                              setStagedDrafts({
+                                ...stagedDrafts,
+                                [article.id]: {
+                                  ...draft,
+                                  imageCaption: event.currentTarget.value,
+                                },
+                              });
+                            }}
+                          />
+                        </label>
+                        <button
+                          type="submit"
+                          className="ghost-button"
+                          disabled={updateArticleMutation.isPending}
+                        >
+                          {updateArticleMutation.isPending ? "Saving..." : "Update prep draft"}
+                        </button>
+                      </form>
+                    </details>
+                    <div className="session-article-detail__actions">
+                      <SessionArticleReferenceActions article={article} includePromotionLinks />
+                      {activeSession ? (
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          disabled={revealArticleMutation.isPending}
+                          onClick={() => revealArticleMutation.mutate(article.id)}
+                        >
+                          {revealArticleMutation.isPending ? "Revealing..." : "Reveal in chat"}
+                        </button>
+                      ) : (
+                        <p className="meta">Begin a session before revealing this article.</p>
+                      )}
                       <button
                         type="button"
-                        className="button-danger"
-                        disabled={revealArticleMutation.isPending}
-                        onClick={() => revealArticleMutation.mutate(article.id)}
-                      >
-                        {revealArticleMutation.isPending ? "Revealing..." : "Reveal"}
-                      </button>
-                      <button
-                        type="button"
-                        className="button-danger"
+                        className="ghost-button"
                         disabled={deleteArticleMutation.isPending}
                         onClick={() => deleteArticleMutation.mutate(article.id)}
                       >
-                        {deleteArticleMutation.isPending ? "Deleting..." : "Delete"}
+                        {deleteArticleMutation.isPending ? "Deleting..." : "Delete article"}
                       </button>
                     </div>
                   </details>
@@ -11328,51 +11344,65 @@ function DmPane({
               })}
             </div>
           ) : (
-            <p className="status status-neutral">No staged articles.</p>
+            <p className="meta">No unrevealed session articles are waiting right now.</p>
           )}
         </article>
 
         {revealedArticles.length ? (
           <article className="card session-sidebar-card" id="session-revealed-articles">
             <div className="section-heading">
-              <h2>Revealed articles</h2>
-              <p className="meta">{revealedArticles.length}</p>
-            </div>
-            <div className="session-surface-subhead">
+              <div>
+                <h2>Revealed articles</h2>
+                <p className="meta">{revealedArticles.length}</p>
+              </div>
               <button
                 type="button"
-                className="button-danger"
+                className="ghost-button"
                 disabled={clearRevealedMutation.isPending || !revealedArticles.length}
                 onClick={() => clearRevealedMutation.mutate()}
               >
-                {clearRevealedMutation.isPending ? "Clearing..." : "Clear all revealed"}
+                {clearRevealedMutation.isPending ? "Clearing..." : "Clear all"}
               </button>
             </div>
-            <div className="article-stack">
-              {revealedArticles.map((article) => (
-                <details className="article-card" key={article.id}>
-                  <summary>
-                    <strong>{article.title}</strong>
-                    <span className="article-kind">{article.source_kind || "unclassified"}</span>
-                  </summary>
-                  {article.image ? (
-                    <img className="article-image" src={resolveArticleImage(campaignSlug, article)} alt={article.image.alt_text || "Article image"} />
-                  ) : null}
-                  <SessionArticleSourceLine article={article} />
-                  {renderArticleBody(article)}
-                  <div className="article-actions">
-                    <SessionArticleReferenceActions article={article} includePromotionLinks />
-                    <button
-                      type="button"
-                      className="button-danger"
-                      onClick={() => deleteArticleMutation.mutate(article.id)}
-                      disabled={deleteArticleMutation.isPending}
-                    >
-                      {deleteArticleMutation.isPending ? "Deleting..." : "Delete"}
-                    </button>
-                  </div>
-                </details>
-              ))}
+            <div className="session-article-stack">
+              {revealedArticles.map((article) => {
+                const revealedLabel = article.revealed_at
+                  ? `Revealed ${formatTimestamp(article.revealed_at)}`
+                  : article.created_at
+                    ? `Revealed ${formatTimestamp(article.created_at)}`
+                    : null;
+                return (
+                  <details className="feature-detail session-article-detail" data-session-article-id={article.id} key={article.id}>
+                    <summary>
+                      <span>{article.title}</span>
+                      {revealedLabel ? <span className="meta">{revealedLabel}</span> : null}
+                    </summary>
+                    {article.image ? (
+                      <figure className="article-figure">
+                        <img
+                          className="article-image"
+                          src={resolveArticleImage(campaignSlug, article)}
+                          alt={article.image.alt_text || "Article image"}
+                        />
+                        {article.image.caption ? <figcaption className="meta article-image__caption">{article.image.caption}</figcaption> : null}
+                      </figure>
+                    ) : null}
+                    <SessionArticleSourceLine article={article} />
+                    {renderArticleBody(article, "article-body--compact")}
+                    <div className="session-article-detail__actions">
+                      <SessionArticleReferenceActions article={article} includePromotionLinks />
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => deleteArticleMutation.mutate(article.id)}
+                        disabled={deleteArticleMutation.isPending}
+                      >
+                        {deleteArticleMutation.isPending ? "Deleting..." : "Delete article"}
+                      </button>
+                    </div>
+                  </details>
+                );
+              })}
             </div>
           </article>
         ) : null}

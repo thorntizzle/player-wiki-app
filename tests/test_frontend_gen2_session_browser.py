@@ -217,6 +217,77 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(page.get_by_role("heading", name="Session controls")).to_be_visible(timeout=5000)
             expect(page.get_by_role("heading", name="Session article store")).to_be_visible(timeout=5000)
             expect(page.get_by_role("heading", name="Live session")).to_be_visible(timeout=5000)
+
+            session_start_response = page.request.post(f"{base_url}/campaigns/linden-pass/session/start")
+            assert session_start_response.status in {200, 302}
+
+            staged_title = "Gen2 Session Parity Staged"
+            revealed_title = "Gen2 Session Parity Revealed"
+            staged_response = page.request.post(
+                f"{base_url}/campaigns/linden-pass/session/articles",
+                form={"title": staged_title, "body_markdown": "Staged only."},
+            )
+            assert staged_response.status in {200, 302}
+            revealed_source_response = page.request.post(
+                f"{base_url}/campaigns/linden-pass/session/articles",
+                form={"title": revealed_title, "body_markdown": "To be revealed."},
+            )
+            assert revealed_source_response.status in {200, 302}
+            reveal_ready_card = page.locator("article#session-staged-articles").locator(
+                "details.feature-detail.session-article-detail",
+                has_text=revealed_title,
+            )
+            expect(reveal_ready_card).to_be_visible(timeout=10000)
+            reveal_ready_card.locator("div.session-article-detail__actions").get_by_role("button", name="Reveal in chat").click()
+            expect(reveal_ready_card).to_have_count(0, timeout=10000)
+
+            staged_parity_section = page.locator("article#session-staged-articles")
+            revealed_parity_section = page.locator("article#session-revealed-articles")
+            revealed_card = revealed_parity_section.locator("details.feature-detail.session-article-detail", has_text=revealed_title)
+            expect(revealed_card).to_be_visible(timeout=10000)
+            staged_card = staged_parity_section.locator("details.feature-detail.session-article-detail", has_text=staged_title)
+            expect(staged_card).to_be_visible(timeout=10000)
+
+            if not staged_card.evaluate("(element) => element.open"):
+                staged_card.locator("> summary").click()
+            assert staged_card.evaluate("(element) => element.open") is True
+
+            if not revealed_card.evaluate("(element) => element.open"):
+                revealed_card.locator("> summary").click()
+            assert revealed_card.evaluate("(element) => element.open") is True
+
+            staged_edit_detail = staged_card.locator("details.session-article-edit-detail")
+            if not staged_edit_detail.evaluate("(element) => element.open"):
+                staged_edit_detail.locator("summary").click()
+            assert staged_edit_detail.evaluate("(element) => element.open") is True
+
+            expect(staged_parity_section.locator("div.session-article-stack")).to_have_count(1)
+            expect(revealed_parity_section.locator("div.session-article-stack")).to_have_count(1)
+            expect(staged_parity_section.locator("details.feature-detail.session-article-detail")).to_have_count(1)
+            expect(revealed_parity_section.locator("details.feature-detail.session-article-detail")).to_have_count(1)
+            expect(staged_card.locator("details.session-article-edit-detail")).to_have_count(1)
+            expect(staged_card.locator("form.stack-form.session-article-edit-form")).to_have_count(1)
+            expect(staged_card.locator("div.session-article-detail__actions")).to_have_count(1)
+            expect(revealed_card.locator("div.session-article-detail__actions")).to_have_count(1)
+            expect(staged_card.get_by_role("button", name="Update prep draft")).to_have_count(1)
+            expect(staged_card.locator("div.session-article-detail__actions").get_by_role("button", name="Reveal in chat")).to_have_class(
+                re.compile(r"\bghost-button\b")
+            )
+            expect(staged_card.locator("div.session-article-detail__actions").get_by_role("button", name="Delete article")).to_have_class(
+                re.compile(r"\bghost-button\b")
+            )
+            expect(revealed_card.locator("div.session-article-detail__actions").get_by_role("button", name="Delete article")).to_have_class(
+                re.compile(r"\bghost-button\b")
+            )
+            expect(revealed_parity_section.get_by_role("button", name="Clear all")).to_have_class(re.compile(r"\bghost-button\b"))
+
+            for section in (staged_parity_section, revealed_parity_section):
+                expect(section.locator(".article-stack")).to_have_count(0)
+                expect(section.locator("details.article-card")).to_have_count(0)
+                expect(section.locator(".article-actions")).to_have_count(0)
+                expect(section.locator(".article-kind")).to_have_count(0)
+                expect(section.locator(".button-danger")).to_have_count(0)
+
             dm_card_texts = page.evaluate(
                 """() => {
                     const section = document.querySelector(".pane-visible .page-layout.session-layout > .session-column");
@@ -3017,10 +3088,16 @@ def test_gen2_session_preserves_local_state_across_live_polling(
 
             session_tabs.get_by_role("button", name="DM", exact=True).click()
             dm_pane = page.locator(".pane-visible")
-            article_card = dm_pane.locator("details.article-card", has_text="Gen2 Preservation Article")
+            article_card = dm_pane.locator("details.feature-detail.session-article-detail", has_text="Gen2 Preservation Article")
             expect(article_card).to_be_visible(timeout=5000)
-            article_card.locator("summary").click()
+            if not article_card.evaluate("(element) => element.open"):
+                article_card.locator("> summary").click()
             assert article_card.evaluate("(element) => element.open") is True
+
+            edit_detail = article_card.locator("details.session-article-edit-detail")
+            if not edit_detail.evaluate("(element) => element.open"):
+                edit_detail.locator("summary").click()
+            assert edit_detail.evaluate("(element) => element.open") is True
 
             title_input = article_card.get_by_label("Title", exact=True)
             body_input = article_card.get_by_label("Body (markdown or html)")
@@ -3052,8 +3129,16 @@ def test_gen2_session_preserves_local_state_across_live_polling(
             expect(page.locator(".pane-visible").get_by_label("Character", exact=True)).to_have_value(selected_character)
 
             session_tabs.get_by_role("button", name="DM", exact=True).click()
-            article_card = page.locator(".pane-visible").locator("details.article-card", has_text="Gen2 Preservation Article")
+            article_card = page.locator(".pane-visible").locator("details.feature-detail.session-article-detail", has_text="Gen2 Preservation Article")
+            if not article_card.evaluate("(element) => element.open"):
+                article_card.locator("> summary").click()
             assert article_card.evaluate("(element) => element.open") is True
+
+            edit_detail = article_card.locator("details.session-article-edit-detail")
+            if not edit_detail.evaluate("(element) => element.open"):
+                edit_detail.locator("summary").click()
+            assert edit_detail.evaluate("(element) => element.open") is True
+
             expect(article_card.get_by_label("Title", exact=True)).to_have_value("Unsaved Gen2 Preservation Title")
             expect(article_card.get_by_label("Body (markdown or html)")).to_have_value(
                 "Unsaved body should remain in the staged article editor.",
@@ -3758,7 +3843,7 @@ def test_gen2_dm_content_browser_staged_article_workflow(
             expect(staged_card.locator("div.session-article-detail__actions")).to_have_count(1)
             expect(staged_card.get_by_role("button", name="Delete article")).to_have_class(re.compile(r"\bghost-button\b"))
             expect(staged_card.locator(".article-body.article-body--compact")).to_have_count(1)
-            staged_card.locator("summary").first.click()
+            staged_card.locator("> summary").first.click()
             staged_card.locator("details.session-article-edit-detail > summary").click()
             staged_card.get_by_label("Body").fill(article_updated_body)
             staged_card.get_by_role("button", name="Update prep draft").click()
@@ -3792,7 +3877,7 @@ def test_gen2_dm_content_browser_staged_article_workflow(
                 if not target_card.count():
                     continue
                 if not target_card.first.evaluate("element => element.open"):
-                    target_card.first.locator("summary").click()
+                    target_card.first.locator("> summary").click()
                 expect(target_card.first.locator("div.session-article-detail__actions").locator(".article-actions")).to_have_count(0)
                 expect(target_card.first.locator("div.session-article-detail__actions").locator(".button-danger")).to_have_count(0)
                 expect(target_card.first.locator("div.session-article-detail__actions").get_by_role("button", name="Delete article")).to_have_class(
