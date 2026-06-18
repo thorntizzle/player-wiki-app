@@ -13152,29 +13152,27 @@ function DmContentPage() {
       .map((part) => encodeURIComponent(part))
       .join("/");
     const isDeleting = deletePlayerWikiPageMutation.isPending;
+    const pageId = `wiki-page-${simpleSlug(pageFile.page_ref)}`;
     return (
-      <details
-        className="article-card dm-player-wiki-card"
+      <article
+        className="dm-content-item dm-player-wiki-card"
         key={pageFile.page_ref}
-        onToggle={(event) => {
-          const target = event.currentTarget;
-          if (target.open && !playerWikiEditDrafts[pageFile.page_ref]) {
-            void loadPlayerWikiEditDraft(pageFile.page_ref);
-          }
-        }}
+        id={pageId}
       >
-        <summary>
-          <strong>{pageFile.page.title || pageFile.page_ref}</strong>
-          <span className="article-kind">{pageFile.page_ref}.md</span>
-        </summary>
-        <div className="badge-list">
-          <span className="meta-badge">{playerWikiStatusLabel(pageFile)}</span>
-          <span className="meta-badge">{pageFile.page.section || "Unsectioned"}</span>
-          {pageFile.page.subsection ? <span className="meta-badge">{pageFile.page.subsection}</span> : null}
-          {pageFile.page.image_path ? <span className="meta-badge">Image</span> : null}
-          <span className="meta-badge">{safety.removal_status_label}</span>
+        <div className="dm-content-item__header">
+          <div>
+            <h3>{pageFile.page.title || pageFile.page_ref}</h3>
+            <p className="meta">{pageFile.page_ref}.md</p>
+            {pageFile.page.summary ? <p className="meta">{pageFile.page.summary}</p> : null}
+          </div>
+          <div className="badge-list">
+            <span className="meta-badge">{playerWikiStatusLabel(pageFile)}</span>
+            <span className="meta-badge">{pageFile.page.section || "Unsectioned"}</span>
+            {pageFile.page.subsection ? <span className="meta-badge">{pageFile.page.subsection}</span> : null}
+            {pageFile.page.image_path ? <span className="meta-badge">Image</span> : null}
+            <span className="meta-badge">{safety.removal_status_label}</span>
+          </div>
         </div>
-        {pageFile.page.summary ? <p className="meta">{pageFile.page.summary}</p> : null}
         {pageFile.page.source_ref ? <p className="meta">Source: {pageFile.page.source_ref}</p> : null}
         <div className="dm-content-removal-safety">
           <p className="meta">
@@ -13185,31 +13183,67 @@ function DmContentPage() {
               {safety.hard_delete_blockers.map((blocker) => (
                 <li className="meta" key={blocker}>
                   {blocker}
-                </li>
-              ))}
-            </ul>
-          ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
         </div>
-        <div className="article-actions">
+        <div className="dm-content-item__actions">
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={!canManagePlayerWiki}
+            onClick={() => void loadPlayerWikiEditDraft(pageFile.page_ref)}
+          >
+            Edit
+          </button>
           {pageFile.page.is_visible ? (
-            <a className="button button-secondary" href={`/app-next/campaigns/${encodedCampaignSlug}/pages/${encodedPageRef}`}>
+            <a
+              className="ghost-button"
+              href={`/app-next/campaigns/${encodedCampaignSlug}/pages/${encodedPageRef}`}
+            >
               Open
             </a>
           ) : null}
-          <a className="button button-secondary" href={`/campaigns/${encodedCampaignSlug}/dm-content/player-wiki/pages/${encodedPageRef}/edit`}>
-            Flask editor
-          </a>
           <button
             type="button"
+            className="ghost-button"
             disabled={!canManagePlayerWiki || archivePlayerWikiPageMutation.isPending || !pageFile.page.published}
             onClick={() => archivePlayerWikiPageMutation.mutate(pageFile.page_ref)}
           >
             {archivePlayerWikiPageMutation.isPending ? "Archiving..." : "Unpublish/archive"}
           </button>
+          {safety.can_hard_delete ? (
+            <form className="dm-content-delete-form">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={deleteConfirmed}
+                  disabled={!canManagePlayerWiki || !safety.can_hard_delete}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                    const checked = event.currentTarget.checked;
+                    setPlayerWikiDeleteConfirm((current) => ({
+                      ...current,
+                      [pageFile.page_ref]: checked,
+                    }));
+                  }}
+                />
+                Confirm hard delete
+              </label>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={!canManagePlayerWiki || !safety.can_hard_delete || !deleteConfirmed || isDeleting}
+                onClick={() => deletePlayerWikiPageMutation.mutate(pageFile.page_ref)}
+              >
+                {isDeleting ? "Deleting..." : "Delete file"}
+              </button>
+            </form>
+          ) : null}
         </div>
         {editDraft ? (
           <form
-            className="session-form dm-player-wiki-edit-form"
+            className="stack-form dm-player-wiki-edit-form"
             onSubmit={(event: FormEvent<HTMLFormElement>) => {
               event.preventDefault();
               if (!editDraft.title.trim()) {
@@ -13237,43 +13271,14 @@ function DmContentPage() {
               includeSlug: false,
               disabled: !canManagePlayerWiki,
             })}
-            <div className="article-actions">
+            <div className="dm-content-item__actions">
               <button type="submit" disabled={!canManagePlayerWiki || savePlayerWikiPageMutation.isPending}>
                 {savePlayerWikiPageMutation.isPending ? "Saving..." : "Save wiki page"}
               </button>
             </div>
           </form>
-        ) : (
-          <button type="button" disabled={!canManagePlayerWiki} onClick={() => void loadPlayerWikiEditDraft(pageFile.page_ref)}>
-            Load editor
-          </button>
-        )}
-        <div className="dm-content-delete-form">
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={deleteConfirmed}
-              disabled={!canManagePlayerWiki || !safety.can_hard_delete}
-              onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                const checked = event.currentTarget.checked;
-                setPlayerWikiDeleteConfirm((current) => ({
-                  ...current,
-                  [pageFile.page_ref]: checked,
-                }));
-              }}
-            />
-            Confirm hard delete
-          </label>
-          <button
-            type="button"
-            className="button-danger"
-            disabled={!canManagePlayerWiki || !safety.can_hard_delete || !deleteConfirmed || isDeleting}
-            onClick={() => deletePlayerWikiPageMutation.mutate(pageFile.page_ref)}
-          >
-            {isDeleting ? "Deleting..." : "Delete file"}
-          </button>
-        </div>
-      </details>
+        ) : null}
+      </article>
     );
   };
 
@@ -13601,7 +13606,7 @@ function DmContentPage() {
               <p className="meta">Direct authoring for durable player-facing reference pages.</p>
             </div>
             <form
-              className="session-form"
+              className="stack-form dm-player-wiki-edit-form"
               onSubmit={(event: FormEvent<HTMLFormElement>) => {
                 event.preventDefault();
                 if (!playerWikiCreateDraft.title.trim()) {
@@ -13649,7 +13654,7 @@ function DmContentPage() {
             </form>
             {contentPagesQuery.isLoading ? <p className="status status-neutral">Loading Player Wiki pages ...</p> : null}
             {!contentPagesQuery.isLoading && filteredPlayerWikiPages.length ? (
-              <div className="article-stack dm-player-wiki-list">
+              <div className="dm-content-list dm-player-wiki-list">
                 {filteredPlayerWikiPages.map(renderPlayerWikiPageCard)}
               </div>
             ) : null}

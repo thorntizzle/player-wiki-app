@@ -2480,6 +2480,38 @@ a:hover {
   padding: 0.5rem 0.65rem;
 }
 
+.dm-content-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.dm-content-item {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+}
+
+.dm-content-item__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.dm-content-item__header h3 {
+  margin: 0;
+}
+
+.dm-content-item__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
 .dm-content-preview {
   margin: 0;
   padding: 0.72rem 0.8rem;
