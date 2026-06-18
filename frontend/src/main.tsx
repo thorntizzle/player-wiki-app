@@ -8136,7 +8136,10 @@ function CharacterPane({
   const inventory = asRecordArray(state.inventory);
   const currency = isXianxia ? asRecord(xianxiaState.currency) : asRecord(state.currency);
   const notes = asRecord(state.notes);
-  const abilityScores = asRecord(stats.ability_scores);
+  const dndAbilities = asRecordArray(detailRecord?.abilities);
+  const dndSkills = asRecordArray(detailRecord?.skills);
+  const dndProficiencyGroups = asRecordArray(detailRecord?.proficiency_groups);
+  const hasDndAbilitySkillsContent = Boolean(dndAbilities.length || dndSkills.length || dndProficiencyGroups.length);
   const spells = asRecordArray(spellcasting.spells);
   const equipmentState = detailRecord?.equipment_state;
   const equipmentRows = equipmentState?.rows ?? [];
@@ -11306,33 +11309,83 @@ function CharacterPane({
                 <div className="section-heading">
                   <h2>Abilities and Skills</h2>
                 </div>
-                <div className="ability-grid">
-                  {Object.entries(abilityScores).map(([key, value]) => {
-                    const ability = asRecord(value);
-                    return (
-                      <article className="character-state-card" key={key}>
-                        <h4>{key}</h4>
-                        <p>Score {String(ability.score ?? "--")}</p>
-                        <p>Modifier {String(ability.modifier ?? "--")}</p>
-                        <p>Save {String(ability.save_bonus ?? "--")}</p>
-                      </article>
-                    );
-                  })}
-                </div>
-                <div className="stat-grid">
-                  <article>
-                    <strong>Passive Perception</strong>
-                    <span>{String(stats.passive_perception ?? "--")}</span>
+                {hasDndAbilitySkillsContent ? (
+                  <>
+                    <div className="ability-grid ability-grid--skills">
+                      {dndAbilities.map((ability, abilityIndex) => {
+                        const abilityRecord = asRecord(ability);
+                        const abilitySkills = asRecordArray(abilityRecord.skills);
+                        const abilityScoreValue = readNumber(abilityRecord.score, NaN);
+                        const abilityScore = Number.isNaN(abilityScoreValue) ? "--" : String(abilityScoreValue);
+                        return (
+                          <article
+                            className="ability-card ability-card--skills"
+                            key={readString(abilityRecord.key, `ability-${abilityIndex}`)}
+                          >
+                            <div>
+                              <p className="card-kicker">{readString(abilityRecord.abbr, readString(abilityRecord.key))}</p>
+                              <h3>{abilityScore}</h3>
+                              <p>{readString(abilityRecord.name)}</p>
+                              <p className="meta">
+                                Modifier {readString(abilityRecord.modifier)} | Save {readString(abilityRecord.save_bonus)}
+                              </p>
+                            </div>
+                            {abilitySkills.length ? (
+                              <ul className="plain-list ability-skill-list">
+                                {abilitySkills.map((skill, skillIndex) => {
+                                  const skillRecord = asRecord(skill);
+                                  const isProficient = Boolean(skillRecord.is_proficient);
+                                  const proficiencyLabel = readString(skillRecord.proficiency_label);
+                                  return (
+                                    <li
+                                      className={
+                                        isProficient
+                                          ? "ability-skill-list__item ability-skill-list__item--proficient"
+                                          : "ability-skill-list__item"
+                                      }
+                                      key={readString(skillRecord.name, `skill-${abilityIndex}-${skillIndex}`)}
+                                    >
+                                      <span>{readString(skillRecord.name)}</span>
+                                      <strong>{readString(skillRecord.bonus)}</strong>
+                                      {proficiencyLabel && proficiencyLabel !== "None" ? (
+                                        <span className="meta">{proficiencyLabel}</span>
+                                      ) : null}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            ) : (
+                              <p className="meta">No linked skills</p>
+                            )}
+                          </article>
+                        );
+                      })}
+                    </div>
+
+                    {dndProficiencyGroups.length ? (
+                      <div className="detail-cluster">
+                        <div>
+                          <h3>Proficiencies</h3>
+                          <div className="detail-grid">
+                            {dndProficiencyGroups.map((group) => {
+                              const groupRecord = asRecord(group);
+                              return (
+                                <article className="detail-card" key={readString(groupRecord.title)}>
+                                  <h4>{readString(groupRecord.title)}</h4>
+                                  <p>{asStringArray(groupRecord.values_list).join(", ")}</p>
+                                </article>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <article className="detail-card">
+                    <p className="meta">No ability or skill details are recorded on this sheet yet.</p>
                   </article>
-                  <article>
-                    <strong>Passive Insight</strong>
-                    <span>{String(stats.passive_insight ?? "--")}</span>
-                  </article>
-                  <article>
-                    <strong>Passive Investigation</strong>
-                    <span>{String(stats.passive_investigation ?? "--")}</span>
-                  </article>
-                </div>
+                )}
               </section>
             ) : null}
 

@@ -1284,6 +1284,33 @@ def test_character_dnd_inventory_section_uses_flask_style_row_form_chrome() -> N
     assert '>Save<' not in inventory_controls_markup
 
 
+def test_character_dnd_abilities_and_skills_section_uses_flask_style_skill_layout_chrome() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    section_start = source.index('{isDnd && activeCharacterSection === "abilities" ? (')
+    section_end = source.index(
+        '{isReadSurface && activeCharacterSection === "controls" && canUseControls && controls ? (',
+        section_start,
+    )
+    section_markup = source[section_start:section_end]
+
+    assert 'className="ability-grid ability-grid--skills"' in section_markup
+    assert 'className="ability-card ability-card--skills"' in section_markup
+    assert 'className="card-kicker"' in section_markup
+    assert 'className="plain-list ability-skill-list"' in section_markup
+    assert "ability-skill-list__item" in section_markup
+    assert "ability-skill-list__item--proficient" in section_markup
+    assert "No linked skills" in section_markup
+    assert 'className="detail-cluster"' in section_markup
+    assert 'className="detail-card"' in section_markup
+    assert "No ability or skill details are recorded on this sheet yet." in section_markup
+
+    assert 'className="character-state-card"' not in section_markup
+    assert 'className="stat-grid"' not in section_markup
+    assert "Passive Perception" not in section_markup
+    assert "Passive Insight" not in section_markup
+    assert "Passive Investigation" not in section_markup
+
+
 def test_character_dnd_equipment_section_uses_flask_style_row_form_chrome() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "equipment" ? (')

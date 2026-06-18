@@ -1550,6 +1550,29 @@ export interface CharacterPresentedInventoryItem {
   tags: string[];
 }
 
+export interface CharacterAbilitySkill {
+  name: string;
+  bonus: string;
+  proficiency_label?: string;
+  is_proficient?: boolean;
+  ability_key?: string;
+}
+
+export interface CharacterAbility {
+  key: string;
+  abbr: string;
+  name: string;
+  score: number;
+  modifier: string;
+  save_bonus: string;
+  skills?: CharacterAbilitySkill[];
+}
+
+export interface CharacterProficiencyGroup {
+  title: string;
+  values_list: string[];
+}
+
 export interface CharacterXianxiaNamedRecord {
   name: string;
   href?: string;
@@ -1675,6 +1698,9 @@ export interface CharacterRecord {
   arcane_armor_state?: CharacterArcaneArmorState;
   presented_spellcasting?: CharacterPresentedSpellcasting;
   presented_inventory?: CharacterPresentedInventoryItem[];
+  abilities?: CharacterAbility[];
+  skills?: CharacterAbilitySkill[];
+  proficiency_groups?: CharacterProficiencyGroup[];
   presented_xianxia?: CharacterPresentedXianxia;
   portrait?: CharacterPortrait | null;
   controls?: CharacterControls | null;
