@@ -12221,7 +12221,7 @@ function DmContentPage() {
   const dmContentQuery = useQuery({
     queryKey: ["dm-content", resolvedCampaignSlug],
     queryFn: () => apiClient.getDmContent(resolvedCampaignSlug),
-    enabled: Boolean(resolvedCampaignSlug) && (activeLane === "statblocks" || activeLane === "conditions"),
+    enabled: Boolean(resolvedCampaignSlug),
     retry: false,
   });
 
@@ -12691,22 +12691,28 @@ function DmContentPage() {
       : activeLane === "systems"
         ? null
       : getApiErrorMessage(dmContentQuery.error);
-  const pageTitle = activeLane === "statblocks"
-    ? "DM Content: Statblocks"
-    : activeLane === "conditions"
-      ? "DM Content: Conditions"
-      : activeLane === "player-wiki"
-        ? "DM Content: Player Wiki"
-        : activeLane === "systems"
-          ? "DM Content: Systems"
-          : "DM Content: Staged Articles";
-  const canShowDmPlus = (activeLane === "statblocks" || activeLane === "conditions")
-    ? canManageDmContent
-    : activeLane === "staged-articles"
-      ? canManageSession
-      : activeLane === "player-wiki"
-        ? canManagePlayerWiki
-        : false;
+  const dmContentSystemsQuery = useQuery({
+    queryKey: ["dm-content-systems", resolvedCampaignSlug],
+    queryFn: () => apiClient.getDmContentSystems(resolvedCampaignSlug),
+    enabled: Boolean(resolvedCampaignSlug) && activeLane === "systems",
+    retry: false,
+  });
+  const dmContentLede = activeLane === "staged-articles"
+    ? "Session reveal article prep."
+    : activeLane === "systems"
+      ? "Systems policy, custom entries, imports, and history."
+      : activeLane === "conditions"
+        ? "Custom combat conditions."
+        : activeLane === "player-wiki"
+          ? "Published player wiki page management."
+          : "DM-side statblocks for Combat NPC seeding.";
+  const dmContentLaneCounts = {
+    statblocks: dmContentQuery.data?.subpage_counts?.statblocks ?? (dmContentQuery.data?.statblocks.length ?? 0),
+    conditions: dmContentQuery.data?.subpage_counts?.conditions ?? (dmContentQuery.data?.conditions.length ?? 0),
+    stagedArticles: dmContentQuery.data?.subpage_counts?.staged_articles ?? stagedArticles.length,
+    playerWiki: dmContentQuery.data?.subpage_counts?.player_wiki ?? playerWikiPages.length,
+    systems: dmContentQuery.data?.subpage_counts?.systems ?? (dmContentSystemsQuery.data?.source_count ?? 0),
+  };
   const pageIsLoading = activeLane === "staged-articles"
     ? sessionQuery.isLoading
     : activeLane === "player-wiki"
@@ -13269,47 +13275,44 @@ function DmContentPage() {
   return (
     <>
       <section className="hero compact dm-content-hero">
-        <Link to="/" className="button button-secondary">
-          Back to list
-        </Link>
-        <h2>{pageTitle}</h2>
-        {canShowDmPlus ? (
-          <div className="article-actions">
-            {(activeLane === "statblocks" || activeLane === "conditions") && canManageDmContent ? <span className="pill">DM+</span> : null}
-            {activeLane === "staged-articles" && canManageSession ? <span className="pill">DM+</span> : null}
-            {activeLane === "player-wiki" && canManagePlayerWiki ? <span className="pill">DM+</span> : null}
-          </div>
-        ) : null}
+        <p className="eyebrow">DM content</p>
+        <h1>DM Content</h1>
+        <p className="lede">{dmContentLede}</p>
         <nav className="character-subpage-nav dm-content-subpage-nav" aria-label="DM Content subpages">
           <a
             className={activeLane === "statblocks" ? "button-link" : "ghost-button"}
             href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content`}
           >
-            Statblocks
+            <span>Statblocks</span>
+            <span className="meta-badge">{dmContentLaneCounts.statblocks}</span>
           </a>
           <a
             className={activeLane === "staged-articles" ? "button-link" : "ghost-button"}
             href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=staged-articles`}
           >
-            Staged Articles
+            <span>Staged Articles</span>
+            <span className="meta-badge">{dmContentLaneCounts.stagedArticles}</span>
           </a>
           <a
             className={activeLane === "conditions" ? "button-link" : "ghost-button"}
             href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=conditions`}
           >
-            Conditions
+            <span>Conditions</span>
+            <span className="meta-badge">{dmContentLaneCounts.conditions}</span>
           </a>
           <a
             className={activeLane === "player-wiki" ? "button-link" : "ghost-button"}
             href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=player-wiki`}
           >
-            Player Wiki
+            <span>Player Wiki</span>
+            <span className="meta-badge">{dmContentLaneCounts.playerWiki}</span>
           </a>
           <a
             className={activeLane === "systems" ? "button-link" : "ghost-button"}
             href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=systems`}
           >
-            Systems
+            <span>Systems</span>
+            <span className="meta-badge">{dmContentLaneCounts.systems}</span>
           </a>
         </nav>
       </section>

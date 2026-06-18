@@ -1853,19 +1853,39 @@ def register_api(app) -> None:
             abort(404)
 
         service = current_app.extensions["campaign_dm_content_service"]
+        can_manage_content = can_manage_campaign_content(campaign_slug)
+        can_manage_session = can_manage_campaign_session(campaign_slug)
+        can_manage_systems = can_manage_campaign_systems(campaign_slug)
+        statblocks = service.list_statblocks(campaign_slug)
+        conditions = service.list_condition_definitions(campaign_slug)
+        session_service = _campaign_session_service()
+        systems_service = current_app.extensions.get("systems_service")
+        player_wiki_page_count = len(campaign.pages) if can_manage_content else 0
+        staged_article_count = (
+            len(session_service.list_articles(campaign_slug, statuses=("staged",)))
+            if can_manage_session and session_service is not None
+            else 0
+        )
+        systems_lane_count = (
+            len(systems_service.list_campaign_source_states(campaign_slug))
+            if can_manage_systems and systems_service is not None
+            else 0
+        )
+
         return {
             "campaign": serialize_campaign(campaign),
             "permissions": {
                 "can_manage_dm_content": can_manage_campaign_dm_content(campaign_slug),
             },
-            "statblocks": [
-                serialize_dm_statblock(statblock)
-                for statblock in service.list_statblocks(campaign_slug)
-            ],
-            "conditions": [
-                serialize_condition_definition(definition)
-                for definition in service.list_condition_definitions(campaign_slug)
-            ],
+            "statblocks": [serialize_dm_statblock(statblock) for statblock in statblocks],
+            "conditions": [serialize_condition_definition(definition) for definition in conditions],
+            "subpage_counts": {
+                "statblocks": len(statblocks),
+                "conditions": len(conditions),
+                "player_wiki": player_wiki_page_count,
+                "staged_articles": staged_article_count,
+                "systems": systems_lane_count,
+            },
         }
 
     def serialize_campaign_config_record(record) -> dict[str, Any]:

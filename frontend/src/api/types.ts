@@ -917,6 +917,14 @@ export interface DmContentConditionResponse extends ApiResponseBase {
   condition: DmContentConditionDefinition;
 }
 
+export interface DmContentSubpageCounts {
+  statblocks: number;
+  player_wiki: number;
+  staged_articles: number;
+  conditions: number;
+  systems: number;
+}
+
 export interface ContentPageRemovalSafety {
   can_hard_delete: boolean;
   hard_delete_blockers: string[];
@@ -1009,6 +1017,7 @@ export interface DmContentResponse extends ApiResponseBase {
   permissions: CampaignPermissions;
   statblocks: DmContentStatblock[];
   conditions: DmContentConditionDefinition[];
+  subpage_counts?: DmContentSubpageCounts;
 }
 
 export interface SystemsLibraryRecord {

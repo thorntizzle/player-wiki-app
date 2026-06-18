@@ -1577,6 +1577,31 @@ def test_api_dm_content_endpoints_require_dm_permissions(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-content-api")
     player_token = issue_api_token(app, users["party"]["email"], label="player-dm-content-api")
 
+    initial_dm_content_response = client.get("/api/v1/campaigns/linden-pass/dm-content", headers=api_headers(dm_token))
+    assert initial_dm_content_response.status_code == 200
+    initial_dm_content_payload = initial_dm_content_response.get_json()
+    initial_statblock_count = len(initial_dm_content_payload["statblocks"])
+    initial_condition_count = len(initial_dm_content_payload["conditions"])
+    initial_counts = initial_dm_content_payload.get("subpage_counts", {})
+    initial_staged_count = initial_counts.get("staged_articles")
+    if initial_staged_count is None:
+        session_status = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
+        assert session_status.status_code == 200
+        initial_staged_count = len(session_status.get_json()["staged_articles"])
+    initial_player_wiki_count = initial_counts.get("player_wiki")
+    if initial_player_wiki_count is None:
+        initial_pages_response = client.get("/api/v1/campaigns/linden-pass/content/pages", headers=api_headers(dm_token))
+        assert initial_pages_response.status_code == 200
+        initial_player_wiki_count = len(initial_pages_response.get_json()["pages"])
+    initial_systems_count = initial_counts.get("systems")
+    if initial_systems_count is None:
+        systems_payload = client.get(
+            "/api/v1/campaigns/linden-pass/dm-content/systems",
+            headers=api_headers(dm_token),
+        )
+        assert systems_payload.status_code == 200
+        initial_systems_count = int(systems_payload.get_json().get("source_count") or 0)
+
     statblock_response = client.post(
         "/api/v1/campaigns/linden-pass/dm-content/statblocks",
         headers=api_headers(dm_token),
@@ -1673,14 +1698,47 @@ def test_api_dm_content_endpoints_require_dm_permissions(client, app, users):
 
     assert blocked_condition_update_response.status_code == 403
 
+    create_staged_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={"mode": "manual", "title": "DM Content Count Prep", "body_markdown": "A staged article for count coverage."},
+    )
+    assert create_staged_response.status_code == 200
+    create_staged_payload = create_staged_response.get_json()
+    assert create_staged_payload["article"]["title"] == "DM Content Count Prep"
+
+    page_ref = "notes/dm-content-api-counts"
+    create_page_response = client.put(
+        f"/api/v1/campaigns/linden-pass/content/pages/{page_ref}",
+        headers=api_headers(dm_token),
+        json={
+            "metadata": {
+                "title": "DM Content API Count Page",
+                "section": "Notes",
+                "type": "note",
+                "summary": "A temporary page used to cover subpage count parity in tests.",
+                "published": True,
+                "reveal_after_session": 0,
+            },
+            "body_markdown": "API coverage for DM Content lane counts.",
+        },
+    )
+    assert create_page_response.status_code == 200
+
     dm_content_response = client.get("/api/v1/campaigns/linden-pass/dm-content", headers=api_headers(dm_token))
 
     assert dm_content_response.status_code == 200
     dm_content_payload = dm_content_response.get_json()
-    assert len(dm_content_payload["statblocks"]) == 1
-    assert len(dm_content_payload["conditions"]) == 1
-    assert dm_content_payload["statblocks"][0]["subsection"] == "Dock Crew"
-    assert dm_content_payload["conditions"][0]["name"] == "Off Balance Revised"
+    assert "subpage_counts" in dm_content_payload
+    assert len(dm_content_payload["statblocks"]) == initial_statblock_count + 1
+    assert len(dm_content_payload["conditions"]) == initial_condition_count + 1
+    assert dm_content_payload["subpage_counts"]["statblocks"] == initial_statblock_count + 1
+    assert dm_content_payload["subpage_counts"]["conditions"] == initial_condition_count + 1
+    assert dm_content_payload["subpage_counts"]["player_wiki"] == initial_player_wiki_count + 1
+    assert dm_content_payload["subpage_counts"]["staged_articles"] == initial_staged_count + 1
+    assert dm_content_payload["subpage_counts"]["systems"] == initial_systems_count
+    assert any(statblock["subsection"] == "Dock Crew" for statblock in dm_content_payload["statblocks"])
+    assert any(condition["name"] == "Off Balance Revised" for condition in dm_content_payload["conditions"])
 
     blocked_response = client.get("/api/v1/campaigns/linden-pass/dm-content", headers=api_headers(player_token))
 
