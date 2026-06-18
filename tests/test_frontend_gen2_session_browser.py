@@ -1084,14 +1084,14 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
                 "Public campaign wiki pages are available without signing in. Use an account only when you need admin or character access."
             )
             expect(desktop_page.locator("main > .panel")).to_have_count(0)
-            expect(desktop_page.get_by_role("link", name="Open Campaign").first).to_have_attribute(
+            campaign_card = desktop_page.locator(".campaign-picker-grid .campaign-card").first
+            expect(campaign_card.locator("a.button-link")).to_have_count(1)
+            expect(campaign_card.locator("a.button-link", has_text="Open campaign")).to_have_attribute(
                 "href",
                 "/campaigns/linden-pass",
             )
-            expect(desktop_page.get_by_role("link", name="Open Session").first).to_have_attribute(
-                "href",
-                "/campaigns/linden-pass/session",
-            )
+            expect(campaign_card.get_by_role("link", name="Open Session")).to_have_count(0)
+            expect(campaign_card.locator(".article-actions")).to_have_count(0)
             desktop_page.goto(f"{base_url}/app-next/")
 
             mobile_page.goto(f"{base_url}/app-next/account")

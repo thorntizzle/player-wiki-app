@@ -4678,14 +4678,9 @@ function CampaignListPage() {
             {entry.campaign.current_session !== null && entry.campaign.current_session !== undefined ? (
               <p className="meta">Visible through session {entry.campaign.current_session}</p>
             ) : null}
-            <div className="article-actions">
-              <a className="button" href={campaignRouteHref(entry.campaign.slug, "", preferredFrontendMode)}>
-                Open Campaign
-              </a>
-              <a className="button button-secondary" href={campaignRouteHref(entry.campaign.slug, "session", preferredFrontendMode)}>
-                Open Session
-              </a>
-            </div>
+            <a className="button-link" href={campaignRouteHref(entry.campaign.slug, "", preferredFrontendMode)}>
+              Open campaign
+            </a>
           </article>
         ))}
       </section>
