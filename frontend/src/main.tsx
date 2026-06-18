@@ -8730,6 +8730,13 @@ function CharacterPane({
     patchInventory.mutate({ itemId, payload: { expected_revision: revision, quantity } });
   };
 
+  const submitInventoryOnBlur = (event: FocusEvent<HTMLInputElement>) => {
+    if (!canEdit || patchInventory.isPending) {
+      return;
+    }
+    event.currentTarget.form?.requestSubmit();
+  };
+
   const submitXianxiaInventoryAdd = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selected || !canEdit) {
@@ -10464,7 +10471,7 @@ function CharacterPane({
                   <h2>Inventory</h2>
                 </div>
                 {inventory.length ? (
-                  <div className="character-card-grid">
+                  <div className="inventory-list">
                     {inventory.map((item) => {
                       const id = readString(item.id);
                       const itemRef = readString(item.catalog_ref, id);
@@ -10475,13 +10482,19 @@ function CharacterPane({
                       const itemDescriptionHtml = readString(presentedItem?.description_html);
                       const itemTags = presentedItem?.tags?.length ? presentedItem.tags : [];
                       return (
-                        <article className="character-state-card" key={id || itemRef || itemName}>
-                          <h4>{itemName}</h4>
-                          <p className="meta">
-                            Qty {readNumber(item.quantity, 1)}
-                            {item.weight ? ` | ${readString(item.weight)}` : ""}
-                          </p>
+                        <article className="inventory-row" key={id || itemRef || itemName}>
+                          <div className="inventory-row__header">
+                            <h3>{itemHref ? <a href={itemHref}>{itemName}</a> : itemName}</h3>
+                          </div>
                           {itemTags.length ? <p className="meta">{itemTags.join(", ")}</p> : null}
+                          {canEdit && id ? (
+                            item.weight ? <p className="meta">{readString(item.weight)}</p> : null
+                          ) : (
+                            <p className="meta">
+                              Qty {readNumber(item.quantity, 1)}
+                              {item.weight ? ` | ${readString(item.weight)}` : ""}
+                            </p>
+                          )}
                           {itemDescriptionHtml || itemNotes || itemHref ? (
                             <button
                               type="button"
@@ -10499,21 +10512,28 @@ function CharacterPane({
                             </button>
                           ) : null}
                           {canEdit && id ? (
-                            <form onSubmit={(event) => submitInventory(event, id)} className="compact-state-form">
-                              <label className="chat-label" htmlFor={`inventory-${id}`}>
-                                Quantity
+                            <form
+                              onSubmit={(event) => submitInventory(event, id)}
+                              className="session-inline-form inventory-row__quantity-form"
+                              data-character-autosubmit
+                              data-character-sheet-edit-form="inventory"
+                              data-character-sheet-edit-row-id={id}
+                            >
+                              <label className="session-field" htmlFor={`inventory-${id}`}>
+                                <span>Quantity</span>
+                                <input
+                                  id={`inventory-${id}`}
+                                  type="number"
+                                  min="0"
+                                  value={inventoryDrafts[id] ?? ""}
+                                  onChange={(event) =>
+                                    setInventoryDrafts({ ...inventoryDrafts, [id]: event.currentTarget.value })
+                                  }
+                                  onBlur={submitInventoryOnBlur}
+                                />
                               </label>
-                              <input
-                                id={`inventory-${id}`}
-                                type="number"
-                                min="0"
-                                value={inventoryDrafts[id] ?? ""}
-                                onChange={(event) =>
-                                  setInventoryDrafts({ ...inventoryDrafts, [id]: event.currentTarget.value })
-                                }
-                              />
-                              <button type="submit" disabled={patchInventory.isPending}>
-                                Save
+                              <button type="submit" className="visually-hidden" disabled={patchInventory.isPending || !canEdit}>
+                                Update {itemName} quantity
                               </button>
                             </form>
                           ) : null}
