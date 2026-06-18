@@ -735,6 +735,119 @@ def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_sour
     assert 'name="description_markdown"' in condition_create_markup
 
 
+def test_character_xianxia_inventory_section_uses_flask_style_row_form_chrome() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    section_start = source.index('{isXianxia && activeCharacterSection === "inventory" ? (')
+    section_end = source.index('<section className="read-section" id="xianxia-personal">', section_start)
+    section_markup = source[section_start:section_end]
+    controls_end = section_markup.index("<form onSubmit={submitCurrency}")
+    inventory_controls_markup = section_markup[:controls_end]
+
+    assert 'className="inventory-list"' in inventory_controls_markup
+    assert 'className="inventory-row"' in inventory_controls_markup
+    assert 'className="inventory-row__header"' in inventory_controls_markup
+    assert 'className="detail-cluster"' in inventory_controls_markup
+    assert 'className="detail-card session-card" id="xianxia-inventory-add"' in inventory_controls_markup
+
+    assert 'className="stack-form"' in inventory_controls_markup
+    assert 'className="builder-field-grid"' in inventory_controls_markup
+    assert 'className="session-field" htmlFor="xianxia-new-item-name"' in inventory_controls_markup
+    assert 'className="session-field" htmlFor="xianxia-new-item-quantity"' in inventory_controls_markup
+    assert 'className="session-field" htmlFor="xianxia-new-item-nature"' in inventory_controls_markup
+    assert 'className="session-field" htmlFor="xianxia-new-item-type"' in inventory_controls_markup
+    assert 'className="session-field" htmlFor="xianxia-new-item-tags"' in inventory_controls_markup
+    assert 'className="session-field" htmlFor="xianxia-new-item-notes"' in inventory_controls_markup
+
+    assert (
+        re.search(
+            r'<label className="session-field" htmlFor={`xianxia-inventory-name-\$\{item\.id\}`}>\s*<span>Name</span>',
+            inventory_controls_markup,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'<label className="session-field" htmlFor={`xianxia-inventory-quantity-\$\{item\.id\}`}>\s*<span>Quantity</span>',
+            inventory_controls_markup,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'<label className="session-field" htmlFor={`xianxia-inventory-nature-\$\{item\.id\}`}>\s*<span>Nature</span>',
+            inventory_controls_markup,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'<label className="session-field" htmlFor={`xianxia-inventory-type-\$\{item\.id\}`}>\s*<span>Type</span>',
+            inventory_controls_markup,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'<label className="session-field" htmlFor={`xianxia-inventory-tags-\$\{item\.id\}`}>\s*<span>Tags</span>',
+            inventory_controls_markup,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'<label className="session-field" htmlFor={`xianxia-inventory-notes-\$\{item\.id\}`}>\s*<span>Notes</span>',
+            inventory_controls_markup,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'<label className="session-field" htmlFor="xianxia-new-item-name">\s*<span>Name</span>',
+            inventory_controls_markup,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'<label className="session-field" htmlFor="xianxia-new-item-quantity">\s*<span>Quantity</span>',
+            inventory_controls_markup,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'<label className="session-field" htmlFor="xianxia-new-item-nature">\s*<span>Nature</span>',
+            inventory_controls_markup,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'<label className="session-field" htmlFor="xianxia-new-item-type">\s*<span>Type</span>',
+            inventory_controls_markup,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'<label className="session-field" htmlFor="xianxia-new-item-tags">\s*<span>Tags</span>',
+            inventory_controls_markup,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r'<label className="session-field" htmlFor="xianxia-new-item-notes">\s*<span>Notes</span>',
+            inventory_controls_markup,
+        )
+        is not None
+    )
+
+    assert "className=\"chat-label\"" not in inventory_controls_markup
+    assert 'className="button-danger"' not in inventory_controls_markup
+    assert 'className="button-link subtle"' in inventory_controls_markup
+
+
 def test_player_session_revealed_articles_panel_uses_session_article_row_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     panel_start = source.index("function SessionArticlesPanel({")

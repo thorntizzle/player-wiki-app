@@ -9751,149 +9751,159 @@ function CharacterPane({
                   <h2>Inventory</h2>
                 </div>
                 {xianxiaInventory.length ? (
-                  <div className="character-card-grid">
+                  <div className="inventory-list">
                     {xianxiaInventory.map((item) => {
                       const draft = xianxiaInventoryDrafts[item.id] ?? xianxiaInventoryDraftFromItem(item);
                       return (
-                        <article className="character-state-card" key={item.id}>
-                          <h4>{item.name}</h4>
-                          <p className="meta">{joinDisplay([`Qty ${item.quantity}`, item.item_nature, item.item_type, item.is_equipped ? "Equipped" : ""])}</p>
+                        <article className="inventory-row" key={item.id}>
+                          <div className="inventory-row__header">
+                            <h4>{item.name}</h4>
+                            <strong>x{item.quantity}</strong>
+                          </div>
+                          <p className="meta">{joinDisplay([item.item_nature, item.item_type, item.is_equipped ? "Equipped" : ""])}</p>
                           {item.tags.length ? <p className="meta">{item.tags.join(", ")}</p> : null}
                           {item.notes ? <p className="meta">{item.notes}</p> : null}
                           {canEdit ? (
-                            <form onSubmit={(event) => submitXianxiaInventoryUpdate(event, item)} className="equipment-state-form">
-                              <label className="chat-label" htmlFor={`xianxia-inventory-name-${item.id}`}>
-                                Name
-                                <input
-                                  id={`xianxia-inventory-name-${item.id}`}
-                                  value={draft.name}
-                                  onChange={(event) =>
-                                    setXianxiaInventoryDrafts({
-                                      ...xianxiaInventoryDrafts,
-                                      [item.id]: { ...draft, name: event.currentTarget.value },
-                                    })
-                                  }
-                                />
-                              </label>
-                              <label className="chat-label" htmlFor={`xianxia-inventory-quantity-${item.id}`}>
-                                Quantity
-                                <input
-                                  id={`xianxia-inventory-quantity-${item.id}`}
-                                  type="number"
-                                  min="0"
-                                  value={draft.quantity}
-                                  onChange={(event) =>
-                                    setXianxiaInventoryDrafts({
-                                      ...xianxiaInventoryDrafts,
-                                      [item.id]: { ...draft, quantity: event.currentTarget.value },
-                                    })
-                                  }
-                                />
-                              </label>
-                              <label className="chat-label" htmlFor={`xianxia-inventory-nature-${item.id}`}>
-                                Nature
-                                <select
-                                  id={`xianxia-inventory-nature-${item.id}`}
-                                  value={draft.itemNature}
-                                  onChange={(event) =>
-                                    setXianxiaInventoryDrafts({
-                                      ...xianxiaInventoryDrafts,
-                                      [item.id]: { ...draft, itemNature: event.currentTarget.value },
-                                    })
-                                  }
-                                >
-                                  <option value="Mundane">Mundane</option>
-                                  <option value="Relic">Relic</option>
-                                </select>
-                              </label>
-                              <label className="chat-label" htmlFor={`xianxia-inventory-type-${item.id}`}>
-                                Type
-                                <select
-                                  id={`xianxia-inventory-type-${item.id}`}
-                                  value={draft.itemType}
-                                  onChange={(event) =>
-                                    setXianxiaInventoryDrafts({
-                                      ...xianxiaInventoryDrafts,
-                                      [item.id]: { ...draft, itemType: event.currentTarget.value },
-                                    })
-                                  }
-                                >
-                                  <option value="Weapon">Weapon</option>
-                                  <option value="Armor">Armor</option>
-                                  <option value="Artifact">Artifact</option>
-                                  <option value="Consumable">Consumable</option>
-                                  <option value="Miscellaneous">Miscellaneous</option>
-                                </select>
-                              </label>
-                              <label className="chat-label" htmlFor={`xianxia-inventory-tags-${item.id}`}>
-                                Tags
-                                <input
-                                  id={`xianxia-inventory-tags-${item.id}`}
-                                  value={draft.tags}
-                                  onChange={(event) =>
-                                    setXianxiaInventoryDrafts({
-                                      ...xianxiaInventoryDrafts,
-                                      [item.id]: { ...draft, tags: event.currentTarget.value },
-                                    })
-                                  }
-                                />
-                              </label>
-                              <label className="chat-label" htmlFor={`xianxia-inventory-notes-${item.id}`}>
-                                Notes
-                                <textarea
-                                  id={`xianxia-inventory-notes-${item.id}`}
-                                  rows={3}
-                                  value={draft.notes}
-                                  onChange={(event) =>
-                                    setXianxiaInventoryDrafts({
-                                      ...xianxiaInventoryDrafts,
-                                      [item.id]: { ...draft, notes: event.currentTarget.value },
-                                    })
-                                  }
-                                />
-                              </label>
-                              <label className="toggle-row">
-                                <input
-                                  type="checkbox"
-                                  checked={draft.equippable}
-                                  onChange={(event) =>
-                                    setXianxiaInventoryDrafts({
-                                      ...xianxiaInventoryDrafts,
-                                      [item.id]: { ...draft, equippable: event.currentTarget.checked },
-                                    })
-                                  }
-                                />
-                                Equippable
-                              </label>
-                              {draft.equippable ? (
-                                <label className="toggle-row">
-                                  <input
-                                    type="checkbox"
-                                    checked={draft.isEquipped}
-                                    onChange={(event) => {
-                                      const isEquipped = event.currentTarget.checked;
-                                      setXianxiaInventoryDrafts({
-                                        ...xianxiaInventoryDrafts,
-                                        [item.id]: { ...draft, isEquipped },
-                                      });
-                                      toggleXianxiaInventoryEquipped(item, isEquipped);
-                                    }}
-                                  />
-                                  Equipped
-                                </label>
-                              ) : null}
-                              <button type="submit" disabled={patchXianxiaInventoryItem.isPending}>
-                                {patchXianxiaInventoryItem.isPending ? "Saving..." : "Save item"}
-                              </button>
+                            <div className="detail-cluster">
+                              <details className="detail-card">
+                                <summary>Edit item</summary>
+                                <form onSubmit={(event) => submitXianxiaInventoryUpdate(event, item)} className="stack-form">
+                                  <div className="builder-field-grid">
+                                    <label className="session-field" htmlFor={`xianxia-inventory-name-${item.id}`}>
+                                      <span>Name</span>
+                                      <input
+                                        id={`xianxia-inventory-name-${item.id}`}
+                                        value={draft.name}
+                                        onChange={(event) =>
+                                          setXianxiaInventoryDrafts({
+                                            ...xianxiaInventoryDrafts,
+                                            [item.id]: { ...draft, name: event.currentTarget.value },
+                                          })
+                                        }
+                                      />
+                                    </label>
+                                    <label className="session-field" htmlFor={`xianxia-inventory-quantity-${item.id}`}>
+                                      <span>Quantity</span>
+                                      <input
+                                        id={`xianxia-inventory-quantity-${item.id}`}
+                                        type="number"
+                                        min="0"
+                                        value={draft.quantity}
+                                        onChange={(event) =>
+                                          setXianxiaInventoryDrafts({
+                                            ...xianxiaInventoryDrafts,
+                                            [item.id]: { ...draft, quantity: event.currentTarget.value },
+                                          })
+                                        }
+                                      />
+                                    </label>
+                                    <label className="session-field" htmlFor={`xianxia-inventory-nature-${item.id}`}>
+                                      <span>Nature</span>
+                                      <select
+                                        id={`xianxia-inventory-nature-${item.id}`}
+                                        value={draft.itemNature}
+                                        onChange={(event) =>
+                                          setXianxiaInventoryDrafts({
+                                            ...xianxiaInventoryDrafts,
+                                            [item.id]: { ...draft, itemNature: event.currentTarget.value },
+                                          })
+                                        }
+                                      >
+                                        <option value="Mundane">Mundane</option>
+                                        <option value="Relic">Relic</option>
+                                      </select>
+                                    </label>
+                                    <label className="session-field" htmlFor={`xianxia-inventory-type-${item.id}`}>
+                                      <span>Type</span>
+                                      <select
+                                        id={`xianxia-inventory-type-${item.id}`}
+                                        value={draft.itemType}
+                                        onChange={(event) =>
+                                          setXianxiaInventoryDrafts({
+                                            ...xianxiaInventoryDrafts,
+                                            [item.id]: { ...draft, itemType: event.currentTarget.value },
+                                          })
+                                        }
+                                      >
+                                        <option value="Weapon">Weapon</option>
+                                        <option value="Armor">Armor</option>
+                                        <option value="Artifact">Artifact</option>
+                                        <option value="Consumable">Consumable</option>
+                                        <option value="Miscellaneous">Miscellaneous</option>
+                                      </select>
+                                    </label>
+                                    <label className="session-field" htmlFor={`xianxia-inventory-tags-${item.id}`}>
+                                      <span>Tags</span>
+                                      <input
+                                        id={`xianxia-inventory-tags-${item.id}`}
+                                        value={draft.tags}
+                                        onChange={(event) =>
+                                          setXianxiaInventoryDrafts({
+                                            ...xianxiaInventoryDrafts,
+                                            [item.id]: { ...draft, tags: event.currentTarget.value },
+                                          })
+                                        }
+                                      />
+                                    </label>
+                                    <label className="session-field" htmlFor={`xianxia-inventory-notes-${item.id}`}>
+                                      <span>Notes</span>
+                                      <textarea
+                                        id={`xianxia-inventory-notes-${item.id}`}
+                                        rows={3}
+                                        value={draft.notes}
+                                        onChange={(event) =>
+                                          setXianxiaInventoryDrafts({
+                                            ...xianxiaInventoryDrafts,
+                                            [item.id]: { ...draft, notes: event.currentTarget.value },
+                                          })
+                                        }
+                                      />
+                                    </label>
+                                  </div>
+                                  <label className="toggle-row">
+                                    <input
+                                      type="checkbox"
+                                      checked={draft.equippable}
+                                      onChange={(event) =>
+                                        setXianxiaInventoryDrafts({
+                                          ...xianxiaInventoryDrafts,
+                                          [item.id]: { ...draft, equippable: event.currentTarget.checked },
+                                        })
+                                      }
+                                    />
+                                    Equippable
+                                  </label>
+                                  {draft.equippable ? (
+                                    <label className="toggle-row">
+                                      <input
+                                        type="checkbox"
+                                        checked={draft.isEquipped}
+                                        onChange={(event) => {
+                                          const isEquipped = event.currentTarget.checked;
+                                          setXianxiaInventoryDrafts({
+                                            ...xianxiaInventoryDrafts,
+                                            [item.id]: { ...draft, isEquipped },
+                                          });
+                                          toggleXianxiaInventoryEquipped(item, isEquipped);
+                                        }}
+                                      />
+                                      Equipped
+                                    </label>
+                                  ) : null}
+                                  <button type="submit" disabled={patchXianxiaInventoryItem.isPending}>
+                                    {patchXianxiaInventoryItem.isPending ? "Saving..." : "Save item"}
+                                  </button>
+                                </form>
+                              </details>
                               <button
                                 type="button"
-                                className="button-danger"
+                                className="button-link subtle"
                                 disabled={removeXianxiaInventoryItem.isPending}
                                 onClick={() => removeXianxiaInventory(item)}
                               >
                                 {removeXianxiaInventoryItem.isPending ? "Removing..." : "Remove"}
                               </button>
-                            </form>
+                            </div>
                           ) : null}
                         </article>
                       );
@@ -9903,90 +9913,110 @@ function CharacterPane({
                   <p className="status status-neutral">No Xianxia inventory items.</p>
                 )}
                 {canEdit ? (
-                  <form onSubmit={submitXianxiaInventoryAdd} className="equipment-state-form">
-                    <h4>Add item</h4>
-                    <label className="chat-label" htmlFor="xianxia-new-item-name">
-                      Name
-                      <input
-                        id="xianxia-new-item-name"
-                        value={newXianxiaInventoryDraft.name}
-                        onChange={(event) => setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, name: event.currentTarget.value })}
-                      />
-                    </label>
-                    <label className="chat-label" htmlFor="xianxia-new-item-quantity">
-                      Quantity
-                      <input
-                        id="xianxia-new-item-quantity"
-                        type="number"
-                        min="0"
-                        value={newXianxiaInventoryDraft.quantity}
-                        onChange={(event) => setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, quantity: event.currentTarget.value })}
-                      />
-                    </label>
-                    <label className="chat-label" htmlFor="xianxia-new-item-nature">
-                      Nature
-                      <select
-                        id="xianxia-new-item-nature"
-                        value={newXianxiaInventoryDraft.itemNature}
-                        onChange={(event) => setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, itemNature: event.currentTarget.value })}
-                      >
-                        <option value="Mundane">Mundane</option>
-                        <option value="Relic">Relic</option>
-                      </select>
-                    </label>
-                    <label className="chat-label" htmlFor="xianxia-new-item-type">
-                      Type
-                      <select
-                        id="xianxia-new-item-type"
-                        value={newXianxiaInventoryDraft.itemType}
-                        onChange={(event) => setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, itemType: event.currentTarget.value })}
-                      >
-                        <option value="Weapon">Weapon</option>
-                        <option value="Armor">Armor</option>
-                        <option value="Artifact">Artifact</option>
-                        <option value="Consumable">Consumable</option>
-                        <option value="Miscellaneous">Miscellaneous</option>
-                      </select>
-                    </label>
-                    <label className="chat-label" htmlFor="xianxia-new-item-tags">
-                      Tags
-                      <input
-                        id="xianxia-new-item-tags"
-                        value={newXianxiaInventoryDraft.tags}
-                        onChange={(event) => setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, tags: event.currentTarget.value })}
-                      />
-                    </label>
-                    <label className="chat-label" htmlFor="xianxia-new-item-notes">
-                      Notes
-                      <textarea
-                        id="xianxia-new-item-notes"
-                        rows={3}
-                        value={newXianxiaInventoryDraft.notes}
-                        onChange={(event) => setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, notes: event.currentTarget.value })}
-                      />
-                    </label>
-                    <label className="toggle-row">
-                      <input
-                        type="checkbox"
-                        checked={newXianxiaInventoryDraft.equippable}
-                        onChange={(event) => setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, equippable: event.currentTarget.checked })}
-                      />
-                      Equippable
-                    </label>
-                    {newXianxiaInventoryDraft.equippable ? (
+                  <article className="detail-card session-card" id="xianxia-inventory-add">
+                    <h3>Add inventory item</h3>
+                    <form onSubmit={submitXianxiaInventoryAdd} className="stack-form">
+                      <div className="builder-field-grid">
+                        <label className="session-field" htmlFor="xianxia-new-item-name">
+                          <span>Name</span>
+                          <input
+                            id="xianxia-new-item-name"
+                            value={newXianxiaInventoryDraft.name}
+                            onChange={(event) =>
+                              setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, name: event.currentTarget.value })
+                            }
+                          />
+                        </label>
+                        <label className="session-field" htmlFor="xianxia-new-item-quantity">
+                          <span>Quantity</span>
+                          <input
+                            id="xianxia-new-item-quantity"
+                            type="number"
+                            min="0"
+                            value={newXianxiaInventoryDraft.quantity}
+                            onChange={(event) =>
+                              setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, quantity: event.currentTarget.value })
+                            }
+                          />
+                        </label>
+                        <label className="session-field" htmlFor="xianxia-new-item-nature">
+                          <span>Nature</span>
+                          <select
+                            id="xianxia-new-item-nature"
+                            value={newXianxiaInventoryDraft.itemNature}
+                            onChange={(event) =>
+                              setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, itemNature: event.currentTarget.value })
+                            }
+                          >
+                            <option value="Mundane">Mundane</option>
+                            <option value="Relic">Relic</option>
+                          </select>
+                        </label>
+                        <label className="session-field" htmlFor="xianxia-new-item-type">
+                          <span>Type</span>
+                          <select
+                            id="xianxia-new-item-type"
+                            value={newXianxiaInventoryDraft.itemType}
+                            onChange={(event) =>
+                              setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, itemType: event.currentTarget.value })
+                            }
+                          >
+                            <option value="Weapon">Weapon</option>
+                            <option value="Armor">Armor</option>
+                            <option value="Artifact">Artifact</option>
+                            <option value="Consumable">Consumable</option>
+                            <option value="Miscellaneous">Miscellaneous</option>
+                          </select>
+                        </label>
+                        <label className="session-field" htmlFor="xianxia-new-item-tags">
+                          <span>Tags</span>
+                          <input
+                            id="xianxia-new-item-tags"
+                            value={newXianxiaInventoryDraft.tags}
+                            onChange={(event) =>
+                              setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, tags: event.currentTarget.value })
+                            }
+                          />
+                        </label>
+                        <label className="session-field" htmlFor="xianxia-new-item-notes">
+                          <span>Notes</span>
+                          <textarea
+                            id="xianxia-new-item-notes"
+                            rows={3}
+                            value={newXianxiaInventoryDraft.notes}
+                            onChange={(event) =>
+                              setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, notes: event.currentTarget.value })
+                            }
+                          />
+                        </label>
+                      </div>
                       <label className="toggle-row">
                         <input
                           type="checkbox"
-                          checked={newXianxiaInventoryDraft.isEquipped}
-                          onChange={(event) => setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, isEquipped: event.currentTarget.checked })}
+                          checked={newXianxiaInventoryDraft.equippable}
+                          onChange={(event) =>
+                            setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, equippable: event.currentTarget.checked })
+                          }
                         />
-                        Equipped
+                        Equippable
                       </label>
-                    ) : null}
-                    <button type="submit" disabled={addXianxiaInventoryItem.isPending}>
-                      {addXianxiaInventoryItem.isPending ? "Adding..." : "Add item"}
-                    </button>
-                  </form>
+                      {newXianxiaInventoryDraft.equippable ? (
+                        <label className="toggle-row">
+                          <input
+                            type="checkbox"
+                            checked={newXianxiaInventoryDraft.isEquipped}
+                            onChange={(event) =>
+                              setNewXianxiaInventoryDraft({ ...newXianxiaInventoryDraft, isEquipped: event.currentTarget.checked })
+                            }
+                          />
+                          Equipped
+                        </label>
+                      ) : null}
+                      <button type="submit" className="button-link" disabled={addXianxiaInventoryItem.isPending}>
+                        {addXianxiaInventoryItem.isPending ? "Adding..." : "Add item"}
+                      </button>
+                    </form>
+                  </article>
                 ) : null}
                 <form onSubmit={submitCurrency} className="currency-grid">
                   {(xianxiaCurrency.length ? xianxiaCurrency : [
