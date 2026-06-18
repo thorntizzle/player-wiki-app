@@ -4600,22 +4600,24 @@ function CampaignListPage() {
         message={appError ?? campaignError}
         onAuth={() => setAuthRequired(true)}
       />
-      <section className="grid campaign-picker-grid">
-        {campaigns.map((entry) => (
-          <article className="card campaign-card" key={entry.campaign.slug}>
-            <p className="card-kicker">{campaignRoleLabel(entry.role)}</p>
-            <h2>{entry.campaign.title}</h2>
-            <p>{entry.campaign.summary}</p>
-            {entry.campaign.system ? <p className="meta">System: {entry.campaign.system}</p> : null}
-            {entry.campaign.current_session !== null && entry.campaign.current_session !== undefined ? (
-              <p className="meta">Visible through session {entry.campaign.current_session}</p>
-            ) : null}
-            <a className="button-link" href={campaignRouteHref(entry.campaign.slug, "", preferredFrontendMode)}>
-              Open campaign
-            </a>
-          </article>
-        ))}
-      </section>
+      {campaigns.length ? (
+        <section className="grid campaign-picker-grid">
+          {campaigns.map((entry) => (
+            <article className="card campaign-card" key={entry.campaign.slug}>
+              <p className="card-kicker">{campaignRoleLabel(entry.role)}</p>
+              <h2>{entry.campaign.title}</h2>
+              <p>{entry.campaign.summary}</p>
+              {entry.campaign.system ? <p className="meta">System: {entry.campaign.system}</p> : null}
+              {entry.campaign.current_session !== null && entry.campaign.current_session !== undefined ? (
+                <p className="meta">Visible through session {entry.campaign.current_session}</p>
+              ) : null}
+              <a className="button-link" href={campaignRouteHref(entry.campaign.slug, "", preferredFrontendMode)}>
+                Open campaign
+              </a>
+            </article>
+          ))}
+        </section>
+      ) : null}
       {!appQuery.isLoading && !campaignsQuery.isLoading && !campaigns.length && !campaignError ? (
         <section className="card auth-card campaign-picker-empty">
           <h2>{emptyHeading}</h2>

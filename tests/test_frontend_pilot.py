@@ -22,6 +22,34 @@ def test_gen2_topbar_account_controls_use_flask_chrome_classes_in_source() -> No
     assert "button button-secondary" not in account_controls_markup
 
 
+def test_campaign_picker_grid_and_empty_state_are_mutually_exclusive_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    campaign_list_start = source.index("function CampaignListPage() {")
+    campaign_list_end = source.index("function adminSearch(", campaign_list_start)
+    campaign_list_source = source[campaign_list_start:campaign_list_end]
+
+    assert (
+        re.search(
+            r"\{campaigns\.length \? \(\s*<section className=\"grid campaign-picker-grid\">[\s\S]*?</section>\s*\)\s*:\s*null\}",
+            campaign_list_source,
+        )
+        is not None
+    )
+    assert "{campaigns.length ? (" in campaign_list_source
+    assert (
+        '{!appQuery.isLoading && !campaignsQuery.isLoading && !campaigns.length && !campaignError ? ('
+        in campaign_list_source
+    )
+
+    assert (
+        re.search(r"<ApiErrorNotice[\s\S]*?/\>\s*\r?\n\s*\{campaigns\.length \? \(", campaign_list_source) is not None
+    )
+    assert (
+        re.search(r"<ApiErrorNotice[\s\S]*?/\>\s*\r?\n\s*<section className=\"grid campaign-picker-grid\">", campaign_list_source)
+        is None
+    )
+
+
 def test_frontend_pilot_routes_are_closed(client, app, tmp_path):
     dist_dir = tmp_path / "frontend-dist"
     assets_dir = dist_dir / "assets"
