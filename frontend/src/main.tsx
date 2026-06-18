@@ -14880,13 +14880,19 @@ function CharacterRosterPage() {
       ? "Use the Xianxia character creator to start new native character records directly in the app."
       : "Use the current PHB level 1 builder to create new characters directly in the app."
     : "Native character creation and progression stay hidden here for campaigns outside the current DND-5E in-app toolset.";
+  const rosterLede =
+    characterCreateLane === "dnd5e"
+      ? "Open a player sheet in read mode for play, or start a new in-app PHB level 1 character when you need native sheet data instead of an imported PDF."
+      : characterCreateLane === "xianxia"
+      ? "Open a player sheet in read mode for play, or start a new native Xianxia character record for this campaign."
+      : "Open a player sheet for read mode, use inline state controls when authorized, and use Advanced Editor for larger sheet changes.";
 
   return (
     <>
       <section className="hero compact character-roster-hero">
         <p className="eyebrow">Character roster</p>
         <h1>Characters</h1>
-        <p className="lede">Open player sheets, use the shared inline state controls, and keep larger authoring workflows in Flask while Gen2 parity grows.</p>
+        <p className="lede">{rosterLede}</p>
       </section>
       <ApiErrorNotice isLoading={rosterQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       <section className="card search-card character-roster-tools">
@@ -14925,7 +14931,7 @@ function CharacterRosterPage() {
       {data ? (
         <>
           {characters.length ? (
-            <div className="character-roster-grid">
+            <section className="grid">
               {characters.map((character) => (
                 <article className="card character-card" key={character.slug}>
                   <div className="character-card__top">
@@ -14982,7 +14988,7 @@ function CharacterRosterPage() {
                   </a>
                 </article>
               ))}
-            </div>
+            </section>
           ) : (
             <section className="card">
               <h2>{submittedQuery ? "No matching characters" : "No visible characters yet"}</h2>

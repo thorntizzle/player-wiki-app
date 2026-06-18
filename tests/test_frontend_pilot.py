@@ -793,6 +793,39 @@ def test_character_supported_hero_links_preserve_supported_nav_while_hiding_flas
     assert "Realm Ascension" in cultivation_hero
 
 
+def test_character_roster_page_copy_and_grid_class_parity_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+
+    roster_start = source.index("function CharacterRosterPage() {")
+    roster_end = source.index("function CharacterDetailPage()", roster_start)
+    roster_source = source[roster_start:roster_end]
+
+    assert (
+        "Open a player sheet in read mode for play, or start a new in-app PHB level 1 character when you need native sheet data instead of an imported PDF."
+        in roster_source
+    )
+    assert (
+        "Open a player sheet in read mode for play, or start a new native Xianxia character record for this campaign."
+        in roster_source
+    )
+    assert (
+        "Open a player sheet for read mode, use inline state controls when authorized, and use Advanced Editor for larger sheet changes."
+        in roster_source
+    )
+    assert (
+        "Open player sheets, use the shared inline state controls, and keep larger authoring workflows in Flask while Gen2 parity grows."
+        not in roster_source
+    )
+    assert '<section className="grid">' in roster_source
+    assert 'className="character-roster-grid"' not in roster_source
+
+
+def test_grid_minimum_card_size_is_flask_260px_and_character_roster_grid_selector_is_removed() -> None:
+    source = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+    assert "grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));" in source
+    assert ".character-roster-grid" not in source
+
+
 def test_character_form_actions_do_not_convert_non_targeted_builder_rows() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
 

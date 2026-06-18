@@ -789,12 +789,6 @@ a:hover {
   margin-bottom: 0.6rem;
 }
 
-.character-roster-grid {
-  display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-}
-
 .main-shell > .character-roster-hero ~ * {
   margin-top: 1rem;
 }
@@ -1128,7 +1122,7 @@ a:hover {
 .grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
 .card {
