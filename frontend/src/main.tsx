@@ -14570,10 +14570,10 @@ function CombatPage() {
       <>
         <section className="combat-dm-grid" aria-label="DM tactical controls">
           <article className="card combat-control-card">
-            <div className="compact-header">
+            <div className="section-heading">
               <div>
-                <p className="meta">Authority</p>
-                <h3>Turn Focus</h3>
+                <p className="card-kicker">Authority</p>
+                <h2>Turn Focus</h2>
               </div>
               {selectedCombatant.is_current_turn ? <span className="pill">Current</span> : null}
             </div>
@@ -14814,10 +14814,10 @@ function CombatPage() {
 
         {selectedCombatant.character_slug ? (
           <section className="combat-pc-workspace">
-            <div className="compact-header">
+            <div className="section-heading">
               <div>
                 <p className="meta">Selected PC detail</p>
-                <h3>{selectedCombatant.name}</h3>
+                <h2>{selectedCombatant.name}</h2>
               </div>
             </div>
             <CharacterPane campaignSlug={campaignSlug} initialCharacterSlug={selectedCombatant.character_slug} surface="combat" />
@@ -15170,10 +15170,10 @@ function CombatPage() {
 
   const renderPlayerWorkspace = () => (
     <section className="combat-pc-workspace">
-      <div className="compact-header">
+      <div className="section-heading">
         <div>
           <p className="meta">Selected PC workspace</p>
-          <h3>{selectedPlayerCharacter?.name ?? "No tracked PC in combat"}</h3>
+          <h2>{selectedPlayerCharacter?.name ?? "No tracked PC in combat"}</h2>
         </div>
         {payload?.player_character_targets.length ? (
           <div className="button-row">
@@ -15278,24 +15278,31 @@ function CombatPage() {
 
           {tracker?.combatants.length ? (
             <section className="combat-carousel" aria-label="Combatant carousel">
-              <div className="compact-header">
-                <h3>Turn Order</h3>
-                <label className="chat-label combat-jump-label">
-                  Jump
-                  <select
-                    value={selectedCombatant?.id ?? ""}
-                    onChange={(event) => selectCombatant(Number(event.currentTarget.value))}
-                  >
-                    {tracker.combatants.map((combatant) => (
-                      <option key={combatant.id} value={combatant.id}>
-                        {combatant.name} - turn {combatant.turn_value}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              <div className="section-heading">
+                <div>
+                  <h2>Turn Order</h2>
+                  <p className="meta">Initiative is pinned here while the main panel shows your tracked character.</p>
+                </div>
               </div>
               <div className="combat-carousel-track">
                 {tracker.combatants.map((combatant) => renderCombatantCard(combatant))}
+              </div>
+              <div className="combat-turn-order-jump">
+                <label className="combat-turn-order-jump__label" htmlFor="combat-turn-order-jump-select">
+                  Jump to combatant
+                </label>
+                <select
+                  id="combat-turn-order-jump-select"
+                  className="combat-turn-order-jump__select"
+                  value={selectedCombatant?.id ?? ""}
+                  onChange={(event) => selectCombatant(Number(event.currentTarget.value))}
+                >
+                  {tracker.combatants.map((combatant) => (
+                    <option key={combatant.id} value={combatant.id}>
+                      {combatant.name} - turn {combatant.turn_value}
+                    </option>
+                  ))}
+                </select>
               </div>
             </section>
           ) : (

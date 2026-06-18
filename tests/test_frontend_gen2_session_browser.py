@@ -1346,17 +1346,22 @@ def test_gen2_combat_browser_opens_player_workspace_and_preserves_focused_draft(
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat")
             expect(page.get_by_role("heading", name=re.compile(r"Combat:", re.I))).to_be_visible(timeout=10000)
             expect(page.get_by_role("heading", name="Turn Order")).to_be_visible()
+            expect(page.locator(".combat-carousel .compact-header")).to_have_count(0)
+            expect(page.locator(".combat-pc-workspace .compact-header")).to_have_count(0)
             carousel = page.locator(".combat-carousel")
+            expect(carousel.locator("> .section-heading > div > h2")).to_have_text("Turn Order")
+            expect(carousel.locator("> .section-heading .meta")).to_contain_text("Initiative is pinned here")
+            expect(carousel.get_by_label("Jump to combatant")).to_be_visible()
             expect(carousel.get_by_role("button", name=re.compile(r"Arden March", re.I))).to_be_visible()
             expect(carousel.get_by_role("button", name=re.compile(r"Clockwork Hound", re.I))).to_be_visible()
             expect(page.get_by_role("heading", name="Combat Character")).to_be_visible(timeout=10000)
+            workspace = page.locator(".combat-pc-workspace")
+            expect(workspace.locator("> .section-heading h2")).to_be_visible()
 
             carousel.get_by_role("button", name=re.compile(r"Clockwork Hound", re.I)).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?combatant=\d+"))
             expect(page.get_by_role("heading", name="Clockwork Hound")).to_be_visible()
             expect(page.get_by_role("heading", name="Combat Character")).to_be_visible()
-
-            workspace = page.locator(".combat-pc-workspace")
             current_hp = workspace.get_by_label("Current HP", exact=True).first
             expect(current_hp).to_be_visible(timeout=10000)
             current_hp.fill("33")
@@ -1397,10 +1402,18 @@ def test_gen2_combat_browser_exposes_dm_status_and_controls(
             combat_nav = page.get_by_role("navigation", name="Combat view")
             expect(combat_nav.get_by_role("button", name="DM Status")).to_be_visible()
             expect(combat_nav.get_by_role("button", name="DM Controls")).to_be_visible()
+            expect(page.locator(".combat-carousel .compact-header")).to_have_count(0)
+            expect(page.locator(".combat-pc-workspace .compact-header")).to_have_count(0)
 
             carousel = page.locator(".combat-carousel")
+            expect(carousel.locator("> .section-heading > div > h2")).to_have_text("Turn Order")
+            expect(carousel.locator("> .section-heading .meta")).to_contain_text("Initiative is pinned here")
+            expect(carousel.get_by_label("Jump to combatant")).to_be_visible()
             carousel.get_by_role("button", name=re.compile(r"Clockwork Hound", re.I)).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?view=status&combatant=\d+"))
+            expect(page.locator(".combat-dm-grid .combat-control-card").first.locator(".section-heading h2")).to_have_text(
+                "Turn Focus",
+            )
             expect(page.get_by_role("heading", name="Vitals")).to_be_visible(timeout=5000)
 
             dm_current_hp = page.get_by_label("DM Current HP", exact=True)
@@ -1465,6 +1478,12 @@ def test_gen2_combat_visual_parity_smoke(
             expect(desktop_page.locator(".combat-summary-band")).to_be_visible()
             expect(desktop_page.locator(".combat-carousel")).to_be_visible()
             expect(desktop_page.locator(".combat-selected-snapshot")).to_be_visible()
+            expect(desktop_page.locator(".combat-carousel .compact-header")).to_have_count(0)
+            expect(desktop_page.locator(".combat-pc-workspace .compact-header")).to_have_count(0)
+            expect(desktop_page.locator(".combat-carousel > .section-heading > div > h2")).to_have_text("Turn Order")
+            expect(desktop_page.locator(".combat-carousel > .section-heading .meta")).to_contain_text("Initiative is pinned here")
+            expect(desktop_page.locator(".combat-carousel").get_by_label("Jump to combatant")).to_be_visible()
+            expect(desktop_page.locator(".combat-pc-workspace > .section-heading > div > h2")).to_be_visible()
             player_metrics = desktop_page.evaluate(
                 """() => {
                     const main = document.querySelector("main.main-shell") || document.querySelector("main");

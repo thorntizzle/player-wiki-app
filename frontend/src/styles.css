@@ -3680,16 +3680,29 @@ textarea {
   box-shadow: var(--shadow);
 }
 
-.combat-carousel .compact-header,
-.combat-pc-workspace .compact-header {
+.combat-carousel > .section-heading,
+.combat-pc-workspace > .section-heading {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 0.75rem;
 }
 
-.combat-jump-label {
-  width: min(280px, 100%);
+.combat-turn-order-jump {
+  width: 100%;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.combat-turn-order-jump__label {
+  font-size: 0.87rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.combat-turn-order-jump__select {
+  width: 100%;
+  max-width: 100%;
 }
 
 .combat-carousel-track {
@@ -3789,7 +3802,7 @@ textarea {
   min-width: 0;
 }
 
-.combat-pc-workspace > .compact-header {
+.combat-pc-workspace > .section-heading {
   padding: 0.85rem 1rem;
   border: 1px solid var(--border);
   border-radius: 18px;
@@ -4003,8 +4016,8 @@ textarea {
   .split-grid,
   .session-log-row,
   .inline-two-col,
-  .combat-carousel .compact-header,
-  .combat-pc-workspace .compact-header,
+  .combat-carousel > .section-heading,
+  .combat-pc-workspace > .section-heading,
   .combat-condition-chip,
   .compact-card {
     flex-direction: column;
