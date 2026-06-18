@@ -13135,46 +13135,46 @@ function DmContentPage() {
                   });
                 }}
               >
-                <label htmlFor={`dm-statblock-subsection-${statblock.id}`} className="chat-label">
-                  Subsection
+                <label className="field">
+                  <span>Subsection</span>
+                  <input
+                    id={`dm-statblock-subsection-${statblock.id}`}
+                    name="subsection"
+                    value={draft.subsection}
+                    disabled={!canManageDmContent}
+                    maxLength={80}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                      const subsection = event.currentTarget.value;
+                      setStatblockDrafts((current) => ({
+                        ...current,
+                        [statblock.id]: {
+                          ...(current[statblock.id] ?? draft),
+                          subsection,
+                        },
+                      }));
+                    }}
+                  />
                 </label>
-                <input
-                  id={`dm-statblock-subsection-${statblock.id}`}
-                  name="subsection"
-                  value={draft.subsection}
-                  disabled={!canManageDmContent}
-                  maxLength={80}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                    const subsection = event.currentTarget.value;
-                    setStatblockDrafts((current) => ({
-                      ...current,
-                      [statblock.id]: {
-                        ...(current[statblock.id] ?? draft),
-                        subsection,
-                      },
-                    }));
-                  }}
-                />
-                <label htmlFor={`dm-statblock-markdown-${statblock.id}`} className="chat-label">
-                  Source markdown body
+                <label className="field">
+                  <span>Source markdown body</span>
+                  <textarea
+                    id={`dm-statblock-markdown-${statblock.id}`}
+                    name="markdown_text"
+                    rows={12}
+                    value={draft.markdown}
+                    disabled={!canManageDmContent}
+                    onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+                      const markdown = event.currentTarget.value;
+                      setStatblockDrafts((current) => ({
+                        ...current,
+                        [statblock.id]: {
+                          ...(current[statblock.id] ?? draft),
+                          markdown,
+                        },
+                      }));
+                    }}
+                  />
                 </label>
-                <textarea
-                  id={`dm-statblock-markdown-${statblock.id}`}
-                  name="markdown_text"
-                  rows={12}
-                  value={draft.markdown}
-                  disabled={!canManageDmContent}
-                  onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-                    const markdown = event.currentTarget.value;
-                    setStatblockDrafts((current) => ({
-                      ...current,
-                      [statblock.id]: {
-                        ...(current[statblock.id] ?? draft),
-                        markdown,
-                      },
-                    }));
-                  }}
-                />
                 <button type="submit" disabled={!canManageDmContent || updateStatblockMutation.isPending}>
                   {updateStatblockMutation.isPending ? "Saving..." : "Save statblock"}
                 </button>
@@ -13214,65 +13214,65 @@ function DmContentPage() {
         {canManageDmContent ? (
           <details className="feature-detail">
             <summary>Edit condition</summary>
-            <form
-              className="stack-form"
-              onSubmit={(event: FormEvent<HTMLFormElement>) => {
-                event.preventDefault();
-                const formData = new FormData(event.currentTarget);
-                const updatedName = String(formData.get("name") || "").trim();
-                const description = String(formData.get("description_markdown") || "");
-                updateConditionMutation.mutate({
-                  id: condition.id,
-                  payload: {
-                    name: updatedName || condition.name,
-                    description_markdown: description,
-                  },
-                });
-              }}
-            >
-              <label htmlFor={`dm-condition-name-${condition.id}`} className="chat-label">
-                Name
-              </label>
-              <input
-                id={`dm-condition-name-${condition.id}`}
-                name="name"
-                value={draft.name}
-                disabled={!canManageDmContent}
-                onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                  const name = event.currentTarget.value;
-                  setConditionDrafts((current) => ({
-                    ...current,
-                    [condition.id]: {
-                      ...(current[condition.id] ?? draft),
-                      name,
+              <form
+                className="stack-form"
+                onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                  event.preventDefault();
+                  const formData = new FormData(event.currentTarget);
+                  const updatedName = String(formData.get("name") || "").trim();
+                  const description = String(formData.get("description_markdown") || "");
+                  updateConditionMutation.mutate({
+                    id: condition.id,
+                    payload: {
+                      name: updatedName || condition.name,
+                      description_markdown: description,
                     },
-                  }));
+                  });
                 }}
-              />
-              <label htmlFor={`dm-condition-description-${condition.id}`} className="chat-label">
-                Description (markdown)
-              </label>
-              <textarea
-                id={`dm-condition-description-${condition.id}`}
-                name="description_markdown"
-                rows={8}
-                value={draft.description}
-                disabled={!canManageDmContent}
-                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-                  const description = event.currentTarget.value;
-                  setConditionDrafts((current) => ({
-                    ...current,
-                    [condition.id]: {
-                      ...(current[condition.id] ?? draft),
-                      description,
-                    },
-                  }));
-                }}
-              />
-              <button type="submit" disabled={!canManageDmContent || updateConditionMutation.isPending}>
-                {updateConditionMutation.isPending ? "Saving..." : "Save condition"}
-              </button>
-            </form>
+              >
+                <label className="field">
+                  <span>Condition name</span>
+                  <input
+                    id={`dm-condition-name-${condition.id}`}
+                    name="name"
+                    value={draft.name}
+                    disabled={!canManageDmContent}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                      const name = event.currentTarget.value;
+                      setConditionDrafts((current) => ({
+                        ...current,
+                        [condition.id]: {
+                          ...(current[condition.id] ?? draft),
+                          name,
+                        },
+                      }));
+                    }}
+                  />
+                </label>
+                <label className="field">
+                  <span>Description</span>
+                  <textarea
+                    id={`dm-condition-description-${condition.id}`}
+                    name="description_markdown"
+                    rows={8}
+                    value={draft.description}
+                    disabled={!canManageDmContent}
+                    onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+                      const description = event.currentTarget.value;
+                      setConditionDrafts((current) => ({
+                        ...current,
+                        [condition.id]: {
+                          ...(current[condition.id] ?? draft),
+                          description,
+                        },
+                      }));
+                    }}
+                  />
+                </label>
+                <button type="submit" disabled={!canManageDmContent || updateConditionMutation.isPending}>
+                  {updateConditionMutation.isPending ? "Saving..." : "Save condition"}
+                </button>
+              </form>
           </details>
         ) : null}
         {canManageDmContent ? (
@@ -13504,7 +13504,7 @@ function DmContentPage() {
               <p className="meta">Upload or paste markdown for DM-side encounter prep.</p>
             </div>
             <form
-              className="session-form"
+              className="stack-form"
               onSubmit={(event: FormEvent<HTMLFormElement>) => {
                 event.preventDefault();
                 const formData = new FormData(event.currentTarget);
@@ -13515,85 +13515,85 @@ function DmContentPage() {
                 });
               }}
             >
-              <label htmlFor="dm-statblock-create-file-import" className="chat-label">
-                Import markdown file
-              </label>
-              <input
-                id="dm-statblock-create-file-import"
-                type="file"
-                accept=".md,.markdown,text/markdown,text/plain"
-                disabled={!canManageDmContent}
-                onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                  const file = event.currentTarget.files?.item(0);
-                  if (!file) {
-                    return;
-                  }
-                  readTextFile(file, (payload) => {
-                    if (!payload) {
-                      setPaneError("Unable to read that markdown file.");
-                      setUiMessage(null);
+              <label className="field">
+                <span>Import markdown file</span>
+                <input
+                  id="dm-statblock-create-file-import"
+                  type="file"
+                  accept=".md,.markdown,text/markdown,text/plain"
+                  disabled={!canManageDmContent}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                    const file = event.currentTarget.files?.item(0);
+                    if (!file) {
                       return;
                     }
-                    setPaneError(null);
-                    setUiMessage(null);
+                    readTextFile(file, (payload) => {
+                      if (!payload) {
+                        setPaneError("Unable to read that markdown file.");
+                        setUiMessage(null);
+                        return;
+                      }
+                      setPaneError(null);
+                      setUiMessage(null);
+                      setStatblockCreateDraft((current) => ({
+                        ...current,
+                        filename: payload.filename,
+                        markdown: payload.text,
+                      }));
+                    });
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span>Source filename</span>
+                <input
+                  id="dm-statblock-create-filename"
+                  name="filename"
+                  value={statblockCreateDraft.filename}
+                  disabled={!canManageDmContent}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                    const filename = event.currentTarget.value;
                     setStatblockCreateDraft((current) => ({
                       ...current,
-                      filename: payload.filename,
-                      markdown: payload.text,
+                      filename,
                     }));
-                  });
-                }}
-              />
-              <label htmlFor="dm-statblock-create-filename" className="chat-label">
-                Source filename
+                  }}
+                />
               </label>
-              <input
-                id="dm-statblock-create-filename"
-                name="filename"
-                value={statblockCreateDraft.filename}
-                disabled={!canManageDmContent}
-                onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                  const filename = event.currentTarget.value;
-                  setStatblockCreateDraft((current) => ({
-                    ...current,
-                    filename,
-                  }));
-                }}
-              />
-              <label htmlFor="dm-statblock-create-subsection" className="chat-label">
-                Subsection
+              <label className="field">
+                <span>Subsection</span>
+                <input
+                  id="dm-statblock-create-subsection"
+                  name="subsection"
+                  maxLength={80}
+                  value={statblockCreateDraft.subsection}
+                  disabled={!canManageDmContent}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                    const subsection = event.currentTarget.value;
+                    setStatblockCreateDraft((current) => ({
+                      ...current,
+                      subsection,
+                    }));
+                  }}
+                />
               </label>
-              <input
-                id="dm-statblock-create-subsection"
-                name="subsection"
-                maxLength={80}
-                value={statblockCreateDraft.subsection}
-                disabled={!canManageDmContent}
-                onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                  const subsection = event.currentTarget.value;
-                  setStatblockCreateDraft((current) => ({
-                    ...current,
-                    subsection,
-                  }));
-                }}
-              />
-              <label htmlFor="dm-statblock-create-markdown" className="chat-label">
-                Source markdown body
+              <label className="field">
+                <span>Source markdown body</span>
+                <textarea
+                  id="dm-statblock-create-markdown"
+                  name="markdown_text"
+                  rows={16}
+                  value={statblockCreateDraft.markdown}
+                  disabled={!canManageDmContent}
+                  onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+                    const markdown = event.currentTarget.value;
+                    setStatblockCreateDraft((current) => ({
+                      ...current,
+                      markdown,
+                    }));
+                  }}
+                />
               </label>
-              <textarea
-                id="dm-statblock-create-markdown"
-                name="markdown_text"
-                rows={16}
-                value={statblockCreateDraft.markdown}
-                disabled={!canManageDmContent}
-                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-                  const markdown = event.currentTarget.value;
-                  setStatblockCreateDraft((current) => ({
-                    ...current,
-                    markdown,
-                  }));
-                }}
-              />
               <button type="submit" disabled={!canManageDmContent || createStatblockMutation.isPending}>
                 {createStatblockMutation.isPending ? "Saving..." : "Save statblock"}
               </button>
@@ -13657,7 +13657,7 @@ function DmContentPage() {
               <p className="meta">Custom combat condition reminder.</p>
             </div>
             <form
-              className="session-form"
+              className="stack-form"
               onSubmit={(event: FormEvent<HTMLFormElement>) => {
                 event.preventDefault();
                 const formData = new FormData(event.currentTarget);
@@ -13674,39 +13674,39 @@ function DmContentPage() {
                 });
               }}
             >
-              <label htmlFor="dm-condition-create-name" className="chat-label">
-                Name
+              <label className="field">
+                <span>Condition name</span>
+                <input
+                  id="dm-condition-create-name"
+                  name="name"
+                  value={conditionCreateDraft.name}
+                  disabled={!canManageDmContent}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                    const name = event.currentTarget.value;
+                    setConditionCreateDraft((current) => ({
+                      ...current,
+                      name,
+                    }));
+                  }}
+                />
               </label>
-              <input
-                id="dm-condition-create-name"
-                name="name"
-                value={conditionCreateDraft.name}
-                disabled={!canManageDmContent}
-                onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                  const name = event.currentTarget.value;
-                  setConditionCreateDraft((current) => ({
-                    ...current,
-                    name,
-                  }));
-                }}
-              />
-              <label htmlFor="dm-condition-create-description" className="chat-label">
-                Description (markdown)
+              <label className="field">
+                <span>Description</span>
+                <textarea
+                  id="dm-condition-create-description"
+                  name="description_markdown"
+                  rows={10}
+                  value={conditionCreateDraft.description}
+                  disabled={!canManageDmContent}
+                  onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+                    const description = event.currentTarget.value;
+                    setConditionCreateDraft((current) => ({
+                      ...current,
+                      description,
+                    }));
+                  }}
+                />
               </label>
-              <textarea
-                id="dm-condition-create-description"
-                name="description_markdown"
-                rows={10}
-                value={conditionCreateDraft.description}
-                disabled={!canManageDmContent}
-                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-                  const description = event.currentTarget.value;
-                  setConditionCreateDraft((current) => ({
-                    ...current,
-                    description,
-                  }));
-                }}
-              />
               <button type="submit" disabled={!canManageDmContent || createConditionMutation.isPending}>
                 {createConditionMutation.isPending ? "Saving..." : "Save condition"}
               </button>

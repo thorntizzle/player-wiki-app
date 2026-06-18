@@ -679,6 +679,62 @@ def test_dm_content_player_wiki_editor_fields_use_flask_style_labels_in_source()
     assert "dm-player-wiki-edit-form" not in source
 
 
+def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+
+    statblock_edit_start = source.index("const renderStatblockCard = (")
+    statblock_edit_end = source.index("const renderConditionCard =", statblock_edit_start)
+    statblock_edit_markup = source[statblock_edit_start:statblock_edit_end]
+
+    assert 'className="chat-label"' not in statblock_edit_markup
+    assert 'className="stack-form"' in statblock_edit_markup
+    assert '<label className="field">' in statblock_edit_markup
+    assert re.search(r'<label className="field">\s*<span>Subsection</span>', statblock_edit_markup) is not None
+    assert re.search(r'<label className="field">\s*<span>Source markdown body</span>', statblock_edit_markup) is not None
+    assert 'name="subsection"' in statblock_edit_markup
+    assert 'name="markdown_text"' in statblock_edit_markup
+
+    condition_edit_start = source.index("const renderConditionCard = (")
+    condition_edit_end = source.index("const renderPlayerWikiPageCard =", condition_edit_start)
+    condition_edit_markup = source[condition_edit_start:condition_edit_end]
+
+    assert 'className="chat-label"' not in condition_edit_markup
+    assert 'className="stack-form"' in condition_edit_markup
+    assert '<label className="field">' in condition_edit_markup
+    assert re.search(r'<label className="field">\s*<span>Condition name</span>', condition_edit_markup) is not None
+    assert re.search(r'<label className="field">\s*<span>Description</span>', condition_edit_markup) is not None
+    assert 'name="name"' in condition_edit_markup
+    assert 'name="description_markdown"' in condition_edit_markup
+
+    statblock_create_start = source.index('<section className="card dm-statblock-create">')
+    statblock_create_end = source.index('<section className="card dm-statblock-library">', statblock_create_start)
+    statblock_create_markup = source[statblock_create_start:statblock_create_end]
+
+    assert 'className="stack-form"' in statblock_create_markup
+    assert 'className="session-form"' not in statblock_create_markup
+    assert 'className="chat-label"' not in statblock_create_markup
+    assert re.search(r'<label className="field">\s*<span>Import markdown file</span>', statblock_create_markup) is not None
+    assert re.search(r'<label className="field">\s*<span>Source filename</span>', statblock_create_markup) is not None
+    assert re.search(r'<label className="field">\s*<span>Subsection</span>', statblock_create_markup) is not None
+    assert re.search(r'<label className="field">\s*<span>Source markdown body</span>', statblock_create_markup) is not None
+    assert 'name="filename"' in statblock_create_markup
+    assert 'name="subsection"' in statblock_create_markup
+    assert 'name="markdown_text"' in statblock_create_markup
+    assert 'type="file"' in statblock_create_markup
+
+    condition_create_start = source.index('<section className="card dm-condition-create">')
+    condition_create_end = source.index('<section className="card dm-condition-library">', condition_create_start)
+    condition_create_markup = source[condition_create_start:condition_create_end]
+
+    assert 'className="stack-form"' in condition_create_markup
+    assert 'className="session-form"' not in condition_create_markup
+    assert 'className="chat-label"' not in condition_create_markup
+    assert re.search(r'<label className="field">\s*<span>Condition name</span>', condition_create_markup) is not None
+    assert re.search(r'<label className="field">\s*<span>Description</span>', condition_create_markup) is not None
+    assert 'name="name"' in condition_create_markup
+    assert 'name="description_markdown"' in condition_create_markup
+
+
 def test_player_session_revealed_articles_panel_uses_session_article_row_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     panel_start = source.index("function SessionArticlesPanel({")
