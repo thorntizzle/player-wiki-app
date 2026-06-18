@@ -48,6 +48,8 @@ def test_campaign_picker_grid_and_empty_state_are_mutually_exclusive_in_source()
         re.search(r"<ApiErrorNotice[\s\S]*?/\>\s*\r?\n\s*<section className=\"grid campaign-picker-grid\">", campaign_list_source)
         is None
     )
+    assert '<p className="meta">Visible through session {entry.campaign.current_session}</p>' in campaign_list_source
+    assert "entry.campaign.current_session !== null && entry.campaign.current_session !== undefined ? (" not in campaign_list_source
 
 
 def test_frontend_pilot_routes_are_closed(client, app, tmp_path):
