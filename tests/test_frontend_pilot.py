@@ -806,11 +806,33 @@ def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_sour
 
 def test_character_xianxia_inventory_section_uses_flask_style_row_form_chrome() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    resources_start = source.index('{isXianxia && activeCharacterSection === "resources" ? (')
+    resources_end = source.index('{isXianxia && activeCharacterSection === "skills" ? (', resources_start)
+    resources_markup = source[resources_start:resources_end]
+
+    assert 'id="session-active-state"' in resources_markup
+    assert '<h3>Active Stance and Aura</h3>' in resources_markup
+    assert 'className="section-heading"' in resources_markup
+    assert 'form onSubmit={submitXianxiaActiveState}' in resources_markup
+    assert 'className="session-vitals-form"' in resources_markup
+    assert (
+        re.search(r'<label className="session-field" htmlFor="xianxia-active-stance">\s*<span>Active Stance</span>', resources_markup)
+        is not None
+    )
+    assert (
+        re.search(r'<label className="session-field" htmlFor="xianxia-active-aura">\s*<span>Active Aura</span>', resources_markup)
+        is not None
+    )
+    assert 'Save Active Stance and Aura' in resources_markup
+    assert 'className="inline-two-col"' not in resources_markup
+    assert 'className="chat-label"' not in resources_markup
+
     section_start = source.index('{isXianxia && activeCharacterSection === "inventory" ? (')
     section_end = source.index('<section className="read-section" id="xianxia-personal">', section_start)
     section_markup = source[section_start:section_end]
-    controls_end = section_markup.index("<form onSubmit={submitCurrency}")
+    controls_end = section_markup.index('<div className="detail-grid" id="session-currency">')
     inventory_controls_markup = section_markup[:controls_end]
+    currency_controls_markup = section_markup[controls_end:]
 
     assert 'className="inventory-list"' in inventory_controls_markup
     assert 'className="inventory-row"' in inventory_controls_markup
@@ -915,6 +937,23 @@ def test_character_xianxia_inventory_section_uses_flask_style_row_form_chrome() 
     assert "className=\"chat-label\"" not in inventory_controls_markup
     assert 'className="button-danger"' not in inventory_controls_markup
     assert 'className="button-link subtle"' in inventory_controls_markup
+
+    assert 'className="detail-grid" id="session-currency"' in currency_controls_markup
+    assert '<article className="detail-card session-card">' in currency_controls_markup
+    assert "<h3>Currency</h3>" in currency_controls_markup
+    assert 'className="currency-grid"' in currency_controls_markup
+    assert 'className="currency-form currency-box"' in currency_controls_markup
+    assert 'className="currency-box__header"' in currency_controls_markup
+    assert 'className="currency-box__amount"' in currency_controls_markup
+    assert "onBlur={submitCurrencyOnBlur}" in currency_controls_markup
+    assert 'className="visually-hidden"' in currency_controls_markup
+    assert 'Update {entry.label}' in currency_controls_markup
+    assert re.search(r'<button type="submit" className="visually-hidden" disabled=\{patchCurrency\.isPending \|\| !canEdit\}>\s*Update \{entry\.label\}\s*</button>', currency_controls_markup) is not None
+
+    assert 'className="chat-label"' not in currency_controls_markup
+    assert 'className="inline-two-col"' not in currency_controls_markup
+    assert 'form onSubmit={submitCurrency} className="currency-grid"' not in currency_controls_markup
+    assert 'Save currency' not in currency_controls_markup
 
 
 def test_player_session_revealed_articles_panel_uses_session_article_row_chrome_in_source() -> None:

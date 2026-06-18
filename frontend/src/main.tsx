@@ -11,7 +11,7 @@ import {
   useParams,
 } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
-import type { ChangeEvent, FormEvent } from "react";
+import type { ChangeEvent, FocusEvent, FormEvent } from "react";
 import "./styles.css";
 import {
   CampaignApiClient,
@@ -8150,6 +8150,10 @@ function CharacterPane({
   const xianxiaYinYang = presentedXianxia.resources?.yin_yang ?? [];
   const xianxiaDao = presentedXianxia.resources?.dao;
   const xianxiaInsight = presentedXianxia.resources?.insight;
+  const xianxiaActiveStateStatus = joinDisplay([
+    readString(presentedXianxia.active_state?.stance?.status_label),
+    readString(presentedXianxia.active_state?.aura?.status_label),
+  ]);
   const presentedSpells = collectPresentedSpells(detailRecord);
   const presentedInventory = detailRecord?.presented_inventory ?? [];
   const presentedInventoryByKey = useMemo(() => {
@@ -8841,6 +8845,13 @@ function CharacterPane({
     }
     setStatusMessage("Saving...");
     patchCurrency.mutate(payload);
+  };
+
+  const submitCurrencyOnBlur = (event: FocusEvent<HTMLInputElement>) => {
+    if (!canEdit || patchCurrency.isPending) {
+      return;
+    }
+    event.currentTarget.form?.requestSubmit();
   };
 
   const submitNotes = (event: FormEvent<HTMLFormElement>) => {
@@ -9639,30 +9650,35 @@ function CharacterPane({
                     </p>
                   </article>
                 ) : null}
-                <form onSubmit={submitXianxiaActiveState} className="inline-two-col">
-                  <label htmlFor="xianxia-active-stance" className="chat-label">
-                    Active Stance
-                  </label>
-                  <input
-                    id="xianxia-active-stance"
-                    value={xianxiaActiveDraft.activeStanceName}
-                    disabled={!canEdit}
-                    onChange={(event) => setXianxiaActiveDraft({ ...xianxiaActiveDraft, activeStanceName: event.currentTarget.value })}
-                  />
-                  <label htmlFor="xianxia-active-aura" className="chat-label">
-                    Active Aura
-                  </label>
-                  <input
-                    id="xianxia-active-aura"
-                    value={xianxiaActiveDraft.activeAuraName}
-                    disabled={!canEdit}
-                    onChange={(event) => setXianxiaActiveDraft({ ...xianxiaActiveDraft, activeAuraName: event.currentTarget.value })}
-                  />
-                  <div />
-                  <button type="submit" disabled={patchXianxiaActiveState.isPending || !canEdit}>
-                    {patchXianxiaActiveState.isPending ? "Saving..." : "Save active state"}
-                  </button>
-                </form>
+                <article className="detail-card" id="session-active-state">
+                  <div className="section-heading">
+                    <h3>Active Stance and Aura</h3>
+                    {xianxiaActiveStateStatus ? <p className="meta">{xianxiaActiveStateStatus}</p> : null}
+                  </div>
+                  <form onSubmit={submitXianxiaActiveState} className="session-vitals-form">
+                    <label className="session-field" htmlFor="xianxia-active-stance">
+                      <span>Active Stance</span>
+                      <input
+                        id="xianxia-active-stance"
+                        value={xianxiaActiveDraft.activeStanceName}
+                        disabled={!canEdit}
+                        onChange={(event) => setXianxiaActiveDraft({ ...xianxiaActiveDraft, activeStanceName: event.currentTarget.value })}
+                      />
+                    </label>
+                    <label className="session-field" htmlFor="xianxia-active-aura">
+                      <span>Active Aura</span>
+                      <input
+                        id="xianxia-active-aura"
+                        value={xianxiaActiveDraft.activeAuraName}
+                        disabled={!canEdit}
+                        onChange={(event) => setXianxiaActiveDraft({ ...xianxiaActiveDraft, activeAuraName: event.currentTarget.value })}
+                      />
+                    </label>
+                    <button type="submit" className="button-link" disabled={patchXianxiaActiveState.isPending || !canEdit}>
+                      {patchXianxiaActiveState.isPending ? "Saving..." : "Save Active Stance and Aura"}
+                    </button>
+                  </form>
+                </article>
               </section>
             ) : null}
 
@@ -10018,28 +10034,38 @@ function CharacterPane({
                     </form>
                   </article>
                 ) : null}
-                <form onSubmit={submitCurrency} className="currency-grid">
-                  {(xianxiaCurrency.length ? xianxiaCurrency : [
-                    { key: "coin", label: "Coin", amount: readNumber(currency.coin) },
-                    { key: "supply", label: "Supply", amount: readNumber(currency.supply) },
-                    { key: "spirit_stones", label: "Spirit Stones", amount: readNumber(currency.spirit_stones) },
-                  ]).map((entry) => (
-                    <label key={entry.key} className="chat-label" htmlFor={`currency-${entry.key}`}>
-                      {entry.label}
-                      <input
-                        id={`currency-${entry.key}`}
-                        type="number"
-                        min="0"
-                        value={currencyDraft[entry.key] ?? String(entry.amount ?? 0)}
-                        disabled={!canEdit}
-                        onChange={(event) => setCurrencyDraft({ ...currencyDraft, [entry.key]: event.currentTarget.value })}
-                      />
-                    </label>
-                  ))}
-                  <button type="submit" disabled={patchCurrency.isPending || !canEdit}>
-                    {patchCurrency.isPending ? "Saving..." : "Save currency"}
-                  </button>
-                </form>
+                <div className="detail-grid" id="session-currency">
+                  <article className="detail-card session-card">
+                    <h3>Currency</h3>
+                    <div className="currency-grid">
+                      {(xianxiaCurrency.length ? xianxiaCurrency : [
+                        { key: "coin", label: "Coin", amount: readNumber(currency.coin) },
+                        { key: "supply", label: "Supply", amount: readNumber(currency.supply) },
+                        { key: "spirit_stones", label: "Spirit Stones", amount: readNumber(currency.spirit_stones) },
+                      ]).map((entry) => (
+                        <form key={entry.key} onSubmit={submitCurrency} className="currency-form currency-box">
+                          <div className="currency-box__header">
+                            <span>{entry.label}</span>
+                          </div>
+                          <input
+                            className="currency-box__amount"
+                            id={`currency-${entry.key}`}
+                            type="number"
+                            min="0"
+                            value={currencyDraft[entry.key] ?? String(entry.amount ?? 0)}
+                            disabled={!canEdit}
+                            onChange={(event) => setCurrencyDraft({ ...currencyDraft, [entry.key]: event.currentTarget.value })}
+                            onBlur={submitCurrencyOnBlur}
+                          />
+                          {entry.description ? <p className="meta">{entry.description}</p> : null}
+                          <button type="submit" className="visually-hidden" disabled={patchCurrency.isPending || !canEdit}>
+                            Update {entry.label}
+                          </button>
+                        </form>
+                      ))}
+                    </div>
+                  </article>
+                </div>
               </section>
             ) : null}
 
