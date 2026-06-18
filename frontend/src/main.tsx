@@ -1933,23 +1933,18 @@ function CharacterAdvancedEditorPage() {
       {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
 
       {data && !data.supported ? (
-        <section className="card">
+        <section className="card auth-card">
           <h2>Advanced Editor Is Not Available In Gen2</h2>
           <p>{data.unsupported_message || "This character system uses a different authoring lane."}</p>
-          <div className="button-row">
+          <div className="hero-actions">
             {data.links.character_url ? (
-              <a className="button" href={data.links.character_url}>
+              <a className="button-link" href={data.links.character_url}>
                 Back to sheet
               </a>
             ) : null}
             {data.links.cultivation_url ? (
-              <a className="button button-secondary" href={data.links.cultivation_url}>
+              <a className="ghost-button" href={data.links.cultivation_url}>
                 Cultivation
-              </a>
-            ) : null}
-            {data.links.flask_character_url ? (
-              <a className="button button-secondary" href={data.links.flask_character_url}>
-                Flask sheet
               </a>
             ) : null}
           </div>
@@ -2156,23 +2151,18 @@ function CharacterProgressionRepairPage() {
       {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
 
       {data && !data.supported ? (
-        <section className="card">
+        <section className="card auth-card">
           <h2>{data.lane === "ready" ? "Progression Repair Is Complete" : "Progression Repair Is Not Available In Gen2"}</h2>
           <p>{data.unsupported_message || "This character is not ready for Gen2 progression repair."}</p>
-          <div className="button-row">
+          <div className="hero-actions">
             {data.links.level_up_url ? (
-              <a className="button" href={data.links.level_up_url}>
+              <a className="button-link" href={data.links.level_up_url}>
                 Level Up
               </a>
             ) : null}
             {data.links.cultivation_url ? (
-              <a className="button button-secondary" href={data.links.cultivation_url}>
+              <a className="ghost-button" href={data.links.cultivation_url}>
                 Cultivation
-              </a>
-            ) : null}
-            {data.links.flask_character_url ? (
-              <a className="button button-secondary" href={data.links.flask_character_url}>
-                Flask sheet
               </a>
             ) : null}
           </div>
@@ -2476,32 +2466,23 @@ function CharacterRetrainingPage() {
       {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
 
       {data && !data.supported ? (
-        <section className="card">
+        <section className="card auth-card">
           <h2>Retraining Is Not Available In Gen2</h2>
           <p>{data.unsupported_message || "This character is not ready for Gen2 retraining."}</p>
-          <div className="button-row">
+          <div className="hero-actions">
             {data.links.character_url ? (
-              <a className="button" href={data.links.character_url}>
+              <a className="button-link" href={data.links.character_url}>
                 Back to sheet
               </a>
             ) : null}
             {data.links.progression_repair_url ? (
-              <a className="button button-secondary" href={data.links.progression_repair_url}>
+              <a className="ghost-button" href={data.links.progression_repair_url}>
                 Progression repair
-              </a>
-            ) : data?.links?.flask_progression_repair_url ? (
-              <a className="button button-secondary" href={data.links.flask_progression_repair_url}>
-                Flask repair
               </a>
             ) : null}
             {data.links.cultivation_url ? (
-              <a className="button button-secondary" href={data.links.cultivation_url}>
+              <a className="ghost-button" href={data.links.cultivation_url}>
                 Cultivation
-              </a>
-            ) : null}
-            {data.links.flask_character_url ? (
-              <a className="button button-secondary" href={data.links.flask_character_url}>
-                Flask sheet
               </a>
             ) : null}
           </div>
@@ -2695,32 +2676,23 @@ function CharacterLevelUpPage() {
       {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
 
       {data && !data.supported ? (
-        <section className="card">
+        <section className="card auth-card">
           <h2>Level-Up Is Not Available In Gen2</h2>
           <p>{data.unsupported_message || "This character is not ready for Gen2 level-up."}</p>
-          <div className="button-row">
+          <div className="hero-actions">
             {data.links.character_url ? (
-              <a className="button" href={data.links.character_url}>
+              <a className="button-link" href={data.links.character_url}>
                 Back to sheet
               </a>
             ) : null}
             {data.links.progression_repair_url ? (
-              <a className="button button-secondary" href={data.links.progression_repair_url}>
+              <a className="ghost-button" href={data.links.progression_repair_url}>
                 Progression repair
-              </a>
-            ) : data.links.flask_progression_repair_url ? (
-              <a className="button button-secondary" href={data.links.flask_progression_repair_url}>
-                Flask repair
               </a>
             ) : null}
             {data.links.cultivation_url ? (
-              <a className="button button-secondary" href={data.links.cultivation_url}>
+              <a className="ghost-button" href={data.links.cultivation_url}>
                 Cultivation
-              </a>
-            ) : null}
-            {data.links.flask_character_url ? (
-              <a className="button button-secondary" href={data.links.flask_character_url}>
-                Flask sheet
               </a>
             ) : null}
           </div>
@@ -3429,18 +3401,13 @@ function CharacterCultivationPage() {
       {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
 
       {data && !data.supported ? (
-        <section className="card">
+        <section className="card auth-card">
           <h2>Cultivation Is Not Available</h2>
           <p>{data.unsupported_message || "This character system uses a different advancement lane."}</p>
-          <div className="button-row">
+          <div className="hero-actions">
             {data.links.character_url ? (
-              <a className="button" href={data.links.character_url}>
+              <a className="button-link" href={data.links.character_url}>
                 Back to sheet
-              </a>
-            ) : null}
-            {data.links.flask_character_url ? (
-              <a className="button button-secondary" href={data.links.flask_character_url}>
-                Flask sheet
               </a>
             ) : null}
           </div>

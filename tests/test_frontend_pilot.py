@@ -301,6 +301,86 @@ def test_combat_conditions_chrome_in_source() -> None:
     assert "className=\"button button-secondary\"" not in condition_section_markup
 
 
+def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+
+    def component_source(component_name: str) -> str:
+        start = source.index(f"function {component_name}() {{")
+        end = source.find("\nfunction ", start + len(component_name) + 10)
+        if end == -1:
+            end = len(source)
+        return source[start:end]
+
+    def unsupported_card(component_name: str) -> str:
+        component_markup = component_source(component_name)
+        unsupported_match = re.search(
+            r"\{data && !data\.supported \? \(\s*<section className=\"[^\"]*\"\s*>[\s\S]*?</section>\s*\) : null\}",
+            component_markup,
+        )
+        assert unsupported_match is not None, f"Unsupported block not found for {component_name}"
+        return unsupported_match.group(0)
+
+    advanced_markup = unsupported_card("CharacterAdvancedEditorPage")
+    assert '<section className="card auth-card">' in advanced_markup
+    assert '<div className="hero-actions">' in advanced_markup
+    assert '<div className="button-row">' not in advanced_markup
+    assert 'className="button button-secondary"' not in advanced_markup
+    assert "Flask sheet" not in advanced_markup
+    assert 'className="button-link" href={data.links.character_url}>' in advanced_markup
+    assert "Back to sheet" in advanced_markup
+    assert 'className="ghost-button" href={data.links.cultivation_url}>' in advanced_markup
+    assert "Cultivation" in advanced_markup
+
+    progression_markup = unsupported_card("CharacterProgressionRepairPage")
+    assert '<section className="card auth-card">' in progression_markup
+    assert '<div className="hero-actions">' in progression_markup
+    assert '<div className="button-row">' not in progression_markup
+    assert 'className="button button-secondary"' not in progression_markup
+    assert "Flask sheet" not in progression_markup
+    assert "Flask repair" not in progression_markup
+    assert 'className="button-link" href={data.links.level_up_url}>' in progression_markup
+    assert "Level Up" in progression_markup
+    assert 'className="ghost-button" href={data.links.cultivation_url}>' in progression_markup
+    assert "Cultivation" in progression_markup
+
+    retraining_markup = unsupported_card("CharacterRetrainingPage")
+    assert '<section className="card auth-card">' in retraining_markup
+    assert '<div className="hero-actions">' in retraining_markup
+    assert '<div className="button-row">' not in retraining_markup
+    assert 'className="button button-secondary"' not in retraining_markup
+    assert "Flask sheet" not in retraining_markup
+    assert "Flask repair" not in retraining_markup
+    assert 'className="button-link" href={data.links.character_url}>' in retraining_markup
+    assert "Back to sheet" in retraining_markup
+    assert 'className="ghost-button" href={data.links.progression_repair_url}>' in retraining_markup
+    assert "Progression repair" in retraining_markup
+    assert 'className="ghost-button" href={data.links.cultivation_url}>' in retraining_markup
+    assert "Cultivation" in retraining_markup
+
+    level_up_markup = unsupported_card("CharacterLevelUpPage")
+    assert '<section className="card auth-card">' in level_up_markup
+    assert '<div className="hero-actions">' in level_up_markup
+    assert '<div className="button-row">' not in level_up_markup
+    assert 'className="button button-secondary"' not in level_up_markup
+    assert "Flask sheet" not in level_up_markup
+    assert "Flask repair" not in level_up_markup
+    assert 'className="button-link" href={data.links.character_url}>' in level_up_markup
+    assert "Back to sheet" in level_up_markup
+    assert 'className="ghost-button" href={data.links.progression_repair_url}>' in level_up_markup
+    assert "Progression repair" in level_up_markup
+    assert 'className="ghost-button" href={data.links.cultivation_url}>' in level_up_markup
+    assert "Cultivation" in level_up_markup
+
+    cultivation_markup = unsupported_card("CharacterCultivationPage")
+    assert '<section className="card auth-card">' in cultivation_markup
+    assert '<div className="hero-actions">' in cultivation_markup
+    assert '<div className="button-row">' not in cultivation_markup
+    assert 'className="button button-secondary"' not in cultivation_markup
+    assert "Flask sheet" not in cultivation_markup
+    assert 'className="button-link" href={data.links.character_url}>' in cultivation_markup
+    assert "Back to sheet" in cultivation_markup
+
+
 def test_combat_unsupported_system_fallback_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     combat_page_start = source.index("function CombatPage() {")
