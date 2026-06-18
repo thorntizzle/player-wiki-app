@@ -156,6 +156,56 @@ def test_combat_action_chrome_in_source() -> None:
     assert "onClick={() => clearCombatMutation.mutate()}" in clear_button_block
 
 
+def test_combat_dm_controls_add_and_cleanup_chrome_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    combat_page_start = source.index("function CombatPage() {")
+    campaign_combat_route_start = source.index("const campaignCombatRoute", combat_page_start)
+    combat_page_source = source[combat_page_start:campaign_combat_route_start]
+
+    add_heading_index = combat_page_source.index("<h2>Add combatant</h2>")
+    add_card_start = combat_page_source.rfind('<section className="card sidebar-card">', 0, add_heading_index)
+    add_card_end = combat_page_source.index("</section>", add_heading_index) + len("</section>")
+    add_card_markup = combat_page_source[add_card_start:add_card_end]
+
+    assert add_card_start >= 0
+    assert add_card_markup.count('<section className="card sidebar-card">') == 1
+    assert 'className="combat-add-combatant-mode-switcher"' in add_card_markup
+    assert 'role="radiogroup"' in add_card_markup
+    assert 'aria-label="Add combatant type"' in add_card_markup
+    assert 'className="combat-add-combatant-mode-toggle"' in add_card_markup
+    assert '<label className="ghost-button" htmlFor="combat-add-mode-player">' in add_card_markup
+    assert '<label className="ghost-button" htmlFor="combat-add-mode-custom">' in add_card_markup
+    assert "combat-add-combatant-mode-panel combat-add-combatant-mode-panel--player" in add_card_markup
+    assert 'combat-add-combatant-mode-panel--systems' in add_card_markup
+    assert 'combat-add-combatant-mode-panel--dm-content' in add_card_markup
+    assert 'combat-add-combatant-mode-panel--custom' in add_card_markup
+    assert 'className="field">' in add_card_markup
+    assert '<span>Character</span>' in add_card_markup
+    assert '<span>Search monsters</span>' in add_card_markup
+    assert '<span>Statblock</span>' in add_card_markup
+    assert '<span>Display name</span>' in add_card_markup
+    assert '<span>Name</span>' in add_card_markup
+    assert 'className="stack-form"' in add_card_markup
+    assert 'combat-inline-form' not in add_card_markup
+    assert 'className="chat-label"' not in add_card_markup
+    assert '<h3>Add PC</h3>' not in add_card_markup
+    assert '<h3>Add NPC</h3>' not in add_card_markup
+    assert '<h3>Add Statblock</h3>' not in add_card_markup
+    assert '<h3>Add Systems Monster</h3>' not in add_card_markup
+
+    cleanup_heading_index = combat_page_source.index("<h2>Encounter cleanup</h2>")
+    cleanup_card_start = combat_page_source.rfind('<section className="card sidebar-card">', 0, cleanup_heading_index)
+    cleanup_card_end = combat_page_source.index("</section>", cleanup_heading_index) + len("</section>")
+    cleanup_card_markup = combat_page_source[cleanup_card_start:cleanup_card_end]
+
+    assert cleanup_card_start >= 0
+    assert 'className="card sidebar-card"' in cleanup_card_markup
+    assert "className=\"ghost-button\"" in cleanup_card_markup
+    assert "onClick={() => clearCombatMutation.mutate()}" in cleanup_card_markup
+    assert "Clear tracker" in cleanup_card_markup
+    assert 'className="button-row"' not in cleanup_card_markup
+
+
 def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     combat_page_start = source.index("function CombatPage() {")

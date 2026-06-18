@@ -14259,6 +14259,9 @@ function CombatPage() {
     turnValue: "",
     initiativePriority: "1",
   });
+  const [combatAddMode, setCombatAddMode] = useState<"player" | "systems" | "dm-content" | "custom">(
+    "player",
+  );
   const [systemsSearchQuery, setSystemsSearchQuery] = useState("");
   const [systemsSearchStatus, setSystemsSearchStatus] = useState<string | null>(null);
   const [systemsSearchResults, setSystemsSearchResults] = useState<CombatSystemsMonsterSearchResult[]>([]);
@@ -14271,6 +14274,14 @@ function CombatPage() {
     setSelectedCombatantId(Number.isFinite(parsed) && parsed > 0 ? parsed : null);
     setActiveCombatView(readSearchView(currentSearch));
   }, [location.href]);
+
+  useEffect(() => {
+    if (!canAccessSystems && combatAddMode === "systems") {
+      setCombatAddMode("player");
+    } else if (!canAccessDmContent && combatAddMode === "dm-content") {
+      setCombatAddMode("player");
+    }
+  }, [canAccessSystems, canAccessDmContent, combatAddMode]);
 
   const combatQuery = useQuery({
     queryKey: ["combat", campaignSlug, activeCombatView, selectedCombatantId],
@@ -15010,318 +15021,396 @@ function CombatPage() {
             <p className="meta">Encounter controls</p>
             <h3>Tracker</h3>
           </div>
-          <div className="button-row">
-            <button type="button" onClick={() => advanceTurnMutation.mutate()} disabled={advanceTurnMutation.isPending}>
-              {advanceTurnMutation.isPending ? "Advancing..." : "Advance turn"}
-            </button>
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={confirmClearTracker}
-                onChange={(event) => setConfirmClearTracker(event.currentTarget.checked)}
-              />
-              Confirm clear tracker
-            </label>
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={() => clearCombatMutation.mutate()}
-              disabled={!confirmClearTracker || clearCombatMutation.isPending}
-            >
-              {clearCombatMutation.isPending ? "Clearing..." : "Clear tracker"}
-            </button>
-          </div>
+          <button type="button" onClick={() => advanceTurnMutation.mutate()} disabled={advanceTurnMutation.isPending}>
+            {advanceTurnMutation.isPending ? "Advancing..." : "Advance turn"}
+          </button>
         </article>
 
-        <article className="card combat-control-card">
-          <div>
-            <p className="meta">Player character</p>
-            <h3>Add PC</h3>
-          </div>
-          {availableCharacters.length ? (
-            <form
-              className="combat-inline-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                addPlayerMutation.mutate();
-              }}
+        <section className="card sidebar-card">
+          <h2>Add combatant</h2>
+          <div className="combat-add-combatant-mode-switcher" role="radiogroup" aria-label="Add combatant type">
+            <input
+              className="combat-add-combatant-mode-radio combat-add-combatant-mode-radio--player"
+              id="combat-add-mode-player"
+              name="combat-add-mode"
+              type="radio"
+              value="player"
+              checked={combatAddMode === "player"}
+              onChange={() => setCombatAddMode("player")}
+            />
+            {canAccessSystems ? (
+              <input
+                className="combat-add-combatant-mode-radio combat-add-combatant-mode-radio--systems"
+                id="combat-add-mode-systems"
+                name="combat-add-mode"
+                type="radio"
+                value="systems"
+                checked={combatAddMode === "systems"}
+                onChange={() => setCombatAddMode("systems")}
+              />
+            ) : null}
+            {canAccessDmContent ? (
+              <input
+                className="combat-add-combatant-mode-radio combat-add-combatant-mode-radio--dm-content"
+                id="combat-add-mode-dm-content"
+                name="combat-add-mode"
+                type="radio"
+                value="dm-content"
+                checked={combatAddMode === "dm-content"}
+                onChange={() => setCombatAddMode("dm-content")}
+              />
+            ) : null}
+            <input
+              className="combat-add-combatant-mode-radio combat-add-combatant-mode-radio--custom"
+              id="combat-add-mode-custom"
+              name="combat-add-mode"
+              type="radio"
+              value="custom"
+              checked={combatAddMode === "custom"}
+              onChange={() => setCombatAddMode("custom")}
+            />
+            <div className="combat-add-combatant-mode-toggle">
+              <label className="ghost-button" htmlFor="combat-add-mode-player">
+                Add player character
+              </label>
+              {canAccessSystems ? (
+                <label className="ghost-button" htmlFor="combat-add-mode-systems">
+                  Add NPC from Systems
+                </label>
+              ) : null}
+              {canAccessDmContent ? (
+                <label className="ghost-button" htmlFor="combat-add-mode-dm-content">
+                  Add NPC from DM Content
+                </label>
+              ) : null}
+              <label className="ghost-button" htmlFor="combat-add-mode-custom">
+                Add custom combatant
+              </label>
+            </div>
+
+            <div
+              className={`combat-add-combatant-mode-panel combat-add-combatant-mode-panel--player ${
+                combatAddMode === "player" ? "combat-add-combatant-mode-panel--active" : ""
+              }`}
             >
-              <label className="chat-label">
-                Character
-                <select
-                  value={playerSeedDraft.characterSlug}
-                  onChange={(event) => setPlayerSeedDraft({ ...playerSeedDraft, characterSlug: event.currentTarget.value })}
+              {availableCharacters.length ? (
+                <form
+                  className="stack-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    addPlayerMutation.mutate();
+                  }}
                 >
-                  <option value="">Choose character</option>
-                  {availableCharacters.map((choice) => (
-                    <option key={choice.slug} value={choice.slug}>
-                      {choice.name} {choice.subtitle ? `- ${choice.subtitle}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="chat-label">
-                Turn value
-                <input
-                  type="number"
-                  value={playerSeedDraft.turnValue}
-                  onChange={(event) => setPlayerSeedDraft({ ...playerSeedDraft, turnValue: event.currentTarget.value })}
-                />
-              </label>
-              <label className="chat-label">
-                Priority
-                <input
-                  type="number"
-                  min="1"
-                  value={playerSeedDraft.initiativePriority}
-                  onChange={(event) =>
-                    setPlayerSeedDraft({ ...playerSeedDraft, initiativePriority: event.currentTarget.value })
-                  }
-                />
-              </label>
-              <button type="submit" disabled={addPlayerMutation.isPending}>
-                {addPlayerMutation.isPending ? "Adding..." : "Add player character"}
-              </button>
-            </form>
-          ) : (
-            <p className="meta">All available visible characters are already in the tracker.</p>
-          )}
-        </article>
-
-        <article className="card combat-control-card">
-          <div>
-            <p className="meta">Manual NPC</p>
-            <h3>Add NPC</h3>
-          </div>
-          <form
-            className="combat-inline-form combat-inline-form--wide"
-            onSubmit={(event) => {
-              event.preventDefault();
-              addNpcMutation.mutate();
-            }}
-          >
-            <label className="chat-label">
-              Name
-              <input
-                type="text"
-                value={npcSeedDraft.displayName}
-                onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, displayName: event.currentTarget.value })}
-              />
-            </label>
-            <label className="chat-label">
-              Turn
-              <input
-                type="number"
-                value={npcSeedDraft.turnValue}
-                onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, turnValue: event.currentTarget.value })}
-              />
-            </label>
-            <label className="chat-label">
-              Initiative bonus
-              <input
-                type="number"
-                value={npcSeedDraft.initiativeBonus}
-                onChange={(event) =>
-                  setNpcSeedDraft({ ...npcSeedDraft, initiativeBonus: event.currentTarget.value })
-                }
-              />
-            </label>
-            <label className="chat-label">
-              DEX mod
-              <input
-                type="number"
-                value={npcSeedDraft.dexterityModifier}
-                onChange={(event) =>
-                  setNpcSeedDraft({ ...npcSeedDraft, dexterityModifier: event.currentTarget.value })
-                }
-              />
-            </label>
-            <label className="chat-label">
-              Max HP
-              <input
-                type="number"
-                min="0"
-                value={npcSeedDraft.maxHp}
-                onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, maxHp: event.currentTarget.value })}
-              />
-            </label>
-            <label className="chat-label">
-              Current HP
-              <input
-                type="number"
-                min="0"
-                value={npcSeedDraft.currentHp}
-                onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, currentHp: event.currentTarget.value })}
-              />
-            </label>
-            <label className="chat-label">
-              Movement
-              <input
-                type="number"
-                min="0"
-                value={npcSeedDraft.movementTotal}
-                onChange={(event) =>
-                  setNpcSeedDraft({ ...npcSeedDraft, movementTotal: event.currentTarget.value })
-                }
-              />
-            </label>
-            <label className="chat-label">
-              Priority
-              <input
-                type="number"
-                min="1"
-                value={npcSeedDraft.initiativePriority}
-                onChange={(event) =>
-                  setNpcSeedDraft({ ...npcSeedDraft, initiativePriority: event.currentTarget.value })
-                }
-              />
-            </label>
-            <button type="submit" disabled={addNpcMutation.isPending}>
-              {addNpcMutation.isPending ? "Adding..." : "Add manual NPC"}
-            </button>
-          </form>
-        </article>
-
-        <article className="card combat-control-card">
-          <div>
-            <p className="meta">DM Content</p>
-            <h3>Add Statblock</h3>
-          </div>
-          {canAccessDmContent && availableStatblocks.length ? (
-            <form
-              className="combat-inline-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                addStatblockMutation.mutate();
-              }}
-            >
-              <label className="chat-label">
-                Statblock
-                <select
-                  value={statblockSeedDraft.statblockId}
-                  onChange={(event) => setStatblockSeedDraft({ ...statblockSeedDraft, statblockId: event.currentTarget.value })}
-                >
-                  <option value="">Choose statblock</option>
-                  {availableStatblocks.map((choice) => (
-                    <option key={choice.id} value={choice.id}>
-                      {choice.title} - {choice.subtitle}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="chat-label">
-                Display name override
-                <input
-                  type="text"
-                  value={statblockSeedDraft.displayName}
-                  onChange={(event) =>
-                    setStatblockSeedDraft({ ...statblockSeedDraft, displayName: event.currentTarget.value })
-                  }
-                />
-              </label>
-              <label className="chat-label">
-                Turn override
-                <input
-                  type="number"
-                  value={statblockSeedDraft.turnValue}
-                  onChange={(event) =>
-                    setStatblockSeedDraft({ ...statblockSeedDraft, turnValue: event.currentTarget.value })
-                  }
-                />
-              </label>
-              <label className="chat-label">
-                Priority
-                <input
-                  type="number"
-                  min="1"
-                  value={statblockSeedDraft.initiativePriority}
-                  onChange={(event) =>
-                    setStatblockSeedDraft({ ...statblockSeedDraft, initiativePriority: event.currentTarget.value })
-                  }
-                />
-              </label>
-              <button type="submit" disabled={addStatblockMutation.isPending}>
-                {addStatblockMutation.isPending ? "Adding..." : "Add statblock"}
-              </button>
-            </form>
-          ) : (
-            <p className="meta">
-              {canAccessDmContent ? "No DM Content statblocks are available." : "DM Content access is required for statblock seeding."}
-            </p>
-          )}
-        </article>
-
-        <article className="card combat-control-card">
-          <div>
-            <p className="meta">Systems source</p>
-            <h3>Add Systems Monster</h3>
-          </div>
-          {canAccessSystems ? (
-            <>
-              <form className="search-form" onSubmit={searchSystemsMonsters}>
-                <label htmlFor="combat-systems-search">Search Systems monsters</label>
-                <input
-                  id="combat-systems-search"
-                  type="search"
-                  value={systemsSearchQuery}
-                  onChange={(event) => setSystemsSearchQuery(event.currentTarget.value)}
-                />
-                <button type="submit">Search</button>
-              </form>
-              {systemsSearchStatus ? <p className="status status-neutral">{systemsSearchStatus}</p> : null}
-              <div className="combat-systems-results">
-                {systemsSearchResults.map((result) => (
-                  <article className="compact-card" key={result.entry_key}>
-                    <div>
-                      <strong>{result.title}</strong>
-                      <p className="meta">
-                        {result.source_id} - {result.subtitle} - Init {result.initiative_bonus}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => addSystemsMonsterMutation.mutate(result.entry_key)}
-                      disabled={addSystemsMonsterMutation.isPending}
+                  <label className="field">
+                    <span>Character</span>
+                    <select
+                      value={playerSeedDraft.characterSlug}
+                      onChange={(event) => setPlayerSeedDraft({ ...playerSeedDraft, characterSlug: event.currentTarget.value })}
                     >
-                      Add
-                    </button>
-                  </article>
-                ))}
+                      <option value="">Choose character</option>
+                      {availableCharacters.map((choice) => (
+                        <option key={choice.slug} value={choice.slug}>
+                          {choice.name} {choice.subtitle ? `- ${choice.subtitle}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Turn value</span>
+                    <input
+                      type="number"
+                      value={playerSeedDraft.turnValue}
+                      onChange={(event) => setPlayerSeedDraft({ ...playerSeedDraft, turnValue: event.currentTarget.value })}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Priority</span>
+                    <input
+                      type="number"
+                      min="1"
+                      value={playerSeedDraft.initiativePriority}
+                      onChange={(event) =>
+                        setPlayerSeedDraft({ ...playerSeedDraft, initiativePriority: event.currentTarget.value })
+                      }
+                    />
+                  </label>
+                  <button type="submit" disabled={addPlayerMutation.isPending}>
+                    {addPlayerMutation.isPending ? "Adding..." : "Add player character"}
+                  </button>
+                </form>
+              ) : (
+                <p className="meta">All visible player characters are already in the tracker.</p>
+              )}
+            </div>
+
+            {canAccessSystems ? (
+              <div
+                className={`combat-add-combatant-mode-panel combat-add-combatant-mode-panel--systems ${
+                  combatAddMode === "systems" ? "combat-add-combatant-mode-panel--active" : ""
+                }`}
+              >
+                <form className="stack-form" onSubmit={searchSystemsMonsters}>
+                  <label className="field">
+                    <span>Search monsters</span>
+                    <input
+                      type="search"
+                      value={systemsSearchQuery}
+                      onChange={(event) => setSystemsSearchQuery(event.currentTarget.value)}
+                    />
+                  </label>
+                  <button type="submit">Search</button>
+                </form>
+                {systemsSearchStatus ? <p className="status status-neutral">{systemsSearchStatus}</p> : null}
+                <div className="combat-systems-results">
+                  {systemsSearchResults.map((result) => (
+                    <article className="compact-card" key={result.entry_key}>
+                      <div>
+                        <strong>{result.title}</strong>
+                        <p className="meta">
+                          {result.source_id} - {result.subtitle} - Init {result.initiative_bonus}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => addSystemsMonsterMutation.mutate(result.entry_key)}
+                        disabled={addSystemsMonsterMutation.isPending}
+                      >
+                        Add
+                      </button>
+                    </article>
+                  ))}
+                </div>
+                <div className="stack-form">
+                  <label className="field">
+                    <span>Display name</span>
+                    <input
+                      type="text"
+                      value={systemsSeedDraft.displayName}
+                      onChange={(event) =>
+                        setSystemsSeedDraft({ ...systemsSeedDraft, displayName: event.currentTarget.value })
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Turn value</span>
+                    <input
+                      type="number"
+                      value={systemsSeedDraft.turnValue}
+                      onChange={(event) =>
+                        setSystemsSeedDraft({ ...systemsSeedDraft, turnValue: event.currentTarget.value })
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Priority</span>
+                    <input
+                      type="number"
+                      min="1"
+                      value={systemsSeedDraft.initiativePriority}
+                      onChange={(event) =>
+                        setSystemsSeedDraft({ ...systemsSeedDraft, initiativePriority: event.currentTarget.value })
+                      }
+                    />
+                  </label>
+                </div>
               </div>
-              <div className="combat-inline-form">
-                <label className="chat-label">
-                  Display name override
+            ) : null}
+
+            {canAccessDmContent ? (
+              <div
+                className={`combat-add-combatant-mode-panel combat-add-combatant-mode-panel--dm-content ${
+                  combatAddMode === "dm-content" ? "combat-add-combatant-mode-panel--active" : ""
+                }`}
+              >
+                {availableStatblocks.length ? (
+                  <form
+                    className="stack-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      addStatblockMutation.mutate();
+                    }}
+                  >
+                    <label className="field">
+                      <span>Statblock</span>
+                      <select
+                        value={statblockSeedDraft.statblockId}
+                        onChange={(event) =>
+                          setStatblockSeedDraft({ ...statblockSeedDraft, statblockId: event.currentTarget.value })
+                        }
+                      >
+                        <option value="">Choose statblock</option>
+                        {availableStatblocks.map((choice) => (
+                          <option key={choice.id} value={choice.id}>
+                            {choice.title} - {choice.subtitle}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Display name override</span>
+                      <input
+                        type="text"
+                        value={statblockSeedDraft.displayName}
+                        onChange={(event) =>
+                          setStatblockSeedDraft({ ...statblockSeedDraft, displayName: event.currentTarget.value })
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Turn override</span>
+                      <input
+                        type="number"
+                        value={statblockSeedDraft.turnValue}
+                        onChange={(event) =>
+                          setStatblockSeedDraft({ ...statblockSeedDraft, turnValue: event.currentTarget.value })
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Priority</span>
+                      <input
+                        type="number"
+                        min="1"
+                        value={statblockSeedDraft.initiativePriority}
+                        onChange={(event) =>
+                          setStatblockSeedDraft({ ...statblockSeedDraft, initiativePriority: event.currentTarget.value })
+                        }
+                      />
+                    </label>
+                    <button type="submit" disabled={addStatblockMutation.isPending}>
+                      {addStatblockMutation.isPending ? "Adding..." : "Add statblock"}
+                    </button>
+                  </form>
+                ) : (
+                  <p className="meta">Upload statblocks on the DM Content page to use them here.</p>
+                )}
+              </div>
+            ) : null}
+
+            <div
+              className={`combat-add-combatant-mode-panel combat-add-combatant-mode-panel--custom ${
+                combatAddMode === "custom" ? "combat-add-combatant-mode-panel--active" : ""
+              }`}
+            >
+              <form
+                className="stack-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  addNpcMutation.mutate();
+                }}
+              >
+                <label className="field">
+                  <span>Name</span>
                   <input
                     type="text"
-                    value={systemsSeedDraft.displayName}
-                    onChange={(event) => setSystemsSeedDraft({ ...systemsSeedDraft, displayName: event.currentTarget.value })}
+                    value={npcSeedDraft.displayName}
+                    onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, displayName: event.currentTarget.value })}
                   />
                 </label>
-                <label className="chat-label">
-                  Turn override
+                <label className="field">
+                  <span>Turn value</span>
                   <input
                     type="number"
-                    value={systemsSeedDraft.turnValue}
-                    onChange={(event) => setSystemsSeedDraft({ ...systemsSeedDraft, turnValue: event.currentTarget.value })}
+                    value={npcSeedDraft.turnValue}
+                    onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, turnValue: event.currentTarget.value })}
                   />
                 </label>
-                <label className="chat-label">
-                  Priority
+                <label className="field">
+                  <span>Initiative bonus</span>
                   <input
                     type="number"
-                    min="1"
-                    value={systemsSeedDraft.initiativePriority}
+                    value={npcSeedDraft.initiativeBonus}
                     onChange={(event) =>
-                      setSystemsSeedDraft({ ...systemsSeedDraft, initiativePriority: event.currentTarget.value })
+                      setNpcSeedDraft({ ...npcSeedDraft, initiativeBonus: event.currentTarget.value })
                     }
                   />
                 </label>
-              </div>
-            </>
-          ) : (
-            <p className="meta">Systems access is required for monster source search.</p>
-          )}
-        </article>
+                <label className="field">
+                  <span>Dex mod</span>
+                  <input
+                    type="number"
+                    value={npcSeedDraft.dexterityModifier}
+                    onChange={(event) =>
+                      setNpcSeedDraft({ ...npcSeedDraft, dexterityModifier: event.currentTarget.value })
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Current HP</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={npcSeedDraft.currentHp}
+                    onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, currentHp: event.currentTarget.value })}
+                  />
+                </label>
+                <label className="field">
+                  <span>Max HP</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={npcSeedDraft.maxHp}
+                    onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, maxHp: event.currentTarget.value })}
+                  />
+                </label>
+                <label className="field">
+                  <span>Temp HP</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={npcSeedDraft.tempHp}
+                    onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, tempHp: event.currentTarget.value })}
+                  />
+                </label>
+                <label className="field">
+                  <span>Movement</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={npcSeedDraft.movementTotal}
+                    onChange={(event) =>
+                      setNpcSeedDraft({ ...npcSeedDraft, movementTotal: event.currentTarget.value })
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Priority</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={npcSeedDraft.initiativePriority}
+                    onChange={(event) =>
+                      setNpcSeedDraft({ ...npcSeedDraft, initiativePriority: event.currentTarget.value })
+                    }
+                  />
+                </label>
+                <button type="submit" disabled={addNpcMutation.isPending}>
+                  {addNpcMutation.isPending ? "Adding..." : "Add NPC combatant"}
+                </button>
+              </form>
+            </div>
+          </div>
+        </section>
+
+        <section className="card sidebar-card">
+          <h2>Encounter cleanup</h2>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={confirmClearTracker}
+              onChange={(event) => setConfirmClearTracker(event.currentTarget.checked)}
+            />
+            Confirm clear tracker
+          </label>
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => clearCombatMutation.mutate()}
+            disabled={!confirmClearTracker || clearCombatMutation.isPending}
+          >
+            {clearCombatMutation.isPending ? "Clearing..." : "Clear tracker"}
+          </button>
+        </section>
       </section>
     );
   };
