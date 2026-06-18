@@ -2797,7 +2797,18 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                 expect(page.get_by_role("link", name="Source page")).to_be_visible()
                 expect(page.get_by_role("link", name="Source category")).to_be_visible()
                 expect(page.get_by_text(entry_body)).to_be_visible()
-                expect(page.get_by_role("link", name="Manage campaign override")).to_be_visible()
+                management_card = page.locator("section#systems-entry-management.card.sidebar-card")
+                manage_campaign_override_link = management_card.get_by_role("link", name="Manage campaign override")
+                expect(management_card).to_be_visible()
+                expect(management_card.get_by_text(
+                    "Shared library entry. Campaign DMs normally use overrides; app admins can allow trusted campaign DMs to edit shared/core content directly."
+                )).to_be_visible()
+                expect(manage_campaign_override_link).to_be_visible()
+                expect(manage_campaign_override_link).to_have_class(re.compile(r"\bghost-button\b"))
+                expect(management_card.locator(".button.button-secondary")).to_have_count(0)
+                expect(management_card.locator(".article-actions")).to_have_count(0)
+                expect(management_card.locator(".article-card")).to_have_count(0)
+                expect(management_card.locator(".article-kind")).to_have_count(0)
 
                 hero_position_before_layout = page.evaluate(
                     """() => {

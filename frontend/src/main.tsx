@@ -6994,13 +6994,18 @@ function SystemsEntryPage() {
               </ul>
             </section>
             {data?.permissions.can_manage_systems ? (
-              <section className="card sidebar-card systems-sidebar-card">
+              <section className="card sidebar-card systems-sidebar-card" id="systems-entry-management">
                 <h2>Entry Management</h2>
-                {data.links.dm_content_systems_url ? (
-                  <a className="button button-secondary" href={data.links.dm_content_systems_url}>Manage campaign override</a>
-                ) : (
-                  <SystemsManageLink campaignSlug={resolvedCampaignSlug} canManage />
-                )}
+                <p className="meta">
+                  Shared library entry. Campaign DMs normally use overrides; app admins can allow trusted campaign DMs to edit shared/core content directly.
+                </p>
+                <div className="badge-list">
+                  {data.links.dm_content_systems_url ? (
+                    <a className="ghost-button" href={data.links.dm_content_systems_url}>Manage campaign override</a>
+                  ) : (
+                    <SystemsManageLink campaignSlug={resolvedCampaignSlug} canManage />
+                  )}
+                </div>
               </section>
             ) : null}
           </aside>
