@@ -5306,7 +5306,7 @@ function AdminUserDetailPage() {
                           Edit
                         </a>
                         {membership.status !== "removed" ? (
-                          <button type="button" className="button button-secondary" disabled={mutationPending} onClick={() => removeMembership.mutate(membership)}>
+                          <button type="button" className="button" disabled={mutationPending} onClick={() => removeMembership.mutate(membership)}>
                             Remove
                           </button>
                         ) : null}
@@ -5336,7 +5336,7 @@ function AdminUserDetailPage() {
                         >
                           Edit
                         </a>
-                        <button type="button" className="button button-secondary" disabled={mutationPending} onClick={() => removeAssignment.mutate(assignment)}>
+                        <button type="button" className="button" disabled={mutationPending} onClick={() => removeAssignment.mutate(assignment)}>
                           Clear
                         </button>
                       </div>
@@ -5377,7 +5377,7 @@ function AdminUserDetailPage() {
                       </button>
                     ) : null}
                     {data.can_manage_account && data.managed_user.status !== "disabled" ? (
-                      <button type="button" className="button button-secondary" disabled={mutationPending} onClick={() => disableUser.mutate()}>
+                      <button type="button" className="button" disabled={mutationPending} onClick={() => disableUser.mutate()}>
                         {disableUser.isPending ? "Saving..." : "Disable user"}
                       </button>
                     ) : null}

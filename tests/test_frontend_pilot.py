@@ -101,3 +101,32 @@ def test_frontend_pilot_without_build_returns_not_found(client, app, tmp_path):
     app.config["APP_NEXT_DIST_DIR"] = tmp_path / "missing-frontend-dist"
     response = client.get("/app-next/")
     assert response.status_code == 404
+
+
+def test_admin_user_detail_action_button_chrome_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    admin_user_detail_start = source.index("function AdminUserDetailPage() {")
+    admin_user_detail_end = source.index("function AccountSettingsPage()", admin_user_detail_start)
+    admin_user_detail_source = source[admin_user_detail_start:admin_user_detail_end]
+
+    remove_on_click = 'onClick={() => removeMembership.mutate(membership)}'
+    clear_on_click = 'onClick={() => removeAssignment.mutate(assignment)}'
+    disable_on_click = 'onClick={() => disableUser.mutate()}'
+
+    remove_start = admin_user_detail_source.rfind("<button", 0, admin_user_detail_source.index(remove_on_click))
+    remove_end = admin_user_detail_source.index("</button>", remove_start) + len("</button>")
+    remove_button_block = admin_user_detail_source[remove_start:remove_end]
+    assert "className=\"button\"" in remove_button_block
+    assert "className=\"button button-secondary\"" not in remove_button_block
+
+    clear_start = admin_user_detail_source.rfind("<button", 0, admin_user_detail_source.index(clear_on_click))
+    clear_end = admin_user_detail_source.index("</button>", clear_start) + len("</button>")
+    clear_button_block = admin_user_detail_source[clear_start:clear_end]
+    assert "className=\"button\"" in clear_button_block
+    assert "className=\"button button-secondary\"" not in clear_button_block
+
+    disable_start = admin_user_detail_source.rfind("<button", 0, admin_user_detail_source.index(disable_on_click))
+    disable_end = admin_user_detail_source.index("</button>", disable_start) + len("</button>")
+    disable_button_block = admin_user_detail_source[disable_start:disable_end]
+    assert "className=\"button\"" in disable_button_block
+    assert "className=\"button button-secondary\"" not in disable_button_block
