@@ -200,6 +200,53 @@ def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
     assert "{deleteUser.isPending ? \"Deleting...\" : \"Delete user\"}" in delete_button_block
 
 
+def test_admin_user_account_actions_are_flat_stack_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    admin_user_detail_start = source.index("function AdminUserDetailPage() {")
+    admin_user_detail_end = source.index("function AccountSettingsPage()", admin_user_detail_start)
+    admin_user_detail_source = source[admin_user_detail_start:admin_user_detail_end]
+
+    heading_index = admin_user_detail_source.index("<h2>Account actions</h2>")
+    account_actions_start = admin_user_detail_source.rfind('<article className="card admin-panel">', 0, heading_index)
+    account_actions_end = admin_user_detail_source.index("</article>", heading_index) + len("</article>")
+    account_actions_block = admin_user_detail_source[account_actions_start:account_actions_end]
+
+    assert '<div className="admin-action-stack">' in account_actions_block
+    assert 'className="admin-action-stack admin-action-groups"' not in account_actions_block
+
+    assert "admin-action-groups" not in account_actions_block
+    assert "admin-action-group" not in account_actions_block
+    assert "admin-action-group__heading" not in account_actions_block
+    assert "admin-danger-box" not in account_actions_block
+    assert "Credential actions" not in account_actions_block
+    assert "Account state" not in account_actions_block
+    assert "Destructive actions" not in account_actions_block
+
+    assert "Generate invite link" in account_actions_block
+    assert "onClick={() => issueInvite.mutate()}" in account_actions_block
+    assert "Generate password reset link" in account_actions_block
+    assert "onClick={() => issuePasswordReset.mutate()}" in account_actions_block
+    assert "Re-enable user" in account_actions_block
+    assert "onClick={() => enableUser.mutate()}" in account_actions_block
+    assert "Disable user" in account_actions_block
+    assert "onClick={() => disableUser.mutate()}" in account_actions_block
+
+    assert '<label className="field">' in account_actions_block
+    assert "id=\"admin-delete-confirm-email\"" in account_actions_block
+    assert "onClick={() => deleteUser.mutate()}" in account_actions_block
+    assert (
+        "disabled={mutationPending || deleteConfirm.trim().toLowerCase() !== data.managed_user.email.toLowerCase()}"
+        in account_actions_block
+    )
+    assert "{deleteUser.isPending ? \"Deleting...\" : \"Delete user\"}" in account_actions_block
+    assert "Delete user" in account_actions_block
+    assert 'className="ghost-button"' in account_actions_block
+
+    assert 'className="meta"' in account_actions_block
+    assert "status-error admin-non-admin-note" not in account_actions_block
+    assert "status-error" not in account_actions_block
+
+
 def test_session_chat_logs_card_uses_flask_style_row_hooks_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     chat_logs_start = source.index('<article className="card session-sidebar-card" id="session-chat-logs">')

@@ -5282,64 +5282,51 @@ function AdminUserDetailPage() {
           <section className="page-layout admin-layout">
             <article className="card admin-panel">
               <h2>Account actions</h2>
-              <div className="admin-action-stack admin-action-groups">
-                <div className="admin-action-group">
-                  <p className="admin-action-group__heading">Credential actions</p>
-                  <div className="admin-action-stack">
-                    {data.managed_user.status === "invited" ? (
-                      <button type="button" className="button" disabled={mutationPending} onClick={() => issueInvite.mutate()}>
-                        {issueInvite.isPending ? "Generating..." : "Generate invite link"}
-                      </button>
-                    ) : null}
-                    {data.managed_user.status === "active" ? (
-                      <button type="button" className="button" disabled={mutationPending} onClick={() => issuePasswordReset.mutate()}>
-                        {issuePasswordReset.isPending ? "Generating..." : "Generate password reset link"}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="admin-action-group">
-                  <p className="admin-action-group__heading">Account state</p>
-                  <div className="admin-action-stack">
-                    {data.can_manage_account && data.managed_user.status === "disabled" ? (
-                      <button type="button" className="button" disabled={mutationPending} onClick={() => enableUser.mutate()}>
-                        {enableUser.isPending ? "Saving..." : "Re-enable user"}
-                      </button>
-                    ) : null}
-                    {data.can_manage_account && data.managed_user.status !== "disabled" ? (
-                      <button type="button" className="button" disabled={mutationPending} onClick={() => disableUser.mutate()}>
-                        {disableUser.isPending ? "Saving..." : "Disable user"}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
+              <div className="admin-action-stack">
+                {data.managed_user.status === "invited" ? (
+                  <button type="button" className="button" disabled={mutationPending} onClick={() => issueInvite.mutate()}>
+                    {issueInvite.isPending ? "Generating..." : "Generate invite link"}
+                  </button>
+                ) : null}
+                {data.managed_user.status === "active" ? (
+                  <button type="button" className="button" disabled={mutationPending} onClick={() => issuePasswordReset.mutate()}>
+                    {issuePasswordReset.isPending ? "Generating..." : "Generate password reset link"}
+                  </button>
+                ) : null}
+                {data.can_manage_account && data.managed_user.status === "disabled" ? (
+                  <button type="button" className="button" disabled={mutationPending} onClick={() => enableUser.mutate()}>
+                    {enableUser.isPending ? "Saving..." : "Re-enable user"}
+                  </button>
+                ) : null}
+                {data.can_manage_account && data.managed_user.status !== "disabled" ? (
+                  <button type="button" className="button" disabled={mutationPending} onClick={() => disableUser.mutate()}>
+                    {disableUser.isPending ? "Saving..." : "Disable user"}
+                  </button>
+                ) : null}
                 {data.can_manage_account ? (
-                  <div className="admin-action-group admin-action-group--danger">
-                    <p className="admin-action-group__heading">Destructive actions</p>
-                    <div className="admin-danger-box">
-                      <label className="field">
-                        <span>Confirm delete by email</span>
-                        <input
-                          id="admin-delete-confirm-email"
-                          name="confirm_email"
-                          type="text"
-                          value={deleteConfirm}
-                          onChange={(event) => setDeleteConfirm(event.currentTarget.value)}
-                          placeholder={data.managed_user.email}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        className="ghost-button"
-                        disabled={mutationPending || deleteConfirm.trim().toLowerCase() !== data.managed_user.email.toLowerCase()}
-                        onClick={() => deleteUser.mutate()}
-                      >
-                        {deleteUser.isPending ? "Deleting..." : "Delete user"}
-                      </button>
-                    </div>
-                  </div>
+                  <>
+                    <label className="field">
+                      <span>Confirm delete by email</span>
+                      <input
+                        id="admin-delete-confirm-email"
+                        name="confirm_email"
+                        type="text"
+                        value={deleteConfirm}
+                        onChange={(event) => setDeleteConfirm(event.currentTarget.value)}
+                        placeholder={data.managed_user.email}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      disabled={mutationPending || deleteConfirm.trim().toLowerCase() !== data.managed_user.email.toLowerCase()}
+                      onClick={() => deleteUser.mutate()}
+                    >
+                      {deleteUser.isPending ? "Deleting..." : "Delete user"}
+                    </button>
+                  </>
                 ) : (
-                  <p className="status status-error admin-non-admin-note">
+                  <p className="meta">
                     Use a different admin account or the CLI if you ever need to change the account you are currently using.
                   </p>
                 )}
