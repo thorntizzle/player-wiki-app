@@ -11952,7 +11952,7 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
           <p className="meta">{payload.entry_override_count} saved override{payload.entry_override_count === 1 ? "" : "s"}</p>
         </div>
         <form
-          className="session-form"
+          className="stack-form"
           onSubmit={(event: FormEvent<HTMLFormElement>) => {
             event.preventDefault();
             updateOverrideMutation.mutate();
@@ -12000,15 +12000,21 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
           </button>
         </form>
         {payload.entry_override_rows.length ? (
-          <div className="article-stack systems-override-list">
+          <div className="dm-content-list systems-override-list">
             {payload.entry_override_rows.map((override) => (
-              <article className="article-card" key={override.entry_key}>
-                <h4>{override.entry_href ? <a href={override.entry_href}>{override.entry_title}</a> : override.entry_title}</h4>
-                <p className="meta">{override.entry_key}</p>
-                <p className="meta">{override.source_label}{override.entry_type_label ? ` | ${override.entry_type_label}` : ""}</p>
-                <div className="badge-list">
-                  <span className="meta-badge">{override.visibility_label}</span>
-                  <span className="meta-badge">{override.enablement_label}</span>
+              <article className="dm-content-item" key={override.entry_key}>
+                <div className="dm-content-item__header">
+                  <div>
+                    <h3>{override.entry_href ? <a href={override.entry_href}>{override.entry_title}</a> : override.entry_title}</h3>
+                    <p className="meta">{override.entry_key}</p>
+                    {override.source_label ? (
+                      <p className="meta">{override.source_label}{override.entry_type_label ? ` | ${override.entry_type_label}` : ""}</p>
+                    ) : null}
+                  </div>
+                  <div className="badge-list">
+                    <span className="meta-badge">{override.visibility_label}</span>
+                    <span className="meta-badge">{override.enablement_label}</span>
+                  </div>
                 </div>
               </article>
             ))}
@@ -12024,7 +12030,7 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
           <p className="meta">{payload.custom_entry_count} custom campaign entr{payload.custom_entry_count === 1 ? "y" : "ies"}</p>
         </div>
         <form
-          className="session-form"
+          className="stack-form"
           onSubmit={(event: FormEvent<HTMLFormElement>) => {
             event.preventDefault();
             createCustomMutation.mutate();
@@ -12054,60 +12060,73 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
         </form>
 
         {allCustomEntries.length ? (
-          <div className="article-stack systems-custom-list">
+          <div className="dm-content-list systems-custom-list">
             {allCustomEntries.map((entry) => {
               const draft = customEditDrafts[entry.slug] ?? buildSystemsCustomDraftFromEntry(entry);
               return (
-                <details className="article-card" key={entry.entry_key}>
-                  <summary>
-                    <strong>{entry.title}</strong>
-                    <span className="article-kind">{entry.entry_type_label}</span>
-                  </summary>
-                  <p className="meta">{entry.source_id} | {entry.visibility_label} | {entry.status_label}</p>
-                  {entry.href ? <a className="button button-secondary" href={entry.href}>Open entry</a> : null}
-                  {entry.provenance ? <p className="meta">Source/provenance: {entry.provenance}</p> : null}
-                  {entry.search_metadata ? <p className="meta">Search metadata: {entry.search_metadata}</p> : null}
-                  {entry.body_markdown ? <pre className="dm-content-preview dm-content-preview--compact">{entry.body_markdown}</pre> : null}
-                  <form
-                    className="session-form"
-                    onSubmit={(event: FormEvent<HTMLFormElement>) => {
-                      event.preventDefault();
-                      updateCustomMutation.mutate(entry);
-                    }}
-                  >
-                    {renderCustomFields({
-                      idPrefix: `systems-custom-edit-${entry.id}`,
-                      draft,
-                      setDraft: (next) => setCustomEditDrafts((current) => ({ ...current, [entry.slug]: next })),
-                      includeSlug: false,
-                      disabled: !canManageSystems,
-                    })}
-                    <div className="badge-list">
-                      <button type="submit" disabled={!canManageSystems || updateCustomMutation.isPending}>
-                        {updateCustomMutation.isPending ? "Saving..." : "Update custom entry"}
-                      </button>
-                      {entry.is_archived ? (
-                        <button
-                          type="button"
-                          className="button button-secondary"
-                          disabled={!canManageSystems || restoreCustomMutation.isPending}
-                          onClick={() => restoreCustomMutation.mutate(entry)}
-                        >
-                          {restoreCustomMutation.isPending ? "Restoring..." : "Restore"}
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="button-danger"
-                          disabled={!canManageSystems || archiveCustomMutation.isPending}
-                          onClick={() => archiveCustomMutation.mutate(entry)}
-                        >
-                          {archiveCustomMutation.isPending ? "Archiving..." : "Archive"}
-                        </button>
-                      )}
+                <article className="dm-content-item" key={entry.entry_key}>
+                  <div className="dm-content-item__header">
+                    <div>
+                      <h3>{entry.title}</h3>
+                      <p className="meta">{entry.source_id} | {entry.visibility_label} | {entry.status_label}</p>
                     </div>
-                  </form>
-                </details>
+                    <div className="badge-list">
+                      <span className="meta-badge">{entry.entry_type_label}</span>
+                    </div>
+                  </div>
+                  <div className="dm-content-item__actions">
+                    {entry.href ? (
+                      <a className="ghost-button" href={entry.href}>
+                        Open entry
+                      </a>
+                    ) : null}
+                    {entry.is_archived ? (
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        disabled={!canManageSystems || restoreCustomMutation.isPending}
+                        onClick={() => restoreCustomMutation.mutate(entry)}
+                      >
+                        {restoreCustomMutation.isPending ? "Restoring..." : "Restore"}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        disabled={!canManageSystems || archiveCustomMutation.isPending}
+                        onClick={() => archiveCustomMutation.mutate(entry)}
+                      >
+                        {archiveCustomMutation.isPending ? "Archiving..." : "Archive"}
+                      </button>
+                    )}
+                  </div>
+                  <details className="feature-detail">
+                    <summary>Review or edit custom entry</summary>
+                    {entry.provenance ? <p className="meta">Source/provenance: {entry.provenance}</p> : null}
+                    {entry.search_metadata ? <p className="meta">Search metadata: {entry.search_metadata}</p> : null}
+                    {entry.body_markdown ? <pre className="dm-content-preview dm-content-preview--compact">{entry.body_markdown}</pre> : null}
+                    <form
+                      className="stack-form"
+                      onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                        event.preventDefault();
+                        updateCustomMutation.mutate(entry);
+                      }}
+                    >
+                      {renderCustomFields({
+                        idPrefix: `systems-custom-edit-${entry.id}`,
+                        draft,
+                        setDraft: (next) => setCustomEditDrafts((current) => ({ ...current, [entry.slug]: next })),
+                        includeSlug: false,
+                        disabled: !canManageSystems,
+                      })}
+                      <div className="badge-list">
+                        <button type="submit" disabled={!canManageSystems || updateCustomMutation.isPending}>
+                          {updateCustomMutation.isPending ? "Saving..." : "Update custom entry"}
+                        </button>
+                      </div>
+                    </form>
+                  </details>
+                </article>
               );
             })}
           </div>
@@ -12124,7 +12143,7 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
           <p className="meta">DND-5E ZIP import remains on the permission-gated Flask form for this slice.</p>
         </div>
         {payload.permissions.can_import_shared_systems && payload.supports_dnd5e_import ? (
-          <a className="button button-secondary" href={`${payload.links.flask_systems_lane_url}#systems-shared-imports`}>
+          <a className="ghost-button" href={`${payload.links.flask_systems_lane_url}#systems-shared-imports`}>
             Open admin import form
           </a>
         ) : (
@@ -12140,21 +12159,25 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
           <p className="meta">{payload.import_run_count} recent shared-library run{payload.import_run_count === 1 ? "" : "s"}</p>
         </div>
         {payload.import_run_rows.length ? (
-          <div className="article-stack systems-import-history">
+          <div className="dm-content-list systems-import-history">
             {payload.import_run_rows.map((run) => (
-              <article className="article-card" key={run.id}>
-                <h4>{run.source_id} import #{run.id}</h4>
-                <p className="meta">Started {formatTimestamp(run.started_at)}{run.completed_at ? ` | Completed ${formatTimestamp(run.completed_at)}` : ""}</p>
-                {run.import_version ? <p className="meta">Import version: {run.import_version}</p> : null}
-                <div className="badge-list">
-                  <span className="meta-badge">{run.status}</span>
-                  {run.imported_count !== null ? <span className="meta-badge">{run.imported_count} entries</span> : null}
-                  {run.source_file_count !== null ? <span className="meta-badge">{run.source_file_count} files</span> : null}
+              <article className="dm-content-item" key={run.id}>
+                <div className="dm-content-item__header">
+                  <div>
+                    <h3>{run.source_id} import #{run.id}</h3>
+                    <p className="meta">Started {formatTimestamp(run.started_at)}{run.completed_at ? ` | Completed ${formatTimestamp(run.completed_at)}` : ""}</p>
+                    {run.import_version ? <p className="meta">Import version: {run.import_version}</p> : null}
+                    {run.type_summary.length ? (
+                      <p className="meta">{run.type_summary.map((item) => `${item.entry_type_label}: ${item.count}`).join(", ")}</p>
+                    ) : null}
+                    {run.error ? <p className="meta">Error: {run.error}</p> : null}
+                  </div>
+                  <div className="badge-list">
+                    <span className="meta-badge">{run.status}</span>
+                    {run.imported_count !== null ? <span className="meta-badge">{run.imported_count} entries</span> : null}
+                    {run.source_file_count !== null ? <span className="meta-badge">{run.source_file_count} files</span> : null}
+                  </div>
                 </div>
-                {run.type_summary.length ? (
-                  <p className="meta">{run.type_summary.map((item) => `${item.entry_type_label}: ${item.count}`).join(", ")}</p>
-                ) : null}
-                {run.error ? <p className="meta">Error: {run.error}</p> : null}
                 {run.source_files.length ? (
                   <details className="feature-detail">
                     <summary>Review imported files and entry counts</summary>

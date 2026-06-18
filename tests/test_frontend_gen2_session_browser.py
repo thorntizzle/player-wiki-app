@@ -3598,6 +3598,32 @@ def test_gen2_dm_content_browser_systems_custom_entry_workflow(
             expect(page.get_by_role("heading", name="Shared Source Imports")).to_be_visible()
             expect(page.get_by_role("heading", name="Import-Run History")).to_be_visible()
 
+            entry_overrides = page.locator("#systems-entry-overrides")
+            custom_panel = page.locator("#systems-custom-entries")
+            import_history = page.locator("#systems-import-history")
+
+            expect(entry_overrides.locator("article.article-card")).to_have_count(0)
+            expect(entry_overrides.locator(".article-actions")).to_have_count(0)
+            expect(entry_overrides.locator(".article-kind")).to_have_count(0)
+            expect(entry_overrides.locator(".button-danger")).to_have_count(0)
+            expect(custom_panel.locator("details.article-card")).to_have_count(0)
+            expect(custom_panel.locator(".article-kind")).to_have_count(0)
+            expect(custom_panel.locator(".article-actions")).to_have_count(0)
+            expect(custom_panel.locator(".button-danger")).to_have_count(0)
+            expect(import_history.locator("article.article-card")).to_have_count(0)
+            expect(import_history.locator(".article-actions")).to_have_count(0)
+            expect(import_history.locator(".article-kind")).to_have_count(0)
+            expect(import_history.locator(".button-danger")).to_have_count(0)
+
+            entry_override_item_count = entry_overrides.locator(".dm-content-list .dm-content-item").count()
+            import_history_item_count = import_history.locator(".dm-content-list .dm-content-item").count()
+            if entry_override_item_count:
+                expect(entry_overrides.locator(".dm-content-list .dm-content-item")).to_have_count(entry_override_item_count)
+                expect(entry_overrides.locator(".dm-content-list .dm-content-item .dm-content-item__header")).to_have_count(entry_override_item_count)
+            if import_history_item_count:
+                expect(import_history.locator(".dm-content-list .dm-content-item")).to_have_count(import_history_item_count)
+                expect(import_history.locator(".dm-content-list .dm-content-item .dm-content-item__header")).to_have_count(import_history_item_count)
+
             custom_panel = page.locator("#systems-custom-entries")
             custom_panel.locator("#systems-custom-create-title").fill(entry_title)
             custom_panel.locator("#systems-custom-create-slug").fill("gen2-focus-rule")
@@ -3609,7 +3635,11 @@ def test_gen2_dm_content_browser_systems_custom_entry_workflow(
             expect(page.get_by_text(f"Custom Systems entry created: {entry_title}.")).to_be_visible(timeout=10000)
 
             custom_panel.get_by_label("Search custom entries").fill("Gen2 Focus")
-            entry_card = custom_panel.locator("details.article-card", has_text=entry_title)
+            expect(custom_panel.locator("div.dm-content-list")).to_have_count(1)
+            entry_card = custom_panel.locator("article.dm-content-item", has_text=entry_title)
+            expect(entry_card.locator("summary")).to_be_visible(timeout=10000)
+            expect(entry_card.locator(".dm-content-item__header")).to_have_count(1)
+            expect(entry_card.locator("form.stack-form")).to_have_count(1)
             expect(entry_card).to_be_visible(timeout=10000)
             entry_card.locator("summary").click()
             expect(entry_card.locator("pre.dm-content-preview", has_text=entry_body)).to_be_visible()
@@ -3619,25 +3649,25 @@ def test_gen2_dm_content_browser_systems_custom_entry_workflow(
             entry_card.get_by_role("button", name="Update custom entry").click()
             expect(page.get_by_text(f"Custom Systems entry updated: {updated_entry_title}.")).to_be_visible(timeout=10000)
 
-            updated_card = custom_panel.locator("details.article-card", has_text=updated_entry_title)
+            updated_card = custom_panel.locator("article.dm-content-item", has_text=updated_entry_title)
             expect(updated_card).to_be_visible(timeout=10000)
-            if not updated_card.evaluate("element => element.open"):
+            if not updated_card.locator("details.feature-detail").evaluate("element => element.open"):
                 updated_card.locator("summary").click()
             expect(updated_card.locator("pre.dm-content-preview", has_text=updated_entry_body)).to_be_visible()
 
             updated_card.get_by_role("button", name="Archive").click()
             expect(page.get_by_text(f"Custom Systems entry archived: {updated_entry_title}.")).to_be_visible(timeout=10000)
-            archived_card = custom_panel.locator("details.article-card", has_text=updated_entry_title)
+            archived_card = custom_panel.locator("article.dm-content-item", has_text=updated_entry_title)
             expect(archived_card).to_be_visible(timeout=10000)
-            if not archived_card.evaluate("element => element.open"):
+            if not archived_card.locator("details.feature-detail").evaluate("element => element.open"):
                 archived_card.locator("summary").click()
             expect(archived_card.get_by_text("Archived")).to_be_visible()
 
             archived_card.get_by_role("button", name="Restore").click()
             expect(page.get_by_text(f"Custom Systems entry restored: {updated_entry_title}.")).to_be_visible(timeout=10000)
-            restored_card = custom_panel.locator("details.article-card", has_text=updated_entry_title)
+            restored_card = custom_panel.locator("article.dm-content-item", has_text=updated_entry_title)
             expect(restored_card).to_be_visible(timeout=10000)
-            if not restored_card.evaluate("element => element.open"):
+            if not restored_card.locator("details.feature-detail").evaluate("element => element.open"):
                 restored_card.locator("summary").click()
             expect(restored_card.get_by_text("Active")).to_be_visible()
         finally:
