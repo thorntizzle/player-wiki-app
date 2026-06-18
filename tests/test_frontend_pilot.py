@@ -238,11 +238,39 @@ def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
     )
     assert "{setCurrentMutation.isPending ? \"Setting...\" : \"Set current\"}" in turn_focus_markup
 
+    assert 'className="stack-form combat-status-authority-form"' in turn_focus_markup
+    assert re.search(r'<label className="field">\s*<span>Turn value</span>', turn_focus_markup) is not None
+    assert re.search(r'<label className="field">\s*<span>Priority</span>', turn_focus_markup) is not None
+    assert "className=\"chat-label\"" not in turn_focus_markup
+
     assert 'className="hero-actions combat-turn-actions"' in turn_focus_markup
     assert '{advanceTurnMutation.isPending ? "Advancing..." : "Advance turn"}' in turn_focus_markup
     assert '<button type="button" onClick={() => advanceTurnMutation.mutate()} disabled={advanceTurnMutation.isPending}>' in turn_focus_markup
 
     assert '<div className="button-row">' not in turn_focus_markup
+
+
+def test_combat_dm_status_tactical_forms_chrome_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    combat_page_start = source.index("function CombatPage() {")
+    campaign_combat_route_start = source.index("const campaignCombatRoute", combat_page_start)
+    combat_page_source = source[combat_page_start:campaign_combat_route_start]
+
+    tactical_start = combat_page_source.index('<section className="combat-dm-grid" aria-label="DM tactical controls">')
+    tactical_end = combat_page_source.index('<section className="combat-pc-workspace"', tactical_start)
+    tactical_markup = combat_page_source[tactical_start:tactical_end]
+
+    assert "combat-summary-grid combat-summary-grid--snapshot" in tactical_markup
+    assert "combat-stat combat-stat--editable" in tactical_markup
+    assert "combat-stat-input combat-stat-input--number" in tactical_markup
+    assert "combat-stat-input combat-stat-input--single" in tactical_markup
+    assert "combat-inline-value" in tactical_markup
+    assert "combat-resource-strip combat-inline-resource-form" in tactical_markup
+    assert "combat-resource-toggle" in tactical_markup
+    assert "combat-resource" in tactical_markup
+
+    assert "combat-inline-form" not in tactical_markup
+    assert 'className="chat-label"' not in tactical_markup
 
 
 def test_combat_player_workspace_target_chrome_in_source() -> None:

@@ -14831,7 +14831,7 @@ function CombatPage() {
               </div>
             </div>
             <form
-              className="combat-inline-form"
+              className="stack-form combat-status-authority-form"
               onSubmit={(event) => {
                 event.preventDefault();
                 updateTurnMutation.mutate({
@@ -14841,16 +14841,16 @@ function CombatPage() {
                 });
               }}
             >
-              <label className="chat-label">
-                Turn value
+              <label className="field">
+                <span>Turn value</span>
                 <input
                   type="number"
                   value={turnDraft.turnValue}
                   onChange={(event) => setTurnDraft({ ...turnDraft, turnValue: event.currentTarget.value })}
                 />
               </label>
-              <label className="chat-label">
-                Priority
+              <label className="field">
+                <span>Priority</span>
                 <input
                   type="number"
                   min="1"
@@ -14876,36 +14876,48 @@ function CombatPage() {
               <p className="meta">Snapshot</p>
               <h3>Vitals</h3>
             </div>
-            <form
-              className="combat-inline-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                updateVitalsMutation.mutate(vitalsPayload());
-              }}
-            >
-              <label className="chat-label">
-                Current HP
+            <div className="combat-summary-grid combat-summary-grid--snapshot">
+              <form
+                className="combat-stat combat-stat--editable"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  updateVitalsMutation.mutate(vitalsPayload());
+                }}
+              >
+                <span className="meta">HP</span>
+                <div className="combat-inline-value">
+                  <input
+                    className="combat-stat-input combat-stat-input--number"
+                    aria-label="DM Current HP"
+                    type="number"
+                    value={vitalsDraft.currentHp}
+                    onChange={(event) => setVitalsDraft({ ...vitalsDraft, currentHp: event.currentTarget.value })}
+                  />
+                  <span className="combat-inline-divider">/</span>
+                  <strong>{vitalsDraft.maxHp}</strong>
+                </div>
+              </form>
+              <form
+                className="combat-stat combat-stat--editable"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  updateVitalsMutation.mutate(vitalsPayload());
+                }}
+              >
+                <span className="meta">Temp HP</span>
                 <input
-                  aria-label="DM Current HP"
-                  type="number"
-                  value={vitalsDraft.currentHp}
-                  onChange={(event) => setVitalsDraft({ ...vitalsDraft, currentHp: event.currentTarget.value })}
-                />
-              </label>
-              <label className="chat-label">
-                Temp HP
-                <input
+                  className="combat-stat-input combat-stat-input--single"
                   aria-label="DM Temp HP"
                   type="number"
                   min="0"
                   value={vitalsDraft.tempHp}
                   onChange={(event) => setVitalsDraft({ ...vitalsDraft, tempHp: event.currentTarget.value })}
                 />
-              </label>
+              </form>
               {!isPlayerCharacter ? (
                 <>
-                  <label className="chat-label">
-                    Max HP
+                  <label className="field">
+                    <span>Max HP</span>
                     <input
                       aria-label="DM Max HP"
                       type="number"
@@ -14914,9 +14926,10 @@ function CombatPage() {
                       onChange={(event) => setVitalsDraft({ ...vitalsDraft, maxHp: event.currentTarget.value })}
                     />
                   </label>
-                  <label className="chat-label">
-                    Movement total
+                  <label className="field">
+                    <span>Movement total</span>
                     <input
+                      aria-label="DM Movement total"
                       type="number"
                       min="0"
                       value={vitalsDraft.movementTotal}
@@ -14927,10 +14940,10 @@ function CombatPage() {
                   </label>
                 </>
               ) : null}
-              <button type="submit" aria-label="Save DM vitals" disabled={updateVitalsMutation.isPending}>
+              <button type="button" onClick={() => updateVitalsMutation.mutate(vitalsPayload())} aria-label="Save DM vitals" disabled={updateVitalsMutation.isPending}>
                 {updateVitalsMutation.isPending ? "Saving..." : "Save vitals"}
               </button>
-            </form>
+            </div>
           </article>
 
           <article className="card combat-control-card">
@@ -14939,7 +14952,7 @@ function CombatPage() {
               <h3>Action Economy</h3>
             </div>
             <form
-              className="combat-inline-form"
+              className="combat-resource-strip combat-inline-resource-form"
               onSubmit={(event) => {
                 event.preventDefault();
                 updateResourcesMutation.mutate({
@@ -14951,27 +14964,32 @@ function CombatPage() {
                 });
               }}
             >
-              <label className="chat-label">
-                Movement remaining
-                <input
-                  aria-label="DM Movement Remaining"
-                  type="number"
-                  min="0"
-                  value={resourcesDraft.movementRemaining}
-                  onChange={(event) =>
-                    setResourcesDraft({ ...resourcesDraft, movementRemaining: event.currentTarget.value })
-                  }
-                />
+              <label className="combat-stat">
+                <span className="meta">Movement</span>
+                <div className="combat-inline-value">
+                  <input
+                    className="combat-stat-input combat-stat-input--number"
+                    aria-label="DM Movement Remaining"
+                    type="number"
+                    min="0"
+                    value={resourcesDraft.movementRemaining}
+                    onChange={(event) =>
+                      setResourcesDraft({ ...resourcesDraft, movementRemaining: event.currentTarget.value })
+                    }
+                  />
+                  <span className="combat-inline-divider">/</span>
+                  <strong>{vitalsDraft.movementTotal}</strong>
+                </div>
               </label>
-              <label className="checkbox-row">
+              <label className="combat-resource-toggle">
                 <input
                   type="checkbox"
                   checked={resourcesDraft.hasAction}
                   onChange={(event) => setResourcesDraft({ ...resourcesDraft, hasAction: event.currentTarget.checked })}
                 />
-                Action
+                <span className="combat-resource">Action</span>
               </label>
-              <label className="checkbox-row">
+              <label className="combat-resource-toggle">
                 <input
                   type="checkbox"
                   checked={resourcesDraft.hasBonusAction}
@@ -14979,9 +14997,9 @@ function CombatPage() {
                     setResourcesDraft({ ...resourcesDraft, hasBonusAction: event.currentTarget.checked })
                   }
                 />
-                Bonus action
+                <span className="combat-resource">Bonus action</span>
               </label>
-              <label className="checkbox-row">
+              <label className="combat-resource-toggle">
                 <input
                   type="checkbox"
                   checked={resourcesDraft.hasReaction}
@@ -14989,7 +15007,7 @@ function CombatPage() {
                     setResourcesDraft({ ...resourcesDraft, hasReaction: event.currentTarget.checked })
                   }
                 />
-                Reaction
+                <span className="combat-resource">Reaction</span>
               </label>
               <button type="submit" disabled={updateResourcesMutation.isPending}>
                 {updateResourcesMutation.isPending ? "Saving..." : "Save economy"}
