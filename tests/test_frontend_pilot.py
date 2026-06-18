@@ -1101,6 +1101,37 @@ def test_character_xianxia_quick_reference_section_renders_flask_rule_reference_
     assert 'className="chat-label"' not in section_markup
 
 
+def test_character_xianxia_martial_arts_section_uses_flask_feature_row_chrome() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    section_start = source.index('{isXianxia && activeCharacterSection === "martial-arts" ? (')
+    section_end = source.index('{isXianxia && activeCharacterSection === "techniques" ? (', section_start)
+    section_markup = source[section_start:section_end]
+
+    assert 'id: "xianxia-martial-arts"' in section_markup
+    assert 'className="feature-groups"' in section_markup
+    assert 'className="feature-group"' in section_markup
+    assert 'className="feature-stack"' in section_markup
+    assert 'className="feature-row"' in section_markup
+    assert 'className="feature-row__header"' in section_markup
+    assert "Martial Art details" in section_markup
+    assert "Rank progress" in section_markup
+    assert 'className="skill-grid"' in section_markup
+    assert 'skill-pill skill-pill--proficient' in section_markup
+    assert "Learned rank abilities" in section_markup
+    assert "Learned ranks" in section_markup
+    assert 'className="feature-detail"' in section_markup
+    assert 'className="article-body article-body--compact"' in section_markup
+    assert "numberFromUnknown(rank.insight_cost)" in section_markup
+    assert "No Martial Arts are recorded on this sheet yet." in section_markup
+
+    assert 'className="character-card-grid"' not in section_markup
+    assert 'renderXianxiaRecordCard(record, "Martial Art")' not in section_markup
+    assert 'className="character-state-card"' not in section_markup
+    assert 'className="status status-neutral"' not in section_markup
+    assert 'className="inline-two-col"' not in section_markup
+    assert 'className="chat-label"' not in section_markup
+
+
 def test_character_dnd_inventory_currency_section_uses_flask_style_row_form_chrome() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "inventory" ? (')
