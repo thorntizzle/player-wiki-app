@@ -3085,6 +3085,24 @@ textarea {
   padding: 1.25rem;
 }
 
+.character-sheet .read-section {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.character-sheet .section-heading {
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-bottom: 0;
+}
+
+.character-sheet .section-heading,
+.character-sheet .section-heading > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .character-header {
   display: grid;
   gap: 0.55rem;

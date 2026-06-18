@@ -8919,6 +8919,25 @@ function CharacterPane({
     window.history.replaceState(null, "", nextUrl);
   };
 
+  const renderSessionSection = ({
+    id,
+    title,
+    className,
+    children,
+  }: {
+    id?: string;
+    title: string;
+    className?: string;
+    children: React.ReactNode;
+  }) => (
+    <section className={`read-section${className ? ` ${className}` : ""}`} id={id}>
+      <div className="section-heading">
+        <h2>{title}</h2>
+      </div>
+      {children}
+    </section>
+  );
+
   const CharacterShell = "article";
 
   return (
@@ -9309,102 +9328,114 @@ function CharacterPane({
             ) : null}
 
             {isXianxia && activeCharacterSection === "quick-reference" ? (
-              <section className="session-character-form">
-                <h3>Quick Reference</h3>
-                <div className="stat-grid">
-                  <article>
-                    <strong>Realm</strong>
-                    <span>{String(presentedXianxia.identity?.realm ?? "--")}</span>
-                  </article>
-                  <article>
-                    <strong>Actions per turn</strong>
-                    <span>{String(presentedXianxia.identity?.actions_per_turn ?? "--")}</span>
-                    {asRecord(presentedXianxia.quick_reference?.actions).formula ? (
-                      <p className="meta">{readString(asRecord(presentedXianxia.quick_reference?.actions).formula)}</p>
-                    ) : null}
-                  </article>
-                  <article>
-                    <strong>Defense</strong>
-                    <span>{String(asRecord(presentedXianxia.quick_reference?.defense).value ?? presentedXianxia.equipment?.defense ?? "--")}</span>
-                    {asRecord(presentedXianxia.quick_reference?.defense).formula ? (
-                      <p className="meta">Defense = {readString(asRecord(presentedXianxia.quick_reference?.defense).formula)}</p>
-                    ) : null}
-                  </article>
-                  <article>
-                    <strong>Honor</strong>
-                    <span>{String(presentedXianxia.identity?.honor ?? "--")}</span>
-                  </article>
-                  <article>
-                    <strong>Reputation</strong>
-                    <span>{String(presentedXianxia.identity?.reputation ?? "--")}</span>
-                  </article>
-                  <article>
-                    <strong>Insight</strong>
-                    <span>
-                      {xianxiaInsight ? `${xianxiaInsight.available} available / ${xianxiaInsight.spent} spent` : "--"}
-                    </span>
-                  </article>
-                </div>
-                {asRecord(presentedXianxia.quick_reference?.check_formula).summary ? (
-                  <article className="character-state-card">
-                    <h4>Check formula</h4>
-                    <p>{readString(asRecord(presentedXianxia.quick_reference?.check_formula).summary)}</p>
-                  </article>
-                ) : null}
-                {asRecord(presentedXianxia.quick_reference?.difficulty_states).summary ? (
-                  <article className="character-state-card">
-                    <h4>Difficulty states</h4>
-                    <p>{readString(asRecord(presentedXianxia.quick_reference?.difficulty_states).summary)}</p>
-                    <p className="meta">{readString(asRecord(presentedXianxia.quick_reference?.difficulty_states).resolution_note)}</p>
-                  </article>
-                ) : null}
-                {asRecordArray(asRecord(presentedXianxia.quick_reference?.effort_damage).entries).length ? (
-                  <div className="character-card-grid">
-                    {asRecordArray(asRecord(presentedXianxia.quick_reference?.effort_damage).entries).map((entry) => (
-                      <article className="character-state-card" key={readString(entry.key, readString(entry.label))}>
-                        <h4>{readString(entry.label, "Effort")}</h4>
-                        <p>{readString(entry.damage, "--")}</p>
-                        <p className="meta">Score {String(entry.score ?? "--")}</p>
+              renderSessionSection({
+                id: "xianxia-quick-reference",
+                title: "Quick Reference",
+                children: (
+                  <>
+                    <div className="stat-grid">
+                      <article>
+                        <strong>Realm</strong>
+                        <span>{String(presentedXianxia.identity?.realm ?? "--")}</span>
                       </article>
-                    ))}
-                  </div>
-                ) : null}
-                {asRecordArray(presentedXianxia.quick_reference?.active_state_reminders).length ? (
-                  <div className="character-card-grid">
-                    {asRecordArray(presentedXianxia.quick_reference?.active_state_reminders).map((reminder) => (
-                      <article className="character-state-card" key={readString(reminder.label)}>
-                        <h4>{readString(reminder.title, readString(reminder.label))}</h4>
-                        <p>{readString(reminder.status_label)}</p>
-                        {asStringArray(reminder.reference_lines).length ? (
-                          <ul className="plain-list compact-list">
-                            {asStringArray(reminder.reference_lines).map((line, index) => (
-                              <li key={`${readString(reminder.label)}-${index}`}>{line}</li>
-                            ))}
-                          </ul>
+                      <article>
+                        <strong>Actions per turn</strong>
+                        <span>{String(presentedXianxia.identity?.actions_per_turn ?? "--")}</span>
+                        {asRecord(presentedXianxia.quick_reference?.actions).formula ? (
+                          <p className="meta">{readString(asRecord(presentedXianxia.quick_reference?.actions).formula)}</p>
                         ) : null}
                       </article>
-                    ))}
-                  </div>
-                ) : null}
-              </section>
+                      <article>
+                        <strong>Defense</strong>
+                        <span>{String(asRecord(presentedXianxia.quick_reference?.defense).value ?? presentedXianxia.equipment?.defense ?? "--")}</span>
+                        {asRecord(presentedXianxia.quick_reference?.defense).formula ? (
+                          <p className="meta">Defense = {readString(asRecord(presentedXianxia.quick_reference?.defense).formula)}</p>
+                        ) : null}
+                      </article>
+                      <article>
+                        <strong>Honor</strong>
+                        <span>{String(presentedXianxia.identity?.honor ?? "--")}</span>
+                      </article>
+                      <article>
+                        <strong>Reputation</strong>
+                        <span>{String(presentedXianxia.identity?.reputation ?? "--")}</span>
+                      </article>
+                      <article>
+                        <strong>Insight</strong>
+                        <span>
+                          {xianxiaInsight ? `${xianxiaInsight.available} available / ${xianxiaInsight.spent} spent` : "--"}
+                        </span>
+                      </article>
+                    </div>
+                    {asRecord(presentedXianxia.quick_reference?.check_formula).summary ? (
+                      <article className="character-state-card">
+                        <h4>Check formula</h4>
+                        <p>{readString(asRecord(presentedXianxia.quick_reference?.check_formula).summary)}</p>
+                      </article>
+                    ) : null}
+                    {asRecord(presentedXianxia.quick_reference?.difficulty_states).summary ? (
+                      <article className="character-state-card">
+                        <h4>Difficulty states</h4>
+                        <p>{readString(asRecord(presentedXianxia.quick_reference?.difficulty_states).summary)}</p>
+                        <p className="meta">{readString(asRecord(presentedXianxia.quick_reference?.difficulty_states).resolution_note)}</p>
+                      </article>
+                    ) : null}
+                    {asRecordArray(asRecord(presentedXianxia.quick_reference?.effort_damage).entries).length ? (
+                      <div className="character-card-grid">
+                        {asRecordArray(asRecord(presentedXianxia.quick_reference?.effort_damage).entries).map((entry) => (
+                          <article className="character-state-card" key={readString(entry.key, readString(entry.label))}>
+                            <h4>{readString(entry.label, "Effort")}</h4>
+                            <p>{readString(entry.damage, "--")}</p>
+                            <p className="meta">Score {String(entry.score ?? "--")}</p>
+                          </article>
+                        ))}
+                      </div>
+                    ) : null}
+                    {asRecordArray(presentedXianxia.quick_reference?.active_state_reminders).length ? (
+                      <div className="character-card-grid">
+                        {asRecordArray(presentedXianxia.quick_reference?.active_state_reminders).map((reminder) => (
+                          <article className="character-state-card" key={readString(reminder.label)}>
+                            <h4>{readString(reminder.title, readString(reminder.label))}</h4>
+                            <p>{readString(reminder.status_label)}</p>
+                            {asStringArray(reminder.reference_lines).length ? (
+                              <ul className="plain-list compact-list">
+                                {asStringArray(reminder.reference_lines).map((line, index) => (
+                                  <li key={`${readString(reminder.label)}-${index}`}>{line}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </article>
+                        ))}
+                      </div>
+                    ) : null}
+                  </>
+                ),
+              })
             ) : null}
 
             {isXianxia && activeCharacterSection === "martial-arts" ? (
-              <section className="session-character-form">
-                <h3>Martial Arts</h3>
-                {presentedXianxia.martial_arts?.length ? (
-                  <div className="character-card-grid">
-                    {presentedXianxia.martial_arts.map((record) => renderXianxiaRecordCard(record, "Martial Art"))}
-                  </div>
-                ) : (
-                  <p className="status status-neutral">No martial arts recorded.</p>
-                )}
-              </section>
+              renderSessionSection({
+                id: "xianxia-martial-arts",
+                title: "Martial Arts",
+                children: (
+                  <>
+                    {presentedXianxia.martial_arts?.length ? (
+                      <div className="character-card-grid">
+                        {presentedXianxia.martial_arts.map((record) => renderXianxiaRecordCard(record, "Martial Art"))}
+                      </div>
+                    ) : (
+                      <p className="status status-neutral">No martial arts recorded.</p>
+                    )}
+                  </>
+                ),
+              })
             ) : null}
 
             {isXianxia && activeCharacterSection === "techniques" ? (
-              <section className="session-character-form">
-                <h3>Techniques</h3>
+              <section className="read-section" id="xianxia-techniques">
+                <div className="section-heading">
+                  <h2>Techniques</h2>
+                </div>
                 {presentedXianxia.generic_techniques?.length ? (
                   <div className="character-card-grid">
                     {presentedXianxia.generic_techniques.map((record) => renderXianxiaRecordCard(record, "Generic Technique"))}
@@ -9518,8 +9549,10 @@ function CharacterPane({
             ) : null}
 
             {isXianxia && activeCharacterSection === "resources" ? (
-              <section className="session-character-form">
-                <h3>Resources</h3>
+              <section className="read-section" id="xianxia-resources">
+                <div className="section-heading">
+                  <h2>Resources</h2>
+                </div>
                 {xianxiaDurability.length ? renderXianxiaPoolCards(xianxiaDurability) : null}
                 {xianxiaEnergies.length ? renderXianxiaPoolCards(xianxiaEnergies) : null}
                 {xianxiaYinYang.length ? renderXianxiaPoolCards(xianxiaYinYang) : null}
@@ -9559,8 +9592,10 @@ function CharacterPane({
             ) : null}
 
             {isXianxia && activeCharacterSection === "skills" ? (
-              <section className="session-character-form">
-                <h3>Skills</h3>
+              <section className="read-section" id="xianxia-skills">
+                <div className="section-heading">
+                  <h2>Skills</h2>
+                </div>
                 <div className="ability-grid">
                   {presentedXianxia.attributes?.map((attribute) => (
                     <article className="character-state-card" key={attribute.key}>
@@ -9589,8 +9624,10 @@ function CharacterPane({
             ) : null}
 
             {isXianxia && activeCharacterSection === "equipment" ? (
-              <section className="session-character-form">
-                <h3>Equipment</h3>
+              <section className="read-section" id="xianxia-equipment">
+                <div className="section-heading">
+                  <h2>Equipment</h2>
+                </div>
                 <div className="stat-grid">
                   <article>
                     <strong>Defense</strong>
@@ -9634,8 +9671,10 @@ function CharacterPane({
             ) : null}
 
             {isXianxia && activeCharacterSection === "inventory" ? (
-              <section className="session-character-form">
-                <h3>Inventory</h3>
+              <section className="read-section" id="xianxia-inventory">
+                <div className="section-heading">
+                  <h2>Inventory</h2>
+                </div>
                 {xianxiaInventory.length ? (
                   <div className="character-card-grid">
                     {xianxiaInventory.map((item) => {
@@ -9900,8 +9939,10 @@ function CharacterPane({
             ) : null}
 
             {isXianxia && activeCharacterSection === "personal" ? (
-              <section className="session-character-form">
-                <h3>Personal</h3>
+              <section className="read-section" id="xianxia-personal">
+                <div className="section-heading">
+                  <h2>Personal</h2>
+                </div>
                 <div className="stat-grid">
                   <article>
                     <strong>Species</strong>
@@ -9918,8 +9959,10 @@ function CharacterPane({
             ) : null}
 
             {isDnd && activeCharacterSection === "overview" ? (
-              <section className="session-character-form">
-                <h3>Overview</h3>
+              <section className="read-section" id="character-overview">
+                <div className="section-heading">
+                  <h2>Overview</h2>
+                </div>
                 <div className="stat-grid">
                   <article>
                     <strong>Armor Class</strong>
@@ -9950,8 +9993,10 @@ function CharacterPane({
             ) : null}
 
             {isDnd && activeCharacterSection === "resources" ? (
-              <section className="session-character-form">
-                <h3>Resources</h3>
+              <section className="read-section" id="session-resources">
+                <div className="section-heading">
+                  <h2>Resources</h2>
+                </div>
                 {resources.length ? (
                   <div className="character-card-grid">
                     {resources.map((resource) => {
@@ -9993,8 +10038,10 @@ function CharacterPane({
             ) : null}
 
             {isDnd && activeCharacterSection === "spells" ? (
-              <section className="session-character-form">
-                <h3>Spells</h3>
+              <section className="read-section" id="session-spell-slots">
+                <div className="section-heading">
+                  <h2>Spells</h2>
+                </div>
                 <div className="stat-grid">
                   <article>
                     <strong>Ability</strong>
@@ -10090,8 +10137,10 @@ function CharacterPane({
             ) : null}
 
             {isDnd && activeCharacterSection === "equipment" ? (
-              <section className="session-character-form">
-                <h3>Equipment</h3>
+              <section className="read-section" id="character-equipment">
+                <div className="section-heading">
+                  <h2>Equipment</h2>
+                </div>
                 {equipmentState ? (
                   <div className="stat-grid">
                     <article>
@@ -10226,8 +10275,10 @@ function CharacterPane({
             ) : null}
 
             {isDnd && activeCharacterSection === "inventory" ? (
-              <section className="session-character-form">
-                <h3>Inventory</h3>
+              <section className="read-section" id="session-inventory">
+                <div className="section-heading">
+                  <h2>Inventory</h2>
+                </div>
                 {inventory.length ? (
                   <div className="character-card-grid">
                     {inventory.map((item) => {
@@ -10309,8 +10360,10 @@ function CharacterPane({
             ) : null}
 
             {isDnd && activeCharacterSection === "abilities" ? (
-              <section className="session-character-form">
-                <h3>Abilities and Skills</h3>
+              <section className="read-section" id="character-quick-abilities-skills">
+                <div className="section-heading">
+                  <h2>Abilities and Skills</h2>
+                </div>
                 <div className="ability-grid">
                   {Object.entries(abilityScores).map(([key, value]) => {
                     const ability = asRecord(value);
@@ -10342,8 +10395,10 @@ function CharacterPane({
             ) : null}
 
             {isReadSurface && activeCharacterSection === "controls" && canUseControls && controls ? (
-              <section className="session-character-form character-controls-panel">
-                <h3>Controls</h3>
+              <section className="read-section character-controls-panel">
+                <div className="section-heading">
+                  <h2>Controls</h2>
+                </div>
                 <div className="character-card-grid character-controls-grid">
                   <article className="character-state-card">
                     <h4>Player controls</h4>
@@ -10470,8 +10525,10 @@ function CharacterPane({
             ) : null}
 
             {((isDnd || isXianxia) ? activeCharacterSection === "notes" : !isDnd) ? (
-              <section className="session-character-form">
-                <h3>Player notes</h3>
+              <section className="read-section" id="session-notes">
+                <div className="section-heading">
+                  <h2>Player notes</h2>
+                </div>
                 <form onSubmit={submitNotes}>
                   <label htmlFor="character-player-notes" className="chat-label">
                     Player notes
@@ -10493,8 +10550,10 @@ function CharacterPane({
             ) : null}
 
             {!isDnd && !isXianxia ? (
-              <section className="session-character-form">
-                <h3>{characterSystem(detailRecord)}</h3>
+              <section className="read-section" id="character-system-summary">
+                <div className="section-heading">
+                  <h2>{characterSystem(detailRecord)}</h2>
+                </div>
                 <div className="stat-grid">
                   <article>
                     <strong>Current HP</strong>

@@ -297,6 +297,11 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(vitals_bar.locator(".session-bar__summary")).to_be_visible()
             expect(vitals_bar.locator(".session-vitals-form")).to_have_count(1)
             expect(vitals_bar.locator(".session-bar__actions .ghost-button")).to_have_count(2)
+            overview_section = embedded_character_shell.locator("section#character-overview.read-section")
+            expect(overview_section).to_be_visible()
+            expect(overview_section.locator("> .section-heading > h2")).to_have_text("Overview")
+            expect(embedded_character_shell.locator("> section.session-character-form")).to_have_count(0)
+            expect(embedded_character_shell.locator("> section.read-section > h3")).to_have_count(0)
             assert page.locator(".session-pane-content > .panel").count() == 0
             expect(page.locator(".session-pane-content > .panel-header")).to_have_count(0)
             vitals_bar.get_by_role("button", name="Short rest").click()
