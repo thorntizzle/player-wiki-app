@@ -5545,9 +5545,6 @@ function AccountSettingsPage() {
             <p className="meta">
               Theme and live-session chat preferences are stored in the auth database and applied on every signed-in request.
             </p>
-            <a className="ghost-button" href="/account">
-              Flask account
-            </a>
             <a className="ghost-button" href="/campaigns">
               Back to campaigns
             </a>
@@ -5705,9 +5702,6 @@ function CampaignControlPage() {
                 <button type="submit" className="button-link" disabled={saveVisibility.isPending || isUnchanged}>
                   {saveVisibility.isPending ? "Saving..." : "Save visibility"}
                 </button>
-                <a className="ghost-button" href={data.links.flask_control_url}>
-                  Flask Control
-                </a>
               </div>
               {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
               {saveError ? <p className="status status-error">{saveError}</p> : null}
@@ -5719,7 +5713,7 @@ function CampaignControlPage() {
               <div className="section-heading">
                 <div>
                   <h2>Visibility rules</h2>
-                  <p className="meta">These labels match the Flask Control panel and campaign access checks.</p>
+                  <p className="meta">These labels match the Campaign Control panel and campaign access checks.</p>
                 </div>
               </div>
               <div className="reference-stack">
@@ -5945,7 +5939,6 @@ function CampaignHelpPage() {
                 ) : (
                   <a className="button-link" href={data.links.sign_in_url}>Sign in</a>
                 )}
-                <a className="ghost-button" href={data.links.flask_help_url}>Flask Help</a>
               </div>
             </article>
           </aside>
@@ -6920,7 +6913,6 @@ function SystemsEntryPage() {
                 <li><a href={systemsIndexHref(resolvedCampaignSlug)}>Systems landing</a></li>
                 <li><a href={systemsSourceHref(resolvedCampaignSlug, entry.source_id)}>Source page</a></li>
                 <li><a href={systemsSourceCategoryHref(resolvedCampaignSlug, entry.source_id, entry.entry_type)}>Source category</a></li>
-                {data?.links.flask_entry_url ? <li><a href={data.links.flask_entry_url}>Open Flask entry</a></li> : null}
               </ul>
             </section>
             {data?.permissions.can_manage_systems ? (
@@ -16596,7 +16588,7 @@ function CombatPage() {
           ) : (
             <section className="card">
               <h3>No combatants</h3>
-              <p>The tracker is empty. Use the Flask DM controls to seed the encounter for now.</p>
+              <p>The tracker is empty. Use the Encounter controls or DM controls to seed the encounter for now.</p>
             </section>
           )}
 

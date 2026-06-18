@@ -258,6 +258,69 @@ def test_combat_dm_controls_add_and_cleanup_chrome_in_source() -> None:
     assert 'className="button-row"' not in cleanup_card_markup
 
 
+def test_campaign_control_page_cleanup_removes_flask_control_fallback_link() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    control_start = source.index("function CampaignControlPage() {")
+    control_end = source.index("function CampaignHelpPage()", control_start)
+    control_markup = source[control_start:control_end]
+
+    assert "Flask Control" not in control_markup
+    assert "Save visibility" in control_markup
+    assert "statusMessage ? <p className=\"status status-neutral\">{statusMessage}</p> : null" in control_markup
+    assert "saveError ? <p className=\"status status-error\">{saveError}</p> : null" in control_markup
+    assert "These labels match the Campaign Control panel and campaign access checks." in control_markup
+    assert "Flask Control panel" not in control_markup
+
+
+def test_account_settings_page_removes_flask_account_fallback_link() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    account_settings_start = source.index("function AccountSettingsPage() {")
+    account_settings_end = source.index("function buildControlVisibilityDraft", account_settings_start)
+    account_settings_markup = source[account_settings_start:account_settings_end]
+
+    assert "Flask account" not in account_settings_markup
+    assert 'className="ghost-button" href="/campaigns">' in account_settings_markup
+    assert "Save account settings" in account_settings_markup
+    assert "<button type=\"submit\" className=\"button\" disabled={saveSettings.isPending || !hasDraft || isUnchanged}>" in account_settings_markup
+    assert "statusMessage ? <p className=\"status status-neutral\">{statusMessage}</p> : null" in account_settings_markup
+    assert "saveError ? <p className=\"status status-error\">{saveError}</p> : null" in account_settings_markup
+
+
+def test_campaign_help_page_removes_flask_help_fallback() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    help_start = source.index("function CampaignHelpPage() {")
+    help_end = source.index("function splitPinnedPages", help_start)
+    help_markup = source[help_start:help_end]
+
+    assert "Flask Help" not in help_markup
+    assert 'href={data.links.account_url}>Open Account</a>' in help_markup
+    assert "href={data.links.sign_in_url}>Sign in</a>" in help_markup
+    assert "campaign-help-account-actions" in help_markup
+
+
+def test_systems_entry_navigation_removes_open_flask_entry_link() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    systems_entry_start = source.index("function SystemsEntryPage() {")
+    systems_entry_end = source.index("function SessionArticlesPanel(", systems_entry_start)
+    systems_entry_markup = source[systems_entry_start:systems_entry_end]
+
+    assert "Open Flask entry" not in systems_entry_markup
+    assert "Systems landing" in systems_entry_markup
+    assert "Source page" in systems_entry_markup
+    assert "Source category" in systems_entry_markup
+    assert "Entry Management" in systems_entry_markup
+
+
+def test_combat_empty_tracker_prompt_uses_current_surface_wording() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    combat_page_start = source.index("function CombatPage() {")
+    campaign_combat_route_start = source.index("const campaignCombatRoute", combat_page_start)
+    combat_page_source = source[combat_page_start:campaign_combat_route_start]
+
+    assert "Use the Encounter controls or DM controls to seed the encounter for now." in combat_page_source
+    assert "Use the Flask DM controls to seed the encounter for now." not in combat_page_source
+
+
 def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     combat_page_start = source.index("function CombatPage() {")
