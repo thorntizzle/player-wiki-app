@@ -979,6 +979,30 @@ def test_character_xianxia_resources_section_uses_flask_style_resource_cards() -
     assert 'className="chat-label"' not in resources_markup
 
 
+def test_character_xianxia_skills_section_uses_flask_style_skill_pills() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    section_start = source.index('{isXianxia && activeCharacterSection === "skills" ? (')
+    section_end = source.index('{isXianxia && activeCharacterSection === "equipment" ? (', section_start)
+    skills_markup = source[section_start:section_end]
+
+    assert 'className="skill-grid"' in skills_markup
+    assert 'className="skill-pill skill-pill--proficient"' in skills_markup
+    assert '<span className="meta">Trained</span>' in skills_markup
+    assert 'className="detail-card"' in skills_markup
+    assert "No trained skills are recorded on this sheet yet." in skills_markup
+    assert 'id="xianxia-skills-guardrail"' in skills_markup
+    assert "Skill use guardrails" in skills_markup
+    assert 'className="button-link subtle"' in skills_markup
+
+    assert 'className="ability-grid"' not in skills_markup
+    assert 'className="character-state-card"' not in skills_markup
+    assert 'className="character-card-grid"' not in skills_markup
+    assert 'className="plain-list compact-list"' not in skills_markup
+    assert 'className="status status-neutral"' not in skills_markup
+    assert 'className="inline-two-col"' not in skills_markup
+    assert 'className="chat-label"' not in skills_markup
+
+
 def test_character_dnd_inventory_currency_section_uses_flask_style_row_form_chrome() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "inventory" ? (')

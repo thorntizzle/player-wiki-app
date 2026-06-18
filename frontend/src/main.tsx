@@ -8150,6 +8150,11 @@ function CharacterPane({
   const xianxiaYinYang = presentedXianxia.resources?.yin_yang ?? [];
   const xianxiaDao = presentedXianxia.resources?.dao;
   const xianxiaInsight = presentedXianxia.resources?.insight;
+  const skillUseGuardrails = asRecord(presentedXianxia.quick_reference?.skill_use_guardrails);
+  const skillUseGuardrailRuleHref = readString(skillUseGuardrails.rule_href);
+  const skillUseGuardrailRuleTitle = readString(skillUseGuardrails.rule_title, "Skills");
+  const skillUseGuardrailReferenceLines = asStringArray(skillUseGuardrails.reference_lines);
+  const hasSkillUseGuardrail = Boolean(skillUseGuardrailRuleHref) || skillUseGuardrailReferenceLines.length > 0;
   const xianxiaActiveStateStatus = joinDisplay([
     readString(presentedXianxia.active_state?.stance?.status_label),
     readString(presentedXianxia.active_state?.aura?.status_label),
@@ -9724,30 +9729,39 @@ function CharacterPane({
                 <div className="section-heading">
                   <h2>Skills</h2>
                 </div>
-                <div className="ability-grid">
-                  {presentedXianxia.attributes?.map((attribute) => (
-                    <article className="character-state-card" key={attribute.key}>
-                      <h4>{attribute.label}</h4>
-                      <p>Score {attribute.score}</p>
-                    </article>
-                  ))}
-                  {presentedXianxia.efforts?.map((effort) => (
-                    <article className="character-state-card" key={effort.key}>
-                      <h4>{effort.label}</h4>
-                      <p>Score {effort.score}</p>
-                      {effort.damage ? <p className="meta">{effort.damage}</p> : null}
-                    </article>
-                  ))}
-                </div>
                 {presentedXianxia.skills?.trained?.length ? (
-                  <ul className="plain-list compact-list">
+                  <div className="skill-grid">
                     {presentedXianxia.skills.trained.map((skill) => (
-                      <li key={skill.name}>{skill.name}</li>
+                      <div className="skill-pill skill-pill--proficient" key={skill.name}>
+                        <span>{skill.name}</span>
+                        <span className="meta">Trained</span>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 ) : (
-                  <p className="status status-neutral">No trained skills recorded.</p>
+                  <article className="detail-card">
+                    <p className="meta">No trained skills are recorded on this sheet yet.</p>
+                  </article>
                 )}
+                {hasSkillUseGuardrail ? (
+                  <div className="detail-cluster" id="xianxia-skills-guardrail">
+                    <div className="section-heading">
+                      <h3>Skill use guardrails</h3>
+                      {skillUseGuardrailRuleHref ? (
+                        <a className="button-link subtle" href={skillUseGuardrailRuleHref}>
+                          {`${skillUseGuardrailRuleTitle} rule`}
+                        </a>
+                      ) : null}
+                    </div>
+                    {skillUseGuardrailReferenceLines.length ? (
+                      <article className="detail-card">
+                        {skillUseGuardrailReferenceLines.map((line, index) => (
+                          <p key={`${line}-${index}`}>{line}</p>
+                        ))}
+                      </article>
+                    ) : null}
+                  </div>
+                ) : null}
               </section>
             ) : null}
 
