@@ -156,6 +156,45 @@ def test_combat_action_chrome_in_source() -> None:
     assert "onClick={() => clearCombatMutation.mutate()}" in clear_button_block
 
 
+def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    combat_page_start = source.index("function CombatPage() {")
+    campaign_combat_route_start = source.index("const campaignCombatRoute", combat_page_start)
+    combat_page_source = source[combat_page_start:campaign_combat_route_start]
+
+    turn_focus_match = re.search(
+        r'<article className="card combat-control-card">\s*<div className="section-heading combat-status-snapshot__heading"[\s\S]*?</article>',
+        combat_page_source,
+    )
+    assert turn_focus_match is not None
+    turn_focus_markup = turn_focus_match.group(0)
+
+    assert 'className="section-heading combat-status-snapshot__heading"' in turn_focus_markup
+    assert '<div className="combatant-badges">' in turn_focus_markup
+    assert 'className="combat-badge">Round {tracker?.round_number ?? "?"}</span>' in turn_focus_markup
+    assert 'className="combat-badge">Turn {selectedCombatant.turn_value}</span>' in turn_focus_markup
+    assert '<span className="combat-badge combat-badge--active">Current turn</span>' in turn_focus_markup
+    assert (
+        'className="combat-badge combat-badge--button combat-status-snapshot__set-current"'
+        in turn_focus_markup
+    )
+    assert (
+        re.search(
+            r'<button[^>]*className="combat-badge combat-badge--button combat-status-snapshot__set-current"[^>]*'
+            r'onClick=\{\(\) => setCurrentMutation\.mutate\(\)\}[^>]*disabled=\{setCurrentMutation\.isPending\}\s*>',
+            turn_focus_markup,
+        )
+        is not None
+    )
+    assert "{setCurrentMutation.isPending ? \"Setting...\" : \"Set current\"}" in turn_focus_markup
+
+    assert 'className="hero-actions combat-turn-actions"' in turn_focus_markup
+    assert '{advanceTurnMutation.isPending ? "Advancing..." : "Advance turn"}' in turn_focus_markup
+    assert '<button type="button" onClick={() => advanceTurnMutation.mutate()} disabled={advanceTurnMutation.isPending}>' in turn_focus_markup
+
+    assert '<div className="button-row">' not in turn_focus_markup
+
+
 def test_combat_conditions_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     combat_page_start = source.index("function CombatPage() {")

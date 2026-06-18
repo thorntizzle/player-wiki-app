@@ -3840,6 +3840,12 @@ textarea {
   color: var(--accent-deep);
 }
 
+.combat-badge--button {
+  cursor: pointer;
+  appearance: none;
+  text-decoration: none;
+}
+
 .combat-pc-workspace {
   display: grid;
   gap: 0.7rem;

@@ -14703,12 +14703,27 @@ function CombatPage() {
       <>
         <section className="combat-dm-grid" aria-label="DM tactical controls">
           <article className="card combat-control-card">
-            <div className="section-heading">
+            <div className="section-heading combat-status-snapshot__heading">
               <div>
                 <p className="card-kicker">Authority</p>
                 <h2>Turn Focus</h2>
               </div>
-              {selectedCombatant.is_current_turn ? <span className="pill">Current</span> : null}
+              <div className="combatant-badges">
+                <span className="combat-badge">Round {tracker?.round_number ?? "?"}</span>
+                <span className="combat-badge">Turn {selectedCombatant.turn_value}</span>
+                {selectedCombatant.is_current_turn ? (
+                  <span className="combat-badge combat-badge--active">Current turn</span>
+                ) : (
+                  <button
+                    type="button"
+                    className="combat-badge combat-badge--button combat-status-snapshot__set-current"
+                    onClick={() => setCurrentMutation.mutate()}
+                    disabled={setCurrentMutation.isPending}
+                  >
+                    {setCurrentMutation.isPending ? "Setting..." : "Set current"}
+                  </button>
+                )}
+              </div>
             </div>
             <form
               className="combat-inline-form"
@@ -14744,10 +14759,7 @@ function CombatPage() {
                 {updateTurnMutation.isPending ? "Saving..." : "Save turn"}
               </button>
             </form>
-            <div className="button-row">
-              <button type="button" onClick={() => setCurrentMutation.mutate()} disabled={setCurrentMutation.isPending}>
-                {setCurrentMutation.isPending ? "Setting..." : "Set current"}
-              </button>
+            <div className="hero-actions combat-turn-actions">
               <button type="button" onClick={() => advanceTurnMutation.mutate()} disabled={advanceTurnMutation.isPending}>
                 {advanceTurnMutation.isPending ? "Advancing..." : "Advance turn"}
               </button>
