@@ -370,6 +370,11 @@ function normalizeFrontendMode(value: string | null | undefined): FrontendMode {
   return value === "gen2" ? "gen2" : "flask";
 }
 
+function routeFrontendMode(preferredMode: FrontendMode): FrontendMode {
+  const browserPathname = window.location.pathname;
+  return browserPathname === "/app-next" || browserPathname.startsWith("/app-next/") ? "gen2" : preferredMode;
+}
+
 function campaignRouteHref(campaignSlug: string, suffix = "", frontendMode: FrontendMode = "flask"): string {
   const normalizedCampaignSlug = encodeURIComponent(campaignSlug);
   const base = frontendMode === "gen2" ? `/app-next/campaigns/${normalizedCampaignSlug}` : `/campaigns/${normalizedCampaignSlug}`;
@@ -397,6 +402,23 @@ function preferredCampaignLink(href: string, campaignSlug: string, frontendMode:
     return `${preferredBase}/${href.slice(gen2Prefix.length)}`;
   }
   return href;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function preferredCampaignHtml(html: string, campaignSlug: string, frontendMode: FrontendMode): string {
+  if (!html) {
+    return html;
+  }
+  const normalizedCampaignSlug = encodeURIComponent(campaignSlug);
+  const preferredBase = campaignRouteHref(campaignSlug, "", frontendMode);
+  const campaignPathPattern = new RegExp(
+    `href=(["'])(?:/app-next)?/campaigns/${escapeRegExp(normalizedCampaignSlug)}/(pages|sections)/`,
+    "g",
+  );
+  return html.replace(campaignPathPattern, `href=$1${preferredBase}/$2/`);
 }
 
 function campaignVisibilityCanAccess(visibility: CampaignVisibilityMap | undefined, scope: string): boolean {
@@ -4346,58 +4368,62 @@ function AppShell() {
   const campaignPermissions = campaignQuery.data?.permissions;
   const campaignVisibility = campaignQuery.data?.visibility;
   const encodedCampaignSlug = encodeURIComponent(campaignSlug);
+  const shellRouteMode = useMemo(
+    () => routeFrontendMode(preferredFrontendMode),
+    [location.pathname, preferredFrontendMode],
+  );
 
   const navItems = useMemo(
     () => [
       {
-        href: campaignRouteHref(campaignSlug, "", preferredFrontendMode),
+        href: campaignRouteHref(campaignSlug, "", shellRouteMode),
         label: "Campaign Home",
-        isGen2: preferredFrontendMode === "gen2",
+        isGen2: shellRouteMode === "gen2",
         show: campaignVisibilityCanAccess(campaignVisibility, "campaign"),
       },
       {
-        href: campaignRouteHref(campaignSlug, "session", preferredFrontendMode),
+        href: campaignRouteHref(campaignSlug, "session", shellRouteMode),
         label: "Session",
-        isGen2: preferredFrontendMode === "gen2",
+        isGen2: shellRouteMode === "gen2",
         show: campaignVisibilityCanAccess(campaignVisibility, "session"),
       },
       {
-        href: campaignRouteHref(campaignSlug, "combat", preferredFrontendMode),
+        href: campaignRouteHref(campaignSlug, "combat", shellRouteMode),
         label: "Combat",
-        isGen2: preferredFrontendMode === "gen2",
+        isGen2: shellRouteMode === "gen2",
         show: campaignVisibilityCanAccess(campaignVisibility, "combat"),
       },
       {
-        href: campaignRouteHref(campaignSlug, "characters", preferredFrontendMode),
+        href: campaignRouteHref(campaignSlug, "characters", shellRouteMode),
         label: "Characters",
-        isGen2: preferredFrontendMode === "gen2",
+        isGen2: shellRouteMode === "gen2",
         show: campaignVisibilityCanAccess(campaignVisibility, "characters"),
       },
       {
-        href: campaignRouteHref(campaignSlug, "systems", preferredFrontendMode),
+        href: campaignRouteHref(campaignSlug, "systems", shellRouteMode),
         label: "Systems",
-        isGen2: preferredFrontendMode === "gen2",
+        isGen2: shellRouteMode === "gen2",
         show: campaignVisibilityCanAccess(campaignVisibility, "systems"),
       },
       {
-        href: campaignRouteHref(campaignSlug, "dm-content", preferredFrontendMode),
+        href: campaignRouteHref(campaignSlug, "dm-content", shellRouteMode),
         label: "DM Content",
-        isGen2: preferredFrontendMode === "gen2",
+        isGen2: shellRouteMode === "gen2",
         show:
           campaignVisibilityCanAccess(campaignVisibility, "dm_content")
           || campaignPermissions?.can_manage_dm_content === true
           || campaignPermissions?.can_manage_content === true,
       },
       {
-        href: campaignRouteHref(campaignSlug, "control", preferredFrontendMode),
+        href: campaignRouteHref(campaignSlug, "control", shellRouteMode),
         label: "Control",
-        isGen2: preferredFrontendMode === "gen2",
+        isGen2: shellRouteMode === "gen2",
         show: campaignPermissions?.can_manage_visibility === true,
       },
       {
-        href: campaignRouteHref(campaignSlug, "help", preferredFrontendMode),
+        href: campaignRouteHref(campaignSlug, "help", shellRouteMode),
         label: "Help",
-        isGen2: preferredFrontendMode === "gen2",
+        isGen2: shellRouteMode === "gen2",
         show: Boolean(campaignQuery.data),
       },
     ],
@@ -4408,7 +4434,7 @@ function AppShell() {
       campaignQuery.data,
       campaignVisibility,
       campaignSlug,
-      preferredFrontendMode,
+      shellRouteMode,
     ],
   );
 
@@ -4594,6 +4620,7 @@ function CampaignListPage() {
   const emptyLede = user
     ? "Your account is active, but it is not currently assigned to any campaigns."
     : "There are currently no public campaign wiki pages to browse.";
+  const pickerRouteMode = routeFrontendMode(preferredFrontendMode);
 
   return (
     <>
@@ -4618,7 +4645,7 @@ function CampaignListPage() {
               <p>{entry.campaign.summary}</p>
               {entry.campaign.system ? <p className="meta">System: {entry.campaign.system}</p> : null}
               <p className="meta">Visible through session {entry.campaign.current_session}</p>
-              <a className="button-link" href={campaignRouteHref(entry.campaign.slug, "", preferredFrontendMode)}>
+              <a className="button-link" href={campaignRouteHref(entry.campaign.slug, "", pickerRouteMode)}>
                 Open campaign
               </a>
             </article>
@@ -6125,7 +6152,7 @@ function WikiHomePage() {
 
   const error = getApiErrorMessage(wikiQuery.error);
   const data = wikiQuery.data;
-  const wikiFrontendMode = normalizeFrontendMode(data?.frontend_mode ?? preferredFrontendMode);
+  const wikiFrontendMode = routeFrontendMode(normalizeFrontendMode(data?.frontend_mode ?? preferredFrontendMode));
 
   return (
     <>
@@ -6168,7 +6195,9 @@ function WikiHomePage() {
                   {data.overview_page.summary ? <p className="lede">{data.overview_page.summary}</p> : null}
                   <div
                     className="article-body html-body"
-                    dangerouslySetInnerHTML={{ __html: data.overview_page.body_html }}
+                    dangerouslySetInnerHTML={{
+                      __html: preferredCampaignHtml(data.overview_page.body_html, resolvedCampaignSlug, wikiFrontendMode),
+                    }}
                   />
                 </article>
               </div>
@@ -6215,7 +6244,7 @@ function WikiSectionPage() {
 
   const data = sectionQuery.data;
   const error = getApiErrorMessage(sectionQuery.error);
-  const wikiFrontendMode = normalizeFrontendMode(data?.frontend_mode ?? preferredFrontendMode);
+  const wikiFrontendMode = routeFrontendMode(normalizeFrontendMode(data?.frontend_mode ?? preferredFrontendMode));
   const topLevel = splitPinnedPages(data?.top_level_pages ?? []);
   const allPages = splitPinnedPages(data?.pages ?? []);
 
@@ -6360,7 +6389,7 @@ function WikiArticlePage() {
   const data: WikiPageResponse | undefined = pageQuery.data;
   const page: WikiPageDetail | undefined = data?.page;
   const error = getApiErrorMessage(pageQuery.error);
-  const wikiFrontendMode = normalizeFrontendMode(data?.frontend_mode ?? preferredFrontendMode);
+  const wikiFrontendMode = routeFrontendMode(normalizeFrontendMode(data?.frontend_mode ?? preferredFrontendMode));
   const campaignContextLink =
     ((wikiFrontendMode === "gen2" ? data?.links.gen2_campaign_url : data?.links.campaign_url) ??
       (wikiFrontendMode === "gen2" ? data?.links.campaign_url : data?.links.gen2_campaign_url)) ??
@@ -6385,7 +6414,12 @@ function WikiArticlePage() {
                 {page.image.caption ? <figcaption className="meta article-image__caption">{page.image.caption}</figcaption> : null}
               </figure>
             ) : null}
-            <div className="article-body html-body" dangerouslySetInnerHTML={{ __html: page.body_html }} />
+            <div
+              className="article-body html-body"
+              dangerouslySetInnerHTML={{
+                __html: preferredCampaignHtml(page.body_html, campaignSlug, wikiFrontendMode),
+              }}
+            />
           </article>
           <aside className="sidebar">
             <section className="card sidebar-card">

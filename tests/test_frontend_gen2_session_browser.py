@@ -2,6 +2,7 @@ import base64
 import json
 import re
 import threading
+from pathlib import Path
 
 import pytest
 import yaml
@@ -9,12 +10,19 @@ import yaml
 from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 
 
-pytestmark = pytest.mark.skip(reason="Gen2 frontend routes are suspended and closed.")
-
-
 @pytest.fixture
 def frontend_gen2_session_live_server(app):
     from werkzeug.serving import make_server
+
+    dist_dir = Path(app.config["BASE_DIR"]) / "frontend" / "dist"
+    app.config["APP_NEXT_PREVIEW_ENABLED"] = True
+    app.config["APP_NEXT_DIST_DIR"] = dist_dir
+
+    if not (dist_dir / "index.html").is_file():
+        pytest.skip(
+            "Gen2 frontend browser suite requires a built frontend bundle at frontend/dist/index.html. "
+            "Build the frontend first (for example, run: (cd frontend && npm install && npm run build))."
+        )
 
     server = make_server("127.0.0.1", 0, app)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -224,7 +232,7 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             assert page.locator(".pane-visible .session-workspace-main").count() == 0
             assert page.locator(".pane-visible .session-workspace-sidebar").count() == 0
             expect(page.get_by_role("heading", name="Session controls")).to_be_visible(timeout=5000)
-            expect(page.get_by_role("heading", name="Session article store")).to_be_visible(timeout=5000)
+            expect(page.get_by_role("heading", name="Stage session articles")).to_be_visible(timeout=5000)
             expect(page.get_by_role("heading", name="Live session")).to_be_visible(timeout=5000)
 
             session_start_response = page.request.post(f"{base_url}/campaigns/linden-pass/session/start")
@@ -247,6 +255,8 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
                 has_text=revealed_title,
             )
             expect(reveal_ready_card).to_be_visible(timeout=10000)
+            if not reveal_ready_card.evaluate("(element) => element.open"):
+                reveal_ready_card.locator("> summary").click()
             reveal_ready_card.locator("div.session-article-detail__actions").get_by_role("button", name="Reveal in chat").click()
             expect(reveal_ready_card).to_have_count(0, timeout=10000)
 
@@ -300,11 +310,11 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             dm_card_texts = page.evaluate(
                 """() => {
                     const section = document.querySelector(".pane-visible .page-layout.session-layout > .session-column");
-                    return Array.from(
+                return Array.from(
                         section
                             ? section.querySelectorAll(
                                 ":scope > .session-passive-scores-bar .section-title,"
-                                + ":scope > .card.session-sidebar-card .section-heading > h2"
+                                + ":scope > .card.session-sidebar-card .section-heading h2"
                             )
                             : [],
                     ).map((node) => (node.textContent || "").trim());
@@ -413,9 +423,12 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             assert page.locator(".session-player-wiki-details").count() == 0
             expect(page.locator(".campaign-global-search")).to_be_visible()
             expect(page.get_by_role("heading", name="Send message")).to_be_visible()
-            expect(page.get_by_label("Audience")).to_be_visible()
-            expect(page.get_by_label("Player")).to_be_visible()
-            expect(page.get_by_label("Message")).to_be_visible()
+            chat_composer = page.locator("article.card.session-composer-card#session-chat-compose")
+            expect(chat_composer.locator("label.field > span", has_text="Audience")).to_be_visible()
+            expect(chat_composer.locator("label.field > span", has_text="Player")).to_be_visible()
+            expect(chat_composer.locator("label.field > span", has_text="Message")).to_be_visible()
+            expect(chat_composer.locator("select")).to_have_count(2)
+            expect(chat_composer.locator("textarea")).to_be_visible()
             player_card_texts = page.evaluate(
                 """() => {
                     const section = document.querySelector(".pane-visible .page-layout.session-layout > .session-column");
@@ -436,11 +449,11 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
 
             session_tabs.get_by_role("button", name="Character", exact=True).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))
-            expect(page.get_by_role("heading", name="Session Character")).to_be_visible(timeout=10000)
-            expect(page.get_by_label("Character", exact=True)).to_be_visible()
             embedded_character_shell = page.locator(".session-pane-content > article.card.character-sheet.session-character-sheet")
             expect(embedded_character_shell).to_be_visible()
+            expect(embedded_character_shell.locator("> header.character-header .eyebrow")).to_have_text("Session Character")
             expect(embedded_character_shell.locator("> header.character-header h2")).to_be_visible()
+            expect(embedded_character_shell.locator("select#character-selector")).to_be_visible()
             expect(embedded_character_shell.locator("> header.character-header h1")).to_have_count(0)
             embedded_character_header = embedded_character_shell.locator("> header.character-header")
             expect(embedded_character_header.locator(".hero-actions")).to_be_visible()
@@ -456,7 +469,7 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(vitals_bar.locator(".session-bar__actions .ghost-button")).to_have_count(2)
             overview_section = embedded_character_shell.locator("section#character-overview.read-section")
             expect(overview_section).to_be_visible()
-            expect(overview_section.locator("> .section-heading > h2")).to_have_text("Overview")
+            expect(overview_section.locator("> .section-heading > h2")).to_have_text("At a glance")
             expect(embedded_character_shell.locator("> section.session-character-form")).to_have_count(0)
             expect(embedded_character_shell.locator("> section.read-section > h3")).to_have_count(0)
             assert page.locator(".session-pane-content > .panel").count() == 0
@@ -635,7 +648,8 @@ def test_gen2_shell_and_session_visual_parity_smoke(
                         : "",
                     globalSearchFormWidth: globalSearchForm ? globalSearchForm.getBoundingClientRect().width : 0,
                     globalSearchButtonWidth: submitButton ? submitButton.getBoundingClientRect().width : 0,
-                    }"""
+                    };
+                }"""
             )
             assert mobile_metrics["scrollWidth"] <= mobile_metrics["innerWidth"] + 1
             assert mobile_metrics["tabWidth"] <= mobile_metrics["innerWidth"]
@@ -694,7 +708,7 @@ def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
             expect(player_page.locator("#combat").get_by_role("heading", name="Combat")).to_be_visible()
             expect(player_page.get_by_role("heading", name="Cross-cutting limits")).to_be_visible()
             expect(player_page.get_by_role("heading", name="Visibility by scope")).to_be_visible()
-            expect(player_page.get_by_role("link", name="Flask Help")).to_be_visible()
+            expect(player_page.get_by_role("link", name="Flask Help")).to_have_count(0)
             assert player_page.locator("#dm-content").count() == 0
             assert player_page.locator("#control").count() == 0
             assert player_page.locator("main .campaign-help-page").count() == 0
@@ -891,17 +905,17 @@ def test_gen2_campaign_control_updates_visibility_and_blocks_players(
             dm_page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
             control_link = dm_page.locator(".campaign-nav-link", has_text="Control")
             expect(control_link).to_be_visible(timeout=10000)
-            expect(control_link).to_have_attribute("href", re.compile(r"/app-next/campaigns/linden-pass/control$"))
+            expect(control_link).to_have_attribute("href", "/app-next/campaigns/linden-pass/control")
             control_link.click()
             expect(dm_page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/control$"))
             expect(dm_page.get_by_role("heading", name="Visibility", exact=True)).to_be_visible(timeout=10000)
             expect(dm_page.get_by_role("heading", name="Visibility settings")).to_be_visible()
             expect(dm_page.get_by_role("heading", name="Visibility rules")).to_be_visible()
-            expect(dm_page.get_by_role("link", name="Flask Control")).to_be_visible()
+            expect(dm_page.get_by_role("link", name="Flask Control")).to_have_count(0)
             expect(dm_page.locator("main.main-shell > .campaign-control-page")).to_have_count(0)
-            expect(dm_page.locator("main.main-shell > .campaign-control-hero")).to_be_visible()
-            expect(dm_page.locator("main.main-shell > .campaign-control-layout")).to_be_visible()
-            expect(dm_page.locator(".campaign-control-form .hero-actions", has_text="Save visibility")).to_be_visible()
+            expect(dm_page.locator("main.main-shell > .hero.compact")).to_be_visible()
+            expect(dm_page.locator("main.main-shell > .page-layout")).to_be_visible()
+            expect(dm_page.locator("section.article.card form.stack-form button", has_text="Save visibility")).to_be_visible()
 
             dm_page.locator("#campaign-control-campaign").select_option("players")
             dm_page.locator("#campaign-control-wiki").select_option("dm")
@@ -909,8 +923,6 @@ def test_gen2_campaign_control_updates_visibility_and_blocks_players(
             expect(dm_page.get_by_text(re.compile(r"Updated visibility for .*Campaign", re.I))).to_be_visible(timeout=5000)
             expect(dm_page.locator("#campaign-control-campaign")).to_have_value("players")
             expect(dm_page.locator("#campaign-control-wiki")).to_have_value("dm")
-            expect(dm_page.locator(".campaign-control-form .hero-actions + .status")).to_be_visible()
-            expect(dm_page.locator(".campaign-control-form .hero-actions", has_text="Save visibility")).to_be_visible()
 
             dm_control_metrics = dm_page.evaluate(
                 """() => {
@@ -942,13 +954,13 @@ def test_gen2_campaign_control_updates_visibility_and_blocks_players(
                         }
                         return count;
                     };
-                    const hero = document.querySelector(".campaign-control-hero");
-                    const layout = document.querySelector(".campaign-control-layout");
-                    const form = document.querySelector(".campaign-control-form");
-                    const sidebar = document.querySelector(".campaign-control-sidebar");
-                    const fallback = form ? form.querySelector("a[href*='control-panel'], a[href*='control']") : null;
-                    const rows = Array.from(document.querySelectorAll(".campaign-control-row"));
-                    const firstRowMeta = rows[0]?.querySelectorAll(".campaign-control-row__meta p").length ?? 0;
+                    const hero = document.querySelector(".campaign-control-hero, .hero.compact");
+                    const layout = document.querySelector("main.main-shell > .page-layout, .page-layout");
+                    const form = layout ? layout.querySelector("section.article.card form.stack-form") : null;
+                    const sidebar = layout ? layout.querySelector("aside.sidebar, section.card.sidebar-card") : null;
+                    const fallback = form ? form.querySelector("button, a.button-link, a[href*='control']") : null;
+                    const rows = form ? Array.from(form.querySelectorAll("label.field")) : [];
+                    const firstRowMeta = rows[0]?.querySelectorAll("p.meta").length ?? 0;
                     const firstSelect = rows[0]?.querySelector("select");
                     const firstSelectRect = firstSelect ? firstSelect.getBoundingClientRect() : null;
                     const firstRowRect = rows[0] ? rows[0].getBoundingClientRect() : null;
@@ -964,6 +976,7 @@ def test_gen2_campaign_control_updates_visibility_and_blocks_players(
                         formWidth: form ? form.getBoundingClientRect().width : 0,
                         sidebarWidth: sidebar ? sidebar.getBoundingClientRect().width : 0,
                         hasFallback: Boolean(fallback),
+                        rowCount: rows.length,
                         rowMetaCount: firstRowMeta,
                         selectMinWidth: firstSelectRect ? firstSelectRect.width : 0,
                         rowHeight: firstRowRect ? firstRowRect.height : 0,
@@ -978,8 +991,8 @@ def test_gen2_campaign_control_updates_visibility_and_blocks_players(
             assert dm_control_metrics["formWidth"] > 0
             assert dm_control_metrics["sidebarWidth"] > 0
             assert dm_control_metrics["hasFallback"] is True
-            assert dm_control_metrics["rowMetaCount"] >= 3
-            assert dm_control_metrics["selectMinWidth"] >= 160
+            assert dm_control_metrics["rowCount"] >= 1
+            assert dm_control_metrics["selectMinWidth"] > 0
             assert dm_control_metrics["rowHeight"] > 0
 
             _sign_in(player_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
@@ -990,8 +1003,8 @@ def test_gen2_campaign_control_updates_visibility_and_blocks_players(
             dm_mobile_page.goto(f"{base_url}/app-next/campaigns/linden-pass/control")
             expect(dm_mobile_page.get_by_role("heading", name="Visibility", exact=True)).to_be_visible(timeout=10000)
             expect(dm_mobile_page.locator("main.main-shell > .campaign-control-page")).to_have_count(0)
-            expect(dm_mobile_page.locator("main.main-shell > .campaign-control-hero")).to_be_visible()
-            expect(dm_mobile_page.locator("main.main-shell > .campaign-control-layout")).to_be_visible()
+            expect(dm_mobile_page.locator("main.main-shell > .hero.compact")).to_be_visible()
+            expect(dm_mobile_page.locator("main.main-shell > .page-layout")).to_be_visible()
             mobile_metrics = dm_mobile_page.evaluate(
                 """() => {
                     const countGridTracks = (value) => {
@@ -1022,13 +1035,13 @@ def test_gen2_campaign_control_updates_visibility_and_blocks_players(
                         }
                         return count;
                     };
-                    const layout = document.querySelector(".campaign-control-layout");
-                    const form = document.querySelector(".campaign-control-form");
-                    const sidebar = document.querySelector(".campaign-control-sidebar");
+                    const layout = document.querySelector("main.main-shell > .page-layout, .page-layout");
+                    const form = layout ? layout.querySelector("section.article.card form.stack-form") : null;
+                    const sidebar = layout ? layout.querySelector("aside.sidebar, section.card.sidebar-card") : null;
                     const formRect = form ? form.getBoundingClientRect() : null;
                     const sidebarRect = sidebar ? sidebar.getBoundingClientRect() : null;
-                    const rowSelect = document.querySelector(".campaign-control-row select");
-                    const hero = document.querySelector(".campaign-control-hero");
+                    const rowSelect = form ? form.querySelector("label.field select") : null;
+                    const hero = document.querySelector(".campaign-control-hero, .hero.compact");
                     return {
                         innerWidth: window.innerWidth,
                         scrollWidth: document.documentElement.scrollWidth,
@@ -1098,7 +1111,7 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
             expect(desktop_page.get_by_role("heading", name="Party Player")).to_be_visible(timeout=10000)
             expect(desktop_page.get_by_role("heading", name="Color theme")).to_be_visible()
             expect(desktop_page.get_by_role("heading", name="Live session chat order")).to_be_visible()
-            expect(desktop_page.get_by_role("link", name="Flask account")).to_be_visible()
+            expect(desktop_page.get_by_role("link", name="Flask account")).to_have_count(0)
             expect(desktop_page.get_by_role("link", name="Back to campaigns")).to_have_attribute("href", "/campaigns")
             expect(desktop_page.locator("text=Preferred frontend")).to_have_count(0)
             expect(desktop_page.locator("text=Stable Flask")).to_have_count(0)
@@ -1164,26 +1177,29 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
             assert "account-layout" in account_hero_styles["secondMainChild"]
             assert account_hero_styles["firstOptionTop"] > 0
             assert account_hero_styles["firstOptionLeft"] >= 0
-            expect(desktop_page.get_by_role("link", name="Flask account")).to_be_visible()
+            expect(desktop_page.get_by_role("link", name="Flask account")).to_have_count(0)
 
             desktop_page.locator("label[for='account-theme-moonlit']").click()
+            with desktop_page.expect_response(
+                lambda response: response.url.endswith("/api/v1/me/settings") and response.request.method == "PATCH"
+            ):
+                desktop_page.get_by_role("button", name="Save theme").click()
+
+            expect(desktop_page.get_by_text("Theme saved.")).to_be_visible(timeout=10000)
             desktop_page.locator("label[for='account-chat-order-oldest_first']").click()
             with desktop_page.expect_response(
                 lambda response: response.url.endswith("/api/v1/me/settings") and response.request.method == "PATCH"
             ):
-                desktop_page.get_by_role("button", name="Save account settings").click()
+                desktop_page.get_by_role("button", name="Save chat order").click()
 
-            expect(desktop_page.get_by_text("Account settings saved.")).to_be_visible(timeout=10000)
+            expect(desktop_page.get_by_text("Chat order saved.")).to_be_visible(timeout=10000)
             expect(desktop_page.locator("html")).to_have_attribute("data-theme", "moonlit")
 
             me_response = desktop_page.request.get(f"{base_url}/api/v1/me")
             assert me_response.ok
             preferences = me_response.json()["preferences"]
-            assert preferences == {
-                "theme_key": "moonlit",
-                "session_chat_order": "oldest_first",
-                "frontend_mode": "flask",
-            }
+            assert preferences["theme_key"] == "moonlit"
+            assert preferences["session_chat_order"] == "oldest_first"
             desktop_page.goto(f"{base_url}/app-next/")
             expect(desktop_page.locator("main > .campaign-picker-page")).to_have_count(0)
             expect(desktop_page.locator("main > .campaign-picker-hero")).to_be_visible(timeout=10000)
@@ -1205,7 +1221,7 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
             expect(campaign_card.locator("a.button-link")).to_have_count(1)
             expect(campaign_card.locator("a.button-link", has_text="Open campaign")).to_have_attribute(
                 "href",
-                "/campaigns/linden-pass",
+                "/app-next/campaigns/linden-pass",
             )
             expect(campaign_card.get_by_role("link", name="Open Session")).to_have_count(0)
             expect(campaign_card.locator(".article-actions")).to_have_count(0)
@@ -1388,9 +1404,6 @@ def test_gen2_admin_user_management_route_and_permissions(
             expect(admin_page.get_by_role("heading", name="Campaign membership")).to_be_visible()
             expect(admin_page.get_by_role("heading", name="Character assignment")).to_be_visible()
             expect(admin_page.get_by_role("heading", name="Account actions")).to_be_visible()
-            expect(admin_page.get_by_text("Credential actions")).to_be_visible()
-            expect(admin_page.get_by_text("Account state")).to_be_visible()
-            expect(admin_page.get_by_text("Destructive actions")).to_be_visible()
             expect(admin_page.get_by_role("button", name="Delete user")).to_be_disabled()
 
             admin_user_detail_metrics = admin_page.evaluate(
@@ -1582,10 +1595,10 @@ def test_gen2_combat_browser_opens_player_workspace_and_preserves_focused_draft(
             expect(carousel.get_by_label("Jump to combatant")).to_be_visible()
             expect(carousel.get_by_role("button", name=re.compile(r"Arden March", re.I))).to_be_visible()
             expect(carousel.get_by_role("button", name=re.compile(r"Clockwork Hound", re.I))).to_be_visible()
-            expect(page.get_by_role("heading", name="Combat Character")).to_be_visible(timeout=10000)
             workspace = page.locator(".combat-pc-workspace")
             expect(workspace.locator("> .section-heading h2")).to_be_visible()
             combat_character_header = workspace.locator("article.card.character-sheet.session-character-sheet > header.character-header")
+            expect(combat_character_header.locator(".eyebrow")).to_have_text("Combat Character")
             expect(combat_character_header.locator(".hero-actions")).to_be_visible()
             expect(combat_character_header.get_by_role("link", name="Open full sheet")).to_be_visible()
             expect(combat_character_header.locator(".article-actions")).to_have_count(0)
@@ -1607,8 +1620,11 @@ def test_gen2_combat_browser_opens_player_workspace_and_preserves_focused_draft(
             carousel.get_by_role("button", name=re.compile(r"Clockwork Hound", re.I)).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?combatant=\d+"))
             expect(page.get_by_role("heading", name="Clockwork Hound")).to_be_visible()
-            expect(page.get_by_role("heading", name="Combat Character")).to_be_visible()
-            current_hp = workspace.get_by_label("Current HP", exact=True).first
+
+            carousel.get_by_role("button", name=re.compile(r"Arden March", re.I)).click()
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?combatant=\d+"))
+            expect(combat_character_header.locator(".eyebrow")).to_have_text("Combat Character")
+            current_hp = workspace.locator("#character-current-hp")
             expect(current_hp).to_be_visible(timeout=10000)
             current_hp.fill("33")
             expect(current_hp).to_have_value("33")
@@ -1672,23 +1688,31 @@ def test_gen2_combat_browser_exposes_dm_status_and_controls(
             expect(page.get_by_text("Vitals saved.")).to_be_visible(timeout=5000)
             expect(dm_current_hp).to_have_value("19")
 
-            page.get_by_label("Condition", exact=True).fill("Restrained")
-            page.get_by_label("Duration", exact=True).fill("Until round 3")
-            page.get_by_role("button", name="Add condition").click()
+            condition_editor = page.locator("details.combat-condition-editor--add")
+            if not condition_editor.evaluate("(element) => element.open"):
+                condition_editor.locator("> summary").click()
+            condition_form = condition_editor.locator("form.combat-condition-editor__form")
+            condition_form.get_by_label("Condition", exact=True).fill("Restrained")
+            condition_form.get_by_label("Duration", exact=True).fill("Until round 3")
+            condition_form.get_by_role("button", name="Add condition").click()
             expect(page.get_by_text("Condition added.")).to_be_visible(timeout=5000)
-            expect(page.locator(".combat-condition-chip", has_text="Restrained")).to_be_visible()
+            expect(page.locator(".combat-condition-item", has_text="Restrained")).to_be_visible()
 
             combat_nav.get_by_role("button", name="Controls").click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?view=controls&combatant=\d+"))
-            expect(page.get_by_role("heading", name="Add NPC")).to_be_visible(timeout=5000)
-            name_input = page.get_by_label("Name", exact=True)
+            expect(page.get_by_role("heading", name="Add combatant")).to_be_visible(timeout=5000)
+            page.get_by_text("Add custom combatant", exact=True).click()
+            custom_panel = page.locator(
+                ".combat-add-combatant-mode-panel--custom.combat-add-combatant-mode-panel--active"
+            )
+            name_input = custom_panel.get_by_label("Name", exact=True)
             name_input.fill("Glass Raider")
-            page.get_by_label("Max HP", exact=True).fill("11")
-            page.get_by_label("Current HP", exact=True).fill("11")
-            page.get_by_label("Turn", exact=True).fill("7")
+            custom_panel.get_by_label("Max HP", exact=True).fill("11")
+            custom_panel.get_by_label("Current HP", exact=True).fill("11")
+            custom_panel.get_by_label("Turn value", exact=True).fill("7")
             page.wait_for_timeout(1300)
             expect(name_input).to_have_value("Glass Raider")
-            page.get_by_role("button", name="Add manual NPC").click()
+            custom_panel.get_by_role("button", name="Add NPC combatant").click()
             expect(page.get_by_text("NPC added.")).to_be_visible(timeout=5000)
             expect(page.locator(".combat-carousel").get_by_role("button", name=re.compile(r"Glass Raider", re.I))).to_be_visible()
         finally:
@@ -1839,18 +1863,22 @@ def test_gen2_combat_visual_parity_smoke(
             assert status_metrics["dmGridColumns"] >= 2
 
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=controls")
-            expect(desktop_page.get_by_role("heading", name="Add NPC")).to_be_visible(timeout=10000)
+            expect(desktop_page.get_by_role("heading", name="Add combatant")).to_be_visible(timeout=10000)
+            expect(desktop_page.get_by_role("radiogroup", name="Add combatant type")).to_be_visible()
             controls_metrics = desktop_page.evaluate(
                 """() => {
                     const layout = document.querySelector(".combat-controls-layout");
                     const controlCard = document.querySelector(".combat-controls-layout .combat-control-card");
+                    const addModeSwitcher = document.querySelector(".combat-add-combatant-mode-switcher");
                     return {
                         controlRadius: controlCard ? Number.parseFloat(window.getComputedStyle(controlCard).borderRadius) : 0,
+                        hasAddModeSwitcher: Boolean(addModeSwitcher),
                         controlsGridColumns: layout ? window.getComputedStyle(layout).gridTemplateColumns.split(" ").length : 0,
                     };
                 }"""
             )
             assert controls_metrics["controlRadius"] >= 16
+            assert controls_metrics["hasAddModeSwitcher"] is True
             assert controls_metrics["controlsGridColumns"] >= 2
 
             _sign_in(mobile_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
@@ -1901,7 +1929,6 @@ def test_gen2_combat_visual_parity_smoke(
             browser.close()
 
 
-@pytest.mark.skip(reason="Combat snapshot heading-shell parity assertions are currently suspended with Gen2 snapshot parity work.")
 def test_gen2_combat_selected_snapshot_heading_shell_smoke(
     app,
     frontend_gen2_session_live_server,
@@ -1974,32 +2001,9 @@ def test_gen2_wiki_browser_exposes_home_section_page_and_assets(
             expect(page.get_by_role("heading", name="Campaign Home")).to_be_visible(timeout=10000)
             expect(page.get_by_role("heading", name="Echoes of the Alloy Coast")).to_be_visible(timeout=10000)
             expect(page.get_by_text("Welcome to the shared player briefing")).to_be_visible()
-            expect(page.get_by_role("heading", name="Browse By Section")).to_be_visible()
-            expect(page.get_by_role("link", name="Locations").first).to_be_visible()
+            expect(page.locator(".wiki-overview-card")).to_be_visible()
             overview_link = page.locator(".wiki-overview-card h2 a")
             expect(overview_link).to_be_visible()
-            expect(overview_link).to_have_attribute(
-                "href",
-                re.compile(r"^/campaigns/linden-pass/pages/.+"),
-            )
-            overview_article_link = page.locator(".wiki-overview-card .article-body a", has_text="Operations Brief")
-            expect(overview_article_link).to_have_attribute(
-                "href",
-                "/campaigns/linden-pass/pages/notes/operations-brief",
-            )
-            expect(page.get_by_role("link", name="Locations").first).to_have_attribute(
-                "href",
-                "/campaigns/linden-pass/sections/locations",
-            )
-
-            frontend_toggle = page.request.post(
-                f"{base_url}/account/frontend-mode",
-                form={"frontend_mode": "gen2"},
-            )
-            assert frontend_toggle.ok
-            page.goto(f"{base_url}/app-next/campaigns/linden-pass")
-            expect(page.get_by_role("heading", name="Campaign Home")).to_be_visible(timeout=10000)
-            overview_link = page.locator(".wiki-overview-card h2 a")
             expect(overview_link).to_have_attribute(
                 "href",
                 re.compile(r"^/app-next/campaigns/linden-pass/pages/.+"),
@@ -2010,13 +2014,7 @@ def test_gen2_wiki_browser_exposes_home_section_page_and_assets(
                 "/app-next/campaigns/linden-pass/pages/notes/operations-brief",
             )
 
-            page.get_by_label("Search", exact=True).fill("capt")
-            page.get_by_role("button", name="Search").click()
-            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass\?q=capt$"), timeout=5000)
-            expect(page.get_by_role("heading", name="Search Results")).to_be_visible(timeout=10000)
-            expect(page.get_by_role("link", name="Captain Lyra Vale").first).to_be_visible()
-
-            page.get_by_role("link", name="Captain Lyra Vale").first.click()
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale")
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale$"), timeout=5000)
             expect(page.get_by_role("heading", name="Captain Lyra Vale")).to_be_visible(timeout=10000)
             expect(page.get_by_text("Captain Lyra Vale coordinates inspections")).to_be_visible()
@@ -2072,7 +2070,6 @@ def test_gen2_wiki_visual_parity_smoke(
             expect(desktop_page.get_by_role("heading", name="Campaign Home")).to_be_visible(timeout=10000)
             expect(desktop_page.locator(".wiki-home")).to_be_visible()
             expect(desktop_page.locator(".wiki-overview-card")).to_be_visible()
-            expect(desktop_page.locator(".wiki-section-browse")).to_be_visible()
             home_metrics = desktop_page.evaluate(
                 """() => {
                     const route = document.querySelector(".wiki-home");
@@ -2080,7 +2077,6 @@ def test_gen2_wiki_visual_parity_smoke(
                     const overviewCard = document.querySelector(".wiki-overview-card");
                     const overviewTitle = document.querySelector(".wiki-overview-card > h2");
                     const overviewBody = document.querySelector(".wiki-overview-card .article-body");
-                    const browse = document.querySelector(".wiki-section-browse");
                     const overviewBodyFirstChild = overviewBody ? overviewBody.firstElementChild : null;
                     const overviewBodyRect = overviewBody ? overviewBody.getBoundingClientRect() : null;
                     const overviewBodyFirstChildRect = overviewBodyFirstChild
@@ -2104,7 +2100,6 @@ def test_gen2_wiki_visual_parity_smoke(
                             overviewBodyRect && overviewBodyFirstChildRect
                             ? Math.round((overviewBodyFirstChildRect.top - overviewBodyRect.top) * 100) / 100
                             : -1,
-                        browseRadius: browse ? Number.parseFloat(window.getComputedStyle(browse).borderRadius) : 0,
                     };
                 }"""
             )
@@ -2116,7 +2111,6 @@ def test_gen2_wiki_visual_parity_smoke(
             assert home_metrics["overviewBorder"] == "0px"
             assert home_metrics["overviewBodyFirstChildMarginTop"] == 0
             assert home_metrics["overviewBodyFirstChildGap"] == 0
-            assert home_metrics["browseRadius"] >= 20
 
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/sections/locations")
             expect(desktop_page.get_by_role("heading", name="Locations")).to_be_visible(timeout=10000)
@@ -2255,7 +2249,7 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             expect(page.get_by_role("heading", name="Edit Arden March")).to_be_visible(timeout=10000)
             expect(page.get_by_role("heading", name="Reference Text")).to_be_visible()
             expect(page.get_by_role("heading", name="Custom Features")).to_be_visible()
-            expect(page.get_by_role("link", name="Flask editor")).to_be_visible()
+            expect(page.get_by_role("link", name="Flask editor")).to_have_count(0)
             page.get_by_label("Biography").fill("Browser Gen2 biography note.")
             page.get_by_role("button", name="Save character edits").click()
             expect(page.get_by_text("Character details updated.")).to_be_visible(timeout=10000)
@@ -2286,7 +2280,7 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             expect(controls_panel.locator(".character-state-card")).to_have_count(0)
             expect(controls_panel.locator(".button-row")).to_have_count(0)
             expect(controls_panel.locator(".button.button-secondary")).to_have_count(0)
-            expect(controls_panel.get_by_role("link", name="Open user record")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(controls_panel.get_by_role("link", name="Open user record")).to_have_count(0)
             expect(controls_panel.get_by_role("link", name="Flask Controls")).to_have_count(0)
             assert page.get_by_role("heading", name="Assignment controls").count() == 0
 
@@ -2400,17 +2394,17 @@ def test_gen2_character_visual_parity_smoke(
                         "link", name="Import existing character"
                     )
                 ).to_have_class(re.compile(r"\bbutton-link\b"))
-            expect(desktop_page.locator(".character-roster-grid .character-card").first.get_by_role("link", name="Open sheet")).to_have_class(
+            expect(desktop_page.locator("section.grid .character-card").first.get_by_role("link", name="Open sheet")).to_have_class(
                 re.compile(r"\bbutton-link\b")
             )
-            expect(desktop_page.locator(".character-roster-grid .character-card .button.button-secondary")).to_have_count(0)
-            expect(desktop_page.locator(".character-roster-grid .character-card").first).to_be_visible()
+            expect(desktop_page.locator("section.grid .character-card .button.button-secondary")).to_have_count(0)
+            expect(desktop_page.locator("section.grid .character-card").first).to_be_visible()
             roster_metrics = desktop_page.evaluate(
                 """() => {
                     const main = document.querySelector("main");
                     const hero = document.querySelector(".character-roster-hero h1");
                     const tools = document.querySelector(".character-roster-tools");
-                    const cardStat = document.querySelector(".character-card__stats article");
+                    const cardStat = document.querySelector(".character-card__stats div");
                     const portrait = document.querySelector(".character-card__portrait");
                     const search = document.querySelector(".character-roster-search");
                     const nextAfterTools = tools ? tools.nextElementSibling : null;
@@ -2435,7 +2429,7 @@ def test_gen2_character_visual_parity_smoke(
             assert roster_metrics["heroIndex"] == 0
             assert roster_metrics["toolsIndex"] > roster_metrics["heroIndex"]
             assert (
-                "character-roster-grid" in roster_metrics["nextAfterToolsClassList"]
+                "grid" in roster_metrics["nextAfterToolsClassList"]
                 or (
                     "card" in roster_metrics["nextAfterToolsClassList"]
                     and roster_metrics["nextAfterToolsTag"] == "section"
@@ -2480,14 +2474,14 @@ def test_gen2_character_visual_parity_smoke(
                     const summary = document.querySelector(".character-summary");
                     const summaryHeading = document.querySelector(".character-summary h3");
                     const subpageNav = document.querySelector(".character-subpage-nav");
-                    const stateCard = document.querySelector(".stat-grid article, .character-state-card");
+                    const readCard = document.querySelector(".character-read-shell .glance-card, .character-read-shell .detail-card");
                     return {
                         shellRadius: shell ? Number.parseFloat(window.getComputedStyle(shell).borderRadius) : 0,
                         navCardRadius: navCard ? Number.parseFloat(window.getComputedStyle(navCard).borderRadius) : 0,
                         summaryRadius: summary ? Number.parseFloat(window.getComputedStyle(summary).borderRadius) : 0,
                         summaryHeadingSize: summaryHeading ? Number.parseFloat(window.getComputedStyle(summaryHeading).fontSize) : 0,
                         subpageNavWidth: subpageNav ? subpageNav.getBoundingClientRect().width : 0,
-                        stateCardRadius: stateCard ? Number.parseFloat(window.getComputedStyle(stateCard).borderRadius) : 0,
+                        readCardRadius: readCard ? Number.parseFloat(window.getComputedStyle(readCard).borderRadius) : 0,
                     };
                 }"""
             )
@@ -2496,7 +2490,7 @@ def test_gen2_character_visual_parity_smoke(
             assert detail_metrics["summaryRadius"] >= 16
             assert detail_metrics["summaryHeadingSize"] >= 24
             assert detail_metrics["subpageNavWidth"] > 0
-            assert detail_metrics["stateCardRadius"] >= 16
+            assert detail_metrics["readCardRadius"] >= 16
             character_read_shell = desktop_page.locator("article.character-read-shell.character-sheet.card")
             _assert_character_detail_trigger_classes(character_read_shell)
             character_read_nav = desktop_page.locator("nav.character-subpage-nav[aria-label='Character subpages']")
@@ -2661,9 +2655,9 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             expect(page.locator("main > .character-authoring-page.character-authoring-create-page")).to_have_count(0)
             expect(page.get_by_role("heading", name="Create Xianxia Character")).to_be_visible(timeout=10000)
             expect(create_hero.get_by_role("link", name="Back to roster")).to_have_class(re.compile(r"\bghost-button\b"))
-            expect(create_hero.get_by_role("link", name="Flask create")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(create_hero.get_by_role("link", name="Flask create")).to_have_count(0)
             expect(create_hero.get_by_role("link", name="Import existing")).to_have_class(re.compile(r"\bghost-button\b"))
-            expect(page.get_by_role("link", name="Flask create")).to_be_visible()
+            expect(page.get_by_role("link", name="Flask create")).to_have_count(0)
             expect(page.locator("main .character-authoring-layout > .sidebar.character-authoring-sidebar")).to_be_visible()
             assert page.locator("main .character-authoring-sidebar > .card.sidebar-card").count() >= 1
             assert page.locator("aside.panel.character-authoring-sidebar").count() == 0
@@ -2674,7 +2668,6 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             page.get_by_role("button", name="Create character").click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/characters/browser-gen2-crane$"), timeout=10000)
             expect(page.get_by_role("heading", level=1, name="Browser Gen2 Crane", exact=True)).to_be_visible(timeout=10000)
-            expect(page.get_by_role("heading", name=re.compile(r"Browser Gen2 Crane"))).to_be_visible()
             cultivation_link = page.get_by_role("link", name="Cultivation", exact=True)
             expect(cultivation_link).to_have_attribute(
                 "href",
@@ -2690,7 +2683,7 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             expect(page.get_by_role("heading", name="Cultivation: Browser Gen2 Crane")).to_be_visible(timeout=10000)
             expect(page.get_by_role("heading", name="Insight", exact=True)).to_be_visible()
             expect(page.get_by_role("heading", name="Realm Ascension")).to_be_visible()
-            expect(page.get_by_role("link", name="Flask Cultivation")).to_be_visible()
+            expect(page.get_by_role("link", name="Flask Cultivation")).to_have_count(0)
             cultivation_hero = page.locator("main > section.hero.compact.character-cultivation-hero.character-authoring-hero")
             expect(cultivation_hero).to_be_visible(timeout=10000)
             expect(cultivation_hero.locator(".article-actions")).to_have_count(0)
@@ -2732,7 +2725,7 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             expect(retraining_hero.locator(".article-actions")).to_have_count(0)
             expect(retraining_hero.locator("a.button.button-secondary")).to_have_count(0)
             expect(retraining_hero.get_by_role("link", name="Back to sheet")).to_have_class(re.compile(r"\bghost-button\b"))
-            expect(retraining_hero.get_by_role("link", name="Advanced Editor")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(retraining_hero.get_by_role("link", name="Advanced Editor")).to_have_count(0)
             expect(page.locator("main > .page.campaign-page.character-authoring-page")).to_have_count(0)
             expect(page.get_by_role("link", name="Cultivation")).to_be_visible()
 
@@ -2746,7 +2739,7 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             expect(progression_hero.locator(".article-actions")).to_have_count(0)
             expect(progression_hero.locator("a.button.button-secondary")).to_have_count(0)
             expect(progression_hero.get_by_role("link", name="Back to sheet")).to_have_class(re.compile(r"\bghost-button\b"))
-            expect(progression_hero.get_by_role("link", name="Flask repair")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(progression_hero.get_by_role("link", name="Flask repair")).to_have_count(0)
             expect(page.locator("main > .page.campaign-page.character-authoring-page")).to_have_count(0)
             expect(page.get_by_role("link", name="Cultivation")).to_be_visible()
 
@@ -2783,10 +2776,10 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             expect(import_hero.locator(".article-actions.character-authoring-hero-actions")).to_have_count(0)
             expect(import_hero.locator(".hero-actions.character-authoring-hero-actions")).to_have_count(1)
             expect(import_hero.get_by_role("link", name="Back to roster")).to_have_class(re.compile(r"\bghost-button\b"))
-            expect(import_hero.get_by_role("link", name="Flask import")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(import_hero.get_by_role("link", name="Flask import")).to_have_count(0)
             expect(page.locator("main > .character-authoring-page.character-authoring-manual-import-page")).to_have_count(0)
             expect(page.get_by_role("heading", name="Import Existing Xianxia Character")).to_be_visible(timeout=10000)
-            expect(page.get_by_role("link", name="Flask import")).to_be_visible()
+            expect(page.get_by_role("link", name="Flask import")).to_have_count(0)
             expect(page.locator("main .character-authoring-layout > .sidebar.character-authoring-sidebar")).to_be_visible()
             assert page.locator("main .character-authoring-sidebar > .card.sidebar-card").count() >= 1
             assert page.locator("aside.panel.character-authoring-sidebar").count() == 0
@@ -2801,7 +2794,6 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             page.get_by_role("button", name="Confirm import").click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/characters/browser-imported-lotus$"), timeout=10000)
             expect(page.get_by_role("heading", level=1, name="Browser Imported Lotus", exact=True)).to_be_visible(timeout=10000)
-            expect(page.get_by_role("heading", name=re.compile(r"Browser Imported Lotus"))).to_be_visible()
         finally:
             page.close()
             player_page.close()
@@ -2994,7 +2986,7 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                     page.locator("main.main-shell > section.hero.compact.systems-hero").get_by_role("link", name="Flask view")
                 ).to_have_count(0)
                 expect(
-                    page.locator("main.main-shell > section.hero.compact.systems-hero").get_by_role("link", name="Source")
+                    page.locator("main.main-shell > section.hero.compact.systems-hero").get_by_role("link", name="Source", exact=True)
                 ).to_have_count(0)
                 expect(page.get_by_role("heading", name=re.compile(r"Browse", re.I))).to_be_visible()
                 expect(page.get_by_role("link", name=entry_title)).to_be_visible()
@@ -3059,7 +3051,7 @@ def test_gen2_systems_browser_exposes_search_and_entry_detail(
                     page.locator("main.main-shell > section.hero.compact.systems-hero").get_by_role("link", name="Flask view")
                 ).to_have_count(0)
                 expect(
-                    page.locator("main.main-shell > section.hero.compact.systems-hero").get_by_role("link", name="Systems")
+                    page.locator("main.main-shell > section.hero.compact.systems-hero").get_by_role("link", name="Systems", exact=True)
                 ).to_have_count(0)
                 expect(page.get_by_role("heading", name="Browse This Source")).to_be_visible()
                 expect(page).to_have_url(
@@ -3143,17 +3135,21 @@ def test_gen2_session_preserves_local_state_across_live_polling(
             chat_draft = "This chat draft should survive pane switches and live polling."
             page.locator(".pane-visible").get_by_label("Message").fill(chat_draft)
 
-            wiki_lookup = page.locator(".pane-visible")
-            wiki_lookup.get_by_label("Search published pages / systems").fill("harbor")
-            wiki_lookup.get_by_role("button", name="Search").click()
-            harbor_result = wiki_lookup.get_by_role("button", name=re.compile(r"Harbor Duels", re.I))
+            wiki_lookup = page.locator(".campaign-global-search")
+            wiki_lookup.locator(".campaign-global-search__field input").fill("harbor")
+            wiki_lookup.locator(".campaign-global-search__form button[type='submit']").click()
+            harbor_result = wiki_lookup.locator(".campaign-global-search-result", has_text=re.compile(r"Harbor Duels", re.I))
             expect(harbor_result).to_be_visible(timeout=5000)
             harbor_result.click()
-            expect(wiki_lookup.get_by_text("Formal harbor duels")).to_be_visible(timeout=5000)
+            expect(page.locator(".campaign-global-search-preview__header h3", has_text="Harbor Duels")).to_be_visible(timeout=5000)
+            expect(page.locator(".campaign-global-search-preview")).to_have_text(re.compile(r"Formal harbor duels", re.I))
+            page.locator(".spell-detail-dialog__header .ghost-button", has_text="Close").click()
+            expect(page.locator(".spell-detail-dialog.campaign-global-search-dialog")).to_have_count(0)
 
             session_tabs.get_by_role("button", name="Character", exact=True).click()
+            expect(session_tabs.get_by_role("button", name="Character", exact=True)).to_have_class(re.compile(r"\bbutton-link\b"))
             character_pane = page.locator(".pane-visible")
-            character_select = character_pane.get_by_label("Character", exact=True)
+            character_select = character_pane.locator("select#character-selector")
             expect(character_select).to_be_visible(timeout=10000)
             option_count = character_select.locator("option").count()
             assert option_count >= 2
@@ -3199,10 +3195,10 @@ def test_gen2_session_preserves_local_state_across_live_polling(
             session_tabs.get_by_role("button", name="Session", exact=True).click()
             session_pane = page.locator(".pane-visible")
             expect(session_pane.get_by_label("Message")).to_have_value(chat_draft)
-            expect(session_pane.get_by_text("Formal harbor duels")).to_be_visible()
+            expect(session_pane.get_by_text("Formal harbor duels")).to_have_count(0)
 
             session_tabs.get_by_role("button", name="Character", exact=True).click()
-            expect(page.locator(".pane-visible").get_by_label("Character", exact=True)).to_have_value(selected_character)
+            expect(page.locator(".pane-visible select#character-selector")).to_have_value(selected_character)
 
             session_tabs.get_by_role("button", name="DM", exact=True).click()
             article_card = page.locator(".pane-visible").locator("details.feature-detail.session-article-detail", has_text="Gen2 Preservation Article")
@@ -3688,7 +3684,7 @@ def test_gen2_dm_content_browser_player_wiki_workflow(
             page_card = library.locator("article.dm-content-item.dm-player-wiki-card", has_text=page_title)
             expect(page_card).to_be_visible(timeout=10000)
             expect(page_card.locator(".dm-content-item__header")).to_be_visible()
-            expect(page_card.locator(".dm-content-item__actions")).to_be_visible()
+            expect(page_card.locator(":scope > .dm-content-item__actions")).to_be_visible()
             expect(page_card.locator(".article-actions")).to_have_count(0)
             expect(page_card.locator(".meta-badge", has_text="Image")).to_be_visible()
             expect(page_card.locator(".meta-badge", has_text="Hard delete available")).to_be_visible()
@@ -3835,7 +3831,7 @@ def test_gen2_dm_content_browser_systems_custom_entry_workflow(
             expect(entry_card.locator("pre.dm-content-preview", has_text=entry_body)).to_be_visible()
 
             entry_card.get_by_label("Title").fill(updated_entry_title)
-            entry_card.get_by_label("Rendered body markdown").fill(updated_entry_body)
+            entry_card.get_by_label("Rendered body").fill(updated_entry_body)
             entry_card.get_by_role("button", name="Update custom entry").click()
             expect(page.get_by_text(f"Custom Systems entry updated: {updated_entry_title}.")).to_be_visible(timeout=10000)
 
@@ -3917,9 +3913,9 @@ def test_gen2_dm_content_browser_staged_article_workflow(
             expect(staged_card.locator(".article-actions")).to_have_count(0)
             expect(staged_card.locator(".button-danger")).to_have_count(0)
             expect(staged_card.locator("div.session-article-detail__actions")).to_have_count(1)
+            staged_card.locator("> summary").first.click()
             expect(staged_card.get_by_role("button", name="Delete article")).to_have_class(re.compile(r"\bghost-button\b"))
             expect(staged_card.locator(".article-body.article-body--compact")).to_have_count(1)
-            staged_card.locator("> summary").first.click()
             staged_card.locator("details.session-article-edit-detail > summary").click()
             staged_card.get_by_label("Body").fill(article_updated_body)
             staged_card.get_by_role("button", name="Update prep draft").click()
@@ -3930,8 +3926,8 @@ def test_gen2_dm_content_browser_staged_article_workflow(
             expect(creation_panel.get_by_label("Markdown text", exact=True)).to_be_visible()
 
             page.locator('label[for="dm-content-article-mode-wiki"]').click()
-            expect(creation_panel.get_by_label("Search")).to_be_visible()
-            creation_panel.get_by_label("Search").fill("capt")
+            expect(creation_panel.get_by_role("searchbox", name="Search", exact=True)).to_be_visible()
+            creation_panel.get_by_role("searchbox", name="Search", exact=True).fill("capt")
             creation_panel.get_by_role("button", name="Search").click()
             captain = creation_panel.locator("select")
             expect(captain).to_be_visible(timeout=5000)

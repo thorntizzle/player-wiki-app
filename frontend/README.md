@@ -1,8 +1,8 @@
 # Gen2 Frontend
 
-This React + TypeScript frontend is currently suspended. The source remains in place for possible future resumption, but Flask serves it only when preview hosting is explicitly enabled.
+This React + TypeScript frontend is open for gated preview. Flask remains the default browser UI, and Flask serves Gen2 only when preview hosting is explicitly enabled.
 
-The suspension status and resumption checklist live in:
+The preview status and route-promotion checklist live in:
 
 - `docs/gen2-migration-readiness.md`
 
@@ -32,9 +32,9 @@ npm run dev
   - Set `PLAYER_WIKI_ENABLE_APP_NEXT_PREVIEW=1` and point `PLAYER_WIKI_APP_NEXT_DIST_DIR` (defaults to `<repo>/frontend/dist`) to enable local preview hosting.
 - The Vite dev server proxies `/api/*` requests to `http://127.0.0.1:5000`.
 
-## Historical Coverage
+## Preview Coverage
 
-The suspended Gen2 build covered:
+The preview-gated Gen2 build covers:
 
 - campaign list, campaign home, published wiki sections, and published wiki pages
 - Session player/character/DM panes
@@ -46,6 +46,8 @@ The suspended Gen2 build covered:
 - Admin dashboard and user-management operations
 - Campaign Help guidance, effective access, visibility notes, and Flask fallback links
 - Campaign Control visibility editing for campaign and scope access floors
+
+The refreshed browser acceptance suite lives in `tests/test_frontend_gen2_session_browser.py` and currently covers preview route loading, core write flows, route-mode preservation inside `/app-next`, desktop/mobile overflow checks, and visible Flask-fallback cleanup.
 
 Flask remains the source of truth for workflows that are still Flask-first or intentionally fallback-only, including shared/core Systems entry editing, Systems imports, and CLI/bootstrap recovery operations.
 
@@ -73,11 +75,12 @@ When preview hosting is enabled, Flask serves `PLAYER_WIKI_APP_NEXT_DIST_DIR` (d
 
 - Flask hosts Gen2 only when preview is enabled via `PLAYER_WIKI_ENABLE_APP_NEXT_PREVIEW=1`; otherwise it returns 404 for `GET /app-next`, `GET /app-next/`, and `GET /app-next/<path>`.
 - Account settings no longer include a preferred-frontend selector.
-- Campaign picker cards always open Flask routes.
+- Flask campaign picker cards open Flask routes; the Gen2 preview picker opens `/app-next/campaigns/<slug>` direct preview routes.
+- Direct `/app-next` preview navigation forces Gen2 route mode for shell, campaign, and wiki links while stored legacy preferences continue to normalize to Flask.
 
-## Historical API Used By Gen2
+## API Used By Gen2
 
-The full API reference is maintained in `docs/api-v1.md`. The list below is historical orientation for the suspended Gen2 app and should not be treated as evidence that `/app-next` is currently hosted.
+The full API reference is maintained in `docs/api-v1.md`. The list below is orientation for the preview-gated Gen2 app and should not be treated as evidence that `/app-next` is production-default.
 
 - `GET /api/v1/app`
 - `GET /api/v1/me`

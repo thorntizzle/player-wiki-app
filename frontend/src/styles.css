@@ -933,7 +933,8 @@ a:hover {
   gap: 0.55rem;
 }
 
-.session-file-input {
+.session-file-input,
+.field input.session-file-input {
   position: absolute;
   width: 1px;
   height: 1px;
