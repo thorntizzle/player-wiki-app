@@ -28,6 +28,13 @@ def env_float(name: str, default: float) -> float:
     return float(raw_value)
 
 
+def env_path(name: str, default: Path) -> Path:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return Path(raw_value)
+
+
 def build_default_base_url(host: str, port: int, scheme: str) -> str:
     visible_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
     default_port = (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
@@ -64,6 +71,11 @@ class Config:
     APP_INSTANCE_NAME = resolve_instance_name()
     CAMPAIGNS_DIR = Path(os.getenv("PLAYER_WIKI_CAMPAIGNS_DIR", str(BASE_DIR / "campaigns")))
     LOCAL_DATA_DIR = BASE_DIR / ".local"
+    APP_NEXT_PREVIEW_ENABLED = env_bool("PLAYER_WIKI_ENABLE_APP_NEXT_PREVIEW", False)
+    APP_NEXT_DIST_DIR = env_path(
+        "PLAYER_WIKI_APP_NEXT_DIST_DIR",
+        BASE_DIR / "frontend" / "dist",
+    )
 
     SECRET_KEY = os.getenv("PLAYER_WIKI_SECRET_KEY", "development-only-secret-key")
     HOST = os.getenv("PLAYER_WIKI_HOST", "127.0.0.1")

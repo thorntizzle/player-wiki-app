@@ -1,6 +1,6 @@
 # Gen2 Frontend
 
-This React + TypeScript frontend is currently suspended. The source remains in place for possible future resumption, but Flask does not serve it: `/app-next` and `/app-next/...` intentionally return 404.
+This React + TypeScript frontend is currently suspended. The source remains in place for possible future resumption, but Flask serves it only when preview hosting is explicitly enabled.
 
 The suspension status and resumption checklist live in:
 
@@ -27,7 +27,9 @@ npm run dev
 ```
 
 - In a second terminal, start the Flask app as usual (`python run.py`).
-- Open `http://127.0.0.1:5173/app-next/` only for isolated Vite development. Flask-hosted `http://127.0.0.1:5000/app-next/` is closed while Gen2 is suspended.
+- Open `http://127.0.0.1:5173/app-next/` only for isolated Vite development.
+- Flask-hosted `http://127.0.0.1:5000/app-next/` is preview-only and is disabled by default.
+  - Set `PLAYER_WIKI_ENABLE_APP_NEXT_PREVIEW=1` and point `PLAYER_WIKI_APP_NEXT_DIST_DIR` (defaults to `<repo>/frontend/dist`) to enable local preview hosting.
 - The Vite dev server proxies `/api/*` requests to `http://127.0.0.1:5000`.
 
 ## Historical Coverage
@@ -56,12 +58,20 @@ npm run build
 
 The build outputs to `frontend/dist`.
 
-For local development, run `npm run build` after installing dependencies if you need to inspect the bundle directly. The Flask app currently ignores this build output for `/app-next` hosting.
+For local development, run `npm run build` after installing dependencies if you need to inspect the bundle directly.
+
+When preview hosting is enabled, Flask serves `PLAYER_WIKI_APP_NEXT_DIST_DIR` (defaults to `frontend/dist`) by:
+
+- returning `index.html` for `/app-next` and `/app-next/`
+- serving static files from the same directory for `/app-next/<path>` when the file exists
+- falling back to `index.html` for SPA routes (for example `/app-next/campaigns/linden-pass/session` or `/app-next/admin`)
+- returning `404` for missing `/app-next/assets/...` files
+- returning `404` if `index.html` is missing
 `frontend/dist` is still ignored for local Git hygiene and is still excluded from the Docker build context by `.dockerignore` on source builds.
 
 ## Flask integration
 
-- Flask returns 404 for `GET /app-next`, `GET /app-next/`, and `GET /app-next/<path>`.
+- Flask hosts Gen2 only when preview is enabled via `PLAYER_WIKI_ENABLE_APP_NEXT_PREVIEW=1`; otherwise it returns 404 for `GET /app-next`, `GET /app-next/`, and `GET /app-next/<path>`.
 - Account settings no longer include a preferred-frontend selector.
 - Campaign picker cards always open Flask routes.
 

@@ -407,6 +407,14 @@ function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
+function asCharacterXianxiaNamedRecord(value: unknown): CharacterXianxiaNamedRecord {
+  const record = asRecord(value);
+  return {
+    ...record,
+    name: readString(record.name),
+  } as CharacterXianxiaNamedRecord;
+}
+
 function asRecordArray(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.map(asRecord) : [];
 }
@@ -9887,7 +9895,7 @@ function CharacterPane({
                         {approvalRecords.length ? (
                           <ul className="plain-list slot-list">
                             {approvalRecords.map((record, recordIndex) => {
-                              const data = asRecord(record) as CharacterXianxiaNamedRecord;
+                              const data = asCharacterXianxiaNamedRecord(record);
                               const recordName = readString(data.name, "Unnamed record");
                               const statusLabel = readString(data.status_label, readString(data.status, "Unknown"));
                               const statusKey = readString(data.status_key, "unknown");
@@ -9927,9 +9935,7 @@ function CharacterPane({
                                       Approval state: {statusLabel}
                                     </span>
                                   </li>
-                                  {(typeLabel || sourceLabel) ? (
-                                    <li className="meta">{joinDisplay([typeLabel, sourceLabel], " | ")}</li>
-                                  ) : null}
+                                  {(typeLabel || sourceLabel) ? <li className="meta">{joinDisplay([typeLabel, sourceLabel])}</li> : null}
                                   {notes ? <li className="meta">{notes}</li> : null}
                                   {approvalTimestamp ? <li className="meta">Approval timestamp: {approvalTimestamp}</li> : null}
                                   {groupKey && ["karmic_constraints", "ascendant_arts"].includes(groupKey) ? (
@@ -10058,11 +10064,14 @@ function CharacterPane({
                                 }
                               >
                                 <option value="">No prepared note</option>
-                                {asRecordArray(presentedXianxia.approval?.dao_immolating_prepared).map((record, index) => (
-                                  <option key={draftKey(record.name, index)} value={String(index)}>
-                                    {record.name || `Prepared note ${index + 1}`}
-                                  </option>
-                                ))}
+                                {asRecordArray(presentedXianxia.approval?.dao_immolating_prepared).map((record, index) => {
+                                  const preparedRecordName = readString(record.name, `Prepared note ${index + 1}`);
+                                  return (
+                                    <option key={draftKey(preparedRecordName, index)} value={String(index)}>
+                                      {preparedRecordName}
+                                    </option>
+                                  );
+                                })}
                               </select>
                             </label>
                           </>
@@ -15145,14 +15154,6 @@ function CombatPage() {
     setActiveCombatView(readSearchView(currentSearch));
   }, [location.href]);
 
-  useEffect(() => {
-    if (!canAccessSystems && combatAddMode === "systems") {
-      setCombatAddMode("player");
-    } else if (!canAccessDmContent && combatAddMode === "dm-content") {
-      setCombatAddMode("player");
-    }
-  }, [canAccessSystems, canAccessDmContent, combatAddMode]);
-
   const combatQuery = useQuery({
     queryKey: ["combat", campaignSlug, activeCombatView, selectedCombatantId],
     queryFn: async () => {
@@ -15211,6 +15212,14 @@ function CombatPage() {
   const availableStatblocks: CombatAvailableStatblockChoice[] = payload?.available_statblock_choices ?? [];
   const conditionOptions = payload?.combat_condition_options ?? [];
   const encodedCampaignSlug = encodeURIComponent(campaignSlug);
+
+  useEffect(() => {
+    if (!canAccessSystems && combatAddMode === "systems") {
+      setCombatAddMode("player");
+    } else if (!canAccessDmContent && combatAddMode === "dm-content") {
+      setCombatAddMode("player");
+    }
+  }, [canAccessSystems, canAccessDmContent, combatAddMode]);
 
   const setCombatUrl = (view: CombatView, combatantId: number | null) => {
     const params = new URLSearchParams();

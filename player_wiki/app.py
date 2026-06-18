@@ -1648,17 +1648,35 @@ def create_app() -> Flask:
     register_admin(app)
     register_api(app)
 
-    @app.get("/app-next")
-    def app_next_root_closed():
-        abort(404)
+    def _app_next_preview_enabled() -> bool:
+        return bool(app.config.get("APP_NEXT_PREVIEW_ENABLED"))
 
+    def _app_next_dist_dir() -> Path:
+        return Path(app.config.get("APP_NEXT_DIST_DIR", app.config["BASE_DIR"] / "frontend" / "dist"))
+
+    def _app_next_index_html() -> Path:
+        return _app_next_dist_dir() / "index.html"
+
+    @app.get("/app-next")
     @app.get("/app-next/")
-    def app_next_index_closed():
-        abort(404)
+    def app_next_root_or_index():
+        if not _app_next_preview_enabled() or not _app_next_index_html().is_file():
+            abort(404)
+        return send_file(_app_next_index_html())
 
     @app.get("/app-next/<path:asset_path>")
-    def app_next_path_closed(asset_path: str):
-        abort(404)
+    def app_next_path(asset_path: str):
+        if not _app_next_preview_enabled() or not _app_next_index_html().is_file():
+            abort(404)
+
+        dist_dir = _app_next_dist_dir()
+        asset_file = dist_dir / asset_path
+
+        if asset_file.is_file():
+            return send_from_directory(dist_dir, asset_path)
+        if asset_path.startswith("assets/"):
+            abort(404)
+        return send_file(_app_next_index_html())
 
     if app.config["TRUST_PROXY"]:
         hops = app.config["PROXY_FIX_HOPS"]

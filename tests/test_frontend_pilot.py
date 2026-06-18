@@ -53,12 +53,13 @@ def test_campaign_picker_grid_and_empty_state_are_mutually_exclusive_in_source()
 
 
 def test_frontend_pilot_routes_are_closed(client, app, tmp_path):
+    # Ensure closed mode is explicit even when a build is present.
+    app.config["APP_NEXT_PREVIEW_ENABLED"] = False
     dist_dir = tmp_path / "frontend-dist"
     assets_dir = dist_dir / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
     (dist_dir / "index.html").write_text("<!doctype html><html><body>pilot</body></html>", encoding="utf-8")
     (assets_dir / "app.js").write_text("console.log('pilot')", encoding="utf-8")
-
     app.config["APP_NEXT_DIST_DIR"] = dist_dir
 
     bare_response = client.get("/app-next")
@@ -132,11 +133,56 @@ def test_frontend_pilot_routes_are_closed(client, app, tmp_path):
     assert missing_asset_response.status_code == 404
 
 
+def test_frontend_pilot_routes_are_available_with_preview_and_index(app, client, tmp_path):
+    app.config["APP_NEXT_PREVIEW_ENABLED"] = True
+    dist_dir = tmp_path / "frontend-dist-preview"
+    assets_dir = dist_dir / "assets"
+    dist_dir.mkdir(parents=True)
+    (dist_dir / "index.html").write_text("<!doctype html><html><body>preview</body></html>", encoding="utf-8")
+    (dist_dir / "manifest.webmanifest").write_text("{\"name\":\"preview\"}", encoding="utf-8")
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (assets_dir / "app.js").write_text("console.log('app-next-preview')", encoding="utf-8")
+    app.config["APP_NEXT_DIST_DIR"] = dist_dir
+
+    app_root_response = client.get("/app-next")
+    assert app_root_response.status_code == 200
+    assert app_root_response.data == b"<!doctype html><html><body>preview</body></html>"
+
+    app_root_slash_response = client.get("/app-next/")
+    assert app_root_slash_response.status_code == 200
+    assert app_root_slash_response.data == b"<!doctype html><html><body>preview</body></html>"
+
+    asset_response = client.get("/app-next/assets/app.js")
+    assert asset_response.status_code == 200
+    assert asset_response.data == b"console.log('app-next-preview')"
+
+    manifest_response = client.get("/app-next/manifest.webmanifest")
+    assert manifest_response.status_code == 200
+    assert manifest_response.data == b"{\"name\":\"preview\"}"
+
+    route_response = client.get("/app-next/campaigns/linden-pass/session")
+    assert route_response.status_code == 200
+    assert route_response.data == b"<!doctype html><html><body>preview</body></html>"
+
+    admin_route_response = client.get("/app-next/admin")
+    assert admin_route_response.status_code == 200
+    assert admin_route_response.data == b"<!doctype html><html><body>preview</body></html>"
+
+    missing_asset_response = client.get("/app-next/assets/missing.js")
+    assert missing_asset_response.status_code == 404
+
+
 def test_frontend_pilot_without_build_returns_not_found(client, app, tmp_path):
     # Avoid inheriting temp values from earlier test cases.
-    app.config["APP_NEXT_DIST_DIR"] = tmp_path / "missing-frontend-dist"
+    app.config["APP_NEXT_PREVIEW_ENABLED"] = True
+    missing_dist_dir = tmp_path / "missing-frontend-dist"
+    missing_dist_dir.mkdir()
+    (missing_dist_dir / "other.html").write_text("<!doctype html><html><body>no index</body></html>", encoding="utf-8")
+    app.config["APP_NEXT_DIST_DIR"] = missing_dist_dir
     response = client.get("/app-next/")
+    deep_route_response = client.get("/app-next/campaigns/linden-pass/session")
     assert response.status_code == 404
+    assert deep_route_response.status_code == 404
 
 
 def test_session_pane_no_player_wiki_lookup_widget_in_source() -> None:
