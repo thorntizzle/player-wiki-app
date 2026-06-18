@@ -7035,30 +7035,37 @@ function SessionArticlesPanel({
         <p className="meta">{articles.length}</p>
       </div>
       {articles.length ? (
-        <div className="article-stack">
-          {articles.map((article) => (
-            <details className="article-card" key={article.id}>
-              <summary>
-                <strong>{article.title}</strong>
-                <span className="article-kind">{article.source_kind || "unclassified"}</span>
-              </summary>
-              <div className="article-meta">
+        <div className="session-article-stack">
+          {articles.map((article) => {
+            const revealedLabel = article.revealed_at
+              ? `Revealed ${formatTimestamp(article.revealed_at)}`
+              : article.created_at
+                ? `Revealed ${formatTimestamp(article.created_at)}`
+                : null;
+            return (
+              <details className="feature-detail session-article-detail" data-session-article-id={article.id} key={article.id}>
+                <summary>
+                  <span>{article.title}</span>
+                  {revealedLabel ? <span className="meta">{revealedLabel}</span> : null}
+                </summary>
                 {article.image ? (
-                  <img
-                    className="article-image"
-                    src={resolveArticleImage(campaignSlug, article)}
-                    alt={article.image.alt_text || "Session article image"}
-                  />
+                  <figure className="article-figure">
+                    <img
+                      className="article-image"
+                      src={resolveArticleImage(campaignSlug, article)}
+                      alt={article.image.alt_text || article.title || "Article image"}
+                    />
+                    {article.image.caption ? <figcaption className="meta article-image__caption">{article.image.caption}</figcaption> : null}
+                  </figure>
                 ) : null}
-                {article.created_at ? <time>{formatTimestamp(article.created_at)}</time> : null}
-              </div>
-              <SessionArticleSourceLine article={article} />
-              {renderArticleBody(article)}
-              <div className="article-actions">
-                <SessionArticleReferenceActions article={article} includePromotionLinks={false} />
-              </div>
-            </details>
-          ))}
+                <SessionArticleSourceLine article={article} />
+                {renderArticleBody(article, "article-body--compact")}
+                <div className="session-article-detail__actions">
+                  <SessionArticleReferenceActions article={article} includePromotionLinks={false} />
+                </div>
+              </details>
+            );
+          })}
         </div>
       ) : (
         <p className="status status-neutral">{emptyText}</p>

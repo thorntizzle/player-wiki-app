@@ -313,3 +313,28 @@ def test_character_portrait_manager_action_chrome_in_source() -> None:
     assert 'className="button button-secondary"' not in section_markup
     assert 'className="button-row character-portrait-manager__actions"' not in section_markup
     assert "character-portrait-manager__fields" not in section_markup
+
+
+def test_player_session_revealed_articles_panel_uses_session_article_row_chrome_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    panel_start = source.index("function SessionArticlesPanel({")
+    panel_end = source.index("\nfunction SessionPaneChat(", panel_start)
+    panel_markup = source[panel_start:panel_end]
+
+    assert 'className="session-article-stack"' in panel_markup
+    assert 'className="feature-detail session-article-detail"' in panel_markup
+    assert "data-session-article-id={article.id}" in panel_markup
+    assert 'className="article-figure"' in panel_markup
+    assert "const revealedLabel = article.revealed_at" in panel_markup
+    assert "Revealed ${formatTimestamp(article.revealed_at)}" in panel_markup
+    assert "Revealed ${formatTimestamp(article.created_at)}" in panel_markup
+    assert 'renderArticleBody(article, "article-body--compact")' in panel_markup
+    assert 'className="session-article-detail__actions"' in panel_markup
+    assert (
+        "SessionArticleReferenceActions article={article} includePromotionLinks={false}" in panel_markup
+    )
+
+    assert 'className="article-stack"' not in panel_markup
+    assert 'className="article-card"' not in panel_markup
+    assert 'className="article-kind"' not in panel_markup
+    assert 'className="article-actions"' not in panel_markup
