@@ -2276,7 +2276,16 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             expect(page.get_by_text("Owner Player")).to_be_visible()
             expect(page.get_by_role("heading", name="Delete character")).to_be_visible()
             expect(page.get_by_role("button", name="Delete character")).to_be_disabled()
-            expect(page.get_by_role("link", name="Flask Controls")).to_be_visible()
+            controls_panel = page.locator("section.character-controls-panel")
+            expect(controls_panel.locator(".detail-grid.character-controls-grid")).to_have_count(2)
+            expect(controls_panel.locator("article.detail-card")).to_have_count(3)
+            expect(controls_panel.locator("form.stack-form")).to_have_count(1)
+            expect(controls_panel.locator("article.character-controls-card--danger")).to_have_count(1)
+            expect(controls_panel.locator(".character-state-card")).to_have_count(0)
+            expect(controls_panel.locator(".button-row")).to_have_count(0)
+            expect(controls_panel.locator(".button.button-secondary")).to_have_count(0)
+            expect(controls_panel.get_by_role("link", name="Open user record")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(controls_panel.get_by_role("link", name="Flask Controls")).to_have_count(0)
             assert page.get_by_role("heading", name="Assignment controls").count() == 0
 
             _sign_in(owner_page, base_url, email=users["owner"]["email"], password=users["owner"]["password"])

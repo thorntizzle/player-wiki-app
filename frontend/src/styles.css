@@ -3529,12 +3529,12 @@ textarea {
   gap: 0.65rem;
 }
 
-.character-controls-danger {
+.character-controls-card--danger {
   border-color: #f1b4aa;
   background: #fff7f5;
 }
 
-.character-controls-danger h4 {
+.character-controls-card--danger h3 {
   color: #7f1d1d;
 }
 
