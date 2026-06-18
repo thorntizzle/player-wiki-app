@@ -184,6 +184,42 @@ def test_admin_user_detail_action_button_chrome_in_source() -> None:
     assert "className=\"button button-secondary\"" not in disable_button_block
 
 
+def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    admin_user_detail_start = source.index("function AdminUserDetailPage() {")
+    admin_user_detail_end = source.index("function AccountSettingsPage()", admin_user_detail_start)
+    admin_user_detail_source = source[admin_user_detail_start:admin_user_detail_end]
+
+    delete_on_click = 'onClick={() => deleteUser.mutate()}'
+    delete_button_start = admin_user_detail_source.rfind("<button", 0, admin_user_detail_source.index(delete_on_click))
+    delete_button_end = admin_user_detail_source.index("</button>", delete_button_start) + len("</button>")
+    delete_button_block = admin_user_detail_source[delete_button_start:delete_button_end]
+
+    assert 'className="ghost-button"' in delete_button_block
+    assert 'className="button-danger"' not in delete_button_block
+    assert delete_on_click in delete_button_block
+    assert (
+        "disabled={mutationPending || deleteConfirm.trim().toLowerCase() !== data.managed_user.email.toLowerCase()}"
+        in delete_button_block
+    )
+    assert "{deleteUser.isPending ? \"Deleting...\" : \"Delete user\"}" in delete_button_block
+
+
+def test_session_log_detail_delete_button_uses_ghost_button_class_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+
+    delete_on_click = "onClick={() => deleteLogMutation.mutate(logQuery.data.session.id)}"
+    delete_button_start = source.rfind("<button", 0, source.index(delete_on_click))
+    delete_button_end = source.index("</button>", delete_button_start) + len("</button>")
+    delete_button_block = source[delete_button_start:delete_button_end]
+
+    assert "{deleteLogMutation.isPending ? \"Deleting...\" : \"Delete this log\"}" in delete_button_block
+    assert 'className="ghost-button"' in delete_button_block
+    assert 'className="button-danger"' not in delete_button_block
+    assert delete_on_click in delete_button_block
+    assert "disabled={deleteLogMutation.isPending}" in delete_button_block
+
+
 def test_combat_action_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     combat_page_start = source.index("function CombatPage() {")

@@ -5332,7 +5332,7 @@ function AdminUserDetailPage() {
                       </label>
                       <button
                         type="button"
-                        className="button-danger"
+                        className="ghost-button"
                         disabled={mutationPending || deleteConfirm.trim().toLowerCase() !== data.managed_user.email.toLowerCase()}
                         onClick={() => deleteUser.mutate()}
                       >
@@ -12438,7 +12438,7 @@ function DmPane({
                       <h4>Messages</h4>
                       <button
                         type="button"
-                        className="button-danger"
+                        className="ghost-button"
                         onClick={() => deleteLogMutation.mutate(logQuery.data.session.id)}
                         disabled={deleteLogMutation.isPending}
                       >
