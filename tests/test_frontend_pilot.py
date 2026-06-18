@@ -679,6 +679,47 @@ def test_dm_content_player_wiki_editor_fields_use_flask_style_labels_in_source()
     assert "dm-player-wiki-edit-form" not in source
 
 
+def test_dm_content_systems_management_form_field_chrome() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    helper_start = source.index("const renderCustomFields = ({")
+    helper_end = source.index("  if (systemsQuery.isLoading)", helper_start)
+    helper_markup = source[helper_start:helper_end]
+
+    expected_systems_custom_fields = [
+        ("title", "Title"),
+        ("slug", "URL slug"),
+        ("type", "Entry type"),
+        ("visibility", "Visibility"),
+        ("provenance", "Source/provenance"),
+        ("search", "Searchable metadata"),
+        ("body", "Rendered body"),
+    ]
+
+    assert "className=\"chat-label\"" not in helper_markup
+    assert "dm-content-image-edit-row" not in helper_markup
+    assert 'className="builder-field-grid"' in helper_markup
+    assert 'className="field"' in helper_markup
+
+    for suffix, label in expected_systems_custom_fields:
+        label_open = '<label htmlFor={`$' + '{idPrefix}-' + suffix + '`} className="field">'
+        assert label_open in helper_markup
+        assert f"<span>{label}</span>" in helper_markup
+
+    override_start = source.index('<section className="card" id="systems-entry-overrides">')
+    override_end = source.index('<section className="card" id="systems-custom-entries">', override_start)
+    override_markup = source[override_start:override_end]
+
+    assert 'className="stack-form"' in override_markup
+    assert '<label htmlFor="systems-entry-override-key" className="field">' in override_markup
+    assert '<label htmlFor="systems-entry-override-visibility" className="field">' in override_markup
+    assert '<label htmlFor="systems-entry-override-enabled" className="field">' in override_markup
+    assert "<span>Entry key</span>" in override_markup
+    assert "<span>Visibility override</span>" in override_markup
+    assert "<span>Enablement override</span>" in override_markup
+    assert "className=\"chat-label\"" not in override_markup
+    assert "dm-content-image-edit-row" not in override_markup
+
+
 def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
 

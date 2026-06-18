@@ -11871,30 +11871,32 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
     const updateDraft = (updates: Partial<DmContentSystemsCustomDraftState>) => setDraft({ ...draft, ...updates });
     return (
       <>
-        <label htmlFor={`${idPrefix}-title`} className="chat-label">Title</label>
-        <input
-          id={`${idPrefix}-title`}
-          value={draft.title}
-          disabled={disabled}
-          maxLength={200}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ title: event.currentTarget.value })}
-        />
-        {includeSlug ? (
-          <>
-            <label htmlFor={`${idPrefix}-slug`} className="chat-label">URL slug</label>
+        <div className="builder-field-grid">
+          <label htmlFor={`${idPrefix}-title`} className="field">
+            <span>Title</span>
             <input
-              id={`${idPrefix}-slug`}
-              value={draft.slugLeaf}
+              id={`${idPrefix}-title`}
+              value={draft.title}
               disabled={disabled}
-              maxLength={120}
-              placeholder="harbor-spark"
-              onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ slugLeaf: event.currentTarget.value })}
+              maxLength={200}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ title: event.currentTarget.value })}
             />
-          </>
-        ) : null}
-        <div className="dm-content-image-edit-row">
-          <label htmlFor={`${idPrefix}-type`} className="chat-label">
-            Entry type
+          </label>
+          {includeSlug ? (
+            <label htmlFor={`${idPrefix}-slug`} className="field">
+              <span>URL slug</span>
+              <input
+                id={`${idPrefix}-slug`}
+                value={draft.slugLeaf}
+                disabled={disabled}
+                maxLength={120}
+                placeholder="harbor-spark"
+                onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ slugLeaf: event.currentTarget.value })}
+              />
+            </label>
+          ) : null}
+          <label htmlFor={`${idPrefix}-type`} className="field">
+            <span>Entry type</span>
             <select
               id={`${idPrefix}-type`}
               value={draft.entryType}
@@ -11906,8 +11908,8 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
               ))}
             </select>
           </label>
-          <label htmlFor={`${idPrefix}-visibility`} className="chat-label">
-            Visibility
+          <label htmlFor={`${idPrefix}-visibility`} className="field">
+            <span>Visibility</span>
             <select
               id={`${idPrefix}-visibility`}
               value={draft.visibility}
@@ -11920,30 +11922,36 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
             </select>
           </label>
         </div>
-        <label htmlFor={`${idPrefix}-provenance`} className="chat-label">Source/provenance</label>
-        <input
-          id={`${idPrefix}-provenance`}
-          value={draft.provenance}
-          disabled={disabled}
-          maxLength={500}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ provenance: event.currentTarget.value })}
-        />
-        <label htmlFor={`${idPrefix}-search`} className="chat-label">Searchable metadata</label>
-        <textarea
-          id={`${idPrefix}-search`}
-          rows={3}
-          value={draft.searchMetadata}
-          disabled={disabled}
-          onChange={(event: ChangeEvent<HTMLTextAreaElement>) => updateDraft({ searchMetadata: event.currentTarget.value })}
-        />
-        <label htmlFor={`${idPrefix}-body`} className="chat-label">Rendered body markdown</label>
-        <textarea
-          id={`${idPrefix}-body`}
-          rows={10}
-          value={draft.bodyMarkdown}
-          disabled={disabled}
-          onChange={(event: ChangeEvent<HTMLTextAreaElement>) => updateDraft({ bodyMarkdown: event.currentTarget.value })}
-        />
+        <label htmlFor={`${idPrefix}-provenance`} className="field">
+          <span>Source/provenance</span>
+          <input
+            id={`${idPrefix}-provenance`}
+            value={draft.provenance}
+            disabled={disabled}
+            maxLength={500}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ provenance: event.currentTarget.value })}
+          />
+        </label>
+        <label htmlFor={`${idPrefix}-search`} className="field">
+          <span>Searchable metadata</span>
+          <textarea
+            id={`${idPrefix}-search`}
+            rows={3}
+            value={draft.searchMetadata}
+            disabled={disabled}
+            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => updateDraft({ searchMetadata: event.currentTarget.value })}
+          />
+        </label>
+        <label htmlFor={`${idPrefix}-body`} className="field">
+          <span>Rendered body</span>
+          <textarea
+            id={`${idPrefix}-body`}
+            rows={10}
+            value={draft.bodyMarkdown}
+            disabled={disabled}
+            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => updateDraft({ bodyMarkdown: event.currentTarget.value })}
+          />
+        </label>
       </>
     );
   };
@@ -12103,43 +12111,43 @@ function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
             updateOverrideMutation.mutate();
           }}
         >
-          <label htmlFor="systems-entry-override-key" className="chat-label">Entry key</label>
-          <input
-            id="systems-entry-override-key"
-            value={overrideDraft.entryKey}
-            placeholder="dnd-5e|spell|phb|fireball"
-            disabled={!canManageSystems}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => setOverrideDraft({ ...overrideDraft, entryKey: event.currentTarget.value })}
-          />
-          <div className="dm-content-image-edit-row">
-            <label htmlFor="systems-entry-override-visibility" className="chat-label">
-              Visibility override
-              <select
-                id="systems-entry-override-visibility"
-                value={overrideDraft.visibilityOverride}
-                disabled={!canManageSystems}
-                onChange={(event: ChangeEvent<HTMLSelectElement>) => setOverrideDraft({ ...overrideDraft, visibilityOverride: event.currentTarget.value })}
-              >
-                <option value="">Inherit source default</option>
-                {payload.custom_entry_visibility_choices.map((choice) => (
-                  <option key={choice.value} value={choice.value}>{choice.label}</option>
-                ))}
-              </select>
-            </label>
-            <label htmlFor="systems-entry-override-enabled" className="chat-label">
-              Enablement override
-              <select
-                id="systems-entry-override-enabled"
-                value={overrideDraft.enablementOverride}
-                disabled={!canManageSystems}
-                onChange={(event: ChangeEvent<HTMLSelectElement>) => setOverrideDraft({ ...overrideDraft, enablementOverride: event.currentTarget.value })}
-              >
-                <option value="">Inherit source enablement</option>
-                <option value="enabled">Enabled</option>
-                <option value="disabled">Disabled</option>
-              </select>
-            </label>
-          </div>
+          <label htmlFor="systems-entry-override-key" className="field">
+            <span>Entry key</span>
+            <input
+              id="systems-entry-override-key"
+              value={overrideDraft.entryKey}
+              placeholder="dnd-5e|spell|phb|fireball"
+              disabled={!canManageSystems}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setOverrideDraft({ ...overrideDraft, entryKey: event.currentTarget.value })}
+            />
+          </label>
+          <label htmlFor="systems-entry-override-visibility" className="field">
+            <span>Visibility override</span>
+            <select
+              id="systems-entry-override-visibility"
+              value={overrideDraft.visibilityOverride}
+              disabled={!canManageSystems}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) => setOverrideDraft({ ...overrideDraft, visibilityOverride: event.currentTarget.value })}
+            >
+              <option value="">Inherit source default</option>
+              {payload.custom_entry_visibility_choices.map((choice) => (
+                <option key={choice.value} value={choice.value}>{choice.label}</option>
+              ))}
+            </select>
+          </label>
+          <label htmlFor="systems-entry-override-enabled" className="field">
+            <span>Enablement override</span>
+            <select
+              id="systems-entry-override-enabled"
+              value={overrideDraft.enablementOverride}
+              disabled={!canManageSystems}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) => setOverrideDraft({ ...overrideDraft, enablementOverride: event.currentTarget.value })}
+            >
+              <option value="">Inherit source enablement</option>
+              <option value="enabled">Enabled</option>
+              <option value="disabled">Disabled</option>
+            </select>
+          </label>
           <button type="submit" disabled={!canManageSystems || updateOverrideMutation.isPending}>
             {updateOverrideMutation.isPending ? "Saving..." : "Save entry override"}
           </button>
