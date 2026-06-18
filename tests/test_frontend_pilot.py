@@ -205,6 +205,41 @@ def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
     assert "{deleteUser.isPending ? \"Deleting...\" : \"Delete user\"}" in delete_button_block
 
 
+def test_session_chat_logs_card_uses_flask_style_row_hooks_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    chat_logs_start = source.index('<article className="card session-sidebar-card" id="session-chat-logs">')
+    chat_logs_end = source.index('<aside className="session-sidebar">', chat_logs_start)
+    chat_logs_source = source[chat_logs_start:chat_logs_end]
+
+    assert 'className="plain-list session-log-list"' in chat_logs_source
+    assert "session-log-list__row" in chat_logs_source
+    assert "session-log-list__content" in chat_logs_source
+    assert "Session log from ${formatTimestamp(entry.session.started_at)}" in chat_logs_source
+    assert "Session ${entry.session.id}" in chat_logs_source
+    assert "Closed sessions will appear here after the first live run." in chat_logs_source
+    assert "session-log-list-row" not in chat_logs_source
+
+    row_delete_on_click = "onClick={() => deleteLogMutation.mutate(entry.session.id)}"
+    row_delete_button_start = chat_logs_source.rfind("<button", 0, chat_logs_source.index(row_delete_on_click))
+    row_delete_button_end = chat_logs_source.index("</button>", row_delete_button_start) + len("</button>")
+    row_delete_button_block = chat_logs_source[row_delete_button_start:row_delete_button_end]
+    assert "className=\"ghost-button\"" in row_delete_button_block
+    assert "className=\"button-danger\"" not in row_delete_button_block
+    assert row_delete_on_click in row_delete_button_block
+    assert "{deleteLogMutation.isPending ? \"Deleting...\" : \"Delete log\"}" in row_delete_button_block
+    assert "disabled={deleteLogMutation.isPending}" in row_delete_button_block
+
+    detail_delete_on_click = "onClick={() => deleteLogMutation.mutate(logQuery.data.session.id)}"
+    detail_delete_button_start = chat_logs_source.rfind("<button", 0, chat_logs_source.index(detail_delete_on_click))
+    detail_delete_button_end = chat_logs_source.index("</button>", detail_delete_button_start) + len("</button>")
+    detail_delete_button_block = chat_logs_source[detail_delete_button_start:detail_delete_button_end]
+    assert "{deleteLogMutation.isPending ? \"Deleting...\" : \"Delete log\"}" in detail_delete_button_block
+    assert 'className="ghost-button"' in detail_delete_button_block
+    assert "className=\"button-danger\"" not in detail_delete_button_block
+    assert detail_delete_on_click in detail_delete_button_block
+    assert "disabled={deleteLogMutation.isPending}" in detail_delete_button_block
+
+
 def test_session_log_detail_delete_button_uses_ghost_button_class_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
 
@@ -213,7 +248,7 @@ def test_session_log_detail_delete_button_uses_ghost_button_class_in_source() ->
     delete_button_end = source.index("</button>", delete_button_start) + len("</button>")
     delete_button_block = source[delete_button_start:delete_button_end]
 
-    assert "{deleteLogMutation.isPending ? \"Deleting...\" : \"Delete this log\"}" in delete_button_block
+    assert "{deleteLogMutation.isPending ? \"Deleting...\" : \"Delete log\"}" in delete_button_block
     assert 'className="ghost-button"' in delete_button_block
     assert 'className="button-danger"' not in delete_button_block
     assert delete_on_click in delete_button_block

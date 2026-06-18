@@ -12413,20 +12413,39 @@ function DmPane({
           </div>
           {sessionLogs.length ? (
             <div className="session-log-row">
-              <div className="session-log-list">
-                {sessionLogs.map((entry) => (
-                  <button
-                    type="button"
-                    key={entry.session.id}
-                    className={`session-log-list-row ${entry.session.id === selectedLogSessionId ? "active" : ""}`}
-                    onClick={() => setSelectedLogSessionId(entry.session.id)}
-                  >
-                    <strong>Session {entry.session.id}</strong>
-                    <span>{entry.message_count} messages</span>
-                    <small>{formatTimestamp(entry.last_message_at)}</small>
-                  </button>
-                ))}
-              </div>
+              <ul className="plain-list session-log-list">
+                {sessionLogs.map((entry) => {
+                  const sessionLabel = entry.session.started_at
+                    ? `Session log from ${formatTimestamp(entry.session.started_at)}`
+                    : `Session ${entry.session.id}`;
+                  const messageMeta = `${entry.message_count} message${entry.message_count === 1 ? "" : "s"}`;
+                  return (
+                    <li key={entry.session.id}>
+                      <div className="session-log-list__row">
+                        <button
+                          type="button"
+                          className={`session-log-list__content ${entry.session.id === selectedLogSessionId ? "active" : ""}`}
+                          onClick={() => setSelectedLogSessionId(entry.session.id)}
+                        >
+                          <strong>{sessionLabel}</strong>
+                          <p className="meta">
+                            {messageMeta}
+                            {entry.last_message_at ? ` | Last message ${formatTimestamp(entry.last_message_at)}` : null}
+                          </p>
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() => deleteLogMutation.mutate(entry.session.id)}
+                          disabled={deleteLogMutation.isPending}
+                        >
+                          {deleteLogMutation.isPending ? "Deleting..." : "Delete log"}
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
               <div className="session-log-detail">
                 {logQuery.isLoading ? (
                   <p className="status status-neutral">Loading log detail...</p>
@@ -12442,7 +12461,7 @@ function DmPane({
                         onClick={() => deleteLogMutation.mutate(logQuery.data.session.id)}
                         disabled={deleteLogMutation.isPending}
                       >
-                        {deleteLogMutation.isPending ? "Deleting..." : "Delete this log"}
+                        {deleteLogMutation.isPending ? "Deleting..." : "Delete log"}
                       </button>
                     </div>
                     <ol className="log-messages">
@@ -12459,9 +12478,9 @@ function DmPane({
                 )}
               </div>
             </div>
-        ) : (
-          <p className="status status-neutral">No closed session logs.</p>
-        )}
+          ) : (
+            <p className="meta">Closed sessions will appear here after the first live run.</p>
+          )}
         </article>
       </section>
 
