@@ -6353,6 +6353,14 @@ function WikiArticlePage() {
   const page: WikiPageDetail | undefined = data?.page;
   const error = getApiErrorMessage(pageQuery.error);
   const wikiFrontendMode = normalizeFrontendMode(data?.frontend_mode ?? preferredFrontendMode);
+  const campaignContextLink =
+    ((wikiFrontendMode === "gen2" ? data?.links.gen2_campaign_url : data?.links.campaign_url) ??
+      (wikiFrontendMode === "gen2" ? data?.links.campaign_url : data?.links.gen2_campaign_url)) ??
+    "";
+  const sectionContextLink =
+    ((wikiFrontendMode === "gen2" ? data?.links.gen2_section_url : data?.links.section_url) ??
+      (wikiFrontendMode === "gen2" ? data?.links.section_url : data?.links.gen2_section_url)) ??
+    "";
   const showSummary = page?.summary && !["item", "spell", "mechanic"].includes(page.page_type);
 
   return (
@@ -6375,10 +6383,10 @@ function WikiArticlePage() {
             <section className="card sidebar-card">
               <h2>Context</h2>
               <p className="meta">
-                Campaign: <a href={data?.links.campaign_url ?? data?.links.gen2_campaign_url}>{data?.campaign.title}</a>
+                Campaign: <a href={preferredCampaignLink(campaignContextLink, campaignSlug, wikiFrontendMode)}>{data?.campaign.title}</a>
               </p>
               <p className="meta">
-                Section: <a href={data?.links.section_url ?? data?.links.gen2_section_url}>{page.section}</a>
+                Section: <a href={preferredCampaignLink(sectionContextLink, campaignSlug, wikiFrontendMode)}>{page.section}</a>
               </p>
             </section>
             {data?.backlinks.length ? (

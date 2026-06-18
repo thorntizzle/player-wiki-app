@@ -1194,6 +1194,28 @@ def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
     assert "Lookup" in creator_markup
 
 
+def test_wiki_article_page_context_sidebar_prefers_frontend_mode_links() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    article_page_source = _extract_component_source(
+        source,
+        "function WikiArticlePage() {",
+        "function systemsIndexHref(",
+    )
+
+    assert 'Campaign: <a href={preferredCampaignLink(campaignContextLink, campaignSlug, wikiFrontendMode)}>{data?.campaign.title}</a>' in article_page_source
+    assert 'Section: <a href={preferredCampaignLink(sectionContextLink, campaignSlug, wikiFrontendMode)}>{page.section}</a>' in article_page_source
+    assert "const campaignContextLink =" in article_page_source
+    assert '((wikiFrontendMode === "gen2" ? data?.links.gen2_campaign_url : data?.links.campaign_url) ??' in article_page_source
+    assert '(wikiFrontendMode === "gen2" ? data?.links.campaign_url : data?.links.gen2_campaign_url)) ??' in article_page_source
+
+    assert "const sectionContextLink =" in article_page_source
+    assert '((wikiFrontendMode === "gen2" ? data?.links.gen2_section_url : data?.links.section_url) ??' in article_page_source
+    assert '(wikiFrontendMode === "gen2" ? data?.links.section_url : data?.links.gen2_section_url)) ??' in article_page_source
+
+    assert "data?.links.campaign_url ?? data?.links.gen2_campaign_url" not in article_page_source
+    assert "data?.links.section_url ?? data?.links.gen2_section_url" not in article_page_source
+
+
 def test_dm_content_player_wiki_editor_fields_use_flask_style_labels_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     helper_start = source.index("const renderPlayerWikiDraftFields = ({")
