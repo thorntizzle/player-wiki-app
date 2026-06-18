@@ -79,6 +79,15 @@ def _seed_gen2_combat(app, users) -> None:
         )
 
 
+def _assert_character_detail_trigger_classes(surface: object) -> None:
+    assert surface.locator(".button.button-secondary.detail-button").count() == 0
+    shared_detail_buttons = surface.locator("button", has_text=re.compile(r"^(?:Details|Item details)$"))
+    if shared_detail_buttons.count() > 0:
+        assert shared_detail_buttons.evaluate_all(
+            """(buttons) => buttons.every((button) => button.classList.contains('ghost-button') && button.classList.contains('item-detail-button'))"""
+        )
+
+
 def _configure_xianxia_campaign(app) -> None:
     campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
     payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
@@ -436,6 +445,7 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(embedded_character_header.get_by_role("link", name="Open full character page")).to_be_visible()
             expect(embedded_character_header.locator(".article-actions")).to_have_count(0)
             expect(embedded_character_header.locator(".button.button-secondary")).to_have_count(0)
+            _assert_character_detail_trigger_classes(embedded_character_shell)
             vitals_bar = embedded_character_shell.locator("section#session-vitals.session-bar")
             expect(vitals_bar).to_be_visible()
             expect(vitals_bar.locator("> .panel-header")).to_have_count(0)
@@ -454,6 +464,17 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(embedded_character_shell.locator("section.card.session-card > .panel-header")).to_have_count(0)
             expect(embedded_character_shell.locator("ul.rest-preview-list")).to_have_count(1)
             expect(embedded_character_shell.locator("section.card.session-card .hero-actions .ghost-button")).to_have_count(2)
+            character_nav = embedded_character_shell.locator("nav.character-subpage-nav[aria-label='Character subpages']")
+            for section_name, section_id in (
+                ("Spells", "session-spell-slots"),
+                ("Equipment", "character-equipment"),
+                ("Inventory", "session-inventory"),
+            ):
+                section_link = character_nav.get_by_role("link", name=section_name)
+                if section_link.count() > 0:
+                    section_link.click()
+                    expect(embedded_character_shell.locator(f"section#{section_id}")).to_be_visible(timeout=10000)
+                    _assert_character_detail_trigger_classes(embedded_character_shell)
             embedded_character_shell.locator("section.card.session-card .hero-actions").get_by_role("button", name="Cancel").click()
         finally:
             page.close()
@@ -1549,6 +1570,7 @@ def test_gen2_combat_browser_opens_player_workspace_and_preserves_focused_draft(
             expect(combat_character_header.get_by_role("link", name="Open full sheet")).to_be_visible()
             expect(combat_character_header.locator(".article-actions")).to_have_count(0)
             expect(combat_character_header.locator(".button.button-secondary")).to_have_count(0)
+            _assert_character_detail_trigger_classes(workspace.locator("article.card.character-sheet.session-character-sheet"))
 
             carousel.get_by_role("button", name=re.compile(r"Clockwork Hound", re.I)).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?combatant=\d+"))
@@ -2434,6 +2456,19 @@ def test_gen2_character_visual_parity_smoke(
             assert detail_metrics["summaryHeadingSize"] >= 24
             assert detail_metrics["subpageNavWidth"] > 0
             assert detail_metrics["stateCardRadius"] >= 16
+            character_read_shell = desktop_page.locator("article.character-read-shell.character-sheet.card")
+            _assert_character_detail_trigger_classes(character_read_shell)
+            character_read_nav = desktop_page.locator("nav.character-subpage-nav[aria-label='Character subpages']")
+            for section_name, section_id in (
+                ("Spells", "session-spell-slots"),
+                ("Equipment", "character-equipment"),
+                ("Inventory", "session-inventory"),
+            ):
+                section_link = character_read_nav.get_by_role("link", name=section_name)
+                if section_link.count() > 0:
+                    section_link.click()
+                    expect(character_read_shell.locator(f"section#{section_id}")).to_be_visible(timeout=10000)
+                    _assert_character_detail_trigger_classes(character_read_shell)
 
             _sign_in(mobile_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
             for path in (

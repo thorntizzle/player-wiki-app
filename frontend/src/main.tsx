@@ -8837,7 +8837,7 @@ function CharacterPane({
       {record.reason ? <p className="meta">{record.reason}</p> : null}
       {record.rank_progress_label ? <p className="meta">{record.rank_progress_label}</p> : null}
       {record.body_html || record.description_html || record.notes || record.href || record.prepared_record_notes || record.use_notes ? (
-        <button type="button" className="button button-secondary detail-button" onClick={() => openXianxiaRecordDetail(record, eyebrow)}>
+        <button type="button" className="ghost-button item-detail-button" onClick={() => openXianxiaRecordDetail(record, eyebrow)}>
           Details
         </button>
       ) : null}
@@ -8885,7 +8885,7 @@ function CharacterPane({
         record.prepared_record_notes ||
         record.use_notes ||
         record.technique_anchor_warning ? (
-          <button type="button" className="button button-secondary detail-button" onClick={() => openXianxiaRecordDetail(record, groupTitle)}>
+          <button type="button" className="ghost-button item-detail-button" onClick={() => openXianxiaRecordDetail(record, groupTitle)}>
             Details
           </button>
         ) : null}
@@ -10123,7 +10123,7 @@ function CharacterPane({
                           {[spell.casting_time, spell.range].filter((value) => value && value !== "--").join(" | ")}
                         </p>
                         {spell.description_html || spell.href ? (
-                          <button type="button" className="button button-secondary detail-button" onClick={() => openSpellDetail(spell)}>
+                          <button type="button" className="ghost-button item-detail-button" onClick={() => openSpellDetail(spell)}>
                             Details
                           </button>
                         ) : null}
@@ -10208,7 +10208,7 @@ function CharacterPane({
                           </p>
                           {item.tags.length ? <p className="meta">{item.tags.join(", ")}</p> : null}
                           {item.description_html || item.notes || item.href ? (
-                            <button type="button" className="button button-secondary detail-button" onClick={() => openItemDetail(item)}>
+                            <button type="button" className="ghost-button item-detail-button" onClick={() => openItemDetail(item)}>
                               Item details
                             </button>
                           ) : null}
@@ -10310,7 +10310,7 @@ function CharacterPane({
                           {itemDescriptionHtml || itemNotes || itemHref ? (
                             <button
                               type="button"
-                              className="button button-secondary detail-button"
+                              className="ghost-button item-detail-button"
                               onClick={() =>
                                 openItemDetail({
                                   name: itemName,

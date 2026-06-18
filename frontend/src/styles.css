@@ -2809,9 +2809,10 @@ textarea {
   padding: 0.2rem 0.45rem;
 }
 
-.detail-button {
+.item-detail-button {
   width: fit-content;
-  margin-top: 0.35rem;
+  justify-self: start;
+  margin-top: 0.1rem;
 }
 
 .detail-modal-backdrop {
