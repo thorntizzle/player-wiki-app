@@ -602,23 +602,23 @@ a:hover {
   gap: 0.7rem;
 }
 
-.session-workspace-grid {
+.session-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(270px, 0.85fr);
   align-items: start;
   gap: 1rem;
 }
 
-.session-workspace-grid--single {
+.session-layout--single {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.session-workspace-grid--single .session-workspace-main {
+.session-layout--single .session-column {
   max-width: 100%;
 }
 
-.session-workspace-main,
-.session-workspace-sidebar {
+.session-column,
+.session-sidebar {
   display: grid;
   gap: 0.9rem;
   min-width: 0;
@@ -765,12 +765,12 @@ a:hover {
 }
 
 .session-pane-content .panel,
-.session-workspace-sidebar .panel,
-.session-workspace-main .panel,
-.session-workspace-sidebar .panel-nested,
-.session-workspace-main .panel-nested,
-.session-workspace-main .card.session-sidebar-card,
-.session-workspace-sidebar .card.session-sidebar-card {
+.session-sidebar .panel,
+.session-column .panel,
+.session-sidebar .panel-nested,
+.session-column .panel-nested,
+.session-column .card.session-sidebar-card,
+.session-sidebar .card.session-sidebar-card {
   min-width: 0;
 }
 
@@ -779,8 +779,8 @@ a:hover {
 }
 
 .session-sidebar-card,
-.session-workspace-main .session-sidebar-card,
-.session-workspace-sidebar .session-sidebar-card {
+.session-column .session-sidebar-card,
+.session-sidebar .session-sidebar-card {
   display: grid;
   gap: 0.9rem;
   min-width: 0;
@@ -1923,6 +1923,15 @@ a:hover {
   display: grid;
   gap: 1rem;
   grid-template-columns: minmax(0, 2fr) minmax(16rem, 0.8fr);
+}
+
+.page-layout.session-layout {
+  align-items: start;
+  grid-template-columns: minmax(0, 1.45fr) minmax(270px, 0.85fr);
+}
+
+.page-layout.session-layout--single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .wiki-article-page {
@@ -4023,7 +4032,8 @@ textarea {
     width: 100%;
   }
 
-  .session-workspace-grid {
+  .session-layout,
+  .page-layout.session-layout {
     grid-template-columns: 1fr;
   }
 

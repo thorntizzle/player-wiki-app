@@ -7714,8 +7714,8 @@ function SessionPane({
 
   const revealedArticles = payload?.revealed_articles ?? [];
   return (
-    <section className="session-workspace-grid session-workspace-grid--single">
-      <section className="session-workspace-main">
+    <div className="page-layout session-layout session-layout--single">
+      <section className="session-column">
         <article className="card session-status-card" data-session-status-card>
           <div className="section-heading">
             <h2>Live session</h2>
@@ -7788,7 +7788,7 @@ function SessionPane({
         </details>
       </section>
 
-    </section>
+    </div>
   );
 }
 
@@ -11149,8 +11149,8 @@ function DmPane({
   const statusText = startSessionMutation.isPending ? "Starting session..." : closeSessionMutation.isPending ? "Closing session..." : null;
 
   return (
-    <section className="session-workspace-grid">
-      <section className="session-workspace-main">
+    <div className="page-layout session-layout">
+      <section className="session-column">
         {shouldShowPassiveScores ? (
           <details className="section-block section-block--collapsible session-passive-scores-bar" id="session-passive-scores" open>
             <summary className="section-toggle-summary">
@@ -11439,7 +11439,7 @@ function DmPane({
         </article>
       </section>
 
-      <aside className="session-workspace-sidebar">
+      <aside className="session-sidebar">
         <article className="card session-sidebar-card" id="session-controls">
           <div className="section-heading">
             <h2>Live session</h2>
@@ -11516,7 +11516,7 @@ function DmPane({
           isCreating={createArticleMutation.isPending}
         />
       </aside>
-    </section>
+    </div>
   );
 }
 

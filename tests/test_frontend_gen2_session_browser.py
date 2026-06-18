@@ -201,15 +201,25 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             page.reload()
             expect(page.locator(".session-hero").get_by_role("heading", name="Session")).to_be_visible(timeout=10000)
             expect(page.locator(".campaign-nav-link").get_by_text("Session")).to_be_visible()
+            assert page.locator(".pane-visible .page-layout.session-layout.session-layout--single > .session-column").count() == 1
+            assert page.locator(".pane-visible .page-layout.session-layout > .session-sidebar").count() == 0
+            assert page.locator(".pane-visible .session-workspace-grid").count() == 0
+            assert page.locator(".pane-visible .session-workspace-main").count() == 0
+            assert page.locator(".pane-visible .session-workspace-sidebar").count() == 0
 
             session_tabs.get_by_role("button", name="DM", exact=True).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))
+            assert page.locator(".pane-visible .page-layout.session-layout > .session-column").count() == 1
+            assert page.locator(".pane-visible .page-layout.session-layout > .session-sidebar").count() == 1
+            assert page.locator(".pane-visible .session-workspace-grid").count() == 0
+            assert page.locator(".pane-visible .session-workspace-main").count() == 0
+            assert page.locator(".pane-visible .session-workspace-sidebar").count() == 0
             expect(page.get_by_role("heading", name="Session controls")).to_be_visible(timeout=5000)
             expect(page.get_by_role("heading", name="Session article store")).to_be_visible(timeout=5000)
             expect(page.get_by_role("heading", name="Live session")).to_be_visible(timeout=5000)
             dm_card_texts = page.evaluate(
                 """() => {
-                    const section = document.querySelector(".pane-visible .session-workspace-main");
+                    const section = document.querySelector(".pane-visible .page-layout.session-layout > .session-column");
                     return Array.from(
                         section
                             ? section.querySelectorAll(
@@ -222,7 +232,7 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             )
             sidebar_ids = page.evaluate(
                 """() => {
-                    const sidebar = document.querySelector(".pane-visible .session-workspace-sidebar");
+                    const sidebar = document.querySelector(".pane-visible .page-layout.session-layout > .session-sidebar");
                     const ids = sidebar
                         ? {
                             status: !!sidebar.querySelector("#session-controls"),
@@ -234,7 +244,7 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             )
             main_ids = page.evaluate(
                 """() => {
-                    const main = document.querySelector(".pane-visible .session-workspace-main");
+                    const main = document.querySelector(".pane-visible .page-layout.session-layout > .session-column");
                     const ids = main
                         ? {
                             passive: !!main.querySelector("#session-passive-scores"),
@@ -246,10 +256,10 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
                     return ids;
                 }"""
             )
-            assert page.locator(".pane-visible .session-workspace-main .panel-nested").count() == 0
-            assert page.locator(".pane-visible .session-workspace-sidebar .panel-nested").count() == 0
-            assert page.locator(".pane-visible .session-workspace-main .card.session-sidebar-card").count() >= 2
-            assert page.locator(".pane-visible .session-workspace-sidebar .card.session-sidebar-card").count() >= 2
+            assert page.locator(".pane-visible .page-layout.session-layout > .session-column .panel-nested").count() == 0
+            assert page.locator(".pane-visible .page-layout.session-layout > .session-sidebar .panel-nested").count() == 0
+            assert page.locator(".pane-visible .page-layout.session-layout > .session-column .card.session-sidebar-card").count() >= 2
+            assert page.locator(".pane-visible .page-layout.session-layout > .session-sidebar .card.session-sidebar-card").count() >= 2
             assert "Live session" not in dm_card_texts
             assert dm_card_texts.index("Staged articles") != -1
             assert dm_card_texts.index("Chat logs") != -1
@@ -267,22 +277,34 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
                 {"width": 390, "height": 900},
             ):
                 page.set_viewport_size(viewport)
-                assert page.evaluate(
+                layout_metrics = page.evaluate(
                     """(viewportWidth) => {
+                        const layout = document.querySelector(".pane-visible .page-layout.session-layout");
+                        const layoutColumns = layout ? window.getComputedStyle(layout).gridTemplateColumns : "";
+                        const layoutColumnsCount = layoutColumns.trim()
+                            ? layoutColumns.trim().split(/\\s+/).length
+                            : 0;
                         const selectors = [
-                            ".session-workspace-main",
-                            ".session-workspace-sidebar",
-                            ".session-workspace-grid",
-                            ".session-workspace-main .card.session-sidebar-card",
-                            ".session-workspace-sidebar .card.session-sidebar-card",
+                            ".pane-visible .page-layout.session-layout > .session-column",
+                            ".pane-visible .page-layout.session-layout > .session-sidebar",
+                            ".pane-visible .page-layout.session-layout > .session-column .card.session-sidebar-card",
+                            ".pane-visible .page-layout.session-layout > .session-sidebar .card.session-sidebar-card",
                         ];
-                        return selectors.every((selector) => {
-                            const node = document.querySelector(selector);
-                            return !node || node.scrollWidth <= viewportWidth + 1;
-                        });
+                        return {
+                            fits: selectors.every((selector) => {
+                                const node = document.querySelector(selector);
+                                return !node || node.scrollWidth <= viewportWidth + 1;
+                            }),
+                            layoutColumnsCount,
+                        };
                     }""",
                     viewport["width"],
                 )
+                assert layout_metrics["fits"] is True
+                if viewport["width"] <= 480:
+                    assert layout_metrics["layoutColumnsCount"] == 1
+                else:
+                    assert layout_metrics["layoutColumnsCount"] >= 2
             passive_index = dm_card_texts.index("Passive scores") if "Passive scores" in dm_card_texts else None
             staged_index = dm_card_texts.index("Staged articles")
             logs_index = dm_card_texts.index("Chat logs")
@@ -297,8 +319,8 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             if revealed_index is not None:
                 assert staged_index < revealed_index
                 assert revealed_index < logs_index
-            expect(page.locator(".session-workspace-sidebar").get_by_role("heading", name="Live session")).to_be_visible()
-            expect(page.locator(".session-workspace-sidebar").get_by_role("heading", name="Session controls")).to_be_visible()
+            expect(page.locator(".session-sidebar").get_by_role("heading", name="Live session")).to_be_visible()
+            expect(page.locator(".session-sidebar").get_by_role("heading", name="Session controls")).to_be_visible()
             expect(page.get_by_role("button", name=re.compile(r"Begin session|Close session|Starting|Closing", re.I))).to_be_visible()
             expect(page.get_by_role("heading", name="Staged articles")).to_be_visible()
             expect(page.get_by_role("heading", name="Chat logs")).to_be_visible()
@@ -314,7 +336,7 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(page.get_by_label("Message")).to_be_visible()
             player_card_texts = page.evaluate(
                 """() => {
-                    const section = document.querySelector(".pane-visible .session-workspace-main");
+                    const section = document.querySelector(".pane-visible .page-layout.session-layout > .session-column");
                     return Array.from(
                         section
                             ? section.querySelectorAll(
@@ -408,7 +430,7 @@ def test_gen2_shell_and_session_visual_parity_smoke(
                     const root = document.querySelector(".campaign-global-search");
                     const nav = document.querySelector(".campaign-nav-link");
                     const hero = document.querySelector(".session-hero");
-                    const firstPanel = document.querySelector(".session-workspace-main .session-status-card");
+                    const firstPanel = document.querySelector(".page-layout.session-layout > .session-column .session-status-card");
                     const topbar = document.querySelector(".topbar");
                     const globalSearchForm = document.querySelector(".campaign-global-search__form");
                     const globalSearchResults = document.querySelector(".campaign-global-search__results");
@@ -489,7 +511,7 @@ def test_gen2_shell_and_session_visual_parity_smoke(
                     tabWidth: document.querySelector(".session-tab-strip")?.getBoundingClientRect().width ?? 0,
                     shellWidth: document.querySelector(".session-page-shell")?.getBoundingClientRect().width ?? 0,
                     heroTop: document.querySelector(".session-hero")?.getBoundingClientRect().top ?? 0,
-                    firstPanelTop: document.querySelector(".session-workspace-main .session-status-card")?.getBoundingClientRect().top ?? 0,
+                    firstPanelTop: document.querySelector(".page-layout.session-layout > .session-column .session-status-card")?.getBoundingClientRect().top ?? 0,
                     topbarBottom: document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0,
                     globalSearchFormDirection: globalSearchForm
                         ? window.getComputedStyle(globalSearchForm).flexDirection
