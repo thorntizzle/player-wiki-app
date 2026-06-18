@@ -1573,6 +1573,11 @@ export interface CharacterProficiencyGroup {
   values_list: string[];
 }
 
+export interface CharacterReferenceSection {
+  title?: string;
+  html?: string;
+}
+
 export interface CharacterXianxiaNamedRecord {
   name: string;
   href?: string;
@@ -1694,6 +1699,9 @@ export interface CharacterRecord {
   definition: Record<string, unknown>;
   import_metadata: Record<string, unknown>;
   state_record: CharacterStateRecord;
+  player_notes_markdown?: string;
+  player_notes_html?: string;
+  reference_sections?: CharacterReferenceSection[];
   equipment_state?: CharacterEquipmentState;
   arcane_armor_state?: CharacterArcaneArmorState;
   presented_spellcasting?: CharacterPresentedSpellcasting;

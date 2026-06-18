@@ -1483,6 +1483,32 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
     assert 'className="inline-two-col"' not in section_markup
 
 
+def test_character_notes_section_uses_flask_style_reference_stack_and_edit_chrome() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    notes_section_start = source.index('{((isDnd || isXianxia) ? activeCharacterSection === "notes" : !isDnd) ? (')
+    notes_section_end = source.index('{!isDnd && !isXianxia ? (', notes_section_start)
+    notes_section_markup = source[notes_section_start:notes_section_end]
+
+    assert 'className="read-section" id="session-notes"' in notes_section_markup
+    assert "className=\"section-heading\"" in notes_section_markup
+    assert "<h2>Notes</h2>" in notes_section_markup
+    assert 'className="reference-stack"' in notes_section_markup
+    assert 'className="detail-card"' in notes_section_markup
+    assert "<h3>Note</h3>" in notes_section_markup
+    assert 'className="article-body article-body--compact"' in notes_section_markup
+    assert "dangerouslySetInnerHTML" in notes_section_markup
+    assert "<p className=\"meta\">No notes yet.</p>" in notes_section_markup
+    assert 'className="detail-card session-card"' in notes_section_markup
+    assert 'className="stack-form" data-character-sheet-edit-form="notes"' in notes_section_markup
+    assert 'className="field"' in notes_section_markup
+    assert "<span>Markdown note</span>" in notes_section_markup
+    assert 'name="player_notes_markdown"' in notes_section_markup
+    assert "Save note" in notes_section_markup
+    assert "className=\"chat-label\"" not in notes_section_markup
+    assert "Player notes" not in notes_section_markup
+    assert "Save notes" not in notes_section_markup
+
+
 def test_player_session_revealed_articles_panel_uses_session_article_row_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     panel_start = source.index("function SessionArticlesPanel({")

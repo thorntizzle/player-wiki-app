@@ -2332,8 +2332,8 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             assert external_update_response.status == 200
 
             page.locator("nav.character-subpage-nav[aria-label='Character subpages']").get_by_role("link", name="Notes").click()
-            page.get_by_label("Player notes").fill("This stale browser draft should conflict.")
-            page.get_by_role("button", name="Save notes").click()
+            page.get_by_label("Markdown note").fill("This stale browser draft should conflict.")
+            page.get_by_role("button", name="Save note").click()
             expect(page.get_by_text(re.compile(r"changed in another session|Refresh and try again", re.I))).to_be_visible(
                 timeout=5000
             )

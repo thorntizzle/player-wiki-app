@@ -8136,6 +8136,8 @@ function CharacterPane({
   const inventory = asRecordArray(state.inventory);
   const currency = isXianxia ? asRecord(xianxiaState.currency) : asRecord(state.currency);
   const notes = asRecord(state.notes);
+  const playerNotesHtml = readString(detailRecord?.player_notes_html);
+  const referenceSections = asRecordArray(detailRecord?.reference_sections);
   const dndAbilities = asRecordArray(detailRecord?.abilities);
   const dndSkills = asRecordArray(detailRecord?.skills);
   const dndProficiencyGroups = asRecordArray(detailRecord?.proficiency_groups);
@@ -11513,25 +11515,53 @@ function CharacterPane({
             {((isDnd || isXianxia) ? activeCharacterSection === "notes" : !isDnd) ? (
               <section className="read-section" id="session-notes">
                 <div className="section-heading">
-                  <h2>Player notes</h2>
+                  <h2>Notes</h2>
                 </div>
-                <form onSubmit={submitNotes}>
-                  <label htmlFor="character-player-notes" className="chat-label">
-                    Player notes
-                  </label>
-                  <textarea
-                    id="character-player-notes"
-                    rows={8}
-                    value={notesDraft.notes}
-                    disabled={!canEdit}
-                    onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
-                      setNotesDraft({ ...notesDraft, notes: event.currentTarget.value })
-                    }
-                  />
-                  <button type="submit" disabled={patchNotes.isPending || !canEdit}>
-                    {patchNotes.isPending ? "Saving..." : "Save notes"}
-                  </button>
-                </form>
+                <div className="reference-stack">
+                  {playerNotesHtml ? (
+                    <article className="detail-card">
+                      <h3>Note</h3>
+                      <div className="article-body article-body--compact" dangerouslySetInnerHTML={{ __html: playerNotesHtml }} />
+                    </article>
+                  ) : null}
+                  {referenceSections.length ? (
+                    referenceSections.map((section, sectionIndex) => (
+                      <article className="detail-card" key={readString(section.title, `reference-section-${sectionIndex}`)}>
+                        <h3>{readString(section.title)}</h3>
+                        <div
+                          className="article-body article-body--compact"
+                          dangerouslySetInnerHTML={{ __html: readString(section.html) }}
+                        />
+                      </article>
+                    ))
+                  ) : null}
+                  {!playerNotesHtml && !referenceSections.length ? (
+                    <article className="detail-card">
+                      <p className="meta">No notes yet.</p>
+                    </article>
+                  ) : null}
+                </div>
+                {canEdit ? (
+                  <article className="detail-card session-card">
+                    <form className="stack-form" data-character-sheet-edit-form="notes" onSubmit={submitNotes}>
+                      <label className="field">
+                        <span>Markdown note</span>
+                        <textarea
+                          name="player_notes_markdown"
+                          rows={8}
+                          value={notesDraft.notes}
+                          disabled={!canEdit}
+                          onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+                            setNotesDraft({ ...notesDraft, notes: event.currentTarget.value })
+                          }
+                        />
+                      </label>
+                      <button type="submit" disabled={patchNotes.isPending || !canEdit}>
+                        {patchNotes.isPending ? "Saving..." : "Save note"}
+                      </button>
+                    </form>
+                  </article>
+                ) : null}
               </section>
             ) : null}
 
