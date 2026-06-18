@@ -14962,7 +14962,7 @@ function CombatPage() {
             <p className="meta">Cleanup</p>
             <h3>Selected combatant</h3>
           </div>
-          <button type="button" className="button button-secondary" onClick={() => deleteCombatantMutation.mutate()}>
+          <button type="button" className="ghost-button" onClick={() => deleteCombatantMutation.mutate()}>
             {deleteCombatantMutation.isPending ? "Removing..." : "Remove selected combatant"}
           </button>
         </section>
@@ -14999,7 +14999,7 @@ function CombatPage() {
             </label>
             <button
               type="button"
-              className="button button-secondary"
+              className="ghost-button"
               onClick={() => clearCombatMutation.mutate()}
               disabled={!confirmClearTracker || clearCombatMutation.isPending}
             >

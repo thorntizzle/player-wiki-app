@@ -132,6 +132,30 @@ def test_admin_user_detail_action_button_chrome_in_source() -> None:
     assert "className=\"button button-secondary\"" not in disable_button_block
 
 
+def test_combat_action_chrome_in_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    combat_page_start = source.index("function CombatPage() {")
+    campaign_combat_route_start = source.index("const campaignCombatRoute", combat_page_start)
+    combat_page_source = source[combat_page_start:campaign_combat_route_start]
+
+    remove_on_click = "onClick={() => deleteCombatantMutation.mutate()}"
+    clear_on_click = "onClick={() => clearCombatMutation.mutate()}"
+
+    remove_button_start = combat_page_source.rfind("<button", 0, combat_page_source.index(remove_on_click))
+    remove_button_end = combat_page_source.index("</button>", remove_button_start) + len("</button>")
+    remove_button_block = combat_page_source[remove_button_start:remove_button_end]
+    assert 'className="ghost-button"' in remove_button_block
+    assert "className=\"button button-secondary\"" not in remove_button_block
+    assert "onClick={() => deleteCombatantMutation.mutate()}" in remove_button_block
+
+    clear_button_start = combat_page_source.rfind("<button", 0, combat_page_source.index(clear_on_click))
+    clear_button_end = combat_page_source.index("</button>", clear_button_start) + len("</button>")
+    clear_button_block = combat_page_source[clear_button_start:clear_button_end]
+    assert 'className="ghost-button"' in clear_button_block
+    assert "className=\"button button-secondary\"" not in clear_button_block
+    assert "onClick={() => clearCombatMutation.mutate()}" in clear_button_block
+
+
 def test_character_portrait_manager_action_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     section_start = source.index('<form className="stack-form character-portrait-manager"')
