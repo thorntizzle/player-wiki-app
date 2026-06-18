@@ -1003,6 +1003,37 @@ def test_character_xianxia_skills_section_uses_flask_style_skill_pills() -> None
     assert 'className="chat-label"' not in skills_markup
 
 
+def test_character_xianxia_equipment_section_uses_flask_style_read_section_shape() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    section_start = source.index('{isXianxia && activeCharacterSection === "equipment" ? (')
+    section_end = source.index('{isXianxia && activeCharacterSection === "inventory" ? (', section_start)
+    section_markup = source[section_start:section_end]
+
+    assert 'className="detail-grid"' in section_markup
+    assert 'className="detail-card"' in section_markup
+    assert "Defense calculation" in section_markup
+    assert 'className="plain-list slot-list"' in section_markup
+    assert "Manual armor bonus" in section_markup
+    assert "Constitution" in section_markup
+
+    assert "Necessary weapons" in section_markup
+    assert "No necessary weapons are recorded on this sheet yet." in section_markup
+    assert "Necessary tools" in section_markup
+    assert "No necessary tools are recorded on this sheet yet." in section_markup
+    assert "Equipped inventory" in section_markup
+    assert "Armor is displayed here only; Defense still uses the manual armor bonus above." in section_markup
+    assert "No equippable inventory is currently marked equipped." in section_markup
+
+    assert 'className="stat-grid"' not in section_markup
+    assert 'className="character-card-grid"' not in section_markup
+    assert 'className="character-state-card"' not in section_markup
+    assert 'className="status status-neutral"' not in section_markup
+    assert 'renderXianxiaRecordCard(record, "Necessary Weapon")' not in section_markup
+    assert 'renderXianxiaRecordCard(record, "Necessary Tool")' not in section_markup
+    assert 'className="chat-label"' not in section_markup
+    assert 'className="inline-two-col"' not in section_markup
+
+
 def test_character_dnd_inventory_currency_section_uses_flask_style_row_form_chrome() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "inventory" ? (')
