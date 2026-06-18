@@ -9009,19 +9009,22 @@ function CharacterPane({
     );
   };
 
-  const renderXianxiaPoolCards = (pools: Array<{ key: string; label: string; current: number; max: number; temp?: number }>) => (
-    <div className="character-card-grid">
-      {pools.map((pool) => (
-        <article className="character-state-card" key={pool.key}>
-          <h4>{pool.label}</h4>
-          <p>
-            {pool.current} / {pool.max}
-            {pool.temp !== undefined ? ` +${pool.temp} temp` : ""}
-          </p>
-        </article>
-      ))}
-    </div>
-  );
+  const renderXianxiaPoolCards = (
+    pools: Array<{ key: string; label: string; current: number; max: number; temp?: number }>,
+    options?: {
+      className?: string;
+      keyPrefix?: string;
+    },
+  ) =>
+    pools.map((pool) => (
+      <article className={options?.className ?? "resource-card"} key={options?.keyPrefix ? `${options.keyPrefix}-${pool.key}` : pool.key}>
+        <h3>{pool.label}</h3>
+        <p className="resource-card__value">
+          Current {pool.current} / Max {pool.max}
+        </p>
+        {pool.temp ? <p className="meta">Temporary {pool.label}: {pool.temp}</p> : null}
+      </article>
+    ));
 
   const selectCharacter = (nextSlug: string | null) => {
     setSelectedSlug(nextSlug);
@@ -9664,17 +9667,26 @@ function CharacterPane({
                 <div className="section-heading">
                   <h2>Resources</h2>
                 </div>
-                {xianxiaDurability.length ? renderXianxiaPoolCards(xianxiaDurability) : null}
-                {xianxiaEnergies.length ? renderXianxiaPoolCards(xianxiaEnergies) : null}
-                {xianxiaYinYang.length ? renderXianxiaPoolCards(xianxiaYinYang) : null}
-                {xianxiaDao ? (
-                  <article className="character-state-card">
-                    <h4>Dao</h4>
-                    <p>
-                      {xianxiaDao.current} / {xianxiaDao.max}
-                    </p>
-                  </article>
-                ) : null}
+                <div className="resource-grid">
+                  {xianxiaDurability.length ? renderXianxiaPoolCards(xianxiaDurability, { keyPrefix: "durability" }) : null}
+                  {xianxiaEnergies.length ? renderXianxiaPoolCards(xianxiaEnergies, { keyPrefix: "energies" }) : null}
+                  {xianxiaYinYang.length ? renderXianxiaPoolCards(xianxiaYinYang, { keyPrefix: "yin-yang" }) : null}
+                  {xianxiaDao ? (
+                    <article className="resource-card">
+                      <h3>Dao</h3>
+                      <p className="resource-card__value">
+                        Current {xianxiaDao.current} / Max {xianxiaDao.max}
+                      </p>
+                    </article>
+                  ) : null}
+                  {xianxiaInsight ? (
+                    <article className="resource-card">
+                      <h3>Insight</h3>
+                      <p className="resource-card__value">{readNumber(xianxiaInsight.available, 0)}</p>
+                      <p className="meta">Spent {readNumber(xianxiaInsight.spent, 0)}</p>
+                    </article>
+                  ) : null}
+                </div>
                 <article className="detail-card" id="session-active-state">
                   <div className="section-heading">
                     <h3>Active Stance and Aura</h3>
