@@ -8682,6 +8682,13 @@ function CharacterPane({
     patchResource.mutate({ resourceId, payload: { expected_revision: revision, current } });
   };
 
+  const submitResourceOnBlur = (event: FocusEvent<HTMLInputElement>) => {
+    if (!canEdit || patchResource.isPending) {
+      return;
+    }
+    event.currentTarget.form?.requestSubmit();
+  };
+
   const submitSpellSlot = (event: FormEvent<HTMLFormElement>, slot: Record<string, unknown>) => {
     event.preventDefault();
     const level = readNumber(slot.level);
@@ -10129,32 +10136,47 @@ function CharacterPane({
                   <h2>Resources</h2>
                 </div>
                 {resources.length ? (
-                  <div className="character-card-grid">
+                  <div className="resource-grid resource-grid--compact">
                     {resources.map((resource) => {
                       const id = readString(resource.id);
+                      const resourceLabel = readString(resource.label, id || "Resource");
+                      const resetLabel = readString(
+                        resource["reset_label"] || resource["resetLabel"] || resource["reset_on"],
+                      );
                       return (
-                        <article className="character-state-card" key={id || readString(resource.label)}>
-                          <h4>{readString(resource.label, id || "Resource")}</h4>
-                          <p>
+                        <article
+                          className={`resource-card${canEdit && id ? " session-resource-card session-resource-card--compact" : ""}`}
+                          key={id || resourceLabel}
+                        >
+                          <h4>{resourceLabel}</h4>
+                          <p className="resource-card__value">
                             {readNumber(resource.current)} / {readNumber(resource.max)}
                           </p>
+                          {resetLabel ? <p className="meta">{resetLabel}</p> : null}
                           {resource.notes ? <p className="meta">{readString(resource.notes)}</p> : null}
                           {canEdit && id ? (
-                            <form onSubmit={(event) => submitResource(event, id)} className="compact-state-form">
-                              <label className="chat-label" htmlFor={`resource-${id}`}>
-                                Current
+                            <form
+                              className="session-inline-form"
+                              onSubmit={(event) => submitResource(event, id)}
+                              data-character-autosubmit
+                              data-character-sheet-edit-form="resource"
+                              data-character-sheet-edit-row-id={id}
+                            >
+                              <label className="session-field" htmlFor={`resource-${id}`}>
+                                <span>Current</span>
+                                <input
+                                  id={`resource-${id}`}
+                                  type="number"
+                                  min="0"
+                                  value={resourceDrafts[id] ?? ""}
+                                  onChange={(event) =>
+                                    setResourceDrafts({ ...resourceDrafts, [id]: event.currentTarget.value })
+                                  }
+                                  onBlur={submitResourceOnBlur}
+                                />
                               </label>
-                              <input
-                                id={`resource-${id}`}
-                                type="number"
-                                min="0"
-                                value={resourceDrafts[id] ?? ""}
-                                onChange={(event) =>
-                                  setResourceDrafts({ ...resourceDrafts, [id]: event.currentTarget.value })
-                                }
-                              />
-                              <button type="submit" disabled={patchResource.isPending}>
-                                Save
+                              <button type="submit" className="visually-hidden" disabled={patchResource.isPending || !canEdit}>
+                                Update {resourceLabel}
                               </button>
                             </form>
                           ) : null}

@@ -983,6 +983,37 @@ def test_character_dnd_inventory_currency_section_uses_flask_style_row_form_chro
     assert 'Save currency' not in currency_controls_markup
 
 
+def test_character_dnd_resources_section_uses_flask_style_row_form_chrome() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    resources_start = source.index('{isDnd && activeCharacterSection === "resources" ? (')
+    resources_end = source.index('{isDnd && activeCharacterSection === "spells" ? (', resources_start)
+    resources_markup = source[resources_start:resources_end]
+
+    assert 'className="resource-grid resource-grid--compact"' in resources_markup
+    assert 'className="resource-card' in resources_markup
+    assert 'className="session-inline-form"' in resources_markup
+    assert 'data-character-autosubmit' in resources_markup
+    assert 'data-character-sheet-edit-form="resource"' in resources_markup
+    assert 'data-character-sheet-edit-row-id={id}' in resources_markup
+    assert 'className="session-field"' in resources_markup
+    assert (
+        re.search(
+            r'<label className="session-field" htmlFor=\{`resource-\$\{id\}`\}>\s*<span>Current</span>\s*<input',
+            resources_markup,
+        )
+        is not None
+    )
+    assert 'className="resource-card__value"' in resources_markup
+    assert 'className="visually-hidden"' in resources_markup
+    assert 'Update {resourceLabel}' in resources_markup
+
+    assert 'className="character-card-grid"' not in resources_markup
+    assert 'className="character-state-card"' not in resources_markup
+    assert 'className="compact-state-form"' not in resources_markup
+    assert 'className="chat-label"' not in resources_markup
+    assert 'Save' not in resources_markup
+
+
 def test_player_session_revealed_articles_panel_uses_session_article_row_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     panel_start = source.index("function SessionArticlesPanel({")
