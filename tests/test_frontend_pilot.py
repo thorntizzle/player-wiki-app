@@ -1990,8 +1990,9 @@ def test_character_dnd_inventory_section_uses_flask_style_row_form_chrome() -> N
     assert '>Save<' not in inventory_controls_markup
 
 
-def test_character_dnd_abilities_and_skills_section_uses_flask_style_skill_layout_chrome() -> None:
+def test_character_dnd_abilities_and_skills_section_uses_compact_skill_proficiency_cues() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "abilities" ? (')
     section_end = source.index(
         '{isReadSurface && activeCharacterSection === "controls" && canUseControls && controls ? (',
@@ -2001,14 +2002,32 @@ def test_character_dnd_abilities_and_skills_section_uses_flask_style_skill_layou
 
     assert 'className="ability-grid ability-grid--skills"' in section_markup
     assert 'className="ability-card ability-card--skills"' in section_markup
-    assert 'className="card-kicker"' in section_markup
+    assert 'className="ability-card__name"' in section_markup
+    assert 'className="ability-card__score"' in section_markup
+    assert 'className="ability-card__values"' in section_markup
+    assert 'className="ability-card__value"' in section_markup
     assert 'className="plain-list ability-skill-list"' in section_markup
     assert "ability-skill-list__item" in section_markup
     assert "ability-skill-list__item--proficient" in section_markup
+    assert "ability-skill-list__item--expertise" in section_markup
+    assert 'className="ability-skill-list__pill"' in section_markup
+    assert 'className="ability-skill-list__name"' in section_markup
+    assert 'className="ability-skill-list__bonus"' in section_markup
+    assert 'className="visually-hidden"' in section_markup
+    assert '<span>{readString(skillRecord.name)}</span>' not in section_markup
+    assert '<strong>{readString(skillRecord.bonus)}</strong>' not in section_markup
+    assert '<span className="meta">{proficiencyLabel}</span>' not in section_markup
+    assert 'className="card-kicker"' not in section_markup
     assert "No linked skills" in section_markup
     assert 'className="detail-cluster"' in section_markup
     assert 'className="detail-card"' in section_markup
     assert "No ability or skill details are recorded on this sheet yet." in section_markup
+    assert ".ability-grid--skills {" in styles
+    assert ".ability-card__name {" in styles
+    assert ".ability-card__value strong {" in styles
+    assert ".ability-skill-list__pill {" in styles
+    assert ".ability-skill-list__item--proficient .ability-skill-list__pill" in styles
+    assert ".ability-skill-list__item--expertise .ability-skill-list__pill" in styles
 
     assert 'className="character-state-card"' not in section_markup
     assert 'className="stat-grid"' not in section_markup

@@ -11307,18 +11307,27 @@ function CharacterPane({
                         const abilitySkills = asRecordArray(abilityRecord.skills);
                         const abilityScoreValue = readNumber(abilityRecord.score, NaN);
                         const abilityScore = Number.isNaN(abilityScoreValue) ? "--" : String(abilityScoreValue);
+                        const abilityName = readString(abilityRecord.name);
                         return (
                           <article
                             className="ability-card ability-card--skills"
                             key={readString(abilityRecord.key, `ability-${abilityIndex}`)}
                           >
-                            <div>
-                              <p className="card-kicker">{readString(abilityRecord.abbr, readString(abilityRecord.key))}</p>
-                              <h3>{abilityScore}</h3>
-                              <p>{readString(abilityRecord.name)}</p>
-                              <p className="meta">
-                                Modifier {readString(abilityRecord.modifier)} | Save {readString(abilityRecord.save_bonus)}
-                              </p>
+                            <div className="ability-card__summary">
+                              <h3 className="ability-card__name">
+                                {abilityName || readString(abilityRecord.key, "Ability")}
+                              </h3>
+                              <strong className="ability-card__score">{abilityScore}</strong>
+                              <div className="ability-card__values">
+                                <span className="ability-card__value">
+                                  <span>Modifier</span>
+                                  <strong>{readString(abilityRecord.modifier)}</strong>
+                                </span>
+                                <span className="ability-card__value">
+                                  <span>Save</span>
+                                  <strong>{readString(abilityRecord.save_bonus)}</strong>
+                                </span>
+                              </div>
                             </div>
                             {abilitySkills.length ? (
                               <ul className="plain-list ability-skill-list">
@@ -11326,20 +11335,27 @@ function CharacterPane({
                                   const skillRecord = asRecord(skill);
                                   const isProficient = Boolean(skillRecord.is_proficient);
                                   const proficiencyLabel = readString(skillRecord.proficiency_label);
+                                  const normalizedProficiency = proficiencyLabel.toLowerCase();
+                                  const proficiencyClass =
+                                    normalizedProficiency === "expertise"
+                                      ? "ability-skill-list__item--expertise"
+                                      : isProficient
+                                        ? "ability-skill-list__item--proficient"
+                                        : "";
+                                  const skillName = readString(skillRecord.name);
+                                  const skillBonus = readString(skillRecord.bonus);
                                   return (
                                     <li
-                                      className={
-                                        isProficient
-                                          ? "ability-skill-list__item ability-skill-list__item--proficient"
-                                          : "ability-skill-list__item"
-                                      }
+                                      className={["ability-skill-list__item", proficiencyClass].filter(Boolean).join(" ")}
                                       key={readString(skillRecord.name, `skill-${abilityIndex}-${skillIndex}`)}
                                     >
-                                      <span>{readString(skillRecord.name)}</span>
-                                      <strong>{readString(skillRecord.bonus)}</strong>
-                                      {proficiencyLabel && proficiencyLabel !== "None" ? (
-                                        <span className="meta">{proficiencyLabel}</span>
-                                      ) : null}
+                                      <span className="ability-skill-list__pill">
+                                        <span className="ability-skill-list__name">{skillName}</span>
+                                        <strong className="ability-skill-list__bonus">{skillBonus}</strong>
+                                        {proficiencyLabel && proficiencyLabel !== "None" ? (
+                                          <span className="visually-hidden">{proficiencyLabel}</span>
+                                        ) : null}
+                                      </span>
                                     </li>
                                   );
                                 })}

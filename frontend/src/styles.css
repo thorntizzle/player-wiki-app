@@ -3602,6 +3602,110 @@ button.spell-card__main:focus-visible .spell-card__name {
   grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
 }
 
+.ability-grid--skills {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr));
+  gap: 0.75rem;
+}
+
+.ability-card--skills {
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.ability-card__summary {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.ability-card__name {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.05rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.ability-card__score {
+  color: var(--ink);
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.ability-card__values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.ability-card__value {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  border: 1px solid var(--border-accent);
+  border-radius: 8px;
+  background: var(--surface-accent-soft);
+  padding: 0.4rem 0.45rem;
+}
+
+.ability-card__value span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.ability-card__value strong {
+  color: var(--accent-deep);
+  font-size: 1.18rem;
+  line-height: 1;
+}
+
+.ability-skill-list {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.ability-skill-list__item {
+  min-width: 0;
+}
+
+.ability-skill-list__pill {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.25rem 0.4rem;
+}
+
+.ability-skill-list__item--proficient .ability-skill-list__pill {
+  border-color: var(--border-accent);
+  background: var(--surface-soft-muted);
+}
+
+.ability-skill-list__item--expertise .ability-skill-list__pill {
+  border-color: var(--accent-deep);
+  background: var(--surface-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-deep);
+}
+
+.ability-skill-list__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ability-skill-list__bonus {
+  justify-self: end;
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1;
+}
+
 .stat-grid article,
 .character-state-card {
   border: 1px solid var(--border);
