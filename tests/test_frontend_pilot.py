@@ -2109,6 +2109,7 @@ def test_character_dnd_resources_section_uses_flask_style_row_form_chrome() -> N
 
 def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "spells" ? (')
     section_end = source.index('{isDnd && activeCharacterSection === "equipment" ? (', section_start)
     section_markup = source[section_start:section_end]
@@ -2165,6 +2166,38 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
     assert 'className="spell-level-group"' in section_markup
     assert 'className="spell-level-group__heading"' in section_markup
     assert 'className="spell-card-grid spell-card-grid--level"' in section_markup
+    assert ".spell-slot-editor-list {" in styles
+    assert ".character-sheet .spell-slot-editor-list--compact," in styles
+    assert ".character-sheet .spell-card-grid--level" in styles
+    assert (
+        re.search(
+            r"\.character-sheet \.spell-slot-editor-list--compact,\s*"
+            r"\.character-sheet \.spell-card-grid--level\s*\{\s*"
+            r"grid-template-columns: repeat\(3, minmax\(0, min\(24rem, 100%\)\)\);",
+            styles,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r"@media \(max-width: 740px\) \{[\s\S]*?"
+            r"\.character-sheet \.spell-slot-editor-list--compact,\s*"
+            r"\.character-sheet \.spell-card-grid--level\s*\{\s*"
+            r"grid-template-columns: repeat\(2, minmax\(0, min\(24rem, 100%\)\)\);",
+            styles,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r"@media \(max-width: 520px\) \{[\s\S]*?"
+            r"\.character-sheet \.spell-slot-editor-list--compact,\s*"
+            r"\.character-sheet \.spell-card-grid--level\s*\{\s*"
+            r"grid-template-columns: minmax\(0, min\(24rem, 100%\)\);",
+            styles,
+        )
+        is not None
+    )
     assert 'className="spell-card"' in section_markup
     assert 'className="spell-card__main"' in section_markup
     assert 'className="spell-card__eyebrow"' in section_markup
