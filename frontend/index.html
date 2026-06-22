@@ -138,6 +138,8 @@
         var failOpenDelayMs = 12000;
         var failOpenTimer = null;
         var hideStarted = false;
+        var appReady = false;
+        var stylesReady = false;
 
         root.classList.add(loadingClass);
         root.classList.remove(closingClass);
@@ -255,6 +257,13 @@
           });
         }
 
+        function maybeRemoveLoadingState() {
+          if (!appReady || !stylesReady) {
+            return;
+          }
+          window.setTimeout(removeLoadingState, 80);
+        }
+
         function isAppStylesheet(linkElement) {
           var href = linkElement.href || linkElement.getAttribute("href") || "";
           return (
@@ -307,7 +316,8 @@
         function hideWhenReady() {
           prepareLoadingMedia();
           waitForAppStylesheets().then(function () {
-            window.setTimeout(removeLoadingState, 80);
+            stylesReady = true;
+            maybeRemoveLoadingState();
           });
         }
 
@@ -364,14 +374,26 @@
           }
         }
 
-        function beginLoadingState() {
+        function beginLoadingState(options) {
           hideStarted = false;
+          appReady = false;
+          stylesReady = Boolean(options && options.stylesAlreadyReady);
           sessionStorage.setItem(navigationStartStorageKey, String(Date.now()));
           root.classList.add(loadingClass);
           root.classList.remove(closingClass);
           prepareLoadingMedia();
           scheduleFailOpen();
+          maybeRemoveLoadingState();
         }
+
+        window.__cpwAppLoadingBegin = function () {
+          beginLoadingState({ stylesAlreadyReady: true });
+        };
+
+        window.__cpwAppLoadingReady = function () {
+          appReady = true;
+          maybeRemoveLoadingState();
+        };
 
         prepareLoadingMedia();
         scheduleFailOpen();
@@ -379,13 +401,13 @@
         document.addEventListener("click", function (event) {
           var anchor = event.target && event.target.closest ? event.target.closest("a[href]") : null;
           if (shouldHandleAnchorNavigation(anchor, event)) {
-            beginLoadingState();
+            beginLoadingState({ stylesAlreadyReady: true });
           }
         });
 
         document.addEventListener("submit", function (event) {
           if (shouldHandleFormNavigation(event.target, event)) {
-            beginLoadingState();
+            beginLoadingState({ stylesAlreadyReady: true });
           }
         });
 

@@ -207,7 +207,20 @@ def test_frontend_index_includes_app_loading_shell_source() -> None:
     assert "html.app-loading #root" in source
     assert "failOpenDelayMs = 12000" in source
     assert "/app-next/assets/" in source
+    assert "__cpwAppLoadingBegin" in source
+    assert "__cpwAppLoadingReady" in source
     assert "Loading campaign player wiki..." in source
+
+
+def test_frontend_app_signals_loading_readiness_from_query_state_source() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+
+    assert "useIsFetching" in source
+    assert "function useAppLoadingReadiness" in source
+    assert "window.__cpwAppLoadingBegin?.();" in source
+    assert "window.__cpwAppLoadingReady?.();" in source
+    assert "activeFetchCount > 0" in source
+    assert "queryClient.isFetching() === 0" in source
 
 
 def test_frontend_pilot_without_build_returns_not_found(client, app, tmp_path):

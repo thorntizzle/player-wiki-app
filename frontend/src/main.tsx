@@ -10,7 +10,7 @@ import {
   useLocation,
   useParams,
 } from "@tanstack/react-router";
-import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useIsFetching, useMutation, useQuery } from "@tanstack/react-query";
 import type { ChangeEvent, FocusEvent, FormEvent } from "react";
 import "./styles.css";
 import {
@@ -142,6 +142,13 @@ import {
 interface ApiMessageEnvelope {
   status: number;
   message: string;
+}
+
+declare global {
+  interface Window {
+    __cpwAppLoadingBegin?: () => void;
+    __cpwAppLoadingReady?: () => void;
+  }
 }
 
 interface EmbeddedImageInput {
@@ -4282,8 +4289,51 @@ function AuthNotice() {
   );
 }
 
+function useAppLoadingReadiness(locationHref: string) {
+  const activeFetchCount = useIsFetching();
+  const previousLocationHref = useRef<string | null>(null);
+  const readyTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (previousLocationHref.current === null) {
+      previousLocationHref.current = locationHref;
+      return;
+    }
+    if (previousLocationHref.current !== locationHref) {
+      previousLocationHref.current = locationHref;
+      window.__cpwAppLoadingBegin?.();
+    }
+  }, [locationHref]);
+
+  useEffect(() => {
+    if (readyTimerRef.current !== null) {
+      window.clearTimeout(readyTimerRef.current);
+      readyTimerRef.current = null;
+    }
+
+    if (activeFetchCount > 0) {
+      return undefined;
+    }
+
+    readyTimerRef.current = window.setTimeout(() => {
+      if (queryClient.isFetching() === 0) {
+        window.__cpwAppLoadingReady?.();
+      }
+      readyTimerRef.current = null;
+    }, 180);
+
+    return () => {
+      if (readyTimerRef.current !== null) {
+        window.clearTimeout(readyTimerRef.current);
+        readyTimerRef.current = null;
+      }
+    };
+  }, [activeFetchCount, locationHref]);
+}
+
 function AppShell() {
   const location = useLocation();
+  useAppLoadingReadiness(location.href);
   const [apiToken, setApiToken] = useState(() => {
     try {
       return localStorage.getItem("cpw-pilot-api-token") || "";
