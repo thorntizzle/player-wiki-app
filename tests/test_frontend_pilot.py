@@ -1291,26 +1291,51 @@ def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
     assert "Lookup" in creator_markup
 
 
-def test_wiki_article_page_context_sidebar_prefers_frontend_mode_links() -> None:
+def test_wiki_pages_render_section_nav_and_article_omits_context_sidebar() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    nav_source = _extract_component_source(
+        source,
+        "function WikiSectionNav({",
+        "function WikiSectionBrowse({",
+    )
+    home_page_source = _extract_component_source(
+        source,
+        "function WikiHomePage() {",
+        "function WikiSectionPage() {",
+    )
+    section_page_source = _extract_component_source(
+        source,
+        "function WikiSectionPage() {",
+        "function WikiArticlePage() {",
+    )
     article_page_source = _extract_component_source(
         source,
         "function WikiArticlePage() {",
         "function systemsIndexHref(",
     )
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
 
-    assert 'Campaign: <a href={preferredCampaignLink(campaignContextLink, campaignSlug, wikiFrontendMode)}>{data?.campaign.title}</a>' in article_page_source
-    assert 'Section: <a href={preferredCampaignLink(sectionContextLink, campaignSlug, wikiFrontendMode)}>{page.section}</a>' in article_page_source
-    assert "const campaignContextLink =" in article_page_source
-    assert '((wikiFrontendMode === "gen2" ? data?.links.gen2_campaign_url : data?.links.campaign_url) ??' in article_page_source
-    assert '(wikiFrontendMode === "gen2" ? data?.links.campaign_url : data?.links.gen2_campaign_url)) ??' in article_page_source
+    assert 'className="wiki-section-nav"' in nav_source
+    assert 'aria-label="Wiki sections"' in nav_source
+    assert 'href={preferredCampaignLink(section.href, campaignSlug, frontendMode)}' in nav_source
+    assert 'aria-current={isActive ? "page" : undefined}' in nav_source
+    assert 'title={`${section.page_count} page${section.page_count === 1 ? "" : "s"}`}' in nav_source
 
-    assert "const sectionContextLink =" in article_page_source
-    assert '((wikiFrontendMode === "gen2" ? data?.links.gen2_section_url : data?.links.section_url) ??' in article_page_source
-    assert '(wikiFrontendMode === "gen2" ? data?.links.section_url : data?.links.gen2_section_url)) ??' in article_page_source
+    assert "sections={data.section_navigation}" in home_page_source
+    assert "sections={data.section_navigation}" in section_page_source
+    assert "activeSectionSlug={data.section_slug}" in section_page_source
+    assert "sections={data?.section_navigation ?? []}" in article_page_source
+    assert "activeSectionSlug={page.section_slug}" in article_page_source
+    assert 'className={hasBacklinks ? "page-layout wiki-article-page" : "page-layout wiki-article-page wiki-article-page--single"}' in article_page_source
 
-    assert "data?.links.campaign_url ?? data?.links.gen2_campaign_url" not in article_page_source
-    assert "data?.links.section_url ?? data?.links.gen2_section_url" not in article_page_source
+    assert "<h2>Context</h2>" not in article_page_source
+    assert "Campaign:" not in article_page_source
+    assert "Section:" not in article_page_source
+    assert "campaignContextLink" not in article_page_source
+    assert "sectionContextLink" not in article_page_source
+
+    assert ".wiki-section-nav" in styles
+    assert ".wiki-article-page--single" in styles
 
 
 def test_dm_content_player_wiki_editor_fields_use_flask_style_labels_in_source() -> None:

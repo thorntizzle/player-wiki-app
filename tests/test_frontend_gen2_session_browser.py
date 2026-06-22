@@ -2083,11 +2083,20 @@ def test_gen2_wiki_browser_exposes_home_section_page_and_assets(
                 "href",
                 "/app-next/campaigns/linden-pass/pages/notes/operations-brief",
             )
+            home_section_nav = page.locator("nav.wiki-section-nav")
+            expect(home_section_nav).to_be_visible()
+            expect(home_section_nav.get_by_role("link", name="Locations")).to_have_attribute(
+                "href",
+                "/app-next/campaigns/linden-pass/sections/locations",
+            )
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale")
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale$"), timeout=5000)
             expect(page.get_by_role("heading", name="Captain Lyra Vale")).to_be_visible(timeout=10000)
             expect(page.get_by_text("Captain Lyra Vale coordinates inspections")).to_be_visible()
+            article_section_nav = page.locator("nav.wiki-section-nav")
+            expect(article_section_nav.get_by_role("link", name="NPCs")).to_have_attribute("aria-current", "page")
+            expect(page.get_by_role("heading", name="Context")).to_have_count(0)
             image = page.locator("article img.article-image")
             expect(image).to_be_visible()
             image_src = image.get_attribute("src")
@@ -2099,6 +2108,8 @@ def test_gen2_wiki_browser_exposes_home_section_page_and_assets(
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/sections/locations")
             expect(page.get_by_role("heading", name="Locations")).to_be_visible(timeout=10000)
+            section_nav = page.locator("nav.wiki-section-nav")
+            expect(section_nav.get_by_role("link", name="Locations")).to_have_attribute("aria-current", "page")
             civic_details = page.locator("details", has_text="Civic and Institutional Sites")
             expect(civic_details).to_be_visible()
             assert civic_details.evaluate("(element) => element.open") is True
@@ -2184,40 +2195,58 @@ def test_gen2_wiki_visual_parity_smoke(
 
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/sections/locations")
             expect(desktop_page.get_by_role("heading", name="Locations")).to_be_visible(timeout=10000)
+            expect(desktop_page.locator("nav.wiki-section-nav")).to_be_visible()
             section_metrics = desktop_page.evaluate(
                 """() => {
                     const block = document.querySelector(".section-block--collapsible");
                     const chevron = document.querySelector(".section-toggle-chevron");
                     const featured = document.querySelector(".page-card--featured");
+                    const nav = document.querySelector(".wiki-section-nav");
+                    const activeNav = document.querySelector(".wiki-section-nav a[aria-current='page']");
                     return {
                         blockRadius: block ? Number.parseFloat(window.getComputedStyle(block).borderRadius) : 0,
                         chevronRadius: chevron ? Number.parseFloat(window.getComputedStyle(chevron).borderRadius) : 0,
                         featuredPaddingTop: featured ? Number.parseFloat(window.getComputedStyle(featured).paddingTop) : 0,
+                        navDisplay: nav ? window.getComputedStyle(nav).display : "",
+                        activeNavText: activeNav ? activeNav.textContent.trim() : "",
                     };
                 }"""
             )
             assert section_metrics["blockRadius"] >= 20
             assert section_metrics["chevronRadius"] >= 20
             assert section_metrics["featuredPaddingTop"] >= 20
+            assert section_metrics["navDisplay"] == "flex"
+            assert section_metrics["activeNavText"] == "Locations"
 
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale")
             expect(desktop_page.get_by_role("heading", name="Captain Lyra Vale")).to_be_visible(timeout=10000)
-            expect(desktop_page.locator(".wiki-article-page .sidebar-card").first).to_be_visible()
+            expect(desktop_page.locator("nav.wiki-section-nav")).to_be_visible()
+            expect(desktop_page.get_by_role("heading", name="Context")).to_have_count(0)
             article_metrics = desktop_page.evaluate(
                 """() => {
                     const body = document.querySelector(".wiki-article-page .html-body");
                     const image = document.querySelector(".article-figure .article-image");
                     const layout = document.querySelector(".page-layout");
+                    const activeNav = document.querySelector(".wiki-section-nav a[aria-current='page']");
+                    const sidebarCount = document.querySelectorAll(".wiki-article-page .sidebar-card").length;
                     return {
                         bodyBorder: body ? window.getComputedStyle(body).borderTopWidth : "",
                         imageRadius: image ? Number.parseFloat(window.getComputedStyle(image).borderRadius) : 0,
                         columnCount: layout ? window.getComputedStyle(layout).gridTemplateColumns.split(" ").length : 0,
+                        singleColumn: layout ? layout.classList.contains("wiki-article-page--single") : false,
+                        activeNavText: activeNav ? activeNav.textContent.trim() : "",
+                        sidebarCount,
                     };
                 }"""
             )
             assert article_metrics["bodyBorder"] == "0px"
             assert article_metrics["imageRadius"] >= 20
-            assert article_metrics["columnCount"] >= 2
+            assert article_metrics["activeNavText"] == "NPCs"
+            assert article_metrics["singleColumn"] == (article_metrics["sidebarCount"] == 0)
+            if article_metrics["singleColumn"]:
+                assert article_metrics["columnCount"] == 1
+            else:
+                assert article_metrics["columnCount"] >= 2
 
             _sign_in(mobile_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
             for path in (

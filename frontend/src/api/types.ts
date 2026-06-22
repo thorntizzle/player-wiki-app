@@ -329,6 +329,13 @@ export interface WikiSectionGroup {
   pages: WikiPageSummary[];
 }
 
+export interface WikiSectionNavItem {
+  section_name: string;
+  section_slug: string;
+  href: string;
+  page_count: number;
+}
+
 export interface WikiSubsectionGroup {
   subsection_name: string;
   page_count: number;
@@ -447,6 +454,7 @@ export interface WikiHomeResponse extends ApiResponseBase {
   query: string;
   result_count: number;
   grouped_sections: WikiSectionGroup[];
+  section_navigation: WikiSectionNavItem[];
   overview_page: WikiPageDetail | null;
   message: string;
   links: WikiHomeLinks;
@@ -462,6 +470,7 @@ export interface WikiSectionResponse extends ApiResponseBase {
   top_level_pages: WikiPageSummary[];
   subsection_groups: WikiSubsectionGroup[];
   show_subsections: boolean;
+  section_navigation: WikiSectionNavItem[];
   links: {
     flask_section_url: string;
     campaign_url?: string;
@@ -474,6 +483,7 @@ export interface WikiPageResponse extends ApiResponseBase {
   frontend_mode?: string | null;
   page: WikiPageDetail;
   backlinks: WikiPageSummary[];
+  section_navigation: WikiSectionNavItem[];
   links: {
     flask_page_url: string;
     campaign_url?: string;

@@ -1775,6 +1775,26 @@ a:hover {
   margin-bottom: 0.35rem;
 }
 
+.wiki-section-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+  margin: 0.1rem 0 0.35rem;
+}
+
+.wiki-section-nav .button-link,
+.wiki-section-nav .ghost-button {
+  min-height: 2.25rem;
+  padding: 0.42rem 0.78rem;
+  font-size: 0.92rem;
+  line-height: 1.15;
+}
+
+.wiki-section-nav .button-link[aria-current="page"] {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--accent-deep);
+}
+
 .wiki-section-page .section-list__controls {
   margin-bottom: 1rem;
 }
@@ -1901,6 +1921,10 @@ a:hover {
 
 .wiki-article-page {
   grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.7fr);
+}
+
+.wiki-article-page--single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .wiki-article-page > * {

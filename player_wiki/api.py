@@ -1092,6 +1092,29 @@ def register_api(app) -> None:
             ],
         }
 
+    def serialize_public_wiki_section_navigation(
+        campaign,
+        pages: list[Any],
+        *,
+        frontend_mode: str = "flask",
+    ) -> list[dict[str, Any]]:
+        grouped_pages_map: dict[str, list[Any]] = defaultdict(list)
+        for page in pages:
+            grouped_pages_map[page.section].append(page)
+        return [
+            {
+                "section_name": section_name,
+                "section_slug": slugify(section_name),
+                "href": preferred_campaign_href(
+                    campaign.slug,
+                    f"sections/{slugify(section_name)}",
+                    frontend_mode=frontend_mode,
+                ),
+                "page_count": len(grouped_pages_map[section_name]),
+            }
+            for section_name in sorted(grouped_pages_map, key=section_sort_key)
+        ]
+
     def split_public_wiki_pages_by_subsection(
         campaign,
         section_name: str,
@@ -6084,11 +6107,13 @@ def register_api(app) -> None:
         frontend_mode = normalize_frontend_mode(get_current_user_preferences().frontend_mode)
         query = request.args.get("q", "").strip() if can_view_wiki else ""
         grouped_sections: list[dict[str, Any]] = []
+        navigation_pages: list[Any] = []
         result_count = 0
         overview_page = None
 
         if can_view_wiki:
-            pages = repository.search_pages(campaign_slug, query)
+            navigation_pages = repository.search_pages(campaign_slug, "")
+            pages = navigation_pages if not query else repository.search_pages(campaign_slug, query)
             grouped_pages_map: dict[str, list[Any]] = defaultdict(list)
             for page in pages:
                 grouped_pages_map[page.section].append(page)
@@ -6130,6 +6155,15 @@ def register_api(app) -> None:
                     if not can_view_wiki
                     else ""
                 ),
+                "section_navigation": (
+                    serialize_public_wiki_section_navigation(
+                        campaign,
+                        navigation_pages,
+                        frontend_mode=frontend_mode,
+                    )
+                    if can_view_wiki
+                    else []
+                ),
                 "links": {
                     "flask_campaign_url": url_for("campaign_view", campaign_slug=campaign.slug),
                     "campaign_url": preferred_campaign_href(campaign.slug, frontend_mode=frontend_mode),
@@ -6152,6 +6186,7 @@ def register_api(app) -> None:
 
         frontend_mode = normalize_frontend_mode(get_current_user_preferences().frontend_mode)
         section_name = pages[0].section
+        navigation_pages = repository.search_pages(campaign_slug, "")
         split_pages = split_public_wiki_pages_by_subsection(
             campaign,
             section_name,
@@ -6171,6 +6206,11 @@ def register_api(app) -> None:
                     for page in pages
                 ],
                 **split_pages,
+                "section_navigation": serialize_public_wiki_section_navigation(
+                    campaign,
+                    navigation_pages,
+                    frontend_mode=frontend_mode,
+                ),
                 "links": {
                     "flask_section_url": url_for(
                         "section_view",
@@ -6201,6 +6241,7 @@ def register_api(app) -> None:
 
         backlinks = repository.get_backlinks(campaign_slug, page_slug)
         frontend_mode = normalize_frontend_mode(get_current_user_preferences().frontend_mode)
+        navigation_pages = repository.search_pages(campaign_slug, "")
         return jsonify(
             {
                 "ok": True,
@@ -6216,6 +6257,11 @@ def register_api(app) -> None:
                     serialize_public_wiki_page(campaign, backlink, frontend_mode=frontend_mode)
                     for backlink in backlinks
                 ],
+                "section_navigation": serialize_public_wiki_section_navigation(
+                    campaign,
+                    navigation_pages,
+                    frontend_mode=frontend_mode,
+                ),
                 "links": {
                     "flask_page_url": url_for(
                         "page_view",

@@ -129,6 +129,7 @@ import type {
   WikiPageDetail,
   WikiPageResponse,
   WikiPageSummary,
+  WikiSectionNavItem,
   WikiSectionResponse,
   WikiSubsectionGroup,
 } from "./api/types";
@@ -6194,6 +6195,40 @@ function WikiPageGrid({
   );
 }
 
+function WikiSectionNav({
+  sections,
+  campaignSlug,
+  frontendMode,
+  activeSectionSlug = "",
+}: {
+  sections: WikiSectionNavItem[];
+  campaignSlug: string;
+  frontendMode: FrontendMode;
+  activeSectionSlug?: string;
+}) {
+  if (!sections.length) {
+    return null;
+  }
+  return (
+    <nav className="wiki-section-nav" aria-label="Wiki sections">
+      {sections.map((section) => {
+        const isActive = section.section_slug === activeSectionSlug;
+        return (
+          <a
+            key={section.section_slug}
+            className={isActive ? "button-link" : "ghost-button"}
+            href={preferredCampaignLink(section.href, campaignSlug, frontendMode)}
+            aria-current={isActive ? "page" : undefined}
+            title={`${section.page_count} page${section.page_count === 1 ? "" : "s"}`}
+          >
+            {section.section_name}
+          </a>
+        );
+      })}
+    </nav>
+  );
+}
+
 function WikiSectionBrowse({
   data,
   campaignSlug,
@@ -6286,6 +6321,13 @@ function WikiHomePage() {
       <ApiErrorNotice isLoading={wikiQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {data ? (
         <>
+          {data.can_view_wiki ? (
+            <WikiSectionNav
+              sections={data.section_navigation}
+              campaignSlug={resolvedCampaignSlug}
+              frontendMode={wikiFrontendMode}
+            />
+          ) : null}
           {!data.can_view_wiki ? (
             <section className="card">
               <h2>Wiki visibility restricted</h2>
@@ -6396,74 +6438,81 @@ function WikiSectionPage() {
       </section>
       <ApiErrorNotice isLoading={sectionQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {data ? (
-        data.show_subsections ? (
-          <>
-            <div className="section-list__controls">
-              <button className="ghost-button section-list__control" type="button" onClick={() => setAllSubsectionsOpen(false)}>
-                Collapse all
-              </button>
-              <button className="ghost-button section-list__control" type="button" onClick={() => setAllSubsectionsOpen(true)}>
-                Expand all
-              </button>
-            </div>
-            <WikiPageGrid
-              pages={topLevel.pinned}
-              featured
-              campaignSlug={resolvedCampaignSlug}
-              frontendMode={wikiFrontendMode}
-              headingLevel="h2"
-              kickerMode="displayType"
-            />
-            <WikiPageGrid
-              pages={topLevel.regular}
-              campaignSlug={resolvedCampaignSlug}
-              frontendMode={wikiFrontendMode}
-              headingLevel="h2"
-              kickerMode="displayType"
-            />
-            <section className="section-list">
-              {data.subsection_groups.map((group) => {
-                const split = splitPinnedPages(group.pages);
-                const isOpen = !collapsedSubsections.has(group.subsection_name);
-                return (
-                  <details
-                    className="section-block section-block--collapsible"
-                    key={group.subsection_name}
-                    open={isOpen}
-                    onToggle={(event) => setSubsectionOpen(group, event.currentTarget.open)}
-                  >
-                    <summary className="section-toggle-summary">
-                      <span className="section-toggle-summary__content">
-                        <span className="section-title">{group.subsection_name}</span>
-                        <span className="meta">
-                          {group.page_count} page{group.page_count === 1 ? "" : "s"}
+        <>
+          <WikiSectionNav
+            sections={data.section_navigation}
+            campaignSlug={resolvedCampaignSlug}
+            frontendMode={wikiFrontendMode}
+            activeSectionSlug={data.section_slug}
+          />
+          {data.show_subsections ? (
+            <>
+              <div className="section-list__controls">
+                <button className="ghost-button section-list__control" type="button" onClick={() => setAllSubsectionsOpen(false)}>
+                  Collapse all
+                </button>
+                <button className="ghost-button section-list__control" type="button" onClick={() => setAllSubsectionsOpen(true)}>
+                  Expand all
+                </button>
+              </div>
+              <WikiPageGrid
+                pages={topLevel.pinned}
+                featured
+                campaignSlug={resolvedCampaignSlug}
+                frontendMode={wikiFrontendMode}
+                headingLevel="h2"
+                kickerMode="displayType"
+              />
+              <WikiPageGrid
+                pages={topLevel.regular}
+                campaignSlug={resolvedCampaignSlug}
+                frontendMode={wikiFrontendMode}
+                headingLevel="h2"
+                kickerMode="displayType"
+              />
+              <section className="section-list">
+                {data.subsection_groups.map((group) => {
+                  const split = splitPinnedPages(group.pages);
+                  const isOpen = !collapsedSubsections.has(group.subsection_name);
+                  return (
+                    <details
+                      className="section-block section-block--collapsible"
+                      key={group.subsection_name}
+                      open={isOpen}
+                      onToggle={(event) => setSubsectionOpen(group, event.currentTarget.open)}
+                    >
+                      <summary className="section-toggle-summary">
+                        <span className="section-toggle-summary__content">
+                          <span className="section-title">{group.subsection_name}</span>
+                          <span className="meta">
+                            {group.page_count} page{group.page_count === 1 ? "" : "s"}
+                          </span>
                         </span>
-                      </span>
-                      <span className="section-toggle-chevron" aria-hidden="true"></span>
-                    </summary>
-                    <div className="section-block__body">
-                      <WikiPageGrid
-                        pages={split.pinned}
-                        featured
-                        campaignSlug={resolvedCampaignSlug}
-                        frontendMode={wikiFrontendMode}
-                        headingLevel="h3"
-                        kickerMode="displayType"
-                      />
-                      <WikiPageGrid
-                        pages={split.regular}
-                        campaignSlug={resolvedCampaignSlug}
-                        frontendMode={wikiFrontendMode}
-                        headingLevel="h3"
-                        kickerMode="displayType"
-                      />
-                    </div>
-                  </details>
-                );
-              })}
-            </section>
-          </>
-        ) : (
+                        <span className="section-toggle-chevron" aria-hidden="true"></span>
+                      </summary>
+                      <div className="section-block__body">
+                        <WikiPageGrid
+                          pages={split.pinned}
+                          featured
+                          campaignSlug={resolvedCampaignSlug}
+                          frontendMode={wikiFrontendMode}
+                          headingLevel="h3"
+                          kickerMode="displayType"
+                        />
+                        <WikiPageGrid
+                          pages={split.regular}
+                          campaignSlug={resolvedCampaignSlug}
+                          frontendMode={wikiFrontendMode}
+                          headingLevel="h3"
+                          kickerMode="displayType"
+                        />
+                      </div>
+                    </details>
+                  );
+                })}
+              </section>
+            </>
+          ) : (
           <>
             <WikiPageGrid
               pages={allPages.pinned}
@@ -6481,7 +6530,8 @@ function WikiSectionPage() {
               kickerMode="displayType"
             />
           </>
-        )
+          )}
+        </>
       ) : null}
     </>
   );
@@ -6512,61 +6562,53 @@ function WikiArticlePage() {
   const page: WikiPageDetail | undefined = data?.page;
   const error = getApiErrorMessage(pageQuery.error);
   const wikiFrontendMode = routeFrontendMode(normalizeFrontendMode(data?.frontend_mode ?? preferredFrontendMode));
-  const campaignContextLink =
-    ((wikiFrontendMode === "gen2" ? data?.links.gen2_campaign_url : data?.links.campaign_url) ??
-      (wikiFrontendMode === "gen2" ? data?.links.campaign_url : data?.links.gen2_campaign_url)) ??
-    "";
-  const sectionContextLink =
-    ((wikiFrontendMode === "gen2" ? data?.links.gen2_section_url : data?.links.section_url) ??
-      (wikiFrontendMode === "gen2" ? data?.links.section_url : data?.links.gen2_section_url)) ??
-    "";
   const showSummary = page?.summary && !["item", "spell", "mechanic"].includes(page.page_type);
+  const hasBacklinks = Boolean(data?.backlinks.length);
 
   return (
     <>
       <ApiErrorNotice isLoading={pageQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {page ? (
-        <section className="page-layout wiki-article-page">
-          <article className="article card">
-            <h1>{page.title}</h1>
-            {showSummary ? <p className="lede">{page.summary}</p> : null}
-            {page.image ? (
-              <figure className="article-figure">
-                <img className="article-image" src={page.image.url} alt={page.image.alt_text || page.title} />
-                {page.image.caption ? <figcaption className="meta article-image__caption">{page.image.caption}</figcaption> : null}
-              </figure>
+        <>
+          <WikiSectionNav
+            sections={data?.section_navigation ?? []}
+            campaignSlug={campaignSlug}
+            frontendMode={wikiFrontendMode}
+            activeSectionSlug={page.section_slug}
+          />
+          <section className={hasBacklinks ? "page-layout wiki-article-page" : "page-layout wiki-article-page wiki-article-page--single"}>
+            <article className="article card">
+              <h1>{page.title}</h1>
+              {showSummary ? <p className="lede">{page.summary}</p> : null}
+              {page.image ? (
+                <figure className="article-figure">
+                  <img className="article-image" src={page.image.url} alt={page.image.alt_text || page.title} />
+                  {page.image.caption ? <figcaption className="meta article-image__caption">{page.image.caption}</figcaption> : null}
+                </figure>
+              ) : null}
+              <div
+                className="article-body html-body"
+                dangerouslySetInnerHTML={{
+                  __html: preferredCampaignHtml(page.body_html, campaignSlug, wikiFrontendMode),
+                }}
+              />
+            </article>
+            {hasBacklinks ? (
+              <aside className="sidebar">
+                <section className="card sidebar-card">
+                  <h2>Linked From</h2>
+                  <ul className="plain-list">
+                    {data?.backlinks.map((backlink) => (
+                      <li key={backlink.page_ref}>
+                        <a href={preferredCampaignLink(backlink.href, campaignSlug, wikiFrontendMode)}>{backlink.title}</a>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              </aside>
             ) : null}
-            <div
-              className="article-body html-body"
-              dangerouslySetInnerHTML={{
-                __html: preferredCampaignHtml(page.body_html, campaignSlug, wikiFrontendMode),
-              }}
-            />
-          </article>
-          <aside className="sidebar">
-            <section className="card sidebar-card">
-              <h2>Context</h2>
-              <p className="meta">
-                Campaign: <a href={preferredCampaignLink(campaignContextLink, campaignSlug, wikiFrontendMode)}>{data?.campaign.title}</a>
-              </p>
-              <p className="meta">
-                Section: <a href={preferredCampaignLink(sectionContextLink, campaignSlug, wikiFrontendMode)}>{page.section}</a>
-              </p>
-            </section>
-            {data?.backlinks.length ? (
-              <section className="card sidebar-card">
-                <h2>Linked From</h2>
-                <ul className="plain-list">
-                  {data.backlinks.map((backlink) => (
-                    <li key={backlink.page_ref}>
-                      <a href={preferredCampaignLink(backlink.href, campaignSlug, wikiFrontendMode)}>{backlink.title}</a>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-          </aside>
-        </section>
+          </section>
+        </>
       ) : null}
     </>
   );

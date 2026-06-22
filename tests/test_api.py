@@ -871,6 +871,13 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert 'href="/app-next/campaigns/linden-pass/pages/' not in overview_body
     locations_group = next(section for section in home_payload["grouped_sections"] if section["section_name"] == "Locations")
     assert locations_group["href"] == "/campaigns/linden-pass/sections/locations"
+    locations_nav_item = next(section for section in home_payload["section_navigation"] if section["section_name"] == "Locations")
+    assert locations_nav_item == {
+        "section_name": "Locations",
+        "section_slug": "locations",
+        "href": "/campaigns/linden-pass/sections/locations",
+        "page_count": locations_group["page_count"],
+    }
 
     search_response = client.get(
         "/api/v1/campaigns/linden-pass/wiki?q=capt",
@@ -890,6 +897,7 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert captain["href"] == "/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
     assert "source_ref" not in captain
     assert "aliases" not in captain
+    assert any(section["section_name"] == "Locations" for section in search_payload["section_navigation"])
 
     section_response = client.get(
         "/api/v1/campaigns/linden-pass/wiki/sections/locations",
@@ -905,6 +913,7 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     subsection_names = [group["subsection_name"] for group in section_payload["subsection_groups"]]
     assert "Civic and Institutional Sites" in subsection_names
     assert "Venues and Residences" in subsection_names
+    assert any(section["section_slug"] == "locations" for section in section_payload["section_navigation"])
 
     page_response = client.get(
         "/api/v1/campaigns/linden-pass/wiki/pages/npcs/captain-lyra-vale",
@@ -920,6 +929,7 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert page_payload["links"]["campaign_url"] == "/campaigns/linden-pass"
     assert page_payload["links"]["section_url"] == "/campaigns/linden-pass/sections/npcs"
     assert page_payload["links"]["gen2_campaign_url"] == "/app-next/campaigns/linden-pass"
+    assert any(section["section_slug"] == "npcs" for section in page_payload["section_navigation"])
 
     with app.app_context():
         AuthStore().set_user_frontend_mode(users["party"]["id"], "gen2")
@@ -937,6 +947,10 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert 'href="/app-next/campaigns/linden-pass/pages/' not in legacy_overview_body
     legacy_locations_group = next(section for section in legacy_home_payload["grouped_sections"] if section["section_name"] == "Locations")
     assert legacy_locations_group["href"] == "/campaigns/linden-pass/sections/locations"
+    legacy_locations_nav_item = next(
+        section for section in legacy_home_payload["section_navigation"] if section["section_name"] == "Locations"
+    )
+    assert legacy_locations_nav_item["href"] == "/campaigns/linden-pass/sections/locations"
 
     legacy_search_response = client.get(
         "/api/v1/campaigns/linden-pass/wiki?q=capt",
@@ -976,6 +990,7 @@ def test_api_player_wiki_home_reports_restricted_wiki_scope(
     home_payload = home_response.get_json()
     assert home_payload["can_view_wiki"] is False
     assert home_payload["grouped_sections"] == []
+    assert home_payload["section_navigation"] == []
     assert "requires DM access" in home_payload["message"]
 
     page_response = client.get(
