@@ -160,6 +160,70 @@ def test_gen2_session_page_auth_notice_card_shape(
             browser.close()
 
 
+def test_gen2_loading_cover_decorates_and_dismisses(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
+            expect(page.locator(".session-hero").get_by_role("heading", name="Session")).to_be_visible(timeout=10000)
+            expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
+            page.wait_for_function(
+                """() => {
+                  const root = document.documentElement;
+                  return !root.classList.contains('app-loading') && !root.classList.contains('app-loading-closing');
+                }""",
+                timeout=5000,
+            )
+
+            loading_snapshot = page.evaluate(
+                """() => {
+                  const root = document.documentElement;
+                  const appRoot = document.querySelector('#root');
+                  const cover = document.querySelector('.app-loading-cover');
+                  return {
+                    htmlTheme: root.getAttribute('data-theme'),
+                    hasLoadingClass: root.classList.contains('app-loading'),
+                    hasClosingClass: root.classList.contains('app-loading-closing'),
+                    rootVisibility: appRoot ? getComputedStyle(appRoot).visibility : '',
+                    coverClassName: cover ? cover.className : '',
+                    mediaUrls: cover ? cover.getAttribute('data-app-loading-media-urls') : '',
+                    mediaUrl: cover ? cover.getAttribute('data-app-loading-media-url') : '',
+                  };
+                }"""
+            )
+
+            assert loading_snapshot["htmlTheme"] == "parchment"
+            assert loading_snapshot["hasLoadingClass"] is False
+            assert loading_snapshot["hasClosingClass"] is False
+            assert loading_snapshot["rootVisibility"] == "visible"
+            assert "app-loading-cover--with-image" in loading_snapshot["coverClassName"]
+            assert loading_snapshot["mediaUrl"].startswith("/campaigns/linden-pass/assets/")
+
+            media_urls = json.loads(loading_snapshot["mediaUrls"])
+            assert media_urls
+            assert all(url.startswith("/campaigns/linden-pass/assets/") for url in media_urls)
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_gen2_session_browser_exposes_flask_session_capabilities(
     frontend_gen2_session_live_server,
     users,

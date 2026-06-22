@@ -138,7 +138,20 @@ def test_frontend_pilot_routes_are_available_with_preview_and_index(app, client,
     dist_dir = tmp_path / "frontend-dist-preview"
     assets_dir = dist_dir / "assets"
     dist_dir.mkdir(parents=True)
-    (dist_dir / "index.html").write_text("<!doctype html><html><body>preview</body></html>", encoding="utf-8")
+    (dist_dir / "index.html").write_text(
+        (
+            '<!doctype html><html lang="en" data-theme="ember"><head>'
+            '<style id="app-loading-inline-styles">html.app-loading #root { opacity: 0; }</style>'
+            '<script id="app-loading-inline-script">const failOpenDelayMs = 12000;</script>'
+            "</head><body>"
+            '<div class="app-loading-cover" role="status" aria-live="polite" aria-label="Loading application">'
+            '<div class="app-loading-cover__media" aria-hidden="true"></div>'
+            '<p class="app-loading-cover__message">Loading campaign player wiki...</p>'
+            "</div>"
+            '<div id="root">preview</div></body></html>'
+        ),
+        encoding="utf-8",
+    )
     (dist_dir / "manifest.webmanifest").write_text("{\"name\":\"preview\"}", encoding="utf-8")
     assets_dir.mkdir(parents=True, exist_ok=True)
     (assets_dir / "app.js").write_text("console.log('app-next-preview')", encoding="utf-8")
@@ -146,11 +159,17 @@ def test_frontend_pilot_routes_are_available_with_preview_and_index(app, client,
 
     app_root_response = client.get("/app-next")
     assert app_root_response.status_code == 200
-    assert app_root_response.data == b"<!doctype html><html><body>preview</body></html>"
+    app_root_html = app_root_response.get_data(as_text=True)
+    assert "preview" in app_root_html
+    assert 'data-theme="parchment"' in app_root_html
+    assert 'id="app-loading-inline-styles"' in app_root_html
+    assert 'id="app-loading-inline-script"' in app_root_html
+    assert 'class="app-loading-cover"' in app_root_html
+    assert "app-loading-cover--with-image" not in app_root_html
 
     app_root_slash_response = client.get("/app-next/")
     assert app_root_slash_response.status_code == 200
-    assert app_root_slash_response.data == b"<!doctype html><html><body>preview</body></html>"
+    assert "preview" in app_root_slash_response.get_data(as_text=True)
 
     asset_response = client.get("/app-next/assets/app.js")
     assert asset_response.status_code == 200
@@ -162,14 +181,33 @@ def test_frontend_pilot_routes_are_available_with_preview_and_index(app, client,
 
     route_response = client.get("/app-next/campaigns/linden-pass/session")
     assert route_response.status_code == 200
-    assert route_response.data == b"<!doctype html><html><body>preview</body></html>"
+    route_html = route_response.get_data(as_text=True)
+    assert "preview" in route_html
+    assert 'class="app-loading-cover app-loading-cover--with-image"' in route_html
+    assert 'data-app-loading-media-urls=' in route_html
+    assert 'data-app-loading-media-url="/campaigns/linden-pass/assets/' in route_html
 
     admin_route_response = client.get("/app-next/admin")
     assert admin_route_response.status_code == 200
-    assert admin_route_response.data == b"<!doctype html><html><body>preview</body></html>"
+    admin_route_html = admin_route_response.get_data(as_text=True)
+    assert "preview" in admin_route_html
+    assert "app-loading-cover--with-image" not in admin_route_html
 
     missing_asset_response = client.get("/app-next/assets/missing.js")
     assert missing_asset_response.status_code == 404
+
+
+def test_frontend_index_includes_app_loading_shell_source() -> None:
+    source = Path("frontend/index.html").read_text(encoding="utf-8")
+
+    assert 'id="app-loading-inline-styles"' in source
+    assert 'id="app-loading-inline-script"' in source
+    assert 'class="app-loading-cover"' in source
+    assert ".app-loading-cover__media" in source
+    assert "html.app-loading #root" in source
+    assert "failOpenDelayMs = 12000" in source
+    assert "/app-next/assets/" in source
+    assert "Loading campaign player wiki..." in source
 
 
 def test_frontend_pilot_without_build_returns_not_found(client, app, tmp_path):
