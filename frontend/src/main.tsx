@@ -473,6 +473,64 @@ function draftKey(...parts: Array<string | number | null | undefined>): string {
   return parts.map((part) => String(part ?? "")).join("::");
 }
 
+function spellLevelLabel(value: string): string {
+  const label = value.trim();
+  return label || "Spells";
+}
+
+function spellLevelSortValue(label: string): number {
+  const normalized = label.toLowerCase();
+  if (normalized.includes("cantrip")) {
+    return 0;
+  }
+  const match = normalized.match(/\b(\d+)(?:st|nd|rd|th)?\b/);
+  return match ? Number(match[1]) : 999;
+}
+
+function groupSpellsByLevel<T>(
+  spells: T[],
+  levelLabelFor: (spell: T) => string,
+): Array<{ key: string; label: string; spells: T[] }> {
+  const groups = new Map<string, { key: string; label: string; sort: number; index: number; spells: T[] }>();
+  spells.forEach((spell, index) => {
+    const label = spellLevelLabel(levelLabelFor(spell));
+    const sort = spellLevelSortValue(label);
+    const key = draftKey(sort, label.toLowerCase());
+    const group = groups.get(key);
+    if (group) {
+      group.spells.push(spell);
+    } else {
+      groups.set(key, { key, label, sort, index, spells: [spell] });
+    }
+  });
+  return Array.from(groups.values())
+    .sort((a, b) => a.sort - b.sort || a.index - b.index || a.label.localeCompare(b.label))
+    .map(({ key, label, spells: groupedSpells }) => ({ key, label, spells: groupedSpells }));
+}
+
+function compactSpellDetailLine(values: string[]): string {
+  return values.filter((value) => value && value !== "--").join(" | ");
+}
+
+function presentedSpellCardDetailLine(spell: CharacterPresentedSpell): string {
+  return compactSpellDetailLine([
+    spell.casting_time,
+    spell.range,
+    spell.duration,
+    spell.components,
+    spell.save_or_hit,
+  ]);
+}
+
+function rawSpellCardDetailLine(spell: Record<string, unknown>): string {
+  return compactSpellDetailLine([
+    readString(spell.casting_time),
+    readString(spell.range),
+    readString(spell.duration),
+    readString(spell.components),
+  ]);
+}
+
 function collectPresentedSpells(character: CharacterRecord | undefined): CharacterPresentedSpell[] {
   const spellcasting = character?.presented_spellcasting;
   const sections =
@@ -8074,6 +8132,8 @@ function CharacterPane({
     readString(presentedXianxia.active_state?.aura?.status_label),
   ]);
   const presentedSpells = collectPresentedSpells(detailRecord);
+  const presentedSpellGroups = groupSpellsByLevel(presentedSpells, (spell) => spell.level_label);
+  const rawSpellGroups = groupSpellsByLevel(spells, (spell) => readString(spell.level_label));
   const presentedInventory = detailRecord?.presented_inventory ?? [];
   const presentedInventoryByKey = useMemo(() => {
     const lookup = new Map<string, CharacterPresentedInventoryItem>();
@@ -10857,65 +10917,87 @@ function CharacterPane({
                   </div>
                 ) : null}
                 {presentedSpells.length ? (
-                  <div className="spell-card-grid">
-                    {presentedSpells.map((spell) => {
-                      const spellCardContent = (
-                        <>
-                          <span className="spell-card__eyebrow">
-                            {[spell.level_label, spell.school].filter(Boolean).join(" | ") || "Spell"}
-                          </span>
-                          <span className="spell-card__name">{spell.name || "Spell"}</span>
-                          {spell.badges?.length ? (
-                            <span className="badge-list spell-card__badges">
-                              {spell.badges.map((badge) => (
-                                <span className="meta-badge" key={badge}>
-                                  {badge}
-                                </span>
-                              ))}
-                            </span>
-                          ) : null}
-                          <span className="spell-card__meta">
-                            {[spell.casting_time, spell.range].filter((value) => value && value !== "--").join(" | ")}
-                          </span>
-                        </>
-                      );
-                      return (
-                        <article className="spell-card" key={draftKey(spell.class_row_id, spell.name, spell.level_label)}>
-                          {spell.description_html || spell.href ? (
-                            <button
-                              type="button"
-                              className="spell-card__main"
-                              aria-haspopup="dialog"
-                              onClick={() => openSpellDetail(spell)}
-                            >
-                              {spellCardContent}
-                            </button>
-                          ) : (
-                            <span className="spell-card__main">{spellCardContent}</span>
-                          )}
-                        </article>
-                      );
-                    })}
+                  <div className="spell-level-groups">
+                    {presentedSpellGroups.map((group) => (
+                      <section className="spell-level-group" key={group.key}>
+                        <div className="spell-level-group__heading">
+                          <h3>{group.label}</h3>
+                        </div>
+                        <div className="spell-card-grid spell-card-grid--level">
+                          {group.spells.map((spell) => {
+                            const detailLine = presentedSpellCardDetailLine(spell);
+                            const levelSchool = [spell.level_label, spell.school].filter(Boolean).join(" | ");
+                            const spellCardContent = (
+                              <>
+                                <span className="spell-card__name">{spell.name || "Spell"}</span>
+                                <span className="spell-card__eyebrow">{levelSchool || "Spell"}</span>
+                                {spell.badges?.length ? (
+                                  <span className="badge-list spell-card__badges">
+                                    {spell.badges.map((badge) => (
+                                      <span className="meta-badge" key={badge}>
+                                        {badge}
+                                      </span>
+                                    ))}
+                                  </span>
+                                ) : null}
+                                {detailLine ? <span className="spell-card__meta">{detailLine}</span> : null}
+                              </>
+                            );
+                            return (
+                              <article
+                                className="spell-card"
+                                key={draftKey(spell.class_row_id, spell.name, spell.level_label)}
+                              >
+                                {spell.description_html || spell.href ? (
+                                  <button
+                                    type="button"
+                                    className="spell-card__main"
+                                    aria-haspopup="dialog"
+                                    onClick={() => openSpellDetail(spell)}
+                                  >
+                                    {spellCardContent}
+                                  </button>
+                                ) : (
+                                  <span className="spell-card__main">{spellCardContent}</span>
+                                )}
+                              </article>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    ))}
                   </div>
                 ) : spells.length ? (
-                  <div className="spell-card-grid">
-                    {spells.map((spell) => (
-                      <article className="spell-card" key={readString(spell.id, readString(spell.name))}>
-                        <span className="spell-card__main">
-                          {[spell.level_label, spell.school].filter(Boolean).length ? (
-                            <span className="spell-card__eyebrow">
-                              {[spell.level_label, spell.school].filter(Boolean).join(" | ")}
-                            </span>
-                          ) : null}
-                          <span className="spell-card__name">{readString(spell.name, "Spell")}</span>
-                          <span className="spell-card__meta">
-                            {[spell.mark, spell.casting_time, spell.range]
-                              .map((value) => readString(value))
-                              .filter((value) => value && value !== "--")
-                              .join(" | ")}
-                          </span>
-                        </span>
-                      </article>
+                  <div className="spell-level-groups">
+                    {rawSpellGroups.map((group) => (
+                      <section className="spell-level-group" key={group.key}>
+                        <div className="spell-level-group__heading">
+                          <h3>{group.label}</h3>
+                        </div>
+                        <div className="spell-card-grid spell-card-grid--level">
+                          {group.spells.map((spell) => {
+                            const mark = readString(spell.mark);
+                            const detailLine = rawSpellCardDetailLine(spell);
+                            const levelSchool = [readString(spell.level_label), readString(spell.school)]
+                              .filter(Boolean)
+                              .join(" | ");
+                            return (
+                              <article className="spell-card" key={readString(spell.id, readString(spell.name))}>
+                                <span className="spell-card__main">
+                                  <span className="spell-card__name">{readString(spell.name, "Spell")}</span>
+                                  {levelSchool ? <span className="spell-card__eyebrow">{levelSchool}</span> : null}
+                                  {mark ? (
+                                    <span className="badge-list spell-card__badges">
+                                      <span className="meta-badge">{mark}</span>
+                                    </span>
+                                  ) : null}
+                                  {detailLine ? <span className="spell-card__meta">{detailLine}</span> : null}
+                                </span>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      </section>
                     ))}
                   </div>
                 ) : null}

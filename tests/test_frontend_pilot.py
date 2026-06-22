@@ -2149,7 +2149,13 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
     assert "Save DC:" in section_markup
     assert "Attack:" in section_markup
 
-    assert 'className="spell-card-grid"' in section_markup
+    assert "groupSpellsByLevel" in source
+    assert "presentedSpellGroups" in section_markup
+    assert "rawSpellGroups" in section_markup
+    assert 'className="spell-level-groups"' in section_markup
+    assert 'className="spell-level-group"' in section_markup
+    assert 'className="spell-level-group__heading"' in section_markup
+    assert 'className="spell-card-grid spell-card-grid--level"' in section_markup
     assert 'className="spell-card"' in section_markup
     assert 'className="spell-card__main"' in section_markup
     assert 'className="spell-card__eyebrow"' in section_markup
@@ -2157,22 +2163,22 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
     assert 'className="spell-card__meta"' in section_markup
     assert 'className="badge-list spell-card__badges"' in section_markup
     assert "openSpellDetail(spell)" in section_markup
+    assert "presentedSpellCardDetailLine(spell)" in presented_markup
+    assert "rawSpellCardDetailLine(spell)" in section_markup
+    assert "presentedSpells.map" not in presented_markup
     assert (
         re.search(
-            r'presentedSpells\.map\(\(spell\) => \{\s*const spellCardContent = \(\s*<>\s*<span className="spell-card__eyebrow"',
+            r'group\.spells\.map\(\(spell\) => \{\s*const detailLine = presentedSpellCardDetailLine\(spell\);[\s\S]*?const spellCardContent = \(\s*<>\s*<span className="spell-card__name"',
             presented_markup,
             re.S,
         )
         is not None
     )
-    assert (
-        re.search(
-            r'presentedSpells\.map\(\(spell\) => \{\s*const spellCardContent = \(\s*<>\s*<span className="spell-card__eyebrow"[\s\S]*?<span className="spell-card__meta"',
-            presented_markup,
-            re.S,
-        )
-        is not None
+    assert presented_markup.index('className="spell-card__name"') < presented_markup.index('className="spell-card__eyebrow"')
+    assert presented_markup.index('className="spell-card__eyebrow"') < presented_markup.index(
+        'className="badge-list spell-card__badges"'
     )
+    assert "{detailLine ? <span className=\"spell-card__meta\">{detailLine}</span> : null}" in presented_markup
     assert (
         re.search(
             r':\s*\(\s*<span className="spell-card__main">{spellCardContent}</span>',
