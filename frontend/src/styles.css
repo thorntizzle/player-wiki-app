@@ -2933,12 +2933,35 @@ textarea {
   background: var(--surface-soft);
 }
 
+.glance-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.glance-card .meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 0.94rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.glance-card strong {
+  flex: 0 0 auto;
+  max-width: 65%;
+  text-align: right;
+  line-height: 1.05;
+}
+
 .session-card {
   background: var(--surface);
 }
 
 .glance-card strong {
-  font-size: 1.35rem;
+  font-size: 1.48rem;
 }
 
 .character-read-content .glance-card,
