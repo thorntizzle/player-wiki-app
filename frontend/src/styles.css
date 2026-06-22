@@ -1719,6 +1719,66 @@ a:hover {
   margin-top: 0;
 }
 
+.wiki-home-section-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.85rem;
+  align-items: stretch;
+}
+
+.wiki-home-section-card,
+.wiki-home-section-card:hover {
+  text-decoration: none;
+}
+
+.wiki-home-section-card {
+  display: grid;
+  min-height: 8.2rem;
+  align-content: space-between;
+  gap: 0.85rem;
+  color: var(--ink);
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease,
+    background 160ms ease;
+}
+
+.wiki-home-section-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--border-accent);
+  background: var(--featured-bg);
+}
+
+.wiki-home-section-card:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 0.18rem;
+}
+
+.wiki-home-section-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.85rem;
+  height: 2.85rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-raised);
+  color: var(--accent-deep);
+}
+
+.wiki-home-section-card__icon-svg {
+  width: 1.55rem;
+  height: 1.55rem;
+}
+
+.wiki-home-section-card__label {
+  color: var(--accent-deep);
+  font-weight: 800;
+  font-size: 1.06rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
 .section-block {
   display: grid;
   gap: 0.85rem;
@@ -4399,6 +4459,18 @@ button.spell-card__main:focus-visible .spell-card__name {
   justify-content: flex-start;
 }
 
+@media (max-width: 1180px) {
+  .wiki-home-section-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .wiki-home-section-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 740px) {
   .session-pilot,
   .session-shell {
@@ -4480,6 +4552,10 @@ button.spell-card__main:focus-visible .spell-card__name {
 
   .session-log-row {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wiki-home-section-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .session-page-shell {
@@ -4632,6 +4708,10 @@ button.spell-card__main:focus-visible .spell-card__name {
 }
 
 @media (max-width: 520px) {
+  .wiki-home-section-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .character-sheet .resource-grid--compact,
   .character-sheet .resource-grid--editable,
   .character-sheet .spell-slot-editor-list--compact,

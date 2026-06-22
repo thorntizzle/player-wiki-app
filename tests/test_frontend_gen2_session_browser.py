@@ -2069,23 +2069,20 @@ def test_gen2_wiki_browser_exposes_home_section_page_and_assets(
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass")
             expect(page.get_by_role("heading", name="Campaign Home")).to_be_visible(timeout=10000)
-            expect(page.get_by_role("heading", name="Echoes of the Alloy Coast")).to_be_visible(timeout=10000)
-            expect(page.get_by_text("Welcome to the shared player briefing")).to_be_visible()
-            expect(page.locator(".wiki-overview-card")).to_be_visible()
-            overview_link = page.locator(".wiki-overview-card h2 a")
-            expect(overview_link).to_be_visible()
-            expect(overview_link).to_have_attribute(
+            expect(page.locator("nav.wiki-section-nav")).to_have_count(0)
+            expect(page.locator(".wiki-overview-card")).to_have_count(0)
+            section_grid = page.locator(".wiki-home-section-grid")
+            expect(section_grid).to_be_visible()
+            section_cards = section_grid.locator(".wiki-home-section-card")
+            section_card_count = section_cards.count()
+            assert section_card_count >= 12
+            expect(section_grid.locator(".wiki-home-section-card__icon-svg")).to_have_count(section_card_count)
+            overview_section_link = section_grid.get_by_role("link", name=re.compile(r"Overview"))
+            expect(overview_section_link).to_have_attribute(
                 "href",
-                re.compile(r"^/app-next/campaigns/linden-pass/pages/.+"),
+                "/app-next/campaigns/linden-pass/sections/overview",
             )
-            overview_article_link = page.locator(".wiki-overview-card .article-body a", has_text="Operations Brief")
-            expect(overview_article_link).to_have_attribute(
-                "href",
-                "/app-next/campaigns/linden-pass/pages/notes/operations-brief",
-            )
-            home_section_nav = page.locator("nav.wiki-section-nav")
-            expect(home_section_nav).to_be_visible()
-            expect(home_section_nav.get_by_role("link", name="Locations")).to_have_attribute(
+            expect(section_grid.get_by_role("link", name=re.compile(r"Locations"))).to_have_attribute(
                 "href",
                 "/app-next/campaigns/linden-pass/sections/locations",
             )
@@ -2150,48 +2147,36 @@ def test_gen2_wiki_visual_parity_smoke(
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass")
             expect(desktop_page.get_by_role("heading", name="Campaign Home")).to_be_visible(timeout=10000)
             expect(desktop_page.locator(".wiki-home")).to_be_visible()
-            expect(desktop_page.locator(".wiki-overview-card")).to_be_visible()
+            expect(desktop_page.locator(".wiki-home-section-grid")).to_be_visible()
+            expect(desktop_page.locator("nav.wiki-section-nav")).to_have_count(0)
+            expect(desktop_page.locator(".wiki-overview-card")).to_have_count(0)
             home_metrics = desktop_page.evaluate(
                 """() => {
                     const route = document.querySelector(".wiki-home");
                     const hero = document.querySelector(".wiki-home");
-                    const overviewCard = document.querySelector(".wiki-overview-card");
-                    const overviewTitle = document.querySelector(".wiki-overview-card > h2");
-                    const overviewBody = document.querySelector(".wiki-overview-card .article-body");
-                    const overviewBodyFirstChild = overviewBody ? overviewBody.firstElementChild : null;
-                    const overviewBodyRect = overviewBody ? overviewBody.getBoundingClientRect() : null;
-                    const overviewBodyFirstChildRect = overviewBodyFirstChild
-                        ? overviewBodyFirstChild.getBoundingClientRect()
-                        : null;
+                    const sectionGrid = document.querySelector(".wiki-home-section-grid");
+                    const sectionCards = Array.from(document.querySelectorAll(".wiki-home-section-card"));
+                    const firstIcon = document.querySelector(".wiki-home-section-card__icon-svg");
                     return {
                         routeShadow: route ? window.getComputedStyle(route).boxShadow : "",
                         heroDisplay: hero ? window.getComputedStyle(hero).display : "",
-                        overviewDisplay: overviewCard ? window.getComputedStyle(overviewCard).display : "",
-                        overviewTitleMarginTop: overviewTitle
-                            ? Number.parseFloat(window.getComputedStyle(overviewTitle).marginTop)
-                            : -1,
-                        overviewTitleMarginBottom: overviewTitle
-                            ? Number.parseFloat(window.getComputedStyle(overviewTitle).marginBottom)
-                            : -1,
-                        overviewBorder: overviewBody ? window.getComputedStyle(overviewBody).borderTopWidth : "",
-                        overviewBodyFirstChildMarginTop: overviewBodyFirstChild
-                            ? Number.parseFloat(window.getComputedStyle(overviewBodyFirstChild).marginTop)
-                            : -1,
-                        overviewBodyFirstChildGap:
-                            overviewBodyRect && overviewBodyFirstChildRect
-                            ? Math.round((overviewBodyFirstChildRect.top - overviewBodyRect.top) * 100) / 100
-                            : -1,
+                        gridDisplay: sectionGrid ? window.getComputedStyle(sectionGrid).display : "",
+                        gridColumnCount: sectionGrid
+                            ? window.getComputedStyle(sectionGrid).gridTemplateColumns.split(" ").length
+                            : 0,
+                        cardCount: sectionCards.length,
+                        iconCount: document.querySelectorAll(".wiki-home-section-card__icon-svg").length,
+                        firstIconWidth: firstIcon ? Number.parseFloat(window.getComputedStyle(firstIcon).width) : 0,
                     };
                 }"""
             )
             assert home_metrics["routeShadow"] == "none"
             assert home_metrics["heroDisplay"] == "grid"
-            assert home_metrics["overviewDisplay"] == "block"
-            assert home_metrics["overviewTitleMarginTop"] == 0
-            assert home_metrics["overviewTitleMarginBottom"] == 0
-            assert home_metrics["overviewBorder"] == "0px"
-            assert home_metrics["overviewBodyFirstChildMarginTop"] == 0
-            assert home_metrics["overviewBodyFirstChildGap"] == 0
+            assert home_metrics["gridDisplay"] == "grid"
+            assert home_metrics["gridColumnCount"] == 6
+            assert home_metrics["cardCount"] == home_metrics["iconCount"]
+            assert home_metrics["cardCount"] >= 12
+            assert home_metrics["firstIconWidth"] > 20
 
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/sections/locations")
             expect(desktop_page.get_by_role("heading", name="Locations")).to_be_visible(timeout=10000)

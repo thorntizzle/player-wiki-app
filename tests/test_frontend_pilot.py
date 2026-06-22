@@ -1291,7 +1291,7 @@ def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
     assert "Lookup" in creator_markup
 
 
-def test_wiki_pages_render_section_nav_and_article_omits_context_sidebar() -> None:
+def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     nav_source = _extract_component_source(
         source,
@@ -1321,7 +1321,22 @@ def test_wiki_pages_render_section_nav_and_article_omits_context_sidebar() -> No
     assert 'aria-current={isActive ? "page" : undefined}' in nav_source
     assert 'title={`${section.page_count} page${section.page_count === 1 ? "" : "s"}`}' in nav_source
 
+    assert "function WikiHomeSectionGrid({" in nav_source
+    assert 'className="wiki-home-section-grid"' in nav_source
+    assert 'aria-label="Campaign wiki sections"' in nav_source
+    assert 'className="card wiki-home-section-card"' in nav_source
+    assert 'className="wiki-home-section-card__icon"' in nav_source
+    assert "WIKI_SECTION_ICON_BY_SLUG" in nav_source
+    assert "overview: \"book\"" in nav_source
+    assert "spells: \"wand\"" in nav_source
+    assert "mechanics: \"cog\"" in nav_source
+
+    assert "<WikiHomeSectionGrid" in home_page_source
     assert "sections={data.section_navigation}" in home_page_source
+    assert "<WikiSectionNav" not in home_page_source
+    assert "wiki-overview-card" not in home_page_source
+    assert "data.overview_page.body_html" not in home_page_source
+
     assert "sections={data.section_navigation}" in section_page_source
     assert "activeSectionSlug={data.section_slug}" in section_page_source
     assert "sections={data?.section_navigation ?? []}" in article_page_source
@@ -1335,6 +1350,9 @@ def test_wiki_pages_render_section_nav_and_article_omits_context_sidebar() -> No
     assert "sectionContextLink" not in article_page_source
 
     assert ".wiki-section-nav" in styles
+    assert ".wiki-home-section-grid" in styles
+    assert "grid-template-columns: repeat(6, minmax(0, 1fr));" in styles
+    assert ".wiki-home-section-card__icon-svg" in styles
     assert ".wiki-article-page--single" in styles
 
 
