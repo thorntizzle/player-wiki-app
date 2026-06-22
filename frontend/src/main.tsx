@@ -8969,7 +8969,6 @@ function CharacterPane({
                 <p>Class: {selected.class_level_text || "Unknown"}</p>
                 <p>System: {characterSystem(detailRecord)}</p>
                 <p>Status: {selected.status}</p>
-                <p>Revision: {revision || selected.revision}</p>
               </div>
             </div>
             {selected.resource_preview?.length ? (
@@ -16443,10 +16442,6 @@ function CombatPage() {
             <article>
               <span className="meta">Combatants</span>
               <strong>{tracker?.combatant_count ?? 0}</strong>
-            </article>
-            <article>
-              <span className="meta">Live revision</span>
-              <strong>{payload.live_revision}</strong>
             </article>
           </section>
 
