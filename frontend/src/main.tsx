@@ -7639,26 +7639,6 @@ function SessionPane({
   return (
     <div className="page-layout session-layout session-layout--single">
       <section className="session-column">
-        <article className="card session-status-card" data-session-status-card>
-          <div className="section-heading">
-            <h2>Live session</h2>
-            <p className="meta">{payload?.active_session ? "Chat open" : "Chat closed"}</p>
-          </div>
-          <div className="status-row">
-            <article className="stat-card">
-              <h3>Session</h3>
-              <p>{payload?.active_session ? payload.active_session.status : "inactive"}</p>
-            </article>
-            <article className="stat-card">
-              <h3>Messages</h3>
-              <p>{payload?.messages.length ?? 0}</p>
-            </article>
-            <article className="stat-card">
-              <h3>Session ID</h3>
-              <p>{payload?.active_session?.id ?? "none"}</p>
-            </article>
-          </div>
-        </article>
         <SessionPaneChat
           payload={payload}
         />
@@ -16593,6 +16573,8 @@ function SessionPage() {
 
   const payload = sessionQuery.data;
   const canManage = payload?.permissions.can_manage_session ?? false;
+  const sessionIsActive = Boolean(payload?.active_session?.is_active);
+  const sessionStatusLabel = sessionIsActive ? "Session active" : "Session inactive";
 
   useEffect(() => {
     setActivePane((previousActivePane) => coerceSessionPane(previousActivePane, canManage));
@@ -16604,7 +16586,20 @@ function SessionPage() {
     <section className="session-page-shell">
       <section className="hero compact session-hero">
         <p className="eyebrow">Session Workspace</p>
-        <h1>Session</h1>
+        <div className="session-hero__title-row">
+          <h1>Session</h1>
+          <span
+            className={
+              sessionIsActive
+                ? "session-hero__status session-hero__status--active"
+                : "session-hero__status session-hero__status--inactive"
+            }
+            data-session-header-status
+          >
+            <span className="session-hero__status-dot" aria-hidden="true" />
+            {sessionStatusLabel}
+          </span>
+        </div>
         <p className="lede">Live play workspace.</p>
         <div className="hero-actions session-tab-strip">
           <button

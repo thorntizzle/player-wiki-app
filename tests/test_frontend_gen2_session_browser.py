@@ -217,6 +217,9 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
 
             page.reload()
             expect(page.locator(".session-hero").get_by_role("heading", name="Session")).to_be_visible(timeout=10000)
+            expect(page.locator("[data-session-header-status]")).to_contain_text(
+                re.compile(r"Session (active|inactive)"), timeout=5000
+            )
             expect(page.locator(".campaign-nav-link").get_by_text("Session")).to_be_visible()
             assert page.locator(".pane-visible .page-layout.session-layout.session-layout--single > .session-column").count() == 1
             assert page.locator(".pane-visible .page-layout.session-layout > .session-sidebar").count() == 0
@@ -237,6 +240,7 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
 
             session_start_response = page.request.post(f"{base_url}/campaigns/linden-pass/session/start")
             assert session_start_response.status in {200, 302}
+            expect(page.locator("[data-session-header-status]")).to_contain_text("Session active", timeout=10000)
 
             staged_title = "Gen2 Session Parity Staged"
             revealed_title = "Gen2 Session Parity Revealed"
@@ -435,15 +439,17 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
                     return Array.from(
                         section
                             ? section.querySelectorAll(
-                                ":scope > .session-status-card .section-heading h2, :scope > .session-chat-card .section-heading h2"
+                                ":scope > .session-chat-card .section-heading h2"
                             )
                             : [],
                     ).map((node) => (node.textContent || "").trim());
                 }"""
             )
-            assert player_card_texts[:2] == ["Live session", "Chat window"]
-            assert "Revealed articles" not in player_card_texts[:2]
-            assert page.locator("article.card.session-status-card[data-session-status-card]").count() == 1
+            assert player_card_texts[:1] == ["Chat window"]
+            assert "Live session" not in player_card_texts
+            assert "Revealed articles" not in player_card_texts[:1]
+            assert page.locator("article.card.session-status-card[data-session-status-card]").count() == 0
+            expect(page.locator("[data-session-header-status]")).to_contain_text("Session active")
             assert page.locator("article.card.session-chat-card#session-chat[data-session-chat-card]").count() == 1
             assert page.locator("article.card.session-composer-card#session-chat-compose").count() == 1
 
@@ -560,7 +566,7 @@ def test_gen2_shell_and_session_visual_parity_smoke(
                     const root = document.querySelector(".campaign-global-search");
                     const nav = document.querySelector(".campaign-nav-link");
                     const hero = document.querySelector(".session-hero");
-                    const firstPanel = document.querySelector(".page-layout.session-layout > .session-column .session-status-card");
+                    const firstPanel = document.querySelector(".page-layout.session-layout > .session-column .session-chat-card");
                     const topbar = document.querySelector(".topbar");
                     const globalSearchForm = document.querySelector(".campaign-global-search__form");
                     const globalSearchResults = document.querySelector(".campaign-global-search__results");
@@ -641,7 +647,7 @@ def test_gen2_shell_and_session_visual_parity_smoke(
                     tabWidth: document.querySelector(".session-tab-strip")?.getBoundingClientRect().width ?? 0,
                     shellWidth: document.querySelector(".session-page-shell")?.getBoundingClientRect().width ?? 0,
                     heroTop: document.querySelector(".session-hero")?.getBoundingClientRect().top ?? 0,
-                    firstPanelTop: document.querySelector(".page-layout.session-layout > .session-column .session-status-card")?.getBoundingClientRect().top ?? 0,
+                    firstPanelTop: document.querySelector(".page-layout.session-layout > .session-column .session-chat-card")?.getBoundingClientRect().top ?? 0,
                     topbarBottom: document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0,
                     globalSearchFormDirection: globalSearchForm
                         ? window.getComputedStyle(globalSearchForm).flexDirection
