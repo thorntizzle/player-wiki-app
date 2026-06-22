@@ -2069,13 +2069,14 @@ def test_character_dnd_equipment_section_uses_flask_style_row_form_chrome() -> N
 
 def test_character_dnd_resources_section_uses_flask_style_row_form_chrome() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     resources_start = source.index('{isDnd && activeCharacterSection === "resources" ? (')
     resources_end = source.index('{isDnd && activeCharacterSection === "spells" ? (', resources_start)
     resources_markup = source[resources_start:resources_end]
 
-    assert 'className="resource-grid resource-grid--compact"' in resources_markup
+    assert 'className={`resource-grid resource-grid--compact${canEdit ? " resource-grid--editable" : ""}`}' in resources_markup
     assert 'className="resource-card' in resources_markup
-    assert 'className="session-inline-form"' in resources_markup
+    assert 'className="session-inline-form session-inline-form--compact-resource"' in resources_markup
     assert 'data-character-autosubmit' in resources_markup
     assert 'data-character-sheet-edit-form="resource"' in resources_markup
     assert 'data-character-sheet-edit-row-id={id}' in resources_markup
@@ -2090,6 +2091,14 @@ def test_character_dnd_resources_section_uses_flask_style_row_form_chrome() -> N
     assert 'className="resource-card__value"' in resources_markup
     assert 'className="visually-hidden"' in resources_markup
     assert 'Update {resourceLabel}' in resources_markup
+    assert ".visually-hidden" in styles
+    assert ".resource-grid {" in styles
+    assert ".character-sheet .resource-grid--compact," in styles
+    assert ".character-sheet .resource-grid--editable" in styles
+    assert "grid-template-columns: repeat(3, minmax(0, min(24rem, 100%)));" in styles
+    assert ".resource-card {" in styles
+    assert ".session-resource-card--compact" in styles
+    assert ".session-inline-form--compact-resource" in styles
 
     assert 'className="character-card-grid"' not in resources_markup
     assert 'className="character-state-card"' not in resources_markup

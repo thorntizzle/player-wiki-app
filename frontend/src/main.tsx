@@ -10788,7 +10788,7 @@ function CharacterPane({
                   <h2>Resources</h2>
                 </div>
                 {resources.length ? (
-                  <div className="resource-grid resource-grid--compact">
+                  <div className={`resource-grid resource-grid--compact${canEdit ? " resource-grid--editable" : ""}`}>
                     {resources.map((resource) => {
                       const id = readString(resource.id);
                       const resourceLabel = readString(resource.label, id || "Resource");
@@ -10808,7 +10808,7 @@ function CharacterPane({
                           {resource.notes ? <p className="meta">{readString(resource.notes)}</p> : null}
                           {canEdit && id ? (
                             <form
-                              className="session-inline-form"
+                              className="session-inline-form session-inline-form--compact-resource"
                               onSubmit={(event) => submitResource(event, id)}
                               data-character-autosubmit
                               data-character-sheet-edit-form="resource"

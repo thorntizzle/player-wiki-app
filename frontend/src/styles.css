@@ -187,7 +187,8 @@ body {
   line-height: 1.6;
 }
 
-.sr-only {
+.sr-only,
+.visually-hidden {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -3418,6 +3419,80 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
+.resource-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  align-items: stretch;
+  gap: 0.85rem;
+}
+
+.character-sheet .resource-grid--compact,
+.character-sheet .resource-grid--editable {
+  grid-template-columns: repeat(3, minmax(0, min(24rem, 100%)));
+  justify-content: center;
+}
+
+.resource-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-soft);
+  padding: 0.85rem;
+}
+
+.resource-card h3,
+.resource-card h4 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.resource-card p {
+  margin: 0;
+}
+
+.resource-card .meta {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.resource-card__value {
+  color: var(--ink);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.session-resource-card--compact {
+  padding: 0.75rem 0.85rem;
+}
+
+.session-inline-form {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.session-inline-form--compact-resource {
+  margin-top: auto;
+  padding-top: 0.15rem;
+}
+
+.session-resource-card--compact .session-field {
+  gap: 0.25rem;
+}
+
+.session-resource-card--compact .session-field span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
 .spell-level-groups {
   display: grid;
   gap: 1rem;
@@ -4212,6 +4287,11 @@ button.spell-card__main:focus-visible .spell-card__name {
     grid-template-columns: 1fr;
   }
 
+  .character-sheet .resource-grid--compact,
+  .character-sheet .resource-grid--editable {
+    grid-template-columns: repeat(2, minmax(0, min(24rem, 100%)));
+  }
+
   .session-log-row {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -4362,5 +4442,12 @@ button.spell-card__main:focus-visible .spell-card__name {
   .admin-user-grid,
   .admin-panel-form {
     width: 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  .character-sheet .resource-grid--compact,
+  .character-sheet .resource-grid--editable {
+    grid-template-columns: minmax(0, min(24rem, 100%));
   }
 }
