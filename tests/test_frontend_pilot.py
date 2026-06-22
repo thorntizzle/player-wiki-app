@@ -1901,6 +1901,30 @@ def test_character_generic_system_summary_section_uses_detail_grid_cards() -> No
     assert 'className="stat-grid"' not in generic_summary_markup
 
 
+def test_character_pane_status_messages_use_toast_overlay() -> None:
+    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+    pane_start = source.index("function CharacterPane(")
+    pane_end = source.index("interface StagedArticleDraftState", pane_start)
+    pane_markup = source[pane_start:pane_end]
+
+    assert "const TOAST_DISMISS_MS = 3600;" in source
+    assert "function ToastNotice" in source
+    assert 'className={`toast-notice toast-notice--${tone}`}' in source
+    assert 'role="status" aria-live="polite"' in source
+    assert "window.setTimeout(() => setStatusMessage(null), TOAST_DISMISS_MS)" in pane_markup
+    assert "setRestPreview(response.preview);" in pane_markup
+    assert 'setStatusMessage(`${response.preview.label} preview loaded.`);' not in pane_markup
+    assert "preview loaded." not in pane_markup
+    assert "<ToastNotice message={statusMessage} />" in pane_markup
+    assert 'statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null' not in pane_markup
+    assert ".toast-notice {" in styles
+    assert "position: fixed;" in styles
+    assert "z-index: 1200;" in styles
+    assert "animation: toast-notice-fade 3600ms ease forwards;" in styles
+    assert "@keyframes toast-notice-fade" in styles
+
+
 def test_character_dnd_overview_section_uses_flask_style_glance_rows() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "overview" ? (')

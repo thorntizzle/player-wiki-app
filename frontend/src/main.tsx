@@ -4023,6 +4023,20 @@ function ApiErrorNotice({
   return <p className="status status-error">{message.message}</p>;
 }
 
+const TOAST_DISMISS_MS = 3600;
+
+function ToastNotice({ message, tone = "neutral" }: { message: string | null; tone?: "neutral" | "success" }) {
+  if (!message) {
+    return null;
+  }
+
+  return (
+    <div className={`toast-notice toast-notice--${tone}`} role="status" aria-live="polite">
+      <p>{message}</p>
+    </div>
+  );
+}
+
 function CampaignGlobalSearch({ campaignSlug }: { campaignSlug: string }) {
   const { apiClient, setAuthRequired } = useApiClient();
   const [query, setQuery] = useState("");
@@ -7849,6 +7863,14 @@ function CharacterPane({
   const [detailDialog, setDetailDialog] = useState<CharacterDetailDialogState | null>(null);
   const portraitFileInputRef = useRef<HTMLInputElement | null>(null);
 
+  useEffect(() => {
+    if (!statusMessage) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setStatusMessage(null), TOAST_DISMISS_MS);
+    return () => window.clearTimeout(timer);
+  }, [statusMessage]);
+
   const listQuery = useQuery({
     queryKey: ["characters", campaignSlug, ""],
     queryFn: () => apiClient.getCharacters(campaignSlug),
@@ -8390,7 +8412,7 @@ function CharacterPane({
     mutationFn: (restType: "short" | "long") => apiClient.getCharacterRestPreview(campaignSlug, selectedSlug || "", restType),
     onSuccess: (response) => {
       setRestPreview(response.preview);
-      setStatusMessage(`${response.preview.label} preview loaded.`);
+      setStatusMessage(null);
       setErrorMessage(null);
     },
     onError: handleMutationError,
@@ -11590,8 +11612,8 @@ function CharacterPane({
         ) : null}
 
         {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
-        {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
       </CharacterShell>
+      <ToastNotice message={statusMessage} />
       <CharacterDetailDialog detail={detailDialog} onClose={() => setDetailDialog(null)} />
     </div>
   );

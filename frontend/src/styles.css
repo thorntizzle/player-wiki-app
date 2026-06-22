@@ -2181,6 +2181,50 @@ a:hover {
   color: var(--danger);
 }
 
+.toast-notice {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 0.8rem);
+  left: calc(env(safe-area-inset-left, 0px) + 0.8rem);
+  z-index: 1200;
+  width: min(24rem, calc(100vw - 1.6rem));
+  pointer-events: none;
+  animation: toast-notice-fade 3600ms ease forwards;
+}
+
+.toast-notice p {
+  margin: 0;
+  border: 1px solid var(--border-accent);
+  border-radius: 14px;
+  background: var(--surface-strong);
+  box-shadow: var(--shadow-strong);
+  color: var(--accent-deep);
+  padding: 0.7rem 0.85rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.toast-notice--success p {
+  background: var(--surface-accent-strong);
+}
+
+@keyframes toast-notice-fade {
+  0% {
+    opacity: 0;
+    transform: translateY(-0.3rem);
+  }
+
+  10%,
+  82% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-0.3rem);
+  }
+}
+
 .button {
   display: inline-flex;
   align-items: center;
