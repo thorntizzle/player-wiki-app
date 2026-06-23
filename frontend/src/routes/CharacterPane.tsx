@@ -37,7 +37,17 @@ import type {
   CharacterXianxiaDaoUseRequestDraft,
   CharacterXianxiaVitalsDraft,
 } from "../characterPaneDrafts";
-import { xianxiaVitalsFields } from "../characterPaneDrafts";
+import {
+  buildCharacterPaneDraftSnapshot,
+  emptyCharacterControlsDraft,
+  emptyCharacterNotesDraft,
+  emptyCharacterPortraitDraft,
+  emptyCharacterVitalsDraft,
+  emptyCharacterXianxiaActiveStateDraft,
+  emptyCharacterXianxiaDaoUseRequestDraft,
+  emptyCharacterXianxiaVitalsDraft,
+  xianxiaVitalsFields,
+} from "../characterPaneDrafts";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 import { queryClient, useApiClient } from "../apiClientContext";
 import { TOAST_DISMISS_MS, ToastNotice } from "../components/feedback";
@@ -93,30 +103,14 @@ export function CharacterPane({
   const { apiClient, setAuthRequired } = useApiClient();
   const [selectedSlug, setSelectedSlug] = useState<string | null>(initialCharacterSlug);
   const [activeCharacterSection, setActiveCharacterSection] = useState<CharacterSection>(initialSection ?? "overview");
-  const [vitalsDraft, setVitalsDraft] = useState<CharacterVitalsDraft>({
-    expectedRevision: 0,
-    currentHp: "",
-    tempHp: "",
-  });
-  const [xianxiaVitalsDraft, setXianxiaVitalsDraft] = useState<CharacterXianxiaVitalsDraft>({
-    expectedRevision: 0,
-    currentHp: "",
-    tempHp: "",
-    currentStance: "",
-    tempStance: "",
-    currentJing: "",
-    currentQi: "",
-    currentShen: "",
-    currentYin: "",
-    currentYang: "",
-    currentDao: "",
-  });
-  const [xianxiaActiveDraft, setXianxiaActiveDraft] = useState<CharacterXianxiaActiveStateDraft>({
-    expectedRevision: 0,
-    activeStanceName: "",
-    activeAuraName: "",
-  });
-  const [notesDraft, setNotesDraft] = useState<CharacterNotesDraft>({ expectedRevision: 0, notes: "" });
+  const [vitalsDraft, setVitalsDraft] = useState<CharacterVitalsDraft>(emptyCharacterVitalsDraft);
+  const [xianxiaVitalsDraft, setXianxiaVitalsDraft] = useState<CharacterXianxiaVitalsDraft>(
+    emptyCharacterXianxiaVitalsDraft,
+  );
+  const [xianxiaActiveDraft, setXianxiaActiveDraft] = useState<CharacterXianxiaActiveStateDraft>(
+    emptyCharacterXianxiaActiveStateDraft,
+  );
+  const [notesDraft, setNotesDraft] = useState<CharacterNotesDraft>(emptyCharacterNotesDraft);
   const [resourceDrafts, setResourceDrafts] = useState<Record<string, string>>({});
   const [spellSlotDrafts, setSpellSlotDrafts] = useState<Record<string, string>>({});
   const [inventoryDrafts, setInventoryDrafts] = useState<Record<string, string>>({});
@@ -125,24 +119,14 @@ export function CharacterPane({
   const [newXianxiaInventoryDraft, setNewXianxiaInventoryDraft] = useState<CharacterXianxiaInventoryDraft>(
     xianxiaInventoryDraftFromItem(),
   );
-  const [xianxiaDaoRequestDraft, setXianxiaDaoRequestDraft] = useState<CharacterXianxiaDaoUseRequestDraft>({
-    requestName: "",
-    notes: "",
-    preparedRecordIndex: "",
-  });
+  const [xianxiaDaoRequestDraft, setXianxiaDaoRequestDraft] = useState<CharacterXianxiaDaoUseRequestDraft>(
+    emptyCharacterXianxiaDaoUseRequestDraft,
+  );
   const [xianxiaDaoUseNotesDrafts, setXianxiaDaoUseNotesDrafts] = useState<Record<string, string>>({});
   const [arcaneArmorDraft, setArcaneArmorDraft] = useState(false);
   const [currencyDraft, setCurrencyDraft] = useState<Record<string, string>>({});
-  const [portraitDraft, setPortraitDraft] = useState<CharacterPortraitDraft>({
-    file: null,
-    fileName: "",
-    altText: "",
-    caption: "",
-  });
-  const [controlsDraft, setControlsDraft] = useState<CharacterControlsDraft>({
-    assignedUserId: "",
-    deleteConfirmation: "",
-  });
+  const [portraitDraft, setPortraitDraft] = useState<CharacterPortraitDraft>(emptyCharacterPortraitDraft);
+  const [controlsDraft, setControlsDraft] = useState<CharacterControlsDraft>(emptyCharacterControlsDraft);
   const [restPreview, setRestPreview] = useState<CharacterRestPreviewResponse["preview"] | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -225,115 +209,22 @@ export function CharacterPane({
     if (!detailQuery.data) {
       return;
     }
-    const character = detailQuery.data.character;
-    const state = asRecord(character.state_record.state);
-    const vitals = asRecord(state.vitals);
-    const xianxiaState = asRecord(state.xianxia);
-    const xianxiaVitals = asRecord(xianxiaState.vitals);
-    const xianxiaEnergies = asRecord(xianxiaState.energies);
-    const xianxiaYinYang = asRecord(xianxiaState.yin_yang);
-    const xianxiaDao = asRecord(xianxiaState.dao);
-    const presentedXianxia = character.presented_xianxia;
-    const notes = asRecord(state.notes);
-    const nextResourceDrafts: Record<string, string> = {};
-    for (const resource of asRecordArray(state.resources)) {
-      const id = readString(resource.id);
-      if (id) {
-        nextResourceDrafts[id] = String(readNumber(resource.current));
-      }
-    }
-    const nextSpellSlotDrafts: Record<string, string> = {};
-    for (const slot of asRecordArray(state.spell_slots)) {
-      const key = draftKey(readNumber(slot.level), readString(slot.slot_lane_id));
-      nextSpellSlotDrafts[key] = String(readNumber(slot.used));
-    }
-    const nextInventoryDrafts: Record<string, string> = {};
-    for (const item of asRecordArray(state.inventory)) {
-      const id = readString(item.id);
-      if (id) {
-        nextInventoryDrafts[id] = String(readNumber(item.quantity, 1));
-      }
-    }
-    const nextXianxiaInventoryDrafts: Record<string, CharacterXianxiaInventoryDraft> = {};
-    for (const item of presentedXianxia?.inventory?.quantities ?? []) {
-      if (item.id) {
-        nextXianxiaInventoryDrafts[item.id] = xianxiaInventoryDraftFromItem(item);
-        nextInventoryDrafts[item.id] = String(readNumber(item.quantity, 1));
-      }
-    }
-    const nextXianxiaDaoUseNotesDrafts: Record<string, string> = {};
-    for (const group of presentedXianxia?.approval?.status_groups ?? []) {
-      if (group.key !== "dao_immolating_use_records") {
-        continue;
-      }
-      for (const record of group.records) {
-        nextXianxiaDaoUseNotesDrafts[xianxiaDaoUseRecordDraftKey(record)] = readString(record.use_notes);
-      }
-    }
-    const equipmentState = detailQuery.data.character.equipment_state;
-    const nextEquipmentDrafts: Record<string, CharacterEquipmentDraft> = {};
-    for (const item of equipmentState?.rows ?? []) {
-      if (item.id) {
-        nextEquipmentDrafts[item.id] = {
-          isEquipped: Boolean(item.is_equipped),
-          isAttuned: Boolean(item.is_attuned),
-          weaponWieldMode: item.weapon_wield_mode || "",
-        };
-      }
-    }
-    setEquipmentDrafts(nextEquipmentDrafts);
-    setXianxiaInventoryDrafts(nextXianxiaInventoryDrafts);
-    setXianxiaDaoUseNotesDrafts(nextXianxiaDaoUseNotesDrafts);
-    setXianxiaDaoRequestDraft({ requestName: "", notes: "", preparedRecordIndex: "" });
-    setArcaneArmorDraft(Boolean((detailQuery.data.character.arcane_armor_state ?? equipmentState?.arcane_armor_state)?.enabled));
-    const currency = isXianxiaCharacter(character) ? asRecord(xianxiaState.currency) : asRecord(state.currency);
-    const nextCurrencyDraft: Record<string, string> = {};
-    for (const key of ["cp", "sp", "ep", "gp", "pp", "coin", "supply", "spirit_stones"]) {
-      if (currency[key] !== undefined) {
-        nextCurrencyDraft[key] = String(readNumber(currency[key]));
-      }
-    }
-    setVitalsDraft({
-      expectedRevision: detailQuery.data.character.state_record.revision,
-      currentHp: String(readNumber(vitals.current_hp, 0)),
-      tempHp: String(readNumber(vitals.temp_hp, 0)),
-    });
-    setXianxiaVitalsDraft({
-      expectedRevision: detailQuery.data.character.state_record.revision,
-      currentHp: String(readNumber(vitals.current_hp, readNumber(xianxiaVitals.current_hp, 0))),
-      tempHp: String(readNumber(vitals.temp_hp, readNumber(xianxiaVitals.temp_hp, 0))),
-      currentStance: String(readNumber(xianxiaVitals.current_stance, 0)),
-      tempStance: String(readNumber(xianxiaVitals.temp_stance, 0)),
-      currentJing: String(readNumber(asRecord(xianxiaEnergies.jing).current, 0)),
-      currentQi: String(readNumber(asRecord(xianxiaEnergies.qi).current, 0)),
-      currentShen: String(readNumber(asRecord(xianxiaEnergies.shen).current, 0)),
-      currentYin: String(readNumber(xianxiaYinYang.yin_current, 0)),
-      currentYang: String(readNumber(xianxiaYinYang.yang_current, 0)),
-      currentDao: String(readNumber(xianxiaDao.current, 0)),
-    });
-    setXianxiaActiveDraft({
-      expectedRevision: detailQuery.data.character.state_record.revision,
-      activeStanceName: presentedXianxia?.active_state?.stance?.name ?? "",
-      activeAuraName: presentedXianxia?.active_state?.aura?.name ?? "",
-    });
-    setNotesDraft({
-      expectedRevision: detailQuery.data.character.state_record.revision,
-      notes: readString(notes.player_notes_markdown),
-    });
-    setResourceDrafts(nextResourceDrafts);
-    setSpellSlotDrafts(nextSpellSlotDrafts);
-    setInventoryDrafts(nextInventoryDrafts);
-    setCurrencyDraft(nextCurrencyDraft);
-    setPortraitDraft({
-      file: null,
-      fileName: "",
-      altText: character.portrait?.alt_text ?? "",
-      caption: character.portrait?.caption ?? "",
-    });
-    setControlsDraft({
-      assignedUserId: character.controls?.assignment?.user_id ? String(character.controls.assignment.user_id) : "",
-      deleteConfirmation: "",
-    });
+    const draftSnapshot = buildCharacterPaneDraftSnapshot(detailQuery.data.character);
+    setEquipmentDrafts(draftSnapshot.equipmentDrafts);
+    setXianxiaInventoryDrafts(draftSnapshot.xianxiaInventoryDrafts);
+    setXianxiaDaoUseNotesDrafts(draftSnapshot.xianxiaDaoUseNotesDrafts);
+    setXianxiaDaoRequestDraft(emptyCharacterXianxiaDaoUseRequestDraft());
+    setArcaneArmorDraft(draftSnapshot.arcaneArmorEnabled);
+    setVitalsDraft(draftSnapshot.vitalsDraft);
+    setXianxiaVitalsDraft(draftSnapshot.xianxiaVitalsDraft);
+    setXianxiaActiveDraft(draftSnapshot.xianxiaActiveDraft);
+    setNotesDraft(draftSnapshot.notesDraft);
+    setResourceDrafts(draftSnapshot.resourceDrafts);
+    setSpellSlotDrafts(draftSnapshot.spellSlotDrafts);
+    setInventoryDrafts(draftSnapshot.inventoryDrafts);
+    setCurrencyDraft(draftSnapshot.currencyDraft);
+    setPortraitDraft(draftSnapshot.portraitDraft);
+    setControlsDraft(draftSnapshot.controlsDraft);
     if (portraitFileInputRef.current) {
       portraitFileInputRef.current.value = "";
     }
