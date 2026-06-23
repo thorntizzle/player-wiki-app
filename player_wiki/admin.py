@@ -17,6 +17,13 @@ from .admin_audit import (
     load_user_audit_context,
     summarize_audit_event,
 )
+from .admin_context import (
+    get_assignment_form_defaults,
+    get_invite_form_defaults,
+    get_membership_form_defaults,
+    list_campaign_choices,
+    list_character_choices,
+)
 from .auth import admin_required, get_auth_store, get_current_user, get_repository
 from .auth_store import AuditEventRecord, AuthStore, UserAccount
 from .character_repository import CharacterRepository
@@ -28,27 +35,6 @@ def register_admin(app: Flask) -> None:
 
     def build_local_url(path: str) -> str:
         return f"{current_app.config['BASE_URL'].rstrip('/')}{path}"
-
-    def list_campaign_choices() -> list[dict[str, str]]:
-        repository = get_repository()
-        return [
-            {"slug": campaign.slug, "title": campaign.title}
-            for campaign in sorted(repository.campaigns.values(), key=lambda item: item.title.lower())
-        ]
-
-    def list_character_choices() -> list[dict[str, str]]:
-        choices: list[dict[str, str]] = []
-        for campaign in sorted(get_repository().campaigns.values(), key=lambda item: item.title.lower()):
-            for record in get_character_repository().list_visible_characters(campaign.slug):
-                choices.append(
-                    {
-                        "campaign_slug": campaign.slug,
-                        "character_slug": record.definition.character_slug,
-                        "label": f"{campaign.title} | {record.definition.name}",
-                        "value": f"{campaign.slug}::{record.definition.character_slug}",
-                    }
-                )
-        return choices
 
     def build_activity_url(
         endpoint: str,
@@ -75,48 +61,6 @@ def register_admin(app: Flask) -> None:
             "label": label,
             "meta": email if display_name and display_name != email else "",
             "href": url_for("admin_user_detail", user_id=user_id),
-        }
-
-    def get_membership_form_defaults(
-        user: UserAccount,
-        campaigns: list[dict[str, str]],
-    ) -> dict[str, str]:
-        requested_campaign_slug = request.args.get("edit_membership_campaign_slug", "").strip()
-        if requested_campaign_slug:
-            membership = get_auth_store().get_membership(user.id, requested_campaign_slug, statuses=None)
-            if membership is not None:
-                return {
-                    "campaign_slug": membership.campaign_slug,
-                    "role": membership.role,
-                    "status": membership.status,
-                }
-
-        default_campaign_slug = campaigns[0]["slug"] if campaigns else ""
-        return {
-            "campaign_slug": default_campaign_slug,
-            "role": "player",
-            "status": "active",
-        }
-
-    def get_assignment_form_defaults(character_choices: list[dict[str, str]]) -> dict[str, str]:
-        requested_campaign_slug = request.args.get("edit_assignment_campaign_slug", "").strip()
-        requested_character_slug = request.args.get("edit_assignment_character_slug", "").strip()
-        requested_ref = ""
-        if requested_campaign_slug and requested_character_slug:
-            requested_ref = f"{requested_campaign_slug}::{requested_character_slug}"
-
-        available_refs = {item["value"] for item in character_choices}
-        if requested_ref and requested_ref in available_refs:
-            return {"character_ref": requested_ref}
-
-        default_ref = character_choices[0]["value"] if character_choices else ""
-        return {"character_ref": default_ref}
-
-    def get_invite_form_defaults(campaigns: list[dict[str, str]]) -> dict[str, str]:
-        default_campaign_slug = campaigns[0]["slug"] if campaigns else ""
-        return {
-            "user_type": "player" if campaigns else "admin",
-            "campaign_slug": default_campaign_slug,
         }
 
     def render_audit_csv(
@@ -165,7 +109,7 @@ def register_admin(app: Flask) -> None:
         store = get_auth_store()
         repository = get_repository()
         users = store.list_users()
-        campaign_choices = list_campaign_choices()
+        campaign_choices = list_campaign_choices(repository)
         campaign_lookup = {campaign.slug: campaign.title for campaign in repository.campaigns.values()}
 
         user_cards: list[dict[str, Any]] = []
@@ -213,8 +157,8 @@ def register_admin(app: Flask) -> None:
     def build_user_detail_context(user: UserAccount) -> dict[str, Any]:
         store = get_auth_store()
         repository = get_repository()
-        campaigns = list_campaign_choices()
-        character_choices = list_character_choices()
+        campaigns = list_campaign_choices(repository)
+        character_choices = list_character_choices(repository, get_character_repository())
         campaign_lookup = {campaign.slug: campaign.title for campaign in repository.campaigns.values()}
         memberships = store.list_memberships_for_user(
             user.id,
@@ -250,8 +194,8 @@ def register_admin(app: Flask) -> None:
             "assignments": assignments,
             "campaign_lookup": campaign_lookup,
             "audit_event_type_choices": list_audit_event_type_choices(),
-            "membership_form_defaults": get_membership_form_defaults(user, campaigns),
-            "assignment_form_defaults": get_assignment_form_defaults(character_choices),
+            "membership_form_defaults": get_membership_form_defaults(request.args, store, user.id, campaigns),
+            "assignment_form_defaults": get_assignment_form_defaults(request.args, character_choices),
             "can_manage_account": current_user is not None and current_user.id != user.id,
             **user_audit_context,
         }
@@ -310,7 +254,7 @@ def register_admin(app: Flask) -> None:
     @admin_required
     def admin_activity_export():
         store = get_auth_store()
-        campaign_choices = list_campaign_choices()
+        campaign_choices = list_campaign_choices(get_repository())
         campaign_lookup = {campaign.slug: campaign.title for campaign in get_repository().campaigns.values()}
         activity_filters = get_activity_filters(request.args, campaign_choices)
         events = list_all_dashboard_audit_events(store, activity_filters)
@@ -413,7 +357,7 @@ def register_admin(app: Flask) -> None:
     def admin_user_activity_export(user_id: int):
         user = require_user(user_id)
         store = get_auth_store()
-        campaign_choices = list_campaign_choices()
+        campaign_choices = list_campaign_choices(get_repository())
         campaign_lookup = {campaign.slug: campaign.title for campaign in get_repository().campaigns.values()}
         activity_filters = get_activity_filters(request.args, campaign_choices)
         events = list_all_user_audit_events(store, activity_filters, user_id=user.id)
