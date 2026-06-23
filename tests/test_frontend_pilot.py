@@ -1244,6 +1244,24 @@ def test_character_portrait_manager_action_chrome_in_source() -> None:
     assert "character-portrait-manager__fields" not in section_markup
 
 
+def test_character_summary_card_chrome_in_source() -> None:
+    source = Path("frontend/src/components/CharacterSummaryCard.tsx").read_text(encoding="utf-8")
+
+    assert 'className="character-summary"' in source
+    assert 'className="character-summary__main"' in source
+    assert 'className="character-portrait"' in source
+    assert 'alt={selectedPortrait.alt_text || selected.name}' in source
+    assert 'className="plain-list resource-preview-list"' in source
+    assert "HP: {currentHp} / {maxHp}" in source
+    assert "Temp HP: {tempHp}" in source
+    assert "Hit Dice: {selected.hit_dice.value}" in source
+    assert 'Class: {selected.class_level_text || "Unknown"}' in source
+    assert "System: {systemLabel}" in source
+    assert "{children}" in source
+    assert 'className="character-state-card"' not in source
+    assert 'className="button-row character-portrait-manager__actions"' not in source
+
+
 def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
     source = Path("frontend/src/components/DmArticleCreator.tsx").read_text(encoding="utf-8")
     component_start = source.index("function DmArticleCreator({")

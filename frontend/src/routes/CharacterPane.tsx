@@ -57,6 +57,7 @@ import {
 } from "../components/CharacterDetailDialog";
 import { CharacterControlsSection } from "../components/CharacterControlsSection";
 import { CharacterPortraitManager } from "../components/CharacterPortraitManager";
+import { CharacterSummaryCard } from "../components/CharacterSummaryCard";
 import { CharacterDndAbilitySkillsSection } from "../components/CharacterDndAbilitySkillsSection";
 import { CharacterDndEquipmentSection } from "../components/CharacterDndEquipmentSection";
 import { CharacterDndInventorySection } from "../components/CharacterDndInventorySection";
@@ -1219,35 +1220,14 @@ export function CharacterPane({
         {detailQuery.isLoading ? <p className="status status-neutral">Loading character...</p> : null}
 
         {selected ? (
-          <article className="character-summary">
-            <div className="character-summary__main">
-              {selectedPortrait ? (
-                <figure className="character-portrait">
-                  <img src={selectedPortrait.url} alt={selectedPortrait.alt_text || selected.name} />
-                  {selectedPortrait.caption ? <figcaption className="meta">{selectedPortrait.caption}</figcaption> : null}
-                </figure>
-              ) : null}
-              <div>
-                <h3>{selected.name}</h3>
-                <p>
-                  HP: {readNumber(vitals.current_hp, selected.current_hp)} / {readNumber(stats.max_hp, selected.max_hp)}
-                </p>
-                <p>Temp HP: {readNumber(vitals.temp_hp, selected.temp_hp)}</p>
-                {selected.hit_dice?.value ? <p>Hit Dice: {selected.hit_dice.value}</p> : null}
-                <p>Class: {selected.class_level_text || "Unknown"}</p>
-                <p>System: {characterSystem(detailRecord)}</p>
-              </div>
-            </div>
-            {selected.resource_preview?.length ? (
-              <ul className="plain-list resource-preview-list">
-                {selected.resource_preview.map((resource) => (
-                  <li key={`${resource.label}-${resource.value}`}>
-                    <span>{resource.label}</span>
-                    <strong>{resource.value}</strong>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
+          <CharacterSummaryCard
+            currentHp={readNumber(vitals.current_hp, selected.current_hp)}
+            maxHp={readNumber(stats.max_hp, selected.max_hp)}
+            selected={selected}
+            selectedPortrait={selectedPortrait}
+            systemLabel={characterSystem(detailRecord)}
+            tempHp={readNumber(vitals.temp_hp, selected.temp_hp)}
+          >
             {canManagePortrait ? (
               <CharacterPortraitManager
                 handlePortraitFileChange={handlePortraitFileChange}
@@ -1260,7 +1240,7 @@ export function CharacterPane({
                 submitPortrait={submitPortrait}
               />
             ) : null}
-          </article>
+          </CharacterSummaryCard>
         ) : null}
 
         {selected && detailRecord ? (
