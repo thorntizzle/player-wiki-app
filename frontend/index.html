@@ -52,6 +52,38 @@
         overflow: hidden;
       }
 
+      html.app-loading::before,
+      html.app-loading::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: 2147483645;
+        pointer-events: none;
+        transition: opacity var(--app-loading-dismiss-duration) ease;
+      }
+
+      html.app-loading::before {
+        background: var(--app-loading-bg);
+        opacity: 1;
+      }
+
+      html.app-loading::after {
+        background-image: var(--app-loading-visible-media, var(--app-loading-media));
+        background-position: center;
+        background-repeat: no-repeat;
+        background-size: contain;
+        opacity: 0;
+      }
+
+      html.app-loading.app-loading-media-ready::after {
+        opacity: var(--app-loading-media-opacity);
+      }
+
+      html.app-loading-closing::before,
+      html.app-loading-closing::after {
+        opacity: 0;
+      }
+
       .app-loading-cover {
         position: fixed;
         inset: 0;

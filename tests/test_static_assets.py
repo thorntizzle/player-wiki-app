@@ -58,6 +58,8 @@ def test_base_template_includes_inline_loading_bootstrap_and_cover(client):
     assert "cpw:app-loading-nav-start" in html
     assert "app-loading-closing" in html
     assert "prefers-reduced-motion" in html
+    assert "html.app-loading::before" in html
+    assert "html.app-loading::after" in html
     assert "function markLoadingDelayed()" in html
     assert "Still loading campaign player wiki..." in html
     assert ".app-loading-cover__media" in html
@@ -514,11 +516,17 @@ def test_browser_shows_loading_cover_while_stylesheet_streams(static_asset_live_
             loading_snapshot_during_delay = page.evaluate(
                 """() => {
                     const cover = document.querySelector('.app-loading-cover');
+                    const rootBefore = getComputedStyle(document.documentElement, '::before');
+                    const rootAfter = getComputedStyle(document.documentElement, '::after');
                     return {
                       hasLoadingClass: document.documentElement.classList.contains('app-loading'),
                       coverOpacity: cover ? getComputedStyle(cover).opacity : null,
                       pageShellOpacity: getComputedStyle(document.querySelector('.page-shell')).opacity,
                       pageShellVisibility: getComputedStyle(document.querySelector('.page-shell')).visibility,
+                      rootCoverContent: rootBefore.content,
+                      rootCoverPosition: rootBefore.position,
+                      rootCoverInsetTop: rootBefore.top,
+                      rootMediaContent: rootAfter.content,
                     };
                 }"""
             )
@@ -526,6 +534,10 @@ def test_browser_shows_loading_cover_while_stylesheet_streams(static_asset_live_
             assert loading_snapshot_during_delay["coverOpacity"] == "1"
             assert loading_snapshot_during_delay["pageShellOpacity"] == "0"
             assert loading_snapshot_during_delay["pageShellVisibility"] == "hidden"
+            assert loading_snapshot_during_delay["rootCoverContent"] != "none"
+            assert loading_snapshot_during_delay["rootCoverPosition"] == "fixed"
+            assert loading_snapshot_during_delay["rootCoverInsetTop"] == "0px"
+            assert loading_snapshot_during_delay["rootMediaContent"] != "none"
 
             page.wait_for_load_state("load", timeout=12000)
 

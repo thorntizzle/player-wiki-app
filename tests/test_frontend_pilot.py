@@ -210,6 +210,8 @@ def test_frontend_index_includes_app_loading_shell_source() -> None:
     assert 'class="app-loading-cover"' in source
     assert ".app-loading-cover__media" in source
     assert "html.app-loading #root" in source
+    assert "html.app-loading::before" in source
+    assert "html.app-loading::after" in source
     assert "failOpenDelayMs = 12000" in source
     assert "/app-next/assets/" in source
     assert "__cpwAppLoadingBegin" in source
