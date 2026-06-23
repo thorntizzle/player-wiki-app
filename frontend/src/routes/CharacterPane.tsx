@@ -59,6 +59,7 @@ import { CharacterControlsSection } from "../components/CharacterControlsSection
 import { CharacterDndAbilitySkillsSection } from "../components/CharacterDndAbilitySkillsSection";
 import { CharacterDndOverviewSection } from "../components/CharacterDndOverviewSection";
 import { CharacterDndResourcesSection } from "../components/CharacterDndResourcesSection";
+import { CharacterDndSpellsSection } from "../components/CharacterDndSpellsSection";
 import { CharacterNotesSection } from "../components/CharacterNotesSection";
 import { CharacterPersonalSection } from "../components/CharacterPersonalSection";
 import {
@@ -81,8 +82,6 @@ import {
   isDndCharacter,
   isXianxiaCharacter,
   joinDisplay,
-  presentedSpellCardDetailLine,
-  rawSpellCardDetailLine,
   spellDetailFacts,
   xianxiaCharacterSections,
   xianxiaDaoUseRecordDraftKey,
@@ -2938,165 +2937,21 @@ export function CharacterPane({
             ) : null}
 
             {isDnd && activeCharacterSection === "spells" ? (
-              <section className="read-section" id="session-spell-slots">
-                <div className="section-heading">
-                  <h2>Spells</h2>
-                </div>
-                <div className="detail-grid spellcasting-summary-grid">
-                  <article className="detail-card spellcasting-class-card">
-                    <h3>Spellcasting</h3>
-                    <p className="meta">Ability: {String(spellcasting.spellcasting_ability ?? "--")}</p>
-                    <p className="meta">Save DC: {String(spellcasting.spell_save_dc ?? "--")}</p>
-                    <p className="meta">Attack: {String(spellcasting.spell_attack_bonus ?? "--")}</p>
-                  </article>
-                </div>
-                {spellSlots.length ? (
-                  <div className="spell-slot-editor-list spell-slot-editor-list--compact">
-                    {spellSlots.map((slot) => {
-                      const level = readNumber(slot.level);
-                      const slotLaneId = readString(slot.slot_lane_id);
-                      const key = draftKey(level, slotLaneId);
-                      const used = readNumber(slot.used);
-                      const max = readNumber(slot.max);
-                      const available = readNumber(slot.available, Math.max(0, max - used));
-                      const slotLabel = readString(slot.label, `Level ${level}`);
-                      return (
-                        <article className="detail-card" key={key}>
-                          {canEdit ? (
-                            <form
-                              onSubmit={(event) => submitSpellSlot(event, slot)}
-                              className="session-inline-form"
-                              data-character-sheet-edit-form="spell-slot"
-                              data-character-sheet-edit-level={level}
-                              data-character-sheet-edit-slot-lane-id={slotLaneId}
-                              data-character-autosubmit
-                            >
-                              <div className="section-heading">
-                                <h3>{slotLabel}</h3>
-                                <span className="meta">
-                                  {available} available / {max}
-                                </span>
-                              </div>
-                              <label className="session-field" htmlFor={`spell-slot-${key}`}>
-                                <span>Used</span>
-                                <input
-                                  id={`spell-slot-${key}`}
-                                  type="number"
-                                  min="0"
-                                  max={max}
-                                  value={spellSlotDrafts[key] ?? ""}
-                                  onChange={(event) =>
-                                    setSpellSlotDrafts({ ...spellSlotDrafts, [key]: event.currentTarget.value })
-                                  }
-                                  onBlur={submitSpellSlotOnBlur}
-                                />
-                              </label>
-                              <button type="submit" className="visually-hidden" disabled={patchSpellSlot.isPending || !canEdit}>
-                                Update {slotLabel}
-                              </button>
-                            </form>
-                          ) : (
-                            <>
-                              <div className="section-heading">
-                                <h3>{slotLabel}</h3>
-                                <span className="meta">
-                                  {available} available / {max}
-                                </span>
-                              </div>
-                              <p>Used {used} / {max}</p>
-                            </>
-                          )}
-                        </article>
-                      );
-                    })}
-                  </div>
-                ) : null}
-                {presentedSpells.length ? (
-                  <div className="spell-level-groups">
-                    {presentedSpellGroups.map((group) => (
-                      <section className="spell-level-group" key={group.key}>
-                        <div className="spell-level-group__heading">
-                          <h3>{group.label}</h3>
-                        </div>
-                        <div className="spell-card-grid spell-card-grid--level">
-                          {group.spells.map((spell) => {
-                            const detailLine = presentedSpellCardDetailLine(spell);
-                            const levelSchool = [spell.level_label, spell.school].filter(Boolean).join(" | ");
-                            const spellCardContent = (
-                              <>
-                                <span className="spell-card__name">{spell.name || "Spell"}</span>
-                                <span className="spell-card__eyebrow">{levelSchool || "Spell"}</span>
-                                {spell.badges?.length ? (
-                                  <span className="badge-list spell-card__badges">
-                                    {spell.badges.map((badge) => (
-                                      <span className="meta-badge" key={badge}>
-                                        {badge}
-                                      </span>
-                                    ))}
-                                  </span>
-                                ) : null}
-                                {detailLine ? <span className="spell-card__meta">{detailLine}</span> : null}
-                              </>
-                            );
-                            return (
-                              <article
-                                className="spell-card"
-                                key={draftKey(spell.class_row_id, spell.name, spell.level_label)}
-                              >
-                                {spell.description_html || spell.href ? (
-                                  <button
-                                    type="button"
-                                    className="spell-card__main"
-                                    aria-haspopup="dialog"
-                                    onClick={() => openSpellDetail(spell)}
-                                  >
-                                    {spellCardContent}
-                                  </button>
-                                ) : (
-                                  <span className="spell-card__main">{spellCardContent}</span>
-                                )}
-                              </article>
-                            );
-                          })}
-                        </div>
-                      </section>
-                    ))}
-                  </div>
-                ) : spells.length ? (
-                  <div className="spell-level-groups">
-                    {rawSpellGroups.map((group) => (
-                      <section className="spell-level-group" key={group.key}>
-                        <div className="spell-level-group__heading">
-                          <h3>{group.label}</h3>
-                        </div>
-                        <div className="spell-card-grid spell-card-grid--level">
-                          {group.spells.map((spell) => {
-                            const mark = readString(spell.mark);
-                            const detailLine = rawSpellCardDetailLine(spell);
-                            const levelSchool = [readString(spell.level_label), readString(spell.school)]
-                              .filter(Boolean)
-                              .join(" | ");
-                            return (
-                              <article className="spell-card" key={readString(spell.id, readString(spell.name))}>
-                                <span className="spell-card__main">
-                                  <span className="spell-card__name">{readString(spell.name, "Spell")}</span>
-                                  {levelSchool ? <span className="spell-card__eyebrow">{levelSchool}</span> : null}
-                                  {mark ? (
-                                    <span className="badge-list spell-card__badges">
-                                      <span className="meta-badge">{mark}</span>
-                                    </span>
-                                  ) : null}
-                                  {detailLine ? <span className="spell-card__meta">{detailLine}</span> : null}
-                                </span>
-                              </article>
-                            );
-                          })}
-                        </div>
-                      </section>
-                    ))}
-                  </div>
-                ) : null}
-              </section>
+              <CharacterDndSpellsSection
+                canEdit={canEdit}
+                isSaving={patchSpellSlot.isPending}
+                openSpellDetail={openSpellDetail}
+                presentedSpellGroups={presentedSpellGroups}
+                presentedSpells={presentedSpells}
+                rawSpellGroups={rawSpellGroups}
+                spellcasting={spellcasting}
+                spells={spells}
+                spellSlotDrafts={spellSlotDrafts}
+                spellSlots={spellSlots}
+                setSpellSlotDrafts={setSpellSlotDrafts}
+                submitSpellSlot={submitSpellSlot}
+                submitSpellSlotOnBlur={submitSpellSlotOnBlur}
+              />
             ) : null}
 
 

@@ -2183,11 +2183,10 @@ def test_character_dnd_resources_section_uses_flask_style_row_form_chrome() -> N
 
 
 def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/components/CharacterDndSpellsSection.tsx").read_text(encoding="utf-8")
     styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
-    section_start = source.index('{isDnd && activeCharacterSection === "spells" ? (')
-    section_end = source.index('{isDnd && activeCharacterSection === "equipment" ? (', section_start)
-    section_markup = source[section_start:section_end]
+    section_markup = source
 
     controls_start = section_markup.index('{spellSlots.length ? (')
     controls_end = section_markup.index('{presentedSpells.length ? (', controls_start)
@@ -2208,7 +2207,7 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
     assert 'onBlur={submitSpellSlotOnBlur}' in slot_controls_markup
     assert (
         re.search(
-            r'<button type="submit" className="visually-hidden" disabled=\{patchSpellSlot\.isPending \|\| !canEdit\}>\s*Update \{slotLabel\}\s*</button>',
+            r'<button type="submit" className="visually-hidden" disabled=\{isSaving \|\| !canEdit\}>\s*Update \{slotLabel\}\s*</button>',
             slot_controls_markup,
         )
         is not None
@@ -2234,7 +2233,7 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
     assert "Save DC:" in section_markup
     assert "Attack:" in section_markup
 
-    assert "groupSpellsByLevel" in source
+    assert "groupSpellsByLevel" in route_source
     assert "presentedSpellGroups" in section_markup
     assert "rawSpellGroups" in section_markup
     assert 'className="spell-level-groups"' in section_markup
