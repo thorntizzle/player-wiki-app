@@ -47,6 +47,19 @@ export function draftKey(...parts: Array<string | number | null | undefined>): s
   return parts.map((part) => String(part ?? "")).join("::");
 }
 
+export interface CharacterNumberInputParseResult {
+  value: number | null;
+  errorMessage: string | null;
+}
+
+export function parseCharacterNumberInput(value: string, label: string): CharacterNumberInputParseResult {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return { value: null, errorMessage: `Enter a valid ${label}.` };
+  }
+  return { value: parsed, errorMessage: null };
+}
+
 function spellLevelLabel(value: string): string {
   const label = value.trim();
   return label || "Spells";

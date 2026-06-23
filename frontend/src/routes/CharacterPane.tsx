@@ -94,6 +94,7 @@ import {
   isDndCharacter,
   isXianxiaCharacter,
   joinDisplay,
+  parseCharacterNumberInput,
   spellDetailDialogState,
   xianxiaCharacterSections,
   xianxiaDaoUseRecordDraftKey,
@@ -623,13 +624,13 @@ export function CharacterPane({
   });
 
   const parseNumberInput = (value: string, label: string): number | null => {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) {
-      setErrorMessage(`Enter a valid ${label}.`);
+    const result = parseCharacterNumberInput(value, label);
+    if (result.errorMessage) {
+      setErrorMessage(result.errorMessage);
       setStatusMessage(null);
       return null;
     }
-    return parsed;
+    return result.value;
   };
 
   const handlePortraitFileChange = (event: ChangeEvent<HTMLInputElement>) => {

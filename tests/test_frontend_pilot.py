@@ -393,6 +393,20 @@ def test_character_detail_dialog_state_builders_live_in_shared_utils() -> None:
     assert "setDetailDialog(spellDetailDialogState(spell));" in route_source
 
 
+def test_character_number_input_parser_lives_in_shared_utils() -> None:
+    source = Path("frontend/src/characterPaneUtils.ts").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+
+    assert "export function parseCharacterNumberInput" in source
+    assert "const parsed = Number(value);" in source
+    assert "Number.isFinite(parsed)" in source
+    assert 'return { value: null, errorMessage: `Enter a valid ${label}.` };' in source
+    assert "return { value: parsed, errorMessage: null };" in source
+    assert "parseCharacterNumberInput(value, label)" in route_source
+    assert "setErrorMessage(result.errorMessage)" in route_source
+    assert "setStatusMessage(null)" in route_source
+
+
 def test_admin_user_detail_action_button_chrome_in_source() -> None:
     source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
     admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]
