@@ -231,8 +231,9 @@ def register_admin(app: Flask) -> None:
     @admin_required
     def admin_activity_export():
         store = get_auth_store()
-        campaign_choices = list_campaign_choices(get_repository())
-        campaign_lookup = {campaign.slug: campaign.title for campaign in get_repository().campaigns.values()}
+        repository = get_repository()
+        campaign_choices = list_campaign_choices(repository)
+        campaign_lookup = build_campaign_lookup(repository)
         activity_filters = get_activity_filters(request.args, campaign_choices)
         events = list_all_dashboard_audit_events(store, activity_filters)
         return render_audit_csv(
@@ -334,8 +335,9 @@ def register_admin(app: Flask) -> None:
     def admin_user_activity_export(user_id: int):
         user = require_user(user_id)
         store = get_auth_store()
-        campaign_choices = list_campaign_choices(get_repository())
-        campaign_lookup = {campaign.slug: campaign.title for campaign in get_repository().campaigns.values()}
+        repository = get_repository()
+        campaign_choices = list_campaign_choices(repository)
+        campaign_lookup = build_campaign_lookup(repository)
         activity_filters = get_activity_filters(request.args, campaign_choices)
         events = list_all_user_audit_events(store, activity_filters, user_id=user.id)
         return render_audit_csv(
