@@ -2074,6 +2074,30 @@ def test_character_dnd_abilities_and_skills_section_uses_compact_skill_proficien
     assert "Passive Investigation" not in section_markup
 
 
+def test_character_controls_section_keeps_flask_card_form_chrome() -> None:
+    source = Path("frontend/src/components/CharacterControlsSection.tsx").read_text(encoding="utf-8")
+
+    assert 'className="read-section character-controls-panel"' in source
+    assert 'className="detail-grid character-controls-grid"' in source
+    assert 'className="detail-card"' in source
+    assert 'className="ghost-button"' in source
+    assert 'className="stack-form"' in source
+    assert 'className="field"' in source
+    assert "Player controls" in source
+    assert "Current owner" in source
+    assert "Open user record" in source
+    assert "Save assignment" in source
+    assert "Clear assignment" in source
+    assert 'className="detail-card character-controls-card--danger"' in source
+    assert "Delete character" in source
+    assert "Type <code>{characterSlug}</code> to confirm" in source
+
+    assert 'className="character-state-card"' not in source
+    assert 'className="button-row"' not in source
+    assert 'className="button button-secondary"' not in source
+    assert "Flask Controls" not in source
+
+
 def test_character_dnd_equipment_section_uses_flask_style_row_form_chrome() -> None:
     source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "equipment" ? (')

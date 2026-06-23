@@ -55,6 +55,7 @@ import {
   CharacterDetailDialog,
   type CharacterDetailDialogState,
 } from "../components/CharacterDetailDialog";
+import { CharacterControlsSection } from "../components/CharacterControlsSection";
 import { CharacterDndAbilitySkillsSection } from "../components/CharacterDndAbilitySkillsSection";
 import {
   asRecord,
@@ -3499,124 +3500,20 @@ export function CharacterPane({
             ) : null}
 
             {isReadSurface && activeCharacterSection === "controls" && canUseControls && controls ? (
-              <section className="read-section character-controls-panel">
-                <div className="section-heading">
-                  <h2>Controls</h2>
-                </div>
-                <div className="detail-grid character-controls-grid">
-                  <article className="detail-card">
-                    <h3>Player controls</h3>
-                    {controls.current_user_is_owner ? (
-                      <p>Player-controls workspace for {selected.name}.</p>
-                    ) : (
-                      <p>Character management controls for campaign staff.</p>
-                    )}
-                  </article>
-                  <article className="detail-card">
-                    <h3>Current owner</h3>
-                    {controls.assignment ? (
-                      <>
-                        <p>
-                          <strong>{controls.assignment.display_name}</strong>
-                          {controls.assignment.email ? <span className="meta"> | {controls.assignment.email}</span> : null}
-                        </p>
-                        <p className="meta">
-                          Assignment: {controls.assignment.assignment_type
-                            ? `${controls.assignment.assignment_type.charAt(0).toUpperCase()}${controls.assignment.assignment_type.slice(1)}`
-                            : "Owner"}
-                        </p>
-                        {controls.assignment.admin_href ? (
-                          <a className="ghost-button" href={controls.assignment.admin_href}>
-                            Open user record
-                          </a>
-                        ) : null}
-                      </>
-                    ) : (
-                      <p className="meta">No player owner assigned yet.</p>
-                    )}
-                  </article>
-                </div>
-
-                {controls.can_assign_owner ? (
-                  <div className="detail-grid character-controls-grid">
-                    <article className="detail-card character-controls-manager">
-                      <h3>Assignment controls</h3>
-                      <p className="meta">Assignments require an active player membership in this campaign.</p>
-                      {controls.player_choices.length ? (
-                        <form onSubmit={submitCharacterAssignment} className="stack-form">
-                          <label className="field">
-                            <span>Assign owner</span>
-                            <select
-                              id="character-owner-assignment"
-                              value={controlsDraft.assignedUserId}
-                              disabled={controlsMutationPending}
-                              required
-                              onChange={(event) =>
-                                setControlsDraft({ ...controlsDraft, assignedUserId: event.currentTarget.value })
-                              }
-                            >
-                              <option value="">Choose a player</option>
-                              {controls.player_choices.map((choice) => (
-                                <option key={choice.user_id} value={String(choice.user_id)}>
-                                  {choice.label}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <button type="submit" disabled={controlsMutationPending || !controlsDraft.assignedUserId}>
-                            {assignCharacterOwner.isPending ? "Saving..." : "Save assignment"}
-                          </button>
-                        </form>
-                      ) : (
-                        <p className="meta">No active player memberships are available for assignment in this campaign.</p>
-                      )}
-                      {controls.assignment ? (
-                        <form className="stack-form" onSubmit={(event) => { event.preventDefault(); clearCharacterAssignment(); }}>
-                          <button type="submit" disabled={controlsMutationPending}>
-                            {clearCharacterOwner.isPending ? "Clearing..." : "Clear assignment"}
-                          </button>
-                        </form>
-                      ) : null}
-                    </article>
-                  </div>
-                ) : null}
-
-                {controls.can_delete_character ? (
-                  <div className="detail-grid character-controls-grid">
-                    <article className="detail-card character-controls-card--danger">
-                      <h3>Delete character</h3>
-                      <p>
-                        Deleting a character removes the file-backed definition/import metadata, the live character state,
-                        and any current assignment for this character slug.
-                      </p>
-                      <form onSubmit={submitCharacterDelete} className="stack-form">
-                        <label className="field">
-                          <span>
-                            Type <code>{selected.slug}</code> to confirm
-                          </span>
-                          <input
-                            id="character-delete-confirmation"
-                            type="text"
-                            autoComplete="off"
-                            spellCheck={false}
-                            value={controlsDraft.deleteConfirmation}
-                            disabled={controlsMutationPending}
-                            onChange={(event) =>
-                              setControlsDraft({ ...controlsDraft, deleteConfirmation: event.currentTarget.value })
-                            }
-                          />
-                        </label>
-                        <button
-                          type="submit"
-                          disabled={controlsMutationPending || controlsDraft.deleteConfirmation.trim() !== selected.slug}
-                        >
-                          {deleteCharacterMutation.isPending ? "Deleting..." : "Delete character"}
-                        </button>
-                      </form>
-                    </article>
-                  </div>
-                ) : null}
-              </section>
+              <CharacterControlsSection
+                characterName={selected.name}
+                characterSlug={selected.slug}
+                clearCharacterAssignment={clearCharacterAssignment}
+                controls={controls}
+                controlsDraft={controlsDraft}
+                controlsMutationPending={controlsMutationPending}
+                isAssigningOwner={assignCharacterOwner.isPending}
+                isClearingOwner={clearCharacterOwner.isPending}
+                isDeletingCharacter={deleteCharacterMutation.isPending}
+                setControlsDraft={setControlsDraft}
+                submitCharacterAssignment={submitCharacterAssignment}
+                submitCharacterDelete={submitCharacterDelete}
+              />
             ) : null}
 
             {((isDnd || isXianxia) ? activeCharacterSection === "notes" : !isDnd) ? (
