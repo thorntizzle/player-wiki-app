@@ -56,6 +56,7 @@ import {
   type CharacterDetailDialogState,
 } from "../components/CharacterDetailDialog";
 import { CharacterControlsSection } from "../components/CharacterControlsSection";
+import { CharacterEmbeddedSectionNav } from "../components/CharacterEmbeddedSectionNav";
 import { CharacterNavigationCard } from "../components/CharacterNavigationCard";
 import { CharacterPortraitManager } from "../components/CharacterPortraitManager";
 import { CharacterSummaryCard } from "../components/CharacterSummaryCard";
@@ -1346,43 +1347,20 @@ export function CharacterPane({
             </section>
 
             {isDnd && !isReadSurface ? (
-              <nav className="combat-workspace-nav session-character-section-nav" aria-label="Session character sections">
-                {dndVisibleCharacterSections.map((section) => {
-                  const isActive = activeCharacterSection === section.id;
-                  return (
-                    <button
-                      key={section.id}
-                      type="button"
-                      className={`ghost-button combat-workspace-button${isActive ? " combat-workspace-button--active" : ""}`}
-                      aria-pressed={isActive}
-                      aria-current={isActive ? "page" : undefined}
-                      onClick={() => selectCharacterSection(section.id)}
-                    >
-                      {section.label}
-                    </button>
-                  );
-                })}
-              </nav>
+              <CharacterEmbeddedSectionNav
+                activeCharacterSection={activeCharacterSection}
+                selectCharacterSection={selectCharacterSection}
+                sections={dndVisibleCharacterSections}
+                variant="dnd"
+              />
             ) : null}
             {isXianxia && !isReadSurface ? (
-              <div className="character-subpage-nav-card">
-                <nav className="character-subpage-nav" aria-label="Character subpages">
-                  {xianxiaVisibleCharacterSections.map((section) => {
-                    const isActive = activeCharacterSection === section.id;
-                    return (
-                      <button
-                        key={section.id}
-                        type="button"
-                        className={isActive ? "button-link" : "ghost-button"}
-                        aria-current={isActive ? "page" : undefined}
-                        onClick={() => selectCharacterSection(section.id)}
-                      >
-                        {section.label}
-                      </button>
-                    );
-                  })}
-                </nav>
-              </div>
+              <CharacterEmbeddedSectionNav
+                activeCharacterSection={activeCharacterSection}
+                selectCharacterSection={selectCharacterSection}
+                sections={xianxiaVisibleCharacterSections}
+                variant="xianxia"
+              />
             ) : null}
 
             {isXianxia && activeCharacterSection === "quick-reference" ? (

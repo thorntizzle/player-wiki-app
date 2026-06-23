@@ -315,6 +315,21 @@ def test_character_navigation_card_uses_flask_style_chrome_in_source() -> None:
     assert "className=\"chat-label\"" not in source
 
 
+def test_character_embedded_section_nav_uses_flask_style_chrome_in_source() -> None:
+    source = Path("frontend/src/components/CharacterEmbeddedSectionNav.tsx").read_text(encoding="utf-8")
+
+    assert '<nav className="combat-workspace-nav session-character-section-nav" aria-label="Session character sections">' in source
+    assert 'className={`ghost-button combat-workspace-button${isActive ? " combat-workspace-button--active" : ""}`}' in source
+    assert "aria-pressed={isActive}" in source
+    assert 'aria-current={isActive ? "page" : undefined}' in source
+    assert 'className="character-subpage-nav-card"' in source
+    assert '<nav className="character-subpage-nav" aria-label="Character subpages">' in source
+    assert 'className={isActive ? "button-link" : "ghost-button"}' in source
+    assert "onClick={() => selectCharacterSection(section.id)}" in source
+    assert "className=\"section-tabs\"" not in source
+    assert "className=\"chat-label\"" not in source
+
+
 def test_admin_user_detail_action_button_chrome_in_source() -> None:
     source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
     admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]
