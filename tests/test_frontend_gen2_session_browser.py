@@ -274,7 +274,7 @@ def test_gen2_loading_cover_keeps_prepared_media_during_navigation(
                   return Boolean(
                     cover
                     && cover.classList.contains('app-loading-cover--media-ready')
-                    && cover.style.getPropertyValue('--app-loading-media').includes('url(')
+                    && cover.getAttribute('data-app-loading-prepared-media-url')
                   );
                 }""",
                 timeout=5000,
@@ -282,7 +282,7 @@ def test_gen2_loading_cover_keeps_prepared_media_during_navigation(
             prepared_media = page.evaluate(
                 """() => {
                   const cover = document.querySelector('.app-loading-cover');
-                  return cover ? cover.style.getPropertyValue('--app-loading-media') : '';
+                  return cover ? cover.getAttribute('data-app-loading-prepared-media-url') || '' : '';
                 }"""
             )
 
@@ -292,10 +292,10 @@ def test_gen2_loading_cover_keeps_prepared_media_during_navigation(
             visible_media = page.evaluate(
                 """() => {
                   const cover = document.querySelector('.app-loading-cover');
-                  return cover ? cover.style.getPropertyValue('--app-loading-media') : '';
+                  return cover ? cover.style.getPropertyValue('--app-loading-visible-media') : '';
                 }"""
             )
-            assert visible_media == prepared_media
+            assert prepared_media in visible_media
 
             page.evaluate("window.__cpwAppLoadingReady()")
             expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)

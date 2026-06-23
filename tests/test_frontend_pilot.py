@@ -221,7 +221,9 @@ def test_frontend_index_includes_app_loading_shell_source() -> None:
     assert "function applyActiveLoadingMediaFromStorage()" in source
     assert "function loadingMediaUpdateIsSafe()" in source
     assert "if (!loadingMediaUpdateIsSafe())" in source
-    assert "var preparedUrl = String(cover.getAttribute(\"data-app-loading-media-url\") || \"\").trim();" in source
+    assert "--app-loading-visible-media" in source
+    assert "data-app-loading-prepared-media-url" in source
+    assert "function setPreparedLoadingMedia(" in source
     assert "seedLoadingMediaFromCoverData();" in source
     assert "loadingCoverIsVisible() && cover.classList.contains(\"app-loading-cover--media-ready\")" in source
     assert "Loading campaign player wiki..." in source

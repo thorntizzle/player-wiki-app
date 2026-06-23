@@ -81,7 +81,7 @@
       .app-loading-cover__media {
         position: absolute;
         inset: 0;
-        background-image: var(--app-loading-media);
+        background-image: var(--app-loading-visible-media, var(--app-loading-media));
         background-position: center;
         background-repeat: no-repeat;
         background-size: contain;
@@ -267,7 +267,7 @@
           var styleElement = existingStyle || document.createElement("style");
           styleElement.id = activeMediaStyleElementId;
           styleElement.textContent = [
-            "html.app-loading .app-loading-cover { --app-loading-media: "
+            "html.app-loading .app-loading-cover { --app-loading-visible-media: "
               + loadingMediaStyleValue(mediaUrl)
               + " !important; }",
             "html.app-loading." + mediaReadyClass
@@ -276,7 +276,7 @@
           if (!existingStyle) {
             document.head.appendChild(styleElement);
           }
-          root.style.setProperty("--app-loading-media", loadingMediaStyleValue(mediaUrl));
+          root.style.setProperty("--app-loading-visible-media", loadingMediaStyleValue(mediaUrl));
           root.classList.add(mediaReadyClass);
           return mediaUrl;
         }
@@ -288,6 +288,7 @@
             // The visual override can still be removed even if storage is unavailable.
           }
           root.classList.remove(mediaReadyClass);
+          root.style.removeProperty("--app-loading-visible-media");
           root.style.removeProperty("--app-loading-media");
           removeActiveLoadingMediaStyle();
         }
@@ -311,10 +312,21 @@
             setActiveLoadingMediaStyle(mediaUrl);
           }
           if (cover) {
-            cover.style.setProperty("--app-loading-media", loadingMediaStyleValue(mediaUrl));
+            cover.style.setProperty("--app-loading-visible-media", loadingMediaStyleValue(mediaUrl));
             cover.setAttribute("data-app-loading-media-url", mediaUrl);
             cover.classList.add("app-loading-cover--media-ready");
           }
+          return mediaUrl;
+        }
+
+        function setPreparedLoadingMedia(cover, url) {
+          var mediaUrl = sameOriginLoadingMediaUrl(url);
+          if (!cover || !mediaUrl) {
+            return "";
+          }
+          cover.setAttribute("data-app-loading-prepared-media-url", mediaUrl);
+          cover.setAttribute("data-app-loading-media-url", mediaUrl);
+          cover.classList.add("app-loading-cover--media-ready");
           return mediaUrl;
         }
 
@@ -345,14 +357,13 @@
           if (!cover) {
             return;
           }
-          if (
-            cover.classList.contains("app-loading-cover--media-ready")
-            && cover.style.getPropertyValue("--app-loading-media").trim()
-          ) {
-            var preparedUrl = String(cover.getAttribute("data-app-loading-media-url") || "").trim();
-            if (preparedUrl) {
-              applyLoadingMediaToCover(cover, preparedUrl);
-            }
+          var preparedUrl = String(
+            cover.getAttribute("data-app-loading-prepared-media-url")
+              || cover.getAttribute("data-app-loading-media-url")
+              || "",
+          ).trim();
+          if (preparedUrl) {
+            applyLoadingMediaToCover(cover, preparedUrl);
             return;
           }
           var selectedUrl = selectedLoadingMediaUrl(cover);
@@ -382,7 +393,7 @@
             if (!loadingMediaUpdateIsSafe()) {
               return;
             }
-            applyLoadingMediaToCover(cover, selectedUrl, { persistActive: false });
+            setPreparedLoadingMedia(cover, selectedUrl);
           };
           image.onerror = function () {
             if (!loadingMediaUpdateIsSafe()) {

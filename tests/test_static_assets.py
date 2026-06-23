@@ -67,7 +67,9 @@ def test_base_template_includes_inline_loading_bootstrap_and_cover(client):
     assert "function applyActiveLoadingMediaFromStorage()" in html
     assert "function loadingMediaUpdateIsSafe()" in html
     assert "if (!loadingMediaUpdateIsSafe())" in html
-    assert "var preparedUrl = String(cover.getAttribute(\"data-app-loading-media-url\") || \"\").trim();" in html
+    assert "--app-loading-visible-media" in html
+    assert "data-app-loading-prepared-media-url" in html
+    assert "function setPreparedLoadingMedia(" in html
     assert "seedLoadingMediaFromCoverData();" in html
     assert "--app-loading-bg" in html
     assert "Loading campaign player wiki..." in html
@@ -725,6 +727,9 @@ def test_browser_loading_cover_seeds_media_before_outgoing_navigation(static_ass
                   const cover = document.querySelector('.app-loading-cover');
                   cover.classList.remove('app-loading-cover--media-ready');
                   cover.style.removeProperty('--app-loading-media');
+                  cover.style.removeProperty('--app-loading-visible-media');
+                  cover.removeAttribute('data-app-loading-media-url');
+                  cover.removeAttribute('data-app-loading-prepared-media-url');
                   const link = document.createElement('a');
                   link.id = 'app-loading-seed-link';
                   link.href = '/campaigns/linden-pass/session';
@@ -756,7 +761,7 @@ def test_browser_loading_cover_seeds_media_before_outgoing_navigation(static_ass
                   const media = document.querySelector('.app-loading-cover__media');
                   return {
                     ready: cover.classList.contains('app-loading-cover--media-ready'),
-                    styleValue: cover.style.getPropertyValue('--app-loading-media'),
+                    styleValue: cover.style.getPropertyValue('--app-loading-visible-media'),
                     attrValue: cover.getAttribute('data-app-loading-media-url'),
                     backgroundImage: getComputedStyle(media).backgroundImage,
                   };
@@ -796,7 +801,7 @@ def test_browser_loading_cover_persists_prepared_media_before_outgoing_navigatio
                     cover
                     && cover.classList.contains('app-loading-cover--media-ready')
                     && cover.getAttribute('data-app-loading-media-url')
-                    && cover.style.getPropertyValue('--app-loading-media').includes('url(')
+                    && cover.getAttribute('data-app-loading-prepared-media-url')
                   );
                 }
                 """,
@@ -809,7 +814,8 @@ def test_browser_loading_cover_persists_prepared_media_before_outgoing_navigatio
                   const cover = document.querySelector('.app-loading-cover');
                   return {
                     attrValue: cover.getAttribute('data-app-loading-media-url'),
-                    styleValue: cover.style.getPropertyValue('--app-loading-media'),
+                    preparedAttrValue: cover.getAttribute('data-app-loading-prepared-media-url'),
+                    visibleStyleValue: cover.style.getPropertyValue('--app-loading-visible-media'),
                   };
                 }
                 """
@@ -850,20 +856,20 @@ def test_browser_loading_cover_persists_prepared_media_before_outgoing_navigatio
                   const media = document.querySelector('.app-loading-cover__media');
                   return {
                     rootReady: root.classList.contains('app-loading-media-ready'),
-                    rootStyle: root.style.getPropertyValue('--app-loading-media'),
+                    rootStyle: root.style.getPropertyValue('--app-loading-visible-media'),
                     storedActive: sessionStorage.getItem('cpw:app-loading-active-media-url') || '',
-                    coverStyle: cover.style.getPropertyValue('--app-loading-media'),
+                    coverStyle: cover.style.getPropertyValue('--app-loading-visible-media'),
                     backgroundImage: getComputedStyle(media).backgroundImage,
                   };
                 }
                 """
             )
             assert active_snapshot["rootReady"] is True
-            assert active_snapshot["storedActive"] == prepared["attrValue"]
-            assert prepared["attrValue"] in active_snapshot["rootStyle"]
-            assert prepared["attrValue"] in active_snapshot["coverStyle"]
-            assert prepared["attrValue"] in active_snapshot["backgroundImage"]
-            assert prepared["styleValue"] == active_snapshot["coverStyle"]
+            assert active_snapshot["storedActive"] == prepared["preparedAttrValue"]
+            assert prepared["preparedAttrValue"] in active_snapshot["rootStyle"]
+            assert prepared["preparedAttrValue"] in active_snapshot["coverStyle"]
+            assert prepared["preparedAttrValue"] in active_snapshot["backgroundImage"]
+            assert prepared["visibleStyleValue"] == ""
         finally:
             page.close()
             browser.close()
@@ -917,7 +923,7 @@ def test_browser_loading_cover_uses_active_media_across_incoming_document(static
                     href: window.location.href,
                     rootLoading: root.classList.contains('app-loading'),
                     rootReady: root.classList.contains('app-loading-media-ready'),
-                    rootStyle: root.style.getPropertyValue('--app-loading-media'),
+                    rootStyle: root.style.getPropertyValue('--app-loading-visible-media'),
                     activeStyle: style ? style.textContent : '',
                     backgroundImage: getComputedStyle(media).backgroundImage,
                     storedActive: sessionStorage.getItem('cpw:app-loading-active-media-url') || '',
