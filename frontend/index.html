@@ -206,6 +206,39 @@
           return root.classList.contains(loadingClass);
         }
 
+        function loadingMediaStyleValue(url) {
+          return "url(" + JSON.stringify(url) + ")";
+        }
+
+        function selectedLoadingMediaUrl(cover) {
+          var mediaUrls = collectLoadingMediaUrls(cover.getAttribute("data-app-loading-media-urls"));
+          if (mediaUrls.length) {
+            return mediaUrls[currentMediaIndex(mediaUrls.length)];
+          }
+          var fallbackUrl = cover ? String(cover.getAttribute("data-app-loading-media-url") || "").trim() : "";
+          return fallbackUrl || "";
+        }
+
+        function seedLoadingMediaFromCoverData() {
+          var cover = document.querySelector(".app-loading-cover[data-app-loading-media-urls]");
+          if (!cover) {
+            return;
+          }
+          if (
+            cover.classList.contains("app-loading-cover--media-ready")
+            && cover.style.getPropertyValue("--app-loading-media").trim()
+          ) {
+            return;
+          }
+          var selectedUrl = selectedLoadingMediaUrl(cover);
+          if (!selectedUrl) {
+            return;
+          }
+          cover.style.setProperty("--app-loading-media", loadingMediaStyleValue(selectedUrl));
+          cover.setAttribute("data-app-loading-media-url", selectedUrl);
+          cover.classList.add("app-loading-cover--media-ready");
+        }
+
         function prepareLoadingMedia() {
           var cover = document.querySelector(".app-loading-cover[data-app-loading-media-urls]");
           if (!cover) {
@@ -223,7 +256,8 @@
           image.decoding = "async";
           image.loading = "eager";
           image.onload = function () {
-            cover.style.setProperty("--app-loading-media", "url(" + JSON.stringify(selectedUrl) + ")");
+            cover.style.setProperty("--app-loading-media", loadingMediaStyleValue(selectedUrl));
+            cover.setAttribute("data-app-loading-media-url", selectedUrl);
             cover.classList.add("app-loading-cover--media-ready");
           };
           image.onerror = function () {
@@ -392,6 +426,7 @@
           appReady = false;
           stylesReady = Boolean(options && options.stylesAlreadyReady);
           sessionStorage.setItem(navigationStartStorageKey, String(Date.now()));
+          seedLoadingMediaFromCoverData();
           root.classList.add(loadingClass);
           root.classList.remove(closingClass);
           scheduleFailOpen();

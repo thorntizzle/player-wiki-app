@@ -61,6 +61,8 @@ def test_base_template_includes_inline_loading_bootstrap_and_cover(client):
     assert ".app-loading-cover__media" in html
     assert "app-loading-cover__message" in html
     assert "root.classList.contains(loadingClass) && cover.classList.contains(\"app-loading-cover--media-ready\")" in html
+    assert "function seedLoadingMediaFromCoverData()" in html
+    assert "seedLoadingMediaFromCoverData();" in html
     assert "--app-loading-bg" in html
     assert "Loading campaign player wiki..." in html
 
@@ -679,6 +681,86 @@ def test_browser_loading_cover_dismisses_when_cover_image_is_blocked(static_asse
             assert hide_ms < 2500
             expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=2000)
             expect(page.locator(".page-shell")).to_be_visible(timeout=2000)
+        finally:
+            page.close()
+            browser.close()
+
+
+def test_browser_loading_cover_seeds_media_before_outgoing_navigation(static_asset_live_server):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            page.goto(f"{static_asset_live_server}/campaigns/linden-pass", wait_until="load")
+            expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
+
+            media_urls = page.evaluate(
+                """
+                () => {
+                  const cover = document.querySelector('.app-loading-cover');
+                  return cover ? JSON.parse(cover.getAttribute('data-app-loading-media-urls') || '[]') : [];
+                }
+                """
+            )
+            assert media_urls
+
+            page.evaluate(
+                """
+                () => {
+                  const cover = document.querySelector('.app-loading-cover');
+                  cover.classList.remove('app-loading-cover--media-ready');
+                  cover.style.removeProperty('--app-loading-media');
+                  const link = document.createElement('a');
+                  link.id = 'app-loading-seed-link';
+                  link.href = '/campaigns/linden-pass/session';
+                  link.textContent = 'session';
+                  document.body.appendChild(link);
+                  document.addEventListener('click', (event) => {
+                    if (event.target && event.target.id === 'app-loading-seed-link') {
+                      event.preventDefault();
+                    }
+                  }, { once: true });
+                }
+                """
+            )
+            page.evaluate(
+                """
+                () => {
+                  document.querySelector('#app-loading-seed-link').dispatchEvent(
+                    new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })
+                  );
+                }
+                """
+            )
+            expect(page.locator(".app-loading-cover")).to_be_visible(timeout=1000)
+
+            seeded = page.evaluate(
+                """
+                () => {
+                  const cover = document.querySelector('.app-loading-cover');
+                  const media = document.querySelector('.app-loading-cover__media');
+                  return {
+                    ready: cover.classList.contains('app-loading-cover--media-ready'),
+                    styleValue: cover.style.getPropertyValue('--app-loading-media'),
+                    attrValue: cover.getAttribute('data-app-loading-media-url'),
+                    backgroundImage: getComputedStyle(media).backgroundImage,
+                  };
+                }
+                """
+            )
+            assert seeded["ready"] is True
+            assert seeded["styleValue"].startswith('url("')
+            assert seeded["attrValue"].startswith("/campaigns/linden-pass/assets/")
+            assert "/campaigns/linden-pass/assets/" in seeded["backgroundImage"]
         finally:
             page.close()
             browser.close()

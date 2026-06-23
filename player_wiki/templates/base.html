@@ -319,6 +319,7 @@
           clearFailOpenTimer();
           clearDismissTimer();
           writeNavigationStartToStorage();
+          seedLoadingMediaFromCoverData();
           root.classList.remove(closingClass);
           root.classList.add(loadingClass);
           failOpenTimer = window.setTimeout(function () {
@@ -440,6 +441,39 @@
           };
         }
 
+        function selectedLoadingMediaUrl(cover) {
+          var mediaData = pickLoadingMediaForCover(cover);
+          if (mediaData && mediaData.selected) {
+            return mediaData.selected;
+          }
+          var fallbackUrl = cover ? String(cover.getAttribute("data-app-loading-media-url") || "").trim() : "";
+          return fallbackUrl || "";
+        }
+
+        function loadingMediaStyleValue(url) {
+          return "url(" + JSON.stringify(url) + ")";
+        }
+
+        function seedLoadingMediaFromCoverData() {
+          var cover = document.querySelector(".app-loading-cover[data-app-loading-media-urls]");
+          if (!cover) {
+            return;
+          }
+          if (
+            cover.classList.contains("app-loading-cover--media-ready")
+            && cover.style.getPropertyValue("--app-loading-media").trim()
+          ) {
+            return;
+          }
+          var selectedUrl = selectedLoadingMediaUrl(cover);
+          if (!selectedUrl) {
+            return;
+          }
+          cover.style.setProperty("--app-loading-media", loadingMediaStyleValue(selectedUrl));
+          cover.setAttribute("data-app-loading-media-url", selectedUrl);
+          cover.classList.add("app-loading-cover--media-ready");
+        }
+
         function collectLoadingMediaUrls(rawMediaUrls) {
           var rawUrls = parseLoadingMediaUrls(rawMediaUrls);
           var urls = [];
@@ -516,7 +550,8 @@
               if (!response || !response.ok) {
                 return;
               }
-              cover.style.setProperty("--app-loading-media", "url(" + JSON.stringify(mediaData.selected) + ")");
+              cover.style.setProperty("--app-loading-media", loadingMediaStyleValue(mediaData.selected));
+              cover.setAttribute("data-app-loading-media-url", mediaData.selected);
               cover.classList.add("app-loading-cover--media-ready");
             })
             .catch(function () {
