@@ -64,6 +64,7 @@ import { CharacterDndResourcesSection } from "../components/CharacterDndResource
 import { CharacterDndSpellsSection } from "../components/CharacterDndSpellsSection";
 import { CharacterNotesSection } from "../components/CharacterNotesSection";
 import { CharacterPersonalSection } from "../components/CharacterPersonalSection";
+import { CharacterXianxiaEquipmentSection } from "../components/CharacterXianxiaEquipmentSection";
 import { CharacterXianxiaSkillsSection } from "../components/CharacterXianxiaSkillsSection";
 import {
   asRecord,
@@ -2495,81 +2496,10 @@ export function CharacterPane({
             ) : null}
 
             {isXianxia && activeCharacterSection === "equipment" ? (
-              <section className="read-section" id="xianxia-equipment">
-                <div className="section-heading">
-                  <h2>Equipment</h2>
-                </div>
-                <div className="detail-grid">
-                  <article className="detail-card">
-                    <h3>Defense calculation</h3>
-                    {Object.keys(xianxiaDefenseReference).length ? (
-                      <>
-                        <p><strong>{stringFromUnknown(xianxiaDefenseReference.value, "--")}</strong></p>
-                        <ul className="plain-list slot-list">
-                          <li><span>Base</span><strong>{stringFromUnknown(xianxiaDefenseReference.base, "--")}</strong></li>
-                          <li><span>Manual armor bonus</span><strong>{stringFromUnknown(xianxiaDefenseReference.manual_armor_bonus, "--")}</strong></li>
-                          <li><span>Constitution</span><strong>{stringFromUnknown(xianxiaDefenseReference.constitution, "--")}</strong></li>
-                        </ul>
-                        <p className="meta">Defense = {readString(xianxiaDefenseReference.formula, "")}</p>
-                      </>
-                    ) : (
-                      <p><strong>{stringFromUnknown(presentedXianxia.equipment?.defense, "--")}</strong></p>
-                    )}
-                    <p className="meta">Manual armor bonus: {readNumber(presentedXianxia.equipment?.manual_armor_bonus, 0)}</p>
-                  </article>
-                  <article className="detail-card">
-                    <h3>Necessary weapons</h3>
-                    {presentedXianxia.equipment?.necessary_weapons?.length ? (
-                      <ul className="plain-list slot-list">
-                        {presentedXianxia.equipment.necessary_weapons.map((record, index) => (
-                          <li key={`${record.name}-${index}`}>
-                            <span>{record.name}</span>
-                            {record.reason ? <strong>{record.reason}</strong> : null}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="meta">No necessary weapons are recorded on this sheet yet.</p>
-                    )}
-                  </article>
-                  <article className="detail-card">
-                    <h3>Necessary tools</h3>
-                    {presentedXianxia.equipment?.necessary_tools?.length ? (
-                      <ul className="plain-list slot-list">
-                        {presentedXianxia.equipment.necessary_tools.map((record, index) => (
-                          <li key={`${record.name}-${index}`}>
-                            <span>{record.name}</span>
-                            {record.reason ? <strong>{record.reason}</strong> : null}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="meta">No necessary tools are recorded on this sheet yet.</p>
-                    )}
-                  </article>
-                  <article className="detail-card">
-                    <h3>Equipped inventory</h3>
-                    {presentedXianxia.equipment?.equipped_items?.length ? (
-                      <ul className="plain-list slot-list">
-                        {presentedXianxia.equipment.equipped_items.map((item) => (
-                          <React.Fragment key={item.id}>
-                            <li>
-                              <span>{item.name}</span>
-                              <strong>{readString(item.item_type)}</strong>
-                            </li>
-                            {readString(item.item_type) === "Armor" ? (
-                              <li className="meta">Armor is displayed here only; Defense still uses the manual armor bonus above.</li>
-                            ) : null}
-                            {item.notes ? <li className="meta">{item.notes}</li> : null}
-                          </React.Fragment>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="meta">No equippable inventory is currently marked equipped.</p>
-                    )}
-                  </article>
-                </div>
-              </section>
+              <CharacterXianxiaEquipmentSection
+                defenseReference={xianxiaDefenseReference}
+                equipment={presentedXianxia.equipment}
+              />
             ) : null}
 
             {isXianxia && activeCharacterSection === "inventory" ? (

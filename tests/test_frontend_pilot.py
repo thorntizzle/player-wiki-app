@@ -1665,10 +1665,7 @@ def test_character_xianxia_skills_section_uses_flask_style_skill_pills() -> None
 
 
 def test_character_xianxia_equipment_section_uses_flask_style_read_section_shape() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
-    section_start = source.index('{isXianxia && activeCharacterSection === "equipment" ? (')
-    section_end = source.index('{isXianxia && activeCharacterSection === "inventory" ? (', section_start)
-    section_markup = source[section_start:section_end]
+    section_markup = Path("frontend/src/components/CharacterXianxiaEquipmentSection.tsx").read_text(encoding="utf-8")
 
     assert 'className="detail-grid"' in section_markup
     assert 'className="detail-card"' in section_markup
