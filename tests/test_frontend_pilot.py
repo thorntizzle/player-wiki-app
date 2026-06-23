@@ -1959,10 +1959,8 @@ def test_character_dnd_overview_section_uses_flask_style_glance_rows() -> None:
 
 
 def test_character_dnd_inventory_currency_section_uses_flask_style_row_form_chrome() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
-    section_start = source.index('{isDnd && activeCharacterSection === "inventory" ? (')
-    section_end = source.index('{isDnd && activeCharacterSection === "abilities" ? (', section_start)
-    section_markup = source[section_start:section_end]
+    source = Path("frontend/src/components/CharacterDndInventorySection.tsx").read_text(encoding="utf-8")
+    section_markup = source
 
     controls_end = section_markup.index('<div className="detail-grid">')
     currency_controls_markup = section_markup[controls_end:]
@@ -1978,7 +1976,7 @@ def test_character_dnd_inventory_currency_section_uses_flask_style_row_form_chro
     assert 'className="visually-hidden"' in currency_controls_markup
     assert 'Update {key.toUpperCase()}' in currency_controls_markup
     assert '["cp", "sp", "ep", "gp", "pp"].map((key) =>' in currency_controls_markup
-    assert re.search(r'<button type="submit" className="visually-hidden" disabled=\{patchCurrency\.isPending \|\| !canEdit\}>\s*Update \{key\.toUpperCase\(\)\}\s*</button>', currency_controls_markup) is not None
+    assert re.search(r'<button type="submit" className="visually-hidden" disabled=\{isCurrencySaving \|\| !canEdit\}>\s*Update \{key\.toUpperCase\(\)\}\s*</button>', currency_controls_markup) is not None
 
     assert 'className="chat-label"' not in currency_controls_markup
     assert 'form onSubmit={submitCurrency} className="currency-grid"' not in currency_controls_markup
@@ -1986,10 +1984,8 @@ def test_character_dnd_inventory_currency_section_uses_flask_style_row_form_chro
 
 
 def test_character_dnd_inventory_section_uses_flask_style_row_form_chrome() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
-    section_start = source.index('{isDnd && activeCharacterSection === "inventory" ? (')
-    section_end = source.index('{isDnd && activeCharacterSection === "abilities" ? (', section_start)
-    section_markup = source[section_start:section_end]
+    source = Path("frontend/src/components/CharacterDndInventorySection.tsx").read_text(encoding="utf-8")
+    section_markup = source
 
     controls_end = section_markup.index('<div className="detail-grid">')
     inventory_controls_markup = section_markup[:controls_end]
@@ -2014,7 +2010,7 @@ def test_character_dnd_inventory_section_uses_flask_style_row_form_chrome() -> N
     assert 'Update {itemName} quantity' in inventory_controls_markup
     assert (
         re.search(
-            r'<button type="submit" className="visually-hidden" disabled=\{patchInventory\.isPending \|\| !canEdit\}>\s*Update \{itemName\} quantity\s*</button>',
+            r'<button type="submit" className="visually-hidden" disabled=\{isInventorySaving \|\| !canEdit\}>\s*Update \{itemName\} quantity\s*</button>',
             inventory_controls_markup,
         )
         is not None
