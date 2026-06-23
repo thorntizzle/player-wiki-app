@@ -2034,14 +2034,9 @@ def test_character_dnd_inventory_section_uses_flask_style_row_form_chrome() -> N
 
 
 def test_character_dnd_abilities_and_skills_section_uses_compact_skill_proficiency_cues() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/components/CharacterDndAbilitySkillsSection.tsx").read_text(encoding="utf-8")
     styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
-    section_start = source.index('{isDnd && activeCharacterSection === "abilities" ? (')
-    section_end = source.index(
-        '{isReadSurface && activeCharacterSection === "controls" && canUseControls && controls ? (',
-        section_start,
-    )
-    section_markup = source[section_start:section_end]
+    section_markup = source
 
     assert 'className="ability-grid ability-grid--skills"' in section_markup
     assert 'className="ability-card ability-card--skills"' in section_markup
