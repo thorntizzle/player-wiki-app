@@ -86,7 +86,9 @@ import {
 } from "../characterValueUtils";
 import {
   characterSystem,
+  characterReadSectionUrl,
   collectPresentedSpells,
+  defaultCharacterReadSection,
   dndCharacterSections,
   draftKey,
   groupSpellsByLevel,
@@ -393,16 +395,9 @@ export function CharacterPane({
     ? [...xianxiaCharacterSections, { id: "controls" as CharacterSection, label: "Controls" }]
     : xianxiaCharacterSections;
   const visibleCharacterSections = isDnd ? dndVisibleCharacterSections : xianxiaVisibleCharacterSections;
-  const readSurfaceSectionBaseUrl = selectedSlug
-    ? `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters/${encodeURIComponent(selectedSlug)}`
-    : "";
-  const readSurfaceDefaultSection = isXianxia ? "quick-reference" : "overview";
-  const readSurfaceSectionUrl = (section: CharacterSection) => {
-    if (section === readSurfaceDefaultSection) {
-      return readSurfaceSectionBaseUrl;
-    }
-    return `${readSurfaceSectionBaseUrl}?page=${encodeURIComponent(section)}`;
-  };
+  const readSurfaceDefaultSection = defaultCharacterReadSection(isXianxia);
+  const readSurfaceSectionUrl = (section: CharacterSection) =>
+    characterReadSectionUrl(campaignSlug, selectedSlug, section, readSurfaceDefaultSection);
   const handleReadSurfaceSectionNavClick = (section: CharacterSection) => (event: MouseEvent<HTMLAnchorElement>) => {
     if (!selectedSlug) {
       return;
@@ -1090,9 +1085,7 @@ export function CharacterPane({
     if (!isReadSurface || !selectedSlug) {
       return;
     }
-    const defaultSection = isXianxia ? "quick-reference" : "overview";
-    const basePath = `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters/${encodeURIComponent(selectedSlug)}`;
-    const nextUrl = section === defaultSection ? basePath : `${basePath}?page=${encodeURIComponent(section)}`;
+    const nextUrl = characterReadSectionUrl(campaignSlug, selectedSlug, section, defaultCharacterReadSection(isXianxia));
     window.history.replaceState(null, "", nextUrl);
   };
 

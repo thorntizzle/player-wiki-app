@@ -228,6 +228,26 @@ export const xianxiaCharacterSections: Array<{ id: CharacterSection; label: stri
   { id: "notes", label: "Notes" },
 ];
 
+export function defaultCharacterReadSection(isXianxia: boolean): CharacterSection {
+  return isXianxia ? "quick-reference" : "overview";
+}
+
+export function characterReadSectionUrl(
+  campaignSlug: string,
+  characterSlug: string | null | undefined,
+  section: CharacterSection,
+  defaultSection: CharacterSection,
+): string {
+  if (!characterSlug) {
+    return "";
+  }
+  const basePath = `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters/${encodeURIComponent(characterSlug)}`;
+  if (section === defaultSection) {
+    return basePath;
+  }
+  return `${basePath}?page=${encodeURIComponent(section)}`;
+}
+
 export function normalizeCharacterSection(value: string | null): CharacterSection | null {
   switch ((value || "").trim().toLowerCase()) {
     case "overview":

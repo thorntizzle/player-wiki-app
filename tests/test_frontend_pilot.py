@@ -407,6 +407,24 @@ def test_character_number_input_parser_lives_in_shared_utils() -> None:
     assert "setStatusMessage(null)" in route_source
 
 
+def test_character_read_section_url_helpers_live_in_shared_utils() -> None:
+    source = Path("frontend/src/characterPaneUtils.ts").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+
+    assert "export function defaultCharacterReadSection" in source
+    assert 'return isXianxia ? "quick-reference" : "overview";' in source
+    assert "export function characterReadSectionUrl" in source
+    assert "if (!characterSlug) {" in source
+    assert "encodeURIComponent(campaignSlug)" in source
+    assert "encodeURIComponent(characterSlug)" in source
+    assert "if (section === defaultSection)" in source
+    assert "return `${basePath}?page=${encodeURIComponent(section)}`;" in source
+    assert "defaultCharacterReadSection(isXianxia)" in route_source
+    assert "characterReadSectionUrl(campaignSlug, selectedSlug, section, readSurfaceDefaultSection)" in route_source
+    assert "characterReadSectionUrl(campaignSlug, selectedSlug, section, defaultCharacterReadSection(isXianxia))" in route_source
+    assert "readSurfaceSectionBaseUrl" not in route_source
+
+
 def test_admin_user_detail_action_button_chrome_in_source() -> None:
     source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
     admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]
