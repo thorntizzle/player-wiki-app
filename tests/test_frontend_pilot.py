@@ -1492,7 +1492,7 @@ def test_character_xianxia_inventory_section_uses_flask_style_row_form_chrome() 
     assert 'className="chat-label"' not in resources_markup
 
     section_start = source.index('{isXianxia && activeCharacterSection === "inventory" ? (')
-    section_end = source.index('<section className="read-section" id="xianxia-personal">', section_start)
+    section_end = source.index('{isXianxia && activeCharacterSection === "personal" ? (', section_start)
     section_markup = source[section_start:section_end]
     controls_end = section_markup.index('<div className="detail-grid" id="session-currency">')
     inventory_controls_markup = section_markup[:controls_end]
@@ -1878,10 +1878,8 @@ def test_character_xianxia_techniques_section_uses_flask_chrome_parity() -> None
 
 
 def test_character_xianxia_personal_section_uses_flask_style_reference_stack_and_detail_cards() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
-    personal_section_start = source.index('{isXianxia && activeCharacterSection === "personal" ? (')
-    personal_section_end = source.index('{isDnd && activeCharacterSection === "overview" ? (', personal_section_start)
-    personal_section_markup = source[personal_section_start:personal_section_end]
+    source = Path("frontend/src/components/CharacterPersonalSection.tsx").read_text(encoding="utf-8")
+    personal_section_markup = source
 
     assert 'className="read-section" id="xianxia-personal"' in personal_section_markup
     assert "<h2>Personal</h2>" in personal_section_markup
