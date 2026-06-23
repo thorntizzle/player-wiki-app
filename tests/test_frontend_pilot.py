@@ -1024,11 +1024,7 @@ def test_character_supported_hero_links_preserve_supported_nav_while_hiding_flas
 
 
 def test_character_roster_page_copy_and_grid_class_parity_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-
-    roster_start = source.index("function CharacterRosterPage() {")
-    roster_end = source.index("function CharacterDetailPage()", roster_start)
-    roster_source = source[roster_start:roster_end]
+    roster_source = Path("frontend/src/routes/CharacterRosterPage.tsx").read_text(encoding="utf-8")
 
     assert (
         "Open a player sheet in read mode for play, or start a new in-app PHB level 1 character when you need native sheet data instead of an imported PDF."
@@ -1051,11 +1047,7 @@ def test_character_roster_page_copy_and_grid_class_parity_in_source() -> None:
 
 
 def test_character_roster_heading_visibility_is_gated_by_create_or_unsupported_system_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-
-    roster_start = source.index("function CharacterRosterPage() {")
-    roster_end = source.index("function CharacterDetailPage()", roster_start)
-    roster_source = source[roster_start:roster_end]
+    roster_source = Path("frontend/src/routes/CharacterRosterPage.tsx").read_text(encoding="utf-8")
 
     assert re.search(
         r"const shouldShowRosterToolsHeading\s*=\s*hasCreateCharacterLink \|\| data\?\.tools\?\.native_character_create_supported === false;",
@@ -1081,11 +1073,7 @@ def test_character_roster_heading_visibility_is_gated_by_create_or_unsupported_s
 
 
 def test_character_roster_card_meta_join_and_stats_divs_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-
-    roster_start = source.index("function CharacterRosterPage() {")
-    roster_end = source.index("function CharacterDetailPage()", roster_start)
-    roster_source = source[roster_start:roster_end]
+    roster_source = Path("frontend/src/routes/CharacterRosterPage.tsx").read_text(encoding="utf-8")
 
     card_start = roster_source.index('<article className="card character-card"')
     card_end = roster_source.index("</article>", card_start) + len("</article>")
@@ -1103,7 +1091,7 @@ def test_character_roster_card_meta_join_and_stats_divs_in_source() -> None:
 
 
 def test_character_roster_empty_state_copy_is_exact_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterRosterPage.tsx").read_text(encoding="utf-8")
     assert (
         "This campaign does not currently have any active player sheets available in the app."
         in source
