@@ -235,11 +235,14 @@ def test_frontend_app_signals_loading_readiness_from_query_state_source() -> Non
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
 
     assert "useIsFetching" in source
+    assert "useNavigate" in source
     assert "function useAppLoadingReadiness" in source
+    assert "function appNextHrefToRouterPath" in source
     assert "location.pathname" in source
     assert "previousLocationPathname" in source
     assert "window.__cpwAppLoadingBegin?.();" in source
     assert "window.__cpwAppLoadingReady?.();" in source
+    assert "void navigate({ to: appNextHrefToRouterPath(item.href) as never });" in source
     assert "activeFetchCount > 0" in source
     assert "queryClient.isFetching() === 0" in source
 

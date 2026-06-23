@@ -848,9 +848,24 @@ def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
             help_link = player_page.locator(".campaign-nav-link", has_text="Help")
             expect(help_link).to_be_visible(timeout=10000)
             expect(help_link).to_have_attribute("href", re.compile(r"/app-next/campaigns/linden-pass/help$"))
+            player_page.evaluate(
+                """() => {
+                  window.__cpwGen2TopNavMarker = "alive";
+                  window.__cpwGen2TopNavLoadingBeginCount = 0;
+                  const originalBegin = window.__cpwAppLoadingBegin;
+                  window.__cpwAppLoadingBegin = () => {
+                    window.__cpwGen2TopNavLoadingBeginCount += 1;
+                    if (typeof originalBegin === "function") {
+                      originalBegin();
+                    }
+                  };
+                }"""
+            )
             help_link.click()
             expect(player_page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/help$"))
             expect(player_page.get_by_role("heading", name="Help")).to_be_visible(timeout=10000)
+            assert player_page.evaluate("window.__cpwGen2TopNavMarker") == "alive"
+            assert player_page.evaluate("window.__cpwGen2TopNavLoadingBeginCount") >= 1
             expect(player_page.get_by_role("heading", name="Current access")).to_be_visible()
             expect(player_page.locator("#campaign-home").get_by_role("heading", name="Campaign Home")).to_be_visible()
             expect(player_page.locator("#systems").get_by_role("heading", name="Systems")).to_be_visible()

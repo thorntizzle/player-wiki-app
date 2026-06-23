@@ -8,6 +8,7 @@ import {
   Outlet,
   RouterProvider,
   useLocation,
+  useNavigate,
   useParams,
 } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider, useIsFetching, useMutation, useQuery } from "@tanstack/react-query";
@@ -388,6 +389,16 @@ function campaignRouteHref(campaignSlug: string, suffix = "", frontendMode: Fron
   const base = frontendMode === "gen2" ? `/app-next/campaigns/${normalizedCampaignSlug}` : `/campaigns/${normalizedCampaignSlug}`;
   const normalizedSuffix = suffix.replace(/^\/+/, "");
   return normalizedSuffix ? `${base}/${normalizedSuffix}` : base;
+}
+
+function appNextHrefToRouterPath(href: string): string {
+  if (href === "/app-next") {
+    return "/";
+  }
+  if (href.startsWith("/app-next/")) {
+    return href.slice("/app-next".length);
+  }
+  return href || "/";
 }
 
 function preferredCampaignLink(href: string, campaignSlug: string, frontendMode: FrontendMode): string {
@@ -4406,6 +4417,7 @@ function useAppLoadingReadiness(locationPathname: string) {
 
 function AppShell() {
   const location = useLocation();
+  const navigate = useNavigate();
   useAppLoadingReadiness(location.pathname);
   const [apiToken, setApiToken] = useState(() => {
     try {
@@ -4671,8 +4683,15 @@ function AppShell() {
                   key={item.label}
                   className={isNavItemActive(item.label, item.href) ? "campaign-nav-link is-active" : "campaign-nav-link"}
                   href={item.href}
-                  onClick={() => {
-                    if (!item.isGen2) {
+                  onClick={(event) => {
+                    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                      return;
+                    }
+                    if (item.isGen2) {
+                      event.preventDefault();
+                      window.__cpwAppLoadingBegin?.();
+                      void navigate({ to: appNextHrefToRouterPath(item.href) as never });
+                    } else {
                       setNavigationLabel(item.label);
                     }
                   }}
