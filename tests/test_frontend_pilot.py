@@ -233,11 +233,12 @@ def test_frontend_index_includes_app_loading_shell_source() -> None:
 
 def test_frontend_app_signals_loading_readiness_from_query_state_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    link_helper_source = Path("frontend/src/campaignLinks.ts").read_text(encoding="utf-8")
 
     assert "useIsFetching" in source
     assert "useNavigate" in source
     assert "function useAppLoadingReadiness" in source
-    assert "function appNextHrefToRouterPath" in source
+    assert "function appNextHrefToRouterPath" in link_helper_source
     assert "location.pathname" in source
     assert "previousLocationPathname" in source
     assert "window.__cpwAppLoadingBegin?.();" in source
@@ -306,7 +307,7 @@ def test_admin_user_detail_action_button_chrome_in_source() -> None:
     admin_user_detail_source = _extract_component_source(
         source,
         "function AdminUserDetailPage() {",
-        "function splitPinnedPages",
+        "function systemsIndexHref(",
     )
 
     remove_on_click = 'onClick={() => removeMembership.mutate(membership)}'
@@ -337,7 +338,7 @@ def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
     admin_user_detail_source = _extract_component_source(
         source,
         "function AdminUserDetailPage() {",
-        "function splitPinnedPages",
+        "function systemsIndexHref(",
     )
 
     delete_on_click = 'onClick={() => deleteUser.mutate()}'
@@ -360,7 +361,7 @@ def test_admin_user_account_actions_are_flat_stack_in_source() -> None:
     admin_user_detail_source = _extract_component_source(
         source,
         "function AdminUserDetailPage() {",
-        "function splitPinnedPages",
+        "function systemsIndexHref(",
     )
 
     heading_index = admin_user_detail_source.index("<h2>Account actions</h2>")
@@ -1313,7 +1314,7 @@ def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
 
 
 def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/WikiRoutes.tsx").read_text(encoding="utf-8")
     nav_source = _extract_component_source(
         source,
         "function WikiSectionNav({",
@@ -1321,19 +1322,15 @@ def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> N
     )
     home_page_source = _extract_component_source(
         source,
-        "function WikiHomePage() {",
-        "function WikiSectionPage() {",
+        "export function WikiHomePage() {",
+        "export function WikiSectionPage() {",
     )
     section_page_source = _extract_component_source(
         source,
-        "function WikiSectionPage() {",
-        "function WikiArticlePage() {",
+        "export function WikiSectionPage() {",
+        "export function WikiArticlePage() {",
     )
-    article_page_source = _extract_component_source(
-        source,
-        "function WikiArticlePage() {",
-        "function systemsIndexHref(",
-    )
+    article_page_source = source[source.index("export function WikiArticlePage() {"):]
     styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
 
     assert 'className="wiki-section-nav"' in nav_source
