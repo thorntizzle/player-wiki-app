@@ -56,6 +56,7 @@ import {
   type CharacterDetailDialogState,
 } from "../components/CharacterDetailDialog";
 import { CharacterControlsSection } from "../components/CharacterControlsSection";
+import { CharacterNavigationCard } from "../components/CharacterNavigationCard";
 import { CharacterPortraitManager } from "../components/CharacterPortraitManager";
 import { CharacterSummaryCard } from "../components/CharacterSummaryCard";
 import { CharacterDndAbilitySkillsSection } from "../components/CharacterDndAbilitySkillsSection";
@@ -1175,46 +1176,16 @@ export function CharacterPane({
           </header>
         )}
 
-        <div
-          className={isReadSurface ? "character-subpage-nav-card" : "character-selector-card"}
-          data-character-subpage-nav-card={isReadSurface ? "" : undefined}
-        >
-          {isReadSurface ? (
-            <nav className="character-subpage-nav" aria-label="Character subpages">
-              {visibleCharacterSections.map((section) => (
-                <a
-                  key={section.id}
-                  href={readSurfaceSectionUrl(section.id)}
-                  className={activeCharacterSection === section.id ? "button-link" : "ghost-button"}
-                  data-character-read-subpage-link
-                  data-character-read-target-subpage={section.id}
-                  onClick={handleReadSurfaceSectionNavClick(section.id)}
-                >
-                  {section.label}
-                </a>
-              ))}
-            </nav>
-          ) : (
-            <>
-              <label className="field" htmlFor="character-selector">
-                <span>Character</span>
-                <select
-                  id="character-selector"
-                  value={selectedSlug || ""}
-                  onChange={(event) => {
-                    selectCharacter(event.currentTarget.value || null);
-                  }}
-                >
-                  {characterList.map((item) => (
-                    <option key={item.slug} value={item.slug}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </>
-          )}
-        </div>
+        <CharacterNavigationCard
+          activeCharacterSection={activeCharacterSection}
+          characterList={characterList}
+          handleReadSurfaceSectionNavClick={handleReadSurfaceSectionNavClick}
+          isReadSurface={isReadSurface}
+          readSurfaceSectionUrl={readSurfaceSectionUrl}
+          selectCharacter={selectCharacter}
+          selectedSlug={selectedSlug}
+          visibleCharacterSections={visibleCharacterSections}
+        />
 
         {listQuery.isLoading ? <p className="status status-neutral">Loading characters...</p> : null}
         {detailQuery.isLoading ? <p className="status status-neutral">Loading character...</p> : null}

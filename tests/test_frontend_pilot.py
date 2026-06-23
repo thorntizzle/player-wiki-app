@@ -297,21 +297,22 @@ def test_session_pane_no_player_wiki_lookup_widget_in_source() -> None:
     assert 'className="campaign-global-search__form"' in shell_source
 
 
-def test_character_pane_non_read_selector_uses_flask_style_field_chrome_in_source() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
-    character_pane_source = source[source.index("export function CharacterPane({"):]
-    selector_class_start = character_pane_source.index('className={isReadSurface ? "character-subpage-nav-card" : "character-selector-card"}')
-    selector_start = character_pane_source.rfind("<div", 0, selector_class_start)
-    selector_end = character_pane_source.index("{listQuery.isLoading ? <p className=\"status status-neutral\">Loading characters...</p> : null}", selector_start)
-    selector_markup = character_pane_source[selector_start:selector_end]
+def test_character_navigation_card_uses_flask_style_chrome_in_source() -> None:
+    source = Path("frontend/src/components/CharacterNavigationCard.tsx").read_text(encoding="utf-8")
 
-    assert 'className={isReadSurface ? "character-subpage-nav-card" : "character-selector-card"}' in selector_markup
-    assert "data-character-subpage-nav-card={isReadSurface ? \"\" : undefined}" in selector_markup
-    assert '<label className="field" htmlFor="character-selector">' in selector_markup
-    assert "<span>Character</span>" in selector_markup
-    assert "id=\"character-selector\"" in selector_markup
-    assert "selectCharacter(event.currentTarget.value || null)" in selector_markup
-    assert "className=\"chat-label\"" not in selector_markup
+    assert 'className={isReadSurface ? "character-subpage-nav-card" : "character-selector-card"}' in source
+    assert "data-character-subpage-nav-card={isReadSurface ? \"\" : undefined}" in source
+    assert '<nav className="character-subpage-nav" aria-label="Character subpages">' in source
+    assert "href={readSurfaceSectionUrl(section.id)}" in source
+    assert 'className={activeCharacterSection === section.id ? "button-link" : "ghost-button"}' in source
+    assert "data-character-read-subpage-link" in source
+    assert "data-character-read-target-subpage={section.id}" in source
+    assert "onClick={handleReadSurfaceSectionNavClick(section.id)}" in source
+    assert '<label className="field" htmlFor="character-selector">' in source
+    assert "<span>Character</span>" in source
+    assert 'id="character-selector"' in source
+    assert "selectCharacter(event.currentTarget.value || null)" in source
+    assert "className=\"chat-label\"" not in source
 
 
 def test_admin_user_detail_action_button_chrome_in_source() -> None:
