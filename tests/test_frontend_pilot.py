@@ -1347,7 +1347,7 @@ def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> N
 
 
 def test_dm_content_player_wiki_editor_fields_use_flask_style_labels_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
     helper_start = source.index("const renderPlayerWikiDraftFields = ({")
     helper_end = source.index("const renderStatblockCard =", helper_start)
     helper_markup = source[helper_start:helper_end]
@@ -1427,7 +1427,7 @@ def test_dm_content_systems_management_form_field_chrome() -> None:
 
 
 def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
 
     statblock_edit_start = source.index("const renderStatblockCard = (")
     statblock_edit_end = source.index("const renderConditionCard =", statblock_edit_start)
@@ -2366,7 +2366,7 @@ def test_dm_session_revealed_articles_panel_uses_session_article_row_chrome_in_s
 
 
 def test_dm_content_staged_articles_edit_form_uses_flask_style_file_field_markup() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
     queue_start = source.index('<article className="card" id="dm-content-staged-articles-queue">')
     queue_end = source.index("</article>", queue_start) + len("</article>")
     queue_markup = source[queue_start:queue_end]
