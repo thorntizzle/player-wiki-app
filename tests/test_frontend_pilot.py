@@ -353,6 +353,28 @@ def test_character_header_uses_flask_style_chrome_in_source() -> None:
     assert "Character route" not in source
 
 
+def test_character_vitals_bar_uses_flask_style_chrome_in_source() -> None:
+    source = Path("frontend/src/components/CharacterVitalsBar.tsx").read_text(encoding="utf-8")
+
+    assert '<section className="session-bar session-bar--compact" id="session-vitals">' in source
+    assert 'className="session-bar__summary"' in source
+    assert '<div className="session-bar__actions" id="session-rest">' in source
+    assert 'onClick={() => onPreviewRest("short")}' in source
+    assert 'onClick={() => onPreviewRest("long")}' in source
+    assert 'className="session-vitals-form session-vitals-form--compact"' in source
+    assert "xianxiaVitalsFields.map((field)" in source
+    assert "id={`xianxia-${field.key}`}" in source
+    assert "Save Xianxia pools" in source
+    assert 'id="character-current-hp"' in source
+    assert 'id="character-temp-hp"' in source
+    assert "<span> / {maxHp}</span>" in source
+    assert 'className="plain-list rest-preview-list"' in source
+    assert '{"->"}' in source
+    assert 'onClick={() => onApplyRest(restPreview.rest_type === "short" ? "short" : "long")}' in source
+    assert "onClick={onClearRestPreview}" in source
+    assert "className=\"chat-label\"" not in source
+
+
 def test_admin_user_detail_action_button_chrome_in_source() -> None:
     source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
     admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]

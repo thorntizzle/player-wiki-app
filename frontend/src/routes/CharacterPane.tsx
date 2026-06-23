@@ -46,7 +46,6 @@ import {
   emptyCharacterXianxiaActiveStateDraft,
   emptyCharacterXianxiaDaoUseRequestDraft,
   emptyCharacterXianxiaVitalsDraft,
-  xianxiaVitalsFields,
 } from "../characterPaneDrafts";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 import { queryClient, useApiClient } from "../apiClientContext";
@@ -61,6 +60,7 @@ import { CharacterHeader } from "../components/CharacterHeader";
 import { CharacterNavigationCard } from "../components/CharacterNavigationCard";
 import { CharacterPortraitManager } from "../components/CharacterPortraitManager";
 import { CharacterSummaryCard } from "../components/CharacterSummaryCard";
+import { CharacterVitalsBar } from "../components/CharacterVitalsBar";
 import { CharacterDndAbilitySkillsSection } from "../components/CharacterDndAbilitySkillsSection";
 import { CharacterDndEquipmentSection } from "../components/CharacterDndEquipmentSection";
 import { CharacterDndInventorySection } from "../components/CharacterDndInventorySection";
@@ -1174,134 +1174,30 @@ export function CharacterPane({
 
         {selected && detailRecord ? (
           <>
-            <section className="session-bar session-bar--compact" id="session-vitals">
-              <div className="session-bar__summary">
-                <p className="eyebrow">{surfaceMetaLabel}</p>
-                <h2>Vitals</h2>
-              </div>
-              <div className="session-bar__actions" id="session-rest">
-                <button
-                  type="button"
-                  className="ghost-button"
-                  disabled={previewRest.isPending || !canEdit}
-                  onClick={() => previewRest.mutate("short")}
-                >
-                  Short rest
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button"
-                  disabled={previewRest.isPending || !canEdit}
-                  onClick={() => previewRest.mutate("long")}
-                >
-                  Long rest
-                </button>
-              </div>
-              {isXianxia ? (
-                <form onSubmit={submitXianxiaVitals} className="session-vitals-form session-vitals-form--compact">
-                  {xianxiaVitalsFields.map((field) => (
-                    <div className="session-vitals-form__group" key={field.key}>
-                      <label htmlFor={`xianxia-${field.key}`} className="session-field">
-                        <span>{field.label}</span>
-                        <input
-                          id={`xianxia-${field.key}`}
-                          type="number"
-                          value={xianxiaVitalsDraft[field.key]}
-                          disabled={!canEdit}
-                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                            setXianxiaVitalsDraft({
-                              ...xianxiaVitalsDraft,
-                              [field.key]: event.currentTarget.value,
-                            })
-                          }
-                        />
-                      </label>
-                    </div>
-                  ))}
-                  <button type="submit" disabled={patchVitals.isPending || !canEdit}>
-                    {patchVitals.isPending ? "Saving..." : "Save Xianxia pools"}
-                  </button>
-                </form>
-              ) : (
-                <form onSubmit={submitVitals} className="session-vitals-form session-vitals-form--compact">
-                  <div className="session-vitals-form__group">
-                    <label htmlFor="character-current-hp" className="session-field">
-                      <span>Current HP</span>
-                      <div className="session-number-inline">
-                        <input
-                          id="character-current-hp"
-                          type="number"
-                          value={vitalsDraft.currentHp}
-                          disabled={!canEdit}
-                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                            setVitalsDraft({ ...vitalsDraft, currentHp: event.currentTarget.value })
-                          }
-                        />
-                        <span> / {readNumber(stats.max_hp, selected?.max_hp)}</span>
-                      </div>
-                    </label>
-                  </div>
-                  <div className="session-vitals-form__group">
-                    <label htmlFor="character-temp-hp" className="session-field">
-                      <span>Temp HP</span>
-                      <input
-                        id="character-temp-hp"
-                        type="number"
-                        value={vitalsDraft.tempHp}
-                        disabled={!canEdit}
-                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                          setVitalsDraft({ ...vitalsDraft, tempHp: event.currentTarget.value })
-                        }
-                      />
-                    </label>
-                  </div>
-                  <button type="submit" disabled={patchVitals.isPending || !canEdit}>
-                    {patchVitals.isPending ? "Saving..." : "Save vitals"}
-                  </button>
-                </form>
-              )}
-              {restPreview ? (
-                <section className="card session-card">
-                  <div className="section-heading">
-                    <h2>{restPreview.label} confirmation</h2>
-                  </div>
-                  <ul className="plain-list rest-preview-list">
-                    {restPreview.changes.length ? (
-                      restPreview.changes.map((change) => (
-                        <li key={`${change.label}-${change.from_value}-${change.to_value}`}>
-                          <strong>{change.label}</strong>: <span>{change.from_value} {"->"} {change.to_value}</span>
-                        </li>
-                      ))
-                    ) : (
-                      <li>No modeled state changes will be applied by this {restPreview.label.toLowerCase()}.</li>
-                    )}
-                  </ul>
-                  <div className="hero-actions">
-                    <button
-                      type="button"
-                      className="ghost-button"
-                      disabled={applyRest.isPending || !canEdit}
-                      onClick={() =>
-                        applyRest.mutate({
-                          restType: restPreview.rest_type === "short" ? "short" : "long",
-                          payload: { expected_revision: revision },
-                        })
-                      }
-                    >
-                      {applyRest.isPending ? "Applying..." : "Apply"}
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost-button"
-                      onClick={() => setRestPreview(null)}
-                      disabled={applyRest.isPending}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </section>
-              ) : null}
-            </section>
+            <CharacterVitalsBar
+              canEdit={canEdit}
+              isRestApplying={applyRest.isPending}
+              isRestPreviewLoading={previewRest.isPending}
+              isVitalsSaving={patchVitals.isPending}
+              isXianxia={isXianxia}
+              maxHp={readNumber(stats.max_hp, selected?.max_hp)}
+              onApplyRest={(restType) =>
+                applyRest.mutate({
+                  restType,
+                  payload: { expected_revision: revision },
+                })
+              }
+              onClearRestPreview={() => setRestPreview(null)}
+              onPreviewRest={(restType) => previewRest.mutate(restType)}
+              restPreview={restPreview}
+              setVitalsDraft={setVitalsDraft}
+              setXianxiaVitalsDraft={setXianxiaVitalsDraft}
+              submitVitals={submitVitals}
+              submitXianxiaVitals={submitXianxiaVitals}
+              surfaceMetaLabel={surfaceMetaLabel}
+              vitalsDraft={vitalsDraft}
+              xianxiaVitalsDraft={xianxiaVitalsDraft}
+            />
 
             {isDnd && !isReadSurface ? (
               <CharacterEmbeddedSectionNav
