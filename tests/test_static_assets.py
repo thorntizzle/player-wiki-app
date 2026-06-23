@@ -75,9 +75,8 @@ def test_base_template_includes_inline_loading_bootstrap_and_cover(client):
     assert "data-app-loading-prepared-media-url" in html
     assert "function setPreparedLoadingMedia(" in html
     assert "seedLoadingMediaFromCoverData();" in html
-    assert "function shouldSoftNavigateTo(" in html
-    assert "function softNavigate(" in html
-    assert "playerWiki:soft-navigation-before-swap" in html
+    assert "function softNavigate(" not in html
+    assert "data-app-soft-navigation-script" not in html
     assert "--app-loading-bg" in html
     assert "Loading campaign player wiki..." in html
 
@@ -1175,7 +1174,7 @@ def test_browser_navigation_feedback_short_minimum_duration(static_asset_live_se
             browser.close()
 
 
-def test_browser_campaign_link_soft_navigation_keeps_cover_element(static_asset_live_server):
+def test_browser_campaign_link_uses_document_navigation(static_asset_live_server):
     try:
         from playwright.sync_api import expect, sync_playwright
     except Exception as exc:
@@ -1189,8 +1188,12 @@ def test_browser_campaign_link_soft_navigation_keeps_cover_element(static_asset_
             pytest.skip(f"Playwright browser unavailable: {exc}")
 
         try:
+            target_request_count = 0
+
             def delay_session_route(route):
+                nonlocal target_request_count
                 if route.request.method == "GET" and route.request.url.rstrip("/").endswith("/campaigns/linden-pass/sections/sessions"):
+                    target_request_count += 1
                     time.sleep(0.35)
                 route.continue_()
 
@@ -1205,40 +1208,28 @@ def test_browser_campaign_link_soft_navigation_keeps_cover_element(static_asset_
             page.evaluate(
                 """
                 () => {
-                  window.__cpwSoftNavigationMarker = "alive";
-                  document.querySelector(".app-loading-cover").dataset.testSoftNavigationMarker = "alive";
+                  window.__cpwDocumentNavigationMarker = "old-document";
                   const link = document.createElement("a");
                   link.href = "/campaigns/linden-pass/sections/sessions";
-                  link.id = "app-soft-nav-section-link";
+                  link.id = "app-document-nav-section-link";
                   link.textContent = "Sessions section";
                   document.body.appendChild(link);
                 }
                 """
             )
 
-            page.locator("#app-soft-nav-section-link").click()
+            page.locator("#app-document-nav-section-link").click()
             page.wait_for_function(
                 "document.documentElement.classList.contains('app-loading')",
                 timeout=1000,
-            )
-            assert (
-                page.evaluate(
-                    "document.querySelector('.app-loading-cover').dataset.testSoftNavigationMarker"
-                )
-                == "alive"
             )
 
             page.wait_for_url("**/campaigns/linden-pass/sections/sessions")
             expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
             expect(page.locator(".page-shell")).to_be_visible(timeout=5000)
             expect(page.locator("main h1").first).to_contain_text("Sessions")
-            assert page.evaluate("window.__cpwSoftNavigationMarker") == "alive"
-            assert (
-                page.evaluate(
-                    "document.querySelector('.app-loading-cover').dataset.testSoftNavigationMarker"
-                )
-                == "alive"
-            )
+            assert page.evaluate("window.__cpwDocumentNavigationMarker") is None
+            assert target_request_count == 1
         finally:
             page.close()
             browser.close()

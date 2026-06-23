@@ -197,16 +197,12 @@
         var dismissTimer = null;
         var navigationStart = 0;
         var loadingMediaScheduled = false;
-        var softNavigationInFlight = false;
-        var lastHistoryPathname = window.location.pathname;
-        var lastHistorySearch = window.location.search;
         var defaultLoadingMessage = "Loading campaign player wiki...";
         var delayedLoadingMessage = "Still loading campaign player wiki...";
         var asyncInteractionSelector = "[data-combat-live-root], [data-combat-status-live-root], "
           + "[data-combat-character-live-root], [data-session-live-root], [data-session-shell-root], "
           + "[data-character-read-shell-root], [data-combat-async], [data-session-async], "
           + "[data-combat-inline-autosubmit], [data-character-read-subpage-link]";
-        var riskyScriptPattern = /(?:document|window)\.addEventListener\(\s*['"]DOMContentLoaded['"]/;
 
         function now() {
           return Date.now();
@@ -833,158 +829,6 @@
           return false;
         }
 
-        function hasMountedAsyncInteraction() {
-          return !!document.querySelector(asyncInteractionSelector);
-        }
-
-        function campaignPathParts(pathname) {
-          var match = String(pathname || "").match(/^\/campaigns\/([^/]+)(?:\/|$)/);
-          if (!match) {
-            return null;
-          }
-          return {
-            slug: match[1],
-          };
-        }
-
-        function shouldSoftNavigateTo(url) {
-          if (!window.fetch || !window.DOMParser || softNavigationInFlight) {
-            return false;
-          }
-          if (!isSameOrigin(url) || !isAllowedProtocol(url) || isHashOnlyNavigation(url)) {
-            return false;
-          }
-          if (hasMountedAsyncInteraction()) {
-            return false;
-          }
-          return isSameCampaignNavigationTarget(url);
-        }
-
-        function isSameCampaignNavigationTarget(url) {
-          var currentCampaign = campaignPathParts(window.location.pathname);
-          var targetCampaign = campaignPathParts(url.pathname);
-          return !!(
-            currentCampaign
-            && targetCampaign
-            && currentCampaign.slug === targetCampaign.slug
-          );
-        }
-
-        function bodyScriptsAreSafeForSoftNavigation(doc) {
-          var scripts = Array.prototype.slice.call(doc.body ? doc.body.querySelectorAll("script") : []);
-          for (var i = 0; i < scripts.length; i += 1) {
-            var script = scripts[i];
-            if (script.src) {
-              return false;
-            }
-            if (riskyScriptPattern.test(script.textContent || "")) {
-              return false;
-            }
-          }
-          return true;
-        }
-
-        function syncDocumentMetadata(doc) {
-          if (doc.title) {
-            document.title = doc.title;
-          }
-          if (doc.documentElement && doc.documentElement.dataset.theme) {
-            document.documentElement.dataset.theme = doc.documentElement.dataset.theme;
-          }
-        }
-
-        function executeSoftNavigationScripts(doc) {
-          var oldManagedScripts = document.querySelectorAll("script[data-app-soft-navigation-script='1']");
-          for (var i = 0; i < oldManagedScripts.length; i += 1) {
-            oldManagedScripts[i].remove();
-          }
-
-          var scripts = Array.prototype.slice.call(doc.body ? doc.body.querySelectorAll("script") : []);
-          for (var j = 0; j < scripts.length; j += 1) {
-            var sourceScript = scripts[j];
-            var script = document.createElement("script");
-            for (var k = 0; k < sourceScript.attributes.length; k += 1) {
-              var attribute = sourceScript.attributes[k];
-              script.setAttribute(attribute.name, attribute.value);
-            }
-            script.setAttribute("data-app-soft-navigation-script", "1");
-            script.textContent = sourceScript.textContent || "";
-            document.body.appendChild(script);
-          }
-        }
-
-        function finishSoftNavigation(url, doc, options) {
-          var targetShell = doc.querySelector(".page-shell");
-          var currentShell = document.querySelector(".page-shell");
-          if (!targetShell || !currentShell) {
-            throw new Error("Soft navigation shell missing");
-          }
-          if (!bodyScriptsAreSafeForSoftNavigation(doc)) {
-            throw new Error("Soft navigation target has unsafe scripts");
-          }
-
-          document.dispatchEvent(new CustomEvent("playerWiki:soft-navigation-before-swap"));
-          currentShell.replaceWith(targetShell);
-          syncDocumentMetadata(doc);
-          executeSoftNavigationScripts(doc);
-          if (options && options.replaceHistory) {
-            window.history.replaceState({ appSoftNavigation: true }, "", url.href);
-          } else {
-            window.history.pushState({ appSoftNavigation: true }, "", url.href);
-          }
-          lastHistoryPathname = window.location.pathname;
-          lastHistorySearch = window.location.search;
-          window.scrollTo(0, 0);
-          requestFrame(function () {
-            requestFrame(function () {
-              onLoad();
-            });
-          });
-        }
-
-        function fallbackToDocumentNavigation(url, options) {
-          if (options && options.reload) {
-            window.location.reload();
-            return;
-          }
-          window.location.assign(url.href);
-        }
-
-        function softNavigate(url, options) {
-          softNavigationInFlight = true;
-          window.fetch(url.href, {
-            credentials: "same-origin",
-            headers: {
-              "Accept": "text/html",
-              "X-Requested-With": "fetch",
-            },
-          }).then(function (response) {
-            var contentType = response.headers.get("content-type") || "";
-            var responseUrl = toUrl(response.url || url.href);
-            if (
-              !response.ok
-              || contentType.indexOf("text/html") < 0
-              || !responseUrl
-              || !isSameCampaignNavigationTarget(responseUrl)
-            ) {
-              throw new Error("Soft navigation received non-HTML response");
-            }
-            return response.text().then(function (html) {
-              return {
-                html: html,
-                url: responseUrl,
-              };
-            });
-          }).then(function (result) {
-            var doc = new DOMParser().parseFromString(result.html, "text/html");
-            finishSoftNavigation(result.url, doc, options);
-          }).catch(function () {
-            fallbackToDocumentNavigation(url, options);
-          }).finally(function () {
-            softNavigationInFlight = false;
-          });
-        }
-
         function submitterTarget(submitter) {
           if (!(submitter instanceof HTMLInputElement || submitter instanceof HTMLButtonElement)) {
             return "";
@@ -1048,11 +892,6 @@
             return;
           }
           beginLoadingState();
-          var url = toUrl(link.getAttribute("href"));
-          if (url && shouldSoftNavigateTo(url)) {
-            event.preventDefault();
-            softNavigate(url);
-          }
         }
 
         function handleSubmit(event) {
@@ -1080,30 +919,6 @@
 
         document.addEventListener("click", handleClick);
         document.addEventListener("submit", handleSubmit);
-        try {
-          if (campaignPathParts(window.location.pathname)) {
-            window.history.replaceState({ appSoftNavigation: true }, "", window.location.href);
-          }
-        } catch (_error) {
-          // History state is only an enhancement for same-document navigation.
-        }
-        window.addEventListener("popstate", function () {
-          var url = toUrl(window.location.href);
-          if (url && url.pathname === lastHistoryPathname && url.search === lastHistorySearch && url.hash) {
-            return;
-          }
-          if (url) {
-            lastHistoryPathname = url.pathname;
-            lastHistorySearch = url.search;
-          }
-          if (!url || !shouldSoftNavigateTo(url)) {
-            beginLoadingState();
-            fallbackToDocumentNavigation(url || new URL(window.location.href), { reload: true });
-            return;
-          }
-          beginLoadingState();
-          softNavigate(url, { replaceHistory: true });
-        });
         window.addEventListener("pageshow", function (event) {
           if (event.persisted) {
             restoreFromHistoryCache();
