@@ -306,7 +306,7 @@ def test_admin_user_detail_action_button_chrome_in_source() -> None:
     admin_user_detail_source = _extract_component_source(
         source,
         "function AdminUserDetailPage() {",
-        "function buildControlVisibilityDraft",
+        "function HelpList",
     )
 
     remove_on_click = 'onClick={() => removeMembership.mutate(membership)}'
@@ -337,7 +337,7 @@ def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
     admin_user_detail_source = _extract_component_source(
         source,
         "function AdminUserDetailPage() {",
-        "function buildControlVisibilityDraft",
+        "function HelpList",
     )
 
     delete_on_click = 'onClick={() => deleteUser.mutate()}'
@@ -360,7 +360,7 @@ def test_admin_user_account_actions_are_flat_stack_in_source() -> None:
     admin_user_detail_source = _extract_component_source(
         source,
         "function AdminUserDetailPage() {",
-        "function buildControlVisibilityDraft",
+        "function HelpList",
     )
 
     heading_index = admin_user_detail_source.index("<h2>Account actions</h2>")
@@ -529,10 +529,7 @@ def test_combat_dm_controls_add_and_cleanup_chrome_in_source() -> None:
 
 
 def test_campaign_control_page_cleanup_removes_flask_control_fallback_link() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    control_start = source.index("function CampaignControlPage() {")
-    control_end = source.index("function CampaignHelpPage()", control_start)
-    control_markup = source[control_start:control_end]
+    control_markup = Path("frontend/src/routes/CampaignControlPage.tsx").read_text(encoding="utf-8")
 
     assert "Flask Control" not in control_markup
     assert "Flask Control panel" not in control_markup
