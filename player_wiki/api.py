@@ -10,10 +10,17 @@ from pathlib import Path
 import re
 from datetime import timedelta
 from typing import Any
-from urllib.parse import urlencode
 
 from flask import Blueprint, abort, current_app, jsonify, request, send_file, url_for
 
+from .admin_audit import (
+    build_activity_params,
+    build_activity_query_url,
+    get_activity_filters,
+    list_audit_event_type_choices,
+    load_dashboard_audit_context,
+    load_user_audit_context,
+)
 from .auth import (
     can_access_campaign_scope,
     can_access_campaign_systems_entry,
@@ -47,7 +54,6 @@ from .auth_store import (
     normalize_session_chat_order,
     isoformat,
 )
-from .admin import AUDIT_PAGE_SIZE, EVENT_TITLES as ADMIN_EVENT_TITLES, SOURCE_LABELS as ADMIN_SOURCE_LABELS
 from .campaign_combat_service import CampaignCombatRevisionConflictError, CampaignCombatValidationError
 from .campaign_content_service import (
     CampaignContentError,
@@ -483,70 +489,7 @@ def register_api(app) -> None:
                 )
         return choices
 
-    def list_admin_audit_event_type_choices() -> list[dict[str, str]]:
-        return [
-            {"value": event_type, "label": ADMIN_EVENT_TITLES.get(event_type, event_type.replace("_", " ").title())}
-            for event_type in sorted(ADMIN_EVENT_TITLES)
-        ]
-
-    def get_admin_activity_filters(campaign_choices: list[dict[str, str]]) -> dict[str, Any]:
-        allowed_campaigns = {item["slug"] for item in campaign_choices}
-        allowed_event_types = set(ADMIN_EVENT_TITLES)
-
-        query = request.args.get("audit_q", "").strip()
-        event_type = request.args.get("audit_event_type", "").strip()
-        campaign_slug = request.args.get("audit_campaign_slug", "").strip()
-        raw_page = request.args.get("audit_page", "").strip()
-
-        if event_type not in allowed_event_types:
-            event_type = ""
-        if campaign_slug not in allowed_campaigns:
-            campaign_slug = ""
-        try:
-            page = max(1, int(raw_page))
-        except (TypeError, ValueError):
-            page = 1
-
-        return {
-            "query": query,
-            "event_type": event_type,
-            "campaign_slug": campaign_slug,
-            "page": page,
-        }
-
-    def build_admin_activity_params(
-        activity_filters: dict[str, Any],
-        *,
-        page: int | None = None,
-    ) -> dict[str, Any]:
-        params: dict[str, Any] = {}
-        if activity_filters.get("query"):
-            params["audit_q"] = activity_filters["query"]
-        if activity_filters.get("event_type"):
-            params["audit_event_type"] = activity_filters["event_type"]
-        if activity_filters.get("campaign_slug"):
-            params["audit_campaign_slug"] = activity_filters["campaign_slug"]
-
-        page_value = activity_filters.get("page", 1) if page is None else page
-        if isinstance(page_value, int) and page_value > 1:
-            params["audit_page"] = page_value
-        return params
-
-    def build_admin_gen2_activity_url(
-        path: str,
-        activity_filters: dict[str, Any],
-        *,
-        page: int | None = None,
-    ) -> str:
-        params = build_admin_activity_params(activity_filters, page=page)
-        query = urlencode(params)
-        return f"{path}?{query}" if query else path
-
-    def format_admin_timestamp(value) -> str:
-        return value.strftime("%Y-%m-%d %H:%M UTC")
-
     def build_admin_user_reference(
-        *,
         user_id: int | None,
         display_name: str | None,
         email: str | None,
@@ -560,191 +503,6 @@ def register_api(app) -> None:
             "meta": email if display_name and display_name != email else "",
             "href": f"/app-next/admin/users/{user_id}",
             "flask_href": url_for("admin_user_detail", user_id=user_id),
-        }
-
-    def summarize_admin_audit_event(event) -> str | None:
-        detail_bits: list[str] = []
-        metadata = event.metadata
-
-        if metadata.get("is_admin") is True:
-            detail_bits.append("app admin")
-
-        role = metadata.get("role")
-        if isinstance(role, str) and role:
-            detail_bits.append(f"role {role}")
-
-        status = metadata.get("status")
-        if isinstance(status, str) and status:
-            detail_bits.append(f"status {status}")
-
-        scope = metadata.get("scope")
-        if isinstance(scope, str) and scope:
-            detail_bits.append(f"scope {scope}")
-
-        visibility = metadata.get("visibility")
-        if isinstance(visibility, str) and visibility:
-            detail_bits.append(f"visibility {visibility}")
-
-        source_id = metadata.get("source_id")
-        if isinstance(source_id, str) and source_id:
-            detail_bits.append(f"source {source_id}")
-
-        library_slug = metadata.get("library_slug")
-        if isinstance(library_slug, str) and library_slug:
-            detail_bits.append(f"library {library_slug}")
-
-        entry_key = metadata.get("entry_key")
-        if isinstance(entry_key, str) and entry_key:
-            detail_bits.append(f"entry {entry_key}")
-
-        email = metadata.get("email")
-        if isinstance(email, str) and email:
-            detail_bits.append(f"user {email}")
-
-        if metadata.get("is_enabled") is True:
-            detail_bits.append("enabled")
-        elif metadata.get("is_enabled") is False:
-            detail_bits.append("disabled")
-
-        assignment_type = metadata.get("assignment_type")
-        if isinstance(assignment_type, str) and assignment_type:
-            detail_bits.append(f"assignment {assignment_type}")
-
-        if metadata.get("previous_user_id") is not None:
-            detail_bits.append("reassigned")
-
-        source_key = metadata.get("source") or metadata.get("via")
-        if isinstance(source_key, str) and source_key:
-            source_label = ADMIN_SOURCE_LABELS.get(source_key, source_key.replace("_", " "))
-            detail_bits.append(f"via {source_label}")
-
-        return " | ".join(detail_bits) if detail_bits else None
-
-    def present_admin_audit_event(event, *, campaign_lookup: dict[str, str]) -> dict[str, Any]:
-        scope_bits: list[str] = []
-        if event.campaign_slug:
-            scope_bits.append(campaign_lookup.get(event.campaign_slug, event.campaign_slug))
-        if event.character_slug:
-            scope_bits.append(event.character_slug)
-
-        return {
-            "id": event.id,
-            "event_type": event.event_type,
-            "title": ADMIN_EVENT_TITLES.get(event.event_type, event.event_type.replace("_", " ").title()),
-            "timestamp": format_admin_timestamp(event.created_at),
-            "actor": build_admin_user_reference(
-                user_id=event.actor_user_id,
-                display_name=event.actor_display_name,
-                email=event.actor_email,
-            ),
-            "target": build_admin_user_reference(
-                user_id=event.target_user_id,
-                display_name=event.target_display_name,
-                email=event.target_email,
-            ),
-            "actor_email": event.actor_email or "",
-            "target_email": event.target_email or "",
-            "campaign_slug": event.campaign_slug or "",
-            "character_slug": event.character_slug or "",
-            "scope": " / ".join(scope_bits) if scope_bits else "",
-            "details": summarize_admin_audit_event(event) or "",
-        }
-
-    def build_admin_pagination_context(
-        activity_filters: dict[str, Any],
-        *,
-        total_events: int,
-        path: str,
-    ) -> dict[str, Any]:
-        total_pages = max(1, (total_events + AUDIT_PAGE_SIZE - 1) // AUDIT_PAGE_SIZE)
-        current_page = min(int(activity_filters.get("page", 1)), total_pages)
-
-        return {
-            "current_page": current_page,
-            "page_size": AUDIT_PAGE_SIZE,
-            "total_events": total_events,
-            "total_pages": total_pages,
-            "has_previous": current_page > 1,
-            "has_next": current_page < total_pages,
-            "previous_url": build_admin_gen2_activity_url(path, activity_filters, page=current_page - 1)
-            if current_page > 1
-            else "",
-            "next_url": build_admin_gen2_activity_url(path, activity_filters, page=current_page + 1)
-            if current_page < total_pages
-            else "",
-        }
-
-    def load_admin_dashboard_audit_context(
-        store,
-        campaign_lookup: dict[str, str],
-        activity_filters: dict[str, Any],
-    ) -> dict[str, Any]:
-        total_events = store.count_recent_audit_events(
-            query=activity_filters["query"] or None,
-            event_type=activity_filters["event_type"] or None,
-            campaign_slug=activity_filters["campaign_slug"] or None,
-        )
-        pagination = build_admin_pagination_context(
-            activity_filters,
-            total_events=total_events,
-            path="/app-next/admin",
-        )
-        effective_filters = {**activity_filters, "page": pagination["current_page"]}
-        events = store.list_recent_audit_events(
-            limit=AUDIT_PAGE_SIZE,
-            offset=(pagination["current_page"] - 1) * AUDIT_PAGE_SIZE,
-            query=effective_filters["query"] or None,
-            event_type=effective_filters["event_type"] or None,
-            campaign_slug=effective_filters["campaign_slug"] or None,
-        )
-        export_params = build_admin_activity_params(effective_filters, page=1)
-        return {
-            "activity_filters": effective_filters,
-            "pagination": pagination,
-            "export_url": url_for("admin_activity_export", **export_params),
-            "recent_audit_events": [
-                present_admin_audit_event(event, campaign_lookup=campaign_lookup)
-                for event in events
-            ],
-        }
-
-    def load_admin_user_audit_context(
-        store,
-        campaign_lookup: dict[str, str],
-        activity_filters: dict[str, Any],
-        *,
-        user_id: int,
-    ) -> dict[str, Any]:
-        total_events = store.count_audit_events_for_user(
-            user_id,
-            query=activity_filters["query"] or None,
-            event_type=activity_filters["event_type"] or None,
-            campaign_slug=activity_filters["campaign_slug"] or None,
-        )
-        path = f"/app-next/admin/users/{user_id}"
-        pagination = build_admin_pagination_context(
-            activity_filters,
-            total_events=total_events,
-            path=path,
-        )
-        effective_filters = {**activity_filters, "page": pagination["current_page"]}
-        events = store.list_audit_events_for_user(
-            user_id,
-            limit=AUDIT_PAGE_SIZE,
-            offset=(pagination["current_page"] - 1) * AUDIT_PAGE_SIZE,
-            query=effective_filters["query"] or None,
-            event_type=effective_filters["event_type"] or None,
-            campaign_slug=effective_filters["campaign_slug"] or None,
-        )
-        export_params = build_admin_activity_params(effective_filters, page=1)
-        return {
-            "activity_filters": effective_filters,
-            "pagination": pagination,
-            "export_url": url_for("admin_user_activity_export", user_id=user_id, **export_params),
-            "recent_audit_events": [
-                present_admin_audit_event(event, campaign_lookup=campaign_lookup)
-                for event in events
-            ],
         }
 
     def serialize_admin_membership(membership, campaign_lookup: dict[str, str]) -> dict[str, Any]:
@@ -837,10 +595,17 @@ def register_api(app) -> None:
                 }
             )
 
-        dashboard_audit_context = load_admin_dashboard_audit_context(
+        dashboard_audit_context = load_dashboard_audit_context(
             store,
             campaign_lookup,
-            get_admin_activity_filters(campaign_choices),
+            get_activity_filters(request.args, campaign_choices),
+            build_page_url=lambda filters, page: build_activity_query_url("/app-next/admin", filters, page=page),
+            build_export_url=lambda filters: url_for(
+                "admin_activity_export",
+                **build_activity_params(filters, page=1),
+            ),
+            build_user_reference=build_admin_user_reference,
+            include_event_id=True,
         )
 
         current_user = get_current_user()
@@ -849,7 +614,7 @@ def register_api(app) -> None:
             "admin_user": serialize_user(current_user) if current_user is not None else None,
             "campaign_choices": campaign_choices,
             "invite_form_defaults": get_admin_invite_form_defaults(campaign_choices),
-            "audit_event_type_choices": list_admin_audit_event_type_choices(),
+            "audit_event_type_choices": list_audit_event_type_choices(),
             "user_cards": sorted(user_cards, key=lambda item: item["email"]),
             "links": {
                 "gen2_admin_url": "/app-next/admin",
@@ -876,11 +641,23 @@ def register_api(app) -> None:
         )
         assignments = store.list_character_assignments_for_user(user.id)
         current_user = get_current_user()
-        user_audit_context = load_admin_user_audit_context(
+        user_audit_context = load_user_audit_context(
             store,
             campaign_lookup,
-            get_admin_activity_filters(campaigns),
+            get_activity_filters(request.args, campaigns),
             user_id=user.id,
+            build_page_url=lambda filters, page: build_activity_query_url(
+                f"/app-next/admin/users/{user.id}",
+                filters,
+                page=page,
+            ),
+            build_export_url=lambda filters: url_for(
+                "admin_user_activity_export",
+                user_id=user.id,
+                **build_activity_params(filters, page=1),
+            ),
+            build_user_reference=build_admin_user_reference,
+            include_event_id=True,
         )
 
         return {
@@ -890,7 +667,7 @@ def register_api(app) -> None:
             "character_choices": character_choices,
             "memberships": [serialize_admin_membership(membership, campaign_lookup) for membership in memberships],
             "assignments": [serialize_admin_assignment(assignment, campaign_lookup) for assignment in assignments],
-            "audit_event_type_choices": list_admin_audit_event_type_choices(),
+            "audit_event_type_choices": list_audit_event_type_choices(),
             "membership_form_defaults": get_admin_membership_form_defaults(user, campaigns),
             "assignment_form_defaults": get_admin_assignment_form_defaults(character_choices),
             "can_manage_account": current_user is not None and current_user.id != user.id,
