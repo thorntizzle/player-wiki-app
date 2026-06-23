@@ -195,6 +195,7 @@ from .campaign_wiki_safety import (
 )
 from .db import get_db_query_metrics, register_db, reset_db_query_metrics
 from .models import section_sort_key, subsection_sort_key
+from .player_choices import build_active_player_choices
 from .session_article_publisher import (
     SESSION_ARTICLE_SECTION_TARGETS,
     SESSION_ARTICLE_SOURCE_REF_PREFIX,
@@ -2103,24 +2104,16 @@ def create_app() -> Flask:
         can_assign_owner = bool(user and user.is_admin)
         can_delete_character = can_manage_campaign_content(campaign_slug)
 
-        player_choices: list[dict[str, object]] = []
-        if can_assign_owner:
-            for candidate in sorted(
-                store.list_users(),
-                key=lambda item: ((item.display_name or "").lower(), item.email.lower()),
-            ):
-                if not candidate.is_active:
-                    continue
-                membership = store.get_membership(candidate.id, campaign_slug, statuses=("active",))
-                if membership is None or membership.role != "player":
-                    continue
-                player_choices.append(
-                    {
-                        "user_id": candidate.id,
-                        "label": f"{candidate.display_name} ({candidate.email})",
-                        "is_current": bool(assignment and assignment.user_id == candidate.id),
-                    }
-                )
+        player_choices = (
+            build_active_player_choices(
+                store,
+                campaign_slug,
+                current_user_id=assignment.user_id if assignment is not None else None,
+                include_current=True,
+            )
+            if can_assign_owner
+            else []
+        )
 
         return {
             "assignment": (
@@ -2145,24 +2138,7 @@ def create_app() -> Flask:
         }
 
     def build_session_message_recipient_player_choices(campaign_slug: str) -> list[dict[str, object]]:
-        store = get_auth_store()
-        choices: list[dict[str, object]] = []
-        for candidate in sorted(
-            store.list_users(),
-            key=lambda item: ((item.display_name or "").lower(), item.email.lower()),
-        ):
-            if not candidate.is_active:
-                continue
-            membership = store.get_membership(candidate.id, campaign_slug, statuses=("active",))
-            if membership is None or membership.role != "player":
-                continue
-            choices.append(
-                {
-                    "user_id": candidate.id,
-                    "label": f"{candidate.display_name} ({candidate.email})",
-                }
-            )
-        return choices
+        return build_active_player_choices(get_auth_store(), campaign_slug)
 
     def normalize_character_page_ref(value: object) -> str:
         if isinstance(value, dict):

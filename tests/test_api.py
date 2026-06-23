@@ -1336,6 +1336,31 @@ def test_api_session_messages_support_private_audience_scope(client, app, users)
     assert log_messages[owner_only_body]["recipient_label"] == "Owner Player"
 
 
+def test_active_player_choices_use_campaign_membership_list(app, users, monkeypatch):
+    from player_wiki.player_choices import build_active_player_choices
+
+    with app.app_context():
+        store = app.extensions["auth_store"]
+
+        def fail_get_membership(*args, **kwargs):
+            raise AssertionError("player choices should use the campaign membership list")
+
+        monkeypatch.setattr(store, "get_membership", fail_get_membership)
+
+        choices = build_active_player_choices(
+            store,
+            "linden-pass",
+            current_user_id=users["owner"]["id"],
+            include_current=True,
+        )
+
+    choices_by_id = {int(choice["user_id"]): choice for choice in choices}
+    assert set(choices_by_id) == {users["owner"]["id"], users["party"]["id"]}
+    assert choices_by_id[users["owner"]["id"]]["label"] == "Owner Player (owner@example.com)"
+    assert choices_by_id[users["owner"]["id"]]["is_current"] is True
+    assert choices_by_id[users["party"]["id"]]["is_current"] is False
+
+
 def test_api_session_state_includes_revision_and_view_token(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-metadata-api")
 

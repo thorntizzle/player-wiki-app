@@ -646,6 +646,87 @@ class AuthStore:
         memberships = [self._map_membership(row) for row in rows]
         return [membership for membership in memberships if membership.status in statuses]
 
+    def list_campaign_user_memberships(
+        self,
+        campaign_slug: str,
+        *,
+        statuses: tuple[str, ...] | None = ("active",),
+        roles: tuple[str, ...] | None = None,
+        user_statuses: tuple[str, ...] | None = ("active",),
+    ) -> list[tuple[UserAccount, CampaignMembership]]:
+        conditions = ["membership.campaign_slug = ?"]
+        params: list[Any] = [campaign_slug]
+        if statuses is not None:
+            if not statuses:
+                return []
+            placeholders = ", ".join("?" for _ in statuses)
+            conditions.append(f"membership.status IN ({placeholders})")
+            params.extend(statuses)
+        if roles is not None:
+            if not roles:
+                return []
+            placeholders = ", ".join("?" for _ in roles)
+            conditions.append(f"membership.role IN ({placeholders})")
+            params.extend(roles)
+        if user_statuses is not None:
+            if not user_statuses:
+                return []
+            placeholders = ", ".join("?" for _ in user_statuses)
+            conditions.append(f"account.status IN ({placeholders})")
+            params.extend(user_statuses)
+
+        rows = get_db().execute(
+            f"""
+            SELECT
+                account.id AS user_id,
+                account.email AS user_email,
+                account.display_name AS user_display_name,
+                account.is_admin AS user_is_admin,
+                account.status AS user_status,
+                account.password_hash AS user_password_hash,
+                account.auth_version AS user_auth_version,
+                account.created_at AS user_created_at,
+                account.updated_at AS user_updated_at,
+                membership.id AS membership_id,
+                membership.user_id AS membership_user_id,
+                membership.campaign_slug AS membership_campaign_slug,
+                membership.role AS membership_role,
+                membership.status AS membership_status,
+                membership.created_at AS membership_created_at,
+                membership.updated_at AS membership_updated_at
+            FROM campaign_memberships AS membership
+            JOIN users AS account ON account.id = membership.user_id
+            WHERE {" AND ".join(conditions)}
+            ORDER BY lower(account.display_name), lower(account.email)
+            """,
+            tuple(params),
+        ).fetchall()
+
+        results: list[tuple[UserAccount, CampaignMembership]] = []
+        for row in rows:
+            user = UserAccount(
+                id=int(row["user_id"]),
+                email=str(row["user_email"]),
+                display_name=str(row["user_display_name"]),
+                is_admin=bool(row["user_is_admin"]),
+                status=str(row["user_status"]),
+                password_hash=row["user_password_hash"],
+                auth_version=int(row["user_auth_version"]),
+                created_at=parse_timestamp(row["user_created_at"]) or utcnow(),
+                updated_at=parse_timestamp(row["user_updated_at"]) or utcnow(),
+            )
+            membership = CampaignMembership(
+                id=int(row["membership_id"]),
+                user_id=int(row["membership_user_id"]),
+                campaign_slug=str(row["membership_campaign_slug"]),
+                role=str(row["membership_role"]),
+                status=str(row["membership_status"]),
+                created_at=parse_timestamp(row["membership_created_at"]) or utcnow(),
+                updated_at=parse_timestamp(row["membership_updated_at"]) or utcnow(),
+            )
+            results.append((user, membership))
+        return results
+
     def get_membership(
         self,
         user_id: int,

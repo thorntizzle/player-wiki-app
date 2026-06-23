@@ -138,6 +138,7 @@ from .character_store import CharacterStateConflictError
 from .character_repository import load_campaign_character_config
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
 from .models import section_sort_key, subsection_sort_key
+from .player_choices import build_active_player_choices
 from .repository import slugify
 from .session_models import (
     SESSION_ARTICLE_SOURCE_KIND_PAGE,
@@ -1664,24 +1665,7 @@ def register_api(app) -> None:
         return results
 
     def build_session_message_recipient_player_choices(campaign_slug: str) -> list[dict[str, object]]:
-        store = get_auth_store()
-        choices: list[dict[str, object]] = []
-        for candidate in sorted(
-            store.list_users(),
-            key=lambda item: ((item.display_name or "").lower(), item.email.lower()),
-        ):
-            if not candidate.is_active:
-                continue
-            membership = store.get_membership(candidate.id, campaign_slug, statuses=("active",))
-            if membership is None or membership.role != "player":
-                continue
-            choices.append(
-                {
-                    "user_id": candidate.id,
-                    "label": f"{candidate.display_name} ({candidate.email})",
-                }
-            )
-        return choices
+        return build_active_player_choices(get_auth_store(), campaign_slug)
 
     def build_session_payload(campaign_slug: str) -> dict[str, Any]:
         campaign = get_repository().get_campaign(campaign_slug)
@@ -4853,24 +4837,16 @@ def register_api(app) -> None:
         assigned_user = store.get_user_by_id(assignment.user_id) if assignment is not None else None
         can_assign_owner = bool(user and user.is_admin)
 
-        player_choices: list[dict[str, Any]] = []
-        if can_assign_owner:
-            for candidate in sorted(
-                store.list_users(),
-                key=lambda item: ((item.display_name or "").lower(), item.email.lower()),
-            ):
-                if not candidate.is_active:
-                    continue
-                membership = store.get_membership(candidate.id, campaign_slug, statuses=("active",))
-                if membership is None or membership.role != "player":
-                    continue
-                player_choices.append(
-                    {
-                        "user_id": candidate.id,
-                        "label": f"{candidate.display_name} ({candidate.email})",
-                        "is_current": bool(assignment and assignment.user_id == candidate.id),
-                    }
-                )
+        player_choices = (
+            build_active_player_choices(
+                store,
+                campaign_slug,
+                current_user_id=assignment.user_id if assignment is not None else None,
+                include_current=True,
+            )
+            if can_assign_owner
+            else []
+        )
 
         return {
             "available": True,
