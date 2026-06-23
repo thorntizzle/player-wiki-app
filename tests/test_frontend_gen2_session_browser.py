@@ -583,15 +583,19 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
                     return Array.from(
                         section
                             ? section.querySelectorAll(
-                                ":scope > .session-chat-card .section-heading h2"
+                                ":scope > .card h2"
                             )
                             : [],
                     ).map((node) => (node.textContent || "").trim());
                 }"""
             )
-            assert player_card_texts[:1] == ["Chat window"]
+            assert player_card_texts[:2] == ["Chat window", "Send message"]
             assert "Live session" not in player_card_texts
-            assert "Revealed articles" not in player_card_texts[:1]
+            assert "Revealed articles" not in player_card_texts
+            assert page.locator(".pane-visible .page-layout.session-layout > .session-column").get_by_role(
+                "heading",
+                name="Revealed articles",
+            ).count() == 0
             assert page.locator("article.card.session-status-card[data-session-status-card]").count() == 0
             expect(page.locator("[data-session-header-status]")).to_contain_text("Session active")
             assert page.locator("article.card.session-chat-card#session-chat[data-session-chat-card]").count() == 1

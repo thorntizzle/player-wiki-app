@@ -7369,67 +7369,6 @@ function SystemsEntryPage() {
   );
 }
 
-function SessionArticlesPanel({
-  campaignSlug,
-  articles,
-  title,
-  emptyText,
-  className = "card session-articles-card",
-}: {
-  campaignSlug: string;
-  articles: SessionArticle[];
-  title: string;
-  emptyText: string;
-  className?: string;
-}) {
-  const mergedClassName = Array.from(new Set(`card ${className ?? ""}`.split(/\s+/).filter(Boolean))).join(" ");
-
-  return (
-    <article className={mergedClassName}>
-      <div className="section-heading">
-        <h2>{title}</h2>
-        <p className="meta">{articles.length}</p>
-      </div>
-      {articles.length ? (
-        <div className="session-article-stack">
-          {articles.map((article) => {
-            const revealedLabel = article.revealed_at
-              ? `Revealed ${formatTimestamp(article.revealed_at)}`
-              : article.created_at
-                ? `Revealed ${formatTimestamp(article.created_at)}`
-                : null;
-            return (
-              <details className="feature-detail session-article-detail" data-session-article-id={article.id} key={article.id}>
-                <summary>
-                  <span>{article.title}</span>
-                  {revealedLabel ? <span className="meta">{revealedLabel}</span> : null}
-                </summary>
-                {article.image ? (
-                  <figure className="article-figure">
-                    <img
-                      className="article-image"
-                      src={resolveArticleImage(campaignSlug, article)}
-                      alt={article.image.alt_text || article.title || "Article image"}
-                    />
-                    {article.image.caption ? <figcaption className="meta article-image__caption">{article.image.caption}</figcaption> : null}
-                  </figure>
-                ) : null}
-                <SessionArticleSourceLine article={article} />
-                {renderArticleBody(article, "article-body--compact")}
-                <div className="session-article-detail__actions">
-                  <SessionArticleReferenceActions article={article} includePromotionLinks={false} />
-                </div>
-              </details>
-            );
-          })}
-        </div>
-      ) : (
-        <p className="status status-neutral">{emptyText}</p>
-      )}
-    </article>
-  );
-}
-
 function SessionPaneChat({
   payload,
 }: {
@@ -8002,7 +7941,6 @@ function SessionPane({
     postMessage.mutate(messagePayload);
   };
 
-  const revealedArticles = payload?.revealed_articles ?? [];
   return (
     <div className="page-layout session-layout session-layout--single">
       <section className="session-column">
@@ -8022,14 +7960,6 @@ function SessionPane({
           onSend={sendMessage}
           isSending={postMessage.isPending}
         />
-        {revealedArticles.length ? (
-          <SessionArticlesPanel
-            campaignSlug={campaignSlug}
-            articles={revealedArticles}
-            title="Revealed articles"
-            emptyText="No revealed articles yet."
-          />
-        ) : null}
       </section>
 
     </div>
