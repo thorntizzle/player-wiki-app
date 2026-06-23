@@ -607,7 +607,15 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(embedded_character_shell).to_be_visible()
             expect(embedded_character_shell.locator("> header.character-header .eyebrow")).to_have_text("Session Character")
             expect(embedded_character_shell.locator("> header.character-header h2")).to_be_visible()
-            expect(embedded_character_shell.locator("select#character-selector")).to_be_visible()
+            character_selector = embedded_character_shell.locator("select#character-selector")
+            expect(character_selector).to_be_visible()
+            selected_character_slug = character_selector.input_value()
+            assert selected_character_slug
+            selected_character_option_text = character_selector.locator("option:checked").inner_text()
+            assert selected_character_slug not in selected_character_option_text
+            character_summary_text = embedded_character_shell.locator("article.character-summary").inner_text()
+            assert selected_character_slug not in character_summary_text
+            assert "Status:" not in character_summary_text
             expect(embedded_character_shell.locator("> header.character-header h1")).to_have_count(0)
             embedded_character_header = embedded_character_shell.locator("> header.character-header")
             expect(embedded_character_header.locator(".hero-actions")).to_be_visible()

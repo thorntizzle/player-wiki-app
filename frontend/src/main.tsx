@@ -9243,7 +9243,7 @@ function CharacterPane({
                 >
                   {characterList.map((item) => (
                     <option key={item.slug} value={item.slug}>
-                      {item.name} ({item.slug})
+                      {item.name}
                     </option>
                   ))}
                 </select>
@@ -9265,9 +9265,7 @@ function CharacterPane({
                 </figure>
               ) : null}
               <div>
-                <h3>
-                  {selected.name} ({selected.slug})
-                </h3>
+                <h3>{selected.name}</h3>
                 <p>
                   HP: {readNumber(vitals.current_hp, selected.current_hp)} / {readNumber(stats.max_hp, selected.max_hp)}
                 </p>
@@ -9275,7 +9273,6 @@ function CharacterPane({
                 {selected.hit_dice?.value ? <p>Hit Dice: {selected.hit_dice.value}</p> : null}
                 <p>Class: {selected.class_level_text || "Unknown"}</p>
                 <p>System: {characterSystem(detailRecord)}</p>
-                <p>Status: {selected.status}</p>
               </div>
             </div>
             {selected.resource_preview?.length ? (
