@@ -303,9 +303,11 @@ def test_character_pane_non_read_selector_uses_flask_style_field_chrome_in_sourc
 
 def test_admin_user_detail_action_button_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    admin_user_detail_start = source.index("function AdminUserDetailPage() {")
-    admin_user_detail_end = source.index("function AccountSettingsPage()", admin_user_detail_start)
-    admin_user_detail_source = source[admin_user_detail_start:admin_user_detail_end]
+    admin_user_detail_source = _extract_component_source(
+        source,
+        "function AdminUserDetailPage() {",
+        "function buildControlVisibilityDraft",
+    )
 
     remove_on_click = 'onClick={() => removeMembership.mutate(membership)}'
     clear_on_click = 'onClick={() => removeAssignment.mutate(assignment)}'
@@ -332,9 +334,11 @@ def test_admin_user_detail_action_button_chrome_in_source() -> None:
 
 def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    admin_user_detail_start = source.index("function AdminUserDetailPage() {")
-    admin_user_detail_end = source.index("function AccountSettingsPage()", admin_user_detail_start)
-    admin_user_detail_source = source[admin_user_detail_start:admin_user_detail_end]
+    admin_user_detail_source = _extract_component_source(
+        source,
+        "function AdminUserDetailPage() {",
+        "function buildControlVisibilityDraft",
+    )
 
     delete_on_click = 'onClick={() => deleteUser.mutate()}'
     delete_button_start = admin_user_detail_source.rfind("<button", 0, admin_user_detail_source.index(delete_on_click))
@@ -353,9 +357,11 @@ def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
 
 def test_admin_user_account_actions_are_flat_stack_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    admin_user_detail_start = source.index("function AdminUserDetailPage() {")
-    admin_user_detail_end = source.index("function AccountSettingsPage()", admin_user_detail_start)
-    admin_user_detail_source = source[admin_user_detail_start:admin_user_detail_end]
+    admin_user_detail_source = _extract_component_source(
+        source,
+        "function AdminUserDetailPage() {",
+        "function buildControlVisibilityDraft",
+    )
 
     heading_index = admin_user_detail_source.index("<h2>Account actions</h2>")
     account_actions_start = admin_user_detail_source.rfind('<article className="card admin-panel">', 0, heading_index)
@@ -578,10 +584,7 @@ def test_campaign_control_page_cleanup_removes_flask_control_fallback_link() -> 
 
 
 def test_account_settings_page_removes_flask_account_fallback_link() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    account_settings_start = source.index("function AccountSettingsPage() {")
-    account_settings_end = source.index("function buildControlVisibilityDraft", account_settings_start)
-    account_settings_markup = source[account_settings_start:account_settings_end]
+    account_settings_markup = Path("frontend/src/routes/AccountSettingsPage.tsx").read_text(encoding="utf-8")
 
     assert "Flask account" not in account_settings_markup
     assert 'className="ghost-button" href="/campaigns">' in account_settings_markup
@@ -662,7 +665,7 @@ def test_campaign_help_page_removes_flask_help_fallback() -> None:
 def test_systems_entry_navigation_removes_open_flask_entry_link() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     systems_entry_start = source.index("function SystemsEntryPage() {")
-    systems_entry_end = source.index("function SessionArticlesPanel(", systems_entry_start)
+    systems_entry_end = source.index("function SessionPaneChat(", systems_entry_start)
     systems_entry_markup = source[systems_entry_start:systems_entry_end]
 
     assert "Open Flask entry" not in systems_entry_markup
@@ -1972,15 +1975,16 @@ def test_character_generic_system_summary_section_uses_detail_grid_cards() -> No
 
 def test_character_pane_status_messages_use_toast_overlay() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    feedback_source = Path("frontend/src/components/feedback.tsx").read_text(encoding="utf-8")
     styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     pane_start = source.index("function CharacterPane(")
     pane_end = source.index("interface StagedArticleDraftState", pane_start)
     pane_markup = source[pane_start:pane_end]
 
-    assert "const TOAST_DISMISS_MS = 3600;" in source
-    assert "function ToastNotice" in source
-    assert 'className={`toast-notice toast-notice--${tone}`}' in source
-    assert 'role="status" aria-live="polite"' in source
+    assert "const TOAST_DISMISS_MS = 3600;" in feedback_source
+    assert "function ToastNotice" in feedback_source
+    assert 'className={`toast-notice toast-notice--${tone}`}' in feedback_source
+    assert 'role="status" aria-live="polite"' in feedback_source
     assert "window.setTimeout(() => setStatusMessage(null), TOAST_DISMISS_MS)" in pane_markup
     assert "setRestPreview(response.preview);" in pane_markup
     assert 'setStatusMessage(`${response.preview.label} preview loaded.`);' not in pane_markup
@@ -2375,10 +2379,11 @@ def test_character_notes_section_uses_flask_style_reference_stack_and_edit_chrom
     assert "Save notes" not in notes_section_markup
 
 
-def test_player_session_revealed_articles_panel_uses_session_article_row_chrome_in_source() -> None:
+def test_dm_session_revealed_articles_panel_uses_session_article_row_chrome_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    panel_start = source.index("function SessionArticlesPanel({")
-    panel_end = source.index("\nfunction SessionPaneChat(", panel_start)
+    panel_id_start = source.index('id="session-revealed-articles"')
+    panel_start = source.rfind("<article", 0, panel_id_start)
+    panel_end = source.index('<article className="card session-sidebar-card" id="session-chat-logs">', panel_start)
     panel_markup = source[panel_start:panel_end]
 
     assert 'className="session-article-stack"' in panel_markup
@@ -2391,7 +2396,7 @@ def test_player_session_revealed_articles_panel_uses_session_article_row_chrome_
     assert 'renderArticleBody(article, "article-body--compact")' in panel_markup
     assert 'className="session-article-detail__actions"' in panel_markup
     assert (
-        "SessionArticleReferenceActions article={article} includePromotionLinks={false}" in panel_markup
+        "SessionArticleReferenceActions article={article} includePromotionLinks />" in panel_markup
     )
 
     assert 'className="article-stack"' not in panel_markup
