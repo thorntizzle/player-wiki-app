@@ -281,13 +281,9 @@ def test_frontend_pilot_without_build_returns_not_found(client, app, tmp_path):
 
 
 def test_session_pane_no_player_wiki_lookup_widget_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/SessionRoutes.tsx").read_text(encoding="utf-8")
     shell_source = Path("frontend/src/AppShell.tsx").read_text(encoding="utf-8")
-    session_pane_source = _extract_component_source(
-        source,
-        "function SessionPane({",
-        "function CharacterPane({",
-    )
+    session_pane_source = source[source.index("export function SessionPane({"):]
 
     assert "SessionPaneWikiLookup" not in session_pane_source
     assert "wikiQuery" not in session_pane_source
@@ -1269,7 +1265,7 @@ def test_character_portrait_manager_action_chrome_in_source() -> None:
 def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     component_start = source.index("function DmArticleCreator({")
-    component_end = source.index("function SessionPane({", component_start)
+    component_end = source.index("function CharacterPane({", component_start)
     creator_markup = source[component_start:component_end]
 
     assert 'className="stack-form"' in creator_markup
