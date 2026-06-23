@@ -2319,10 +2319,8 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
 
 
 def test_character_notes_section_uses_flask_style_reference_stack_and_edit_chrome() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
-    notes_section_start = source.index('{((isDnd || isXianxia) ? activeCharacterSection === "notes" : !isDnd) ? (')
-    notes_section_end = source.index('{!isDnd && !isXianxia ? (', notes_section_start)
-    notes_section_markup = source[notes_section_start:notes_section_end]
+    source = Path("frontend/src/components/CharacterNotesSection.tsx").read_text(encoding="utf-8")
+    notes_section_markup = source
 
     assert 'className="read-section" id="session-notes"' in notes_section_markup
     assert "className=\"section-heading\"" in notes_section_markup

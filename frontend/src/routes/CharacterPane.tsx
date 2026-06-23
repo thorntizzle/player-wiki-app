@@ -57,6 +57,7 @@ import {
 } from "../components/CharacterDetailDialog";
 import { CharacterControlsSection } from "../components/CharacterControlsSection";
 import { CharacterDndAbilitySkillsSection } from "../components/CharacterDndAbilitySkillsSection";
+import { CharacterNotesSection } from "../components/CharacterNotesSection";
 import {
   asRecord,
   asRecordArray,
@@ -3517,56 +3518,15 @@ export function CharacterPane({
             ) : null}
 
             {((isDnd || isXianxia) ? activeCharacterSection === "notes" : !isDnd) ? (
-              <section className="read-section" id="session-notes">
-                <div className="section-heading">
-                  <h2>Notes</h2>
-                </div>
-                <div className="reference-stack">
-                  {playerNotesHtml ? (
-                    <article className="detail-card">
-                      <h3>Note</h3>
-                      <div className="article-body article-body--compact" dangerouslySetInnerHTML={{ __html: playerNotesHtml }} />
-                    </article>
-                  ) : null}
-                  {referenceSections.length ? (
-                    referenceSections.map((section, sectionIndex) => (
-                      <article className="detail-card" key={readString(section.title, `reference-section-${sectionIndex}`)}>
-                        <h3>{readString(section.title)}</h3>
-                        <div
-                          className="article-body article-body--compact"
-                          dangerouslySetInnerHTML={{ __html: readString(section.html) }}
-                        />
-                      </article>
-                    ))
-                  ) : null}
-                  {!playerNotesHtml && !referenceSections.length ? (
-                    <article className="detail-card">
-                      <p className="meta">No notes yet.</p>
-                    </article>
-                  ) : null}
-                </div>
-                {canEdit ? (
-                  <article className="detail-card session-card">
-                    <form className="stack-form" data-character-sheet-edit-form="notes" onSubmit={submitNotes}>
-                      <label className="field">
-                        <span>Markdown note</span>
-                        <textarea
-                          name="player_notes_markdown"
-                          rows={8}
-                          value={notesDraft.notes}
-                          disabled={!canEdit}
-                          onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
-                            setNotesDraft({ ...notesDraft, notes: event.currentTarget.value })
-                          }
-                        />
-                      </label>
-                      <button type="submit" disabled={patchNotes.isPending || !canEdit}>
-                        {patchNotes.isPending ? "Saving..." : "Save note"}
-                      </button>
-                    </form>
-                  </article>
-                ) : null}
-              </section>
+              <CharacterNotesSection
+                canEdit={canEdit}
+                isSaving={patchNotes.isPending}
+                notesDraft={notesDraft}
+                playerNotesHtml={playerNotesHtml}
+                referenceSections={referenceSections}
+                setNotesDraft={setNotesDraft}
+                submitNotes={submitNotes}
+              />
             ) : null}
 
             {!isDnd && !isXianxia ? (
