@@ -62,6 +62,9 @@ def test_base_template_includes_inline_loading_bootstrap_and_cover(client):
     assert "app-loading-cover__message" in html
     assert "root.classList.contains(loadingClass) && cover.classList.contains(\"app-loading-cover--media-ready\")" in html
     assert "function seedLoadingMediaFromCoverData()" in html
+    assert "cpw:app-loading-active-media-url" in html
+    assert "app-loading-media-ready" in html
+    assert "function applyActiveLoadingMediaFromStorage()" in html
     assert "seedLoadingMediaFromCoverData();" in html
     assert "--app-loading-bg" in html
     assert "Loading campaign player wiki..." in html
@@ -761,6 +764,77 @@ def test_browser_loading_cover_seeds_media_before_outgoing_navigation(static_ass
             assert seeded["styleValue"].startswith('url("')
             assert seeded["attrValue"].startswith("/campaigns/linden-pass/assets/")
             assert "/campaigns/linden-pass/assets/" in seeded["backgroundImage"]
+        finally:
+            page.close()
+            browser.close()
+
+
+def test_browser_loading_cover_uses_active_media_across_incoming_document(static_asset_live_server):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            first_response = page.goto(f"{static_asset_live_server}/campaigns/linden-pass", wait_until="load")
+            assert first_response is not None
+            media_urls = _extract_loading_media_urls(first_response.text())
+            if len(media_urls) < 2:
+                pytest.skip("insufficient loading media candidates for active-media handoff test")
+            active_media_url = media_urls[-1]
+            page.evaluate(
+                """(activeUrl) => {
+                  sessionStorage.setItem('cpw:app-loading-active-media-url', activeUrl);
+                }""",
+                active_media_url,
+            )
+
+            def delay_stylesheet(route):
+                time.sleep(4.5)
+                route.continue_()
+
+            page.route("**/static/styles.css**", delay_stylesheet)
+            page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass?active-media-handoff=1",
+                wait_until="commit",
+            )
+            page.wait_for_timeout(3500)
+
+            snapshot = page.evaluate(
+                """
+                () => {
+                  const root = document.documentElement;
+                  const media = document.querySelector('.app-loading-cover__media');
+                  const style = document.querySelector('#app-loading-active-media-style');
+                  return {
+                    href: window.location.href,
+                    rootLoading: root.classList.contains('app-loading'),
+                    rootReady: root.classList.contains('app-loading-media-ready'),
+                    rootStyle: root.style.getPropertyValue('--app-loading-media'),
+                    activeStyle: style ? style.textContent : '',
+                    backgroundImage: getComputedStyle(media).backgroundImage,
+                    storedActive: sessionStorage.getItem('cpw:app-loading-active-media-url') || '',
+                  };
+                }
+                """
+            )
+            assert snapshot["rootLoading"] is True, snapshot
+            assert snapshot["rootReady"] is True, snapshot
+            assert active_media_url in snapshot["rootStyle"], snapshot
+            assert active_media_url in snapshot["activeStyle"], snapshot
+            assert active_media_url in snapshot["backgroundImage"], snapshot
+            assert snapshot["storedActive"] == active_media_url, snapshot
+
+            page.unroute("**/static/styles.css**")
+            expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
+            assert page.evaluate("sessionStorage.getItem('cpw:app-loading-active-media-url')") is None
         finally:
             page.close()
             browser.close()

@@ -216,6 +216,9 @@ def test_frontend_index_includes_app_loading_shell_source() -> None:
     assert "__cpwAppLoadingReady" in source
     assert "function advanceAndPrepareNextLoadingMedia()" in source
     assert "function seedLoadingMediaFromCoverData()" in source
+    assert "cpw:app-loading-active-media-url" in source
+    assert "app-loading-media-ready" in source
+    assert "function applyActiveLoadingMediaFromStorage()" in source
     assert "seedLoadingMediaFromCoverData();" in source
     assert "loadingCoverIsVisible() && cover.classList.contains(\"app-loading-cover--media-ready\")" in source
     assert "Loading campaign player wiki..." in source

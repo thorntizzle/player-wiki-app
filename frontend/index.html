@@ -113,7 +113,8 @@
         opacity: 0;
       }
 
-      html.app-loading .app-loading-cover--media-ready .app-loading-cover__media {
+      html.app-loading .app-loading-cover--media-ready .app-loading-cover__media,
+      html.app-loading.app-loading-media-ready .app-loading-cover__media {
         opacity: var(--app-loading-media-opacity);
       }
 
@@ -133,14 +134,18 @@
         var root = document.documentElement;
         var loadingClass = "app-loading";
         var closingClass = "app-loading-closing";
+        var mediaReadyClass = "app-loading-media-ready";
         var navigationStartStorageKey = "cpw:app-loading-nav-start";
         var mediaRotationStorageKey = "cpw:app-loading-media-index";
+        var activeMediaStorageKey = "cpw:app-loading-active-media-url";
+        var activeMediaStyleElementId = "app-loading-active-media-style";
         var failOpenDelayMs = 12000;
         var failOpenTimer = null;
         var hideStarted = false;
         var appReady = false;
         var stylesReady = false;
 
+        applyActiveLoadingMediaFromStorage();
         root.classList.add(loadingClass);
         root.classList.remove(closingClass);
 
@@ -210,6 +215,109 @@
           return "url(" + JSON.stringify(url) + ")";
         }
 
+        function sameOriginLoadingMediaUrl(rawUrl) {
+          if (!rawUrl) {
+            return "";
+          }
+          try {
+            var parsedUrl = new URL(rawUrl, window.location.href);
+            if (parsedUrl.origin !== window.location.origin) {
+              return "";
+            }
+          } catch (error) {
+            return "";
+          }
+          return rawUrl;
+        }
+
+        function readActiveLoadingMediaUrl() {
+          try {
+            return sameOriginLoadingMediaUrl(sessionStorage.getItem(activeMediaStorageKey));
+          } catch (error) {
+            return "";
+          }
+        }
+
+        function writeActiveLoadingMediaUrl(url) {
+          var mediaUrl = sameOriginLoadingMediaUrl(url);
+          if (!mediaUrl) {
+            return "";
+          }
+          try {
+            sessionStorage.setItem(activeMediaStorageKey, mediaUrl);
+          } catch (error) {
+            return "";
+          }
+          return mediaUrl;
+        }
+
+        function removeActiveLoadingMediaStyle() {
+          var existingStyle = document.getElementById(activeMediaStyleElementId);
+          if (existingStyle) {
+            existingStyle.remove();
+          }
+        }
+
+        function setActiveLoadingMediaStyle(url) {
+          var mediaUrl = sameOriginLoadingMediaUrl(url);
+          if (!mediaUrl) {
+            return "";
+          }
+          var existingStyle = document.getElementById(activeMediaStyleElementId);
+          var styleElement = existingStyle || document.createElement("style");
+          styleElement.id = activeMediaStyleElementId;
+          styleElement.textContent = [
+            "html.app-loading .app-loading-cover { --app-loading-media: "
+              + loadingMediaStyleValue(mediaUrl)
+              + " !important; }",
+            "html.app-loading." + mediaReadyClass
+              + " .app-loading-cover__media { opacity: var(--app-loading-media-opacity); }",
+          ].join("\n");
+          if (!existingStyle) {
+            document.head.appendChild(styleElement);
+          }
+          root.style.setProperty("--app-loading-media", loadingMediaStyleValue(mediaUrl));
+          root.classList.add(mediaReadyClass);
+          return mediaUrl;
+        }
+
+        function clearActiveLoadingMedia() {
+          try {
+            sessionStorage.removeItem(activeMediaStorageKey);
+          } catch (error) {
+            // The visual override can still be removed even if storage is unavailable.
+          }
+          root.classList.remove(mediaReadyClass);
+          root.style.removeProperty("--app-loading-media");
+          removeActiveLoadingMediaStyle();
+        }
+
+        function applyActiveLoadingMediaFromStorage() {
+          var activeUrl = readActiveLoadingMediaUrl();
+          if (activeUrl) {
+            setActiveLoadingMediaStyle(activeUrl);
+          }
+          return activeUrl;
+        }
+
+        function applyLoadingMediaToCover(cover, url, options) {
+          var mediaUrl = sameOriginLoadingMediaUrl(url);
+          if (!mediaUrl) {
+            return "";
+          }
+          var persistActive = !(options && options.persistActive === false);
+          if (persistActive) {
+            writeActiveLoadingMediaUrl(mediaUrl);
+            setActiveLoadingMediaStyle(mediaUrl);
+          }
+          if (cover) {
+            cover.style.setProperty("--app-loading-media", loadingMediaStyleValue(mediaUrl));
+            cover.setAttribute("data-app-loading-media-url", mediaUrl);
+            cover.classList.add("app-loading-cover--media-ready");
+          }
+          return mediaUrl;
+        }
+
         function selectedLoadingMediaUrl(cover) {
           var mediaUrls = collectLoadingMediaUrls(cover.getAttribute("data-app-loading-media-urls"));
           if (mediaUrls.length) {
@@ -221,6 +329,13 @@
 
         function seedLoadingMediaFromCoverData() {
           var cover = document.querySelector(".app-loading-cover[data-app-loading-media-urls]");
+          var activeUrl = applyActiveLoadingMediaFromStorage();
+          if (activeUrl) {
+            if (cover) {
+              applyLoadingMediaToCover(cover, activeUrl);
+            }
+            return;
+          }
           if (!cover) {
             return;
           }
@@ -234,9 +349,7 @@
           if (!selectedUrl) {
             return;
           }
-          cover.style.setProperty("--app-loading-media", loadingMediaStyleValue(selectedUrl));
-          cover.setAttribute("data-app-loading-media-url", selectedUrl);
-          cover.classList.add("app-loading-cover--media-ready");
+          applyLoadingMediaToCover(cover, selectedUrl);
         }
 
         function prepareLoadingMedia() {
@@ -256,9 +369,7 @@
           image.decoding = "async";
           image.loading = "eager";
           image.onload = function () {
-            cover.style.setProperty("--app-loading-media", loadingMediaStyleValue(selectedUrl));
-            cover.setAttribute("data-app-loading-media-url", selectedUrl);
-            cover.classList.add("app-loading-cover--media-ready");
+            applyLoadingMediaToCover(cover, selectedUrl, { persistActive: false });
           };
           image.onerror = function () {
             cover.classList.remove("app-loading-cover--media-ready");
@@ -296,6 +407,7 @@
           root.classList.add(closingClass);
           window.requestAnimationFrame(function () {
             root.classList.remove(loadingClass);
+            clearActiveLoadingMedia();
             advanceAndPrepareNextLoadingMedia();
             window.setTimeout(function () {
               root.classList.remove(closingClass);
@@ -460,6 +572,7 @@
 
         window.addEventListener("pageshow", function (event) {
           if (event.persisted) {
+            clearActiveLoadingMedia();
             removeLoadingState();
           }
         });
