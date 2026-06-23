@@ -560,6 +560,12 @@
           return mediaUrl;
         }
 
+        function loadingMediaUpdateIsSafe() {
+          return !root.classList.contains(loadingClass)
+            && !root.classList.contains(closingClass)
+            && !readActiveLoadingMediaUrl();
+        }
+
         function seedLoadingMediaFromCoverData() {
           var cover = document.querySelector(".app-loading-cover[data-app-loading-media-urls]");
           var activeUrl = applyActiveLoadingMediaFromStorage();
@@ -576,6 +582,10 @@
             cover.classList.contains("app-loading-cover--media-ready")
             && cover.style.getPropertyValue("--app-loading-media").trim()
           ) {
+            var preparedUrl = String(cover.getAttribute("data-app-loading-media-url") || "").trim();
+            if (preparedUrl) {
+              applyLoadingMediaToCover(cover, preparedUrl);
+            }
             return;
           }
           var selectedUrl = selectedLoadingMediaUrl(cover);
@@ -658,6 +668,9 @@
           warmLoadingMedia(mediaData.all);
           window.fetch(mediaData.selected, { cache: "force-cache", credentials: "same-origin" })
             .then(function (response) {
+              if (!loadingMediaUpdateIsSafe()) {
+                return;
+              }
               if (!response || !response.ok) {
                 return;
               }

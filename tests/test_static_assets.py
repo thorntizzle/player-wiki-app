@@ -65,6 +65,9 @@ def test_base_template_includes_inline_loading_bootstrap_and_cover(client):
     assert "cpw:app-loading-active-media-url" in html
     assert "app-loading-media-ready" in html
     assert "function applyActiveLoadingMediaFromStorage()" in html
+    assert "function loadingMediaUpdateIsSafe()" in html
+    assert "if (!loadingMediaUpdateIsSafe())" in html
+    assert "var preparedUrl = String(cover.getAttribute(\"data-app-loading-media-url\") || \"\").trim();" in html
     assert "seedLoadingMediaFromCoverData();" in html
     assert "--app-loading-bg" in html
     assert "Loading campaign player wiki..." in html
@@ -764,6 +767,103 @@ def test_browser_loading_cover_seeds_media_before_outgoing_navigation(static_ass
             assert seeded["styleValue"].startswith('url("')
             assert seeded["attrValue"].startswith("/campaigns/linden-pass/assets/")
             assert "/campaigns/linden-pass/assets/" in seeded["backgroundImage"]
+        finally:
+            page.close()
+            browser.close()
+
+
+def test_browser_loading_cover_persists_prepared_media_before_outgoing_navigation(static_asset_live_server):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            page.goto(f"{static_asset_live_server}/campaigns/linden-pass", wait_until="load")
+            expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
+            page.wait_for_function(
+                """
+                () => {
+                  const cover = document.querySelector('.app-loading-cover');
+                  return Boolean(
+                    cover
+                    && cover.classList.contains('app-loading-cover--media-ready')
+                    && cover.getAttribute('data-app-loading-media-url')
+                    && cover.style.getPropertyValue('--app-loading-media').includes('url(')
+                  );
+                }
+                """,
+                timeout=5000,
+            )
+
+            prepared = page.evaluate(
+                """
+                () => {
+                  const cover = document.querySelector('.app-loading-cover');
+                  return {
+                    attrValue: cover.getAttribute('data-app-loading-media-url'),
+                    styleValue: cover.style.getPropertyValue('--app-loading-media'),
+                  };
+                }
+                """
+            )
+
+            page.evaluate(
+                """
+                () => {
+                  const link = document.createElement('a');
+                  link.id = 'app-loading-prepared-link';
+                  link.href = '/campaigns/linden-pass?prepared-media=1';
+                  link.textContent = 'campaign';
+                  document.body.appendChild(link);
+                  document.addEventListener('click', (event) => {
+                    if (event.target && event.target.id === 'app-loading-prepared-link') {
+                      event.preventDefault();
+                    }
+                  }, { once: true });
+                }
+                """
+            )
+            page.evaluate(
+                """
+                () => {
+                  document.querySelector('#app-loading-prepared-link').dispatchEvent(
+                    new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })
+                  );
+                }
+                """
+            )
+            expect(page.locator(".app-loading-cover")).to_be_visible(timeout=1000)
+
+            active_snapshot = page.evaluate(
+                """
+                () => {
+                  const root = document.documentElement;
+                  const cover = document.querySelector('.app-loading-cover');
+                  const media = document.querySelector('.app-loading-cover__media');
+                  return {
+                    rootReady: root.classList.contains('app-loading-media-ready'),
+                    rootStyle: root.style.getPropertyValue('--app-loading-media'),
+                    storedActive: sessionStorage.getItem('cpw:app-loading-active-media-url') || '',
+                    coverStyle: cover.style.getPropertyValue('--app-loading-media'),
+                    backgroundImage: getComputedStyle(media).backgroundImage,
+                  };
+                }
+                """
+            )
+            assert active_snapshot["rootReady"] is True
+            assert active_snapshot["storedActive"] == prepared["attrValue"]
+            assert prepared["attrValue"] in active_snapshot["rootStyle"]
+            assert prepared["attrValue"] in active_snapshot["coverStyle"]
+            assert prepared["attrValue"] in active_snapshot["backgroundImage"]
+            assert prepared["styleValue"] == active_snapshot["coverStyle"]
         finally:
             page.close()
             browser.close()

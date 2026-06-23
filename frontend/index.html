@@ -318,6 +318,12 @@
           return mediaUrl;
         }
 
+        function loadingMediaUpdateIsSafe() {
+          return !root.classList.contains(loadingClass)
+            && !root.classList.contains(closingClass)
+            && !readActiveLoadingMediaUrl();
+        }
+
         function selectedLoadingMediaUrl(cover) {
           var mediaUrls = collectLoadingMediaUrls(cover.getAttribute("data-app-loading-media-urls"));
           if (mediaUrls.length) {
@@ -343,6 +349,10 @@
             cover.classList.contains("app-loading-cover--media-ready")
             && cover.style.getPropertyValue("--app-loading-media").trim()
           ) {
+            var preparedUrl = String(cover.getAttribute("data-app-loading-media-url") || "").trim();
+            if (preparedUrl) {
+              applyLoadingMediaToCover(cover, preparedUrl);
+            }
             return;
           }
           var selectedUrl = selectedLoadingMediaUrl(cover);
@@ -369,9 +379,15 @@
           image.decoding = "async";
           image.loading = "eager";
           image.onload = function () {
+            if (!loadingMediaUpdateIsSafe()) {
+              return;
+            }
             applyLoadingMediaToCover(cover, selectedUrl, { persistActive: false });
           };
           image.onerror = function () {
+            if (!loadingMediaUpdateIsSafe()) {
+              return;
+            }
             cover.classList.remove("app-loading-cover--media-ready");
           };
           image.src = selectedUrl;
@@ -408,10 +424,10 @@
           window.requestAnimationFrame(function () {
             root.classList.remove(loadingClass);
             clearActiveLoadingMedia();
-            advanceAndPrepareNextLoadingMedia();
             window.setTimeout(function () {
               root.classList.remove(closingClass);
               hideStarted = false;
+              advanceAndPrepareNextLoadingMedia();
             }, getDismissDurationMs() + 40);
           });
         }
