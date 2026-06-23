@@ -425,6 +425,26 @@ def test_character_read_section_url_helpers_live_in_shared_utils() -> None:
     assert "readSurfaceSectionBaseUrl" not in route_source
 
 
+def test_character_section_policy_helpers_live_in_shared_utils() -> None:
+    source = Path("frontend/src/characterPaneUtils.ts").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+
+    assert "export function visibleCharacterSectionsForSystem" in source
+    assert "const baseSections = isDnd ? dndCharacterSections : xianxiaCharacterSections;" in source
+    assert "return canUseControls ? [...baseSections, characterControlsSection] : baseSections;" in source
+    assert "export function normalizeActiveCharacterSectionForSystem" in source
+    assert 'isXianxia && activeSection === "overview"' in source
+    assert 'isDnd && activeSection === "quick-reference"' in source
+    assert 'activeSection === "controls" && hasDetailRecord && !canUseControls' in source
+    assert "return defaultCharacterReadSection(isXianxia);" in source
+    assert "visibleCharacterSectionsForSystem(true, canUseControls)" in route_source
+    assert "visibleCharacterSectionsForSystem(false, canUseControls)" in route_source
+    assert "normalizeActiveCharacterSectionForSystem(activeCharacterSection" in route_source
+    assert "normalizedActiveCharacterSection !== activeCharacterSection" in route_source
+    assert "? [...dndCharacterSections" not in route_source
+    assert "? [...xianxiaCharacterSections" not in route_source
+
+
 def test_admin_user_detail_action_button_chrome_in_source() -> None:
     source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
     admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]

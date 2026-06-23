@@ -89,16 +89,16 @@ import {
   characterReadSectionUrl,
   collectPresentedSpells,
   defaultCharacterReadSection,
-  dndCharacterSections,
   draftKey,
   groupSpellsByLevel,
   itemDetailDialogState,
   isDndCharacter,
   isXianxiaCharacter,
   joinDisplay,
+  normalizeActiveCharacterSectionForSystem,
   parseCharacterNumberInput,
   spellDetailDialogState,
-  xianxiaCharacterSections,
+  visibleCharacterSectionsForSystem,
   xianxiaDaoUseRecordDraftKey,
   xianxiaInventoryDraftFromItem,
   xianxiaInventoryPayloadFromDraft,
@@ -375,25 +375,21 @@ export function CharacterPane({
   const embeddedHeaderDetails = selected
     ? [selected.class_level_text, selected.species, selected.background].filter((value) => Boolean(value))
     : [];
+  const normalizedActiveCharacterSection = normalizeActiveCharacterSectionForSystem(activeCharacterSection, {
+    canUseControls,
+    hasDetailRecord: Boolean(detailRecord),
+    isDnd,
+    isXianxia,
+  });
 
   useEffect(() => {
-    if (isXianxia && activeCharacterSection === "overview") {
-      setActiveCharacterSection("quick-reference");
+    if (normalizedActiveCharacterSection !== activeCharacterSection) {
+      setActiveCharacterSection(normalizedActiveCharacterSection);
     }
-    if (isDnd && activeCharacterSection === "quick-reference") {
-      setActiveCharacterSection("overview");
-    }
-    if (activeCharacterSection === "controls" && detailRecord && !canUseControls) {
-      setActiveCharacterSection(isXianxia ? "quick-reference" : "overview");
-    }
-  }, [activeCharacterSection, canUseControls, detailRecord, isDnd, isXianxia]);
+  }, [activeCharacterSection, normalizedActiveCharacterSection]);
 
-  const dndVisibleCharacterSections = canUseControls
-    ? [...dndCharacterSections, { id: "controls" as CharacterSection, label: "Controls" }]
-    : dndCharacterSections;
-  const xianxiaVisibleCharacterSections = canUseControls
-    ? [...xianxiaCharacterSections, { id: "controls" as CharacterSection, label: "Controls" }]
-    : xianxiaCharacterSections;
+  const dndVisibleCharacterSections = visibleCharacterSectionsForSystem(true, canUseControls);
+  const xianxiaVisibleCharacterSections = visibleCharacterSectionsForSystem(false, canUseControls);
   const visibleCharacterSections = isDnd ? dndVisibleCharacterSections : xianxiaVisibleCharacterSections;
   const readSurfaceDefaultSection = defaultCharacterReadSection(isXianxia);
   const readSurfaceSectionUrl = (section: CharacterSection) =>

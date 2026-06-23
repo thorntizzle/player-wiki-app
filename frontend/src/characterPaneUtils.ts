@@ -228,8 +228,39 @@ export const xianxiaCharacterSections: Array<{ id: CharacterSection; label: stri
   { id: "notes", label: "Notes" },
 ];
 
+const characterControlsSection: { id: CharacterSection; label: string } = { id: "controls", label: "Controls" };
+
+export function visibleCharacterSectionsForSystem(
+  isDnd: boolean,
+  canUseControls: boolean,
+): Array<{ id: CharacterSection; label: string }> {
+  const baseSections = isDnd ? dndCharacterSections : xianxiaCharacterSections;
+  return canUseControls ? [...baseSections, characterControlsSection] : baseSections;
+}
+
 export function defaultCharacterReadSection(isXianxia: boolean): CharacterSection {
   return isXianxia ? "quick-reference" : "overview";
+}
+
+export function normalizeActiveCharacterSectionForSystem(
+  activeSection: CharacterSection,
+  {
+    canUseControls,
+    hasDetailRecord,
+    isDnd,
+    isXianxia,
+  }: { canUseControls: boolean; hasDetailRecord: boolean; isDnd: boolean; isXianxia: boolean },
+): CharacterSection {
+  if (isXianxia && activeSection === "overview") {
+    return "quick-reference";
+  }
+  if (isDnd && activeSection === "quick-reference") {
+    return "overview";
+  }
+  if (activeSection === "controls" && hasDetailRecord && !canUseControls) {
+    return defaultCharacterReadSection(isXianxia);
+  }
+  return activeSection;
 }
 
 export function characterReadSectionUrl(
