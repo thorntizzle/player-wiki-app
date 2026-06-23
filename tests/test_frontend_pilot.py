@@ -25,7 +25,7 @@ def test_gen2_topbar_account_controls_use_flask_chrome_classes_in_source() -> No
 def test_campaign_picker_grid_and_empty_state_are_mutually_exclusive_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     campaign_list_start = source.index("function CampaignListPage() {")
-    campaign_list_end = source.index("function adminSearch(", campaign_list_start)
+    campaign_list_end = source.index("function SessionPaneChat(", campaign_list_start)
     campaign_list_source = source[campaign_list_start:campaign_list_end]
 
     assert (
@@ -303,12 +303,8 @@ def test_character_pane_non_read_selector_uses_flask_style_field_chrome_in_sourc
 
 
 def test_admin_user_detail_action_button_chrome_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    admin_user_detail_source = _extract_component_source(
-        source,
-        "function AdminUserDetailPage() {",
-        "function SessionPaneChat(",
-    )
+    source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
+    admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]
 
     remove_on_click = 'onClick={() => removeMembership.mutate(membership)}'
     clear_on_click = 'onClick={() => removeAssignment.mutate(assignment)}'
@@ -334,12 +330,8 @@ def test_admin_user_detail_action_button_chrome_in_source() -> None:
 
 
 def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    admin_user_detail_source = _extract_component_source(
-        source,
-        "function AdminUserDetailPage() {",
-        "function SessionPaneChat(",
-    )
+    source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
+    admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]
 
     delete_on_click = 'onClick={() => deleteUser.mutate()}'
     delete_button_start = admin_user_detail_source.rfind("<button", 0, admin_user_detail_source.index(delete_on_click))
@@ -357,12 +349,8 @@ def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
 
 
 def test_admin_user_account_actions_are_flat_stack_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    admin_user_detail_source = _extract_component_source(
-        source,
-        "function AdminUserDetailPage() {",
-        "function SessionPaneChat(",
-    )
+    source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
+    admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]
 
     heading_index = admin_user_detail_source.index("<h2>Account actions</h2>")
     account_actions_start = admin_user_detail_source.rfind('<article className="card admin-panel">', 0, heading_index)
