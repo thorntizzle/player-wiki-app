@@ -1688,12 +1688,9 @@ def test_character_xianxia_equipment_section_uses_flask_style_read_section_shape
 
 
 def test_character_xianxia_quick_reference_section_uses_flask_style_read_chrome() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
-    section_start = source.index('{isXianxia && activeCharacterSection === "quick-reference" ? (')
-    section_end = source.index('{isXianxia && activeCharacterSection === "martial-arts" ? (', section_start)
-    section_markup = source[section_start:section_end]
+    section_markup = Path("frontend/src/components/CharacterXianxiaQuickReferenceSection.tsx").read_text(encoding="utf-8")
 
-    assert 'id: "xianxia-quick-reference"' in section_markup
+    assert 'id="xianxia-quick-reference"' in section_markup
     assert 'className="glance-grid"' in section_markup
     assert 'className="glance-card"' in section_markup
     assert 'id="xianxia-check-formula"' in section_markup
@@ -1721,10 +1718,7 @@ def test_character_xianxia_quick_reference_section_uses_flask_style_read_chrome(
 
 
 def test_character_xianxia_quick_reference_section_renders_flask_rule_reference_subsections() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
-    section_start = source.index('{isXianxia && activeCharacterSection === "quick-reference" ? (')
-    section_end = source.index('{isXianxia && activeCharacterSection === "martial-arts" ? (', section_start)
-    section_markup = source[section_start:section_end]
+    section_markup = Path("frontend/src/components/CharacterXianxiaQuickReferenceSection.tsx").read_text(encoding="utf-8")
 
     assert 'id="xianxia-honor-interactions"' in section_markup
     assert "Honor interactions" in section_markup
