@@ -217,6 +217,8 @@ def test_frontend_app_signals_loading_readiness_from_query_state_source() -> Non
 
     assert "useIsFetching" in source
     assert "function useAppLoadingReadiness" in source
+    assert "location.pathname" in source
+    assert "previousLocationPathname" in source
     assert "window.__cpwAppLoadingBegin?.();" in source
     assert "window.__cpwAppLoadingReady?.();" in source
     assert "activeFetchCount > 0" in source

@@ -4362,21 +4362,21 @@ function AuthNotice() {
   );
 }
 
-function useAppLoadingReadiness(locationHref: string) {
+function useAppLoadingReadiness(locationPathname: string) {
   const activeFetchCount = useIsFetching();
-  const previousLocationHref = useRef<string | null>(null);
+  const previousLocationPathname = useRef<string | null>(null);
   const readyTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (previousLocationHref.current === null) {
-      previousLocationHref.current = locationHref;
+    if (previousLocationPathname.current === null) {
+      previousLocationPathname.current = locationPathname;
       return;
     }
-    if (previousLocationHref.current !== locationHref) {
-      previousLocationHref.current = locationHref;
+    if (previousLocationPathname.current !== locationPathname) {
+      previousLocationPathname.current = locationPathname;
       window.__cpwAppLoadingBegin?.();
     }
-  }, [locationHref]);
+  }, [locationPathname]);
 
   useEffect(() => {
     if (readyTimerRef.current !== null) {
@@ -4401,12 +4401,12 @@ function useAppLoadingReadiness(locationHref: string) {
         readyTimerRef.current = null;
       }
     };
-  }, [activeFetchCount, locationHref]);
+  }, [activeFetchCount, locationPathname]);
 }
 
 function AppShell() {
   const location = useLocation();
-  useAppLoadingReadiness(location.href);
+  useAppLoadingReadiness(location.pathname);
   const [apiToken, setApiToken] = useState(() => {
     try {
       return localStorage.getItem("cpw-pilot-api-token") || "";

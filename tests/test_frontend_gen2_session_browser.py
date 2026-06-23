@@ -1739,6 +1739,26 @@ def test_gen2_combat_browser_exposes_dm_status_and_controls(
             expect(page.locator(".combat-view-switch")).to_have_count(0)
             expect(page.locator(".combat-carousel .compact-header")).to_have_count(0)
             expect(page.locator(".combat-pc-workspace .compact-header")).to_have_count(0)
+            expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
+            page.wait_for_function(
+                """() => {
+                  const root = document.documentElement;
+                  return !root.classList.contains('app-loading') && !root.classList.contains('app-loading-closing');
+                }""",
+                timeout=5000,
+            )
+            page.evaluate(
+                """() => {
+                  window.__cpwLoadingBeginCount = 0;
+                  const originalBegin = window.__cpwAppLoadingBegin;
+                  window.__cpwAppLoadingBegin = () => {
+                    window.__cpwLoadingBeginCount += 1;
+                    if (typeof originalBegin === 'function') {
+                      originalBegin();
+                    }
+                  };
+                }"""
+            )
 
             carousel = page.locator(".combat-carousel")
             expect(carousel.locator("> .section-heading > div > h2")).to_have_text("Turn Order")
@@ -1750,6 +1770,8 @@ def test_gen2_combat_browser_exposes_dm_status_and_controls(
                 "Turn Focus",
             )
             expect(page.get_by_role("heading", name="Vitals")).to_be_visible(timeout=5000)
+            assert page.evaluate("window.__cpwLoadingBeginCount") == 0
+            assert not page.evaluate("document.documentElement.classList.contains('app-loading')")
 
             dm_current_hp = page.get_by_label("DM Current HP", exact=True)
             expect(dm_current_hp).to_be_visible()
@@ -1771,6 +1793,8 @@ def test_gen2_combat_browser_exposes_dm_status_and_controls(
             combat_nav.get_by_role("button", name="Controls").click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?view=controls&combatant=\d+"))
             expect(page.get_by_role("heading", name="Add combatant")).to_be_visible(timeout=5000)
+            assert page.evaluate("window.__cpwLoadingBeginCount") == 0
+            assert not page.evaluate("document.documentElement.classList.contains('app-loading')")
             page.get_by_text("Add custom combatant", exact=True).click()
             custom_panel = page.locator(
                 ".combat-add-combatant-mode-panel--custom.combat-add-combatant-mode-panel--active"
