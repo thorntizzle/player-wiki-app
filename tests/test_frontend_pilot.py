@@ -1943,10 +1943,8 @@ def test_character_pane_status_messages_use_toast_overlay() -> None:
 
 
 def test_character_dnd_overview_section_uses_flask_style_glance_rows() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
-    section_start = source.index('{isDnd && activeCharacterSection === "overview" ? (')
-    section_end = source.index('{isDnd && activeCharacterSection === "resources" ? (', section_start)
-    section_markup = source[section_start:section_end]
+    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    section_markup = Path("frontend/src/components/CharacterDndOverviewSection.tsx").read_text(encoding="utf-8")
 
     assert '<h2>At a glance</h2>' in section_markup
     assert 'className={`glance-grid glance-grid--row glance-grid--quick-row-${rowIndex + 1}`}' in section_markup
@@ -1955,7 +1953,7 @@ def test_character_dnd_overview_section_uses_flask_style_glance_rows() -> None:
     assert "readString(stat.value, \"--\")" in section_markup
     assert '<h2>Overview</h2>' not in section_markup
     assert 'className="stat-grid"' not in section_markup
-    assert "rawOverviewStatRows.length > 0" in source
+    assert "rawOverviewStatRows.length > 0" in route_source
     assert "hasOverviewStatRows ? (" in section_markup
     assert 'className="glance-grid">' in section_markup
 
