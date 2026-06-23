@@ -306,7 +306,7 @@ def test_admin_user_detail_action_button_chrome_in_source() -> None:
     admin_user_detail_source = _extract_component_source(
         source,
         "function AdminUserDetailPage() {",
-        "function HelpList",
+        "function splitPinnedPages",
     )
 
     remove_on_click = 'onClick={() => removeMembership.mutate(membership)}'
@@ -337,7 +337,7 @@ def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
     admin_user_detail_source = _extract_component_source(
         source,
         "function AdminUserDetailPage() {",
-        "function HelpList",
+        "function splitPinnedPages",
     )
 
     delete_on_click = 'onClick={() => deleteUser.mutate()}'
@@ -360,7 +360,7 @@ def test_admin_user_account_actions_are_flat_stack_in_source() -> None:
     admin_user_detail_source = _extract_component_source(
         source,
         "function AdminUserDetailPage() {",
-        "function HelpList",
+        "function splitPinnedPages",
     )
 
     heading_index = admin_user_detail_source.index("<h2>Account actions</h2>")
@@ -631,10 +631,7 @@ def test_account_option_css_matches_flask_parity() -> None:
 
 
 def test_campaign_help_page_removes_flask_help_fallback() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    help_start = source.index("function CampaignHelpPage() {")
-    help_end = source.index("function splitPinnedPages", help_start)
-    help_markup = source[help_start:help_end]
+    help_markup = Path("frontend/src/routes/CampaignHelpPage.tsx").read_text(encoding="utf-8")
 
     assert "Flask Help" not in help_markup
     assert "help-anchor-row" not in help_markup
