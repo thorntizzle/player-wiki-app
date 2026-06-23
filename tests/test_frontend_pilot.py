@@ -2095,10 +2095,8 @@ def test_character_controls_section_keeps_flask_card_form_chrome() -> None:
 
 
 def test_character_dnd_equipment_section_uses_flask_style_row_form_chrome() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
-    section_start = source.index('{isDnd && activeCharacterSection === "equipment" ? (')
-    section_end = source.index('{isDnd && activeCharacterSection === "inventory" ? (', section_start)
-    section_markup = source[section_start:section_end]
+    source = Path("frontend/src/components/CharacterDndEquipmentSection.tsx").read_text(encoding="utf-8")
+    section_markup = source
 
     summary_end = section_markup.index('className="detail-card character-edit-row"')
     summary_markup = section_markup[:summary_end]
@@ -2130,6 +2128,8 @@ def test_character_dnd_equipment_section_uses_flask_style_row_form_chrome() -> N
     assert 'className="checkbox-label"' in section_markup
     assert 'Arcane Armor enabled' in section_markup
     assert 'name="enabled"' in section_markup
+    assert "isFeatureStateSaving || !canEdit" in section_markup
+    assert "isEquipmentStateSaving || !canEdit" in section_markup
     assert 'name="weapon_wield_mode"' in section_markup
     assert 'name="is_equipped"' in section_markup
     assert 'name="is_attuned"' in section_markup

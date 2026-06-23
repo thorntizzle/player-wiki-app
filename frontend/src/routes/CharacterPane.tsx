@@ -57,6 +57,7 @@ import {
 } from "../components/CharacterDetailDialog";
 import { CharacterControlsSection } from "../components/CharacterControlsSection";
 import { CharacterDndAbilitySkillsSection } from "../components/CharacterDndAbilitySkillsSection";
+import { CharacterDndEquipmentSection } from "../components/CharacterDndEquipmentSection";
 import { CharacterDndOverviewSection } from "../components/CharacterDndOverviewSection";
 import { CharacterDndResourcesSection } from "../components/CharacterDndResourcesSection";
 import { CharacterDndSpellsSection } from "../components/CharacterDndSpellsSection";
@@ -2956,185 +2957,23 @@ export function CharacterPane({
 
 
             {isDnd && activeCharacterSection === "equipment" ? (
-              <section className="read-section" id="character-equipment">
-                <div className="section-heading">
-                  <h2>Equipment</h2>
-                </div>
-                {equipmentState ? (
-                  <div className="detail-grid">
-                    <article className="detail-card">
-                      <h3>Attuned items</h3>
-                      <p>
-                        <strong>
-                          {equipmentState.attuned_count} / {equipmentState.max_attuned_items}
-                        </strong>
-                      </p>
-                      <p className="meta">
-                        Attunement is separate from equipped state and usually has room for up to {equipmentState.max_attuned_items} items.
-                      </p>
-                      {equipmentState.over_attunement_limit ? (
-                        <p className="meta">This sheet is currently over the normal attunement limit.</p>
-                      ) : null}
-                    </article>
-                    <article className="detail-card">
-                      <h3>Equipped items</h3>
-                      <p>
-                        <strong>{equipmentState.equipped_count}</strong>
-                      </p>
-                      <p className="meta">
-                        Armor and magic items use equipped state; weapons also track an applicable wielding mode.
-                      </p>
-                    </article>
-                  </div>
-                ) : null}
-                {arcaneArmorState?.available ? (
-                  <article className="detail-card character-edit-row" id="character-arcane-armor-state">
-                    <div className="section-heading">
-                      <h3>{readString(arcaneArmorState.label, "Arcane Armor")}</h3>
-                      <span className="meta">
-                        {[
-                          readString(arcaneArmorState.status_label),
-                          arcaneArmorState.enabled ? readString(arcaneArmorState.hands_label) : "",
-                        ]
-                          .filter(Boolean)
-                          .join(" | ")}
-                      </span>
-                    </div>
-                    {canEdit ? (
-                      <form onSubmit={submitArcaneArmorState} className="stack-form" data-character-autosubmit>
-                        <label className="checkbox-label">
-                          <input
-                            type="checkbox"
-                            name="enabled"
-                            value="1"
-                            checked={arcaneArmorDraft}
-                            disabled={patchFeatureState.isPending || !canEdit}
-                            onChange={(event) => {
-                              const nextArcaneArmorState = event.currentTarget.checked;
-                              setArcaneArmorDraft(nextArcaneArmorState);
-                              submitArcaneArmorState(undefined, nextArcaneArmorState);
-                            }}
-                          />
-                          Arcane Armor enabled
-                        </label>
-                      </form>
-                    ) : null}
-                  </article>
-                ) : null}
-                {equipmentRows.length ? (
-                  <div className="equipment-state-grid" id={isCombatSurface ? "combat-character-equipment-state" : "character-equipment-state"}>
-                    {equipmentRows.map((item) => {
-                      const draft = equipmentDrafts[item.id] ?? {
-                        isEquipped: Boolean(item.is_equipped),
-                        isAttuned: Boolean(item.is_attuned),
-                        weaponWieldMode: item.weapon_wield_mode || "",
-                      };
-                      return (
-                        <article className="detail-card character-edit-row" key={item.id || item.name}>
-                          <div className="section-heading">
-                            <h3>
-                              {item.href ? <a href={item.href}>{readString(item.name, "Item")}</a> : readString(item.name, "Item")}
-                            </h3>
-                            <span className="meta">{readString(item.source_label)}</span>
-                          </div>
-                          <p className="meta">
-                            {[readString(item.equipped_label), item.requires_attunement ? (item.is_attuned ? "Attuned" : "Not attuned") : ""]
-                              .filter(Boolean)
-                              .join(" | ")}
-                          </p>
-                          {item.tags.length ? <p className="meta">{item.tags.join(", ")}</p> : null}
-                          {item.description_html || item.notes || item.href ? (
-                            <button type="button" className="ghost-button item-detail-button" onClick={() => openItemDetail(item)}>
-                              Item details
-                            </button>
-                          ) : null}
-                          {canEdit ? (
-                            <form
-                              onSubmit={(event) => submitEquipmentState(event, item)}
-                              className="stack-form"
-                              data-character-autosubmit
-                              data-character-sheet-edit-form="equipment-state"
-                            >
-                              <div className="detail-grid">
-                                {item.supports_weapon_wield_mode ? (
-                                  <label>
-                                    Wielding
-                                    <select
-                                      id={`equipment-wield-${item.id}`}
-                                      name="weapon_wield_mode"
-                                      value={draft.weaponWieldMode}
-                                      disabled={patchEquipmentState.isPending || !canEdit}
-                                      onChange={(event) => {
-                                        const nextDraft = { ...draft, weaponWieldMode: event.currentTarget.value };
-                                        setEquipmentDrafts({
-                                          ...equipmentDrafts,
-                                          [item.id]: nextDraft,
-                                        });
-                                        submitEquipmentStatePatch(item, nextDraft);
-                                      }}
-                                    >
-                                      <option value="">Not equipped</option>
-                                      {item.weapon_wield_options.map((option) => (
-                                        <option value={option.value} key={option.value}>
-                                          {option.label}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                ) : (
-                                  <label className="checkbox-label">
-                                    <input
-                                      type="checkbox"
-                                      name="is_equipped"
-                                      value="1"
-                                      checked={draft.isEquipped}
-                                      disabled={patchEquipmentState.isPending || !canEdit}
-                                      onChange={(event) => {
-                                        const nextDraft = { ...draft, isEquipped: event.currentTarget.checked };
-                                        setEquipmentDrafts({
-                                          ...equipmentDrafts,
-                                          [item.id]: nextDraft,
-                                        });
-                                        submitEquipmentStatePatch(item, nextDraft);
-                                      }}
-                                    />
-                                    Equipped
-                                  </label>
-                                )}
-                                {item.requires_attunement ? (
-                                  <label className="checkbox-label">
-                                    <input
-                                      type="checkbox"
-                                      name="is_attuned"
-                                      value="1"
-                                      checked={draft.isAttuned}
-                                      disabled={patchEquipmentState.isPending || !canEdit}
-                                      onChange={(event) => {
-                                        const nextDraft = { ...draft, isAttuned: event.currentTarget.checked };
-                                        setEquipmentDrafts({
-                                          ...equipmentDrafts,
-                                          [item.id]: nextDraft,
-                                        });
-                                        submitEquipmentStatePatch(item, nextDraft);
-                                      }}
-                                    />
-                                    Attuned
-                                  </label>
-                                ) : null}
-                              </div>
-                              {item.attunement_hint && item.attunement_hint !== "Requires attunement" ? (
-                                <p className="meta">{item.attunement_hint}</p>
-                              ) : null}
-                            </form>
-                          ) : null}
-                        </article>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="status status-neutral">No equipment state rows.</p>
-                )}
-              </section>
+              <CharacterDndEquipmentSection
+                arcaneArmorDraft={arcaneArmorDraft}
+                arcaneArmorState={arcaneArmorState}
+                canEdit={canEdit}
+                equipmentDrafts={equipmentDrafts}
+                equipmentRows={equipmentRows}
+                equipmentState={equipmentState}
+                isCombatSurface={isCombatSurface}
+                isEquipmentStateSaving={patchEquipmentState.isPending}
+                isFeatureStateSaving={patchFeatureState.isPending}
+                openItemDetail={openItemDetail}
+                setArcaneArmorDraft={setArcaneArmorDraft}
+                setEquipmentDrafts={setEquipmentDrafts}
+                submitArcaneArmorState={submitArcaneArmorState}
+                submitEquipmentState={submitEquipmentState}
+                submitEquipmentStatePatch={submitEquipmentStatePatch}
+              />
             ) : null}
 
             {isDnd && activeCharacterSection === "inventory" ? (
