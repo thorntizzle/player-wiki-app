@@ -56,6 +56,7 @@ import {
   type CharacterDetailDialogState,
 } from "../components/CharacterDetailDialog";
 import { CharacterControlsSection } from "../components/CharacterControlsSection";
+import { CharacterPortraitManager } from "../components/CharacterPortraitManager";
 import { CharacterDndAbilitySkillsSection } from "../components/CharacterDndAbilitySkillsSection";
 import { CharacterDndEquipmentSection } from "../components/CharacterDndEquipmentSection";
 import { CharacterDndInventorySection } from "../components/CharacterDndInventorySection";
@@ -1248,57 +1249,16 @@ export function CharacterPane({
               </ul>
             ) : null}
             {canManagePortrait ? (
-              <form className="stack-form character-portrait-manager" onSubmit={submitPortrait}>
-                <label className="field" htmlFor="character-portrait-file">
-                  <span>Portrait image</span>
-                  <input
-                    id="character-portrait-file"
-                    ref={portraitFileInputRef}
-                    type="file"
-                    accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp"
-                    disabled={portraitMutationPending}
-                    onChange={handlePortraitFileChange}
-                  />
-                </label>
-                <label className="field" htmlFor="character-portrait-alt">
-                  <span>Alt text</span>
-                  <input
-                    id="character-portrait-alt"
-                    type="text"
-                    maxLength={200}
-                    value={portraitDraft.altText}
-                    disabled={portraitMutationPending}
-                    onChange={(event) => setPortraitDraft((current) => ({ ...current, altText: event.currentTarget.value }))}
-                  />
-                </label>
-                <label className="field" htmlFor="character-portrait-caption">
-                  <span>Caption</span>
-                  <input
-                    id="character-portrait-caption"
-                    type="text"
-                    maxLength={300}
-                    value={portraitDraft.caption}
-                    disabled={portraitMutationPending}
-                    onChange={(event) => setPortraitDraft((current) => ({ ...current, caption: event.currentTarget.value }))}
-                  />
-                </label>
-                <div className="hero-actions character-portrait-manager__actions">
-                  <button className="button" type="submit" disabled={portraitMutationPending || !portraitDraft.file}>
-                    Save portrait
-                  </button>
-                  {selectedPortrait ? (
-                    <button
-                      type="button"
-                      className="ghost-button"
-                      disabled={portraitMutationPending}
-                      onClick={removePortrait}
-                    >
-                      Remove portrait
-                    </button>
-                  ) : null}
-                  {portraitDraft.fileName ? <span className="meta">{portraitDraft.fileName}</span> : null}
-                </div>
-              </form>
+              <CharacterPortraitManager
+                handlePortraitFileChange={handlePortraitFileChange}
+                portraitDraft={portraitDraft}
+                portraitFileInputRef={portraitFileInputRef}
+                portraitMutationPending={portraitMutationPending}
+                removePortrait={removePortrait}
+                selectedPortrait={selectedPortrait}
+                setPortraitDraft={setPortraitDraft}
+                submitPortrait={submitPortrait}
+              />
             ) : null}
           </article>
         ) : null}

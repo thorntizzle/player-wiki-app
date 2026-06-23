@@ -1220,7 +1220,7 @@ def test_combat_unsupported_system_fallback_chrome_in_source() -> None:
 
 
 def test_character_portrait_manager_action_chrome_in_source() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/components/CharacterPortraitManager.tsx").read_text(encoding="utf-8")
     section_start = source.index('<form className="stack-form character-portrait-manager"')
     section_end = source.index("</form>", section_start) + len("</form>")
     section_markup = source[section_start:section_end]
