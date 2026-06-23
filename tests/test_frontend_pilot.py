@@ -302,7 +302,7 @@ def test_character_pane_non_read_selector_uses_flask_style_field_chrome_in_sourc
     character_pane_source = _extract_component_source(
         source,
         "function CharacterPane({",
-        "function DmPane({",
+        "function DmContentPage(",
     )
     selector_class_start = character_pane_source.index('className={isReadSurface ? "character-subpage-nav-card" : "character-selector-card"}')
     selector_start = character_pane_source.rfind("<div", 0, selector_class_start)
@@ -410,7 +410,7 @@ def test_admin_user_account_actions_are_flat_stack_in_source() -> None:
 
 
 def test_session_chat_logs_card_uses_flask_style_row_hooks_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/SessionDmPane.tsx").read_text(encoding="utf-8")
     chat_logs_start = source.index('<article className="card session-sidebar-card" id="session-chat-logs">')
     chat_logs_end = source.index('<aside className="session-sidebar">', chat_logs_start)
     chat_logs_source = source[chat_logs_start:chat_logs_end]
@@ -445,7 +445,7 @@ def test_session_chat_logs_card_uses_flask_style_row_hooks_in_source() -> None:
 
 
 def test_session_log_detail_delete_button_uses_ghost_button_class_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/SessionDmPane.tsx").read_text(encoding="utf-8")
 
     delete_on_click = "onClick={() => deleteLogMutation.mutate(logQuery.data.session.id)}"
     delete_button_start = source.rfind("<button", 0, source.index(delete_on_click))
@@ -1943,7 +1943,7 @@ def test_character_pane_status_messages_use_toast_overlay() -> None:
     feedback_source = Path("frontend/src/components/feedback.tsx").read_text(encoding="utf-8")
     styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     pane_start = source.index("function CharacterPane(")
-    pane_end = source.index("function DmPane(", pane_start)
+    pane_end = source.index("function DmContentPage(", pane_start)
     pane_markup = source[pane_start:pane_end]
 
     assert "const TOAST_DISMISS_MS = 3600;" in feedback_source
@@ -2345,7 +2345,7 @@ def test_character_notes_section_uses_flask_style_reference_stack_and_edit_chrom
 
 
 def test_dm_session_revealed_articles_panel_uses_session_article_row_chrome_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/SessionDmPane.tsx").read_text(encoding="utf-8")
     panel_id_start = source.index('id="session-revealed-articles"')
     panel_start = source.rfind("<article", 0, panel_id_start)
     panel_end = source.index('<article className="card session-sidebar-card" id="session-chat-logs">', panel_start)
