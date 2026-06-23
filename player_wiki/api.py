@@ -22,6 +22,9 @@ from .admin_audit import (
     load_user_audit_context,
 )
 from .admin_context import (
+    build_campaign_lookup,
+    build_user_card_summaries,
+    build_user_reference_payload,
     get_assignment_form_defaults,
     get_invite_form_defaults,
     get_membership_form_defaults,
@@ -482,14 +485,13 @@ def register_api(app) -> None:
     ) -> dict[str, str] | None:
         if user_id is None or email is None:
             return None
-
-        label = display_name or email
-        return {
-            "label": label,
-            "meta": email if display_name and display_name != email else "",
-            "href": f"/app-next/admin/users/{user_id}",
-            "flask_href": url_for("admin_user_detail", user_id=user_id),
-        }
+        return build_user_reference_payload(
+            user_id,
+            display_name,
+            email,
+            href=f"/app-next/admin/users/{user_id}",
+            flask_href=url_for("admin_user_detail", user_id=user_id),
+        )
 
     def serialize_admin_membership(membership, campaign_lookup: dict[str, str]) -> dict[str, Any]:
         payload = serialize_membership(membership)
@@ -513,34 +515,7 @@ def register_api(app) -> None:
         repository = get_repository()
         users = store.list_users()
         campaign_choices = list_campaign_choices(repository)
-        campaign_lookup = {campaign.slug: campaign.title for campaign in repository.campaigns.values()}
-
-        user_cards: list[dict[str, Any]] = []
-        for user in users:
-            memberships = store.list_memberships_for_user(
-                user.id,
-                statuses=("active", "invited", "removed"),
-            )
-            assignments = store.list_character_assignments_for_user(user.id)
-            user_cards.append(
-                {
-                    "id": user.id,
-                    "email": user.email,
-                    "display_name": user.display_name,
-                    "status": user.status,
-                    "is_admin": user.is_admin,
-                    "href": f"/app-next/admin/users/{user.id}",
-                    "flask_href": url_for("admin_user_detail", user_id=user.id),
-                    "membership_summary": [
-                        f"{campaign_lookup.get(membership.campaign_slug, membership.campaign_slug)}"
-                        f" | {membership.role} ({membership.status})"
-                        for membership in memberships
-                    ],
-                    "assignment_summary": [
-                        f"{assignment.campaign_slug}/{assignment.character_slug}" for assignment in assignments
-                    ],
-                }
-            )
+        campaign_lookup = build_campaign_lookup(repository)
 
         dashboard_audit_context = load_dashboard_audit_context(
             store,
@@ -562,7 +537,15 @@ def register_api(app) -> None:
             "campaign_choices": campaign_choices,
             "invite_form_defaults": get_invite_form_defaults(campaign_choices),
             "audit_event_type_choices": list_audit_event_type_choices(),
-            "user_cards": sorted(user_cards, key=lambda item: item["email"]),
+            "user_cards": build_user_card_summaries(
+                store,
+                users,
+                campaign_lookup,
+                build_links=lambda user: {
+                    "href": f"/app-next/admin/users/{user.id}",
+                    "flask_href": url_for("admin_user_detail", user_id=user.id),
+                },
+            ),
             "links": {
                 "gen2_admin_url": "/app-next/admin",
                 "flask_admin_url": url_for("admin_dashboard"),
@@ -581,7 +564,7 @@ def register_api(app) -> None:
         repository = get_repository()
         campaigns = list_campaign_choices(repository)
         character_choices = list_character_choices(repository, get_character_repository())
-        campaign_lookup = {campaign.slug: campaign.title for campaign in repository.campaigns.values()}
+        campaign_lookup = build_campaign_lookup(repository)
         memberships = store.list_memberships_for_user(
             user.id,
             statuses=("active", "invited", "removed"),

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
+
+
+def build_campaign_lookup(repository: Any) -> dict[str, str]:
+    return {campaign.slug: campaign.title for campaign in repository.campaigns.values()}
 
 
 def list_campaign_choices(repository: Any) -> list[dict[str, str]]:
@@ -74,3 +78,61 @@ def get_invite_form_defaults(campaigns: list[dict[str, str]]) -> dict[str, str]:
         "user_type": "player" if campaigns else "admin",
         "campaign_slug": default_campaign_slug,
     }
+
+
+def build_user_reference_payload(
+    user_id: int | None,
+    display_name: str | None,
+    email: str | None,
+    *,
+    href: str,
+    flask_href: str | None = None,
+) -> dict[str, str] | None:
+    if user_id is None or email is None:
+        return None
+
+    label = display_name or email
+    payload = {
+        "label": label,
+        "meta": email if display_name and display_name != email else "",
+        "href": href,
+    }
+    if flask_href is not None:
+        payload["flask_href"] = flask_href
+    return payload
+
+
+def build_user_card_summaries(
+    store: Any,
+    users: list[Any],
+    campaign_lookup: dict[str, str],
+    *,
+    build_links: Callable[[Any], Mapping[str, str]] | None = None,
+) -> list[dict[str, Any]]:
+    user_cards: list[dict[str, Any]] = []
+    for user in users:
+        memberships = store.list_memberships_for_user(
+            user.id,
+            statuses=("active", "invited", "removed"),
+        )
+        assignments = store.list_character_assignments_for_user(user.id)
+        card: dict[str, Any] = {
+            "id": user.id,
+            "email": user.email,
+            "display_name": user.display_name,
+            "status": user.status,
+            "is_admin": user.is_admin,
+            "membership_summary": [
+                f"{campaign_lookup.get(membership.campaign_slug, membership.campaign_slug)}"
+                f" | {membership.role} ({membership.status})"
+                for membership in memberships
+            ],
+            "assignment_summary": [
+                f"{assignment.campaign_slug}/{assignment.character_slug}" for assignment in assignments
+            ],
+        }
+        if build_links is not None:
+            card.update(dict(build_links(user)))
+        user_cards.append(card)
+
+    return sorted(user_cards, key=lambda item: item["email"])
