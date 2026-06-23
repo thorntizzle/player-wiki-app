@@ -1943,7 +1943,7 @@ def test_character_pane_status_messages_use_toast_overlay() -> None:
     feedback_source = Path("frontend/src/components/feedback.tsx").read_text(encoding="utf-8")
     styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     pane_start = source.index("function CharacterPane(")
-    pane_end = source.index("interface StagedArticleDraftState", pane_start)
+    pane_end = source.index("function DmPane(", pane_start)
     pane_markup = source[pane_start:pane_end]
 
     assert "const TOAST_DISMISS_MS = 3600;" in feedback_source
