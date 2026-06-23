@@ -58,6 +58,7 @@ import {
 import { CharacterControlsSection } from "../components/CharacterControlsSection";
 import { CharacterDndAbilitySkillsSection } from "../components/CharacterDndAbilitySkillsSection";
 import { CharacterDndOverviewSection } from "../components/CharacterDndOverviewSection";
+import { CharacterDndResourcesSection } from "../components/CharacterDndResourcesSection";
 import { CharacterNotesSection } from "../components/CharacterNotesSection";
 import { CharacterPersonalSection } from "../components/CharacterPersonalSection";
 import {
@@ -2925,63 +2926,15 @@ export function CharacterPane({
             ) : null}
 
             {isDnd && activeCharacterSection === "resources" ? (
-              <section className="read-section" id="session-resources">
-                <div className="section-heading">
-                  <h2>Resources</h2>
-                </div>
-                {resources.length ? (
-                  <div className={`resource-grid resource-grid--compact${canEdit ? " resource-grid--editable" : ""}`}>
-                    {resources.map((resource) => {
-                      const id = readString(resource.id);
-                      const resourceLabel = readString(resource.label, id || "Resource");
-                      const resetLabel = readString(
-                        resource["reset_label"] || resource["resetLabel"] || resource["reset_on"],
-                      );
-                      return (
-                        <article
-                          className={`resource-card${canEdit && id ? " session-resource-card session-resource-card--compact" : ""}`}
-                          key={id || resourceLabel}
-                        >
-                          <h4>{resourceLabel}</h4>
-                          <p className="resource-card__value">
-                            {readNumber(resource.current)} / {readNumber(resource.max)}
-                          </p>
-                          {resetLabel ? <p className="meta">{resetLabel}</p> : null}
-                          {resource.notes ? <p className="meta">{readString(resource.notes)}</p> : null}
-                          {canEdit && id ? (
-                            <form
-                              className="session-inline-form session-inline-form--compact-resource"
-                              onSubmit={(event) => submitResource(event, id)}
-                              data-character-autosubmit
-                              data-character-sheet-edit-form="resource"
-                              data-character-sheet-edit-row-id={id}
-                            >
-                              <label className="session-field" htmlFor={`resource-${id}`}>
-                                <span>Current</span>
-                                <input
-                                  id={`resource-${id}`}
-                                  type="number"
-                                  min="0"
-                                  value={resourceDrafts[id] ?? ""}
-                                  onChange={(event) =>
-                                    setResourceDrafts({ ...resourceDrafts, [id]: event.currentTarget.value })
-                                  }
-                                  onBlur={submitResourceOnBlur}
-                                />
-                              </label>
-                              <button type="submit" className="visually-hidden" disabled={patchResource.isPending || !canEdit}>
-                                Update {resourceLabel}
-                              </button>
-                            </form>
-                          ) : null}
-                        </article>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="status status-neutral">No tracked resources.</p>
-                )}
-              </section>
+              <CharacterDndResourcesSection
+                canEdit={canEdit}
+                isSaving={patchResource.isPending}
+                resourceDrafts={resourceDrafts}
+                resources={resources}
+                setResourceDrafts={setResourceDrafts}
+                submitResource={submitResource}
+                submitResourceOnBlur={submitResourceOnBlur}
+              />
             ) : null}
 
             {isDnd && activeCharacterSection === "spells" ? (
