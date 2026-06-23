@@ -1263,10 +1263,9 @@ def test_character_portrait_manager_action_chrome_in_source() -> None:
 
 
 def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/components/DmArticleCreator.tsx").read_text(encoding="utf-8")
     component_start = source.index("function DmArticleCreator({")
-    component_end = source.index("function CharacterPane({", component_start)
-    creator_markup = source[component_start:component_end]
+    creator_markup = source[component_start:]
 
     assert 'className="stack-form"' in creator_markup
     assert 'className="session-form-mode-radio session-form-mode-radio--manual"' in creator_markup
