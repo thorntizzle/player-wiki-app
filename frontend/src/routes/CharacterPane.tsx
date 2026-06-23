@@ -27,6 +27,17 @@ import type {
   CharacterSummary,
   CharacterVitalsPatchPayload,
 } from "../api/types";
+import type {
+  CharacterControlsDraft,
+  CharacterEquipmentDraft,
+  CharacterNotesDraft,
+  CharacterPortraitDraft,
+  CharacterVitalsDraft,
+  CharacterXianxiaActiveStateDraft,
+  CharacterXianxiaDaoUseRequestDraft,
+  CharacterXianxiaVitalsDraft,
+} from "../characterPaneDrafts";
+import { xianxiaVitalsFields } from "../characterPaneDrafts";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 import { queryClient, useApiClient } from "../apiClientContext";
 import { TOAST_DISMISS_MS, ToastNotice } from "../components/feedback";
@@ -64,74 +75,7 @@ import {
   type CharacterSection,
   type CharacterXianxiaInventoryDraft,
 } from "../characterPaneUtils";
-import { readBinaryAsBase64, type EmbeddedImageInput } from "../sessionArticleDrafts";
-
-interface CharacterVitalsDraft {
-  expectedRevision: number;
-  currentHp: string;
-  tempHp: string;
-}
-
-interface CharacterXianxiaVitalsDraft extends CharacterVitalsDraft {
-  currentStance: string;
-  tempStance: string;
-  currentJing: string;
-  currentQi: string;
-  currentShen: string;
-  currentYin: string;
-  currentYang: string;
-  currentDao: string;
-}
-
-type CharacterXianxiaVitalsField = Exclude<keyof CharacterXianxiaVitalsDraft, "expectedRevision">;
-
-interface CharacterXianxiaActiveStateDraft {
-  expectedRevision: number;
-  activeStanceName: string;
-  activeAuraName: string;
-}
-
-interface CharacterXianxiaDaoUseRequestDraft {
-  requestName: string;
-  notes: string;
-  preparedRecordIndex: string;
-}
-
-interface CharacterNotesDraft {
-  expectedRevision: number;
-  notes: string;
-}
-
-interface CharacterEquipmentDraft {
-  isEquipped: boolean;
-  isAttuned: boolean;
-  weaponWieldMode: string;
-}
-
-interface CharacterPortraitDraft {
-  file: EmbeddedImageInput | null;
-  fileName: string;
-  altText: string;
-  caption: string;
-}
-
-interface CharacterControlsDraft {
-  assignedUserId: string;
-  deleteConfirmation: string;
-}
-
-const xianxiaVitalsFields: Array<{ key: CharacterXianxiaVitalsField; label: string }> = [
-  { key: "currentHp", label: "Current HP" },
-  { key: "tempHp", label: "Temp HP" },
-  { key: "currentStance", label: "Current Stance" },
-  { key: "tempStance", label: "Temp Stance" },
-  { key: "currentJing", label: "Jing" },
-  { key: "currentQi", label: "Qi" },
-  { key: "currentShen", label: "Shen" },
-  { key: "currentYin", label: "Yin" },
-  { key: "currentYang", label: "Yang" },
-  { key: "currentDao", label: "Dao" },
-];
+import { readBinaryAsBase64 } from "../sessionArticleDrafts";
 
 export function CharacterPane({
   campaignSlug,
