@@ -23,10 +23,7 @@ def test_gen2_topbar_account_controls_use_flask_chrome_classes_in_source() -> No
 
 
 def test_campaign_picker_grid_and_empty_state_are_mutually_exclusive_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    campaign_list_start = source.index("function CampaignListPage() {")
-    campaign_list_end = source.index("function SessionPaneChat(", campaign_list_start)
-    campaign_list_source = source[campaign_list_start:campaign_list_end]
+    campaign_list_source = Path("frontend/src/routes/CampaignPickerPage.tsx").read_text(encoding="utf-8")
 
     assert (
         re.search(
