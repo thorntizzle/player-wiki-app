@@ -58,6 +58,8 @@ def test_base_template_includes_inline_loading_bootstrap_and_cover(client):
     assert "cpw:app-loading-nav-start" in html
     assert "app-loading-closing" in html
     assert "prefers-reduced-motion" in html
+    assert "function markLoadingDelayed()" in html
+    assert "Still loading campaign player wiki..." in html
     assert ".app-loading-cover__media" in html
     assert "app-loading-cover__message" in html
     assert "root.classList.contains(loadingClass) && cover.classList.contains(\"app-loading-cover--media-ready\")" in html
@@ -557,6 +559,81 @@ def test_browser_shows_loading_cover_while_stylesheet_streams(static_asset_live_
             assert paint_timing["cssResponseEnd"] > 0
             if paint_timing["firstContentfulPaint"] > 0:
                 assert paint_timing["firstContentfulPaint"] >= paint_timing["cssResponseEnd"] - 1
+        finally:
+            page.close()
+            browser.close()
+
+
+def test_browser_loading_cover_stays_up_when_stylesheet_exceeds_delay(
+    static_asset_live_server,
+    client,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    response = client.get("/campaigns/linden-pass")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True).replace(
+        "failOpenDelayMs = 12000",
+        "failOpenDelayMs = 100",
+    )
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            page.route(
+                "**/campaigns/linden-pass",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="text/html",
+                    body=html,
+                ),
+            )
+
+            def delay_stylesheet(route):
+                time.sleep(0.7)
+                route.continue_()
+
+            page.route("**/static/styles.css**", delay_stylesheet)
+            page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass",
+                wait_until="commit",
+            )
+            page.wait_for_timeout(250)
+
+            delayed_snapshot = page.evaluate(
+                """() => {
+                    const root = document.documentElement;
+                    const cover = document.querySelector('.app-loading-cover');
+                    const shell = document.querySelector('.page-shell');
+                    const message = document.querySelector('.app-loading-cover__message');
+                    return {
+                      hasLoadingClass: root.classList.contains('app-loading'),
+                      coverVisibility: cover ? getComputedStyle(cover).visibility : null,
+                      coverOpacity: cover ? getComputedStyle(cover).opacity : null,
+                      shellVisibility: shell ? getComputedStyle(shell).visibility : null,
+                      shellOpacity: shell ? getComputedStyle(shell).opacity : null,
+                      message: message ? message.textContent : '',
+                    };
+                }"""
+            )
+            assert delayed_snapshot["hasLoadingClass"] is True
+            assert delayed_snapshot["coverVisibility"] == "visible"
+            assert delayed_snapshot["coverOpacity"] == "1"
+            assert delayed_snapshot["shellVisibility"] == "hidden"
+            assert delayed_snapshot["shellOpacity"] == "0"
+            assert delayed_snapshot["message"] == "Still loading campaign player wiki..."
+
+            page.wait_for_load_state("load", timeout=5000)
+            expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
+            expect(page.locator(".page-shell")).to_be_visible(timeout=5000)
         finally:
             page.close()
             browser.close()

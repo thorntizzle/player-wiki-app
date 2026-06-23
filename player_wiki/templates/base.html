@@ -164,6 +164,8 @@
         var dismissTimer = null;
         var navigationStart = 0;
         var loadingMediaScheduled = false;
+        var defaultLoadingMessage = "Loading campaign player wiki...";
+        var delayedLoadingMessage = "Still loading campaign player wiki...";
         var asyncInteractionSelector = "[data-combat-live-root], [data-combat-status-live-root], "
           + "[data-combat-character-live-root], [data-session-live-root], [data-session-shell-root], "
           + "[data-character-read-shell-root], [data-combat-async], [data-session-async], "
@@ -235,6 +237,21 @@
 
         function clearDismissTimer() {
           dismissTimer = clearTimer(dismissTimer);
+        }
+
+        function setLoadingMessage(message) {
+          var messageElement = document.querySelector(".app-loading-cover__message");
+          if (messageElement) {
+            messageElement.textContent = message;
+          }
+        }
+
+        function markLoadingDelayed() {
+          clearFailOpenTimer();
+          if (!root.classList.contains(loadingClass)) {
+            return;
+          }
+          setLoadingMessage(delayedLoadingMessage);
         }
 
         function readMediaRotationIndex(mediaCount) {
@@ -326,12 +343,11 @@
           clearDismissTimer();
           writeNavigationStartToStorage();
           seedLoadingMediaFromCoverData();
+          setLoadingMessage(defaultLoadingMessage);
           root.classList.remove(closingClass);
           root.classList.add(loadingClass);
           failOpenTimer = window.setTimeout(function () {
-            clearNavigationStartFromStorage();
-            clearFailOpenTimer();
-            removeLoadingState();
+            markLoadingDelayed();
           }, failOpenDelayMs);
         }
 
@@ -378,6 +394,13 @@
             onLoad();
           }
 
+          function markFailed() {
+            if (hasDispatched) {
+              return;
+            }
+            markLoadingDelayed();
+          }
+
           for (var i = 0; i < candidateStylesheets.length; i++) {
             var stylesheet = candidateStylesheets[i];
             if (!stylesheet.getAttribute("href")) {
@@ -391,7 +414,7 @@
             }
             pending += 1;
             stylesheet.addEventListener("load", markDone, { once: true });
-            stylesheet.addEventListener("error", markDone, { once: true });
+            stylesheet.addEventListener("error", markFailed, { once: true });
           }
 
           if (pending === 0) {
@@ -851,9 +874,7 @@
         root.classList.remove(closingClass);
         applyActiveLoadingMediaFromStorage();
         failOpenTimer = window.setTimeout(function () {
-          clearNavigationStartFromStorage();
-          clearFailOpenTimer();
-          removeLoadingState();
+          markLoadingDelayed();
         }, failOpenDelayMs);
         root.classList.add(loadingClass);
 
