@@ -1469,7 +1469,7 @@ def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_sour
 
 
 def test_character_xianxia_inventory_section_uses_flask_style_row_form_chrome() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    inventory_markup = Path("frontend/src/components/CharacterXianxiaInventorySection.tsx").read_text(encoding="utf-8")
     resources_markup = Path("frontend/src/components/CharacterXianxiaResourcesSection.tsx").read_text(encoding="utf-8")
 
     assert 'id="session-active-state"' in resources_markup
@@ -1489,12 +1489,9 @@ def test_character_xianxia_inventory_section_uses_flask_style_row_form_chrome() 
     assert 'className="inline-two-col"' not in resources_markup
     assert 'className="chat-label"' not in resources_markup
 
-    section_start = source.index('{isXianxia && activeCharacterSection === "inventory" ? (')
-    section_end = source.index('{isXianxia && activeCharacterSection === "personal" ? (', section_start)
-    section_markup = source[section_start:section_end]
-    controls_end = section_markup.index('<div className="detail-grid" id="session-currency">')
-    inventory_controls_markup = section_markup[:controls_end]
-    currency_controls_markup = section_markup[controls_end:]
+    controls_end = inventory_markup.index('<div className="detail-grid" id="session-currency">')
+    inventory_controls_markup = inventory_markup[:controls_end]
+    currency_controls_markup = inventory_markup[controls_end:]
 
     assert 'className="inventory-list"' in inventory_controls_markup
     assert 'className="inventory-row"' in inventory_controls_markup
@@ -1610,7 +1607,7 @@ def test_character_xianxia_inventory_section_uses_flask_style_row_form_chrome() 
     assert "onBlur={submitCurrencyOnBlur}" in currency_controls_markup
     assert 'className="visually-hidden"' in currency_controls_markup
     assert 'Update {entry.label}' in currency_controls_markup
-    assert re.search(r'<button type="submit" className="visually-hidden" disabled=\{patchCurrency\.isPending \|\| !canEdit\}>\s*Update \{entry\.label\}\s*</button>', currency_controls_markup) is not None
+    assert re.search(r'<button type="submit" className="visually-hidden" disabled=\{isCurrencySaving \|\| !canEdit\}>\s*Update \{entry\.label\}\s*</button>', currency_controls_markup) is not None
 
     assert 'className="chat-label"' not in currency_controls_markup
     assert 'className="inline-two-col"' not in currency_controls_markup
