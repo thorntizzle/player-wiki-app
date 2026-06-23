@@ -60,6 +60,7 @@ import { CharacterHeader } from "../components/CharacterHeader";
 import { CharacterNavigationCard } from "../components/CharacterNavigationCard";
 import { CharacterPortraitManager } from "../components/CharacterPortraitManager";
 import { CharacterSummaryCard } from "../components/CharacterSummaryCard";
+import { CharacterSystemSummarySection } from "../components/CharacterSystemSummarySection";
 import { CharacterVitalsBar } from "../components/CharacterVitalsBar";
 import { CharacterDndAbilitySkillsSection } from "../components/CharacterDndAbilitySkillsSection";
 import { CharacterDndEquipmentSection } from "../components/CharacterDndEquipmentSection";
@@ -1440,21 +1441,11 @@ export function CharacterPane({
             ) : null}
 
             {!isDnd && !isXianxia ? (
-              <section className="read-section" id="character-system-summary">
-                <div className="section-heading">
-                  <h2>{characterSystem(detailRecord)}</h2>
-                </div>
-                <div className="detail-grid">
-                  <article className="detail-card">
-                    <h3>Current HP</h3>
-                    <strong>{String(vitals.current_hp ?? "--")}</strong>
-                  </article>
-                  <article className="detail-card">
-                    <h3>Temp HP</h3>
-                    <strong>{String(vitals.temp_hp ?? "--")}</strong>
-                  </article>
-                </div>
-              </section>
+              <CharacterSystemSummarySection
+                currentHp={vitals.current_hp}
+                systemLabel={characterSystem(detailRecord)}
+                tempHp={vitals.temp_hp}
+              />
             ) : null}
           </>
         ) : null}

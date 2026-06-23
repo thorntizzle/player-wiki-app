@@ -1959,18 +1959,15 @@ def test_character_xianxia_personal_section_uses_flask_style_reference_stack_and
 
 
 def test_character_generic_system_summary_section_uses_detail_grid_cards() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
-    summary_section_start = source.index('<section className="read-section" id="character-system-summary">')
-    generic_summary_end = source.index("</section>", summary_section_start)
-    generic_summary_markup = source[summary_section_start:generic_summary_end]
+    generic_summary_markup = Path("frontend/src/components/CharacterSystemSummarySection.tsx").read_text(encoding="utf-8")
 
     assert '<section className="read-section" id="character-system-summary">' in generic_summary_markup
     assert 'className="detail-grid"' in generic_summary_markup
     assert '<article className="detail-card">' in generic_summary_markup
     assert "<h3>Current HP</h3>" in generic_summary_markup
     assert "<h3>Temp HP</h3>" in generic_summary_markup
-    assert '<strong>{String(vitals.current_hp ?? "--")}</strong>' in generic_summary_markup
-    assert '<strong>{String(vitals.temp_hp ?? "--")}</strong>' in generic_summary_markup
+    assert '<strong>{String(currentHp ?? "--")}</strong>' in generic_summary_markup
+    assert '<strong>{String(tempHp ?? "--")}</strong>' in generic_summary_markup
 
     assert 'className="stat-grid"' not in generic_summary_markup
 
