@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { ChangeEvent, FocusEvent, FormEvent } from "react";
+import type { ChangeEvent, FocusEvent, FormEvent, MouseEvent } from "react";
 import { apiErrorMessage } from "../api/client";
 import type {
   CharacterCurrencyPatchPayload,
@@ -400,7 +400,7 @@ export function CharacterPane({
     }
     return `${readSurfaceSectionBaseUrl}?page=${encodeURIComponent(section)}`;
   };
-  const handleReadSurfaceSectionNavClick = (section: CharacterSection) => (event: React.MouseEvent<HTMLAnchorElement>) => {
+  const handleReadSurfaceSectionNavClick = (section: CharacterSection) => (event: MouseEvent<HTMLAnchorElement>) => {
     if (!selectedSlug) {
       return;
     }
@@ -1108,11 +1108,9 @@ export function CharacterPane({
     window.history.replaceState(null, "", nextUrl);
   };
 
-  const CharacterShell = "article";
-
   return (
     <div className={isReadSurface ? "page-layout character-layout character-read-content" : "session-pane-content"}>
-      <CharacterShell
+      <article
         className={
           isReadSurface
             ? "article card character-sheet character-read-shell"
@@ -1451,7 +1449,7 @@ export function CharacterPane({
         ) : null}
 
         {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
-      </CharacterShell>
+      </article>
       <ToastNotice message={statusMessage} />
       <CharacterDetailDialog detail={detailDialog} onClose={() => setDetailDialog(null)} />
     </div>
