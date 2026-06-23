@@ -300,6 +300,8 @@
             if (dismissMs <= 0) {
               root.classList.remove(loadingClass);
               root.classList.remove(closingClass);
+              advanceLoadingMediaIndex();
+              scheduleLoadingMedia();
               return;
             }
             root.classList.add(closingClass);
@@ -307,6 +309,8 @@
             dismissTimer = window.setTimeout(function () {
               root.classList.remove(closingClass);
               root.classList.remove(loadingClass);
+              advanceLoadingMediaIndex();
+              scheduleLoadingMedia();
             }, dismissMs);
           });
         }
@@ -330,15 +334,11 @@
           clearFailOpenTimer();
           if (holdMs <= 0) {
             removeLoadingState();
-            advanceLoadingMediaIndex();
-            scheduleLoadingMedia();
             return;
           }
           clearDismissTimer();
           dismissTimer = window.setTimeout(function () {
             removeLoadingState();
-            advanceLoadingMediaIndex();
-            scheduleLoadingMedia();
           }, holdMs);
         }
 
@@ -505,6 +505,9 @@
           }
           var mediaData = pickLoadingMediaForCover(cover);
           if (!mediaData || !mediaData.selected) {
+            return;
+          }
+          if (root.classList.contains(loadingClass) && cover.classList.contains("app-loading-cover--media-ready")) {
             return;
           }
           warmLoadingMedia(mediaData.all);

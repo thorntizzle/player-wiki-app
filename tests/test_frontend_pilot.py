@@ -209,6 +209,8 @@ def test_frontend_index_includes_app_loading_shell_source() -> None:
     assert "/app-next/assets/" in source
     assert "__cpwAppLoadingBegin" in source
     assert "__cpwAppLoadingReady" in source
+    assert "function advanceAndPrepareNextLoadingMedia()" in source
+    assert "loadingCoverIsVisible() && cover.classList.contains(\"app-loading-cover--media-ready\")" in source
     assert "Loading campaign player wiki..." in source
 
 

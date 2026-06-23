@@ -224,6 +224,83 @@ def test_gen2_loading_cover_decorates_and_dismisses(
             browser.close()
 
 
+def test_gen2_loading_cover_keeps_prepared_media_during_navigation(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
+            expect(page.locator(".session-hero").get_by_role("heading", name="Session")).to_be_visible(timeout=10000)
+            expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
+            page.wait_for_function(
+                """() => {
+                  const root = document.documentElement;
+                  return !root.classList.contains('app-loading') && !root.classList.contains('app-loading-closing');
+                }""",
+                timeout=5000,
+            )
+
+            media_urls = page.evaluate(
+                """() => {
+                  const cover = document.querySelector('.app-loading-cover');
+                  return cover ? JSON.parse(cover.getAttribute('data-app-loading-media-urls') || '[]') : [];
+                }"""
+            )
+            if len(media_urls) < 2:
+                pytest.skip("insufficient loading media candidates for swap regression")
+
+            page.wait_for_function(
+                """() => {
+                  const cover = document.querySelector('.app-loading-cover');
+                  return Boolean(
+                    cover
+                    && cover.classList.contains('app-loading-cover--media-ready')
+                    && cover.style.getPropertyValue('--app-loading-media').includes('url(')
+                  );
+                }""",
+                timeout=5000,
+            )
+            prepared_media = page.evaluate(
+                """() => {
+                  const cover = document.querySelector('.app-loading-cover');
+                  return cover ? cover.style.getPropertyValue('--app-loading-media') : '';
+                }"""
+            )
+
+            page.evaluate("window.__cpwAppLoadingBegin()")
+            page.wait_for_function("document.documentElement.classList.contains('app-loading')", timeout=1000)
+            page.wait_for_timeout(700)
+            visible_media = page.evaluate(
+                """() => {
+                  const cover = document.querySelector('.app-loading-cover');
+                  return cover ? cover.style.getPropertyValue('--app-loading-media') : '';
+                }"""
+            )
+            assert visible_media == prepared_media
+
+            page.evaluate("window.__cpwAppLoadingReady()")
+            expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_gen2_session_browser_exposes_flask_session_capabilities(
     frontend_gen2_session_live_server,
     users,

@@ -60,6 +60,7 @@ def test_base_template_includes_inline_loading_bootstrap_and_cover(client):
     assert "prefers-reduced-motion" in html
     assert ".app-loading-cover__media" in html
     assert "app-loading-cover__message" in html
+    assert "root.classList.contains(loadingClass) && cover.classList.contains(\"app-loading-cover--media-ready\")" in html
     assert "--app-loading-bg" in html
     assert "Loading campaign player wiki..." in html
 

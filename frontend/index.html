@@ -202,6 +202,10 @@
           );
         }
 
+        function loadingCoverIsVisible() {
+          return root.classList.contains(loadingClass);
+        }
+
         function prepareLoadingMedia() {
           var cover = document.querySelector(".app-loading-cover[data-app-loading-media-urls]");
           if (!cover) {
@@ -209,6 +213,9 @@
           }
           var mediaUrls = collectLoadingMediaUrls(cover.getAttribute("data-app-loading-media-urls"));
           if (!mediaUrls.length) {
+            return;
+          }
+          if (loadingCoverIsVisible() && cover.classList.contains("app-loading-cover--media-ready")) {
             return;
           }
           var selectedUrl = mediaUrls[currentMediaIndex(mediaUrls.length)];
@@ -223,6 +230,17 @@
             cover.classList.remove("app-loading-cover--media-ready");
           };
           image.src = selectedUrl;
+        }
+
+        function advanceAndPrepareNextLoadingMedia() {
+          var cover = document.querySelector(".app-loading-cover[data-app-loading-media-urls]");
+          if (!cover) {
+            return;
+          }
+          advanceMediaRotation(
+            collectLoadingMediaUrls(cover.getAttribute("data-app-loading-media-urls")).length,
+          );
+          prepareLoadingMedia();
         }
 
         function scheduleFailOpen() {
@@ -241,15 +259,10 @@
             window.clearTimeout(failOpenTimer);
             failOpenTimer = null;
           }
-          var cover = document.querySelector(".app-loading-cover[data-app-loading-media-urls]");
-          if (cover) {
-            advanceMediaRotation(
-              collectLoadingMediaUrls(cover.getAttribute("data-app-loading-media-urls")).length,
-            );
-          }
           root.classList.add(closingClass);
           window.requestAnimationFrame(function () {
             root.classList.remove(loadingClass);
+            advanceAndPrepareNextLoadingMedia();
             window.setTimeout(function () {
               root.classList.remove(closingClass);
               hideStarted = false;
@@ -381,7 +394,6 @@
           sessionStorage.setItem(navigationStartStorageKey, String(Date.now()));
           root.classList.add(loadingClass);
           root.classList.remove(closingClass);
-          prepareLoadingMedia();
           scheduleFailOpen();
           maybeRemoveLoadingState();
         }
