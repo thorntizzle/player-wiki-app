@@ -5,7 +5,7 @@ import type {
   CharacterXianxiaInventoryItemPayload,
   CharacterXianxiaNamedRecord,
 } from "./api/types";
-import type { DetailFact } from "./components/CharacterDetailDialog";
+import type { CharacterDetailDialogState, DetailFact } from "./components/CharacterDetailDialog";
 import { asRecord, readString } from "./characterValueUtils";
 
 export interface CharacterXianxiaInventoryDraft {
@@ -149,6 +149,36 @@ export function spellDetailFacts(spell: CharacterPresentedSpell): DetailFact[] {
     { label: "Components", value: spell.components },
     { label: "Save / attack", value: spell.save_or_hit },
   ].filter((fact) => fact.value && fact.value !== "--");
+}
+
+export interface CharacterItemDetailInput {
+  name: string;
+  href?: string;
+  description_html?: string;
+  notes?: string;
+}
+
+export function itemDetailDialogState(item: CharacterItemDetailInput): CharacterDetailDialogState {
+  return {
+    eyebrow: "Item details",
+    title: item.name || "Item",
+    html: item.description_html || "",
+    notes: item.notes || "",
+    href: item.href || "",
+  };
+}
+
+export function spellDetailDialogState(spell: CharacterPresentedSpell): CharacterDetailDialogState {
+  const source = [spell.source, spell.reference].filter(Boolean).join(" | ");
+  return {
+    eyebrow: [spell.level_label, spell.school].filter(Boolean).join(" | ") || "Spell details",
+    title: spell.name || "Spell",
+    html: spell.description_html || "",
+    notes: spell.management_note || "",
+    href: spell.href || "",
+    facts: [...spellDetailFacts(spell), ...(source ? [{ label: "Source", value: source }] : [])],
+    badges: spell.badges ?? [],
+  };
 }
 
 export function characterSystem(character: CharacterRecord | undefined): string {

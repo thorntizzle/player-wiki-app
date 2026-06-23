@@ -375,6 +375,24 @@ def test_character_vitals_bar_uses_flask_style_chrome_in_source() -> None:
     assert "className=\"chat-label\"" not in source
 
 
+def test_character_detail_dialog_state_builders_live_in_shared_utils() -> None:
+    source = Path("frontend/src/characterPaneUtils.ts").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+
+    assert "export function itemDetailDialogState" in source
+    assert 'eyebrow: "Item details"' in source
+    assert 'title: item.name || "Item"' in source
+    assert 'html: item.description_html || ""' in source
+    assert "export function spellDetailDialogState" in source
+    assert 'eyebrow: [spell.level_label, spell.school].filter(Boolean).join(" | ") || "Spell details"' in source
+    assert 'title: spell.name || "Spell"' in source
+    assert 'notes: spell.management_note || ""' in source
+    assert 'facts: [...spellDetailFacts(spell), ...(source ? [{ label: "Source", value: source }] : [])]' in source
+    assert "badges: spell.badges ?? []" in source
+    assert "setDetailDialog(itemDetailDialogState(item));" in route_source
+    assert "setDetailDialog(spellDetailDialogState(spell));" in route_source
+
+
 def test_admin_user_detail_action_button_chrome_in_source() -> None:
     source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
     admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]

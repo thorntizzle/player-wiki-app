@@ -90,14 +90,16 @@ import {
   dndCharacterSections,
   draftKey,
   groupSpellsByLevel,
+  itemDetailDialogState,
   isDndCharacter,
   isXianxiaCharacter,
   joinDisplay,
-  spellDetailFacts,
+  spellDetailDialogState,
   xianxiaCharacterSections,
   xianxiaDaoUseRecordDraftKey,
   xianxiaInventoryDraftFromItem,
   xianxiaInventoryPayloadFromDraft,
+  type CharacterItemDetailInput,
   type CharacterSection,
   type CharacterXianxiaInventoryDraft,
 } from "../characterPaneUtils";
@@ -707,27 +709,12 @@ export function CharacterPane({
     });
   };
 
-  const openItemDetail = (item: { name: string; href?: string; description_html?: string; notes?: string }) => {
-    setDetailDialog({
-      eyebrow: "Item details",
-      title: item.name || "Item",
-      html: item.description_html || "",
-      notes: item.notes || "",
-      href: item.href || "",
-    });
+  const openItemDetail = (item: CharacterItemDetailInput) => {
+    setDetailDialog(itemDetailDialogState(item));
   };
 
   const openSpellDetail = (spell: CharacterPresentedSpell) => {
-    const source = [spell.source, spell.reference].filter(Boolean).join(" | ");
-    setDetailDialog({
-      eyebrow: [spell.level_label, spell.school].filter(Boolean).join(" | ") || "Spell details",
-      title: spell.name || "Spell",
-      html: spell.description_html || "",
-      notes: spell.management_note || "",
-      href: spell.href || "",
-      facts: [...spellDetailFacts(spell), ...(source ? [{ label: "Source", value: source }] : [])],
-      badges: spell.badges ?? [],
-    });
+    setDetailDialog(spellDetailDialogState(spell));
   };
 
   const submitVitals = (event: FormEvent<HTMLFormElement>) => {
