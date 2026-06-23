@@ -1500,6 +1500,8 @@ def test_api_session_article_source_search_returns_wiki_pages_and_systems_entrie
         result for result in wiki_payload["results"] if result["source_ref"] == "npcs/captain-lyra-vale"
     )
     assert captain_result["source_kind"] == "page"
+    assert captain_result["kind_label"] == "Wiki"
+    assert captain_result["select_label"] == "Captain Lyra Vale - Wiki - NPCs"
 
     systems_search = client.get(
         "/api/v1/campaigns/linden-pass/session/article-sources/search?q=gob",
@@ -1511,6 +1513,9 @@ def test_api_session_article_source_search_returns_wiki_pages_and_systems_entrie
     assert systems_payload["results"][0]["source_kind"] == "systems"
     assert systems_payload["results"][0]["source_ref"] == f"systems:{goblin_slug}"
     assert systems_payload["results"][0]["title"] == "Goblin"
+    assert systems_payload["results"][0]["subtitle"] == "Monsters - MM"
+    assert systems_payload["results"][0]["kind_label"] == "Systems"
+    assert systems_payload["results"][0]["select_label"] == "Goblin - Systems - Monsters - MM"
 
 
 def test_api_can_pull_visible_systems_entry_into_session_store(client, app, users, tmp_path):

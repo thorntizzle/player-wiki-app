@@ -149,6 +149,9 @@ from .session_models import (
 )
 from .session_article_publisher import list_published_pages_for_session_articles
 from .session_presenter import present_session_dm_passive_score_rows
+from .session_source_presenter import (
+    build_session_article_source_search_results as build_shared_session_article_source_search_results,
+)
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
 from .systems_ingest import SystemsIngestError, extracted_systems_archive
 from .systems_labels import (
@@ -1606,63 +1609,16 @@ def register_api(app) -> None:
         campaign = get_repository().get_campaign(campaign_slug)
         if campaign is None:
             abort(404)
-
-        normalized_query = query.strip()
-        if len(normalized_query) < 2:
-            return []
-
-        results: list[dict[str, str]] = []
-        page_records = get_campaign_page_store().search_page_records(
-            campaign.slug,
-            normalized_query,
-            limit=max(limit, 1) * 2,
-            include_body=False,
+        return build_shared_session_article_source_search_results(
+            campaign=campaign,
+            campaign_slug=campaign_slug,
+            query=query,
+            page_store=get_campaign_page_store(),
+            systems_service=current_app.extensions["systems_service"],
+            can_access_systems=can_access_campaign_scope(campaign_slug, "systems"),
+            can_access_systems_entry=lambda entry_slug: can_access_campaign_systems_entry(campaign_slug, entry_slug),
+            limit=limit,
         )
-        for record in page_records:
-            if not campaign.is_page_visible(record.page):
-                continue
-            context_parts = [record.page.section]
-            if record.page.subsection:
-                context_parts.append(record.page.subsection)
-            results.append(
-                {
-                    "source_ref": build_session_article_page_source_ref(record.page_ref),
-                    "source_kind": SESSION_ARTICLE_SOURCE_KIND_PAGE,
-                    "title": record.page.title,
-                    "subtitle": " / ".join(part for part in context_parts if part),
-                    "kind_label": "Wiki",
-                    "select_label": f"{record.page.title} - Wiki - {' / '.join(part for part in context_parts if part)}",
-                }
-            )
-            if len(results) >= limit:
-                return results
-
-        if can_access_campaign_scope(campaign_slug, "systems"):
-            systems_entries = current_app.extensions["systems_service"].search_entries_for_campaign(
-                campaign_slug,
-                query=normalized_query,
-                limit=max(limit, 1) * 2,
-            )
-            for entry in systems_entries:
-                if not can_access_campaign_systems_entry(campaign_slug, entry.slug):
-                    continue
-                results.append(
-                    {
-                        "source_ref": build_session_article_systems_source_ref(entry.slug),
-                        "source_kind": SESSION_ARTICLE_SOURCE_KIND_SYSTEMS,
-                        "title": entry.title,
-                        "subtitle": f"{systems_entry_type_label(entry.entry_type)} - {entry.source_id}",
-                        "kind_label": "Systems",
-                        "select_label": (
-                            f"{entry.title} - Systems - {systems_entry_type_label(entry.entry_type)} - "
-                            f"{entry.source_id}"
-                        ),
-                    }
-                )
-                if len(results) >= limit:
-                    break
-
-        return results
 
     def build_session_message_recipient_player_choices(campaign_slug: str) -> list[dict[str, object]]:
         return build_active_player_choices(get_auth_store(), campaign_slug)
