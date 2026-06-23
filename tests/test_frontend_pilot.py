@@ -1644,10 +1644,7 @@ def test_character_xianxia_resources_section_uses_flask_style_resource_cards() -
 
 
 def test_character_xianxia_skills_section_uses_flask_style_skill_pills() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
-    section_start = source.index('{isXianxia && activeCharacterSection === "skills" ? (')
-    section_end = source.index('{isXianxia && activeCharacterSection === "equipment" ? (', section_start)
-    skills_markup = source[section_start:section_end]
+    skills_markup = Path("frontend/src/components/CharacterXianxiaSkillsSection.tsx").read_text(encoding="utf-8")
 
     assert 'className="skill-grid"' in skills_markup
     assert 'className="skill-pill skill-pill--proficient"' in skills_markup

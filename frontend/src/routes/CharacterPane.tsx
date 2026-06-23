@@ -64,6 +64,7 @@ import { CharacterDndResourcesSection } from "../components/CharacterDndResource
 import { CharacterDndSpellsSection } from "../components/CharacterDndSpellsSection";
 import { CharacterNotesSection } from "../components/CharacterNotesSection";
 import { CharacterPersonalSection } from "../components/CharacterPersonalSection";
+import { CharacterXianxiaSkillsSection } from "../components/CharacterXianxiaSkillsSection";
 import {
   asRecord,
   asRecordArray,
@@ -2484,44 +2485,13 @@ export function CharacterPane({
             ) : null}
 
             {isXianxia && activeCharacterSection === "skills" ? (
-              <section className="read-section" id="xianxia-skills">
-                <div className="section-heading">
-                  <h2>Skills</h2>
-                </div>
-                {presentedXianxia.skills?.trained?.length ? (
-                  <div className="skill-grid">
-                    {presentedXianxia.skills.trained.map((skill) => (
-                      <div className="skill-pill skill-pill--proficient" key={skill.name}>
-                        <span>{skill.name}</span>
-                        <span className="meta">Trained</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <article className="detail-card">
-                    <p className="meta">No trained skills are recorded on this sheet yet.</p>
-                  </article>
-                )}
-                {hasSkillUseGuardrail ? (
-                  <div className="detail-cluster" id="xianxia-skills-guardrail">
-                    <div className="section-heading">
-                      <h3>Skill use guardrails</h3>
-                      {skillUseGuardrailRuleHref ? (
-                        <a className="button-link subtle" href={skillUseGuardrailRuleHref}>
-                          {`${skillUseGuardrailRuleTitle} rule`}
-                        </a>
-                      ) : null}
-                    </div>
-                    {skillUseGuardrailReferenceLines.length ? (
-                      <article className="detail-card">
-                        {skillUseGuardrailReferenceLines.map((line, index) => (
-                          <p key={`${line}-${index}`}>{line}</p>
-                        ))}
-                      </article>
-                    ) : null}
-                  </div>
-                ) : null}
-              </section>
+              <CharacterXianxiaSkillsSection
+                hasSkillUseGuardrail={hasSkillUseGuardrail}
+                skillUseGuardrailReferenceLines={skillUseGuardrailReferenceLines}
+                skillUseGuardrailRuleHref={skillUseGuardrailRuleHref}
+                skillUseGuardrailRuleTitle={skillUseGuardrailRuleTitle}
+                trainedSkills={presentedXianxia.skills?.trained ?? []}
+              />
             ) : null}
 
             {isXianxia && activeCharacterSection === "equipment" ? (
