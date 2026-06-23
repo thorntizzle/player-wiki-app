@@ -804,6 +804,17 @@ def test_combat_empty_tracker_prompt_uses_current_surface_wording() -> None:
     assert "Use the Flask DM controls to seed the encounter for now." not in combat_page_source
 
 
+def test_gen2_combat_focus_changes_preserve_mounted_payload_in_source() -> None:
+    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    combat_page_source = _extract_function_component_source(source, "CombatPage")
+
+    assert "const navigate = useNavigate();" in combat_page_source
+    assert "void navigate({ to: nextPath as never });" in combat_page_source
+    assert "window.history.pushState" not in combat_page_source
+    assert "placeholderData: (previousData) => previousData" in combat_page_source
+    assert "focusedCombatantFromTracker" in combat_page_source
+
+
 def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
     source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
     combat_page_source = _extract_function_component_source(source, "CombatPage")

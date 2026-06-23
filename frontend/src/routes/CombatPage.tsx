@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useLocation, useParams } from "@tanstack/react-router";
+import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { FormEvent } from "react";
 import { apiErrorMessage } from "../api/client";
@@ -86,15 +86,19 @@ export function CombatPage() {
     from: "/campaigns/$campaignSlug/combat",
   });
   const location = useLocation();
+  const navigate = useNavigate();
   const campaignSlug = params.campaignSlug ?? "";
   const { apiClient, setAuthRequired } = useApiClient();
   const readSearchView = (search: string): CombatView => {
     const requested = new URLSearchParams(search).get("view");
     return requested === "status" || requested === "controls" ? requested : "player";
   };
-  const [selectedCombatantId, setSelectedCombatantId] = useState<number | null>(() => {
-    const parsed = Number(new URLSearchParams(window.location.search).get("combatant") || "");
+  const readSearchCombatantId = (search: string): number | null => {
+    const parsed = Number(new URLSearchParams(search).get("combatant") || "");
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  };
+  const [selectedCombatantId, setSelectedCombatantId] = useState<number | null>(() => {
+    return readSearchCombatantId(window.location.search);
   });
   const [activeCombatView, setActiveCombatView] = useState<CombatView>(() => readSearchView(window.location.search));
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -151,9 +155,7 @@ export function CombatPage() {
 
   useEffect(() => {
     const currentSearch = window.location.search;
-    const params = new URLSearchParams(currentSearch);
-    const parsed = Number(params.get("combatant") || "");
-    setSelectedCombatantId(Number.isFinite(parsed) && parsed > 0 ? parsed : null);
+    setSelectedCombatantId(readSearchCombatantId(currentSearch));
     setActiveCombatView(readSearchView(currentSearch));
   }, [location.href]);
 
@@ -178,6 +180,7 @@ export function CombatPage() {
       return resolved ?? apiClient.getCombat(campaignSlug, selectedCombatantId);
     },
     enabled: Boolean(campaignSlug),
+    placeholderData: (previousData) => previousData,
     refetchInterval: (query) => {
       const data = query.state.data;
       if (data && !data.combat_system_supported) {
@@ -196,7 +199,14 @@ export function CombatPage() {
 
   const payload = combatQuery.data;
   const tracker = payload?.tracker;
-  const selectedCombatant = payload?.selected_combatant ?? null;
+  const focusedCombatantFromTracker =
+    selectedCombatantId && tracker?.combatants
+      ? tracker.combatants.find((combatant) => combatant.id === selectedCombatantId) ?? null
+      : null;
+  const selectedCombatant =
+    focusedCombatantFromTracker && payload?.selected_combatant?.id !== selectedCombatantId
+      ? focusedCombatantFromTracker
+      : payload?.selected_combatant ?? focusedCombatantFromTracker;
   const selectedCombatantMeta = selectedCombatant
     ? selectedCombatant.subtitle || selectedCombatant.source_label || selectedCombatant.type_label
     : "";
@@ -233,7 +243,8 @@ export function CombatPage() {
       params.set("combatant", String(combatantId));
     }
     const query = params.toString();
-    window.history.pushState(null, "", `/app-next/campaigns/${encodedCampaignSlug}/combat${query ? `?${query}` : ""}`);
+    const nextPath = `/campaigns/${encodedCampaignSlug}/combat${query ? `?${query}` : ""}`;
+    void navigate({ to: nextPath as never });
   };
 
   useEffect(() => {
