@@ -1470,9 +1470,7 @@ def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_sour
 
 def test_character_xianxia_inventory_section_uses_flask_style_row_form_chrome() -> None:
     source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
-    resources_start = source.index('{isXianxia && activeCharacterSection === "resources" ? (')
-    resources_end = source.index('{isXianxia && activeCharacterSection === "skills" ? (', resources_start)
-    resources_markup = source[resources_start:resources_end]
+    resources_markup = Path("frontend/src/components/CharacterXianxiaResourcesSection.tsx").read_text(encoding="utf-8")
 
     assert 'id="session-active-state"' in resources_markup
     assert '<h3>Active Stance and Aura</h3>' in resources_markup
@@ -1621,20 +1619,17 @@ def test_character_xianxia_inventory_section_uses_flask_style_row_form_chrome() 
 
 
 def test_character_xianxia_resources_section_uses_flask_style_resource_cards() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
-    resources_start = source.index('{isXianxia && activeCharacterSection === "resources" ? (')
-    resources_end = source.index('{isXianxia && activeCharacterSection === "skills" ? (', resources_start)
-    resources_markup = source[resources_start:resources_end]
+    resources_markup = Path("frontend/src/components/CharacterXianxiaResourcesSection.tsx").read_text(encoding="utf-8")
 
-    assert 'Current {pool.current} / Max {pool.max}' in source
-    assert '{pool.temp ? <p className="meta">Temporary {pool.label}: {pool.temp}</p> : null}' in source
+    assert 'Current {pool.current} / Max {pool.max}' in resources_markup
+    assert '{pool.temp ? <p className="meta">Temporary {pool.label}: {pool.temp}</p> : null}' in resources_markup
     assert 'className="resource-grid"' in resources_markup
     assert 'className="resource-card"' in resources_markup
     assert 'className="resource-card__value"' in resources_markup
     assert 'Current {xianxiaDao.current} / Max {xianxiaDao.max}' in resources_markup
     assert '<h3>Dao</h3>' in resources_markup
     assert '<h3>Insight</h3>' in resources_markup
-    assert 'className="meta">Spent {readNumber(xianxiaInsight.spent, 0)}</p>' in resources_markup
+    assert 'className="meta">Spent {readNumber(insight.spent, 0)}</p>' in resources_markup
     assert 'id="session-active-state"' in resources_markup
 
     assert 'className="character-card-grid"' not in resources_markup

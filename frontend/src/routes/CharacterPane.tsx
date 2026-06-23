@@ -65,6 +65,7 @@ import { CharacterDndSpellsSection } from "../components/CharacterDndSpellsSecti
 import { CharacterNotesSection } from "../components/CharacterNotesSection";
 import { CharacterPersonalSection } from "../components/CharacterPersonalSection";
 import { CharacterXianxiaEquipmentSection } from "../components/CharacterXianxiaEquipmentSection";
+import { CharacterXianxiaResourcesSection } from "../components/CharacterXianxiaResourcesSection";
 import { CharacterXianxiaSkillsSection } from "../components/CharacterXianxiaSkillsSection";
 import {
   asRecord,
@@ -1090,23 +1091,6 @@ export function CharacterPane({
     }
     return <div className="article-body article-body--compact" dangerouslySetInnerHTML={{ __html: bodyHtml }} />;
   };
-
-  const renderXianxiaPoolCards = (
-    pools: Array<{ key: string; label: string; current: number; max: number; temp?: number }>,
-    options?: {
-      className?: string;
-      keyPrefix?: string;
-    },
-  ) =>
-    pools.map((pool) => (
-      <article className={options?.className ?? "resource-card"} key={options?.keyPrefix ? `${options.keyPrefix}-${pool.key}` : pool.key}>
-        <h3>{pool.label}</h3>
-        <p className="resource-card__value">
-          Current {pool.current} / Max {pool.max}
-        </p>
-        {pool.temp ? <p className="meta">Temporary {pool.label}: {pool.temp}</p> : null}
-      </article>
-    ));
 
   const selectCharacter = (nextSlug: string | null) => {
     setSelectedSlug(nextSlug);
@@ -2429,60 +2413,19 @@ export function CharacterPane({
             ) : null}
 
             {isXianxia && activeCharacterSection === "resources" ? (
-              <section className="read-section" id="xianxia-resources">
-                <div className="section-heading">
-                  <h2>Resources</h2>
-                </div>
-                <div className="resource-grid">
-                  {xianxiaDurability.length ? renderXianxiaPoolCards(xianxiaDurability, { keyPrefix: "durability" }) : null}
-                  {xianxiaEnergies.length ? renderXianxiaPoolCards(xianxiaEnergies, { keyPrefix: "energies" }) : null}
-                  {xianxiaYinYang.length ? renderXianxiaPoolCards(xianxiaYinYang, { keyPrefix: "yin-yang" }) : null}
-                  {xianxiaDao ? (
-                    <article className="resource-card">
-                      <h3>Dao</h3>
-                      <p className="resource-card__value">
-                        Current {xianxiaDao.current} / Max {xianxiaDao.max}
-                      </p>
-                    </article>
-                  ) : null}
-                  {xianxiaInsight ? (
-                    <article className="resource-card">
-                      <h3>Insight</h3>
-                      <p className="resource-card__value">{readNumber(xianxiaInsight.available, 0)}</p>
-                      <p className="meta">Spent {readNumber(xianxiaInsight.spent, 0)}</p>
-                    </article>
-                  ) : null}
-                </div>
-                <article className="detail-card" id="session-active-state">
-                  <div className="section-heading">
-                    <h3>Active Stance and Aura</h3>
-                    {xianxiaActiveStateStatus ? <p className="meta">{xianxiaActiveStateStatus}</p> : null}
-                  </div>
-                  <form onSubmit={submitXianxiaActiveState} className="session-vitals-form">
-                    <label className="session-field" htmlFor="xianxia-active-stance">
-                      <span>Active Stance</span>
-                      <input
-                        id="xianxia-active-stance"
-                        value={xianxiaActiveDraft.activeStanceName}
-                        disabled={!canEdit}
-                        onChange={(event) => setXianxiaActiveDraft({ ...xianxiaActiveDraft, activeStanceName: event.currentTarget.value })}
-                      />
-                    </label>
-                    <label className="session-field" htmlFor="xianxia-active-aura">
-                      <span>Active Aura</span>
-                      <input
-                        id="xianxia-active-aura"
-                        value={xianxiaActiveDraft.activeAuraName}
-                        disabled={!canEdit}
-                        onChange={(event) => setXianxiaActiveDraft({ ...xianxiaActiveDraft, activeAuraName: event.currentTarget.value })}
-                      />
-                    </label>
-                    <button type="submit" className="button-link" disabled={patchXianxiaActiveState.isPending || !canEdit}>
-                      {patchXianxiaActiveState.isPending ? "Saving..." : "Save Active Stance and Aura"}
-                    </button>
-                  </form>
-                </article>
-              </section>
+              <CharacterXianxiaResourcesSection
+                activeStateStatus={xianxiaActiveStateStatus}
+                canEdit={canEdit}
+                durability={xianxiaDurability}
+                energies={xianxiaEnergies}
+                insight={xianxiaInsight}
+                isActiveStateSaving={patchXianxiaActiveState.isPending}
+                setXianxiaActiveDraft={setXianxiaActiveDraft}
+                submitXianxiaActiveState={submitXianxiaActiveState}
+                xianxiaActiveDraft={xianxiaActiveDraft}
+                xianxiaDao={xianxiaDao}
+                yinYang={xianxiaYinYang}
+              />
             ) : null}
 
             {isXianxia && activeCharacterSection === "skills" ? (
