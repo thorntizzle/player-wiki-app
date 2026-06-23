@@ -183,15 +183,20 @@ def test_frontend_pilot_routes_are_available_with_preview_and_index(app, client,
     assert route_response.status_code == 200
     route_html = route_response.get_data(as_text=True)
     assert "preview" in route_html
-    assert 'class="app-loading-cover app-loading-cover--with-image"' in route_html
+    assert (
+        'class="app-loading-cover app-loading-cover--with-image app-loading-cover--media-ready"'
+        in route_html
+    )
     assert 'data-app-loading-media-urls=' in route_html
     assert 'data-app-loading-media-url="/campaigns/linden-pass/assets/' in route_html
+    assert 'style="--app-loading-media: url(&quot;/campaigns/linden-pass/assets/' in route_html
 
     admin_route_response = client.get("/app-next/admin")
     assert admin_route_response.status_code == 200
     admin_route_html = admin_route_response.get_data(as_text=True)
     assert "preview" in admin_route_html
     assert "app-loading-cover--with-image" not in admin_route_html
+    assert "app-loading-cover--media-ready" not in admin_route_html
 
     missing_asset_response = client.get("/app-next/assets/missing.js")
     assert missing_asset_response.status_code == 404

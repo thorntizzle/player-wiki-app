@@ -1712,6 +1712,8 @@ def create_app() -> Flask:
 
         media_urls_json = escape(json.dumps(media_urls), quote=False).replace("'", "&#39;")
         first_media_url = escape(media_urls[0], quote=True)
+        loading_media_style = f"--app-loading-media: url({json.dumps(media_urls[0])});"
+        loading_media_style_attr = escape(loading_media_style, quote=True)
         replacement_attrs = (
             f" data-app-loading-media-urls='{media_urls_json}'"
             f" data-app-loading-media-url=\"{first_media_url}\""
@@ -1725,6 +1727,7 @@ def create_app() -> Flask:
                 return tag
 
             cover_replaced = True
+            media_attrs = replacement_attrs
             tag = re.sub(
                 r"\sdata-app-loading-media-urls=(\"[^\"]*\"|'[^']*'|[^\s>]+)",
                 "",
@@ -1743,10 +1746,27 @@ def create_app() -> Flask:
                 class_names = match.group(2).split()
                 if "app-loading-cover--with-image" not in class_names:
                     class_names.append("app-loading-cover--with-image")
+                if "app-loading-cover--media-ready" not in class_names:
+                    class_names.append("app-loading-cover--media-ready")
                 return f"class={quote}{' '.join(class_names)}{quote}"
 
             tag = re.sub(r"class=(['\"])(.*?)\1", replace_class, tag, count=1, flags=re.IGNORECASE)
-            return f"{tag[:-1]}{replacement_attrs}>"
+            if re.search(r"\sstyle=(['\"])(.*?)\1", tag, flags=re.IGNORECASE):
+                def replace_style(match: re.Match[str]) -> str:
+                    quote = match.group(1)
+                    existing_style = re.sub(
+                        r"(^|;)\s*--app-loading-media\s*:\s*url\([^;]*\)\s*;?",
+                        ";",
+                        match.group(2),
+                        flags=re.IGNORECASE,
+                    ).strip()
+                    separator = " " if not existing_style or existing_style.endswith(";") else "; "
+                    return f"style={quote}{existing_style}{separator}{loading_media_style_attr}{quote}"
+
+                tag = re.sub(r"\sstyle=(['\"])(.*?)\1", replace_style, tag, count=1, flags=re.IGNORECASE)
+            else:
+                media_attrs += f" style=\"{loading_media_style_attr}\""
+            return f"{tag[:-1]}{media_attrs}>"
 
         return re.sub(r"<div\b[^>]*>", replace_cover_tag, index_html, flags=re.IGNORECASE)
 

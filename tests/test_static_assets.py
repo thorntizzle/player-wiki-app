@@ -113,8 +113,10 @@ def test_base_template_uses_loading_image_for_campaign_when_available(client):
     html = response.get_data(as_text=True)
 
     assert 'app-loading-cover--with-image' in html
+    assert 'app-loading-cover--media-ready' in html
     assert 'data-app-loading-media-urls=' in html
     assert 'data-app-loading-media-url="/campaigns/linden-pass/assets/' in html
+    assert "style='--app-loading-media: url(\"/campaigns/linden-pass/assets/" in html
     assert "force-cache" in html
     assert "background-size: contain" in html
 
@@ -125,7 +127,9 @@ def test_base_template_no_loading_image_for_global_routes(client):
     html = response.get_data(as_text=True)
 
     assert 'app-loading-cover--with-image' not in html
-    assert '<div class="app-loading-cover" role="status"' in html
+    cover_match = re.search(r'<div class="app-loading-cover[^"]*"', html)
+    assert cover_match is not None
+    assert cover_match.group(0) == '<div class="app-loading-cover"'
 
 
 def test_base_template_has_theme_scoped_palette_for_loading_cover(client):

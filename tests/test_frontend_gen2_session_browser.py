@@ -203,6 +203,7 @@ def test_gen2_loading_cover_decorates_and_dismisses(
                     hasClosingClass: root.classList.contains('app-loading-closing'),
                     rootVisibility: appRoot ? getComputedStyle(appRoot).visibility : '',
                     coverClassName: cover ? cover.className : '',
+                    coverStyle: cover ? cover.getAttribute('style') || '' : '',
                     mediaUrls: cover ? cover.getAttribute('data-app-loading-media-urls') : '',
                     mediaUrl: cover ? cover.getAttribute('data-app-loading-media-url') : '',
                   };
@@ -214,6 +215,8 @@ def test_gen2_loading_cover_decorates_and_dismisses(
             assert loading_snapshot["hasClosingClass"] is False
             assert loading_snapshot["rootVisibility"] == "visible"
             assert "app-loading-cover--with-image" in loading_snapshot["coverClassName"]
+            assert "app-loading-cover--media-ready" in loading_snapshot["coverClassName"]
+            assert "--app-loading-media: url(" in loading_snapshot["coverStyle"]
             assert loading_snapshot["mediaUrl"].startswith("/campaigns/linden-pass/assets/")
 
             media_urls = json.loads(loading_snapshot["mediaUrls"])
