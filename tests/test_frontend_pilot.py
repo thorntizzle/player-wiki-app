@@ -1749,12 +1749,11 @@ def test_character_xianxia_quick_reference_section_renders_flask_rule_reference_
 
 
 def test_character_xianxia_martial_arts_section_uses_flask_feature_row_chrome() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
-    section_start = source.index('{isXianxia && activeCharacterSection === "martial-arts" ? (')
-    section_end = source.index('{isXianxia && activeCharacterSection === "techniques" ? (', section_start)
-    section_markup = source[section_start:section_end]
+    section_markup = Path("frontend/src/components/CharacterXianxiaMartialArtsSection.tsx").read_text(
+        encoding="utf-8"
+    )
 
-    assert 'id: "xianxia-martial-arts"' in section_markup
+    assert 'id="xianxia-martial-arts"' in section_markup
     assert 'className="feature-groups"' in section_markup
     assert 'className="feature-group"' in section_markup
     assert 'className="feature-stack"' in section_markup
