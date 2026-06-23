@@ -298,12 +298,8 @@ def test_session_pane_no_player_wiki_lookup_widget_in_source() -> None:
 
 
 def test_character_pane_non_read_selector_uses_flask_style_field_chrome_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    character_pane_source = _extract_component_source(
-        source,
-        "function CharacterPane({",
-        "function DmContentPage(",
-    )
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    character_pane_source = source[source.index("export function CharacterPane({"):]
     selector_class_start = character_pane_source.index('className={isReadSurface ? "character-subpage-nav-card" : "character-selector-card"}')
     selector_start = character_pane_source.rfind("<div", 0, selector_class_start)
     selector_end = character_pane_source.index("{listQuery.isLoading ? <p className=\"status status-neutral\">Loading characters...</p> : null}", selector_start)
@@ -1238,7 +1234,7 @@ def test_combat_unsupported_system_fallback_chrome_in_source() -> None:
 
 
 def test_character_portrait_manager_action_chrome_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     section_start = source.index('<form className="stack-form character-portrait-manager"')
     section_end = source.index("</form>", section_start) + len("</form>")
     section_markup = source[section_start:section_end]
@@ -1487,7 +1483,7 @@ def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_sour
 
 
 def test_character_xianxia_inventory_section_uses_flask_style_row_form_chrome() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     resources_start = source.index('{isXianxia && activeCharacterSection === "resources" ? (')
     resources_end = source.index('{isXianxia && activeCharacterSection === "skills" ? (', resources_start)
     resources_markup = source[resources_start:resources_end]
@@ -1639,7 +1635,7 @@ def test_character_xianxia_inventory_section_uses_flask_style_row_form_chrome() 
 
 
 def test_character_xianxia_resources_section_uses_flask_style_resource_cards() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     resources_start = source.index('{isXianxia && activeCharacterSection === "resources" ? (')
     resources_end = source.index('{isXianxia && activeCharacterSection === "skills" ? (', resources_start)
     resources_markup = source[resources_start:resources_end]
@@ -1662,7 +1658,7 @@ def test_character_xianxia_resources_section_uses_flask_style_resource_cards() -
 
 
 def test_character_xianxia_skills_section_uses_flask_style_skill_pills() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isXianxia && activeCharacterSection === "skills" ? (')
     section_end = source.index('{isXianxia && activeCharacterSection === "equipment" ? (', section_start)
     skills_markup = source[section_start:section_end]
@@ -1686,7 +1682,7 @@ def test_character_xianxia_skills_section_uses_flask_style_skill_pills() -> None
 
 
 def test_character_xianxia_equipment_section_uses_flask_style_read_section_shape() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isXianxia && activeCharacterSection === "equipment" ? (')
     section_end = source.index('{isXianxia && activeCharacterSection === "inventory" ? (', section_start)
     section_markup = source[section_start:section_end]
@@ -1717,7 +1713,7 @@ def test_character_xianxia_equipment_section_uses_flask_style_read_section_shape
 
 
 def test_character_xianxia_quick_reference_section_uses_flask_style_read_chrome() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isXianxia && activeCharacterSection === "quick-reference" ? (')
     section_end = source.index('{isXianxia && activeCharacterSection === "martial-arts" ? (', section_start)
     section_markup = source[section_start:section_end]
@@ -1750,7 +1746,7 @@ def test_character_xianxia_quick_reference_section_uses_flask_style_read_chrome(
 
 
 def test_character_xianxia_quick_reference_section_renders_flask_rule_reference_subsections() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isXianxia && activeCharacterSection === "quick-reference" ? (')
     section_end = source.index('{isXianxia && activeCharacterSection === "martial-arts" ? (', section_start)
     section_markup = source[section_start:section_end]
@@ -1784,7 +1780,7 @@ def test_character_xianxia_quick_reference_section_renders_flask_rule_reference_
 
 
 def test_character_xianxia_martial_arts_section_uses_flask_feature_row_chrome() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isXianxia && activeCharacterSection === "martial-arts" ? (')
     section_end = source.index('{isXianxia && activeCharacterSection === "techniques" ? (', section_start)
     section_markup = source[section_start:section_end]
@@ -1815,7 +1811,7 @@ def test_character_xianxia_martial_arts_section_uses_flask_feature_row_chrome() 
 
 
 def test_character_xianxia_techniques_section_uses_flask_chrome_parity() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isXianxia && activeCharacterSection === "techniques" ? (')
     section_end = source.index('{isXianxia && activeCharacterSection === "resources" ? (', section_start)
     section_markup = source[section_start:section_end]
@@ -1896,7 +1892,7 @@ def test_character_xianxia_techniques_section_uses_flask_chrome_parity() -> None
 
 
 def test_character_xianxia_personal_section_uses_flask_style_reference_stack_and_detail_cards() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     personal_section_start = source.index('{isXianxia && activeCharacterSection === "personal" ? (')
     personal_section_end = source.index('{isDnd && activeCharacterSection === "overview" ? (', personal_section_start)
     personal_section_markup = source[personal_section_start:personal_section_end]
@@ -1922,7 +1918,7 @@ def test_character_xianxia_personal_section_uses_flask_style_reference_stack_and
 
 
 def test_character_generic_system_summary_section_uses_detail_grid_cards() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     summary_section_start = source.index('<section className="read-section" id="character-system-summary">')
     generic_summary_end = source.index("</section>", summary_section_start)
     generic_summary_markup = source[summary_section_start:generic_summary_end]
@@ -1939,12 +1935,11 @@ def test_character_generic_system_summary_section_uses_detail_grid_cards() -> No
 
 
 def test_character_pane_status_messages_use_toast_overlay() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     feedback_source = Path("frontend/src/components/feedback.tsx").read_text(encoding="utf-8")
     styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
-    pane_start = source.index("function CharacterPane(")
-    pane_end = source.index("function DmContentPage(", pane_start)
-    pane_markup = source[pane_start:pane_end]
+    pane_start = source.index("export function CharacterPane(")
+    pane_markup = source[pane_start:]
 
     assert "const TOAST_DISMISS_MS = 3600;" in feedback_source
     assert "function ToastNotice" in feedback_source
@@ -1964,7 +1959,7 @@ def test_character_pane_status_messages_use_toast_overlay() -> None:
 
 
 def test_character_dnd_overview_section_uses_flask_style_glance_rows() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "overview" ? (')
     section_end = source.index('{isDnd && activeCharacterSection === "resources" ? (', section_start)
     section_markup = source[section_start:section_end]
@@ -1982,7 +1977,7 @@ def test_character_dnd_overview_section_uses_flask_style_glance_rows() -> None:
 
 
 def test_character_dnd_inventory_currency_section_uses_flask_style_row_form_chrome() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "inventory" ? (')
     section_end = source.index('{isDnd && activeCharacterSection === "abilities" ? (', section_start)
     section_markup = source[section_start:section_end]
@@ -2009,7 +2004,7 @@ def test_character_dnd_inventory_currency_section_uses_flask_style_row_form_chro
 
 
 def test_character_dnd_inventory_section_uses_flask_style_row_form_chrome() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "inventory" ? (')
     section_end = source.index('{isDnd && activeCharacterSection === "abilities" ? (', section_start)
     section_markup = source[section_start:section_end]
@@ -2053,7 +2048,7 @@ def test_character_dnd_inventory_section_uses_flask_style_row_form_chrome() -> N
 
 
 def test_character_dnd_abilities_and_skills_section_uses_compact_skill_proficiency_cues() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "abilities" ? (')
     section_end = source.index(
@@ -2099,7 +2094,7 @@ def test_character_dnd_abilities_and_skills_section_uses_compact_skill_proficien
 
 
 def test_character_dnd_equipment_section_uses_flask_style_row_form_chrome() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "equipment" ? (')
     section_end = source.index('{isDnd && activeCharacterSection === "inventory" ? (', section_start)
     section_markup = source[section_start:section_end]
@@ -2149,7 +2144,7 @@ def test_character_dnd_equipment_section_uses_flask_style_row_form_chrome() -> N
 
 
 def test_character_dnd_resources_section_uses_flask_style_row_form_chrome() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     resources_start = source.index('{isDnd && activeCharacterSection === "resources" ? (')
     resources_end = source.index('{isDnd && activeCharacterSection === "spells" ? (', resources_start)
@@ -2189,7 +2184,7 @@ def test_character_dnd_resources_section_uses_flask_style_row_form_chrome() -> N
 
 
 def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     section_start = source.index('{isDnd && activeCharacterSection === "spells" ? (')
     section_end = source.index('{isDnd && activeCharacterSection === "equipment" ? (', section_start)
@@ -2319,7 +2314,7 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
 
 
 def test_character_notes_section_uses_flask_style_reference_stack_and_edit_chrome() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     notes_section_start = source.index('{((isDnd || isXianxia) ? activeCharacterSection === "notes" : !isDnd) ? (')
     notes_section_end = source.index('{!isDnd && !isXianxia ? (', notes_section_start)
     notes_section_markup = source[notes_section_start:notes_section_end]
