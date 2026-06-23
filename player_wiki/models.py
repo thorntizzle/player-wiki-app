@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 SECTION_ORDER = {
-    "Overview": 0,
     "Sessions": 10,
     "Notes": 15,
     "Locations": 20,
@@ -17,6 +16,13 @@ SECTION_ORDER = {
     "Mechanics": 80,
     "Lore": 90,
 }
+
+DEPRECATED_WIKI_SECTIONS = {"overview"}
+DEPRECATED_WIKI_PAGE_TYPES = {"overview"}
+
+
+def is_deprecated_wiki_identity(section: str, page_type: str) -> bool:
+    return section.strip().lower() in DEPRECATED_WIKI_SECTIONS or page_type.strip().lower() in DEPRECATED_WIKI_PAGE_TYPES
 
 SUBSECTION_ORDER = {
     "Factions": {
@@ -119,6 +125,10 @@ class Page:
     html_loaded: bool = False
 
     @property
+    def is_deprecated_wiki_overview(self) -> bool:
+        return is_deprecated_wiki_identity(self.section, self.page_type)
+
+    @property
     def searchable_text(self) -> str:
         parts = [self.title, self.subsection, self.summary, self.body_markdown, " ".join(self.aliases)]
         return " ".join(part for part in parts if part).lower()
@@ -154,7 +164,11 @@ class Campaign:
     alias_index: dict[str, str] = field(default_factory=dict)
 
     def is_page_visible(self, page: Page) -> bool:
-        return page.published and page.reveal_after_session <= self.current_session
+        return (
+            page.published
+            and not page.is_deprecated_wiki_overview
+            and page.reveal_after_session <= self.current_session
+        )
 
     def get_visible_page(self, page_slug: str) -> Page | None:
         page = self.pages.get(page_slug)

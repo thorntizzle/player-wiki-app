@@ -1327,9 +1327,11 @@ def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> N
     assert 'className="card wiki-home-section-card"' in nav_source
     assert 'className="wiki-home-section-card__icon"' in nav_source
     assert "WIKI_SECTION_ICON_BY_SLUG" in nav_source
-    assert "overview: \"book\"" in nav_source
+    assert "overview: \"book\"" not in nav_source
     assert "spells: \"wand\"" in nav_source
     assert "mechanics: \"cog\"" in nav_source
+    assert 'targetSubdir: "overview"' not in source
+    assert 'defaultType: "overview"' not in source
 
     assert "<WikiHomeSectionGrid" in home_page_source
     assert "sections={data.section_navigation}" in home_page_source

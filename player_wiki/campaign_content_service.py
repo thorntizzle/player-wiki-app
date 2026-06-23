@@ -16,7 +16,7 @@ from .character_repository import load_campaign_character_config
 from .character_service import build_initial_state, merge_state_with_definition
 from .character_store import CharacterStateStore
 from .db import get_db
-from .models import Campaign, Page, page_sort_key
+from .models import Campaign, Page, is_deprecated_wiki_identity, page_sort_key
 from .repository import slugify
 from .system_policy import default_systems_library_slug, is_xianxia_system, normalize_system_code
 
@@ -268,13 +268,27 @@ def write_campaign_page_file(
     content_dir = Path(campaign.player_content_dir)
     file_path, pure_relative_path = _resolve_relative_path(content_dir, page_ref, required_suffix=".md")
     normalized_metadata = dict(metadata)
-    normalized_metadata.setdefault("slug", pure_relative_path.with_suffix("").as_posix())
+    normalized_page_ref = pure_relative_path.with_suffix("").as_posix()
+    normalized_metadata.setdefault("slug", normalized_page_ref)
+    default_section = (
+        PurePosixPath(normalized_page_ref).parts[0].replace("-", " ").title()
+        if PurePosixPath(normalized_page_ref).parts
+        else "Pages"
+    )
+    normalized_section = str(normalized_metadata.get("section") or default_section).strip()
+    normalized_page_type = str(normalized_metadata.get("type") or "page").strip()
+    if (
+        normalized_page_ref == "index"
+        or normalized_page_ref.startswith("overview/")
+        or is_deprecated_wiki_identity(normalized_section, normalized_page_type)
+    ):
+        raise CampaignContentError("Overview wiki pages are deprecated. Choose a supported section.")
     previous_contents = file_path.read_text(encoding="utf-8") if file_path.exists() else None
 
     try:
         page_store.upsert_page(
             campaign.slug,
-            pure_relative_path.with_suffix("").as_posix(),
+            normalized_page_ref,
             metadata=normalized_metadata,
             body_markdown=body_markdown,
             commit=False,

@@ -2075,13 +2075,9 @@ def test_gen2_wiki_browser_exposes_home_section_page_and_assets(
             expect(section_grid).to_be_visible()
             section_cards = section_grid.locator(".wiki-home-section-card")
             section_card_count = section_cards.count()
-            assert section_card_count >= 12
+            assert section_card_count >= 11
             expect(section_grid.locator(".wiki-home-section-card__icon-svg")).to_have_count(section_card_count)
-            overview_section_link = section_grid.get_by_role("link", name=re.compile(r"Overview"))
-            expect(overview_section_link).to_have_attribute(
-                "href",
-                "/app-next/campaigns/linden-pass/sections/overview",
-            )
+            expect(section_grid.get_by_role("link", name=re.compile(r"Overview"))).to_have_count(0)
             expect(section_grid.get_by_role("link", name=re.compile(r"Locations"))).to_have_attribute(
                 "href",
                 "/app-next/campaigns/linden-pass/sections/locations",
@@ -2175,7 +2171,7 @@ def test_gen2_wiki_visual_parity_smoke(
             assert home_metrics["gridDisplay"] == "grid"
             assert home_metrics["gridColumnCount"] == 6
             assert home_metrics["cardCount"] == home_metrics["iconCount"]
-            assert home_metrics["cardCount"] >= 12
+            assert home_metrics["cardCount"] >= 11
             assert home_metrics["firstIconWidth"] > 20
 
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/sections/locations")

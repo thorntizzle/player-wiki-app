@@ -15,7 +15,6 @@ from .session_models import SessionArticleImageRecord, SessionArticleRecord
 SESSION_ARTICLE_SOURCE_REF_PREFIX = "session-article:"
 
 SESSION_ARTICLE_SECTION_TARGETS = {
-    "Overview": {"target_subdir": "overview", "page_type": "page"},
     "Sessions": {"target_subdir": "sessions", "page_type": "session"},
     "Notes": {"target_subdir": "notes", "page_type": "note"},
     "Locations": {"target_subdir": "locations", "page_type": "location"},

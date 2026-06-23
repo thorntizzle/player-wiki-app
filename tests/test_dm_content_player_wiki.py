@@ -86,6 +86,45 @@ def test_dm_content_player_wiki_subpage_is_hidden_from_players(client, sign_in, 
     assert response.status_code == 404
 
 
+def test_player_wiki_content_api_rejects_deprecated_overview_targets(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    deprecated_writes = [
+        (
+            "/api/v1/campaigns/linden-pass/content/pages/overview/deprecated-guide",
+            {
+                "title": "Deprecated Guide",
+                "section": "Overview",
+                "type": "page",
+                "summary": "This legacy section should no longer be created.",
+            },
+        ),
+        (
+            "/api/v1/campaigns/linden-pass/content/pages/notes/deprecated-guide",
+            {
+                "title": "Deprecated Guide",
+                "section": "Notes",
+                "type": "overview",
+                "summary": "This legacy page type should no longer be created.",
+            },
+        ),
+    ]
+
+    for path, metadata in deprecated_writes:
+        response = client.put(
+            path,
+            json={
+                "metadata": metadata,
+                "body_markdown": "Legacy overview content.",
+            },
+        )
+
+        assert response.status_code == 400
+        payload = response.get_json()
+        assert payload["error"]["code"] == "validation_error"
+        assert "Overview wiki pages are deprecated" in payload["error"]["message"]
+
+
 def test_dm_browser_write_routes_reject_players_when_scopes_are_visible(
     app,
     client,

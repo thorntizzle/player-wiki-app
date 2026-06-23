@@ -3082,6 +3082,8 @@ def test_dm_can_convert_session_article_into_published_wiki_page(
     convert_html = convert_page.get_data(as_text=True)
     assert "Publish settings" in convert_html
     assert "Courier Seal" in convert_html
+    assert ">Overview<" not in convert_html
+    assert 'value="Notes"' in convert_html
 
     publish_response = isolated_campaign_client.post(
         "/campaigns/linden-pass/session/articles/1/convert",

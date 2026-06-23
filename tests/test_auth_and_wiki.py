@@ -427,18 +427,15 @@ def test_campaign_search_shows_matching_page_tiles(client, sign_in, users):
     assert "Items" in body
 
 
-def test_repository_loads_page_bodies_on_demand_for_hub_and_page_views(app, client):
+def test_repository_loads_page_bodies_on_demand_for_page_views(app, client):
     with app.app_context():
         repository = app.extensions["repository_store"].get()
         campaign = repository.get_campaign("linden-pass")
         assert campaign is not None
 
-        overview_page = campaign.get_visible_page("index")
         notes_page = campaign.get_visible_page("notes/operations-brief")
-        assert overview_page is not None
+        assert campaign.get_visible_page("index") is None
         assert notes_page is not None
-        assert overview_page.content_loaded is False
-        assert overview_page.html_loaded is False
         assert notes_page.content_loaded is False
         assert notes_page.html_loaded is False
 
@@ -450,12 +447,9 @@ def test_repository_loads_page_bodies_on_demand_for_hub_and_page_views(app, clie
         campaign = repository.get_campaign("linden-pass")
         assert campaign is not None
 
-        overview_page = campaign.get_visible_page("index")
         notes_page = campaign.get_visible_page("notes/operations-brief")
-        assert overview_page is not None
+        assert campaign.get_visible_page("index") is None
         assert notes_page is not None
-        assert overview_page.content_loaded is True
-        assert overview_page.html_loaded is True
         assert notes_page.content_loaded is False
         assert notes_page.html_loaded is False
 

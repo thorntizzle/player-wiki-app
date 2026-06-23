@@ -837,16 +837,16 @@ def test_api_campaign_control_visibility_requires_manager_and_updates_scopes(cli
 
 def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, app, users):
     player_token = issue_api_token(app, users["party"]["email"], label="player-wiki-api")
-    overview_path = (
+    note_path = (
         app.config["TEST_CAMPAIGNS_DIR"]
         / "linden-pass"
         / "content"
-        / "overview"
-        / "index.md"
+        / "notes"
+        / "operations-brief.md"
     )
-    overview_path.write_text(
+    note_path.write_text(
         (
-            overview_path.read_text(encoding="utf-8")
+            note_path.read_text(encoding="utf-8")
             + "\nLegacy route check: [Captain Lyra Vale](/campaigns/linden-pass/pages/npcs/captain-lyra-vale).\n"
             + "Already Gen2 check: [Harbor Row](/app-next/campaigns/linden-pass/pages/locations/harbor-row).\n"
         ),
@@ -861,14 +861,9 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert home_payload["ok"] is True
     assert home_payload["frontend_mode"] == "flask"
     assert home_payload["can_view_wiki"] is True
-    assert home_payload["overview_page"]["title"] == "Echoes of the Alloy Coast"
-    assert home_payload["overview_page"]["href"].startswith("/campaigns/linden-pass/pages/")
-    overview_body = home_payload["overview_page"]["body_html"]
-    assert "/campaigns/linden-pass/pages/notes/operations-brief" in overview_body
-    assert 'href="/campaigns/linden-pass/pages/npcs/captain-lyra-vale"' in overview_body
-    assert 'href="/campaigns/linden-pass/pages/locations/harbor-row"' in overview_body
-    assert "/app-next/app-next/" not in overview_body
-    assert 'href="/app-next/campaigns/linden-pass/pages/' not in overview_body
+    assert home_payload["overview_page"] is None
+    assert all(section["section_name"] != "Overview" for section in home_payload["grouped_sections"])
+    assert all(section["section_name"] != "Overview" for section in home_payload["section_navigation"])
     locations_group = next(section for section in home_payload["grouped_sections"] if section["section_name"] == "Locations")
     assert locations_group["href"] == "/campaigns/linden-pass/sections/locations"
     locations_nav_item = next(section for section in home_payload["section_navigation"] if section["section_name"] == "Locations")
@@ -931,6 +926,28 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert page_payload["links"]["gen2_campaign_url"] == "/app-next/campaigns/linden-pass"
     assert any(section["section_slug"] == "npcs" for section in page_payload["section_navigation"])
 
+    note_response = client.get(
+        "/api/v1/campaigns/linden-pass/wiki/pages/notes/operations-brief",
+        headers=api_headers(player_token),
+    )
+    assert note_response.status_code == 200
+    note_body = note_response.get_json()["page"]["body_html"]
+    assert 'href="/campaigns/linden-pass/pages/npcs/captain-lyra-vale"' in note_body
+    assert 'href="/campaigns/linden-pass/pages/locations/harbor-row"' in note_body
+    assert "/app-next/app-next/" not in note_body
+    assert 'href="/app-next/campaigns/linden-pass/pages/' not in note_body
+
+    overview_section_response = client.get(
+        "/api/v1/campaigns/linden-pass/wiki/sections/overview",
+        headers=api_headers(player_token),
+    )
+    assert overview_section_response.status_code == 404
+    overview_page_response = client.get(
+        "/api/v1/campaigns/linden-pass/wiki/pages/index",
+        headers=api_headers(player_token),
+    )
+    assert overview_page_response.status_code == 404
+
     with app.app_context():
         AuthStore().set_user_frontend_mode(users["party"]["id"], "gen2")
 
@@ -938,13 +955,9 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert legacy_home_response.status_code == 200
     legacy_home_payload = legacy_home_response.get_json()
     assert legacy_home_payload["frontend_mode"] == "flask"
-    assert legacy_home_payload["overview_page"]["href"].startswith("/campaigns/linden-pass/pages/")
-    legacy_overview_body = legacy_home_payload["overview_page"]["body_html"]
-    assert "/campaigns/linden-pass/pages/notes/operations-brief" in legacy_overview_body
-    assert 'href="/campaigns/linden-pass/pages/npcs/captain-lyra-vale"' in legacy_overview_body
-    assert 'href="/campaigns/linden-pass/pages/locations/harbor-row"' in legacy_overview_body
-    assert "/app-next/app-next/" not in legacy_overview_body
-    assert 'href="/app-next/campaigns/linden-pass/pages/' not in legacy_overview_body
+    assert legacy_home_payload["overview_page"] is None
+    assert all(section["section_name"] != "Overview" for section in legacy_home_payload["grouped_sections"])
+    assert all(section["section_name"] != "Overview" for section in legacy_home_payload["section_navigation"])
     legacy_locations_group = next(section for section in legacy_home_payload["grouped_sections"] if section["section_name"] == "Locations")
     assert legacy_locations_group["href"] == "/campaigns/linden-pass/sections/locations"
     legacy_locations_nav_item = next(

@@ -6230,7 +6230,6 @@ function WikiSectionNav({
 }
 
 type WikiSectionIconName =
-  | "book"
   | "calendar"
   | "fileText"
   | "map"
@@ -6246,7 +6245,6 @@ type WikiSectionIconName =
   | "grid";
 
 const WIKI_SECTION_ICON_BY_SLUG: Record<string, WikiSectionIconName> = {
-  overview: "book",
   sessions: "calendar",
   notes: "fileText",
   locations: "map",
@@ -6279,13 +6277,6 @@ function WikiSectionIcon({ icon }: { icon: WikiSectionIconName }) {
   };
 
   switch (icon) {
-    case "book":
-      return (
-        <svg {...sharedProps}>
-          <path d="M4 19.5V5a2 2 0 0 1 2-2h5v18H6a2 2 0 0 0-2 2" />
-          <path d="M20 19.5V5a2 2 0 0 0-2-2h-5v18h5a2 2 0 0 1 2 2" />
-        </svg>
-      );
     case "calendar":
       return (
         <svg {...sharedProps}>
@@ -11905,7 +11896,6 @@ interface DmContentSystemsCustomDraftState {
 }
 
 const PLAYER_WIKI_SECTION_CHOICES = [
-  { label: "Overview", targetSubdir: "overview", defaultType: "overview" },
   { label: "NPCs", targetSubdir: "npcs", defaultType: "npc" },
   { label: "Locations", targetSubdir: "locations", defaultType: "location" },
   { label: "Factions", targetSubdir: "factions", defaultType: "faction" },
@@ -11930,7 +11920,11 @@ function simpleSlug(value: string, fallback = "page"): string {
 
 function sectionChoiceForLabel(section: string) {
   const normalized = section.trim().toLowerCase();
-  return PLAYER_WIKI_SECTION_CHOICES.find((choice) => choice.label.toLowerCase() === normalized) ?? PLAYER_WIKI_SECTION_CHOICES[8];
+  return (
+    PLAYER_WIKI_SECTION_CHOICES.find((choice) => choice.label.toLowerCase() === normalized) ??
+    PLAYER_WIKI_SECTION_CHOICES.find((choice) => choice.label === "Notes") ??
+    PLAYER_WIKI_SECTION_CHOICES[0]
+  );
 }
 
 function buildInitialPlayerWikiDraft(): DmPlayerWikiDraftState {
