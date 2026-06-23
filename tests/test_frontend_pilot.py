@@ -813,6 +813,34 @@ def test_gen2_combat_focus_changes_preserve_mounted_payload_in_source() -> None:
     assert "window.history.pushState" not in combat_page_source
     assert "placeholderData: (previousData) => previousData" in combat_page_source
     assert "focusedCombatantFromTracker" in combat_page_source
+    assert "syncCombatantDrafts(focusedCombatant);" in combat_page_source
+
+
+def test_gen2_combat_dm_resolves_away_from_player_workspace_in_source() -> None:
+    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    combat_page_source = _extract_function_component_source(source, "CombatPage")
+
+    assert (
+        'const effectiveCombatView: CombatView = canManageCombat\n'
+        '    ? activeCombatView === "controls"\n'
+        '      ? "controls"\n'
+        '      : "status"\n'
+        '    : "player";'
+    ) in combat_page_source
+    assert '{effectiveCombatView === "player" ? renderPlayerWorkspace() : null}' in combat_page_source
+
+
+def test_gen2_combat_dm_status_omits_nested_selected_pc_detail_in_source() -> None:
+    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    dm_status_match = re.search(
+        r"const renderDmStatus = \(\) => \{[\s\S]*?\n  \};(?=\n\n  const renderDmControls)",
+        source,
+    )
+    assert dm_status_match is not None
+    dm_status_source = dm_status_match.group(0)
+
+    assert "Selected PC detail" not in dm_status_source
+    assert "initialCharacterSlug={selectedCombatant.character_slug}" not in dm_status_source
 
 
 def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
@@ -862,7 +890,7 @@ def test_combat_dm_status_tactical_forms_chrome_in_source() -> None:
     combat_page_source = _extract_function_component_source(source, "CombatPage")
 
     tactical_start = combat_page_source.index('<section className="combat-dm-grid" aria-label="DM tactical controls">')
-    tactical_end = combat_page_source.index('<section className="combat-pc-workspace"', tactical_start)
+    tactical_end = combat_page_source.index('<section className="card combat-danger-card">', tactical_start)
     tactical_markup = combat_page_source[tactical_start:tactical_end]
 
     assert "combat-summary-grid combat-summary-grid--snapshot" in tactical_markup

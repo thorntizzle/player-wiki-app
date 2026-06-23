@@ -219,7 +219,11 @@ export function CombatPage() {
   const canManageCombat = Boolean(payload?.permissions.can_manage_combat);
   const canAccessDmContent = Boolean(payload?.permissions.can_access_dm_content);
   const canAccessSystems = Boolean(payload?.permissions.can_access_systems);
-  const effectiveCombatView: CombatView = canManageCombat ? activeCombatView : "player";
+  const effectiveCombatView: CombatView = canManageCombat
+    ? activeCombatView === "controls"
+      ? "controls"
+      : "status"
+    : "player";
   const paneError = getApiErrorMessage(combatQuery.error);
   const availableCharacters: CombatAvailableCharacterChoice[] = payload?.available_character_choices ?? [];
   const availableStatblocks: CombatAvailableStatblockChoice[] = payload?.available_statblock_choices ?? [];
@@ -247,12 +251,31 @@ export function CombatPage() {
     void navigate({ to: nextPath as never });
   };
 
+  const syncCombatantDrafts = (combatant: CombatantSummary) => {
+    setVitalsDraft({
+      currentHp: String(readNumber(combatant.current_hp)),
+      maxHp: String(readNumber(combatant.max_hp)),
+      tempHp: String(readNumber(combatant.temp_hp)),
+      movementTotal: String(readNumber(combatant.movement_total)),
+    });
+    setResourcesDraft({
+      movementRemaining: String(readNumber(combatant.movement_remaining)),
+      hasAction: Boolean(combatant.has_action),
+      hasBonusAction: Boolean(combatant.has_bonus_action),
+      hasReaction: Boolean(combatant.has_reaction),
+    });
+    setTurnDraft({
+      turnValue: String(readNumber(combatant.turn_value)),
+      initiativePriority: String(readNumber(combatant.initiative_priority, 1)),
+    });
+    setConditionDraft({ name: "", durationText: "" });
+  };
+
   useEffect(() => {
     if (!payload?.permissions.can_manage_combat) {
       return;
     }
-    const params = new URLSearchParams(window.location.search);
-    if (!params.has("view") && activeCombatView === "player") {
+    if (activeCombatView === "player") {
       setActiveCombatView("status");
       setCombatUrl("status", selectedCombatantId);
     }
@@ -262,26 +285,14 @@ export function CombatPage() {
     if (!selectedCombatant) {
       return;
     }
-    setVitalsDraft({
-      currentHp: String(readNumber(selectedCombatant.current_hp)),
-      maxHp: String(readNumber(selectedCombatant.max_hp)),
-      tempHp: String(readNumber(selectedCombatant.temp_hp)),
-      movementTotal: String(readNumber(selectedCombatant.movement_total)),
-    });
-    setResourcesDraft({
-      movementRemaining: String(readNumber(selectedCombatant.movement_remaining)),
-      hasAction: Boolean(selectedCombatant.has_action),
-      hasBonusAction: Boolean(selectedCombatant.has_bonus_action),
-      hasReaction: Boolean(selectedCombatant.has_reaction),
-    });
-    setTurnDraft({
-      turnValue: String(readNumber(selectedCombatant.turn_value)),
-      initiativePriority: String(readNumber(selectedCombatant.initiative_priority, 1)),
-    });
-    setConditionDraft({ name: "", durationText: "" });
+    syncCombatantDrafts(selectedCombatant);
   }, [selectedCombatant?.id]);
 
   const selectCombatant = (combatantId: number) => {
+    const focusedCombatant = tracker?.combatants.find((combatant) => combatant.id === combatantId);
+    if (focusedCombatant) {
+      syncCombatantDrafts(focusedCombatant);
+    }
     setSelectedCombatantId(combatantId);
     setCombatUrl(effectiveCombatView, combatantId);
   };
@@ -891,18 +902,6 @@ export function CombatPage() {
             </section>
           </article>
         </section>
-
-        {selectedCombatant.character_slug ? (
-          <section className="combat-pc-workspace">
-            <div className="section-heading">
-              <div>
-                <p className="meta">Selected PC detail</p>
-                <h2>{selectedCombatant.name}</h2>
-              </div>
-            </div>
-            <CharacterPane campaignSlug={campaignSlug} initialCharacterSlug={selectedCombatant.character_slug} surface="combat" />
-          </section>
-        ) : null}
 
         <section className="card combat-danger-card">
           <div>
