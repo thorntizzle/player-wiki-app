@@ -456,10 +456,8 @@ def test_session_log_detail_delete_button_uses_ghost_button_class_in_source() ->
 
 
 def test_combat_action_chrome_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    combat_page_start = source.index("function CombatPage() {")
-    campaign_combat_route_start = source.index("const campaignCombatRoute", combat_page_start)
-    combat_page_source = source[combat_page_start:campaign_combat_route_start]
+    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    combat_page_source = _extract_function_component_source(source, "CombatPage")
 
     remove_on_click = "onClick={() => deleteCombatantMutation.mutate()}"
     clear_on_click = "onClick={() => clearCombatMutation.mutate()}"
@@ -480,10 +478,8 @@ def test_combat_action_chrome_in_source() -> None:
 
 
 def test_combat_dm_controls_add_and_cleanup_chrome_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    combat_page_start = source.index("function CombatPage() {")
-    campaign_combat_route_start = source.index("const campaignCombatRoute", combat_page_start)
-    combat_page_source = source[combat_page_start:campaign_combat_route_start]
+    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    combat_page_source = _extract_function_component_source(source, "CombatPage")
 
     add_heading_index = combat_page_source.index("<h2>Add combatant</h2>")
     add_card_start = combat_page_source.rfind('<section className="card sidebar-card">', 0, add_heading_index)
@@ -670,20 +666,16 @@ def test_systems_entry_navigation_removes_open_flask_entry_link() -> None:
 
 
 def test_combat_empty_tracker_prompt_uses_current_surface_wording() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    combat_page_start = source.index("function CombatPage() {")
-    campaign_combat_route_start = source.index("const campaignCombatRoute", combat_page_start)
-    combat_page_source = source[combat_page_start:campaign_combat_route_start]
+    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    combat_page_source = _extract_function_component_source(source, "CombatPage")
 
     assert "Use the Encounter controls or DM controls to seed the encounter for now." in combat_page_source
     assert "Use the Flask DM controls to seed the encounter for now." not in combat_page_source
 
 
 def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    combat_page_start = source.index("function CombatPage() {")
-    campaign_combat_route_start = source.index("const campaignCombatRoute", combat_page_start)
-    combat_page_source = source[combat_page_start:campaign_combat_route_start]
+    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    combat_page_source = _extract_function_component_source(source, "CombatPage")
 
     turn_focus_match = re.search(
         r'<article className="card combat-control-card">\s*<div className="section-heading combat-status-snapshot__heading"[\s\S]*?</article>',
@@ -724,10 +716,8 @@ def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
 
 
 def test_combat_dm_status_tactical_forms_chrome_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    combat_page_start = source.index("function CombatPage() {")
-    campaign_combat_route_start = source.index("const campaignCombatRoute", combat_page_start)
-    combat_page_source = source[combat_page_start:campaign_combat_route_start]
+    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    combat_page_source = _extract_function_component_source(source, "CombatPage")
 
     tactical_start = combat_page_source.index('<section className="combat-dm-grid" aria-label="DM tactical controls">')
     tactical_end = combat_page_source.index('<section className="combat-pc-workspace"', tactical_start)
@@ -747,7 +737,7 @@ def test_combat_dm_status_tactical_forms_chrome_in_source() -> None:
 
 
 def test_combat_player_workspace_target_chrome_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
     workspace_match = re.search(
         r"const renderPlayerWorkspace = \(\) => \([\s\S]*?\n  \);(?=\n\n  return \()",
         source,
@@ -773,10 +763,8 @@ def test_combat_player_workspace_target_chrome_in_source() -> None:
 
 
 def test_combat_conditions_chrome_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    combat_page_start = source.index("function CombatPage() {")
-    campaign_combat_route_start = source.index("const campaignCombatRoute", combat_page_start)
-    combat_page_source = source[combat_page_start:campaign_combat_route_start]
+    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    combat_page_source = _extract_function_component_source(source, "CombatPage")
 
     condition_section_match = re.search(
         r'<section className="combat-conditions combat-conditions--compact combat-status-conditions">([\s\S]*?)</section>',
@@ -1169,10 +1157,8 @@ def test_character_form_actions_do_not_convert_non_targeted_builder_rows() -> No
 
 
 def test_combat_unsupported_system_fallback_chrome_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    combat_page_start = source.index("function CombatPage() {")
-    campaign_combat_route_start = source.index("const campaignCombatRoute", combat_page_start)
-    combat_page_source = source[combat_page_start:campaign_combat_route_start]
+    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    combat_page_source = _extract_function_component_source(source, "CombatPage")
 
     unsupported_match = re.search(
         r'\{payload && !payload\.combat_system_supported \? \([\s\S]*?<section className="card auth-card"[\s\S]*?</section>[\s\S]*?\) : null\}',
