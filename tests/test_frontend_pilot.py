@@ -307,7 +307,7 @@ def test_admin_user_detail_action_button_chrome_in_source() -> None:
     admin_user_detail_source = _extract_component_source(
         source,
         "function AdminUserDetailPage() {",
-        "function systemsIndexHref(",
+        "function SessionPaneChat(",
     )
 
     remove_on_click = 'onClick={() => removeMembership.mutate(membership)}'
@@ -338,7 +338,7 @@ def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
     admin_user_detail_source = _extract_component_source(
         source,
         "function AdminUserDetailPage() {",
-        "function systemsIndexHref(",
+        "function SessionPaneChat(",
     )
 
     delete_on_click = 'onClick={() => deleteUser.mutate()}'
@@ -361,7 +361,7 @@ def test_admin_user_account_actions_are_flat_stack_in_source() -> None:
     admin_user_detail_source = _extract_component_source(
         source,
         "function AdminUserDetailPage() {",
-        "function systemsIndexHref(",
+        "function SessionPaneChat(",
     )
 
     heading_index = admin_user_detail_source.index("<h2>Account actions</h2>")
@@ -658,10 +658,9 @@ def test_campaign_help_page_removes_flask_help_fallback() -> None:
 
 
 def test_systems_entry_navigation_removes_open_flask_entry_link() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    systems_entry_start = source.index("function SystemsEntryPage() {")
-    systems_entry_end = source.index("function SessionPaneChat(", systems_entry_start)
-    systems_entry_markup = source[systems_entry_start:systems_entry_end]
+    source = Path("frontend/src/routes/SystemsRoutes.tsx").read_text(encoding="utf-8")
+    systems_entry_start = source.index("export function SystemsEntryPage() {")
+    systems_entry_markup = source[systems_entry_start:]
 
     assert "Open Flask entry" not in systems_entry_markup
     assert "Systems landing" in systems_entry_markup
