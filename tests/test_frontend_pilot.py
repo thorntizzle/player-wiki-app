@@ -31,7 +31,7 @@ def _extract_function_component_source(source: str, component_name: str) -> str:
 
 
 def test_gen2_topbar_account_controls_use_flask_chrome_classes_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/AppShell.tsx").read_text(encoding="utf-8")
     account_row = re.search(r'<div className="account-row">([\s\S]*?)</div>', source)
     assert account_row is not None
 
@@ -251,7 +251,7 @@ def test_frontend_index_includes_app_loading_shell_source() -> None:
 
 
 def test_frontend_app_signals_loading_readiness_from_query_state_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/AppShell.tsx").read_text(encoding="utf-8")
     link_helper_source = Path("frontend/src/campaignLinks.ts").read_text(encoding="utf-8")
 
     assert "useIsFetching" in source
@@ -282,6 +282,7 @@ def test_frontend_pilot_without_build_returns_not_found(client, app, tmp_path):
 
 def test_session_pane_no_player_wiki_lookup_widget_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    shell_source = Path("frontend/src/AppShell.tsx").read_text(encoding="utf-8")
     session_pane_source = _extract_component_source(
         source,
         "function SessionPane({",
@@ -297,7 +298,7 @@ def test_session_pane_no_player_wiki_lookup_widget_in_source() -> None:
     assert "Search published pages / systems" not in session_pane_source
     assert "className=\"wiki-result-stack\"" not in session_pane_source
     assert "className=\"wiki-preview\"" not in session_pane_source
-    assert 'className="campaign-global-search__form"' in source
+    assert 'className="campaign-global-search__form"' in shell_source
 
 
 def test_character_pane_non_read_selector_uses_flask_style_field_chrome_in_source() -> None:
