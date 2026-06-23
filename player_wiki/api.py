@@ -107,6 +107,10 @@ from .character_builder import (
     resolve_weapon_wield_mode,
     weapon_wield_mode_label,
 )
+from .character_page_records import (
+    list_builder_campaign_page_records as list_builder_campaign_page_records_for_store,
+    list_visible_character_page_records as list_visible_character_page_records_for_store,
+)
 from .character_editor import (
     CharacterEditValidationError,
     apply_native_character_retraining,
@@ -2874,13 +2878,12 @@ def register_api(app) -> None:
         return links
 
     def list_builder_campaign_page_records(campaign_slug: str, campaign) -> list[object]:
-        relevant_sections = frozenset({CAMPAIGN_MECHANICS_SECTION, CAMPAIGN_ITEMS_SECTION})
-        return [
-            page_record
-            for page_record in current_app.extensions["campaign_page_store"].list_page_records(campaign_slug)
-            if campaign.is_page_visible(page_record.page)
-            and str(page_record.page.section or "").strip() in relevant_sections
-        ]
+        return list_builder_campaign_page_records_for_store(
+            get_campaign_page_store(),
+            campaign_slug,
+            campaign,
+            relevant_sections={CAMPAIGN_MECHANICS_SECTION, CAMPAIGN_ITEMS_SECTION},
+        )
 
     def make_json_safe(value: object) -> object:
         if value is None or isinstance(value, (str, int, float, bool)):
@@ -4933,11 +4936,12 @@ def register_api(app) -> None:
         return _attach_campaign_item_page_support(item_catalog, campaign_item_pages)
 
     def list_visible_character_page_records(campaign_slug: str, campaign) -> list[object]:
-        return [
-            page_record
-            for page_record in get_campaign_page_store().list_page_records(campaign_slug, include_body=True)
-            if getattr(page_record, "page", None) is not None and campaign.is_page_visible(page_record.page)
-        ]
+        return list_visible_character_page_records_for_store(
+            get_campaign_page_store(),
+            campaign_slug,
+            campaign,
+            include_body=True,
+        )
 
     def build_record_equipment_support_lookup(
         record: CharacterRecord,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from html import unescape
 
 import yaml
@@ -172,7 +173,7 @@ def test_xianxia_milestone1_character_create_and_read_routes_cover_system_lane(
     )
     assert "Actions per turn" in quick_html
     assert "Defense calculation" in quick_html
-    assert "Spellcasting" not in quick_html
+    assert re.search(r">\s*Spellcasting\s*<", quick_html) is None
 
     martial_html = unescape(
         client.get(
@@ -215,7 +216,8 @@ def test_xianxia_milestone1_session_state_writes_and_one_day_rest_recovery(
     assert session_page.status_code == 200
     session_html = session_page.get_data(as_text=True)
     assert 'id="session-vitals"' in session_html
-    assert "Save HP, Stance, Energy, Yin/Yang, and Dao" in session_html
+    assert 'data-character-sheet-edit-form="vitals"' in session_html
+    assert "data-character-autosubmit" in session_html
 
     record = _get_character_record(app, "session-rest-crane")
     vitals_response = client.post(

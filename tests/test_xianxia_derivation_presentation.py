@@ -1342,7 +1342,8 @@ def test_xianxia_session_resources_allow_hp_and_temp_hp_updates(
     assert 'name="temp_hp" value="0" min="0"' in resources_html
     assert 'name="current_stance" value="10" min="0" max="10"' in resources_html
     assert 'name="temp_stance" value="0" min="0"' in resources_html
-    assert "Save HP" in resources_html
+    assert 'data-character-sheet-edit-form="vitals"' in resources_html
+    assert "data-character-autosubmit" in resources_html
 
     record = get_character("session-hp-crane")
     assert record is not None
@@ -1515,7 +1516,8 @@ def test_xianxia_session_resources_allow_stance_and_temp_stance_updates(
     assert "HP, Stance, Energy, Yin/Yang, and Dao" in resources_html
     assert 'name="current_stance" value="10" min="0" max="10"' in resources_html
     assert 'name="temp_stance" value="0" min="0"' in resources_html
-    assert "Save HP, Stance, Energy, Yin/Yang, and Dao" in resources_html
+    assert 'data-character-sheet-edit-form="vitals"' in resources_html
+    assert "data-character-autosubmit" in resources_html
 
     record = get_character("session-stance-crane")
     assert record is not None
@@ -1708,7 +1710,8 @@ def test_xianxia_session_resources_allow_jing_qi_and_shen_updates(
     assert 'name="current_jing" value="2" min="0" max="2"' in resources_html
     assert 'name="current_qi" value="1" min="0" max="1"' in resources_html
     assert 'name="current_shen" value="0" min="0" max="0"' in resources_html
-    assert "Save HP, Stance, Energy, Yin/Yang, and Dao" in resources_html
+    assert 'data-character-sheet-edit-form="vitals"' in resources_html
+    assert "data-character-autosubmit" in resources_html
 
     record = get_character("session-energy-crane")
     assert record is not None
@@ -1798,7 +1801,8 @@ def test_xianxia_session_resources_allow_yin_and_yang_updates(
     resources_html = unescape(resources_response.get_data(as_text=True))
     assert 'name="current_yin" value="1" min="0" max="1"' in resources_html
     assert 'name="current_yang" value="1" min="0" max="1"' in resources_html
-    assert "Save HP, Stance, Energy, Yin/Yang, and Dao" in resources_html
+    assert 'data-character-sheet-edit-form="vitals"' in resources_html
+    assert "data-character-autosubmit" in resources_html
 
     record = get_character("session-yin-yang-crane")
     assert record is not None
@@ -1883,7 +1887,8 @@ def test_xianxia_session_resources_allow_dao_update_with_cap(
     resources_html = unescape(resources_response.get_data(as_text=True))
     assert 'name="current_dao" value="2" min="0" max="3"' in resources_html
     assert "Dao 2 / 3" in resources_html
-    assert "Save HP, Stance, Energy, Yin/Yang, and Dao" in resources_html
+    assert 'data-character-sheet-edit-form="vitals"' in resources_html
+    assert "data-character-autosubmit" in resources_html
 
     record = get_character("session-dao-crane")
     assert record is not None
@@ -1977,8 +1982,8 @@ def test_xianxia_inventory_currency_renders_and_updates(
     assert 'name="coin"' in session_html
     assert 'name="supply"' in session_html
     assert 'name="spirit_stones"' in session_html
-    assert 'name="delta" value="coin:-1"' in session_html
-    assert 'name="delta" value="spirit_stones:1"' in session_html
+    assert 'data-character-sheet-edit-form="currency"' in session_html
+    assert "data-character-autosubmit" in session_html
     assert "Save currency" not in session_html
     assert "Out of battle: gain +1 Insight. In battle: restore ALL Energy." in session_html
 
@@ -2414,7 +2419,8 @@ def test_xianxia_session_state_permissions_allow_editable_roles(
     assert session_response.status_code == 200
     session_html = unescape(session_response.get_data(as_text=True))
     assert 'id="session-vitals"' in session_html
-    assert "Save HP, Stance, Energy, Yin/Yang, and Dao" in session_html
+    assert 'data-character-sheet-edit-form="vitals"' in session_html
+    assert "data-character-autosubmit" in session_html
 
     record = get_character(character_slug)
     assert record is not None
@@ -2471,7 +2477,7 @@ def test_xianxia_session_state_permissions_keep_read_only_roles_from_writing(
     read_html = unescape(read_response.get_data(as_text=True))
     assert "Resources" in read_html
     assert 'id="session-vitals"' not in read_html
-    assert "Save HP, Stance, Energy, Yin/Yang, and Dao" not in read_html
+    assert 'data-character-sheet-edit-form="vitals"' not in read_html
 
     session_response = client.get(
         f"/campaigns/linden-pass/session/character?character={character_slug}&page=resources"
