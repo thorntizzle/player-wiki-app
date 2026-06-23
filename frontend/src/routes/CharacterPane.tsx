@@ -57,6 +57,7 @@ import {
 } from "../components/CharacterDetailDialog";
 import { CharacterControlsSection } from "../components/CharacterControlsSection";
 import { CharacterEmbeddedSectionNav } from "../components/CharacterEmbeddedSectionNav";
+import { CharacterHeader } from "../components/CharacterHeader";
 import { CharacterNavigationCard } from "../components/CharacterNavigationCard";
 import { CharacterPortraitManager } from "../components/CharacterPortraitManager";
 import { CharacterSummaryCard } from "../components/CharacterSummaryCard";
@@ -1120,62 +1121,18 @@ export function CharacterPane({
         data-character-read-shell-page={isReadSurface ? activeCharacterSection || "overview" : undefined}
         data-character-read-shell-mode={isReadSurface ? "read" : undefined}
       >
-        {isReadSurface ? (
-          <header className="character-header">
-            <div className="character-header__top">
-              <div className="character-header__identity">
-                <p className="eyebrow">Character sheet</p>
-                <h1>{selected?.name || surfaceHeading}</h1>
-              </div>
-              {hasReadHeaderManagementActions ? (
-                <div className="character-header__actions">
-                  {detailLinks.advanced_editor_url ? (
-                    <a className="ghost-button" href={detailLinks.advanced_editor_url}>
-                      Advanced Editor
-                    </a>
-                  ) : null}
-                  {detailLinks.retraining_url ? (
-                    <a className="ghost-button" href={detailLinks.retraining_url}>
-                      Retraining
-                    </a>
-                  ) : null}
-                  {detailLinks.level_up_url ? (
-                    <a className="ghost-button" href={detailLinks.level_up_url}>
-                      Level up
-                    </a>
-                  ) : null}
-                  {detailProgressionRepairUrl ? (
-                    <a className="ghost-button" href={detailProgressionRepairUrl}>
-                      {detailLinks.progression_repair_url ? "Progression repair" : "Prepare for level-up"}
-                    </a>
-                  ) : null}
-                  {detailLinks.cultivation_url ? (
-                    <a className="ghost-button" href={detailLinks.cultivation_url}>
-                      Cultivation
-                    </a>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          </header>
-        ) : (
-          <header className="character-header">
-            <div className="character-header__top">
-              <div className="character-header__identity">
-                <p className="eyebrow">{surfaceMetaLabel}</p>
-                <h2>{selected?.name || surfaceHeading}</h2>
-                {embeddedHeaderDetails.length ? <p className="lede">{embeddedHeaderDetails.join(" | ")}</p> : null}
-              </div>
-              {selectedCharacterSheetUrl ? (
-                <div className="hero-actions">
-                  <a href={selectedCharacterSheetUrl} className="ghost-button">
-                    {isCombatSurface ? "Open full sheet" : "Open full character page"}
-                  </a>
-                </div>
-              ) : null}
-            </div>
-          </header>
-        )}
+        <CharacterHeader
+          detailLinks={detailLinks}
+          detailProgressionRepairUrl={detailProgressionRepairUrl}
+          embeddedHeaderDetails={embeddedHeaderDetails}
+          hasReadHeaderManagementActions={hasReadHeaderManagementActions}
+          isCombatSurface={isCombatSurface}
+          isReadSurface={isReadSurface}
+          selectedCharacterSheetUrl={selectedCharacterSheetUrl}
+          selectedName={selected?.name}
+          surfaceHeading={surfaceHeading}
+          surfaceMetaLabel={surfaceMetaLabel}
+        />
 
         <CharacterNavigationCard
           activeCharacterSection={activeCharacterSection}

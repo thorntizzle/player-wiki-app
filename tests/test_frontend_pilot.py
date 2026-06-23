@@ -330,6 +330,29 @@ def test_character_embedded_section_nav_uses_flask_style_chrome_in_source() -> N
     assert "className=\"chat-label\"" not in source
 
 
+def test_character_header_uses_flask_style_chrome_in_source() -> None:
+    source = Path("frontend/src/components/CharacterHeader.tsx").read_text(encoding="utf-8")
+
+    assert '<header className="character-header">' in source
+    assert 'className="character-header__top"' in source
+    assert 'className="character-header__identity"' in source
+    assert '<p className="eyebrow">Character sheet</p>' in source
+    assert 'className="character-header__actions"' in source
+    assert "detailLinks.advanced_editor_url" in source
+    assert "detailLinks.retraining_url" in source
+    assert "detailLinks.level_up_url" in source
+    assert "detailProgressionRepairUrl" in source
+    assert 'detailLinks.progression_repair_url ? "Progression repair" : "Prepare for level-up"' in source
+    assert "detailLinks.cultivation_url" in source
+    assert '<p className="eyebrow">{surfaceMetaLabel}</p>' in source
+    assert 'embeddedHeaderDetails.join(" | ")' in source
+    assert '<div className="hero-actions">' in source
+    assert '{isCombatSurface ? "Open full sheet" : "Open full character page"}' in source
+    assert "className=\"article-actions\"" not in source
+    assert "className=\"button button-secondary\"" not in source
+    assert "Character route" not in source
+
+
 def test_admin_user_detail_action_button_chrome_in_source() -> None:
     source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
     admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]
