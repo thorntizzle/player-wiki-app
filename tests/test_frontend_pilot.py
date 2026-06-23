@@ -1779,10 +1779,9 @@ def test_character_xianxia_martial_arts_section_uses_flask_feature_row_chrome() 
 
 
 def test_character_xianxia_techniques_section_uses_flask_chrome_parity() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
-    section_start = source.index('{isXianxia && activeCharacterSection === "techniques" ? (')
-    section_end = source.index('{isXianxia && activeCharacterSection === "resources" ? (', section_start)
-    section_markup = source[section_start:section_end]
+    section_markup = Path("frontend/src/components/CharacterXianxiaTechniquesSection.tsx").read_text(
+        encoding="utf-8"
+    )
 
     assert 'id="xianxia-techniques"' in section_markup
     assert "<h2>Techniques</h2>" in section_markup
