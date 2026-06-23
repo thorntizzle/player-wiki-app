@@ -8,6 +8,28 @@ def _extract_component_source(source: str, start_marker: str, end_marker: str) -
     return source[start:end]
 
 
+def _extract_function_component_source(source: str, component_name: str) -> str:
+    plain_marker = f"function {component_name}() {{"
+    export_marker = f"export {plain_marker}"
+    start = source.find(export_marker)
+    marker = export_marker
+    if start == -1:
+        start = source.index(plain_marker)
+        marker = plain_marker
+
+    search_start = start + len(marker)
+    end_candidates = [
+        index
+        for index in (
+            source.find("\nfunction ", search_start),
+            source.find("\nexport function ", search_start),
+        )
+        if index != -1
+    ]
+    end = min(end_candidates) if end_candidates else len(source)
+    return source[start:end]
+
+
 def test_gen2_topbar_account_controls_use_flask_chrome_classes_in_source() -> None:
     source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     account_row = re.search(r'<div className="account-row">([\s\S]*?)</div>', source)
@@ -788,14 +810,10 @@ def test_combat_conditions_chrome_in_source() -> None:
 
 
 def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
 
     def component_source(component_name: str) -> str:
-        start = source.index(f"function {component_name}() {{")
-        end = source.find("\nfunction ", start + len(component_name) + 10)
-        if end == -1:
-            end = len(source)
-        return source[start:end]
+        return _extract_function_component_source(source, component_name)
 
     def unsupported_card(component_name: str) -> str:
         component_markup = component_source(component_name)
@@ -868,14 +886,10 @@ def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
 
 
 def test_character_supported_form_action_chrome_in_source() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
 
     def component_source(component_name: str) -> str:
-        start = source.index(f"function {component_name}() {{")
-        end = source.find("\nfunction ", start + len(component_name) + 10)
-        if end == -1:
-            end = len(source)
-        return source[start:end]
+        return _extract_function_component_source(source, component_name)
 
     def supported_component(component_name: str) -> str:
         component = component_source(component_name)
@@ -970,14 +984,10 @@ def test_character_supported_form_action_chrome_in_source() -> None:
 
 
 def test_character_supported_hero_links_preserve_supported_nav_while_hiding_flask_fallbacks() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
 
     def component_source(component_name: str) -> str:
-        start = source.index(f"function {component_name}() {{")
-        end = source.find("\nfunction ", start + len(component_name) + 10)
-        if end == -1:
-            end = len(source)
-        return source[start:end]
+        return _extract_function_component_source(source, component_name)
 
     def hero_section(component_name: str) -> str:
         component = component_source(component_name)
@@ -1129,14 +1139,10 @@ def test_grid_minimum_card_size_is_flask_260px_and_character_roster_grid_selecto
 
 
 def test_character_form_actions_do_not_convert_non_targeted_builder_rows() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
 
     def component_source(component_name: str) -> str:
-        start = source.index(f"function {component_name}() {{")
-        end = source.find("\nfunction ", start + len(component_name) + 10)
-        if end == -1:
-            end = len(source)
-        return source[start:end]
+        return _extract_function_component_source(source, component_name)
 
     create_markup = component_source("CharacterCreatePage")
     assert re.search(r'<div className="builder-actions">[\s\S]*?<button\s+type="submit"\s+disabled={!create\.builder_ready \|\| createMutation\.isPending}>', create_markup) is not None
