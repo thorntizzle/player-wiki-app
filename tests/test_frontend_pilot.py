@@ -1390,7 +1390,7 @@ def test_dm_content_player_wiki_editor_fields_use_flask_style_labels_in_source()
 
 
 def test_dm_content_systems_management_form_field_chrome() -> None:
-    source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/DmContentSystemsLane.tsx").read_text(encoding="utf-8")
     helper_start = source.index("const renderCustomFields = ({")
     helper_end = source.index("  if (systemsQuery.isLoading)", helper_start)
     helper_markup = source[helper_start:helper_end]
