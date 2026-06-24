@@ -2488,8 +2488,7 @@ textarea:focus-visible {
 .segmented,
 .chat-actions,
 .article-actions,
-.session-actions-row,
-.session-log-detail-head {
+.session-actions-row {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
@@ -2929,7 +2928,6 @@ textarea {
 .inline-two-col button,
 .session-character-form button,
 .session-vitals-form button,
-.session-log-detail-head button,
 .wiki-selection button,
 .segmented-button {
   border: 1px solid var(--accent-deep);
@@ -2952,7 +2950,6 @@ textarea {
 .inline-two-col button:disabled,
 .session-character-form button:disabled,
 .session-vitals-form button:disabled,
-.session-log-detail-head button:disabled,
 .wiki-selection button:disabled,
 .segmented-button:disabled,
 .session-message-form button:disabled {

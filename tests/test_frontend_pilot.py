@@ -1003,32 +1003,8 @@ def test_session_chat_logs_card_uses_flask_style_row_hooks_in_source() -> None:
     assert "{deleteLogMutation.isPending ? \"Deleting...\" : \"Delete log\"}" in row_delete_button_block
     assert "disabled={!deleteConfirmed || deleteLogMutation.isPending}" in row_delete_button_block
 
-    detail_delete_call = "deleteLog(logQuery.data.session.id);"
-    detail_delete_form_start = chat_logs_source.rfind("<form", 0, chat_logs_source.index(detail_delete_call))
-    detail_delete_form_end = chat_logs_source.index("</form>", detail_delete_form_start) + len("</form>")
-    detail_delete_button_block = chat_logs_source[detail_delete_form_start:detail_delete_form_end]
-    assert 'className="confirmed-action"' in detail_delete_button_block
-    assert "{deleteLogMutation.isPending ? \"Deleting...\" : \"Delete log\"}" in detail_delete_button_block
-    assert 'className="ghost-button"' in detail_delete_button_block
-    assert "className=\"button-danger\"" not in detail_delete_button_block
-    assert detail_delete_call in detail_delete_button_block
-    assert "disabled={!deleteLogConfirm[logQuery.data.session.id] || deleteLogMutation.isPending}" in detail_delete_button_block
-
-
-def test_session_log_detail_delete_button_uses_ghost_button_class_in_source() -> None:
-    source = Path("frontend/src/pages/SessionDmPane.tsx").read_text(encoding="utf-8")
-
-    delete_call = "deleteLog(logQuery.data.session.id);"
-    delete_form_start = source.rfind("<form", 0, source.index(delete_call))
-    delete_form_end = source.index("</form>", delete_form_start) + len("</form>")
-    delete_button_block = source[delete_form_start:delete_form_end]
-
-    assert 'className="confirmed-action"' in delete_button_block
-    assert "{deleteLogMutation.isPending ? \"Deleting...\" : \"Delete log\"}" in delete_button_block
-    assert 'className="ghost-button"' in delete_button_block
-    assert 'className="button-danger"' not in delete_button_block
-    assert delete_call in delete_button_block
-    assert "disabled={!deleteLogConfirm[logQuery.data.session.id] || deleteLogMutation.isPending}" in delete_button_block
+    assert "deleteLog(logQuery.data.session.id);" not in chat_logs_source
+    assert "session-log-detail-head" not in chat_logs_source
 
 
 def test_session_dm_mutations_live_in_shared_hook() -> None:

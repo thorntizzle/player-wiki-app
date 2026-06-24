@@ -592,33 +592,7 @@ export function DmPane({
                 {logQuery.error ? <p className="status status-error">Unable to load log details.</p> : null}
                 {logQuery.data ? (
                   <div>
-                    <div className="session-log-detail-head">
-                      <h4>Messages</h4>
-                      <form
-                        className="confirmed-action"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          deleteLog(logQuery.data.session.id);
-                        }}
-                      >
-                        <label className="checkbox-label">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(deleteLogConfirm[logQuery.data.session.id])}
-                            disabled={deleteLogMutation.isPending}
-                            onChange={(event) => setLogDeleteConfirmed(logQuery.data.session.id, event.currentTarget.checked)}
-                          />
-                          Confirm delete
-                        </label>
-                        <button
-                          type="submit"
-                          className="ghost-button"
-                          disabled={!deleteLogConfirm[logQuery.data.session.id] || deleteLogMutation.isPending}
-                        >
-                          {deleteLogMutation.isPending ? "Deleting..." : "Delete log"}
-                        </button>
-                      </form>
-                    </div>
+                    <h4>Messages</h4>
                     <ol className="log-messages">
                       {logQuery.data.messages.map((entry) => (
                         <li key={entry.id}>
