@@ -22,7 +22,12 @@ import { ApiErrorNotice } from "../components/feedback";
 import { readNumber } from "../characterValueUtils";
 import { CharacterPane } from "./CharacterPane";
 import { resolveCombatLivePayload } from "../combatLiveUtils";
-type CombatView = "player" | "status" | "controls";
+import {
+  CombatantCarousel,
+  CombatSummaryBand,
+  CombatViewSwitch,
+  type CombatView,
+} from "../components/CombatChrome";
 
 interface CombatVitalsDraft {
   currentHp: string;
@@ -529,64 +534,6 @@ export function CombatPage() {
       setSystemsSearchResults([]);
       setSystemsSearchStatus(null);
     }
-  };
-
-  const renderCombatantCard = (combatant: CombatantSummary) => {
-    const isSelected = selectedCombatant?.id === combatant.id;
-    return (
-      <button
-        type="button"
-        className={isSelected ? "combatant-card combatant-card--selected" : "combatant-card"}
-        key={combatant.id}
-        onClick={() => selectCombatant(combatant.id)}
-        aria-pressed={isSelected}
-      >
-        <span className="combatant-card__topline">
-          <strong>{combatant.name}</strong>
-          {combatant.is_current_turn ? <span className="pill">Current</span> : null}
-        </span>
-        <span className="meta">{combatant.subtitle || combatant.type_label}</span>
-        <span className="combatant-card__stats">
-          <span>Turn {combatant.turn_value}</span>
-          {combatant.show_detail ? (
-            <span>
-              HP {readNumber(combatant.current_hp)} / {readNumber(combatant.max_hp)}
-              {readNumber(combatant.temp_hp) ? ` +${readNumber(combatant.temp_hp)} temp` : ""}
-            </span>
-          ) : (
-            <span>Hidden detail</span>
-          )}
-        </span>
-        {combatant.conditions.length ? (
-          <span className="combatant-card__conditions">
-            {combatant.conditions.map((condition) => condition.name).join(", ")}
-          </span>
-        ) : null}
-      </button>
-    );
-  };
-
-  const renderCombatViewSwitch = () => {
-    if (!canManageCombat) {
-      return null;
-    }
-    return (
-      <nav aria-label="DM encounter subview">
-        {[
-          { id: "status" as CombatView, label: "DM status", activeClass: "button-link", inactiveClass: "ghost-button" },
-          { id: "controls" as CombatView, label: "Controls", activeClass: "button-link", inactiveClass: "ghost-button" },
-        ].map((view) => (
-          <button
-            type="button"
-            key={view.id}
-            className={effectiveCombatView === view.id ? view.activeClass : view.inactiveClass}
-            onClick={() => selectCombatView(view.id)}
-          >
-            {view.label}
-          </button>
-        ))}
-      </nav>
-    );
   };
 
   const renderDmStatus = () => {
@@ -1392,7 +1339,9 @@ export function CombatPage() {
               ? "Keep your tracked character open as your in-combat workspace."
               : "Live encounter tracker."}
         </p>
-        {canManageCombat && effectiveCombatView !== "player" ? renderCombatViewSwitch() : null}
+        {canManageCombat && effectiveCombatView !== "player" ? (
+          <CombatViewSwitch effectiveCombatView={effectiveCombatView} onSelect={selectCombatView} />
+        ) : null}
       </section>
 
       <ApiErrorNotice
@@ -1430,50 +1379,18 @@ export function CombatPage() {
 
       {payload?.combat_system_supported ? (
         <>
-          <section className="combat-summary-band" aria-label="Encounter summary">
-            <article>
-              <span className="meta">Round</span>
-              <strong>{tracker?.round_number ?? 1}</strong>
-            </article>
-            <article>
-              <span className="meta">Current turn</span>
-              <strong>{tracker?.current_turn_label || "None"}</strong>
-            </article>
-            <article>
-              <span className="meta">Combatants</span>
-              <strong>{tracker?.combatant_count ?? 0}</strong>
-            </article>
-          </section>
+          <CombatSummaryBand
+            roundNumber={tracker?.round_number}
+            currentTurnLabel={tracker?.current_turn_label}
+            combatantCount={tracker?.combatant_count}
+          />
 
           {tracker?.combatants.length ? (
-            <section className="combat-carousel" aria-label="Combatant carousel">
-              <div className="section-heading">
-                <div>
-                  <h2>Turn Order</h2>
-                  <p className="meta">Initiative is pinned here while the main panel shows your tracked character.</p>
-                </div>
-              </div>
-              <div className="combat-carousel-track">
-                {tracker.combatants.map((combatant) => renderCombatantCard(combatant))}
-              </div>
-              <div className="combat-turn-order-jump">
-                <label className="combat-turn-order-jump__label" htmlFor="combat-turn-order-jump-select">
-                  Jump to combatant
-                </label>
-                <select
-                  id="combat-turn-order-jump-select"
-                  className="combat-turn-order-jump__select"
-                  value={selectedCombatant?.id ?? ""}
-                  onChange={(event) => selectCombatant(Number(event.currentTarget.value))}
-                >
-                  {tracker.combatants.map((combatant) => (
-                    <option key={combatant.id} value={combatant.id}>
-                      {combatant.name} - turn {combatant.turn_value}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </section>
+            <CombatantCarousel
+              combatants={tracker.combatants}
+              selectedCombatantId={selectedCombatant?.id}
+              onSelectCombatant={selectCombatant}
+            />
           ) : (
             <section className="card">
               <h3>No combatants</h3>

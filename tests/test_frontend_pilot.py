@@ -858,6 +858,61 @@ def test_combat_action_chrome_in_source() -> None:
     assert "onClick={() => clearCombatMutation.mutate()}" in clear_button_block
 
 
+def test_combat_chrome_components_preserve_summary_carousel_and_view_switch() -> None:
+    route_source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    chrome_source = Path("frontend/src/components/CombatChrome.tsx").read_text(encoding="utf-8")
+
+    assert "CombatantCarousel" in route_source
+    assert "CombatSummaryBand" in route_source
+    assert "CombatViewSwitch" in route_source
+    assert "const renderCombatantCard =" not in route_source
+    assert "const renderCombatViewSwitch =" not in route_source
+
+    view_switch_source = _extract_component_source(
+        chrome_source,
+        "export function CombatViewSwitch",
+        "interface CombatSummaryBandProps",
+    )
+    assert 'aria-label="DM encounter subview"' in view_switch_source
+    assert 'label: "DM status"' in view_switch_source
+    assert 'label: "Controls"' in view_switch_source
+    assert 'activeClass: "button-link"' in view_switch_source
+    assert 'inactiveClass: "ghost-button"' in view_switch_source
+    assert "onClick={() => onSelect(view.id)}" in view_switch_source
+
+    summary_source = _extract_component_source(
+        chrome_source,
+        "export function CombatSummaryBand",
+        "interface CombatantCarouselProps",
+    )
+    assert 'className="combat-summary-band"' in summary_source
+    assert 'aria-label="Encounter summary"' in summary_source
+    assert "<span className=\"meta\">Round</span>" in summary_source
+    assert "<span className=\"meta\">Current turn</span>" in summary_source
+    assert "<span className=\"meta\">Combatants</span>" in summary_source
+
+    carousel_source = chrome_source[chrome_source.index("export function CombatantCarousel") :]
+    assert 'className="combat-carousel"' in carousel_source
+    assert 'aria-label="Combatant carousel"' in carousel_source
+    assert "<h2>Turn Order</h2>" in carousel_source
+    assert "Initiative is pinned here while the main panel shows your tracked character." in carousel_source
+    assert 'className="combat-carousel-track"' in carousel_source
+    assert 'className="combat-turn-order-jump__label"' in carousel_source
+    assert 'htmlFor="combat-turn-order-jump-select"' in carousel_source
+    assert 'className="combat-turn-order-jump__select"' in carousel_source
+    assert "onSelectCombatant(Number(event.currentTarget.value))" in carousel_source
+
+    card_start = chrome_source.index("function CombatantCard(")
+    card_end = chrome_source.index("export function CombatantCarousel(", card_start)
+    card_source = chrome_source[card_start:card_end]
+    assert 'className={isSelected ? "combatant-card combatant-card--selected" : "combatant-card"}' in card_source
+    assert "onClick={() => onSelect(combatant.id)}" in card_source
+    assert "aria-pressed={isSelected}" in card_source
+    assert 'className="combatant-card__topline"' in card_source
+    assert 'className="combatant-card__stats"' in card_source
+    assert 'className="combatant-card__conditions"' in card_source
+
+
 def test_combat_dm_controls_add_and_cleanup_chrome_in_source() -> None:
     source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
     combat_page_source = _extract_function_component_source(source, "CombatPage")
