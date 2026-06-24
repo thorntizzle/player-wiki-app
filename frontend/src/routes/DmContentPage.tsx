@@ -27,6 +27,7 @@ import { ApiErrorNotice } from "../components/feedback";
 import { DmContentSystemsLane } from "./DmContentSystemsLane";
 import { DmArticleCreator } from "../components/DmArticleCreator";
 import { DmContentConditionCard, DmContentStatblockCard } from "../components/DmContentCards";
+import { DmPlayerWikiPageCard } from "../components/DmPlayerWikiPageCard";
 import { DmPlayerWikiDraftFields } from "../components/DmPlayerWikiDraftFields";
 import { DmStagedArticleQueue } from "../components/DmStagedArticleQueue";
 import {
@@ -45,9 +46,6 @@ import {
   buildPlayerWikiAssetRef,
   buildPlayerWikiDraftFromRecord,
   buildPlayerWikiMetadata,
-  playerWikiRemovalSafety,
-  playerWikiStatusLabel,
-  simpleSlug,
   type DmContentConditionDraftState,
   type DmContentLane,
   type DmContentStatblockDraftState,
@@ -672,148 +670,56 @@ export function DmContentPage() {
     );
   };
 
+  const submitPlayerWikiEditDraft = (pageRef: string, draft: DmPlayerWikiDraftState) => {
+    if (!draft.title.trim()) {
+      setPaneError("Player Wiki page title is required.");
+      setUiMessage(null);
+      return;
+    }
+    savePlayerWikiPageMutation.mutate({
+      mode: "edit",
+      pageRef,
+      draft,
+    });
+  };
+
   const renderPlayerWikiPageCard = (pageFile: ContentPageFileSummary) => {
-    const safety = playerWikiRemovalSafety(pageFile);
     const editDraft = playerWikiEditDrafts[pageFile.page_ref];
     const deleteConfirmed = Boolean(playerWikiDeleteConfirm[pageFile.page_ref]);
-    const encodedPageRef = pageFile.page_ref
-      .split("/")
-      .map((part) => encodeURIComponent(part))
-      .join("/");
-    const isDeleting = deletePlayerWikiPageMutation.isPending;
-    const pageId = `wiki-page-${simpleSlug(pageFile.page_ref)}`;
     return (
-      <article
-        className="dm-content-item dm-player-wiki-card"
+      <DmPlayerWikiPageCard
         key={pageFile.page_ref}
-        id={pageId}
-      >
-        <div className="dm-content-item__header">
-          <div>
-            <h3>{pageFile.page.title || pageFile.page_ref}</h3>
-            <p className="meta">{pageFile.page_ref}.md</p>
-            {pageFile.page.summary ? <p className="meta">{pageFile.page.summary}</p> : null}
-          </div>
-          <div className="badge-list">
-            <span className="meta-badge">{playerWikiStatusLabel(pageFile)}</span>
-            <span className="meta-badge">{pageFile.page.section || "Unsectioned"}</span>
-            {pageFile.page.subsection ? <span className="meta-badge">{pageFile.page.subsection}</span> : null}
-            {pageFile.page.image_path ? <span className="meta-badge">Image</span> : null}
-            <span className="meta-badge">{safety.removal_status_label}</span>
-          </div>
-        </div>
-        {pageFile.page.source_ref ? <p className="meta">Source: {pageFile.page.source_ref}</p> : null}
-        <div className="dm-content-removal-safety">
-          <p className="meta">
-            <strong>Removal safety:</strong> {safety.removal_guidance}
-          </p>
-          {safety.hard_delete_blockers.length ? (
-            <ul className="plain-list">
-              {safety.hard_delete_blockers.map((blocker) => (
-                <li className="meta" key={blocker}>
-                  {blocker}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-        </div>
-        <div className="dm-content-item__actions">
-          <button
-            type="button"
-            className="ghost-button"
-            disabled={!canManagePlayerWiki}
-            onClick={() => void loadPlayerWikiEditDraft(pageFile.page_ref)}
-          >
-            Edit
-          </button>
-          {pageFile.page.is_visible ? (
-            <a
-              className="ghost-button"
-              href={`/app-next/campaigns/${encodedCampaignSlug}/pages/${encodedPageRef}`}
-            >
-              Open
-            </a>
-          ) : null}
-          <button
-            type="button"
-            className="ghost-button"
-            disabled={!canManagePlayerWiki || archivePlayerWikiPageMutation.isPending || !pageFile.page.published}
-            onClick={() => archivePlayerWikiPageMutation.mutate(pageFile.page_ref)}
-          >
-            {archivePlayerWikiPageMutation.isPending ? "Archiving..." : "Unpublish/archive"}
-          </button>
-          {safety.can_hard_delete ? (
-            <form className="dm-content-delete-form">
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={deleteConfirmed}
-                  disabled={!canManagePlayerWiki || !safety.can_hard_delete}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                    const checked = event.currentTarget.checked;
-                    setPlayerWikiDeleteConfirm((current) => ({
-                      ...current,
-                      [pageFile.page_ref]: checked,
-                    }));
-                  }}
-                />
-                Confirm hard delete
-              </label>
-              <button
-                type="button"
-                className="ghost-button"
-                disabled={!canManagePlayerWiki || !safety.can_hard_delete || !deleteConfirmed || isDeleting}
-                onClick={() => deletePlayerWikiPageMutation.mutate(pageFile.page_ref)}
-              >
-                {isDeleting ? "Deleting..." : "Delete file"}
-              </button>
-            </form>
-          ) : null}
-        </div>
-        {editDraft ? (
-          <form
-            className="stack-form dm-content-wiki-form"
-            onSubmit={(event: FormEvent<HTMLFormElement>) => {
-              event.preventDefault();
-              if (!editDraft.title.trim()) {
-                setPaneError("Player Wiki page title is required.");
-                setUiMessage(null);
-                return;
-              }
-              savePlayerWikiPageMutation.mutate({
-                mode: "edit",
-                pageRef: pageFile.page_ref,
-                draft: editDraft,
-              });
-            }}
-          >
-            <p className="meta">Page file: {pageFile.page_ref}.md</p>
-            <DmPlayerWikiDraftFields
-              idPrefix={`dm-player-wiki-edit-${simpleSlug(pageFile.page_ref)}`}
-              draft={editDraft}
-              setDraft={(next) => {
-                setPlayerWikiEditDrafts((current) => ({
-                  ...current,
-                  [pageFile.page_ref]: next,
-                }));
-              }}
-              includeSlug={false}
-              disabled={!canManagePlayerWiki}
-              onImageReadStatus={(errorMessage) => {
-                setPaneError(errorMessage);
-                if (errorMessage) {
-                  setUiMessage(null);
-                }
-              }}
-            />
-            <div className="dm-content-item__actions">
-              <button type="submit" disabled={!canManagePlayerWiki || savePlayerWikiPageMutation.isPending}>
-                {savePlayerWikiPageMutation.isPending ? "Saving..." : "Save wiki page"}
-              </button>
-            </div>
-          </form>
-        ) : null}
-      </article>
+        canManagePlayerWiki={canManagePlayerWiki}
+        deleteConfirmed={deleteConfirmed}
+        editDraft={editDraft}
+        encodedCampaignSlug={encodedCampaignSlug}
+        isArchiving={archivePlayerWikiPageMutation.isPending}
+        isDeleting={deletePlayerWikiPageMutation.isPending}
+        isSaving={savePlayerWikiPageMutation.isPending}
+        onArchive={(pageRef) => archivePlayerWikiPageMutation.mutate(pageRef)}
+        onDelete={(pageRef) => deletePlayerWikiPageMutation.mutate(pageRef)}
+        onDeleteConfirmChange={(pageRef, checked) => {
+          setPlayerWikiDeleteConfirm((current) => ({
+            ...current,
+            [pageRef]: checked,
+          }));
+        }}
+        onDraftChange={(pageRef, next) => {
+          setPlayerWikiEditDrafts((current) => ({
+            ...current,
+            [pageRef]: next,
+          }));
+        }}
+        onImageReadStatus={(errorMessage) => {
+          setPaneError(errorMessage);
+          if (errorMessage) {
+            setUiMessage(null);
+          }
+        }}
+        onLoadEditDraft={loadPlayerWikiEditDraft}
+        onSaveEditDraft={submitPlayerWikiEditDraft}
+        pageFile={pageFile}
+      />
     );
   };
 
