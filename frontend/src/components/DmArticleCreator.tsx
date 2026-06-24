@@ -13,6 +13,7 @@ import {
   type ManualArticleDraftState,
   type UploadArticleDraftState,
 } from "../sessionArticleDrafts";
+import { SessionFileDropzone } from "./SessionFileDropzone";
 
 interface DmArticleCreatorProps {
   mode: ArticleMode;
@@ -172,33 +173,21 @@ export function DmArticleCreator({
                 }}
               />
             </label>
-            <div className="field session-file-field">
-              <span>Image</span>
-              <input
-                className="session-file-input"
-                id={manualImageInputId}
-                type="file"
-                accept=".png,.jpg,.jpeg,.webp,.gif"
-                onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                  const file = event.currentTarget.files?.item(0);
-                  if (!file) {
-                    setManualDraft({ ...manualDraft, image: null });
-                    return;
-                  }
-                  readBinaryAsBase64(file, (payload) => {
-                    setManualDraft({ ...manualDraft, image: payload });
-                  });
-                }}
-              />
-              <label className="session-file-dropzone" htmlFor={manualImageInputId} tabIndex={0}>
-                <strong>Drag and drop a file here</strong>
-                <span className="meta">or use Browse to choose one</span>
-                <span className="session-file-dropzone__browse">Browse</span>
-                <span className="meta session-file-dropzone__name">
-                  {manualDraft.image ? manualDraft.image.filename : "No file selected."}
-                </span>
-              </label>
-            </div>
+            <SessionFileDropzone
+              id={manualImageInputId}
+              label="Image"
+              accept=".png,.jpg,.jpeg,.webp,.gif"
+              selectedFileName={manualDraft.image ? manualDraft.image.filename : undefined}
+              onFileSelected={(file) => {
+                if (!file) {
+                  setManualDraft({ ...manualDraft, image: null });
+                  return;
+                }
+                readBinaryAsBase64(file, (payload) => {
+                  setManualDraft({ ...manualDraft, image: payload });
+                });
+              }}
+            />
             <label className="field" htmlFor={`${manualModeLabel}-image-alt`}>
               <span>Image alt text</span>
               <input
@@ -271,33 +260,21 @@ export function DmArticleCreator({
                 }}
               />
             </label>
-            <div className="field session-file-field">
-              <span>Referenced image</span>
-              <input
-                className="session-file-input"
-                id={uploadReferencedImageInputId}
-                type="file"
-                accept=".png,.jpg,.jpeg,.webp,.gif"
-                onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                  const file = event.currentTarget.files?.item(0);
-                  if (!file) {
-                    setUploadDraft({ ...uploadDraft, image: null });
-                    return;
-                  }
-                  readBinaryAsBase64(file, (payload) => {
-                    setUploadDraft({ ...uploadDraft, image: payload });
-                  });
-                }}
-              />
-              <label className="session-file-dropzone" htmlFor={uploadReferencedImageInputId} tabIndex={0}>
-                <strong>Drag and drop a file here</strong>
-                <span className="meta">or use Browse to choose one</span>
-                <span className="session-file-dropzone__browse">Browse</span>
-                <span className="meta session-file-dropzone__name">
-                  {uploadDraft.image ? uploadDraft.image.filename : "No file selected."}
-                </span>
-              </label>
-            </div>
+            <SessionFileDropzone
+              id={uploadReferencedImageInputId}
+              label="Referenced image"
+              accept=".png,.jpg,.jpeg,.webp,.gif"
+              selectedFileName={uploadDraft.image ? uploadDraft.image.filename : undefined}
+              onFileSelected={(file) => {
+                if (!file) {
+                  setUploadDraft({ ...uploadDraft, image: null });
+                  return;
+                }
+                readBinaryAsBase64(file, (payload) => {
+                  setUploadDraft({ ...uploadDraft, image: payload });
+                });
+              }}
+            />
             <p className="meta">
               If markdown references an image in frontmatter or an embedded image tag, upload that image here.
             </p>

@@ -13,6 +13,7 @@ import {
   SessionArticleReferenceActions,
   SessionArticleSourceLine,
 } from "./SessionArticleDisplay";
+import { SessionFileDropzone } from "./SessionFileDropzone";
 
 interface DmStagedArticleQueueProps {
   campaignSlug: string;
@@ -133,32 +134,22 @@ export function DmStagedArticleQueue({
                         }}
                       />
                     </label>
-                    <div className="field session-file-field">
-                      <span>{article.image ? "Replace image" : "Image"}</span>
-                      <input
-                        id={`dm-content-stage-image-${article.id}`}
-                        className="session-file-input"
-                        type="file"
-                        accept=".png,.jpg,.jpeg,.webp,.gif"
-                        disabled={!canManageSession}
-                        onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                          const file = event.currentTarget.files?.item(0);
-                          if (!file) {
-                            onDraftChange(article, draft, { image: null });
-                            return;
-                          }
-                          readBinaryAsBase64(file, (payload) => {
-                            onDraftChange(article, draft, { image: payload });
-                          });
-                        }}
-                      />
-                      <label className="session-file-dropzone" htmlFor={`dm-content-stage-image-${article.id}`} tabIndex={0}>
-                        <span>Drag and drop a file here</span>
-                        <span className="meta">or use Browse to choose one</span>
-                        <span className="session-file-dropzone__browse">Browse</span>
-                        <span className="meta session-file-dropzone__name">No file selected.</span>
-                      </label>
-                    </div>
+                    <SessionFileDropzone
+                      id={`dm-content-stage-image-${article.id}`}
+                      label={article.image ? "Replace image" : "Image"}
+                      accept=".png,.jpg,.jpeg,.webp,.gif"
+                      disabled={!canManageSession}
+                      selectedFileName={draft.image ? draft.image.filename : undefined}
+                      onFileSelected={(file) => {
+                        if (!file) {
+                          onDraftChange(article, draft, { image: null });
+                          return;
+                        }
+                        readBinaryAsBase64(file, (payload) => {
+                          onDraftChange(article, draft, { image: payload });
+                        });
+                      }}
+                    />
                     <label className="field">
                       <span>Image alt text</span>
                       <input
@@ -183,7 +174,6 @@ export function DmStagedArticleQueue({
                         }}
                       />
                     </label>
-                    {draft.image ? <p className="status status-neutral">Selected image: {draft.image.filename}</p> : null}
                     <button
                       type="submit"
                       className="ghost-button"

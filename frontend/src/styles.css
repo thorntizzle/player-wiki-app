@@ -939,6 +939,11 @@ a:hover {
   gap: 0.55rem;
 }
 
+.session-file-field__label {
+  color: var(--ink);
+  font-weight: 700;
+}
+
 .session-file-input,
 .field input.session-file-input {
   position: absolute;
@@ -965,15 +970,20 @@ a:hover {
 }
 
 .session-file-dropzone:hover,
-.session-file-dropzone:focus-visible,
+.session-file-input:focus-visible + .session-file-dropzone,
 .session-file-dropzone.is-dragging {
   border-color: var(--focus-ring);
   background: var(--surface-soft-muted);
 }
 
-.session-file-dropzone:focus-visible {
+.session-file-input:focus-visible + .session-file-dropzone {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+.session-file-input:disabled + .session-file-dropzone {
+  cursor: not-allowed;
+  opacity: 0.68;
 }
 
 .session-file-dropzone.is-dragging {

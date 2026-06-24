@@ -2226,10 +2226,12 @@ def test_character_summary_card_chrome_in_source() -> None:
 
 def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
     source = Path("frontend/src/components/DmArticleCreator.tsx").read_text(encoding="utf-8")
+    dropzone_source = Path("frontend/src/components/SessionFileDropzone.tsx").read_text(encoding="utf-8")
     styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     component_start = source.index("function DmArticleCreator({")
     creator_markup = source[component_start:]
 
+    assert 'import { SessionFileDropzone } from "./SessionFileDropzone";' in source
     assert 'const modeHelpId = `${idSeed}-article-mode-help`;' in creator_markup
     assert "aria-describedby={modeHelpId}" in creator_markup
     assert 'className="stack-form"' in creator_markup
@@ -2243,9 +2245,9 @@ def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
     assert 'className="session-article-mode-panel session-article-mode-panel--upload"' in creator_markup
     assert 'className="session-article-mode-panel session-article-mode-panel--wiki"' in creator_markup
     assert 'className="field"' in creator_markup
-    assert 'className="field session-file-field"' in creator_markup
-    assert 'className="session-file-input"' in creator_markup
-    assert 'className="session-file-dropzone"' in creator_markup
+    assert "<SessionFileDropzone" in creator_markup
+    assert "selectedFileName={manualDraft.image ? manualDraft.image.filename : undefined}" in creator_markup
+    assert "selectedFileName={uploadDraft.image ? uploadDraft.image.filename : undefined}" in creator_markup
     assert "className=\"session-form\"" not in creator_markup
     assert 'className="segmented"' not in creator_markup
     assert "className=\"segmented-button\"" not in creator_markup
@@ -2253,6 +2255,18 @@ def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
     assert "Search wiki / systems" not in creator_markup
     assert "Lookup" in creator_markup
     assert ".session-article-mode-help" in styles
+    assert 'className="field session-file-field"' in dropzone_source
+    assert 'className="session-file-input"' in dropzone_source
+    assert 'className={`session-file-dropzone${isDragging ? " is-dragging" : ""}`}' in dropzone_source
+    assert "onDragOver={handleDragOver}" in dropzone_source
+    assert "onDrop={handleDrop}" in dropzone_source
+    assert "event.dataTransfer.files?.item(0)" in dropzone_source
+    assert "aria-labelledby={labelId}" in dropzone_source
+    assert 'aria-describedby={`${descriptionId} ${fileNameId}`}' in dropzone_source
+    assert 'id={fileNameId} aria-live="polite"' in dropzone_source
+    assert 'event.dataTransfer.dropEffect = "none";' in dropzone_source
+    assert "tabIndex" not in dropzone_source
+    assert ".session-file-input:focus-visible + .session-file-dropzone" in styles
 
 
 def test_session_dm_article_source_search_status_is_specific() -> None:
@@ -3686,6 +3700,7 @@ def test_dm_content_staged_articles_edit_form_uses_flask_style_file_field_markup
     assert 'className="stack-form session-article-edit-form"' in queue_markup
     assert 'renderArticleBody(article, "article-body--compact")' in queue_markup
     assert "SessionArticleReferenceActions article={article} includePromotionLinks />" in queue_markup
+    assert 'import { SessionFileDropzone } from "./SessionFileDropzone";' in queue_markup
 
     form_match = re.search(
         r'<form\s+className="stack-form session-article-edit-form"[\s\S]*?>',
@@ -3696,11 +3711,10 @@ def test_dm_content_staged_articles_edit_form_uses_flask_style_file_field_markup
     form_end = queue_markup.index("</form>", form_start) + len("</form>")
     form_markup = queue_markup[form_start:form_end]
 
-    assert 'className="field session-file-field"' in form_markup
-    assert 'className="session-file-input"' in form_markup
-    assert 'className="session-file-dropzone"' in form_markup
-    assert 'className="session-file-dropzone__browse"' in form_markup
-    assert 'session-file-dropzone__name' in form_markup
+    assert "<SessionFileDropzone" in form_markup
+    assert 'id={`dm-content-stage-image-${article.id}`}' in form_markup
+    assert 'selectedFileName={draft.image ? draft.image.filename : undefined}' in form_markup
+    assert 'disabled={!canManageSession}' in form_markup
     assert 'label className="field">' in form_markup
     assert re.search(r'<label className="field">\s*<span>Title</span>', form_markup) is not None
     assert re.search(r'<label className="field">\s*<span>Body</span>', form_markup) is not None
@@ -3708,8 +3722,9 @@ def test_dm_content_staged_articles_edit_form_uses_flask_style_file_field_markup
     assert re.search(r'<label className="field">\s*<span>Image caption</span>', form_markup) is not None
     assert 'className="chat-label"' not in queue_markup
     assert "dm-content-image-edit-row" not in queue_markup
+    assert "Selected image:" not in queue_markup
 
     assert (
-        re.search(r'<span>\{article\.image \? "Replace image" : "Image"\}</span>', queue_markup)
+        re.search(r'label=\{article\.image \? "Replace image" : "Image"\}', queue_markup)
         is not None
     )
