@@ -517,6 +517,25 @@ def test_character_progression_repair_route_lives_in_route_module() -> None:
     assert "expected_revision: repair.state_revision" in repair_source
 
 
+def test_character_retraining_route_lives_in_route_module() -> None:
+    main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    authoring_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    retraining_source = Path("frontend/src/routes/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
+
+    assert 'import { CharacterRetrainingPage } from "./routes/CharacterRetrainingPage";' in main_source
+    assert "function CharacterRetrainingPage" not in authoring_source
+    assert "CharacterRetrainingPayload" not in authoring_source
+    assert "characterRetrainingValuesFromContext" not in authoring_source
+    assert 'component: CharacterRetrainingPage' in main_source
+
+    assert "export function CharacterRetrainingPage()" in retraining_source
+    assert 'from: "/campaigns/$campaignSlug/characters/$characterSlug/retraining"' in retraining_source
+    assert "apiClient.getCharacterRetraining(campaignSlug, characterSlug)" in retraining_source
+    assert "apiClient.submitCharacterRetraining(campaignSlug, characterSlug, payload)" in retraining_source
+    assert "characterRetrainingValuesFromContext(retraining)" in retraining_source
+    assert "expected_revision: retraining.state_revision" in retraining_source
+
+
 def test_character_authoring_preview_lists_live_in_component_module() -> None:
     route_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
@@ -1143,9 +1162,11 @@ def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
     progression_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
+    retraining_source = Path("frontend/src/routes/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
     route_sources = {
         "CharacterAdvancedEditorPage": advanced_source,
         "CharacterProgressionRepairPage": progression_source,
+        "CharacterRetrainingPage": retraining_source,
     }
 
     def component_source(component_name: str) -> str:
@@ -1226,11 +1247,13 @@ def test_character_supported_form_action_chrome_in_source() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
     progression_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
+    retraining_source = Path("frontend/src/routes/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
     manual_import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
     route_sources = {
         "CharacterAdvancedEditorPage": advanced_source,
         "CharacterProgressionRepairPage": progression_source,
+        "CharacterRetrainingPage": retraining_source,
     }
 
     def component_source(component_name: str) -> str:
@@ -1333,11 +1356,13 @@ def test_character_supported_hero_links_preserve_supported_nav_while_hiding_flas
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
     progression_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
+    retraining_source = Path("frontend/src/routes/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
     manual_import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
     route_sources = {
         "CharacterAdvancedEditorPage": advanced_source,
         "CharacterProgressionRepairPage": progression_source,
+        "CharacterRetrainingPage": retraining_source,
     }
 
     def component_source(component_name: str) -> str:
