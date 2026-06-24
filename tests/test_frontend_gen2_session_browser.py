@@ -2975,6 +2975,28 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             expect(page.locator("main .character-authoring-layout > .sidebar.character-authoring-sidebar")).to_be_visible()
             assert page.locator("main .character-authoring-sidebar > .card.sidebar-card").count() >= 1
             assert page.locator("aside.panel.character-authoring-sidebar").count() == 0
+            page.set_viewport_size({"width": 390, "height": 900})
+            expect(page.get_by_role("heading", name="Create Xianxia Character")).to_be_visible(timeout=10000)
+            create_mobile_metrics = page.evaluate(
+                """() => {
+                    const layout = document.querySelector("main .character-authoring-layout");
+                    const form = document.querySelector("main .character-authoring-form");
+                    const layoutStyle = layout ? window.getComputedStyle(layout) : null;
+                    const formRect = form ? form.getBoundingClientRect() : null;
+                    return {
+                        scrollWidth: document.documentElement.scrollWidth,
+                        innerWidth: window.innerWidth,
+                        layoutColumns: layoutStyle ? layoutStyle.gridTemplateColumns.trim().split(/\\s+/).filter(Boolean).length : 0,
+                        formLeft: formRect ? formRect.left : 0,
+                        formRight: formRect ? formRect.right : 0,
+                    };
+                }"""
+            )
+            assert create_mobile_metrics["scrollWidth"] <= create_mobile_metrics["innerWidth"] + 1
+            assert create_mobile_metrics["layoutColumns"] == 1
+            assert create_mobile_metrics["formLeft"] >= -1
+            assert create_mobile_metrics["formRight"] <= create_mobile_metrics["innerWidth"] + 1
+            page.set_viewport_size({"width": 1280, "height": 900})
             for field_name, value in create_values.items():
                 page.locator(f"[name='{field_name}']").fill(value)
             for field_name, value in create_selects.items():
@@ -3141,6 +3163,28 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             expect(page.locator("main .character-authoring-layout > .sidebar.character-authoring-sidebar")).to_be_visible()
             assert page.locator("main .character-authoring-sidebar > .card.sidebar-card").count() >= 1
             assert page.locator("aside.panel.character-authoring-sidebar").count() == 0
+            page.set_viewport_size({"width": 390, "height": 900})
+            expect(page.get_by_role("heading", name="Import Existing Xianxia Character")).to_be_visible(timeout=10000)
+            import_mobile_metrics = page.evaluate(
+                """() => {
+                    const layout = document.querySelector("main .character-authoring-layout");
+                    const form = document.querySelector("main .character-authoring-form");
+                    const layoutStyle = layout ? window.getComputedStyle(layout) : null;
+                    const formRect = form ? form.getBoundingClientRect() : null;
+                    return {
+                        scrollWidth: document.documentElement.scrollWidth,
+                        innerWidth: window.innerWidth,
+                        layoutColumns: layoutStyle ? layoutStyle.gridTemplateColumns.trim().split(/\\s+/).filter(Boolean).length : 0,
+                        formLeft: formRect ? formRect.left : 0,
+                        formRight: formRect ? formRect.right : 0,
+                    };
+                }"""
+            )
+            assert import_mobile_metrics["scrollWidth"] <= import_mobile_metrics["innerWidth"] + 1
+            assert import_mobile_metrics["layoutColumns"] == 1
+            assert import_mobile_metrics["formLeft"] >= -1
+            assert import_mobile_metrics["formRight"] <= import_mobile_metrics["innerWidth"] + 1
+            page.set_viewport_size({"width": 1280, "height": 900})
             page.locator("[name='realm']").select_option("Immortal")
             page.locator("[name='honor']").select_option("Majestic")
             page.locator("[name='martial_art_1_slug']").select_option("heavenly-palm")

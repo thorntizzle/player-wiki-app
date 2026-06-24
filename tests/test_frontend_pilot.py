@@ -1999,6 +1999,49 @@ def test_character_supported_form_action_chrome_in_source() -> None:
     assert "className=\"button button-secondary\"" not in level_up_markup
 
 
+def test_character_authoring_labels_and_confirmation_chrome_in_source() -> None:
+    create_source = Path("frontend/src/pages/CharacterCreatePage.tsx").read_text(encoding="utf-8")
+    manual_import_source = Path("frontend/src/pages/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
+    editor_source = Path("frontend/src/pages/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
+    realm_source = Path("frontend/src/components/CharacterCultivationRealmAscension.tsx").read_text(encoding="utf-8")
+
+    assert '["character_slug", "Character URL name", "Auto-generated from name if blank"]' in create_source
+    assert "<span>Character URL name</span>" in create_source
+    assert '["character_slug", "Character URL name", ""]' in manual_import_source
+    assert "<span>Stored Martial Art</span>" in manual_import_source
+    assert '<option value="">Unlinked/manual</option>' in manual_import_source
+    assert '[row.name_input_name, "Manual Name", row.name]' in manual_import_source
+    assert "<h2>Review Import</h2>" in manual_import_source
+    assert '{importMutation.isPending ? "Previewing..." : "Preview import"}' in manual_import_source
+    assert '{importMutation.isPending ? "Importing..." : "Confirm import"}' in manual_import_source
+
+    assert "<span>Character slug</span>" not in create_source
+    assert "<span>Character slug</span>" not in manual_import_source
+    assert "<span>Slug</span>" not in create_source
+    assert "<span>Slug</span>" not in manual_import_source
+
+    assert "Track sourced max-HP and ability-score reductions here" in editor_source
+    assert "<span>Source</span>" in editor_source
+    assert "<h2>Custom Features</h2>" in editor_source
+    assert "<h2>Manual Equipment</h2>" in editor_source
+
+    for input_name, label in (
+        ("realm_ascension_reset_confirmed", "Confirm reset"),
+        ("realm_ascension_rebuild_confirmed", "Confirm rebuild"),
+        ("realm_ascension_final_confirmed", "Confirm ascension"),
+    ):
+        assert re.search(
+            rf'<div className="confirmed-action">\s*'
+            rf'<label className="checkbox-label">\s*'
+            rf'<input type="checkbox" name="{input_name}" required />\s*'
+            rf"<span>{label}</span>",
+            realm_source,
+        ) is not None
+
+    assert 'name="realm_ascension_gm_review_note" rows={3} required' in realm_source
+    assert 'name="realm_ascension_gm_confirmation_note" rows={3} required' in realm_source
+
+
 def test_character_supported_hero_links_preserve_supported_nav_while_hiding_flask_fallbacks() -> None:
     source = Path("frontend/src/pages/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
     advanced_source = Path("frontend/src/pages/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")

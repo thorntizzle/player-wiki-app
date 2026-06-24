@@ -182,6 +182,12 @@ export function CharacterCultivationRealmAscension({
                 <span>Reset notes</span>
                 <textarea name="realm_ascension_reset_notes" rows={2} />
               </label>
+              <div className="confirmed-action">
+                <label className="checkbox-label">
+                  <input type="checkbox" name="realm_ascension_reset_confirmed" required />
+                  <span>Confirm reset</span>
+                </label>
+              </div>
             </>,
           )}
         </article>
@@ -262,6 +268,12 @@ export function CharacterCultivationRealmAscension({
                 <span>Rebuild notes</span>
                 <textarea name="realm_ascension_rebuild_notes" rows={2} />
               </label>
+              <div className="confirmed-action">
+                <label className="checkbox-label">
+                  <input type="checkbox" name="realm_ascension_rebuild_confirmed" required />
+                  <span>Confirm rebuild</span>
+                </label>
+              </div>
             </>,
           )}
         </article>
@@ -278,6 +290,12 @@ export function CharacterCultivationRealmAscension({
                 <span>GM confirmation note</span>
                 <textarea name="realm_ascension_gm_confirmation_note" rows={3} required />
               </label>
+              <div className="confirmed-action">
+                <label className="checkbox-label">
+                  <input type="checkbox" name="realm_ascension_final_confirmed" required />
+                  <span>Confirm ascension</span>
+                </label>
+              </div>
             </>,
           )}
         </article>
