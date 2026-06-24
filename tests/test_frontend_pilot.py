@@ -444,6 +444,26 @@ def test_character_detail_route_wrapper_lives_in_route_module() -> None:
     assert "onSelectedCharacterChange" in route_source
 
 
+def test_character_authoring_preview_lists_live_in_component_module() -> None:
+    route_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    preview_source = Path("frontend/src/components/CharacterAuthoringPreview.tsx").read_text(encoding="utf-8")
+
+    assert 'import { CharacterLevelUpPreviewList, CharacterPreviewList } from "../components/CharacterAuthoringPreview";' in route_source
+    assert "function CharacterPreviewList" not in route_source
+    assert "function CharacterLevelUpPreviewList" not in route_source
+    assert "<CharacterPreviewList preview={create.preview} />" in route_source
+    assert "<CharacterLevelUpPreviewList preview={levelUp.preview ?? {}} />" in route_source
+
+    assert "function PreviewSidebar(" in preview_source
+    assert "export function CharacterPreviewList" in preview_source
+    assert "export function CharacterLevelUpPreviewList" in preview_source
+    assert 'emptyMessage="Choose core options to populate the preview."' in preview_source
+    assert 'className="builder-preview-list"' in preview_source
+    assert 'className="card sidebar-card character-authoring-preview-section"' in preview_source
+    assert "asStringArray(preview.saving_throws)" in preview_source
+    assert "asStringArray(preview.new_spells)" in preview_source
+
+
 def test_character_section_policy_helpers_live_in_shared_utils() -> None:
     source = Path("frontend/src/characterPaneUtils.ts").read_text(encoding="utf-8")
     route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
