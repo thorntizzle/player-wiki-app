@@ -157,8 +157,12 @@ export function CombatDmStatusPanel({
               )}
             </div>
           </div>
+          <p id="combat-turn-editor-help" className="meta">
+            Turn value orders initiative. Priority breaks ties after turn value.
+          </p>
           <form
             className="stack-form combat-status-authority-form"
+            aria-describedby="combat-turn-editor-help"
             onSubmit={(event) => {
               event.preventDefault();
               onUpdateTurn({
@@ -201,9 +205,13 @@ export function CombatDmStatusPanel({
             <p className="meta">Snapshot</p>
             <h3>Vitals</h3>
           </div>
+          <p id="combat-vitals-editor-help" className="meta">
+            Current and temp HP save for every combatant. NPC maximums appear when editable.
+          </p>
           <div className="combat-summary-grid combat-summary-grid--snapshot">
             <form
               className="combat-stat combat-stat--editable"
+              aria-describedby="combat-vitals-editor-help"
               onSubmit={(event) => {
                 event.preventDefault();
                 onUpdateVitals(vitalsPayload());
@@ -214,6 +222,7 @@ export function CombatDmStatusPanel({
                 <input
                   className="combat-stat-input combat-stat-input--number"
                   aria-label="DM Current HP"
+                  aria-describedby="combat-vitals-editor-help"
                   type="number"
                   value={vitalsDraft.currentHp}
                   onChange={(event) => onVitalsDraftChange({ currentHp: event.currentTarget.value })}
@@ -224,6 +233,7 @@ export function CombatDmStatusPanel({
             </form>
             <form
               className="combat-stat combat-stat--editable"
+              aria-describedby="combat-vitals-editor-help"
               onSubmit={(event) => {
                 event.preventDefault();
                 onUpdateVitals(vitalsPayload());
@@ -233,6 +243,7 @@ export function CombatDmStatusPanel({
               <input
                 className="combat-stat-input combat-stat-input--single"
                 aria-label="DM Temp HP"
+                aria-describedby="combat-vitals-editor-help"
                 type="number"
                 min="0"
                 value={vitalsDraft.tempHp}
@@ -245,6 +256,7 @@ export function CombatDmStatusPanel({
                   <span>Max HP</span>
                   <input
                     aria-label="DM Max HP"
+                    aria-describedby="combat-vitals-editor-help"
                     type="number"
                     min="0"
                     value={vitalsDraft.maxHp}
@@ -255,6 +267,7 @@ export function CombatDmStatusPanel({
                   <span>Movement total</span>
                   <input
                     aria-label="DM Movement total"
+                    aria-describedby="combat-vitals-editor-help"
                     type="number"
                     min="0"
                     value={vitalsDraft.movementTotal}
@@ -263,7 +276,13 @@ export function CombatDmStatusPanel({
                 </label>
               </>
             ) : null}
-            <button type="button" onClick={() => onUpdateVitals(vitalsPayload())} aria-label="Save DM vitals" disabled={isUpdatingVitals}>
+            <button
+              type="button"
+              onClick={() => onUpdateVitals(vitalsPayload())}
+              aria-label="Save DM vitals"
+              aria-describedby="combat-vitals-editor-help"
+              disabled={isUpdatingVitals}
+            >
               {isUpdatingVitals ? "Saving..." : "Save vitals"}
             </button>
           </div>
@@ -274,8 +293,12 @@ export function CombatDmStatusPanel({
             <p className="meta">Round tools</p>
             <h3>Action Economy</h3>
           </div>
+          <p id="combat-economy-editor-help" className="meta">
+            Checked actions are available. Movement left saves with the action economy.
+          </p>
           <form
             className="combat-resource-strip combat-inline-resource-form"
+            aria-describedby="combat-economy-editor-help"
             onSubmit={(event) => {
               event.preventDefault();
               onUpdateResources({
@@ -288,11 +311,12 @@ export function CombatDmStatusPanel({
             }}
           >
             <label className="combat-stat">
-              <span className="meta">Movement</span>
+              <span className="meta">Move left</span>
               <div className="combat-inline-value">
                 <input
                   className="combat-stat-input combat-stat-input--number"
                   aria-label="DM Movement Remaining"
+                  aria-describedby="combat-economy-editor-help"
                   type="number"
                   min="0"
                   value={resourcesDraft.movementRemaining}
@@ -326,7 +350,7 @@ export function CombatDmStatusPanel({
               />
               <span className="combat-resource">Reaction</span>
             </label>
-            <button type="submit" disabled={isUpdatingResources}>
+            <button type="submit" aria-describedby="combat-economy-editor-help" disabled={isUpdatingResources}>
               {isUpdatingResources ? "Saving..." : "Save economy"}
             </button>
           </form>

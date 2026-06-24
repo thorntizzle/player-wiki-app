@@ -1874,15 +1874,21 @@ def test_gen2_combat_browser_exposes_dm_status_and_controls(
             expect(carousel.get_by_label("Jump to combatant")).to_be_visible()
             carousel.get_by_role("button", name=re.compile(r"Clockwork Hound", re.I)).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?view=status&combatant=\d+"))
+            expect(page.locator(".combat-selected-snapshot h2")).to_have_text("Clockwork Hound", timeout=5000)
             expect(page.locator(".combat-dm-grid .combat-control-card").first.locator(".section-heading h2")).to_have_text(
                 "Turn Focus",
             )
+            expect(page.get_by_text("Turn value orders initiative. Priority breaks ties after turn value.")).to_be_visible()
             expect(page.get_by_role("heading", name="Vitals")).to_be_visible(timeout=5000)
+            expect(page.get_by_text("Current and temp HP save for every combatant. NPC maximums appear when editable.")).to_be_visible()
+            expect(page.get_by_text("Checked actions are available. Movement left saves with the action economy.")).to_be_visible()
+            expect(page.locator(".combat-inline-resource-form .meta", has_text="Move left")).to_be_visible()
             assert page.evaluate("window.__cpwLoadingBeginCount") == 0
             assert not page.evaluate("document.documentElement.classList.contains('app-loading')")
 
             dm_current_hp = page.get_by_label("DM Current HP", exact=True)
             expect(dm_current_hp).to_be_visible()
+            expect(dm_current_hp).to_have_attribute("aria-describedby", "combat-vitals-editor-help")
             dm_current_hp.fill("19")
             page.get_by_role("button", name="Save DM vitals").click()
             expect(page.get_by_text("Vitals saved.")).to_be_visible(timeout=5000)
@@ -1903,7 +1909,12 @@ def test_gen2_combat_browser_exposes_dm_status_and_controls(
             expect(page.get_by_role("heading", name="Add combatant")).to_be_visible(timeout=5000)
             assert page.evaluate("window.__cpwLoadingBeginCount") == 0
             assert not page.evaluate("document.documentElement.classList.contains('app-loading')")
-            page.get_by_text("Add custom combatant", exact=True).click()
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=controls")
+            expect(page.get_by_role("heading", name="Add combatant")).to_be_visible(timeout=5000)
+            custom_mode_label = page.locator('label[for="combat-add-mode-custom"]')
+            expect(custom_mode_label).to_be_visible()
+            custom_mode_label.click()
             custom_panel = page.locator(
                 ".combat-add-combatant-mode-panel--custom.combat-add-combatant-mode-panel--active"
             )

@@ -268,7 +268,7 @@ export function CombatPage() {
 
   const selectCombatView = (view: CombatView) => {
     setActiveCombatView(view);
-    setCombatUrl(view, selectedCombatantId);
+    setCombatUrl(view, selectedCombatantId ?? selectedCombatant?.id ?? null);
   };
 
   const selectCharacterTarget = (characterSlug: string) => {

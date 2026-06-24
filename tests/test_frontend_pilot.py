@@ -1591,6 +1591,7 @@ def test_gen2_combat_focus_changes_preserve_mounted_payload_in_source() -> None:
     assert "const navigate = useNavigate();" in combat_page_source
     assert "const setCombatUrl = (view: CombatView, combatantId: number | null) => {" in combat_page_source
     assert 'params.set("combatant", String(combatantId));' in combat_page_source
+    assert "setCombatUrl(view, selectedCombatantId ?? selectedCombatant?.id ?? null);" in combat_page_source
     assert "void navigate({ to: nextPath as never });" in combat_page_source
     assert "window.history.pushState" not in combat_page_source
     assert "window.location.assign" not in combat_page_source
@@ -1706,7 +1707,10 @@ def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
     )
     assert '{isSettingCurrent ? "Setting..." : "Set current"}' in turn_focus_markup
 
+    assert 'id="combat-turn-editor-help"' in turn_focus_markup
+    assert "Turn value orders initiative. Priority breaks ties after turn value." in turn_focus_markup
     assert 'className="stack-form combat-status-authority-form"' in turn_focus_markup
+    assert 'aria-describedby="combat-turn-editor-help"' in turn_focus_markup
     assert re.search(r'<label className="field">\s*<span>Turn value</span>', turn_focus_markup) is not None
     assert re.search(r'<label className="field">\s*<span>Priority</span>', turn_focus_markup) is not None
     assert "className=\"chat-label\"" not in turn_focus_markup
@@ -1726,13 +1730,20 @@ def test_combat_dm_status_tactical_forms_chrome_in_source() -> None:
     tactical_markup = combat_page_source[tactical_start:tactical_end]
 
     assert "combat-summary-grid combat-summary-grid--snapshot" in tactical_markup
+    assert 'id="combat-vitals-editor-help"' in tactical_markup
+    assert "Current and temp HP save for every combatant. NPC maximums appear when editable." in tactical_markup
+    assert 'aria-describedby="combat-vitals-editor-help"' in tactical_markup
     assert "combat-stat combat-stat--editable" in tactical_markup
     assert "combat-stat-input combat-stat-input--number" in tactical_markup
     assert "combat-stat-input combat-stat-input--single" in tactical_markup
     assert "combat-inline-value" in tactical_markup
+    assert 'id="combat-economy-editor-help"' in tactical_markup
+    assert "Checked actions are available. Movement left saves with the action economy." in tactical_markup
+    assert 'aria-describedby="combat-economy-editor-help"' in tactical_markup
     assert "combat-resource-strip combat-inline-resource-form" in tactical_markup
     assert "combat-resource-toggle" in tactical_markup
     assert "combat-resource" in tactical_markup
+    assert '<span className="meta">Move left</span>' in tactical_markup
 
     assert "combat-inline-form" not in tactical_markup
     assert 'className="chat-label"' not in tactical_markup
