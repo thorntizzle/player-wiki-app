@@ -22,8 +22,8 @@ import {
 import { AdminDashboardPage, AdminUserDetailPage } from "./routes/AdminRoutes";
 import { CampaignListPage } from "./routes/CampaignPickerPage";
 import { CharacterAdvancedEditorPage } from "./routes/CharacterAdvancedEditorPage";
-import { CharacterCultivationPage } from "./routes/CharacterAuthoringRoutes";
 import { CharacterCreatePage } from "./routes/CharacterCreatePage";
+import { CharacterCultivationPage } from "./routes/CharacterCultivationPage";
 import { CharacterDetailPage } from "./routes/CharacterDetailPage";
 import { CharacterLevelUpPage } from "./routes/CharacterLevelUpPage";
 import { CharacterProgressionRepairPage } from "./routes/CharacterProgressionRepairPage";

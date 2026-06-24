@@ -30,6 +30,11 @@ def _extract_function_component_source(source: str, component_name: str) -> str:
     return source[start:end]
 
 
+def _read_optional_source(path: str) -> str:
+    source_path = Path(path)
+    return source_path.read_text(encoding="utf-8") if source_path.exists() else ""
+
+
 def test_gen2_topbar_account_controls_use_flask_chrome_classes_in_source() -> None:
     source = Path("frontend/src/AppShell.tsx").read_text(encoding="utf-8")
     account_row = re.search(r'<div className="account-row">([\s\S]*?)</div>', source)
@@ -446,7 +451,7 @@ def test_character_detail_route_wrapper_lives_in_route_module() -> None:
 
 def test_character_create_route_lives_in_route_module() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    authoring_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
 
     assert 'import { CharacterCreatePage } from "./routes/CharacterCreatePage";' in main_source
@@ -463,7 +468,7 @@ def test_character_create_route_lives_in_route_module() -> None:
 
 def test_character_xianxia_manual_import_route_lives_in_route_module() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    authoring_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
     import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
 
     assert 'import { CharacterXianxiaManualImportPage } from "./routes/CharacterXianxiaManualImportPage";' in main_source
@@ -480,7 +485,7 @@ def test_character_xianxia_manual_import_route_lives_in_route_module() -> None:
 
 def test_character_advanced_editor_route_lives_in_route_module() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    authoring_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
     editor_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
 
     assert 'import { CharacterAdvancedEditorPage } from "./routes/CharacterAdvancedEditorPage";' in main_source
@@ -500,7 +505,7 @@ def test_character_advanced_editor_route_lives_in_route_module() -> None:
 
 def test_character_progression_repair_route_lives_in_route_module() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    authoring_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
     repair_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
 
     assert 'import { CharacterProgressionRepairPage } from "./routes/CharacterProgressionRepairPage";' in main_source
@@ -519,7 +524,7 @@ def test_character_progression_repair_route_lives_in_route_module() -> None:
 
 def test_character_retraining_route_lives_in_route_module() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    authoring_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
     retraining_source = Path("frontend/src/routes/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
 
     assert 'import { CharacterRetrainingPage } from "./routes/CharacterRetrainingPage";' in main_source
@@ -538,7 +543,7 @@ def test_character_retraining_route_lives_in_route_module() -> None:
 
 def test_character_level_up_route_lives_in_route_module() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    authoring_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
     level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
 
     assert 'import { CharacterLevelUpPage } from "./routes/CharacterLevelUpPage";' in main_source
@@ -555,8 +560,23 @@ def test_character_level_up_route_lives_in_route_module() -> None:
     assert "expected_revision: levelUp.state_revision" in level_up_source
 
 
+def test_character_cultivation_route_lives_in_route_module_and_aggregate_is_retired() -> None:
+    main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    authoring_path = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx")
+    cultivation_source = Path("frontend/src/routes/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
+
+    assert not authoring_path.exists()
+    assert 'import { CharacterCultivationPage } from "./routes/CharacterCultivationPage";' in main_source
+    assert 'component: CharacterCultivationPage' in main_source
+    assert "export function CharacterCultivationPage()" in cultivation_source
+    assert 'from: "/campaigns/$campaignSlug/characters/$characterSlug/cultivation"' in cultivation_source
+    assert "apiClient.getCharacterCultivation(campaignSlug, characterSlug)" in cultivation_source
+    assert "apiClient.runCharacterCultivationAction(campaignSlug, characterSlug" in cultivation_source
+    assert "expected_revision: data.character.state_record.revision" in cultivation_source
+
+
 def test_character_authoring_preview_lists_live_in_component_module() -> None:
-    route_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    route_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
     level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
     preview_source = Path("frontend/src/components/CharacterAuthoringPreview.tsx").read_text(encoding="utf-8")
@@ -580,7 +600,7 @@ def test_character_authoring_preview_lists_live_in_component_module() -> None:
 
 
 def test_character_authoring_dnd_choice_select_lives_in_field_component() -> None:
-    route_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    route_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
     level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
     field_source = Path("frontend/src/components/CharacterAuthoringFields.tsx").read_text(encoding="utf-8")
@@ -597,15 +617,19 @@ def test_character_authoring_dnd_choice_select_lives_in_field_component() -> Non
 
 
 def test_character_authoring_shared_helpers_live_in_utility_module() -> None:
-    route_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    route_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
+    cultivation_source = Path("frontend/src/routes/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
     editor_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
     import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
     level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
     helper_source = Path("frontend/src/characterAuthoringUtils.tsx").read_text(encoding="utf-8")
 
-    assert "from \"../characterAuthoringUtils\";" in route_source
+    assert "from \"../characterAuthoringUtils\";" in cultivation_source
+    assert "from \"../characterAuthoringUtils\";" in level_up_source
     assert "function characterNameFromRecord" not in route_source
     assert "function classLevelTextFromRecord" not in route_source
+    assert "function characterNameFromRecord" not in cultivation_source
+    assert "function classLevelTextFromRecord" not in cultivation_source
     assert "function characterNameFromRecord" not in editor_source
     assert "function classLevelTextFromRecord" not in editor_source
     assert "function characterNameFromRecord" not in level_up_source
@@ -1187,7 +1211,7 @@ def test_combat_conditions_chrome_in_source() -> None:
 
 
 def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
-    source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
     advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
     level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
     progression_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
@@ -1274,7 +1298,7 @@ def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
 
 
 def test_character_supported_form_action_chrome_in_source() -> None:
-    source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
     advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
     level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
     progression_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
@@ -1385,7 +1409,7 @@ def test_character_supported_form_action_chrome_in_source() -> None:
 
 
 def test_character_supported_hero_links_preserve_supported_nav_while_hiding_flask_fallbacks() -> None:
-    source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
     advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
     level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
     progression_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
@@ -1557,7 +1581,7 @@ def test_grid_minimum_card_size_is_flask_260px_and_character_roster_grid_selecto
 
 
 def test_character_form_actions_do_not_convert_non_targeted_builder_rows() -> None:
-    source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/routes/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
     level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
     manual_import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
