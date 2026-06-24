@@ -2802,18 +2802,47 @@ def test_character_pane_status_messages_use_toast_overlay() -> None:
     assert "function ToastNotice" in feedback_source
     assert 'className={`toast-notice toast-notice--${tone}`}' in feedback_source
     assert 'role="status" aria-live="polite"' in feedback_source
-    assert "window.setTimeout(() => setStatusMessage(null), TOAST_DISMISS_MS)" in pane_markup
+    assert "const timer = window.setTimeout(() => setToastMessage(null), dismissMs);" in feedback_source
+    assert "return () => window.clearTimeout(timer);" in feedback_source
+    assert "window.setTimeout(" not in pane_markup
     assert "setRestPreview(response.preview);" in mutation_source
     assert 'setStatusMessage(`${response.preview.label} preview loaded.`);' not in mutation_source
     assert "preview loaded." not in pane_markup
     assert "preview loaded." not in mutation_source
-    assert "<ToastNotice message={statusMessage} />" in pane_markup
+    assert "<ToastNotice message={statusMessage} tone={toastTone} />" in pane_markup
     assert 'statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null' not in pane_markup
     assert ".toast-notice {" in styles
     assert "position: fixed;" in styles
     assert "z-index: 1200;" in styles
     assert "animation: toast-notice-fade 3600ms ease forwards;" in styles
     assert "@keyframes toast-notice-fade" in styles
+
+
+def test_mutation_heavy_gen2_routes_use_shared_toast_notice() -> None:
+    toast_route_paths = [
+        "frontend/src/pages/AccountSettingsPage.tsx",
+        "frontend/src/pages/AdminRoutes.tsx",
+        "frontend/src/pages/CampaignControlPage.tsx",
+        "frontend/src/pages/CharacterAdvancedEditorPage.tsx",
+        "frontend/src/pages/CharacterCreatePage.tsx",
+        "frontend/src/pages/CharacterCultivationPage.tsx",
+        "frontend/src/pages/CharacterLevelUpPage.tsx",
+        "frontend/src/pages/CharacterPane.tsx",
+        "frontend/src/pages/CharacterProgressionRepairPage.tsx",
+        "frontend/src/pages/CharacterRetrainingPage.tsx",
+        "frontend/src/pages/CharacterXianxiaManualImportPage.tsx",
+        "frontend/src/pages/CombatPage.tsx",
+        "frontend/src/pages/DmContentPage.tsx",
+        "frontend/src/pages/DmContentSystemsLane.tsx",
+        "frontend/src/pages/SessionDmPane.tsx",
+    ]
+
+    for path in toast_route_paths:
+        source = Path(path).read_text(encoding="utf-8")
+        assert "useToastNotice" in source, path
+        assert "<ToastNotice message=" in source, path
+        assert "window.setTimeout(" not in source, path
+        assert "TOAST_DISMISS_MS" not in source, path
 
 
 def test_character_pane_draft_state_lives_in_shared_hook() -> None:
