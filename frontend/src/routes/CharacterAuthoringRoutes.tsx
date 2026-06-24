@@ -5,7 +5,6 @@ import type { FormEvent } from "react";
 
 import type {
   CharacterAdvancedEditorContext,
-  CharacterBuilderOption,
   CharacterCreateContextResponse,
   CharacterCreateSubmitPayload,
   CharacterCultivationContext,
@@ -34,6 +33,16 @@ import { CharacterLevelUpPreviewList, CharacterPreviewList } from "../components
 import { ApiErrorNotice, type ApiMessageEnvelope } from "../components/feedback";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 import {
+  draftString,
+  draftStringArray,
+  editorSelectOptions,
+  optionLabel,
+  optionValue,
+  selectOptions,
+  updateAuthoringValue,
+  type CharacterAuthoringValues,
+} from "../characterAuthoringUtils";
+import {
   asRecord,
   asStringArray,
   boolFromUnknown,
@@ -50,50 +59,6 @@ function characterNameFromRecord(character: CharacterRecord | undefined): string
 
 function classLevelTextFromRecord(character: CharacterRecord | undefined): string {
   return readString(asRecord(character?.definition?.profile).class_level_text);
-}
-
-type CharacterAuthoringValues = Record<string, string | string[]>;
-
-function optionValue(option: CharacterBuilderOption): string {
-  return String(option.value || option.slug || option.entry_key || option.key || "");
-}
-
-function optionLabel(option: CharacterBuilderOption): string {
-  const value = optionValue(option);
-  const label = option.label || option.title || option.name || value;
-  return option.source_id ? `${label} (${option.source_id})` : label;
-}
-
-function draftString(values: CharacterAuthoringValues, key: string, fallback = ""): string {
-  const value = values[key];
-  if (Array.isArray(value)) {
-    return value[0] ?? fallback;
-  }
-  return value ?? fallback;
-}
-
-function draftStringArray(values: CharacterAuthoringValues, key: string): string[] {
-  const value = values[key];
-  return Array.isArray(value) ? value : value ? [value] : [];
-}
-
-function updateAuthoringValue(
-  setValues: React.Dispatch<React.SetStateAction<CharacterAuthoringValues>>,
-  key: string,
-  value: string | string[],
-) {
-  setValues((current) => ({ ...current, [key]: value }));
-}
-
-function selectOptions(options: CharacterBuilderOption[]) {
-  return options.map((option) => {
-    const value = optionValue(option);
-    return (
-      <option key={value || optionLabel(option)} value={value}>
-        {optionLabel(option)}
-      </option>
-    );
-  });
 }
 
 function editorValuesFromContext(context: CharacterAdvancedEditorContext | null | undefined): Record<string, string> {
@@ -135,15 +100,6 @@ function editorValuesFromContext(context: CharacterAdvancedEditorContext | null 
     values[`manual_item_notes_${row.index}`] = row.notes ?? "";
   });
   return values;
-}
-
-function editorSelectOptions(options: CharacterBuilderOption[], emptyLabel?: string) {
-  return (
-    <>
-      {emptyLabel ? <option value="">{emptyLabel}</option> : null}
-      {selectOptions(options)}
-    </>
-  );
 }
 
 function characterLevelUpValuesFromContext(context: CharacterLevelUpContext | null | undefined): CharacterAuthoringValues {

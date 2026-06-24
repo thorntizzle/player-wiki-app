@@ -464,6 +464,31 @@ def test_character_authoring_preview_lists_live_in_component_module() -> None:
     assert "asStringArray(preview.new_spells)" in preview_source
 
 
+def test_character_authoring_shared_helpers_live_in_utility_module() -> None:
+    route_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    helper_source = Path("frontend/src/characterAuthoringUtils.tsx").read_text(encoding="utf-8")
+
+    assert "from \"../characterAuthoringUtils\";" in route_source
+    assert "function optionValue" not in route_source
+    assert "function optionLabel" not in route_source
+    assert "function draftString(" not in route_source
+    assert "function draftStringArray" not in route_source
+    assert "function updateAuthoringValue" not in route_source
+    assert "function selectOptions" not in route_source
+    assert "function editorSelectOptions" not in route_source
+
+    assert "export type CharacterAuthoringValues" in helper_source
+    assert "export function optionValue" in helper_source
+    assert "export function optionLabel" in helper_source
+    assert "export function draftString" in helper_source
+    assert "export function draftStringArray" in helper_source
+    assert "export function updateAuthoringValue" in helper_source
+    assert "export function selectOptions" in helper_source
+    assert "export function editorSelectOptions" in helper_source
+    assert 'return option.source_id ? `${label} (${option.source_id})` : label;' in helper_source
+    assert '<option key={value || optionLabel(option)} value={value}>' in helper_source
+
+
 def test_character_section_policy_helpers_live_in_shared_utils() -> None:
     source = Path("frontend/src/characterPaneUtils.ts").read_text(encoding="utf-8")
     route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
