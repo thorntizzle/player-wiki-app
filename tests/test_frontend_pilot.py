@@ -257,19 +257,20 @@ def test_frontend_index_includes_app_loading_shell_source() -> None:
 
 def test_frontend_app_signals_loading_readiness_from_query_state_source() -> None:
     source = Path("frontend/src/AppShell.tsx").read_text(encoding="utf-8")
+    loading_source = Path("frontend/src/appLoadingReadiness.tsx").read_text(encoding="utf-8")
     link_helper_source = Path("frontend/src/campaignLinks.ts").read_text(encoding="utf-8")
 
-    assert "useIsFetching" in source
+    assert "useIsFetching" in loading_source
     assert "useNavigate" in source
-    assert "function useAppLoadingReadiness" in source
+    assert "function useAppLoadingReadiness" in loading_source
     assert "function appNextHrefToRouterPath" in link_helper_source
     assert "location.pathname" in source
-    assert "previousLocationPathname" in source
-    assert "window.__cpwAppLoadingBegin?.();" in source
-    assert "window.__cpwAppLoadingReady?.();" in source
+    assert "previousLocationPathname" in loading_source
+    assert "window.__cpwAppLoadingBegin?.();" in loading_source
+    assert "window.__cpwAppLoadingReady?.();" in loading_source
     assert "void navigate({ to: appNextHrefToRouterPath(item.href) as never });" in source
-    assert "activeFetchCount > 0" in source
-    assert "queryClient.isFetching() === 0" in source
+    assert "activeFetchCount > 0" in loading_source
+    assert "queryClient.isFetching() === 0" in loading_source
 
 
 def test_frontend_pilot_without_build_returns_not_found(client, app, tmp_path):
@@ -288,6 +289,7 @@ def test_frontend_pilot_without_build_returns_not_found(client, app, tmp_path):
 def test_session_pane_no_player_wiki_lookup_widget_in_source() -> None:
     source = Path("frontend/src/routes/SessionRoutes.tsx").read_text(encoding="utf-8")
     shell_source = Path("frontend/src/AppShell.tsx").read_text(encoding="utf-8")
+    search_source = Path("frontend/src/components/CampaignGlobalSearch.tsx").read_text(encoding="utf-8")
     session_pane_source = source[source.index("export function SessionPane({"):]
 
     assert "SessionPaneWikiLookup" not in session_pane_source
@@ -299,7 +301,30 @@ def test_session_pane_no_player_wiki_lookup_widget_in_source() -> None:
     assert "Search published pages / systems" not in session_pane_source
     assert "className=\"wiki-result-stack\"" not in session_pane_source
     assert "className=\"wiki-preview\"" not in session_pane_source
-    assert 'className="campaign-global-search__form"' in shell_source
+    assert 'className="campaign-global-search__form"' in search_source
+    assert "<CampaignGlobalSearch campaignSlug={campaignSlug} />" in shell_source
+
+
+def test_app_shell_search_auth_and_loading_live_in_shared_modules() -> None:
+    shell_source = Path("frontend/src/AppShell.tsx").read_text(encoding="utf-8")
+    search_source = Path("frontend/src/components/CampaignGlobalSearch.tsx").read_text(encoding="utf-8")
+    auth_source = Path("frontend/src/components/AuthNotice.tsx").read_text(encoding="utf-8")
+    loading_source = Path("frontend/src/appLoadingReadiness.tsx").read_text(encoding="utf-8")
+
+    assert 'import { CampaignGlobalSearch } from "./components/CampaignGlobalSearch";' in shell_source
+    assert 'import { AuthNotice } from "./components/AuthNotice";' in shell_source
+    assert 'import { RouteSuspenseFallback, useAppLoadingReadiness } from "./appLoadingReadiness";' in shell_source
+    assert "function CampaignGlobalSearch" not in shell_source
+    assert "function AuthNotice" not in shell_source
+    assert "function RouteSuspenseFallback" not in shell_source
+    assert "function useAppLoadingReadiness" not in shell_source
+    assert "export function CampaignGlobalSearch" in search_source
+    assert 'className="campaign-global-search"' in search_source
+    assert "previewCampaignReference" in search_source
+    assert "export function AuthNotice" in auth_source
+    assert 'className="card auth-notice"' in auth_source
+    assert "export function RouteSuspenseFallback" in loading_source
+    assert "export function useAppLoadingReadiness" in loading_source
 
 
 def test_character_navigation_card_uses_flask_style_chrome_in_source() -> None:
@@ -586,6 +611,7 @@ def test_character_cultivation_route_lives_in_route_module_and_aggregate_is_reti
 def test_gen2_route_modules_are_lazy_loaded_without_dropping_loading_cover_early() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     shell_source = Path("frontend/src/AppShell.tsx").read_text(encoding="utf-8")
+    loading_source = Path("frontend/src/appLoadingReadiness.tsx").read_text(encoding="utf-8")
 
     assert "const CampaignListPage = React.lazy(() =>" in main_source
     assert "const SessionPage = React.lazy(() =>" in main_source
@@ -600,11 +626,11 @@ def test_gen2_route_modules_are_lazy_loaded_without_dropping_loading_cover_early
     assert 'import { DmContentPage } from "./routes/DmContentPage";' not in main_source
     assert 'import { CharacterDetailPage } from "./routes/CharacterDetailPage";' not in main_source
 
-    assert "function RouteSuspenseFallback" in shell_source
-    assert "setRouteSuspensePending(true);" in shell_source
-    assert "return () => setRouteSuspensePending(false);" in shell_source
-    assert "function useAppLoadingReadiness(locationPathname: string, routeSuspensePending: boolean)" in shell_source
-    assert "if (activeFetchCount > 0 || routeSuspensePending)" in shell_source
+    assert "export function RouteSuspenseFallback" in loading_source
+    assert "setRouteSuspensePending(true);" in loading_source
+    assert "return () => setRouteSuspensePending(false);" in loading_source
+    assert "export function useAppLoadingReadiness(locationPathname: string, routeSuspensePending: boolean)" in loading_source
+    assert "if (activeFetchCount > 0 || routeSuspensePending)" in loading_source
     assert "<React.Suspense fallback={<RouteSuspenseFallback setRouteSuspensePending={setRouteSuspensePending} />}>" in shell_source
     assert "useAppLoadingReadiness(location.pathname, routeSuspensePending);" in shell_source
 
