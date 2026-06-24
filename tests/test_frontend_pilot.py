@@ -2141,6 +2141,25 @@ def test_dm_content_systems_management_form_field_chrome() -> None:
     assert "dm-content-image-edit-row" not in override_markup
 
 
+def test_dm_content_systems_mutations_live_in_shared_hook() -> None:
+    lane_source = Path("frontend/src/routes/DmContentSystemsLane.tsx").read_text(encoding="utf-8")
+    hook_source = Path("frontend/src/dmContentSystemsMutations.ts").read_text(encoding="utf-8")
+
+    assert "useDmContentSystemsMutations" in lane_source
+    assert "} = useDmContentSystemsMutations({" in lane_source
+    assert 'import { useMutation } from "@tanstack/react-query";' not in lane_source
+    assert "apiClient.updateSystemsSources" not in lane_source
+    assert "apiClient.updateSystemsEntryOverride" not in lane_source
+    assert "apiClient.createSystemsCustomEntry" not in lane_source
+
+    assert "export function useDmContentSystemsMutations(" in hook_source
+    assert "const updateSourcesMutation = useMutation({" in hook_source
+    assert "const updateOverrideMutation = useMutation({" in hook_source
+    assert "const createCustomMutation = useMutation({" in hook_source
+    assert "apiClient.restoreSystemsCustomEntry(campaignSlug, entry.slug)" in hook_source
+    assert 'setSystemsMessage("Systems source policy saved.");' in hook_source
+
+
 def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_source() -> None:
     source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
     card_source = Path("frontend/src/components/DmContentCards.tsx").read_text(encoding="utf-8")

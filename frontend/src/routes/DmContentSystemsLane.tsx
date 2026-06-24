@@ -1,25 +1,32 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 
-import { apiErrorMessage } from "../api/client";
-import type { CustomSystemsEntry, SystemsSourceRow } from "../api/types";
+import type { SystemsSourceRow } from "../api/types";
 import { getApiErrorMessage } from "../apiErrors";
 import { useApiClient } from "../apiClientContext";
 import { ApiErrorNotice } from "../components/feedback";
 import {
-  buildCustomSystemsPayload,
   buildInitialSystemsCustomDraft,
   buildSystemsCustomDraftFromEntry,
   type DmContentSystemsCustomDraftState,
 } from "../dmContentUtils";
+import {
+  useDmContentSystemsMutations,
+  type DmContentSystemsOverrideDraftState,
+  type DmContentSystemsSourceDraftState,
+} from "../dmContentSystemsMutations";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 import { formatTimestamp } from "../timeFormatting";
 
 export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
   const { apiClient, setAuthRequired } = useApiClient();
-  const [sourceDrafts, setSourceDrafts] = useState<Record<string, { isEnabled: boolean; defaultVisibility: string }>>({});
+  const [sourceDrafts, setSourceDrafts] = useState<Record<string, DmContentSystemsSourceDraftState>>({});
   const [acknowledgeProprietary, setAcknowledgeProprietary] = useState(false);
-  const [overrideDraft, setOverrideDraft] = useState({ entryKey: "", visibilityOverride: "", enablementOverride: "" });
+  const [overrideDraft, setOverrideDraft] = useState<DmContentSystemsOverrideDraftState>({
+    entryKey: "",
+    visibilityOverride: "",
+    enablementOverride: "",
+  });
   const [customCreateDraft, setCustomCreateDraft] = useState<DmContentSystemsCustomDraftState>(() => buildInitialSystemsCustomDraft());
   const [customEditDrafts, setCustomEditDrafts] = useState<Record<string, DmContentSystemsCustomDraftState>>({});
   const [customQuery, setCustomQuery] = useState("");
@@ -77,142 +84,33 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
     });
   }, [systemsQuery.data]);
 
-  const updateSourcesMutation = useMutation({
-    mutationFn: () => {
-      const payload = systemsQuery.data;
-      if (!payload) {
-        throw new Error("Systems payload is not loaded.");
-      }
-      return apiClient.updateSystemsSources(campaignSlug, {
-        acknowledge_proprietary: acknowledgeProprietary,
-        updates: payload.source_rows.map((source) => {
-          const draft = sourceDrafts[source.source_id] ?? {
-            isEnabled: source.is_enabled,
-            defaultVisibility: source.default_visibility,
-          };
-          return {
-            source_id: source.source_id,
-            is_enabled: draft.isEnabled,
-            default_visibility: draft.defaultVisibility,
-          };
-        }),
-      });
-    },
-    onSuccess: () => {
-      setSystemsMessage("Systems source policy saved.");
-      setSystemsError(null);
-      setAcknowledgeProprietary(false);
-      void systemsQuery.refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setSystemsError(apiErrorMessage(error));
-      setSystemsMessage(null);
-    },
-  });
-
-  const updateOverrideMutation = useMutation({
-    mutationFn: () => {
-      const entryKey = overrideDraft.entryKey.trim();
-      if (!entryKey) {
-        throw new Error("Entry key is required.");
-      }
-      const enablement = overrideDraft.enablementOverride === "enabled"
-        ? true
-        : overrideDraft.enablementOverride === "disabled"
-          ? false
-          : null;
-      return apiClient.updateSystemsEntryOverride(campaignSlug, entryKey, {
-        visibility_override: overrideDraft.visibilityOverride || null,
-        is_enabled_override: enablement,
-      });
-    },
-    onSuccess: () => {
-      setSystemsMessage("Systems entry override saved.");
-      setSystemsError(null);
-      setOverrideDraft({ entryKey: "", visibilityOverride: "", enablementOverride: "" });
-      void systemsQuery.refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setSystemsError(apiErrorMessage(error));
-      setSystemsMessage(null);
-    },
-  });
-
-  const createCustomMutation = useMutation({
-    mutationFn: () => apiClient.createSystemsCustomEntry(campaignSlug, buildCustomSystemsPayload(customCreateDraft)),
-    onSuccess: (response) => {
-      setSystemsMessage(`Custom Systems entry created: ${response.entry.title}.`);
-      setSystemsError(null);
-      setCustomCreateDraft(buildInitialSystemsCustomDraft(response.systems));
-      void systemsQuery.refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setSystemsError(apiErrorMessage(error));
-      setSystemsMessage(null);
-    },
-  });
-
-  const updateCustomMutation = useMutation({
-    mutationFn: (entry: CustomSystemsEntry) => {
-      const draft = customEditDrafts[entry.slug] ?? buildSystemsCustomDraftFromEntry(entry);
-      return apiClient.updateSystemsCustomEntry(campaignSlug, entry.slug, buildCustomSystemsPayload(draft));
-    },
-    onSuccess: (response) => {
-      setSystemsMessage(`Custom Systems entry updated: ${response.entry.title}.`);
-      setSystemsError(null);
-      void systemsQuery.refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setSystemsError(apiErrorMessage(error));
-      setSystemsMessage(null);
-    },
-  });
-
-  const archiveCustomMutation = useMutation({
-    mutationFn: (entry: CustomSystemsEntry) => apiClient.archiveSystemsCustomEntry(campaignSlug, entry.slug),
-    onSuccess: (response) => {
-      setSystemsMessage(`Custom Systems entry archived: ${response.entry.title}.`);
-      setSystemsError(null);
-      void systemsQuery.refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setSystemsError(apiErrorMessage(error));
-      setSystemsMessage(null);
-    },
-  });
-
-  const restoreCustomMutation = useMutation({
-    mutationFn: (entry: CustomSystemsEntry) => apiClient.restoreSystemsCustomEntry(campaignSlug, entry.slug),
-    onSuccess: (response) => {
-      setSystemsMessage(`Custom Systems entry restored: ${response.entry.title}.`);
-      setSystemsError(null);
-      void systemsQuery.refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setSystemsError(apiErrorMessage(error));
-      setSystemsMessage(null);
-    },
-  });
-
   const payload = systemsQuery.data;
+  const {
+    archiveCustomMutation,
+    createCustomMutation,
+    restoreCustomMutation,
+    updateCustomMutation,
+    updateOverrideMutation,
+    updateSourcesMutation,
+  } = useDmContentSystemsMutations({
+    apiClient,
+    campaignSlug,
+    payload,
+    sourceDrafts,
+    acknowledgeProprietary,
+    overrideDraft,
+    customCreateDraft,
+    customEditDrafts,
+    setAuthRequired,
+    setSystemsMessage,
+    setSystemsError,
+    setAcknowledgeProprietary,
+    setOverrideDraft,
+    setCustomCreateDraft,
+    refetchSystems: () => {
+      void systemsQuery.refetch();
+    },
+  });
   const pageError = getApiErrorMessage(systemsQuery.error);
   const canManageSystems = Boolean(payload?.permissions.can_manage_systems);
   const allCustomEntries = useMemo(() => {
