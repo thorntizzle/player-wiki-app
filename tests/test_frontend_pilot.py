@@ -1296,6 +1296,27 @@ def test_gen2_combat_dm_status_omits_nested_selected_pc_detail_in_source() -> No
     assert "initialCharacterSlug={selectedCombatant.character_slug}" not in dm_status_source
 
 
+def test_combat_mutations_live_in_shared_hook() -> None:
+    route_source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    hook_source = Path("frontend/src/combatMutations.ts").read_text(encoding="utf-8")
+
+    assert 'import { useCombatMutations, type CombatConditionDraft } from "../combatMutations";' in route_source
+    assert "} = useCombatMutations({" in route_source
+    assert "export function useCombatMutations(" in hook_source
+    assert "apiClient.patchCombatantTurn" in hook_source
+    assert "apiClient.patchCombatantVitals" in hook_source
+    assert "apiClient.patchCombatantResources" in hook_source
+    assert "apiClient.addCombatPlayer" in hook_source
+    assert "apiClient.addCombatNpc" in hook_source
+    assert "apiClient.addCombatStatblock" in hook_source
+    assert "apiClient.addCombatSystemsMonster" in hook_source
+    assert "apiClient.searchCombatSystemsMonsters" in hook_source
+    assert 'queryClient.setQueryData(["combat", campaignSlug, activeCombatView, selectedCombatantId], response);' in hook_source
+    assert "const updateTurnMutation = useMutation" not in route_source
+    assert "apiClient.patchCombatantTurn" not in route_source
+    assert "apiClient.addCombatPlayer" not in route_source
+
+
 def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
     source = Path("frontend/src/components/CombatDmStatusPanel.tsx").read_text(encoding="utf-8")
 
