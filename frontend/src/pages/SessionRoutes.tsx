@@ -10,6 +10,7 @@ import type {
   SessionPayload,
 } from "../api/types";
 import { useApiClient } from "../apiClientContext";
+import { ToastNotice, useToastNotice } from "../components/feedback";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 import { formatTimestamp } from "../timeFormatting";
 
@@ -150,6 +151,7 @@ export function SessionPane({
   const [sendError, setSendError] = useState<string | null>(null);
   const [recipientScope, setRecipientScope] = useState<"global" | "dm_only" | "player">("global");
   const [recipientPlayerId, setRecipientPlayerId] = useState("");
+  const { clearToast, showToast, toastMessage, toastTone } = useToastNotice({ defaultTone: "success" });
   const recipientPlayerChoices = payload?.session_message_recipient_player_choices ?? [];
 
   useEffect(() => {
@@ -172,9 +174,11 @@ export function SessionPane({
     onSuccess: () => {
       setMessageDraft("");
       setSendError(null);
+      showToast("Message posted.", "success");
       refetch();
     },
     onError: (error) => {
+      clearToast();
       if (isAuthError(error)) {
         setAuthRequired(true);
       }
@@ -186,26 +190,32 @@ export function SessionPane({
     event.preventDefault();
     const body = messageDraft.trim();
     if (!body) {
+      clearToast();
       setSendError("Type a message first.");
       return;
     }
     if (!payload?.permissions.can_post_messages) {
+      clearToast();
       setSendError("You do not have permission to post messages.");
       return;
     }
     if (!payload?.active_session) {
+      clearToast();
       setSendError("No active session.");
       return;
     }
     if (recipientScope === "player" && !recipientPlayerChoices.length) {
+      clearToast();
       setSendError("No player recipients available.");
       return;
     }
     if (recipientScope === "player" && !recipientPlayerId) {
+      clearToast();
       setSendError("Choose a player recipient.");
       return;
     }
 
+    clearToast();
     const messagePayload: SessionMessagePostPayload = {
       body,
       recipient_scope: recipientScope,
@@ -217,26 +227,28 @@ export function SessionPane({
   };
 
   return (
-    <div className="page-layout session-layout session-layout--single">
-      <section className="session-column">
-        <SessionPaneChat
-          payload={payload}
-        />
-        <SessionPaneMessageComposer
-          payload={payload}
-          messageDraft={messageDraft}
-          setMessageDraft={setMessageDraft}
-          recipientScope={recipientScope}
-          setRecipientScope={setRecipientScope}
-          recipientPlayerId={recipientPlayerId}
-          setRecipientPlayerId={setRecipientPlayerId}
-          recipientPlayerChoices={recipientPlayerChoices}
-          sendError={sendError}
-          onSend={sendMessage}
-          isSending={postMessage.isPending}
-        />
-      </section>
-
-    </div>
+    <>
+      <ToastNotice message={toastMessage} tone={toastTone} />
+      <div className="page-layout session-layout session-layout--single">
+        <section className="session-column">
+          <SessionPaneChat
+            payload={payload}
+          />
+          <SessionPaneMessageComposer
+            payload={payload}
+            messageDraft={messageDraft}
+            setMessageDraft={setMessageDraft}
+            recipientScope={recipientScope}
+            setRecipientScope={setRecipientScope}
+            recipientPlayerId={recipientPlayerId}
+            setRecipientPlayerId={setRecipientPlayerId}
+            recipientPlayerChoices={recipientPlayerChoices}
+            sendError={sendError}
+            onSend={sendMessage}
+            isSending={postMessage.isPending}
+          />
+        </section>
+      </div>
+    </>
   );
 }

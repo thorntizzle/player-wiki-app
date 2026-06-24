@@ -2827,6 +2827,20 @@ def test_character_pane_status_messages_use_toast_overlay() -> None:
     assert "@keyframes toast-notice-fade" in styles
 
 
+def test_session_player_message_success_uses_toast_overlay() -> None:
+    source = Path("frontend/src/pages/SessionRoutes.tsx").read_text(encoding="utf-8")
+
+    assert 'import { ToastNotice, useToastNotice } from "../components/feedback";' in source
+    assert 'const { clearToast, showToast, toastMessage, toastTone } = useToastNotice({ defaultTone: "success" });' in source
+    assert 'showToast("Message posted.", "success");' in source
+    assert "<ToastNotice message={toastMessage} tone={toastTone} />" in source
+    assert 'sendError ? <p className="status status-error">{sendError}</p> : null' in source
+    assert 'setSendError("Type a message first.");' in source
+    assert 'setSendError("No active session.");' in source
+    assert 'statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null' not in source
+    assert "window.setTimeout(" not in source
+
+
 def test_mutation_heavy_gen2_routes_use_shared_toast_notice() -> None:
     toast_route_paths = [
         "frontend/src/pages/AccountSettingsPage.tsx",
@@ -2844,6 +2858,7 @@ def test_mutation_heavy_gen2_routes_use_shared_toast_notice() -> None:
         "frontend/src/pages/DmContentPage.tsx",
         "frontend/src/pages/DmContentSystemsLane.tsx",
         "frontend/src/pages/SessionDmPane.tsx",
+        "frontend/src/pages/SessionRoutes.tsx",
     ]
 
     for path in toast_route_paths:
