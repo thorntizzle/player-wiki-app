@@ -2647,6 +2647,78 @@ def test_dm_content_mutations_live_in_shared_hook() -> None:
     assert 'showToastMessage("Article staged.");' in hook_source
 
 
+def test_dm_content_destructive_actions_and_success_feedback_use_shared_chrome() -> None:
+    route_source = Path("frontend/src/pages/DmContentPage.tsx").read_text(encoding="utf-8")
+    hook_source = Path("frontend/src/dmContentMutations.ts").read_text(encoding="utf-8")
+    card_source = Path("frontend/src/components/DmContentCards.tsx").read_text(encoding="utf-8")
+    page_card_source = Path("frontend/src/components/DmPlayerWikiPageCard.tsx").read_text(encoding="utf-8")
+    staged_queue_source = Path("frontend/src/components/DmStagedArticleQueue.tsx").read_text(encoding="utf-8")
+
+    assert 'const { showToast, toastMessage, toastTone } = useToastNotice();' in route_source
+    assert "<ToastNotice message={toastMessage} tone={toastTone} />" in route_source
+    assert 'setUiMessage("Loading Player Wiki editor...");' in hook_source
+    assert re.findall(r'setUiMessage\("([^"]+)"\)', route_source + hook_source) == [
+        "Loading Player Wiki editor...",
+    ]
+
+    expected_toast_snippets = [
+        "Statblock saved:",
+        "Statblock updated:",
+        "Statblock deleted:",
+        "Condition saved:",
+        "Condition updated:",
+        "Condition deleted:",
+        "Player Wiki page created:",
+        "Player Wiki page updated:",
+        "Player Wiki page archived:",
+        "Player Wiki page deleted:",
+        "Editor loaded:",
+        "Article staged.",
+        "Article updated.",
+        "Article removed.",
+    ]
+    for snippet in expected_toast_snippets:
+        assert snippet in hook_source
+    assert 'status status-neutral">{uiMessage}</p>' in route_source
+    assert "saved:" not in route_source[route_source.index("{paneError ?"): route_source.index("<ToastNotice")]
+
+    for source, button_label, disabled_guard in (
+        (
+            card_source,
+            "Delete statblock",
+            "disabled={!canManageDmContent || !deleteConfirmed || isDeleting}",
+        ),
+        (
+            card_source,
+            "Delete condition",
+            "disabled={!canManageDmContent || !deleteConfirmed || isDeleting}",
+        ),
+        (
+            page_card_source,
+            "Unpublish/archive",
+            "disabled={!canManagePlayerWiki || isArchiving || !archiveConfirmed}",
+        ),
+        (
+            page_card_source,
+            "Delete file",
+            "disabled={!canManagePlayerWiki || !safety.can_hard_delete || !deleteConfirmed || isDeleting}",
+        ),
+        (
+            staged_queue_source,
+            "Delete article",
+            "disabled={!canManageSession || !deleteConfirmed || isDeleting}",
+        ),
+    ):
+        button_index = source.index(button_label)
+        confirmed_action_start = source.rfind("<form", 0, button_index)
+        confirmed_action_block = source[confirmed_action_start: source.index("</form>", button_index)]
+        assert "confirmed-action" in confirmed_action_block
+        assert "Confirm " in confirmed_action_block
+        assert disabled_guard in confirmed_action_block
+        assert 'className="ghost-button"' in confirmed_action_block
+        assert 'className="button-danger"' not in confirmed_action_block
+
+
 def test_dm_content_systems_management_form_field_chrome() -> None:
     source = Path("frontend/src/pages/DmContentSystemsLane.tsx").read_text(encoding="utf-8")
     helper_start = source.index("const renderCustomFields = ({")
