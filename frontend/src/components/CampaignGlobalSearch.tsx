@@ -205,6 +205,19 @@ export function CampaignGlobalSearch({ campaignSlug }: { campaignSlug: string })
   };
 
   useEffect(() => {
+    if (!isDialogOpen) {
+      return;
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeDialog();
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isDialogOpen]);
+
+  useEffect(() => {
     if (!campaignSlug) {
       setQuery("");
       clearSearchState("");

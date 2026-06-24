@@ -378,6 +378,11 @@ def test_app_shell_search_auth_and_loading_live_in_shared_modules() -> None:
     assert 'return `Found ${resultCount} matching reference${resultCount === 1 ? "" : "s"}.`;' in search_source
     assert 'className="campaign-global-search"' in search_source
     assert "previewCampaignReference" in search_source
+    assert 'ref={closeButtonRef}' in search_source
+    assert 'closeButtonRef.current?.focus({ preventScroll: true });' in search_source
+    assert 'if (event.key === "Escape")' in search_source
+    assert "closeDialog();" in search_source
+    assert "focusTarget.focus({ preventScroll: true });" in search_source
     assert ".campaign-global-search-result:focus-visible" in styles
     assert "outline: 2px solid var(--focus-ring);" in styles[
         styles.index(".campaign-global-search-result:hover,"):styles.index(".campaign-global-search-result__title")
