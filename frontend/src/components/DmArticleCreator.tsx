@@ -334,10 +334,10 @@ export function DmArticleCreator({
               {wikiSearchStatusText}
             </p>
             <div className="wiki-selection">
-              <p className="status status-neutral">
+              <p className="meta session-article-selected-source">
                 {selectedSourceRef
                   ? selectedSourceLabel
-                    ? `Selected source: ${selectedSourceLabel}`
+                    ? `Selected: ${selectedSourceLabel}`
                     : "Selected source ready."
                   : "No source selected"}
               </p>

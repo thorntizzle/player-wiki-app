@@ -2231,6 +2231,8 @@ def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
     assert "Search wiki / systems" not in creator_markup
     assert "Lookup" in creator_markup
     assert ".session-article-mode-help" in styles
+    assert 'className="meta session-article-selected-source"' in creator_markup
+    assert "Selected source:" not in creator_markup
     assert 'className="field session-file-field"' in dropzone_source
     assert 'className="session-file-input"' in dropzone_source
     assert 'className={`session-file-dropzone${isDragging ? " is-dragging" : ""}`}' in dropzone_source
@@ -2252,6 +2254,23 @@ def test_session_dm_article_source_search_status_is_specific() -> None:
     assert "Search complete." not in source
     assert 'return `Found ${resultCount} matching article${resultCount === 1 ? "" : "s"}.`;' in source
     assert 'setSourceStatus(formatSourceSearchStatus(response.message, response.results.length));' in source
+
+
+def test_session_article_source_metadata_is_action_or_recovery_only() -> None:
+    source = Path("frontend/src/components/SessionArticleDisplay.tsx").read_text(encoding="utf-8")
+    source_line = source[
+        source.index("export function SessionArticleSourceLine"):
+        source.index("export function SessionArticleReferenceActions")
+    ]
+    actions = source[source.index("export function SessionArticleReferenceActions"):]
+
+    assert "if (sourceTitle && !sourceUrl)" in source_line
+    assert "Pulled from" not in source_line
+    assert 'const sourceContext = sourceLabel ? `Source (${sourceLabel})` : "Source";' in source_line
+    assert "{sourceContext}: {sourceTitle}" in source_line
+    assert "article.source?.missing_message" in source_line
+    assert "if (sourceUrl)" in actions
+    assert "{article.source?.action_label || \"View source\"}" in actions
 
 
 def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> None:

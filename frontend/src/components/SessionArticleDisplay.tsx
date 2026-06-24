@@ -37,12 +37,12 @@ export function SessionArticleSourceLine({ article }: { article: SessionArticle 
   const sourceKind = article.source_kind?.trim() || "";
   const sourceUrl = getArticleUrl(article.links?.source_url);
   const sourceLabel = getArticleSourceKindLabel(article);
+  const sourceContext = sourceLabel ? `Source (${sourceLabel})` : "Source";
 
-  if (sourceTitle) {
+  if (sourceTitle && !sourceUrl) {
     return (
       <p className="article-context">
-        Pulled from {sourceLabel || "source"}:{" "}
-        {sourceUrl ? <a href={sourceUrl}>{sourceTitle}</a> : sourceTitle}
+        {sourceContext}: {sourceTitle}
       </p>
     );
   }

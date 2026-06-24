@@ -900,6 +900,10 @@ a:hover {
   margin: -0.25rem 0 0;
 }
 
+.session-article-selected-source {
+  margin: 0;
+}
+
 .session-form-mode-radio {
   position: absolute;
   opacity: 0;
