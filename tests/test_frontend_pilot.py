@@ -1194,6 +1194,7 @@ def test_account_settings_page_removes_flask_account_fallback_link() -> None:
 
     assert "Flask account" not in account_settings_markup
     assert 'className="ghost-button" href="/campaigns">' in account_settings_markup
+    assert "account-sidebar" not in account_settings_markup
     assert "className=\"stack-form\" onSubmit={handleThemeSubmit}>" in account_settings_markup
     assert "className=\"stack-form\" onSubmit={handleChatOrderSubmit}>" in account_settings_markup
     assert "Save theme" in account_settings_markup
@@ -1220,6 +1221,7 @@ def test_account_settings_page_removes_flask_account_fallback_link() -> None:
 
 def test_account_option_css_matches_flask_parity() -> None:
     source = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+    assert "account-sidebar" not in source
 
     def css_block(selector: str) -> str:
         selector_start = source.index(f"{selector} {{")

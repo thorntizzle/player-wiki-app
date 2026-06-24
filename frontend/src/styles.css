@@ -1148,18 +1148,16 @@ a:hover {
 .page-layout.account-layout {
   display: grid;
   gap: 1rem;
-  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.85fr);
+  max-width: 72rem;
 }
 
 .account-panel,
-.account-sidebar,
 .account-settings-group {
   display: grid;
   gap: 1rem;
 }
 
-.card.account-panel,
-.card.account-sidebar {
+.card.account-panel {
   padding: 1.25rem;
   border-radius: 22px;
   box-shadow: var(--shadow);
@@ -1239,17 +1237,6 @@ a:hover {
   height: 1rem;
   border-radius: 999px;
   display: inline-block;
-}
-
-.account-sidebar .ghost-button {
-  justify-self: start;
-  display: inline-flex;
-  width: fit-content;
-  align-items: center;
-}
-
-.account-sidebar .meta {
-  margin-bottom: 0.25rem;
 }
 
 .card.admin-panel,

@@ -1300,7 +1300,6 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
                 """() => {
                     const hero = document.querySelector(".hero.compact.account-hero");
                     const panel = document.querySelector(".card.account-panel");
-                    const sidebar = document.querySelector(".card.account-sidebar");
                     const firstOption = document.querySelector(".theme-option");
                     const firstSwatch = document.querySelector(".theme-option__swatch");
                     const firstOptionGrid = document.querySelector(".theme-grid");
@@ -1313,15 +1312,13 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
                         heroBoxShadow: hero ? window.getComputedStyle(hero).boxShadow : "none",
                         panelBorderTop: panel ? window.getComputedStyle(panel).borderTopWidth : "0px",
                         panelBoxShadow: panel ? window.getComputedStyle(panel).boxShadow : "none",
-                        sidebarBorderTop: sidebar ? window.getComputedStyle(sidebar).borderTopWidth : "0px",
-                        sidebarBoxShadow: sidebar ? window.getComputedStyle(sidebar).boxShadow : "none",
+                        hasAccountSidebar: Boolean(document.querySelector(".card.account-sidebar")),
                         hasLegacyFormShell: Boolean(document.querySelector("form.panel.account-settings-form")),
                         hasLegacySidebarShell: Boolean(document.querySelector("aside.panel.account-settings-sidebar")),
                         firstOptionLeft: firstOption ? firstOptionRect.left : 0,
                         firstOptionTop: firstOption ? firstOptionRect.top : 0,
                         hasSwatches: Boolean(firstSwatch),
                         panelRadius: panel ? window.getComputedStyle(panel).borderRadius : "0px",
-                        sidebarRadius: sidebar ? window.getComputedStyle(sidebar).borderRadius : "0px",
                         optionGridColumns: firstOptionGrid ? countGridTracks(window.getComputedStyle(firstOptionGrid).gridTemplateColumns) : 0,
                         accountPanelHeaderCount: document.querySelectorAll(
                             ".card.account-panel .account-settings-group .panel-header"
@@ -1338,11 +1335,9 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
             assert account_hero_styles["heroBorderTop"] == "0px"
             assert account_hero_styles["heroBoxShadow"] == "none"
             assert float(account_hero_styles["panelBorderTop"][:-2]) > 0
-            assert float(account_hero_styles["sidebarBorderTop"][:-2]) > 0
             assert account_hero_styles["panelBoxShadow"] != "none"
-            assert account_hero_styles["sidebarBoxShadow"] != "none"
             assert float(account_hero_styles["panelRadius"][:-2]) > 0
-            assert float(account_hero_styles["sidebarRadius"][:-2]) > 0
+            assert account_hero_styles["hasAccountSidebar"] is False
             assert account_hero_styles["accountPanelHeaderCount"] == 0
             assert account_hero_styles["hasAccountPanelHeader"] is False
             assert account_hero_styles["hasSwatches"] is True
@@ -1433,7 +1428,7 @@ def test_gen2_account_settings_saves_preferences_and_updates_theme(
                     };
                 }"""
             )
-            assert mobile_layout["count"] == 2
+            assert mobile_layout["count"] == 1
             assert mobile_layout["scrollWidth"] <= mobile_layout["innerWidth"] + 1
             assert mobile_layout["maxItemWidth"] <= mobile_layout["innerWidth"] + 1
             assert mobile_layout["stacked"] is True

@@ -129,6 +129,11 @@ export function AccountSettingsPage() {
           Current theme: {selectedTheme?.label ?? preferences?.theme_key ?? "Loading"}
           {user?.is_admin ? " | App admin" : ""}
         </p>
+        <div className="hero-actions">
+          <a className="ghost-button" href="/campaigns">
+            Back to campaigns
+          </a>
+        </div>
       </section>
 
       <ApiErrorNotice isLoading={settingsQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
@@ -226,21 +231,6 @@ export function AccountSettingsPage() {
               </form>
             </section>
           </article>
-
-          <aside className="card account-sidebar">
-            <h2>Account</h2>
-            <p>
-              <strong>{user?.display_name}</strong>
-            </p>
-            <p className="meta">{user?.email}</p>
-            {user?.is_admin ? <p className="meta-badge">App admin</p> : null}
-            <p className="meta">
-              Theme and live-session chat preferences are stored in the auth database and applied on every signed-in request.
-            </p>
-            <a className="ghost-button" href="/campaigns">
-              Back to campaigns
-            </a>
-          </aside>
         </section>
       ) : null}
     </>
