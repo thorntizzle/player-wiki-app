@@ -51,10 +51,14 @@ export function DmContentStatblockCard({
           <h3>{statblock.title}</h3>
         </div>
         <div className="badge-list dm-statblock-badges">
-          {statblock.armor_class !== null ? <span className="meta-badge">AC {statblock.armor_class}</span> : null}
-          <span className="meta-badge">HP {statblock.max_hp}</span>
-          <span className="meta-badge">Speed {statblock.speed_text}</span>
-          <span className="meta-badge">Init {formatInitiativeBonus(statblock.initiative_bonus)}</span>
+          {statblock.armor_class !== null ? (
+            <span className="meta-badge dm-statblock-value-badge">AC {statblock.armor_class}</span>
+          ) : null}
+          <span className="meta-badge dm-statblock-value-badge">HP {statblock.max_hp}</span>
+          <span className="meta-badge dm-statblock-value-badge">Speed {statblock.speed_text}</span>
+          <span className="meta-badge dm-statblock-value-badge">
+            Init {formatInitiativeBonus(statblock.initiative_bonus)}
+          </span>
         </div>
       </div>
       <details className="feature-detail dm-maintenance-detail">

@@ -3923,9 +3923,9 @@ def test_gen2_dm_content_browser_statblock_workflow(
             if not view_detail.evaluate("element => element.open"):
                 view_detail.locator("summary").click()
             expect(view_detail.locator("pre.dm-content-preview")).to_be_visible()
-            expect(statblock_card.locator(".meta-badge", has_text="AC 14")).to_be_visible()
-            expect(statblock_card.locator(".meta-badge", has_text="HP 28")).to_be_visible()
-            expect(statblock_card.locator(".meta-badge", has_text="Init +2")).to_be_visible()
+            expect(statblock_card.locator(".dm-statblock-value-badge", has_text="AC 14")).to_be_visible()
+            expect(statblock_card.locator(".dm-statblock-value-badge", has_text="HP 28")).to_be_visible()
+            expect(statblock_card.locator(".dm-statblock-value-badge", has_text="Init +2")).to_be_visible()
             expect(statblock_card.get_by_text("Combat seed source")).to_have_count(0)
             maintenance_detail = statblock_card.locator("details.dm-maintenance-detail")
             expect(maintenance_detail.locator("summary")).to_be_visible()

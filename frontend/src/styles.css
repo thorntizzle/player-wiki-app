@@ -2826,6 +2826,14 @@ textarea:focus-visible {
   margin: 0;
 }
 
+.dm-statblock-value-badge {
+  border-color: var(--border-accent);
+  background: var(--surface-accent-soft);
+  color: var(--accent-deep);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
 .dm-statblock-groups .section-block {
   background: var(--surface-soft);
 }
