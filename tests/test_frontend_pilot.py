@@ -426,15 +426,17 @@ def test_character_detail_dialog_state_builders_live_in_shared_utils() -> None:
 def test_character_number_input_parser_lives_in_shared_utils() -> None:
     source = Path("frontend/src/characterPaneUtils.ts").read_text(encoding="utf-8")
     route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    submit_handler_source = Path("frontend/src/characterPaneSubmitHandlers.ts").read_text(encoding="utf-8")
 
     assert "export function parseCharacterNumberInput" in source
     assert "const parsed = Number(value);" in source
     assert "Number.isFinite(parsed)" in source
     assert 'return { value: null, errorMessage: `Enter a valid ${label}.` };' in source
     assert "return { value: parsed, errorMessage: null };" in source
-    assert "parseCharacterNumberInput(value, label)" in route_source
-    assert "setErrorMessage(result.errorMessage)" in route_source
-    assert "setStatusMessage(null)" in route_source
+    assert "parseCharacterNumberInput(value, label)" in submit_handler_source
+    assert "setErrorMessage(result.errorMessage)" in submit_handler_source
+    assert "setStatusMessage(null)" in submit_handler_source
+    assert "parseCharacterNumberInput(value, label)" not in route_source
 
 
 def test_character_read_section_url_helpers_live_in_shared_utils() -> None:
@@ -2809,6 +2811,31 @@ def test_character_pane_mutations_live_in_shared_hook() -> None:
     assert "useMutation({" not in route_source
     assert "apiErrorMessage(error)" not in route_source
     assert "queryClient.setQueryData" not in route_source
+
+
+def test_character_pane_submit_handlers_live_in_shared_hook() -> None:
+    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    handler_source = Path("frontend/src/characterPaneSubmitHandlers.ts").read_text(encoding="utf-8")
+
+    assert "export function useCharacterPaneSubmitHandlers" in handler_source
+    assert "parseCharacterNumberInput(value, label)" in handler_source
+    assert "readBinaryAsBase64(file" in handler_source
+    assert "xianxiaInventoryPayloadFromDraft(newXianxiaInventoryDraft)" in handler_source
+    assert "mutations.patchVitals.mutate" in handler_source
+    assert "mutations.patchSpellSlot.mutate" in handler_source
+    assert "mutations.patchEquipmentState.mutate" in handler_source
+    assert "mutations.postXianxiaDaoUseRecord.mutate" in handler_source
+    assert 'player_notes_markdown: notesDraft.notes' in handler_source
+
+    assert 'import { useCharacterPaneSubmitHandlers } from "../characterPaneSubmitHandlers";' in route_source
+    assert "useCharacterPaneSubmitHandlers({" in route_source
+    assert "mutations: characterPaneMutations" in route_source
+    assert "const submitVitals = " not in route_source
+    assert "const submitXianxiaDaoUseRequest = " not in route_source
+    assert "const submitCurrency = " not in route_source
+    assert "parseCharacterNumberInput(value, label)" not in route_source
+    assert "xianxiaInventoryPayloadFromDraft" not in route_source
+    assert "readBinaryAsBase64(file" not in route_source
 
 
 def test_character_dnd_overview_section_uses_flask_style_glance_rows() -> None:
