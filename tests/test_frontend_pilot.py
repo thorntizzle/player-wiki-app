@@ -907,6 +907,40 @@ def test_admin_activity_chrome_lives_in_component_module() -> None:
     assert 'className="ghost-button" href={data.export_url}' in activity_source
 
 
+def test_admin_mutation_feedback_and_audit_controls_use_shared_chrome() -> None:
+    route_source = Path("frontend/src/pages/AdminRoutes.tsx").read_text(encoding="utf-8")
+    hook_source = Path("frontend/src/adminMutations.ts").read_text(encoding="utf-8")
+    activity_source = Path("frontend/src/components/AdminActivity.tsx").read_text(encoding="utf-8")
+
+    assert route_source.count("const { showToast, toastMessage, toastTone } = useToastNotice();") == 2
+    assert route_source.count("setStatusMessage: showToast") == 2
+    assert route_source.count("<ToastNotice message={toastMessage} tone={toastTone} />") == 2
+    assert "statusMessage ?" not in route_source
+    assert "setStatusMessage(response.message || \"Invite created.\");" in hook_source
+    assert "setStatusMessage(response.message || \"Admin user saved.\");" in hook_source
+    assert "setStatusMessage(response.message || \"User deleted.\");" in hook_source
+    assert "setErrorMessage(apiErrorMessage(error));" in hook_source
+
+    filter_source = activity_source[
+        activity_source.index("export function AdminActivityFilters"):
+        activity_source.index("export function AdminActivityList")
+    ]
+    pagination_source = activity_source[activity_source.index("export function AdminPagination"):]
+
+    assert '<form method="get" action={action} className="audit-filter-form admin-filter-form">' in filter_source
+    assert '<button type="submit" className="button">' in filter_source
+    assert 'Filter activity' in filter_source
+    assert '<a className="ghost-button" href={clearHref}>' in filter_source
+    assert '<a className="ghost-button" href={data.export_url}>' in filter_source
+    assert 'className="button button-secondary"' not in filter_source
+
+    assert 'className="pagination-bar admin-pagination"' in pagination_source
+    assert '<a className="ghost-button" href={pagination.previous_url}>' in pagination_source
+    assert '<a className="ghost-button" href={pagination.next_url}>' in pagination_source
+    assert "<button" not in pagination_source
+    assert 'className="button button-secondary"' not in pagination_source
+
+
 def test_admin_mutations_live_in_shared_hook() -> None:
     route_source = Path("frontend/src/pages/AdminRoutes.tsx").read_text(encoding="utf-8")
     hook_source = Path("frontend/src/adminMutations.ts").read_text(encoding="utf-8")
