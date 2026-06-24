@@ -445,6 +445,34 @@ def test_shared_state_cues_do_not_depend_on_color_only() -> None:
     assert ".combat-workspace-button--active {" in styles
 
 
+def test_shared_text_fit_css_prevents_button_and_badge_overflow() -> None:
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+    user_badge_block = styles[styles.index(".user-badge {"):styles.index(".user-badge .meta")]
+    button_fit_block = styles[styles.index(".button,\n.button-link,"):styles.index(".button:hover")]
+
+    assert "flex-wrap: wrap;" in user_badge_block
+    assert "min-width: 0;" in user_badge_block
+    assert "max-width: 100%;" in user_badge_block
+    assert "white-space: normal;" in user_badge_block
+    assert "overflow-wrap: anywhere;" in user_badge_block
+
+    for selector in [
+        ".button,",
+        ".button-link,",
+        ".button-danger,",
+        ".ghost-button,",
+        ".tab-button,",
+        ".segmented-button,",
+        ".combat-workspace-button",
+    ]:
+        assert selector in button_fit_block
+    assert "min-width: 0;" in button_fit_block
+    assert "max-width: 100%;" in button_fit_block
+    assert "white-space: normal;" in button_fit_block
+    assert "overflow-wrap: anywhere;" in button_fit_block
+    assert "text-align: center;" in button_fit_block
+
+
 def test_character_navigation_card_uses_flask_style_chrome_in_source() -> None:
     source = Path("frontend/src/components/CharacterNavigationCard.tsx").read_text(encoding="utf-8")
 

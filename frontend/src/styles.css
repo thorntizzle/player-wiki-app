@@ -287,7 +287,10 @@ a:hover {
 .user-badge {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.45rem;
+  min-width: 0;
+  max-width: 100%;
   min-height: 2.5rem;
   padding: 0.55rem 0.85rem;
   border: 1px solid var(--border);
@@ -295,7 +298,8 @@ a:hover {
   background: var(--surface-raised);
   color: var(--ink);
   font-size: 0.92rem;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .user-badge .meta {
@@ -2482,6 +2486,20 @@ a:hover {
   color: var(--button-ink);
   font-weight: 700;
   cursor: pointer;
+}
+
+.button,
+.button-link,
+.button-danger,
+.ghost-button,
+.tab-button,
+.segmented-button,
+.combat-workspace-button {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .button:hover {
