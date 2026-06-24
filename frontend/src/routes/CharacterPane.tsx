@@ -28,24 +28,10 @@ import type {
   CharacterVitalsPatchPayload,
 } from "../api/types";
 import type {
-  CharacterControlsDraft,
   CharacterEquipmentDraft,
-  CharacterNotesDraft,
-  CharacterPortraitDraft,
-  CharacterVitalsDraft,
-  CharacterXianxiaActiveStateDraft,
-  CharacterXianxiaDaoUseRequestDraft,
-  CharacterXianxiaVitalsDraft,
 } from "../characterPaneDrafts";
 import {
-  buildCharacterPaneDraftSnapshot,
-  emptyCharacterControlsDraft,
-  emptyCharacterNotesDraft,
-  emptyCharacterPortraitDraft,
-  emptyCharacterVitalsDraft,
-  emptyCharacterXianxiaActiveStateDraft,
-  emptyCharacterXianxiaDaoUseRequestDraft,
-  emptyCharacterXianxiaVitalsDraft,
+  useCharacterPaneDraftState,
 } from "../characterPaneDrafts";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 import { queryClient, useApiClient } from "../apiClientContext";
@@ -112,30 +98,6 @@ export function CharacterPane({
   const { apiClient, setAuthRequired } = useApiClient();
   const [selectedSlug, setSelectedSlug] = useState<string | null>(initialCharacterSlug);
   const [activeCharacterSection, setActiveCharacterSection] = useState<CharacterSection>(initialSection ?? "overview");
-  const [vitalsDraft, setVitalsDraft] = useState<CharacterVitalsDraft>(emptyCharacterVitalsDraft);
-  const [xianxiaVitalsDraft, setXianxiaVitalsDraft] = useState<CharacterXianxiaVitalsDraft>(
-    emptyCharacterXianxiaVitalsDraft,
-  );
-  const [xianxiaActiveDraft, setXianxiaActiveDraft] = useState<CharacterXianxiaActiveStateDraft>(
-    emptyCharacterXianxiaActiveStateDraft,
-  );
-  const [notesDraft, setNotesDraft] = useState<CharacterNotesDraft>(emptyCharacterNotesDraft);
-  const [resourceDrafts, setResourceDrafts] = useState<Record<string, string>>({});
-  const [spellSlotDrafts, setSpellSlotDrafts] = useState<Record<string, string>>({});
-  const [inventoryDrafts, setInventoryDrafts] = useState<Record<string, string>>({});
-  const [equipmentDrafts, setEquipmentDrafts] = useState<Record<string, CharacterEquipmentDraft>>({});
-  const [xianxiaInventoryDrafts, setXianxiaInventoryDrafts] = useState<Record<string, CharacterXianxiaInventoryDraft>>({});
-  const [newXianxiaInventoryDraft, setNewXianxiaInventoryDraft] = useState<CharacterXianxiaInventoryDraft>(
-    xianxiaInventoryDraftFromItem(),
-  );
-  const [xianxiaDaoRequestDraft, setXianxiaDaoRequestDraft] = useState<CharacterXianxiaDaoUseRequestDraft>(
-    emptyCharacterXianxiaDaoUseRequestDraft,
-  );
-  const [xianxiaDaoUseNotesDrafts, setXianxiaDaoUseNotesDrafts] = useState<Record<string, string>>({});
-  const [arcaneArmorDraft, setArcaneArmorDraft] = useState(false);
-  const [currencyDraft, setCurrencyDraft] = useState<Record<string, string>>({});
-  const [portraitDraft, setPortraitDraft] = useState<CharacterPortraitDraft>(emptyCharacterPortraitDraft);
-  const [controlsDraft, setControlsDraft] = useState<CharacterControlsDraft>(emptyCharacterControlsDraft);
   const [restPreview, setRestPreview] = useState<CharacterRestPreviewResponse["preview"] | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -189,6 +151,45 @@ export function CharacterPane({
     retry: false,
   });
 
+  const {
+    arcaneArmorEnabled: arcaneArmorDraft,
+    controlsDraft,
+    currencyDraft,
+    equipmentDrafts,
+    inventoryDrafts,
+    newXianxiaInventoryDraft,
+    notesDraft,
+    portraitDraft,
+    resourceDrafts,
+    setArcaneArmorDraft,
+    setControlsDraft,
+    setCurrencyDraft,
+    setEquipmentDrafts,
+    setInventoryDrafts,
+    setNewXianxiaInventoryDraft,
+    setNotesDraft,
+    setPortraitDraft,
+    setResourceDrafts,
+    setSpellSlotDrafts,
+    setVitalsDraft,
+    setXianxiaActiveDraft,
+    setXianxiaDaoRequestDraft,
+    setXianxiaDaoUseNotesDrafts,
+    setXianxiaInventoryDrafts,
+    setXianxiaVitalsDraft,
+    spellSlotDrafts,
+    vitalsDraft,
+    xianxiaActiveDraft,
+    xianxiaDaoRequestDraft,
+    xianxiaDaoUseNotesDrafts,
+    xianxiaInventoryDrafts,
+    xianxiaVitalsDraft,
+  } = useCharacterPaneDraftState({
+    character: detailQuery.data?.character,
+    portraitFileInputRef,
+    selectedSlug,
+  });
+
   useEffect(() => {
     if (listQuery.error && isAuthError(listQuery.error)) {
       setAuthRequired(true);
@@ -213,35 +214,6 @@ export function CharacterPane({
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [detailDialog]);
-
-  useEffect(() => {
-    if (!detailQuery.data) {
-      return;
-    }
-    const draftSnapshot = buildCharacterPaneDraftSnapshot(detailQuery.data.character);
-    setEquipmentDrafts(draftSnapshot.equipmentDrafts);
-    setXianxiaInventoryDrafts(draftSnapshot.xianxiaInventoryDrafts);
-    setXianxiaDaoUseNotesDrafts(draftSnapshot.xianxiaDaoUseNotesDrafts);
-    setXianxiaDaoRequestDraft(emptyCharacterXianxiaDaoUseRequestDraft());
-    setArcaneArmorDraft(draftSnapshot.arcaneArmorEnabled);
-    setVitalsDraft(draftSnapshot.vitalsDraft);
-    setXianxiaVitalsDraft(draftSnapshot.xianxiaVitalsDraft);
-    setXianxiaActiveDraft(draftSnapshot.xianxiaActiveDraft);
-    setNotesDraft(draftSnapshot.notesDraft);
-    setResourceDrafts(draftSnapshot.resourceDrafts);
-    setSpellSlotDrafts(draftSnapshot.spellSlotDrafts);
-    setInventoryDrafts(draftSnapshot.inventoryDrafts);
-    setCurrencyDraft(draftSnapshot.currencyDraft);
-    setPortraitDraft(draftSnapshot.portraitDraft);
-    setControlsDraft(draftSnapshot.controlsDraft);
-    if (portraitFileInputRef.current) {
-      portraitFileInputRef.current.value = "";
-    }
-  }, [
-    detailQuery.data?.character.state_record.revision,
-    detailQuery.data?.character.controls?.assignment?.user_id,
-    selectedSlug,
-  ]);
 
   const detail = detailQuery.data as CharacterDetailResponse | undefined;
   const detailRecord = detail?.character;

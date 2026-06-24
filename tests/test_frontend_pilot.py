@@ -2495,6 +2495,19 @@ def test_character_pane_status_messages_use_toast_overlay() -> None:
     assert "@keyframes toast-notice-fade" in styles
 
 
+def test_character_pane_draft_state_lives_in_shared_hook() -> None:
+    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    draft_source = Path("frontend/src/characterPaneDrafts.ts").read_text(encoding="utf-8")
+
+    assert "export function useCharacterPaneDraftState" in draft_source
+    assert "const draftSnapshot = buildCharacterPaneDraftSnapshot(character);" in draft_source
+    assert "setXianxiaDaoRequestDraft(emptyCharacterXianxiaDaoUseRequestDraft());" in draft_source
+    assert "portraitFileInputRef.current.value = \"\";" in draft_source
+    assert "useCharacterPaneDraftState({" in route_source
+    assert "buildCharacterPaneDraftSnapshot(detailQuery.data.character)" not in route_source
+    assert "setEquipmentDrafts(draftSnapshot.equipmentDrafts)" not in route_source
+
+
 def test_character_dnd_overview_section_uses_flask_style_glance_rows() -> None:
     route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     section_markup = Path("frontend/src/components/CharacterDndOverviewSection.tsx").read_text(encoding="utf-8")

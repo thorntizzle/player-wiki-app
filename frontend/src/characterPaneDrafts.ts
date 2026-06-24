@@ -1,3 +1,4 @@
+import { useEffect, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { CharacterRecord } from "./api/types";
 import { asRecord, asRecordArray, readNumber, readString } from "./characterValueUtils";
 import {
@@ -78,6 +79,124 @@ export interface CharacterPaneDraftSnapshot {
   currencyDraft: Record<string, string>;
   portraitDraft: CharacterPortraitDraft;
   controlsDraft: CharacterControlsDraft;
+}
+
+export interface CharacterPaneDraftState extends CharacterPaneDraftSnapshot {
+  xianxiaDaoRequestDraft: CharacterXianxiaDaoUseRequestDraft;
+  newXianxiaInventoryDraft: CharacterXianxiaInventoryDraft;
+  setVitalsDraft: Dispatch<SetStateAction<CharacterVitalsDraft>>;
+  setXianxiaVitalsDraft: Dispatch<SetStateAction<CharacterXianxiaVitalsDraft>>;
+  setXianxiaActiveDraft: Dispatch<SetStateAction<CharacterXianxiaActiveStateDraft>>;
+  setNotesDraft: Dispatch<SetStateAction<CharacterNotesDraft>>;
+  setResourceDrafts: Dispatch<SetStateAction<Record<string, string>>>;
+  setSpellSlotDrafts: Dispatch<SetStateAction<Record<string, string>>>;
+  setInventoryDrafts: Dispatch<SetStateAction<Record<string, string>>>;
+  setEquipmentDrafts: Dispatch<SetStateAction<Record<string, CharacterEquipmentDraft>>>;
+  setXianxiaInventoryDrafts: Dispatch<SetStateAction<Record<string, CharacterXianxiaInventoryDraft>>>;
+  setNewXianxiaInventoryDraft: Dispatch<SetStateAction<CharacterXianxiaInventoryDraft>>;
+  setXianxiaDaoRequestDraft: Dispatch<SetStateAction<CharacterXianxiaDaoUseRequestDraft>>;
+  setXianxiaDaoUseNotesDrafts: Dispatch<SetStateAction<Record<string, string>>>;
+  setArcaneArmorDraft: Dispatch<SetStateAction<boolean>>;
+  setCurrencyDraft: Dispatch<SetStateAction<Record<string, string>>>;
+  setPortraitDraft: Dispatch<SetStateAction<CharacterPortraitDraft>>;
+  setControlsDraft: Dispatch<SetStateAction<CharacterControlsDraft>>;
+}
+
+export function useCharacterPaneDraftState({
+  character,
+  portraitFileInputRef,
+  selectedSlug,
+}: {
+  character?: CharacterRecord;
+  portraitFileInputRef: RefObject<HTMLInputElement | null>;
+  selectedSlug: string | null;
+}): CharacterPaneDraftState {
+  const [vitalsDraft, setVitalsDraft] = useState<CharacterVitalsDraft>(emptyCharacterVitalsDraft);
+  const [xianxiaVitalsDraft, setXianxiaVitalsDraft] = useState<CharacterXianxiaVitalsDraft>(
+    emptyCharacterXianxiaVitalsDraft,
+  );
+  const [xianxiaActiveDraft, setXianxiaActiveDraft] = useState<CharacterXianxiaActiveStateDraft>(
+    emptyCharacterXianxiaActiveStateDraft,
+  );
+  const [notesDraft, setNotesDraft] = useState<CharacterNotesDraft>(emptyCharacterNotesDraft);
+  const [resourceDrafts, setResourceDrafts] = useState<Record<string, string>>({});
+  const [spellSlotDrafts, setSpellSlotDrafts] = useState<Record<string, string>>({});
+  const [inventoryDrafts, setInventoryDrafts] = useState<Record<string, string>>({});
+  const [equipmentDrafts, setEquipmentDrafts] = useState<Record<string, CharacterEquipmentDraft>>({});
+  const [xianxiaInventoryDrafts, setXianxiaInventoryDrafts] = useState<Record<string, CharacterXianxiaInventoryDraft>>(
+    {},
+  );
+  const [newXianxiaInventoryDraft, setNewXianxiaInventoryDraft] = useState<CharacterXianxiaInventoryDraft>(
+    xianxiaInventoryDraftFromItem(),
+  );
+  const [xianxiaDaoRequestDraft, setXianxiaDaoRequestDraft] = useState<CharacterXianxiaDaoUseRequestDraft>(
+    emptyCharacterXianxiaDaoUseRequestDraft,
+  );
+  const [xianxiaDaoUseNotesDrafts, setXianxiaDaoUseNotesDrafts] = useState<Record<string, string>>({});
+  const [arcaneArmorDraft, setArcaneArmorDraft] = useState(false);
+  const [currencyDraft, setCurrencyDraft] = useState<Record<string, string>>({});
+  const [portraitDraft, setPortraitDraft] = useState<CharacterPortraitDraft>(emptyCharacterPortraitDraft);
+  const [controlsDraft, setControlsDraft] = useState<CharacterControlsDraft>(emptyCharacterControlsDraft);
+
+  useEffect(() => {
+    if (!character) {
+      return;
+    }
+    const draftSnapshot = buildCharacterPaneDraftSnapshot(character);
+    setEquipmentDrafts(draftSnapshot.equipmentDrafts);
+    setXianxiaInventoryDrafts(draftSnapshot.xianxiaInventoryDrafts);
+    setXianxiaDaoUseNotesDrafts(draftSnapshot.xianxiaDaoUseNotesDrafts);
+    setXianxiaDaoRequestDraft(emptyCharacterXianxiaDaoUseRequestDraft());
+    setArcaneArmorDraft(draftSnapshot.arcaneArmorEnabled);
+    setVitalsDraft(draftSnapshot.vitalsDraft);
+    setXianxiaVitalsDraft(draftSnapshot.xianxiaVitalsDraft);
+    setXianxiaActiveDraft(draftSnapshot.xianxiaActiveDraft);
+    setNotesDraft(draftSnapshot.notesDraft);
+    setResourceDrafts(draftSnapshot.resourceDrafts);
+    setSpellSlotDrafts(draftSnapshot.spellSlotDrafts);
+    setInventoryDrafts(draftSnapshot.inventoryDrafts);
+    setCurrencyDraft(draftSnapshot.currencyDraft);
+    setPortraitDraft(draftSnapshot.portraitDraft);
+    setControlsDraft(draftSnapshot.controlsDraft);
+    if (portraitFileInputRef.current) {
+      portraitFileInputRef.current.value = "";
+    }
+  }, [character?.state_record.revision, character?.controls?.assignment?.user_id, selectedSlug]);
+
+  return {
+    vitalsDraft,
+    xianxiaVitalsDraft,
+    xianxiaActiveDraft,
+    notesDraft,
+    resourceDrafts,
+    spellSlotDrafts,
+    inventoryDrafts,
+    equipmentDrafts,
+    xianxiaInventoryDrafts,
+    xianxiaDaoUseNotesDrafts,
+    arcaneArmorEnabled: arcaneArmorDraft,
+    currencyDraft,
+    portraitDraft,
+    controlsDraft,
+    xianxiaDaoRequestDraft,
+    newXianxiaInventoryDraft,
+    setVitalsDraft,
+    setXianxiaVitalsDraft,
+    setXianxiaActiveDraft,
+    setNotesDraft,
+    setResourceDrafts,
+    setSpellSlotDrafts,
+    setInventoryDrafts,
+    setEquipmentDrafts,
+    setXianxiaInventoryDrafts,
+    setNewXianxiaInventoryDraft,
+    setXianxiaDaoRequestDraft,
+    setXianxiaDaoUseNotesDrafts,
+    setArcaneArmorDraft,
+    setCurrencyDraft,
+    setPortraitDraft,
+    setControlsDraft,
+  };
 }
 
 export const xianxiaVitalsFields: Array<{ key: CharacterXianxiaVitalsField; label: string }> = [
