@@ -2038,6 +2038,45 @@ a:hover {
   min-width: 0;
 }
 
+.wiki-backlink-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-soft);
+  padding: 0.65rem 0.8rem;
+}
+
+.wiki-backlink-strip__label {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.wiki-backlink-list {
+  display: flex;
+  flex: 1 1 16rem;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wiki-backlink-list a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-soft-strong);
+  padding: 0.25rem 0.65rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
 .wiki-article-page .article {
   background: linear-gradient(180deg, var(--surface-strong), var(--surface));
 }

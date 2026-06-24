@@ -288,7 +288,19 @@ export function WikiArticlePage() {
             frontendMode={wikiFrontendMode}
             activeSectionSlug={page.section_slug}
           />
-          <section className={hasBacklinks ? "page-layout wiki-article-page" : "page-layout wiki-article-page wiki-article-page--single"}>
+          {hasBacklinks ? (
+            <nav className="wiki-backlink-strip" aria-label="Pages linking here">
+              <span className="wiki-backlink-strip__label">Linked from</span>
+              <ul className="wiki-backlink-list">
+                {data?.backlinks.map((backlink) => (
+                  <li key={backlink.page_ref}>
+                    <a href={preferredCampaignLink(backlink.href, campaignSlug, wikiFrontendMode)}>{backlink.title}</a>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          ) : null}
+          <section className="page-layout wiki-article-page wiki-article-page--single">
             <article className="article card">
               <h1>{page.title}</h1>
               {showSummary ? <p className="lede">{page.summary}</p> : null}
@@ -305,20 +317,6 @@ export function WikiArticlePage() {
                 }}
               />
             </article>
-            {hasBacklinks ? (
-              <aside className="sidebar">
-                <section className="card sidebar-card">
-                  <h2>Linked From</h2>
-                  <ul className="plain-list">
-                    {data?.backlinks.map((backlink) => (
-                      <li key={backlink.page_ref}>
-                        <a href={preferredCampaignLink(backlink.href, campaignSlug, wikiFrontendMode)}>{backlink.title}</a>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              </aside>
-            ) : null}
           </section>
         </>
       ) : null}

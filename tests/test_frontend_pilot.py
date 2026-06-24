@@ -2327,7 +2327,12 @@ def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> N
     assert "activeSectionSlug={data.section_slug}" in section_page_source
     assert "sections={data?.section_navigation ?? []}" in article_page_source
     assert "activeSectionSlug={page.section_slug}" in article_page_source
-    assert 'className={hasBacklinks ? "page-layout wiki-article-page" : "page-layout wiki-article-page wiki-article-page--single"}' in article_page_source
+    assert 'className="wiki-backlink-strip"' in article_page_source
+    assert 'aria-label="Pages linking here"' in article_page_source
+    assert 'className="wiki-backlink-list"' in article_page_source
+    assert '<section className="page-layout wiki-article-page wiki-article-page--single">' in article_page_source
+    assert '<aside className="sidebar">' not in article_page_source
+    assert "Linked From" not in article_page_source
 
     assert "<h2>Context</h2>" not in article_page_source
     assert "Campaign:" not in article_page_source
@@ -2339,6 +2344,8 @@ def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> N
     assert ".wiki-home-section-grid" in styles
     assert "grid-template-columns: repeat(6, minmax(0, 1fr));" in styles
     assert ".wiki-home-section-card__icon-svg" in styles
+    assert ".wiki-backlink-strip" in styles
+    assert ".wiki-backlink-list" in styles
     assert ".wiki-article-page--single" in styles
 
 
