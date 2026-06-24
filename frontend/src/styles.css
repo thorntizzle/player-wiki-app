@@ -3808,6 +3808,37 @@ textarea {
   gap: 1rem;
 }
 
+.spellcasting-summary-values {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr));
+  gap: 0.45rem;
+}
+
+.spellcasting-summary-value {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  border: 1px solid var(--border-accent);
+  border-radius: 8px;
+  background: var(--surface-accent-soft);
+  padding: 0.45rem 0.5rem;
+}
+
+.spellcasting-summary-value span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.spellcasting-summary-value strong {
+  color: var(--accent-deep);
+  font-size: 1.08rem;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
 .spell-level-group {
   display: grid;
   gap: 0.55rem;

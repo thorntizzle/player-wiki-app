@@ -50,9 +50,20 @@ export function CharacterDndSpellsSection({
       <div className="detail-grid spellcasting-summary-grid">
         <article className="detail-card spellcasting-class-card">
           <h3>Spellcasting</h3>
-          <p className="meta">Ability: {String(spellcasting.spellcasting_ability ?? "--")}</p>
-          <p className="meta">Save DC: {String(spellcasting.spell_save_dc ?? "--")}</p>
-          <p className="meta">Attack: {String(spellcasting.spell_attack_bonus ?? "--")}</p>
+          <div className="spellcasting-summary-values" role="group" aria-label="Spellcasting values">
+            <span className="spellcasting-summary-value">
+              <span>Ability</span>
+              <strong>{String(spellcasting.spellcasting_ability ?? "--")}</strong>
+            </span>
+            <span className="spellcasting-summary-value">
+              <span>Save DC</span>
+              <strong>{String(spellcasting.spell_save_dc ?? "--")}</strong>
+            </span>
+            <span className="spellcasting-summary-value">
+              <span>Attack</span>
+              <strong>{String(spellcasting.spell_attack_bonus ?? "--")}</strong>
+            </span>
+          </div>
         </article>
       </div>
       {spellSlots.length ? (

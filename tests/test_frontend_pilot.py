@@ -3814,9 +3814,17 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
     assert 'className="detail-grid spellcasting-summary-grid"' in section_markup
     assert "spellcasting-class-card" in section_markup
     assert "<h3>Spellcasting</h3>" in section_markup
-    assert "Ability:" in section_markup
-    assert "Save DC:" in section_markup
-    assert "Attack:" in section_markup
+    assert 'className="spellcasting-summary-values" role="group" aria-label="Spellcasting values"' in section_markup
+    assert section_markup.count('className="spellcasting-summary-value"') == 3
+    assert "<span>Ability</span>" in section_markup
+    assert "<span>Save DC</span>" in section_markup
+    assert "<span>Attack</span>" in section_markup
+    assert "spellcasting.spellcasting_ability" in section_markup
+    assert "spellcasting.spell_save_dc" in section_markup
+    assert "spellcasting.spell_attack_bonus" in section_markup
+    assert "Ability:" not in section_markup
+    assert "Save DC:" not in section_markup
+    assert "Attack:" not in section_markup
 
     assert "groupSpellsByLevel" in model_source
     assert "presentedSpellGroups" in section_markup
@@ -3826,6 +3834,10 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
     assert 'className="spell-level-group__heading"' in section_markup
     assert 'className="spell-card-grid spell-card-grid--level"' in section_markup
     assert ".spell-slot-editor-list {" in styles
+    assert ".spellcasting-summary-values {" in styles
+    assert "grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr));" in styles
+    assert ".spellcasting-summary-value {" in styles
+    assert ".spellcasting-summary-value strong {" in styles
     assert ".character-sheet .spell-slot-editor-list--compact," in styles
     assert ".character-sheet .spell-card-grid--level" in styles
     assert (
