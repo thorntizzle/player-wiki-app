@@ -35,6 +35,40 @@ def _read_optional_source(path: str) -> str:
     return source_path.read_text(encoding="utf-8") if source_path.exists() else ""
 
 
+def test_normal_gen2_user_surfaces_do_not_render_revision_copy() -> None:
+    user_surface_paths = [
+        "frontend/src/pages/SessionPage.tsx",
+        "frontend/src/pages/CharacterPane.tsx",
+        "frontend/src/pages/CharacterRosterPage.tsx",
+        "frontend/src/pages/CombatPage.tsx",
+        "frontend/src/pages/WikiRoutes.tsx",
+        "frontend/src/pages/SystemsRoutes.tsx",
+        "frontend/src/pages/CampaignHelpPage.tsx",
+        "frontend/src/components/CharacterDndAbilitySkillsSection.tsx",
+        "frontend/src/components/CharacterDndSpellsSection.tsx",
+        "frontend/src/components/CharacterDndEquipmentSection.tsx",
+        "frontend/src/components/CharacterDndInventorySection.tsx",
+        "frontend/src/components/CharacterSystemSummarySection.tsx",
+        "frontend/src/components/CharacterXianxiaResourcesSection.tsx",
+        "frontend/src/components/CharacterXianxiaSkillsSection.tsx",
+        "frontend/src/components/CharacterXianxiaTechniquesSection.tsx",
+        "frontend/src/components/CharacterXianxiaEquipmentSection.tsx",
+        "frontend/src/components/CharacterXianxiaInventorySection.tsx",
+        "frontend/src/components/SessionArticleDisplay.tsx",
+        "frontend/src/components/WikiChrome.tsx",
+        "frontend/src/components/SystemsChrome.tsx",
+    ]
+
+    rendered_revision_copy = re.compile(r"(?:>\s*|[\"'`])Revision\b")
+    offenders = [
+        path
+        for path in user_surface_paths
+        if rendered_revision_copy.search(Path(path).read_text(encoding="utf-8"))
+    ]
+
+    assert offenders == []
+
+
 def test_gen2_topbar_account_controls_use_flask_chrome_classes_in_source() -> None:
     source = Path("frontend/src/AppShell.tsx").read_text(encoding="utf-8")
     account_row = re.search(r'<div className="account-row">([\s\S]*?)</div>', source)
