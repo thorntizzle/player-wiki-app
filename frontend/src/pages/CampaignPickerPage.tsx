@@ -55,6 +55,7 @@ export function CampaignListPage() {
     ? "Your account is active, but it is not currently assigned to any campaigns."
     : "There are currently no public campaign wiki pages to browse.";
   const pickerRouteMode = routeFrontendMode(preferredFrontendMode);
+  const signInHref = `/sign-in?next=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
 
   return (
     <>
@@ -90,6 +91,13 @@ export function CampaignListPage() {
         <section className="card auth-card campaign-picker-empty">
           <h2>{emptyHeading}</h2>
           <p>{emptyLede}</p>
+          {!user ? (
+            <div className="hero-actions">
+              <a className="ghost-button" href={signInHref}>
+                Sign in
+              </a>
+            </div>
+          ) : null}
         </section>
       ) : null}
     </>

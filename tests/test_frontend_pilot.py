@@ -106,7 +106,13 @@ def test_campaign_picker_grid_and_empty_state_are_mutually_exclusive_in_source()
         re.search(r"<ApiErrorNotice[\s\S]*?/\>\s*\r?\n\s*<section className=\"grid campaign-picker-grid\">", campaign_list_source)
         is None
     )
+    assert "const signInHref = `/sign-in?next=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;" in campaign_list_source
+    assert '<p className="card-kicker">{campaignRoleLabel(entry.role)}</p>' in campaign_list_source
+    assert "<h2>{entry.campaign.title}</h2>" in campaign_list_source
+    assert "{entry.campaign.system ? <p className=\"meta\">System: {entry.campaign.system}</p> : null}" in campaign_list_source
     assert '<p className="meta">Visible through session {entry.campaign.current_session}</p>' in campaign_list_source
+    assert campaign_list_source.count('className="button-link" href={campaignRouteHref(entry.campaign.slug, "", pickerRouteMode)}') == 1
+    assert '<a className="ghost-button" href={signInHref}>' in campaign_list_source
     assert "entry.campaign.current_session !== null && entry.campaign.current_session !== undefined ? (" not in campaign_list_source
 
 
