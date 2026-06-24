@@ -26,6 +26,7 @@ import { getApiErrorMessage } from "../apiErrors";
 import { ApiErrorNotice } from "../components/feedback";
 import { DmContentSystemsLane } from "./DmContentSystemsLane";
 import { DmArticleCreator } from "../components/DmArticleCreator";
+import { DmContentConditionCard, DmContentStatblockCard } from "../components/DmContentCards";
 import {
   renderArticleBody,
   resolveArticleImage,
@@ -49,7 +50,6 @@ import {
   buildPlayerWikiAssetRef,
   buildPlayerWikiDraftFromRecord,
   buildPlayerWikiMetadata,
-  formatInitiativeBonus,
   playerWikiRemovalSafety,
   playerWikiStatusLabel,
   sectionChoiceForLabel,
@@ -614,6 +614,29 @@ export function DmContentPage() {
         ? false
       : dmContentQuery.isLoading;
 
+  const updateStatblockDraft = (statblock: DmContentStatblock, updates: Partial<DmContentStatblockDraftState>) => {
+    setStatblockDrafts((current) => ({
+      ...current,
+      [statblock.id]: {
+        ...(current[statblock.id] ?? buildInitialStatblockDraft(statblock)),
+        ...updates,
+      },
+    }));
+  };
+
+  const updateConditionDraft = (
+    condition: DmContentConditionDefinition,
+    updates: Partial<DmContentConditionDraftState>,
+  ) => {
+    setConditionDrafts((current) => ({
+      ...current,
+      [condition.id]: {
+        ...(current[condition.id] ?? buildInitialConditionDraft(condition)),
+        ...updates,
+      },
+    }));
+  };
+
   const renderPlayerWikiDraftFields = ({
     idPrefix,
     draft,
@@ -847,196 +870,34 @@ export function DmContentPage() {
   const renderStatblockCard = (statblock: DmContentStatblock) => {
     const draft = statblockDrafts[statblock.id] ?? buildInitialStatblockDraft(statblock);
     return (
-      <article className="dm-content-item dm-statblock-card" id={`dm-statblock-${statblock.id}`} key={statblock.id}>
-        <div className="dm-content-item__header">
-          <div>
-            <h3>{statblock.title}</h3>
-            <p className="meta">Source file: {statblock.source_filename}</p>
-          </div>
-          <div className="badge-list dm-statblock-badges">
-            {statblock.armor_class !== null ? <span className="meta-badge">AC {statblock.armor_class}</span> : null}
-            <span className="meta-badge">HP {statblock.max_hp}</span>
-            <span className="meta-badge">Speed {statblock.speed_text}</span>
-            <span className="meta-badge">Init {formatInitiativeBonus(statblock.initiative_bonus)}</span>
-          </div>
-        </div>
-        <p className="status status-neutral">{statblock.parser_feedback.summary}</p>
-        <p className="meta">Combat seed source: dm_statblock:{statblock.id}.</p>
-        <details className="feature-detail">
-          <summary>View statblock text</summary>
-          <pre className="dm-content-preview">{statblock.body_markdown}</pre>
-        </details>
-        {canManageDmContent ? (
-          <>
-            <details className="feature-detail">
-              <summary>Edit statblock source</summary>
-              <form
-                className="stack-form"
-                onSubmit={(event: FormEvent<HTMLFormElement>) => {
-                  event.preventDefault();
-                  const formData = new FormData(event.currentTarget);
-                  updateStatblockMutation.mutate({
-                    id: statblock.id,
-                    payload: {
-                      subsection: String(formData.get("subsection") || ""),
-                      markdown_text: String(formData.get("markdown_text") || ""),
-                    },
-                  });
-                }}
-              >
-                <label className="field">
-                  <span>Subsection</span>
-                  <input
-                    id={`dm-statblock-subsection-${statblock.id}`}
-                    name="subsection"
-                    value={draft.subsection}
-                    disabled={!canManageDmContent}
-                    maxLength={80}
-                    onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                      const subsection = event.currentTarget.value;
-                      setStatblockDrafts((current) => ({
-                        ...current,
-                        [statblock.id]: {
-                          ...(current[statblock.id] ?? draft),
-                          subsection,
-                        },
-                      }));
-                    }}
-                  />
-                </label>
-                <label className="field">
-                  <span>Source markdown body</span>
-                  <textarea
-                    id={`dm-statblock-markdown-${statblock.id}`}
-                    name="markdown_text"
-                    rows={12}
-                    value={draft.markdown}
-                    disabled={!canManageDmContent}
-                    onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-                      const markdown = event.currentTarget.value;
-                      setStatblockDrafts((current) => ({
-                        ...current,
-                        [statblock.id]: {
-                          ...(current[statblock.id] ?? draft),
-                          markdown,
-                        },
-                      }));
-                    }}
-                  />
-                </label>
-                <button type="submit" disabled={!canManageDmContent || updateStatblockMutation.isPending}>
-                  {updateStatblockMutation.isPending ? "Saving..." : "Save statblock"}
-                </button>
-              </form>
-            </details>
-            <div className="dm-content-item__actions">
-              <button
-                type="button"
-                className="ghost-button"
-                disabled={!canManageDmContent || deleteStatblockMutation.isPending}
-                onClick={() => deleteStatblockMutation.mutate(statblock.id)}
-              >
-                {deleteStatblockMutation.isPending ? "Deleting..." : "Delete statblock"}
-              </button>
-            </div>
-          </>
-        ) : null}
-      </article>
+      <DmContentStatblockCard
+        key={statblock.id}
+        statblock={statblock}
+        draft={draft}
+        canManageDmContent={canManageDmContent}
+        isUpdating={updateStatblockMutation.isPending}
+        isDeleting={deleteStatblockMutation.isPending}
+        onDraftChange={updateStatblockDraft}
+        onUpdate={(id, payload) => updateStatblockMutation.mutate({ id, payload })}
+        onDelete={(id) => deleteStatblockMutation.mutate(id)}
+      />
     );
   };
 
   const renderConditionCard = (condition: DmContentConditionDefinition) => {
     const draft = conditionDrafts[condition.id] ?? buildInitialConditionDraft(condition);
-    const hasDescription = condition.description_markdown.trim().length > 0;
     return (
-      <article className="dm-content-item dm-condition-card" id={`dm-condition-${condition.id}`} key={condition.id}>
-        <div className="dm-content-item__header">
-          <div>
-            <h3>{condition.name}</h3>
-          </div>
-        </div>
-        {hasDescription ? (
-          <pre className="dm-content-preview dm-content-preview--compact">{condition.description_markdown}</pre>
-        ) : (
-          <p className="meta">No description saved.</p>
-        )}
-        {canManageDmContent ? (
-          <details className="feature-detail">
-            <summary>Edit condition</summary>
-              <form
-                className="stack-form"
-                onSubmit={(event: FormEvent<HTMLFormElement>) => {
-                  event.preventDefault();
-                  const formData = new FormData(event.currentTarget);
-                  const updatedName = String(formData.get("name") || "").trim();
-                  const description = String(formData.get("description_markdown") || "");
-                  updateConditionMutation.mutate({
-                    id: condition.id,
-                    payload: {
-                      name: updatedName || condition.name,
-                      description_markdown: description,
-                    },
-                  });
-                }}
-              >
-                <label className="field">
-                  <span>Condition name</span>
-                  <input
-                    id={`dm-condition-name-${condition.id}`}
-                    name="name"
-                    value={draft.name}
-                    disabled={!canManageDmContent}
-                    onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                      const name = event.currentTarget.value;
-                      setConditionDrafts((current) => ({
-                        ...current,
-                        [condition.id]: {
-                          ...(current[condition.id] ?? draft),
-                          name,
-                        },
-                      }));
-                    }}
-                  />
-                </label>
-                <label className="field">
-                  <span>Description</span>
-                  <textarea
-                    id={`dm-condition-description-${condition.id}`}
-                    name="description_markdown"
-                    rows={8}
-                    value={draft.description}
-                    disabled={!canManageDmContent}
-                    onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-                      const description = event.currentTarget.value;
-                      setConditionDrafts((current) => ({
-                        ...current,
-                        [condition.id]: {
-                          ...(current[condition.id] ?? draft),
-                          description,
-                        },
-                      }));
-                    }}
-                  />
-                </label>
-                <button type="submit" disabled={!canManageDmContent || updateConditionMutation.isPending}>
-                  {updateConditionMutation.isPending ? "Saving..." : "Save condition"}
-                </button>
-              </form>
-          </details>
-        ) : null}
-        {canManageDmContent ? (
-          <div className="dm-content-item__actions">
-            <button
-              type="button"
-              className="ghost-button"
-              disabled={!canManageDmContent || deleteConditionMutation.isPending}
-              onClick={() => deleteConditionMutation.mutate(condition.id)}
-            >
-              {deleteConditionMutation.isPending ? "Deleting..." : "Delete condition"}
-            </button>
-          </div>
-        ) : null}
-      </article>
+      <DmContentConditionCard
+        key={condition.id}
+        condition={condition}
+        draft={draft}
+        canManageDmContent={canManageDmContent}
+        isUpdating={updateConditionMutation.isPending}
+        isDeleting={deleteConditionMutation.isPending}
+        onDraftChange={updateConditionDraft}
+        onUpdate={(id, payload) => updateConditionMutation.mutate({ id, payload })}
+        onDelete={(id) => deleteConditionMutation.mutate(id)}
+      />
     );
   };
 

@@ -1897,10 +1897,24 @@ def test_dm_content_systems_management_form_field_chrome() -> None:
 
 def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_source() -> None:
     source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
+    card_source = Path("frontend/src/components/DmContentCards.tsx").read_text(encoding="utf-8")
 
-    statblock_edit_start = source.index("const renderStatblockCard = (")
-    statblock_edit_end = source.index("const renderConditionCard =", statblock_edit_start)
-    statblock_edit_markup = source[statblock_edit_start:statblock_edit_end]
+    assert 'import { DmContentConditionCard, DmContentStatblockCard } from "../components/DmContentCards";' in source
+    statblock_wrapper_start = source.index("const renderStatblockCard = (")
+    statblock_wrapper_end = source.index("const renderConditionCard =", statblock_wrapper_start)
+    statblock_wrapper_markup = source[statblock_wrapper_start:statblock_wrapper_end]
+    assert "<DmContentStatblockCard" in statblock_wrapper_markup
+    assert 'className="stack-form"' not in statblock_wrapper_markup
+
+    condition_wrapper_start = source.index("const renderConditionCard = (")
+    condition_wrapper_end = source.index("const renderPlayerWikiPageCard =", condition_wrapper_start)
+    condition_wrapper_markup = source[condition_wrapper_start:condition_wrapper_end]
+    assert "<DmContentConditionCard" in condition_wrapper_markup
+    assert 'className="stack-form"' not in condition_wrapper_markup
+
+    statblock_edit_start = card_source.index("export function DmContentStatblockCard(")
+    statblock_edit_end = card_source.index("export function DmContentConditionCard(", statblock_edit_start)
+    statblock_edit_markup = card_source[statblock_edit_start:statblock_edit_end]
 
     assert 'className="chat-label"' not in statblock_edit_markup
     assert 'className="stack-form"' in statblock_edit_markup
@@ -1910,9 +1924,8 @@ def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_sour
     assert 'name="subsection"' in statblock_edit_markup
     assert 'name="markdown_text"' in statblock_edit_markup
 
-    condition_edit_start = source.index("const renderConditionCard = (")
-    condition_edit_end = source.index("const renderPlayerWikiPageCard =", condition_edit_start)
-    condition_edit_markup = source[condition_edit_start:condition_edit_end]
+    condition_edit_start = card_source.index("export function DmContentConditionCard(")
+    condition_edit_markup = card_source[condition_edit_start:]
 
     assert 'className="chat-label"' not in condition_edit_markup
     assert 'className="stack-form"' in condition_edit_markup
