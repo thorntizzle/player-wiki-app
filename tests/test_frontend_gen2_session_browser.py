@@ -1896,13 +1896,20 @@ def test_gen2_combat_browser_exposes_dm_status_and_controls(
 
             condition_editor = page.locator("details.combat-condition-editor--add")
             if not condition_editor.evaluate("(element) => element.open"):
-                condition_editor.locator("> summary").click()
+                condition_editor.locator("> summary").focus()
+                page.keyboard.press("Enter")
             condition_form = condition_editor.locator("form.combat-condition-editor__form")
             condition_form.get_by_label("Condition", exact=True).fill("Restrained")
             condition_form.get_by_label("Duration", exact=True).fill("Until round 3")
-            condition_form.get_by_role("button", name="Add condition").click()
+            condition_form.get_by_role("button", name="Add condition").focus()
+            page.keyboard.press("Enter")
             expect(page.get_by_text("Condition added.")).to_be_visible(timeout=5000)
-            expect(page.locator(".combat-condition-item", has_text="Restrained")).to_be_visible()
+            restrained_condition = page.locator(".combat-condition-item", has_text="Restrained")
+            expect(restrained_condition).to_be_visible()
+            restrained_condition.get_by_role("button", name="Remove").focus()
+            page.keyboard.press("Enter")
+            expect(page.get_by_text("Condition removed.")).to_be_visible(timeout=5000)
+            expect(page.locator(".combat-condition-item", has_text="Restrained")).to_have_count(0)
 
             combat_nav.get_by_role("button", name="Controls").click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?view=controls&combatant=\d+"))
