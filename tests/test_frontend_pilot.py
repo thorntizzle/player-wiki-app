@@ -1407,6 +1407,42 @@ def test_systems_player_browse_hides_raw_source_metadata() -> None:
     assert "{entry.source_id} |" not in chrome_source
 
 
+def test_systems_source_category_nav_has_active_state_and_wrap_css() -> None:
+    route_source = Path("frontend/src/pages/SystemsRoutes.tsx").read_text(encoding="utf-8")
+    chrome_source = Path("frontend/src/components/SystemsChrome.tsx").read_text(encoding="utf-8")
+    type_source = Path("frontend/src/api/types.ts").read_text(encoding="utf-8")
+    source_css = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+    source_page_source = _extract_function_component_source(route_source, "SystemsSourcePage")
+    category_page_source = _extract_function_component_source(route_source, "SystemsSourceCategoryPage")
+
+    assert "export function SystemsSourceNav" in chrome_source
+    assert 'className="systems-source-nav"' in chrome_source
+    assert 'aria-label="Systems source categories"' in chrome_source
+    assert 'aria-current={activeEntryType ? undefined : "page"}' in chrome_source
+    assert 'aria-current={isActive ? "page" : undefined}' in chrome_source
+    assert 'className="systems-source-nav__count"' in chrome_source
+
+    assert "SystemsSourceNav" in source_page_source
+    assert "SystemsCategoryList" not in source_page_source
+    assert "sourceTitle={data.source.title}" in source_page_source
+    assert "groups={data.entry_groups}" in source_page_source
+
+    assert "SystemsSourceNav" in category_page_source
+    assert "groups={data.entry_groups}" in category_page_source
+    assert "activeEntryType={data.entry_type}" in category_page_source
+    assert "entry_groups: SystemsSourceBrowseGroup[];" in type_source
+
+    source_nav_match = re.search(r"\.systems-source-nav\s*\{([\s\S]*?)\}", source_css)
+    assert source_nav_match is not None
+    source_nav_block = source_nav_match.group(1)
+    assert "display: flex;" in source_nav_block
+    assert "flex-wrap: wrap;" in source_nav_block
+    assert "gap: 0.45rem;" in source_nav_block
+    assert ".systems-source-nav .button-link[aria-current=\"page\"]" in source_css
+    assert "box-shadow: 0 0 0 2px var(--border-accent);" in source_css
+    assert "color-mix" not in source_css
+
+
 def test_combat_empty_tracker_prompt_uses_current_surface_wording() -> None:
     source = Path("frontend/src/pages/CombatPage.tsx").read_text(encoding="utf-8")
     combat_page_source = _extract_function_component_source(source, "CombatPage")

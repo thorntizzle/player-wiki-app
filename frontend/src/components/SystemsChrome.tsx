@@ -118,3 +118,50 @@ export function SystemsCategoryList({
     </ul>
   );
 }
+
+export function SystemsSourceNav({
+  campaignSlug,
+  sourceId,
+  sourceTitle,
+  groups,
+  activeEntryType = "",
+  emptyText,
+}: {
+  campaignSlug: string;
+  sourceId: string;
+  sourceTitle: string;
+  groups: SystemsSourceBrowseGroup[];
+  activeEntryType?: string;
+  emptyText?: string;
+}) {
+  if (!groups.length) {
+    return emptyText ? <p className="meta">{emptyText}</p> : null;
+  }
+  return (
+    <nav className="systems-source-nav" aria-label="Systems source categories">
+      <a
+        className={activeEntryType ? "ghost-button" : "button-link"}
+        href={systemsSourceHref(campaignSlug, sourceId)}
+        aria-current={activeEntryType ? undefined : "page"}
+      >
+        {sourceTitle}
+      </a>
+      {groups.map((group) => {
+        const isActive = group.entry_type === activeEntryType;
+        return (
+          <a
+            key={group.entry_type}
+            className={isActive ? "button-link" : "ghost-button"}
+            href={systemsSourceCategoryHref(campaignSlug, sourceId, group.entry_type)}
+            aria-current={isActive ? "page" : undefined}
+          >
+            <span>{group.entry_type_label}</span>
+            <span className="systems-source-nav__count">
+              {group.count} entr{group.count === 1 ? "y" : "ies"}
+            </span>
+          </a>
+        );
+      })}
+    </nav>
+  );
+}

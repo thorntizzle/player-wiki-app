@@ -1168,6 +1168,7 @@ export interface SystemsSourceResponse extends ApiResponseBase {
 export interface SystemsSourceCategoryResponse extends ApiResponseBase {
   campaign: CampaignRecord;
   source: SystemsSourceRow;
+  entry_groups: SystemsSourceBrowseGroup[];
   entry_type: string;
   entry_type_label: string;
   query: string;

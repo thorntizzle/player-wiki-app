@@ -4735,7 +4735,11 @@ def test_api_systems_endpoints_follow_source_visibility_and_allow_dm_policy_upda
         headers=api_headers(dm_token),
     )
     assert source_category.status_code == 200
-    category_entries = source_category.get_json()["entries"]
+    category_payload = source_category.get_json()
+    assert category_payload["entry_groups"][0]["entry_type"] == "monster"
+    assert category_payload["entry_groups"][0]["entry_type_label"] == "Monsters"
+    assert category_payload["entry_groups"][0]["count"] == 1
+    category_entries = category_payload["entries"]
     assert len(category_entries) == 1
     assert category_entries[0]["entry_key"] == goblin_entry_key
     assert category_entries[0]["title"] == "Goblin"

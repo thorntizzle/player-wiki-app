@@ -15,10 +15,10 @@ import {
   systemsIndexHref,
   systemsSourceCategoryHref,
   systemsSourceHref,
-  SystemsCategoryList,
   SystemsEntryList,
   SystemsManageLink,
   SystemsRulesReferenceList,
+  SystemsSourceNav,
 } from "../components/SystemsChrome";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 
@@ -260,9 +260,10 @@ export function SystemsSourcePage() {
             <p className="meta">
               This source currently has {data.browsable_entry_count} browsable entr{data.browsable_entry_count === 1 ? "y" : "ies"} across {data.entry_groups.length} categor{data.entry_groups.length === 1 ? "y" : "ies"}.
             </p>
-            <SystemsCategoryList
+            <SystemsSourceNav
               campaignSlug={resolvedCampaignSlug}
               sourceId={data.source.source_id}
+              sourceTitle={data.source.title}
               groups={data.entry_groups}
               emptyText="No systems entries are currently available in this source for your access level."
             />
@@ -329,6 +330,13 @@ export function SystemsSourceCategoryPage() {
         <div className="systems-browse-grid page-layout">
           <section className="systems-category-band article card">
             <h2>Browse {data.entry_type_label}</h2>
+            <SystemsSourceNav
+              campaignSlug={resolvedCampaignSlug}
+              sourceId={data.source.source_id}
+              sourceTitle={data.source.title}
+              groups={data.entry_groups}
+              activeEntryType={data.entry_type}
+            />
             <form method="get" action={action} className="stack-form">
               <label className="field" htmlFor="systems-category-search">
                 <span>Search this category</span>

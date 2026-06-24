@@ -6513,6 +6513,36 @@ def register_api(app) -> None:
         if not normalized_entry_type:
             abort(404)
 
+        all_entry_groups = []
+        for grouped_entry_type, _ in systems_service.list_entry_type_counts_for_campaign_source(
+            campaign_slug,
+            source_id,
+        ):
+            accessible_entries = list_accessible_campaign_source_entries(
+                campaign_slug,
+                source_id,
+                entry_type=grouped_entry_type,
+                limit=None,
+            )
+            if not accessible_entries:
+                continue
+            all_entry_groups.append(
+                {
+                    "entry_type": grouped_entry_type,
+                    "entry_type_label": systems_entry_type_label(grouped_entry_type),
+                    "count": len(accessible_entries),
+                }
+            )
+        all_entry_groups.sort(
+            key=lambda item: (
+                item["entry_type"] in SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES,
+                *systems_entry_type_sort_key(item["entry_type"]),
+            )
+        )
+        entry_groups = [
+            item for item in all_entry_groups if item["entry_type"] not in SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES
+        ]
+
         all_entries = list_accessible_campaign_source_entries(
             campaign_slug,
             source_id,
@@ -6537,6 +6567,7 @@ def register_api(app) -> None:
                 "ok": True,
                 "campaign": serialize_campaign(get_repository().get_campaign(campaign_slug)),
                 "source": serialize_systems_source_state(campaign_slug, state),
+                "entry_groups": entry_groups,
                 "entry_type": normalized_entry_type,
                 "entry_type_label": systems_entry_type_label(normalized_entry_type),
                 "query": query,

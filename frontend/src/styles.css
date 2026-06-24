@@ -2138,6 +2138,32 @@ a:hover {
   color: var(--muted);
 }
 
+.systems-source-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.systems-source-nav .button-link,
+.systems-source-nav .ghost-button {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  gap: 0.35rem;
+}
+
+.systems-source-nav .button-link[aria-current="page"] {
+  box-shadow: 0 0 0 2px var(--border-accent);
+}
+
+.systems-source-nav__count {
+  font-size: 0.82rem;
+  font-weight: 700;
+  opacity: 0.78;
+}
+
 .systems-entry-band {
   background: linear-gradient(180deg, var(--surface-strong), var(--surface));
 }
