@@ -120,10 +120,10 @@ export function CombatPage() {
   const [confirmClearTracker, setConfirmClearTracker] = useState(false);
 
   useEffect(() => {
-    const currentSearch = window.location.search;
+    const currentSearch = location.searchStr;
     setSelectedCombatantId(readSearchCombatantId(currentSearch));
     setActiveCombatView(readSearchView(currentSearch));
-  }, [location.href]);
+  }, [location.searchStr]);
 
   const combatQuery = useQuery({
     queryKey: ["combat", campaignSlug, activeCombatView, selectedCombatantId],

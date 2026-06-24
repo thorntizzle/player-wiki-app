@@ -1282,14 +1282,16 @@ def test_combat_dm_controls_add_and_cleanup_chrome_in_source() -> None:
 
     assert "<CombatDmControlsPanel" in combat_page_source
     assert "onAddSystemsMonster={(entryKey) => addSystemsMonsterMutation.mutate(entryKey)}" in combat_page_source
+    assert "const currentSearch = location.searchStr;" in combat_page_source
+    assert "}, [location.searchStr]);" in combat_page_source
 
     add_heading_index = controls_panel_source.index("<h2>Add combatant</h2>")
-    add_card_start = controls_panel_source.rfind('<section className="card sidebar-card">', 0, add_heading_index)
+    add_card_start = controls_panel_source.rfind('<section className="card combat-control-card">', 0, add_heading_index)
     add_card_end = controls_panel_source.index("</section>", add_heading_index) + len("</section>")
     add_card_markup = controls_panel_source[add_card_start:add_card_end]
 
     assert add_card_start >= 0
-    assert add_card_markup.count('<section className="card sidebar-card">') == 1
+    assert add_card_markup.count('<section className="card combat-control-card">') == 1
     assert 'className="combat-add-combatant-mode-switcher"' in add_card_markup
     assert 'role="radiogroup"' in add_card_markup
     assert 'aria-label="Add combatant type"' in add_card_markup
@@ -1315,12 +1317,12 @@ def test_combat_dm_controls_add_and_cleanup_chrome_in_source() -> None:
     assert '<h3>Add Systems Monster</h3>' not in add_card_markup
 
     cleanup_heading_index = controls_panel_source.index("<h2>Encounter cleanup</h2>")
-    cleanup_card_start = controls_panel_source.rfind('<section className="card sidebar-card">', 0, cleanup_heading_index)
+    cleanup_card_start = controls_panel_source.rfind('<section className="card combat-control-card">', 0, cleanup_heading_index)
     cleanup_card_end = controls_panel_source.index("</section>", cleanup_heading_index) + len("</section>")
     cleanup_card_markup = controls_panel_source[cleanup_card_start:cleanup_card_end]
 
     assert cleanup_card_start >= 0
-    assert 'className="card sidebar-card"' in cleanup_card_markup
+    assert 'className="card combat-control-card"' in cleanup_card_markup
     assert "className=\"ghost-button\"" in cleanup_card_markup
     assert "onClick={onClearCombat}" in cleanup_card_markup
     assert "Clear tracker" in cleanup_card_markup

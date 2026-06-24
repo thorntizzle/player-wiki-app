@@ -137,7 +137,7 @@ export function CombatDmControlsPanel({
         </button>
       </article>
 
-      <section className="card sidebar-card">
+      <section className="card combat-control-card">
         <h2>Add combatant</h2>
         <div className="combat-add-combatant-mode-switcher" role="radiogroup" aria-label="Add combatant type">
           <input
@@ -487,7 +487,7 @@ export function CombatDmControlsPanel({
         </div>
       </section>
 
-      <section className="card sidebar-card">
+      <section className="card combat-control-card">
         <h2>Encounter cleanup</h2>
         <label className="checkbox-row">
           <input
