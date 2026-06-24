@@ -61,6 +61,10 @@ The refreshed browser acceptance suite lives in `tests/test_frontend_gen2_sessio
 
 Flask remains the source of truth for workflows that are still Flask-first or intentionally fallback-only, including shared/core Systems entry editing, Systems imports, and CLI/bootstrap recovery operations.
 
+## UX Standards
+
+Use `docs/frontend-ux-style-guide.md` for typography, card, button, form, feedback, loading, navigation, accessibility, and gameplay-value presentation standards. Use `docs/frontend-ux-audit-checklist.md` for page-by-page heuristic review before or after visual polish work.
+
 ## Build & Preview
 
 ```powershell

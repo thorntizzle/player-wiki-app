@@ -31,6 +31,9 @@ campaigns/*
 !campaigns/README.md
 docs/*
 !docs/api-v1.md
+!docs/frontend-ux-audit-checklist.md
+!docs/frontend-ux-style-guide.md
+!docs/gen2-migration-readiness.md
 !docs/roadmap-automation-reference.md
 tests/fixtures/campaign_characters/
 frontend/.venv/
