@@ -1560,6 +1560,30 @@ def test_gen2_combat_dm_resolves_away_from_player_workspace_in_source() -> None:
     assert '<CombatDmStatusPanel' in combat_page_source
 
 
+def test_combat_player_selected_snapshot_uses_label_value_tactical_tiles() -> None:
+    source = Path("frontend/src/pages/CombatPage.tsx").read_text(encoding="utf-8")
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+    combat_page_source = _extract_function_component_source(source, "CombatPage")
+    snapshot_start = combat_page_source.index('<section className="combat-selected-snapshot card combat-character-snapshot">')
+    snapshot_end = combat_page_source.index('{effectiveCombatView === "status"', snapshot_start)
+    snapshot_markup = combat_page_source[snapshot_start:snapshot_end]
+
+    assert 'className="combat-selected-snapshot__stats" aria-label="Selected combatant tactical values"' in snapshot_markup
+    assert 'className="combat-stat-tile__label">HP</span>' in snapshot_markup
+    assert 'className="combat-stat-tile__label">Move</span>' in snapshot_markup
+    assert 'className="combat-stat-tile__label">Action</span>' in snapshot_markup
+    assert 'className="combat-stat-tile__label">Bonus</span>' in snapshot_markup
+    assert 'className="combat-stat-tile__label">Reaction</span>' in snapshot_markup
+    assert "{selectedCombatant.has_action ? \"Available\" : \"Spent\"}" in snapshot_markup
+    assert "{selectedCombatant.has_bonus_action ? \"Available\" : \"Spent\"}" in snapshot_markup
+    assert "{selectedCombatant.has_reaction ? \"Available\" : \"Spent\"}" in snapshot_markup
+    assert "HP {readNumber(selectedCombatant.current_hp)}" not in snapshot_markup
+    assert "No action" not in snapshot_markup
+    assert ".combat-stat-tile {" in styles
+    assert ".combat-stat-tile__label {" in styles
+    assert ".combat-stat-tile__value {" in styles
+
+
 def test_gen2_combat_dm_status_omits_nested_selected_pc_detail_in_source() -> None:
     route_source = Path("frontend/src/pages/CombatPage.tsx").read_text(encoding="utf-8")
     dm_status_source = Path("frontend/src/components/CombatDmStatusPanel.tsx").read_text(encoding="utf-8")

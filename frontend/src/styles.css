@@ -4357,12 +4357,32 @@ button.spell-card__main:focus-visible .spell-card__name {
   grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
 }
 
-.combat-selected-snapshot__stats span {
+.combat-stat-tile {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 16px;
   background: var(--surface-soft);
   padding: 0.65rem 0.75rem;
+}
+
+.combat-stat-tile__label {
+  color: var(--muted);
+  font-size: 0.82rem;
   font-weight: 700;
+  line-height: 1.2;
+}
+
+.combat-stat-tile__value {
+  color: var(--ink);
+  font-size: 1.2rem;
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+}
+
+.combat-stat-tile--spent .combat-stat-tile__value {
+  color: var(--muted);
 }
 
 .combatant-badges {

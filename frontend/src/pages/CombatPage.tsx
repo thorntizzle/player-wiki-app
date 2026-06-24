@@ -459,12 +459,31 @@ export function CombatPage() {
                 </div>
               </div>
               {selectedCombatant.show_detail ? (
-                <div className="combat-selected-snapshot__stats">
-                  <span>HP {readNumber(selectedCombatant.current_hp)} / {readNumber(selectedCombatant.max_hp)}</span>
-                  <span>Move {readNumber(selectedCombatant.movement_remaining)} / {readNumber(selectedCombatant.movement_total)}</span>
-                  <span>{selectedCombatant.has_action ? "Action" : "No action"}</span>
-                  <span>{selectedCombatant.has_bonus_action ? "Bonus" : "No bonus"}</span>
-                  <span>{selectedCombatant.has_reaction ? "Reaction" : "No reaction"}</span>
+                <div className="combat-selected-snapshot__stats" aria-label="Selected combatant tactical values">
+                  <div className="combat-stat-tile">
+                    <span className="combat-stat-tile__label">HP</span>
+                    <strong className="combat-stat-tile__value">
+                      {readNumber(selectedCombatant.current_hp)} / {readNumber(selectedCombatant.max_hp)}
+                    </strong>
+                  </div>
+                  <div className="combat-stat-tile">
+                    <span className="combat-stat-tile__label">Move</span>
+                    <strong className="combat-stat-tile__value">
+                      {readNumber(selectedCombatant.movement_remaining)} / {readNumber(selectedCombatant.movement_total)}
+                    </strong>
+                  </div>
+                  <div className={selectedCombatant.has_action ? "combat-stat-tile" : "combat-stat-tile combat-stat-tile--spent"}>
+                    <span className="combat-stat-tile__label">Action</span>
+                    <strong className="combat-stat-tile__value">{selectedCombatant.has_action ? "Available" : "Spent"}</strong>
+                  </div>
+                  <div className={selectedCombatant.has_bonus_action ? "combat-stat-tile" : "combat-stat-tile combat-stat-tile--spent"}>
+                    <span className="combat-stat-tile__label">Bonus</span>
+                    <strong className="combat-stat-tile__value">{selectedCombatant.has_bonus_action ? "Available" : "Spent"}</strong>
+                  </div>
+                  <div className={selectedCombatant.has_reaction ? "combat-stat-tile" : "combat-stat-tile combat-stat-tile--spent"}>
+                    <span className="combat-stat-tile__label">Reaction</span>
+                    <strong className="combat-stat-tile__value">{selectedCombatant.has_reaction ? "Available" : "Spent"}</strong>
+                  </div>
                 </div>
               ) : (
                 <p className="meta">Detailed stats are currently hidden from players.</p>
