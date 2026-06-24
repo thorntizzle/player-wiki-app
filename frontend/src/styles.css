@@ -2309,6 +2309,23 @@ a:hover {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .toast-notice {
+    animation-name: toast-notice-fade-reduced;
+  }
+}
+
+@keyframes toast-notice-fade-reduced {
+  0%,
+  82% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
 .button {
   display: inline-flex;
   align-items: center;

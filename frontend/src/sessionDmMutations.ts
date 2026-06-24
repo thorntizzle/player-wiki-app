@@ -9,12 +9,14 @@ import {
   type ManualArticleDraftState,
 } from "./sessionArticleDrafts";
 
+type StatusReporter = (message: string | null) => void;
+
 interface UseSessionDmMutationsOptions {
   apiClient: CampaignApiClient;
   campaignSlug: string;
   selectedLogSessionId: number | null;
   setAuthRequired: (required: boolean) => void;
-  setUiMessage: Dispatch<SetStateAction<string | null>>;
+  showToastMessage: StatusReporter;
   setPaneError: Dispatch<SetStateAction<string | null>>;
   setManualDraft: Dispatch<SetStateAction<ManualArticleDraftState>>;
   setSelectedLogSessionId: Dispatch<SetStateAction<number | null>>;
@@ -26,7 +28,7 @@ export function useSessionDmMutations({
   campaignSlug,
   selectedLogSessionId,
   setAuthRequired,
-  setUiMessage,
+  showToastMessage,
   setPaneError,
   setManualDraft,
   setSelectedLogSessionId,
@@ -37,14 +39,14 @@ export function useSessionDmMutations({
       setAuthRequired(true);
     }
     setPaneError(apiErrorMessage(error));
-    setUiMessage(null);
+    showToastMessage(null);
   };
 
   const startSessionMutation = useMutation({
     mutationFn: () => apiClient.startSession(campaignSlug),
     onSuccess: () => {
       setPaneError(null);
-      setUiMessage("Session started.");
+      showToastMessage("Session started.");
       refetch();
     },
     onError: handleMutationError,
@@ -54,7 +56,7 @@ export function useSessionDmMutations({
     mutationFn: () => apiClient.closeSession(campaignSlug),
     onSuccess: () => {
       setPaneError(null);
-      setUiMessage("Session closed.");
+      showToastMessage("Session closed.");
       refetch();
     },
     onError: handleMutationError,
@@ -63,7 +65,7 @@ export function useSessionDmMutations({
   const createArticleMutation = useMutation({
     mutationFn: (payload: SessionArticleCreatePayload) => apiClient.createSessionArticle(campaignSlug, payload),
     onSuccess: () => {
-      setUiMessage("Article created.");
+      showToastMessage("Article created.");
       setPaneError(null);
       setManualDraft(buildEmptyManualArticleDraft());
       refetch();
@@ -75,7 +77,7 @@ export function useSessionDmMutations({
     mutationFn: (args: { id: number; payload: SessionArticleUpdatePayload }) =>
       apiClient.updateSessionArticle(campaignSlug, args.id, args.payload),
     onSuccess: () => {
-      setUiMessage("Article updated.");
+      showToastMessage("Article updated.");
       setPaneError(null);
       refetch();
     },
@@ -85,7 +87,7 @@ export function useSessionDmMutations({
   const revealArticleMutation = useMutation({
     mutationFn: (articleId: number) => apiClient.revealSessionArticle(campaignSlug, articleId),
     onSuccess: () => {
-      setUiMessage("Article revealed.");
+      showToastMessage("Article revealed.");
       setPaneError(null);
       refetch();
     },
@@ -95,7 +97,7 @@ export function useSessionDmMutations({
   const deleteArticleMutation = useMutation({
     mutationFn: (articleId: number) => apiClient.deleteSessionArticle(campaignSlug, articleId),
     onSuccess: () => {
-      setUiMessage("Article deleted.");
+      showToastMessage("Article deleted.");
       setPaneError(null);
       refetch();
     },
@@ -105,7 +107,7 @@ export function useSessionDmMutations({
   const clearRevealedMutation = useMutation({
     mutationFn: () => apiClient.clearRevealedSessionArticles(campaignSlug),
     onSuccess: () => {
-      setUiMessage("Revealed articles cleared.");
+      showToastMessage("Revealed articles cleared.");
       setPaneError(null);
       refetch();
     },
@@ -115,7 +117,7 @@ export function useSessionDmMutations({
   const deleteLogMutation = useMutation({
     mutationFn: (sessionId: number) => apiClient.deleteSessionLog(campaignSlug, sessionId),
     onSuccess: (_data, sessionId) => {
-      setUiMessage("Session log deleted.");
+      showToastMessage("Session log deleted.");
       setPaneError(null);
       if (selectedLogSessionId === sessionId) {
         setSelectedLogSessionId(null);

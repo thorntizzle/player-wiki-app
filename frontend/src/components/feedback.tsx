@@ -88,7 +88,7 @@ export function ToastNotice({
   }
 
   return (
-    <div className={`toast-notice toast-notice--${tone}`} role="status" aria-live="polite">
+    <div className={`toast-notice toast-notice--${tone}`} role="status" aria-live="polite" aria-atomic="true">
       <p>{message}</p>
     </div>
   );

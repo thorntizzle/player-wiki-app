@@ -12,6 +12,7 @@ import type {
 } from "../api/types";
 import { useApiClient } from "../apiClientContext";
 import { DmArticleCreator } from "../components/DmArticleCreator";
+import { ToastNotice, useToastNotice } from "../components/feedback";
 import {
   renderArticleBody,
   resolveArticleImage,
@@ -56,13 +57,13 @@ export function DmPane({
   const [sourceStatus, setSourceStatus] = useState<string | null>(null);
   const [selectedSourceRef, setSelectedSourceRef] = useState("");
   const [stagedDrafts, setStagedDrafts] = useState<Record<number, StagedArticleDraftState>>({});
-  const [uiMessage, setUiMessage] = useState<string | null>(null);
   const [paneError, setPaneError] = useState<string | null>(null);
   const [selectedLogSessionId, setSelectedLogSessionId] = useState<number | null>(null);
   const [deleteArticleConfirm, setDeleteArticleConfirm] = useState<Record<number, boolean>>({});
   const [deleteLogConfirm, setDeleteLogConfirm] = useState<Record<number, boolean>>({});
   const [clearRevealedConfirmed, setClearRevealedConfirmed] = useState(false);
   const [closeSessionConfirmed, setCloseSessionConfirmed] = useState(false);
+  const { clearToast, showToast, toastMessage, toastTone } = useToastNotice({ defaultTone: "success" });
 
   useEffect(() => {
     setStagedDrafts((current) => {
@@ -104,7 +105,7 @@ export function DmPane({
     campaignSlug,
     selectedLogSessionId,
     setAuthRequired,
-    setUiMessage,
+    showToastMessage: showToast,
     setPaneError,
     setManualDraft,
     setSelectedLogSessionId,
@@ -195,13 +196,15 @@ export function DmPane({
 
   const clearArticleStatus = () => {
     setPaneError(null);
-    setUiMessage(null);
+    clearToast();
   };
 
   const statusText = startSessionMutation.isPending ? "Starting session..." : closeSessionMutation.isPending ? "Closing session..." : null;
 
   return (
-    <div className="page-layout session-layout">
+    <>
+      <ToastNotice message={toastMessage} tone={toastTone} />
+      <div className="page-layout session-layout">
       <section className="session-column">
         {shouldShowPassiveScores ? (
           <details className="section-block section-block--collapsible session-passive-scores-bar" id="session-passive-scores" open>
@@ -650,7 +653,7 @@ export function DmPane({
             {!activeSession ? (
               <p>Start a session here to open chat on the player Session page and reveal staged handouts.</p>
             ) : null}
-            {statusText || uiMessage ? <p className="meta">{statusText || uiMessage}</p> : null}
+            {statusText ? <p className="meta">{statusText}</p> : null}
             {startSessionMutation.error ? (
               <p className="status status-error">{apiErrorMessage(startSessionMutation.error)}</p>
             ) : null}
@@ -719,6 +722,7 @@ export function DmPane({
           isCreating={createArticleMutation.isPending}
         />
       </aside>
-    </div>
+      </div>
+    </>
   );
 }
