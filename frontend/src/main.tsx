@@ -27,10 +27,10 @@ import {
   CharacterLevelUpPage,
   CharacterProgressionRepairPage,
   CharacterRetrainingPage,
-  CharacterXianxiaManualImportPage,
 } from "./routes/CharacterAuthoringRoutes";
 import { CharacterCreatePage } from "./routes/CharacterCreatePage";
 import { CharacterDetailPage } from "./routes/CharacterDetailPage";
+import { CharacterXianxiaManualImportPage } from "./routes/CharacterXianxiaManualImportPage";
 import { DmContentPage } from "./routes/DmContentPage";
 import { CombatPage } from "./routes/CombatPage";
 import { SessionPage } from "./routes/SessionPage";

@@ -461,6 +461,23 @@ def test_character_create_route_lives_in_route_module() -> None:
     assert "<CharacterPreviewList preview={create.preview} />" in create_source
 
 
+def test_character_xianxia_manual_import_route_lives_in_route_module() -> None:
+    main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    authoring_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
+
+    assert 'import { CharacterXianxiaManualImportPage } from "./routes/CharacterXianxiaManualImportPage";' in main_source
+    assert "function CharacterXianxiaManualImportPage" not in authoring_source
+    assert "CharacterXianxiaManualImportContext" not in authoring_source
+    assert 'component: CharacterXianxiaManualImportPage' in main_source
+
+    assert "export function CharacterXianxiaManualImportPage()" in import_source
+    assert 'from: "/campaigns/$campaignSlug/characters/import/xianxia-manual"' in import_source
+    assert "apiClient.getXianxiaManualImportContext(resolvedCampaignSlug, contextValues)" in import_source
+    assert "apiClient.submitXianxiaManualImport(resolvedCampaignSlug" in import_source
+    assert "manualImportRows(context, rowCount, draftValues)" in import_source
+
+
 def test_character_authoring_preview_lists_live_in_component_module() -> None:
     route_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
@@ -500,6 +517,7 @@ def test_character_authoring_dnd_choice_select_lives_in_field_component() -> Non
 
 def test_character_authoring_shared_helpers_live_in_utility_module() -> None:
     route_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
     helper_source = Path("frontend/src/characterAuthoringUtils.tsx").read_text(encoding="utf-8")
 
     assert "from \"../characterAuthoringUtils\";" in route_source
@@ -516,6 +534,8 @@ def test_character_authoring_shared_helpers_live_in_utility_module() -> None:
     assert "function characterProgressionRepairValuesFromContext" not in route_source
     assert "function characterRetrainingValuesFromContext" not in route_source
     assert "function manualImportRows" not in route_source
+    assert "function manualImportRows" not in import_source
+    assert "manualImportRows(context, rowCount, draftValues)" in import_source
 
     assert "export type CharacterAuthoringValues" in helper_source
     assert "export function optionValue" in helper_source
@@ -1152,6 +1172,7 @@ def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
 def test_character_supported_form_action_chrome_in_source() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
+    manual_import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
 
     def component_source(component_name: str) -> str:
         return _extract_function_component_source(source, component_name)
@@ -1174,7 +1195,7 @@ def test_character_supported_form_action_chrome_in_source() -> None:
     )
     assert "className=\"button button-secondary\"" not in create_markup
 
-    manual_markup = component_source("CharacterXianxiaManualImportPage")
+    manual_markup = _extract_function_component_source(manual_import_source, "CharacterXianxiaManualImportPage")
     assert (
         re.search(
             r'<button\s+type="button"\s+className="ghost-button"\s+onClick=\{\(\) => setRowCount\(\(current\) => current \+ 1\)\}>\s*'
@@ -1251,6 +1272,7 @@ def test_character_supported_form_action_chrome_in_source() -> None:
 def test_character_supported_hero_links_preserve_supported_nav_while_hiding_flask_fallbacks() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
+    manual_import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
 
     def component_source(component_name: str) -> str:
         return _extract_function_component_source(source, component_name)
@@ -1268,7 +1290,9 @@ def test_character_supported_hero_links_preserve_supported_nav_while_hiding_flas
     assert "Back to roster" in create_hero
     assert "Import existing" in create_hero
 
-    manual_hero = hero_section("CharacterXianxiaManualImportPage")
+    manual_component = _extract_function_component_source(manual_import_source, "CharacterXianxiaManualImportPage")
+    manual_hero_start = manual_component.index('<section className="hero')
+    manual_hero = manual_component[manual_hero_start:manual_component.index("</section>", manual_hero_start) + len("</section>")]
     assert "Flask import" not in manual_hero
     assert "Back to roster" in manual_hero
     assert "Import existing" not in manual_hero
@@ -1409,6 +1433,7 @@ def test_grid_minimum_card_size_is_flask_260px_and_character_roster_grid_selecto
 def test_character_form_actions_do_not_convert_non_targeted_builder_rows() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
+    manual_import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
 
     def component_source(component_name: str) -> str:
         return _extract_function_component_source(source, component_name)
@@ -1424,7 +1449,7 @@ def test_character_form_actions_do_not_convert_non_targeted_builder_rows() -> No
         is not None
     )
 
-    manual_markup = component_source("CharacterXianxiaManualImportPage")
+    manual_markup = _extract_function_component_source(manual_import_source, "CharacterXianxiaManualImportPage")
     assert (
         re.search(
             r'<div className="builder-actions">\s*<button\s+type="submit"\s+disabled={importMutation\.isPending}>',
