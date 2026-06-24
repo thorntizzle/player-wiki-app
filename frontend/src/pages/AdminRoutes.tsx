@@ -291,6 +291,29 @@ export function AdminUserDetailPage() {
     || disableUser.isPending
     || enableUser.isPending
     || deleteUser.isPending;
+  const membershipSaveHint = !membershipDraft.campaign_slug
+    ? "Choose a campaign before saving membership."
+    : mutationPending && !setMembership.isPending
+      ? "Finish the current admin action before saving membership."
+      : "";
+  const assignmentSaveHint = !assignmentDraft.character_ref
+    ? "Choose a character before assigning."
+    : mutationPending && !assignCharacter.isPending
+      ? "Finish the current admin action before assigning a character."
+      : "";
+  const disableUserHint = !disableUserConfirmed
+    ? "Check Confirm disable to enable this action."
+    : mutationPending && !disableUser.isPending
+      ? "Finish the current admin action before disabling this account."
+      : "";
+  const deleteEmailMatches = data
+    ? deleteConfirm.trim().toLowerCase() === data.managed_user.email.toLowerCase()
+    : false;
+  const deleteUserHint = data && !deleteEmailMatches
+    ? `Type ${data.managed_user.email} exactly to enable deletion.`
+    : mutationPending && !deleteUser.isPending
+      ? "Finish the current admin action before deleting this account."
+      : "";
 
   return (
     <>
@@ -383,10 +406,16 @@ export function AdminUserDetailPage() {
                   </select>
                 </label>
                 <div className="admin-form-actions">
-                  <button type="submit" className="button" disabled={mutationPending || !membershipDraft.campaign_slug}>
+                  <button
+                    type="submit"
+                    className="button"
+                    disabled={mutationPending || !membershipDraft.campaign_slug}
+                    aria-describedby={membershipSaveHint ? "admin-membership-save-hint" : undefined}
+                  >
                     {setMembership.isPending ? "Saving..." : "Save membership"}
                   </button>
                 </div>
+                {membershipSaveHint ? <p id="admin-membership-save-hint" className="meta">{membershipSaveHint}</p> : null}
               </form>
             </article>
 
@@ -419,10 +448,16 @@ export function AdminUserDetailPage() {
                   </select>
                 </label>
                 <div className="admin-form-actions">
-                  <button type="submit" className="button" disabled={mutationPending || !assignmentDraft.character_ref}>
+                  <button
+                    type="submit"
+                    className="button"
+                    disabled={mutationPending || !assignmentDraft.character_ref}
+                    aria-describedby={assignmentSaveHint ? "admin-assignment-save-hint" : undefined}
+                  >
                     {assignCharacter.isPending ? "Assigning..." : "Assign character"}
                   </button>
                 </div>
+                {assignmentSaveHint ? <p id="admin-assignment-save-hint" className="meta">{assignmentSaveHint}</p> : null}
               </form>
             </article>
           </section>
@@ -569,9 +604,15 @@ export function AdminUserDetailPage() {
                       />
                       Confirm disable
                     </label>
-                    <button type="submit" className="ghost-button" disabled={mutationPending || !disableUserConfirmed}>
+                    <button
+                      type="submit"
+                      className="ghost-button"
+                      disabled={mutationPending || !disableUserConfirmed}
+                      aria-describedby={disableUserHint ? "admin-disable-user-hint" : undefined}
+                    >
                       {disableUser.isPending ? "Saving..." : "Disable user"}
                     </button>
+                    {disableUserHint ? <p id="admin-disable-user-hint" className="meta">{disableUserHint}</p> : null}
                   </form>
                 ) : null}
                 {data.can_manage_account ? (
@@ -590,11 +631,13 @@ export function AdminUserDetailPage() {
                     <button
                       type="button"
                       className="ghost-button"
-                      disabled={mutationPending || deleteConfirm.trim().toLowerCase() !== data.managed_user.email.toLowerCase()}
+                      disabled={mutationPending || !deleteEmailMatches}
+                      aria-describedby={deleteUserHint ? "admin-delete-user-hint" : undefined}
                       onClick={() => deleteUser.mutate()}
                     >
                       {deleteUser.isPending ? "Deleting..." : "Delete user"}
                     </button>
+                    {deleteUserHint ? <p id="admin-delete-user-hint" className="meta">{deleteUserHint}</p> : null}
                   </>
                 ) : (
                   <p className="meta">

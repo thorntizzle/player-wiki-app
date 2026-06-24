@@ -936,6 +936,11 @@ def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
     source = Path("frontend/src/pages/AdminRoutes.tsx").read_text(encoding="utf-8")
     admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]
 
+    assert "const deleteEmailMatches = data" in admin_user_detail_source
+    assert "const deleteUserHint = data && !deleteEmailMatches" in admin_user_detail_source
+    assert "Type ${data.managed_user.email} exactly to enable deletion." in admin_user_detail_source
+    assert 'id="admin-delete-user-hint"' in admin_user_detail_source
+
     delete_on_click = 'onClick={() => deleteUser.mutate()}'
     delete_button_start = admin_user_detail_source.rfind("<button", 0, admin_user_detail_source.index(delete_on_click))
     delete_button_end = admin_user_detail_source.index("</button>", delete_button_start) + len("</button>")
@@ -944,11 +949,44 @@ def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
     assert 'className="ghost-button"' in delete_button_block
     assert 'className="button-danger"' not in delete_button_block
     assert delete_on_click in delete_button_block
-    assert (
-        "disabled={mutationPending || deleteConfirm.trim().toLowerCase() !== data.managed_user.email.toLowerCase()}"
-        in delete_button_block
-    )
+    assert "disabled={mutationPending || !deleteEmailMatches}" in delete_button_block
+    assert 'aria-describedby={deleteUserHint ? "admin-delete-user-hint" : undefined}' in delete_button_block
     assert "{deleteUser.isPending ? \"Deleting...\" : \"Delete user\"}" in delete_button_block
+
+
+def test_admin_user_disabled_actions_have_visible_reasons_in_source() -> None:
+    source = Path("frontend/src/pages/AdminRoutes.tsx").read_text(encoding="utf-8")
+    admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]
+
+    expected_hints = {
+        "membershipSaveHint": (
+            "admin-membership-save-hint",
+            "Choose a campaign before saving membership.",
+            "Finish the current admin action before saving membership.",
+        ),
+        "assignmentSaveHint": (
+            "admin-assignment-save-hint",
+            "Choose a character before assigning.",
+            "Finish the current admin action before assigning a character.",
+        ),
+        "disableUserHint": (
+            "admin-disable-user-hint",
+            "Check Confirm disable to enable this action.",
+            "Finish the current admin action before disabling this account.",
+        ),
+        "deleteUserHint": (
+            "admin-delete-user-hint",
+            "Type ${data.managed_user.email} exactly to enable deletion.",
+            "Finish the current admin action before deleting this account.",
+        ),
+    }
+
+    for hint_name, (hint_id, primary_reason, pending_reason) in expected_hints.items():
+        assert f"const {hint_name} =" in admin_user_detail_source
+        assert primary_reason in admin_user_detail_source
+        assert pending_reason in admin_user_detail_source
+        assert f'id="{hint_id}"' in admin_user_detail_source
+        assert f'aria-describedby={{{hint_name} ? "{hint_id}" : undefined}}' in admin_user_detail_source
 
 
 def test_admin_user_account_actions_are_flat_stack_in_source() -> None:
@@ -984,10 +1022,7 @@ def test_admin_user_account_actions_are_flat_stack_in_source() -> None:
     assert '<label className="field">' in account_actions_block
     assert "id=\"admin-delete-confirm-email\"" in account_actions_block
     assert "onClick={() => deleteUser.mutate()}" in account_actions_block
-    assert (
-        "disabled={mutationPending || deleteConfirm.trim().toLowerCase() !== data.managed_user.email.toLowerCase()}"
-        in account_actions_block
-    )
+    assert "disabled={mutationPending || !deleteEmailMatches}" in account_actions_block
     assert "{deleteUser.isPending ? \"Deleting...\" : \"Delete user\"}" in account_actions_block
     assert "Delete user" in account_actions_block
     assert 'className="ghost-button"' in account_actions_block
