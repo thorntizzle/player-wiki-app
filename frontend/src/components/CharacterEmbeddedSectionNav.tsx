@@ -48,6 +48,7 @@ export function CharacterEmbeddedSectionNav({
               key={section.id}
               type="button"
               className={isActive ? "button-link" : "ghost-button"}
+              aria-pressed={isActive}
               aria-current={isActive ? "page" : undefined}
               onClick={() => selectCharacterSection(section.id)}
             >

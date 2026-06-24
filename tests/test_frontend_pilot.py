@@ -418,6 +418,7 @@ def test_character_embedded_section_nav_uses_flask_style_chrome_in_source() -> N
     assert 'className="character-subpage-nav-card"' in source
     assert '<nav className="character-subpage-nav" aria-label="Character subpages">' in source
     assert 'className={isActive ? "button-link" : "ghost-button"}' in source
+    assert source.count("aria-pressed={isActive}") == 2
     assert "onClick={() => selectCharacterSection(section.id)}" in source
     assert "className=\"section-tabs\"" not in source
     assert "className=\"chat-label\"" not in source
