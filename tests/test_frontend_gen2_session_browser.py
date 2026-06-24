@@ -2780,6 +2780,28 @@ def test_gen2_character_visual_parity_smoke(
                             assert desktop_grid_metrics["slotColumns"] or desktop_grid_metrics["spellColumns"]
                         if desktop_grid_metrics["slotColumns"]:
                             assert desktop_grid_metrics["slotColumns"] == 3
+                            expect(character_read_shell.locator(".spell-slot-values").first).to_be_visible()
+                            desktop_slot_value_metrics = desktop_page.evaluate(
+                                """() => {
+                                    const groups = Array.from(document.querySelectorAll(".spell-slot-values"));
+                                    const values = Array.from(document.querySelectorAll(".spell-slot-value"));
+                                    const labels = values.map((value) =>
+                                        (value.querySelector("span")?.textContent || "").trim()
+                                    );
+                                    return {
+                                        groupCount: groups.length,
+                                        valueCount: values.length,
+                                        labels,
+                                        groupsFit: groups.every((group) => group.scrollWidth <= group.clientWidth + 1),
+                                        valuesFit: values.every((value) => value.scrollWidth <= value.clientWidth + 1),
+                                    };
+                                }"""
+                            )
+                            assert desktop_slot_value_metrics["groupCount"] > 0
+                            assert desktop_slot_value_metrics["valueCount"] >= desktop_slot_value_metrics["groupCount"] * 3
+                            assert {"Available", "Used", "Max"}.issubset(set(desktop_slot_value_metrics["labels"]))
+                            assert desktop_slot_value_metrics["groupsFit"]
+                            assert desktop_slot_value_metrics["valuesFit"]
                         if desktop_grid_metrics["spellColumns"]:
                             assert desktop_grid_metrics["spellColumns"] == 3
                     _assert_character_detail_trigger_classes(character_read_shell)
@@ -2847,6 +2869,23 @@ def test_gen2_character_visual_parity_smoke(
                             assert mobile_grid_metrics["scrollWidth"] <= mobile_grid_metrics["innerWidth"] + 1
                             assert mobile_grid_metrics["columns"]
                             assert all(column_count == 1 for column_count in mobile_grid_metrics["columns"])
+                            if section_name == "Spells" and mobile_character_shell.locator(".spell-slot-values").count() > 0:
+                                mobile_slot_value_metrics = mobile_page.evaluate(
+                                    """() => {
+                                        const groups = Array.from(document.querySelectorAll(".spell-slot-values"));
+                                        const values = Array.from(document.querySelectorAll(".spell-slot-value"));
+                                        return {
+                                            groupCount: groups.length,
+                                            valueCount: values.length,
+                                            groupsFit: groups.every((group) => group.scrollWidth <= group.clientWidth + 1),
+                                            valuesFit: values.every((value) => value.scrollWidth <= value.clientWidth + 1),
+                                        };
+                                    }"""
+                                )
+                                assert mobile_slot_value_metrics["groupCount"] > 0
+                                assert mobile_slot_value_metrics["valueCount"] >= mobile_slot_value_metrics["groupCount"] * 3
+                                assert mobile_slot_value_metrics["groupsFit"]
+                                assert mobile_slot_value_metrics["valuesFit"]
         finally:
             desktop_page.close()
             mobile_page.close()
