@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { ChangeEvent, FormEvent } from "react";
+import type { FormEvent } from "react";
 import { apiErrorMessage } from "../api/client";
 import type {
   ContentPageFileSummary,
@@ -27,8 +27,7 @@ import { ApiErrorNotice } from "../components/feedback";
 import { DmContentSystemsLane } from "./DmContentSystemsLane";
 import { DmArticleCreator } from "../components/DmArticleCreator";
 import { DmConditionsLane } from "../components/DmConditionsLane";
-import { DmPlayerWikiPageCard } from "../components/DmPlayerWikiPageCard";
-import { DmPlayerWikiDraftFields } from "../components/DmPlayerWikiDraftFields";
+import { DmPlayerWikiLane } from "../components/DmPlayerWikiLane";
 import { DmStagedArticleQueue } from "../components/DmStagedArticleQueue";
 import { DmStatblocksLane } from "../components/DmStatblocksLane";
 import {
@@ -649,44 +648,17 @@ export function DmContentPage() {
     });
   };
 
-  const renderPlayerWikiPageCard = (pageFile: ContentPageFileSummary) => {
-    const editDraft = playerWikiEditDrafts[pageFile.page_ref];
-    const deleteConfirmed = Boolean(playerWikiDeleteConfirm[pageFile.page_ref]);
-    return (
-      <DmPlayerWikiPageCard
-        key={pageFile.page_ref}
-        canManagePlayerWiki={canManagePlayerWiki}
-        deleteConfirmed={deleteConfirmed}
-        editDraft={editDraft}
-        encodedCampaignSlug={encodedCampaignSlug}
-        isArchiving={archivePlayerWikiPageMutation.isPending}
-        isDeleting={deletePlayerWikiPageMutation.isPending}
-        isSaving={savePlayerWikiPageMutation.isPending}
-        onArchive={(pageRef) => archivePlayerWikiPageMutation.mutate(pageRef)}
-        onDelete={(pageRef) => deletePlayerWikiPageMutation.mutate(pageRef)}
-        onDeleteConfirmChange={(pageRef, checked) => {
-          setPlayerWikiDeleteConfirm((current) => ({
-            ...current,
-            [pageRef]: checked,
-          }));
-        }}
-        onDraftChange={(pageRef, next) => {
-          setPlayerWikiEditDrafts((current) => ({
-            ...current,
-            [pageRef]: next,
-          }));
-        }}
-        onImageReadStatus={(errorMessage) => {
-          setPaneError(errorMessage);
-          if (errorMessage) {
-            setUiMessage(null);
-          }
-        }}
-        onLoadEditDraft={loadPlayerWikiEditDraft}
-        onSaveEditDraft={submitPlayerWikiEditDraft}
-        pageFile={pageFile}
-      />
-    );
+  const submitPlayerWikiCreateDraft = (draft: DmPlayerWikiDraftState) => {
+    if (!draft.title.trim()) {
+      setPaneError("Player Wiki page title is required.");
+      setUiMessage(null);
+      return;
+    }
+    savePlayerWikiPageMutation.mutate({
+      mode: "create",
+      pageRef: buildPageRefFromDraft(draft),
+      draft,
+    });
   };
 
   return (
@@ -802,78 +774,45 @@ export function DmContentPage() {
           setConditionQuery={setConditionQuery}
         />
       ) : activeLane === "player-wiki" ? (
-        <div className="split-grid dm-content-staged-grid">
-          <section className="card dm-player-wiki-create">
-            <div className="section-heading">
-              <h2>Create player wiki page</h2>
-              <p className="meta">Direct authoring for durable player-facing reference pages.</p>
-            </div>
-            <form
-              className="stack-form dm-content-wiki-form"
-              onSubmit={(event: FormEvent<HTMLFormElement>) => {
-                event.preventDefault();
-                if (!playerWikiCreateDraft.title.trim()) {
-                  setPaneError("Player Wiki page title is required.");
-                  setUiMessage(null);
-                  return;
-                }
-                savePlayerWikiPageMutation.mutate({
-                  mode: "create",
-                  pageRef: buildPageRefFromDraft(playerWikiCreateDraft),
-                  draft: playerWikiCreateDraft,
-                });
-              }}
-            >
-              <DmPlayerWikiDraftFields
-                idPrefix="dm-player-wiki-create"
-                draft={playerWikiCreateDraft}
-                setDraft={setPlayerWikiCreateDraft}
-                includeSlug={true}
-                disabled={!canManagePlayerWiki}
-                onImageReadStatus={(errorMessage) => {
-                  setPaneError(errorMessage);
-                  if (errorMessage) {
-                    setUiMessage(null);
-                  }
-                }}
-              />
-              <button type="submit" disabled={!canManagePlayerWiki || savePlayerWikiPageMutation.isPending}>
-                {savePlayerWikiPageMutation.isPending ? "Saving..." : "Create wiki page"}
-              </button>
-            </form>
-          </section>
-
-          <section className="card dm-player-wiki-library">
-            <div className="section-heading">
-              <h2>Player wiki pages</h2>
-              <p className="meta">{playerWikiPages.length} page{playerWikiPages.length === 1 ? "" : "s"}</p>
-            </div>
-            <form
-              className="search-form dm-player-wiki-search"
-              onSubmit={(event: FormEvent<HTMLFormElement>) => event.preventDefault()}
-            >
-              <label htmlFor="dm-player-wiki-search">Search pages</label>
-              <input
-                id="dm-player-wiki-search"
-                type="search"
-                value={playerWikiQuery}
-                placeholder="Title, section, path, summary"
-                onChange={(event: ChangeEvent<HTMLInputElement>) => setPlayerWikiQuery(event.currentTarget.value)}
-              />
-            </form>
-            {contentPagesQuery.isLoading ? <p className="status status-neutral">Loading Player Wiki pages ...</p> : null}
-            {!contentPagesQuery.isLoading && filteredPlayerWikiPages.length ? (
-              <div className="dm-content-list dm-player-wiki-list">
-                {filteredPlayerWikiPages.map(renderPlayerWikiPageCard)}
-              </div>
-            ) : null}
-            {!contentPagesQuery.isLoading && !filteredPlayerWikiPages.length ? (
-              <p className="status status-neutral">
-                {playerWikiQuery ? "No Player Wiki pages matched that search." : "No Player Wiki pages have been published yet."}
-              </p>
-            ) : null}
-          </section>
-        </div>
+        <DmPlayerWikiLane
+          canManagePlayerWiki={canManagePlayerWiki}
+          deleteConfirm={playerWikiDeleteConfirm}
+          editDrafts={playerWikiEditDrafts}
+          encodedCampaignSlug={encodedCampaignSlug}
+          filteredPlayerWikiPages={filteredPlayerWikiPages}
+          isArchiving={archivePlayerWikiPageMutation.isPending}
+          isDeleting={deletePlayerWikiPageMutation.isPending}
+          isLoading={contentPagesQuery.isLoading}
+          isSaving={savePlayerWikiPageMutation.isPending}
+          onArchive={(pageRef) => archivePlayerWikiPageMutation.mutate(pageRef)}
+          onCreateDraft={submitPlayerWikiCreateDraft}
+          onDelete={(pageRef) => deletePlayerWikiPageMutation.mutate(pageRef)}
+          onDeleteConfirmChange={(pageRef, checked) => {
+            setPlayerWikiDeleteConfirm((current) => ({
+              ...current,
+              [pageRef]: checked,
+            }));
+          }}
+          onDraftChange={(pageRef, next) => {
+            setPlayerWikiEditDrafts((current) => ({
+              ...current,
+              [pageRef]: next,
+            }));
+          }}
+          onImageReadStatus={(errorMessage) => {
+            setPaneError(errorMessage);
+            if (errorMessage) {
+              setUiMessage(null);
+            }
+          }}
+          onLoadEditDraft={loadPlayerWikiEditDraft}
+          onSaveEditDraft={submitPlayerWikiEditDraft}
+          playerWikiCreateDraft={playerWikiCreateDraft}
+          playerWikiPages={playerWikiPages}
+          playerWikiQuery={playerWikiQuery}
+          setPlayerWikiCreateDraft={setPlayerWikiCreateDraft}
+          setPlayerWikiQuery={setPlayerWikiQuery}
+        />
       ) : activeLane === "systems" ? (
         <DmContentSystemsLane campaignSlug={resolvedCampaignSlug} />
       ) : (

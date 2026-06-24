@@ -1878,13 +1878,21 @@ def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> N
 
 def test_dm_content_player_wiki_editor_fields_use_flask_style_labels_in_source() -> None:
     source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
+    lane_source = Path("frontend/src/components/DmPlayerWikiLane.tsx").read_text(encoding="utf-8")
     card_source = Path("frontend/src/components/DmPlayerWikiPageCard.tsx").read_text(encoding="utf-8")
     fields_source = Path("frontend/src/components/DmPlayerWikiDraftFields.tsx").read_text(encoding="utf-8")
 
-    assert 'import { DmPlayerWikiDraftFields } from "../components/DmPlayerWikiDraftFields";' in source
-    assert 'import { DmPlayerWikiPageCard } from "../components/DmPlayerWikiPageCard";' in source
-    assert "<DmPlayerWikiDraftFields" in source
-    assert "<DmPlayerWikiPageCard" in source
+    assert 'import { DmPlayerWikiLane } from "../components/DmPlayerWikiLane";' in source
+    assert "<DmPlayerWikiLane" in source
+    assert 'import { DmPlayerWikiDraftFields } from "../components/DmPlayerWikiDraftFields";' not in source
+    assert 'import { DmPlayerWikiPageCard } from "../components/DmPlayerWikiPageCard";' not in source
+    assert "<DmPlayerWikiDraftFields" not in source
+    assert "<DmPlayerWikiPageCard" not in source
+    assert '<section className="card dm-player-wiki-create">' not in source
+    assert 'className="card dm-player-wiki-create"' in lane_source
+    assert 'className="card dm-player-wiki-library"' in lane_source
+    assert "<DmPlayerWikiDraftFields" in lane_source
+    assert "<DmPlayerWikiPageCard" in lane_source
     assert 'className="dm-content-item dm-player-wiki-card"' not in source
     assert 'className="dm-content-item dm-player-wiki-card"' in card_source
     assert "<DmPlayerWikiDraftFields" in card_source
@@ -1921,9 +1929,10 @@ def test_dm_content_player_wiki_editor_fields_use_flask_style_labels_in_source()
         assert f"<span>{label}</span>" in helper_markup
 
     player_wiki_form_class = 'className="stack-form dm-content-wiki-form"'
-    form_class_matches = re.findall(rf"<form\s+{player_wiki_form_class}", source + card_source)
+    form_class_matches = re.findall(rf"<form\s+{player_wiki_form_class}", lane_source + card_source)
     assert len(form_class_matches) >= 2
     assert "dm-player-wiki-edit-form" not in source
+    assert "dm-player-wiki-edit-form" not in lane_source
     assert "dm-player-wiki-edit-form" not in card_source
 
 
