@@ -2542,7 +2542,11 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
 
             page.reload()
             expect(page.get_by_role("heading", level=1, name="Arden March", exact=True)).to_be_visible(timeout=10000)
-            expect(page.get_by_role("heading", name="Arden March (arden-march)")).to_be_visible()
+            expect(page.locator(".character-summary h3")).to_have_text("Arden March")
+            expect(page.get_by_role("heading", name=re.compile(r"^Arden March \(arden-march\)$"))).to_have_count(0)
+            reloaded_character_text = page.locator("article.character-read-shell.character-sheet.card").inner_text()
+            assert "arden-march" not in reloaded_character_text
+            assert "Status:" not in reloaded_character_text
 
             detail_response = page.request.get(f"{base_url}/api/v1/campaigns/linden-pass/characters/arden-march")
             assert detail_response.status == 200
@@ -2677,11 +2681,15 @@ def test_gen2_character_visual_parity_smoke(
             expect(desktop_page.locator("article.character-read-shell.character-sheet.card")).to_be_visible()
             expect(desktop_page.locator("header.character-header")).to_be_visible()
             expect(desktop_page.locator("section.panel.character-read-shell")).to_have_count(0)
-            expect(desktop_page.get_by_role("heading", name="Arden March (arden-march)")).to_be_visible()
             expect(desktop_page.locator(".character-read-shell")).to_be_visible()
             expect(desktop_page.locator("div.character-subpage-nav-card[data-character-subpage-nav-card]")).to_be_visible()
             expect(desktop_page.locator("nav.character-subpage-nav[aria-label='Character subpages']")).to_be_visible()
             expect(desktop_page.locator(".character-summary")).to_be_visible()
+            expect(desktop_page.locator(".character-summary h3")).to_have_text("Arden March")
+            expect(desktop_page.get_by_role("heading", name=re.compile(r"^Arden March \(arden-march\)$"))).to_have_count(0)
+            character_detail_text = desktop_page.locator("article.character-read-shell.character-sheet.card").inner_text()
+            assert "arden-march" not in character_detail_text
+            assert "Status:" not in character_detail_text
             expect(desktop_page.locator(".character-summary .character-action-row")).to_have_count(0)
             expect(desktop_page.locator(".character-summary .button.button-secondary")).to_have_count(0)
             expect(desktop_page.locator(".character-read-content .section-tabs")).to_have_count(0)
@@ -2725,6 +2733,7 @@ def test_gen2_character_visual_parity_smoke(
             _assert_character_detail_trigger_classes(character_read_shell)
             character_read_nav = desktop_page.locator("nav.character-subpage-nav[aria-label='Character subpages']")
             for section_name, section_id in (
+                ("Resources", "session-resources"),
                 ("Spells", "session-spell-slots"),
                 ("Equipment", "character-equipment"),
                 ("Inventory", "session-inventory"),
@@ -2733,6 +2742,38 @@ def test_gen2_character_visual_parity_smoke(
                 if section_link.count() > 0:
                     section_link.click()
                     expect(character_read_shell.locator(f"section#{section_id}")).to_be_visible(timeout=10000)
+                    if section_name in {"Resources", "Spells"}:
+                        desktop_grid_metrics = desktop_page.evaluate(
+                            """(sectionName) => {
+                                const columnCount = (selector) => {
+                                    const element = document.querySelector(selector);
+                                    if (!element) {
+                                        return 0;
+                                    }
+                                    return window.getComputedStyle(element).gridTemplateColumns
+                                        .split(" ")
+                                        .filter(Boolean).length;
+                                };
+                                return {
+                                    resourceColumns: sectionName === "Resources" ? columnCount(".resource-grid--compact") : 0,
+                                    slotColumns: sectionName === "Spells" ? columnCount(".spell-slot-editor-list--compact") : 0,
+                                    spellColumns: sectionName === "Spells" ? columnCount(".spell-card-grid--level") : 0,
+                                    scrollWidth: document.documentElement.scrollWidth,
+                                    innerWidth: window.innerWidth,
+                                };
+                            }""",
+                            section_name,
+                        )
+                        assert desktop_grid_metrics["scrollWidth"] <= desktop_grid_metrics["innerWidth"] + 1
+                        if section_name == "Resources":
+                            assert desktop_grid_metrics["resourceColumns"] > 0
+                            assert desktop_grid_metrics["resourceColumns"] == 3
+                        if section_name == "Spells":
+                            assert desktop_grid_metrics["slotColumns"] or desktop_grid_metrics["spellColumns"]
+                        if desktop_grid_metrics["slotColumns"]:
+                            assert desktop_grid_metrics["slotColumns"] == 3
+                        if desktop_grid_metrics["spellColumns"]:
+                            assert desktop_grid_metrics["spellColumns"] == 3
                     _assert_character_detail_trigger_classes(character_read_shell)
 
             _sign_in(mobile_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
@@ -2763,6 +2804,41 @@ def test_gen2_character_visual_parity_smoke(
                 assert mobile_metrics["navCardWidth"] <= mobile_metrics["innerWidth"]
                 assert mobile_metrics["navWidth"] <= mobile_metrics["innerWidth"]
                 assert mobile_metrics["searchColumns"] == 1
+                if path.endswith("/characters/arden-march"):
+                    mobile_character_shell = mobile_page.locator("article.character-read-shell.character-sheet.card")
+                    expect(mobile_character_shell.locator(".character-summary h3")).to_have_text("Arden March")
+                    expect(mobile_page.get_by_role("heading", name=re.compile(r"^Arden March \(arden-march\)$"))).to_have_count(0)
+                    mobile_character_text = mobile_character_shell.inner_text()
+                    assert "arden-march" not in mobile_character_text
+                    assert "Status:" not in mobile_character_text
+                    mobile_character_nav = mobile_page.locator("nav.character-subpage-nav[aria-label='Character subpages']")
+                    for section_name, selector in (
+                        ("Resources", ".resource-grid--compact"),
+                        ("Spells", ".spell-slot-editor-list--compact, .spell-card-grid--level"),
+                    ):
+                        section_link = mobile_character_nav.get_by_role("link", name=section_name)
+                        if section_link.count() > 0:
+                            section_link.click()
+                            expect(mobile_character_shell.locator("section.read-section")).to_be_visible(timeout=10000)
+                            mobile_grid_metrics = mobile_page.evaluate(
+                                """(selector) => {
+                                    const elements = Array.from(document.querySelectorAll(selector));
+                                    const columns = elements.map((element) =>
+                                        window.getComputedStyle(element).gridTemplateColumns
+                                            .split(" ")
+                                            .filter(Boolean).length
+                                    );
+                                    return {
+                                        columns,
+                                        scrollWidth: document.documentElement.scrollWidth,
+                                        innerWidth: window.innerWidth,
+                                    };
+                                }""",
+                                selector,
+                            )
+                            assert mobile_grid_metrics["scrollWidth"] <= mobile_grid_metrics["innerWidth"] + 1
+                            assert mobile_grid_metrics["columns"]
+                            assert all(column_count == 1 for column_count in mobile_grid_metrics["columns"])
         finally:
             desktop_page.close()
             mobile_page.close()
