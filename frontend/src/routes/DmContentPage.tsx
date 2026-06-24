@@ -25,10 +25,9 @@ import { useApiClient } from "../apiClientContext";
 import { getApiErrorMessage } from "../apiErrors";
 import { ApiErrorNotice } from "../components/feedback";
 import { DmContentSystemsLane } from "./DmContentSystemsLane";
-import { DmArticleCreator } from "../components/DmArticleCreator";
 import { DmConditionsLane } from "../components/DmConditionsLane";
 import { DmPlayerWikiLane } from "../components/DmPlayerWikiLane";
-import { DmStagedArticleQueue } from "../components/DmStagedArticleQueue";
+import { DmStagedArticlesLane } from "../components/DmStagedArticlesLane";
 import { DmStatblocksLane } from "../components/DmStatblocksLane";
 import {
   buildEmptyManualArticleDraft,
@@ -816,55 +815,48 @@ export function DmContentPage() {
       ) : activeLane === "systems" ? (
         <DmContentSystemsLane campaignSlug={resolvedCampaignSlug} />
       ) : (
-        <div className="split-grid dm-content-staged-grid">
-          <DmArticleCreator
-            className="card"
-            id="dm-content-staged-article-store"
-            mode={mode}
-            setMode={(next) => {
-              clearArticleStatus();
-              setMode(next);
-            }}
-            sourceQuery={sourceQuery}
-            setSourceQuery={setSourceQuery}
-            sourceStatus={sourceStatus}
-            setSourceStatus={setSourceStatus}
-            sourceResults={sourceResults}
-            selectedSourceRef={selectedSourceRef}
-            setSelectedSourceRef={(next) => {
-              setSelectedSourceRef(next);
-              setSourceStatus(null);
-            }}
-            manualDraft={manualDraft}
-            setManualDraft={(next) => {
-              clearArticleStatus();
-              setManualDraft(next);
-            }}
-            uploadDraft={uploadDraft}
-            setUploadDraft={(next) => {
-              clearArticleStatus();
-              setUploadDraft(next);
-            }}
-            onSearchSources={searchSources}
-            onCreate={(payload) => {
-              clearArticleStatus();
-              createArticleMutation.mutate(payload);
-            }}
-            isCreating={createArticleMutation.isPending}
-          />
-
-          <DmStagedArticleQueue
-            campaignSlug={resolvedCampaignSlug}
-            stagedArticles={stagedArticles}
-            stagedDrafts={stagedDrafts}
-            canManageSession={canManageSession}
-            isUpdating={updateArticleMutation.isPending}
-            isDeleting={deleteArticleMutation.isPending}
-            onDraftChange={updateStagedDraft}
-            onUpdateArticle={(args) => updateArticleMutation.mutate(args)}
-            onDeleteArticle={(articleId) => deleteArticleMutation.mutate(articleId)}
-          />
-      </div>
+        <DmStagedArticlesLane
+          campaignSlug={resolvedCampaignSlug}
+          canManageSession={canManageSession}
+          isCreating={createArticleMutation.isPending}
+          isDeleting={deleteArticleMutation.isPending}
+          isUpdating={updateArticleMutation.isPending}
+          manualDraft={manualDraft}
+          mode={mode}
+          onCreate={(payload) => {
+            clearArticleStatus();
+            createArticleMutation.mutate(payload);
+          }}
+          onDeleteArticle={(articleId) => deleteArticleMutation.mutate(articleId)}
+          onDraftChange={updateStagedDraft}
+          onSearchSources={searchSources}
+          onUpdateArticle={(args) => updateArticleMutation.mutate(args)}
+          selectedSourceRef={selectedSourceRef}
+          setManualDraft={(next) => {
+            clearArticleStatus();
+            setManualDraft(next);
+          }}
+          setMode={(next) => {
+            clearArticleStatus();
+            setMode(next);
+          }}
+          setSelectedSourceRef={(next) => {
+            setSelectedSourceRef(next);
+            setSourceStatus(null);
+          }}
+          setSourceQuery={setSourceQuery}
+          setSourceStatus={setSourceStatus}
+          setUploadDraft={(next) => {
+            clearArticleStatus();
+            setUploadDraft(next);
+          }}
+          sourceQuery={sourceQuery}
+          sourceResults={sourceResults}
+          sourceStatus={sourceStatus}
+          stagedArticles={stagedArticles}
+          stagedDrafts={stagedDrafts}
+          uploadDraft={uploadDraft}
+        />
       )}
     </>
   );

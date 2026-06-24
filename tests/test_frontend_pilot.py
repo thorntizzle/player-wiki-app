@@ -2982,10 +2982,17 @@ def test_dm_session_revealed_articles_panel_uses_session_article_row_chrome_in_s
 
 def test_dm_content_staged_articles_edit_form_uses_flask_style_file_field_markup() -> None:
     route_source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
+    lane_source = Path("frontend/src/components/DmStagedArticlesLane.tsx").read_text(encoding="utf-8")
     queue_markup = Path("frontend/src/components/DmStagedArticleQueue.tsx").read_text(encoding="utf-8")
 
-    assert 'import { DmStagedArticleQueue } from "../components/DmStagedArticleQueue";' in route_source
-    assert "<DmStagedArticleQueue" in route_source
+    assert 'import { DmStagedArticlesLane } from "../components/DmStagedArticlesLane";' in route_source
+    assert "<DmStagedArticlesLane" in route_source
+    assert 'import { DmStagedArticleQueue } from "../components/DmStagedArticleQueue";' not in route_source
+    assert "<DmStagedArticleQueue" not in route_source
+    assert 'import { DmStagedArticleQueue } from "./DmStagedArticleQueue";' in lane_source
+    assert 'import { DmArticleCreator } from "./DmArticleCreator";' in lane_source
+    assert "<DmStagedArticleQueue" in lane_source
+    assert "<DmArticleCreator" in lane_source
     assert 'id="dm-content-staged-articles-queue"' in queue_markup
 
     assert 'className="session-article-stack"' in queue_markup
