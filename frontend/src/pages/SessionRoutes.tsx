@@ -107,6 +107,9 @@ function SessionPaneMessageComposer({
               )}
             </select>
           </label>
+          {recipientScope === "player" && !recipientPlayerChoices.length ? (
+            <p className="meta">No specific player recipients are available.</p>
+          ) : null}
           <label className="field">
             <span>Message</span>
             <textarea
@@ -121,6 +124,7 @@ function SessionPaneMessageComposer({
           <button type="submit" className="session-message-form__submit" disabled={isSending || payload?.active_session === null}>
             {isSending ? "Posting..." : "Post to chat"}
           </button>
+          {payload?.active_session === null ? <p className="meta">Begin a session before posting chat.</p> : null}
           {sendError ? <p className="status status-error">{sendError}</p> : null}
         </form>
       ) : (

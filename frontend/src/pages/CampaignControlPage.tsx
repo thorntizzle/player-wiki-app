@@ -152,6 +152,7 @@ export function CampaignControlPage() {
               <button type="submit" disabled={saveVisibility.isPending || isUnchanged}>
                 {saveVisibility.isPending ? "Saving..." : "Save visibility"}
               </button>
+              {isUnchanged && !saveVisibility.isPending ? <p className="meta">No visibility changes to save.</p> : null}
               {saveError ? <p className="status status-error">{saveError}</p> : null}
             </form>
           </section>

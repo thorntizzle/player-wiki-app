@@ -175,6 +175,7 @@ export function AccountSettingsPage() {
                 <button type="submit" className="button" disabled={saveThemeSettings.isPending || isThemeUnchanged}>
                   {saveThemeSettings.isPending ? "Saving..." : "Save theme"}
                 </button>
+                {isThemeUnchanged && !saveThemeSettings.isPending ? <p className="meta">Theme is already current.</p> : null}
                 {themeSaveError ? <p className="status status-error">{themeSaveError}</p> : null}
               </form>
             </section>
@@ -220,6 +221,7 @@ export function AccountSettingsPage() {
                 >
                   {saveChatSettings.isPending ? "Saving..." : "Save chat order"}
                 </button>
+                {isChatOrderUnchanged && !saveChatSettings.isPending ? <p className="meta">Chat order is already current.</p> : null}
                 {chatSaveError ? <p className="status status-error">{chatSaveError}</p> : null}
               </form>
             </section>

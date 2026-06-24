@@ -20,6 +20,7 @@ export function CombatViewSwitch({ effectiveCombatView, onSelect }: CombatViewSw
           key={view.id}
           className={effectiveCombatView === view.id ? view.activeClass : view.inactiveClass}
           onClick={() => onSelect(view.id)}
+          aria-pressed={effectiveCombatView === view.id}
         >
           {view.label}
         </button>

@@ -80,7 +80,7 @@ export function CharacterRosterPage() {
               </a>
             ) : null}
             {data?.links?.import_xianxia_url ? (
-              <a className="button-link" href={data.links.import_xianxia_url}>
+              <a className="ghost-button" href={data.links.import_xianxia_url}>
                 Import existing character
               </a>
             ) : null}
@@ -119,9 +119,11 @@ export function CharacterRosterPage() {
                           {character.name}
                         </a>
                       </h2>
-                      <p className="character-card__meta">
-                        {[character.species, character.background].filter(Boolean).join(" · ") || character.status}
-                      </p>
+                      {[character.species, character.background].filter(Boolean).length ? (
+                        <p className="character-card__meta">
+                          {[character.species, character.background].filter(Boolean).join(" / ")}
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                   <div className="character-card__stats">

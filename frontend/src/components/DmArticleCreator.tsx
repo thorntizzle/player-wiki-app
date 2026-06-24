@@ -78,6 +78,16 @@ export function DmArticleCreator({
     ? sourceResults.find((result) => result.source_ref === selectedSourceRef)
     : null;
   const selectedSourceLabel = selectedSource?.select_label || selectedSource?.title || "";
+  const manualCreateDisabledReason = !manualDraft.title.trim()
+    ? "Add a title before creating the article."
+    : !manualDraft.body.trim() && !manualDraft.image
+      ? "Add body text or an image before creating the article."
+      : "";
+  const uploadCreateDisabledReason = !uploadDraft.filename.trim()
+    ? "Add a source filename before creating the article."
+    : !uploadDraft.markdown.trim()
+      ? "Add markdown text before creating the article."
+      : "";
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -207,11 +217,7 @@ export function DmArticleCreator({
             <button
               type="button"
               className="button"
-              disabled={
-                isCreating
-                || !manualDraft.title.trim()
-                || (!manualDraft.body.trim() && !manualDraft.image)
-              }
+              disabled={isCreating || Boolean(manualCreateDisabledReason)}
               onClick={() =>
                 onCreate({
                   mode: "manual",
@@ -229,6 +235,7 @@ export function DmArticleCreator({
             >
               {isCreating ? "Creating..." : "Create"}
             </button>
+            {manualCreateDisabledReason && !isCreating ? <p className="meta">{manualCreateDisabledReason}</p> : null}
           </div>
         ) : null}
 
@@ -291,7 +298,7 @@ export function DmArticleCreator({
             </p>
             <button
               type="button"
-              disabled={isCreating || !uploadDraft.filename.trim() || !uploadDraft.markdown.trim()}
+              disabled={isCreating || Boolean(uploadCreateDisabledReason)}
               onClick={() =>
                 onCreate({
                   mode: "upload",
@@ -303,6 +310,7 @@ export function DmArticleCreator({
             >
               {isCreating ? "Creating..." : "Create"}
             </button>
+            {uploadCreateDisabledReason && !isCreating ? <p className="meta">{uploadCreateDisabledReason}</p> : null}
           </div>
         ) : null}
 

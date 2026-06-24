@@ -28,6 +28,7 @@ export function DmContentHero({
         <a
           className={activeLane === "statblocks" ? "button-link" : "ghost-button"}
           href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content`}
+          aria-current={activeLane === "statblocks" ? "page" : undefined}
         >
           <span>Statblocks</span>
           <span className="meta-badge">{laneCounts.statblocks}</span>
@@ -35,6 +36,7 @@ export function DmContentHero({
         <a
           className={activeLane === "staged-articles" ? "button-link" : "ghost-button"}
           href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=staged-articles`}
+          aria-current={activeLane === "staged-articles" ? "page" : undefined}
         >
           <span>Staged Articles</span>
           <span className="meta-badge">{laneCounts.stagedArticles}</span>
@@ -42,6 +44,7 @@ export function DmContentHero({
         <a
           className={activeLane === "conditions" ? "button-link" : "ghost-button"}
           href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=conditions`}
+          aria-current={activeLane === "conditions" ? "page" : undefined}
         >
           <span>Conditions</span>
           <span className="meta-badge">{laneCounts.conditions}</span>
@@ -49,6 +52,7 @@ export function DmContentHero({
         <a
           className={activeLane === "player-wiki" ? "button-link" : "ghost-button"}
           href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=player-wiki`}
+          aria-current={activeLane === "player-wiki" ? "page" : undefined}
         >
           <span>Player Wiki</span>
           <span className="meta-badge">{laneCounts.playerWiki}</span>
@@ -56,6 +60,7 @@ export function DmContentHero({
         <a
           className={activeLane === "systems" ? "button-link" : "ghost-button"}
           href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=systems`}
+          aria-current={activeLane === "systems" ? "page" : undefined}
         >
           <span>Systems</span>
           <span className="meta-badge">{laneCounts.systems}</span>
