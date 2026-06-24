@@ -111,6 +111,11 @@ export function CombatDmStatusPanel({
   }
 
   const isPlayerCharacter = Boolean(selectedCombatant.character_slug);
+  const removeCombatantHint = !deleteCombatantConfirmed
+    ? "Check Confirm removal to enable this action."
+    : isDeletingCombatant
+      ? "Selected combatant removal is already in progress."
+      : "";
   const vitalsPayload = (): CombatVitalsPatchPayload => {
     const base: CombatVitalsPatchPayload = {
       current_hp: vitalsDraft.currentHp,
@@ -418,9 +423,19 @@ export function CombatDmStatusPanel({
             />
             Confirm removal
           </label>
-          <button type="submit" className="ghost-button" disabled={!deleteCombatantConfirmed || isDeletingCombatant}>
+          <button
+            type="submit"
+            className="ghost-button"
+            disabled={!deleteCombatantConfirmed || isDeletingCombatant}
+            aria-describedby={removeCombatantHint ? "combat-remove-combatant-hint" : undefined}
+          >
             {isDeletingCombatant ? "Removing..." : "Remove selected combatant"}
           </button>
+          {removeCombatantHint ? (
+            <p id="combat-remove-combatant-hint" className="meta">
+              {removeCombatantHint}
+            </p>
+          ) : null}
         </form>
       </section>
     </>

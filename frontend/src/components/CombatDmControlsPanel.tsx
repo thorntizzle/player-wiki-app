@@ -119,6 +119,12 @@ export function CombatDmControlsPanel({
     );
   }
 
+  const clearTrackerHint = !confirmClearTracker
+    ? "Check Confirm clear tracker to enable this action."
+    : isClearingCombat
+      ? "Tracker clear is already in progress."
+      : "";
+
   return (
     <section className="combat-controls-layout" aria-label="DM combat controls">
       <article className="card combat-control-card">
@@ -496,9 +502,15 @@ export function CombatDmControlsPanel({
           className="ghost-button"
           onClick={onClearCombat}
           disabled={!confirmClearTracker || isClearingCombat}
+          aria-describedby={clearTrackerHint ? "combat-clear-tracker-hint" : undefined}
         >
           {isClearingCombat ? "Clearing..." : "Clear tracker"}
         </button>
+        {clearTrackerHint ? (
+          <p id="combat-clear-tracker-hint" className="meta">
+            {clearTrackerHint}
+          </p>
+        ) : null}
       </section>
     </section>
   );

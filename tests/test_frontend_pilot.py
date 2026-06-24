@@ -1095,6 +1095,10 @@ def test_combat_action_chrome_in_source() -> None:
     remove_button_block = status_panel_source[remove_form_start:remove_form_end]
     assert 'className="confirmed-action"' in remove_button_block
     assert 'className="ghost-button"' in remove_button_block
+    assert 'aria-describedby={removeCombatantHint ? "combat-remove-combatant-hint" : undefined}' in remove_button_block
+    assert 'id="combat-remove-combatant-hint"' in remove_button_block
+    assert "Check Confirm removal to enable this action." in status_panel_source
+    assert "Selected combatant removal is already in progress." in status_panel_source
     assert "className=\"button button-secondary\"" not in remove_button_block
     assert remove_call in remove_button_block
 
@@ -1103,6 +1107,10 @@ def test_combat_action_chrome_in_source() -> None:
     clear_button_end = controls_panel_source.index("</button>", clear_button_start) + len("</button>")
     clear_button_block = controls_panel_source[clear_button_start:clear_button_end]
     assert 'className="ghost-button"' in clear_button_block
+    assert 'aria-describedby={clearTrackerHint ? "combat-clear-tracker-hint" : undefined}' in clear_button_block
+    assert 'id="combat-clear-tracker-hint"' in controls_panel_source
+    assert "Check Confirm clear tracker to enable this action." in controls_panel_source
+    assert "Tracker clear is already in progress." in controls_panel_source
     assert "className=\"button button-secondary\"" not in clear_button_block
     assert clear_on_click in clear_button_block
 
