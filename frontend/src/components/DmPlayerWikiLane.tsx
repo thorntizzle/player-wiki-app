@@ -84,7 +84,6 @@ export function DmPlayerWikiLane({
       <section className="card dm-player-wiki-create">
         <div className="section-heading">
           <h2>Create player wiki page</h2>
-          <p className="meta">Direct authoring for durable player-facing reference pages.</p>
         </div>
         <form
           className="stack-form dm-content-wiki-form"

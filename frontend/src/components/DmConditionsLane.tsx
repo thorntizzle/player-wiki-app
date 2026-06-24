@@ -70,7 +70,6 @@ export function DmConditionsLane({
       <section className="card dm-condition-create">
         <div className="section-heading">
           <h2>Create condition</h2>
-          <p className="meta">Custom combat condition reminder.</p>
         </div>
         <form
           className="stack-form"

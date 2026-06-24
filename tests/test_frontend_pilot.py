@@ -2222,6 +2222,11 @@ def test_dm_content_hero_nav_lives_in_component_module() -> None:
     assert 'className="hero compact dm-content-hero"' in hero_source
     assert 'className="character-subpage-nav dm-content-subpage-nav"' in hero_source
     assert 'aria-label="DM Content subpages"' in hero_source
+    assert 'aria-current={activeLane === "statblocks" ? "page" : undefined}' in hero_source
+    assert 'aria-current={activeLane === "staged-articles" ? "page" : undefined}' in hero_source
+    assert 'aria-current={activeLane === "conditions" ? "page" : undefined}' in hero_source
+    assert 'aria-current={activeLane === "player-wiki" ? "page" : undefined}' in hero_source
+    assert 'aria-current={activeLane === "systems" ? "page" : undefined}' in hero_source
     assert "laneCounts.statblocks" in hero_source
     assert "laneCounts.stagedArticles" in hero_source
     assert "laneCounts.conditions" in hero_source
@@ -2229,6 +2234,19 @@ def test_dm_content_hero_nav_lives_in_component_module() -> None:
     assert "laneCounts.systems" in hero_source
     assert "subpage_counts?.statblocks" in route_source
     assert "subpage_counts?.staged_articles" in route_source
+
+
+def test_dm_content_create_panels_keep_helper_copy_sparse() -> None:
+    statblocks_lane_source = Path("frontend/src/components/DmStatblocksLane.tsx").read_text(encoding="utf-8")
+    conditions_lane_source = Path("frontend/src/components/DmConditionsLane.tsx").read_text(encoding="utf-8")
+    player_wiki_lane_source = Path("frontend/src/components/DmPlayerWikiLane.tsx").read_text(encoding="utf-8")
+
+    assert "Upload or paste markdown for DM-side encounter prep." not in statblocks_lane_source
+    assert "Custom combat condition reminder." not in conditions_lane_source
+    assert "Direct authoring for durable player-facing reference pages." not in player_wiki_lane_source
+    assert "<h2>Create statblock</h2>" in statblocks_lane_source
+    assert "<h2>Create condition</h2>" in conditions_lane_source
+    assert "<h2>Create player wiki page</h2>" in player_wiki_lane_source
 
 
 def test_dm_content_mutations_live_in_shared_hook() -> None:

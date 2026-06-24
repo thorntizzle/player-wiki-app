@@ -80,7 +80,6 @@ export function DmStatblocksLane({
       <section className="card dm-statblock-create">
         <div className="section-heading">
           <h2>Create statblock</h2>
-          <p className="meta">Upload or paste markdown for DM-side encounter prep.</p>
         </div>
         <form
           className="stack-form"
