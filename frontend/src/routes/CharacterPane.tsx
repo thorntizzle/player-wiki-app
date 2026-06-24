@@ -64,14 +64,7 @@ import { CharacterSystemSummarySection } from "../components/CharacterSystemSumm
 import { CharacterVitalsBar } from "../components/CharacterVitalsBar";
 import { CharacterDndSections } from "../components/CharacterDndSections";
 import { CharacterNotesSection } from "../components/CharacterNotesSection";
-import { CharacterPersonalSection } from "../components/CharacterPersonalSection";
-import { CharacterXianxiaEquipmentSection } from "../components/CharacterXianxiaEquipmentSection";
-import { CharacterXianxiaInventorySection } from "../components/CharacterXianxiaInventorySection";
-import { CharacterXianxiaMartialArtsSection } from "../components/CharacterXianxiaMartialArtsSection";
-import { CharacterXianxiaQuickReferenceSection } from "../components/CharacterXianxiaQuickReferenceSection";
-import { CharacterXianxiaResourcesSection } from "../components/CharacterXianxiaResourcesSection";
-import { CharacterXianxiaSkillsSection } from "../components/CharacterXianxiaSkillsSection";
-import { CharacterXianxiaTechniquesSection } from "../components/CharacterXianxiaTechniquesSection";
+import { CharacterXianxiaSections } from "../components/CharacterXianxiaSections";
 import {
   asRecord,
   asRecordArray,
@@ -1187,111 +1180,98 @@ export function CharacterPane({
               />
             ) : null}
 
-            {isXianxia && activeCharacterSection === "quick-reference" ? (
-              <CharacterXianxiaQuickReferenceSection
-                hasSkillUseGuardrail={hasSkillUseGuardrail}
-                hasXianxiaHonorInteractions={hasXianxiaHonorInteractions}
-                hasXianxiaStanceBreak={hasXianxiaStanceBreak}
-                presentedXianxia={presentedXianxia}
-                skillUseGuardrailReferenceLines={skillUseGuardrailReferenceLines}
-                skillUseGuardrailRuleHref={skillUseGuardrailRuleHref}
-                skillUseGuardrailRuleTitle={skillUseGuardrailRuleTitle}
-                xianxiaActionReference={xianxiaActionReference}
-                xianxiaDefenseReference={xianxiaDefenseReference}
-                xianxiaHonorContexts={xianxiaHonorContexts}
-                xianxiaHonorInteractions={xianxiaHonorInteractions}
-                xianxiaHonorReferenceLines={xianxiaHonorReferenceLines}
-                xianxiaInsight={xianxiaInsight}
-                xianxiaRuleTextReferences={xianxiaRuleTextReferences}
-                xianxiaStanceBreak={xianxiaStanceBreak}
-                xianxiaStanceBreakRecoveryLines={xianxiaStanceBreakRecoveryLines}
-                xianxiaStanceBreakReferenceLines={xianxiaStanceBreakReferenceLines}
-              />
-            ) : null}
-            {isXianxia && activeCharacterSection === "martial-arts" ? (
-              <CharacterXianxiaMartialArtsSection martialArts={presentedXianxia.martial_arts} />
-            ) : null}
-            {isXianxia && activeCharacterSection === "techniques" ? (
-              <CharacterXianxiaTechniquesSection
-                approval={presentedXianxia.approval}
-                basicActions={presentedXianxia.basic_actions}
-                canEdit={canEdit}
-                canRecordXianxiaDaoUse={canRecordXianxiaDaoUse}
-                genericTechniques={presentedXianxia.generic_techniques}
-                isDaoUseRecordSaving={postXianxiaDaoUseRecord.isPending}
-                isDaoUseRequestSaving={postXianxiaDaoUseRequest.isPending}
-                setXianxiaDaoRequestDraft={setXianxiaDaoRequestDraft}
-                setXianxiaDaoUseNotesDrafts={setXianxiaDaoUseNotesDrafts}
-                submitXianxiaDaoUseRecord={submitXianxiaDaoUseRecord}
-                submitXianxiaDaoUseRequest={submitXianxiaDaoUseRequest}
-                xianxiaDaoRequestDraft={xianxiaDaoRequestDraft}
-                xianxiaDaoUseNotesDrafts={xianxiaDaoUseNotesDrafts}
-                xianxiaInsight={xianxiaInsight}
-              />
-            ) : null}
-            {isXianxia && activeCharacterSection === "resources" ? (
-              <CharacterXianxiaResourcesSection
-                activeStateStatus={xianxiaActiveStateStatus}
-                canEdit={canEdit}
-                durability={xianxiaDurability}
-                energies={xianxiaEnergies}
-                insight={xianxiaInsight}
-                isActiveStateSaving={patchXianxiaActiveState.isPending}
-                setXianxiaActiveDraft={setXianxiaActiveDraft}
-                submitXianxiaActiveState={submitXianxiaActiveState}
-                xianxiaActiveDraft={xianxiaActiveDraft}
-                xianxiaDao={xianxiaDao}
-                yinYang={xianxiaYinYang}
-              />
-            ) : null}
-
-            {isXianxia && activeCharacterSection === "skills" ? (
-              <CharacterXianxiaSkillsSection
-                hasSkillUseGuardrail={hasSkillUseGuardrail}
-                skillUseGuardrailReferenceLines={skillUseGuardrailReferenceLines}
-                skillUseGuardrailRuleHref={skillUseGuardrailRuleHref}
-                skillUseGuardrailRuleTitle={skillUseGuardrailRuleTitle}
-                trainedSkills={presentedXianxia.skills?.trained ?? []}
-              />
-            ) : null}
-
-            {isXianxia && activeCharacterSection === "equipment" ? (
-              <CharacterXianxiaEquipmentSection
-                defenseReference={xianxiaDefenseReference}
-                equipment={presentedXianxia.equipment}
-              />
-            ) : null}
-
-            {isXianxia && activeCharacterSection === "inventory" ? (
-              <CharacterXianxiaInventorySection
-                canEdit={canEdit}
-                currency={currency}
-                currencyDraft={currencyDraft}
-                inventory={xianxiaInventory}
-                isAddingInventoryItem={addXianxiaInventoryItem.isPending}
-                isCurrencySaving={patchCurrency.isPending}
-                isRemovingInventoryItem={removeXianxiaInventoryItem.isPending}
-                isUpdatingInventoryItem={patchXianxiaInventoryItem.isPending}
-                newXianxiaInventoryDraft={newXianxiaInventoryDraft}
-                setCurrencyDraft={setCurrencyDraft}
-                setNewXianxiaInventoryDraft={setNewXianxiaInventoryDraft}
-                setXianxiaInventoryDrafts={setXianxiaInventoryDrafts}
-                submitCurrency={submitCurrency}
-                submitCurrencyOnBlur={submitCurrencyOnBlur}
-                submitXianxiaInventoryAdd={submitXianxiaInventoryAdd}
-                submitXianxiaInventoryUpdate={submitXianxiaInventoryUpdate}
-                toggleXianxiaInventoryEquipped={toggleXianxiaInventoryEquipped}
-                removeXianxiaInventory={removeXianxiaInventory}
-                xianxiaCurrency={xianxiaCurrency}
-                xianxiaInventoryDrafts={xianxiaInventoryDrafts}
-              />
-            ) : null}
-
-            {isXianxia && activeCharacterSection === "personal" ? (
-              <CharacterPersonalSection
-                personalBackgroundHtml={personalBackgroundHtml}
-                physicalDescriptionHtml={physicalDescriptionHtml}
-                portrait={detailRecord?.portrait}
+            {isXianxia ? (
+              <CharacterXianxiaSections
+                activeCharacterSection={activeCharacterSection}
+                equipment={{
+                  defenseReference: xianxiaDefenseReference,
+                  equipment: presentedXianxia.equipment,
+                }}
+                inventory={{
+                  canEdit,
+                  currency,
+                  currencyDraft,
+                  inventory: xianxiaInventory,
+                  isAddingInventoryItem: addXianxiaInventoryItem.isPending,
+                  isCurrencySaving: patchCurrency.isPending,
+                  isRemovingInventoryItem: removeXianxiaInventoryItem.isPending,
+                  isUpdatingInventoryItem: patchXianxiaInventoryItem.isPending,
+                  newXianxiaInventoryDraft,
+                  removeXianxiaInventory,
+                  setCurrencyDraft,
+                  setNewXianxiaInventoryDraft,
+                  setXianxiaInventoryDrafts,
+                  submitCurrency,
+                  submitCurrencyOnBlur,
+                  submitXianxiaInventoryAdd,
+                  submitXianxiaInventoryUpdate,
+                  toggleXianxiaInventoryEquipped,
+                  xianxiaCurrency,
+                  xianxiaInventoryDrafts,
+                }}
+                martialArts={{
+                  martialArts: presentedXianxia.martial_arts,
+                }}
+                personal={{
+                  personalBackgroundHtml,
+                  physicalDescriptionHtml,
+                  portrait: detailRecord?.portrait,
+                }}
+                quickReference={{
+                  hasSkillUseGuardrail,
+                  hasXianxiaHonorInteractions,
+                  hasXianxiaStanceBreak,
+                  presentedXianxia,
+                  skillUseGuardrailReferenceLines,
+                  skillUseGuardrailRuleHref,
+                  skillUseGuardrailRuleTitle,
+                  xianxiaActionReference,
+                  xianxiaDefenseReference,
+                  xianxiaHonorContexts,
+                  xianxiaHonorInteractions,
+                  xianxiaHonorReferenceLines,
+                  xianxiaInsight,
+                  xianxiaRuleTextReferences,
+                  xianxiaStanceBreak,
+                  xianxiaStanceBreakRecoveryLines,
+                  xianxiaStanceBreakReferenceLines,
+                }}
+                resources={{
+                  activeStateStatus: xianxiaActiveStateStatus,
+                  canEdit,
+                  durability: xianxiaDurability,
+                  energies: xianxiaEnergies,
+                  insight: xianxiaInsight,
+                  isActiveStateSaving: patchXianxiaActiveState.isPending,
+                  setXianxiaActiveDraft,
+                  submitXianxiaActiveState,
+                  xianxiaActiveDraft,
+                  xianxiaDao,
+                  yinYang: xianxiaYinYang,
+                }}
+                skills={{
+                  hasSkillUseGuardrail,
+                  skillUseGuardrailReferenceLines,
+                  skillUseGuardrailRuleHref,
+                  skillUseGuardrailRuleTitle,
+                  trainedSkills: presentedXianxia.skills?.trained ?? [],
+                }}
+                techniques={{
+                  approval: presentedXianxia.approval,
+                  basicActions: presentedXianxia.basic_actions,
+                  canEdit,
+                  canRecordXianxiaDaoUse,
+                  genericTechniques: presentedXianxia.generic_techniques,
+                  isDaoUseRecordSaving: postXianxiaDaoUseRecord.isPending,
+                  isDaoUseRequestSaving: postXianxiaDaoUseRequest.isPending,
+                  setXianxiaDaoRequestDraft,
+                  setXianxiaDaoUseNotesDrafts,
+                  submitXianxiaDaoUseRecord,
+                  submitXianxiaDaoUseRequest,
+                  xianxiaDaoRequestDraft,
+                  xianxiaDaoUseNotesDrafts,
+                  xianxiaInsight,
+                }}
               />
             ) : null}
 

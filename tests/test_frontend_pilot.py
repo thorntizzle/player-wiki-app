@@ -2876,6 +2876,44 @@ def test_character_pane_delegates_dnd_section_composition() -> None:
     assert 'activeCharacterSection === "abilities"' in dnd_sections_source
 
 
+def test_character_pane_delegates_xianxia_section_composition() -> None:
+    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    xianxia_sections_source = Path("frontend/src/components/CharacterXianxiaSections.tsx").read_text(encoding="utf-8")
+
+    assert 'import { CharacterXianxiaSections } from "../components/CharacterXianxiaSections";' in route_source
+    assert "<CharacterXianxiaSections" in route_source
+    assert "activeCharacterSection={activeCharacterSection}" in route_source
+    assert "CharacterXianxiaQuickReferenceSection" not in route_source
+    assert "CharacterXianxiaMartialArtsSection" not in route_source
+    assert "CharacterXianxiaTechniquesSection" not in route_source
+    assert "CharacterXianxiaResourcesSection" not in route_source
+    assert "CharacterXianxiaSkillsSection" not in route_source
+    assert "CharacterXianxiaEquipmentSection" not in route_source
+    assert "CharacterXianxiaInventorySection" not in route_source
+    assert "CharacterPersonalSection" not in route_source
+
+    for section_name in [
+        "CharacterXianxiaQuickReferenceSection",
+        "CharacterXianxiaMartialArtsSection",
+        "CharacterXianxiaTechniquesSection",
+        "CharacterXianxiaResourcesSection",
+        "CharacterXianxiaSkillsSection",
+        "CharacterXianxiaEquipmentSection",
+        "CharacterXianxiaInventorySection",
+        "CharacterPersonalSection",
+    ]:
+        assert section_name in xianxia_sections_source
+
+    assert 'activeCharacterSection === "quick-reference"' in xianxia_sections_source
+    assert 'activeCharacterSection === "martial-arts"' in xianxia_sections_source
+    assert 'activeCharacterSection === "techniques"' in xianxia_sections_source
+    assert 'activeCharacterSection === "resources"' in xianxia_sections_source
+    assert 'activeCharacterSection === "skills"' in xianxia_sections_source
+    assert 'activeCharacterSection === "equipment"' in xianxia_sections_source
+    assert 'activeCharacterSection === "inventory"' in xianxia_sections_source
+    assert 'activeCharacterSection === "personal"' in xianxia_sections_source
+
+
 def test_character_notes_section_uses_flask_style_reference_stack_and_edit_chrome() -> None:
     source = Path("frontend/src/components/CharacterNotesSection.tsx").read_text(encoding="utf-8")
     notes_section_markup = source
