@@ -393,6 +393,58 @@ def test_app_shell_search_auth_and_loading_live_in_shared_modules() -> None:
     assert "export function useAppLoadingReadiness" in loading_source
 
 
+def test_shared_state_cues_do_not_depend_on_color_only() -> None:
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+    dnd_skills_source = Path("frontend/src/components/CharacterDndAbilitySkillsSection.tsx").read_text(encoding="utf-8")
+    xianxia_skills_source = Path("frontend/src/components/CharacterXianxiaSkillsSection.tsx").read_text(encoding="utf-8")
+    embedded_nav_source = Path("frontend/src/components/CharacterEmbeddedSectionNav.tsx").read_text(encoding="utf-8")
+    character_nav_source = Path("frontend/src/components/CharacterNavigationCard.tsx").read_text(encoding="utf-8")
+    dm_content_hero_source = Path("frontend/src/components/DmContentHero.tsx").read_text(encoding="utf-8")
+
+    status_block = styles[styles.index(".status {"):styles.index(".toast-notice {")]
+    disabled_block = styles[styles.index("button:disabled,"):styles.index(".auth-notice {")]
+    confirmed_action_block = styles[styles.index(".confirmed-action {"):styles.index(".confirmed-action .checkbox-label")]
+    proficient_skill_block = styles[
+        styles.index(".ability-skill-list__item--proficient .ability-skill-list__pill"):
+        styles.index(".ability-skill-list__name")
+    ]
+    xianxia_skill_block = styles[styles.index(".skill-pill--proficient {"):styles.index(".character-read-shell")]
+
+    assert "border-left-width: 4px;" in status_block
+    assert ".status-error {" in status_block
+    assert "border-left-color: var(--danger);" in status_block
+    assert ".status-warning {" in status_block
+    assert ".status-error::before," in status_block
+    assert ".status-warning::before" in status_block
+    assert 'content: "!";' in status_block
+    assert "border: 1px solid currentColor;" in status_block
+
+    assert "cursor: not-allowed;" in disabled_block
+    assert "border-style: dashed;" in disabled_block
+    assert "filter: none;" in disabled_block
+
+    assert "border: 1px dashed var(--error-border);" in confirmed_action_block
+    assert "background: var(--error-bg);" in confirmed_action_block
+
+    assert "border-color: var(--border-accent);" in proficient_skill_block
+    assert "box-shadow: inset 0 0 0 1px var(--accent-deep);" in proficient_skill_block
+    assert 'className="visually-hidden"' in dnd_skills_source
+    assert '<span className="meta">{proficiencyLabel}</span>' not in dnd_skills_source
+
+    assert "border-color: var(--border-accent);" in xianxia_skill_block
+    assert 'className="skill-pill skill-pill--proficient"' in xianxia_skills_source
+    assert '<span className="meta">Trained</span>' in xianxia_skills_source
+
+    assert "aria-pressed={isActive}" in embedded_nav_source
+    assert 'aria-current={isActive ? "page" : undefined}' in embedded_nav_source
+    assert 'aria-current={isActive ? "page" : undefined}' in character_nav_source
+    assert 'aria-current={activeLane === "statblocks" ? "page" : undefined}' in dm_content_hero_source
+    assert ".campaign-nav-link.is-active {" in styles
+    assert ".wiki-section-nav .button-link[aria-current=\"page\"]" in styles
+    assert ".systems-source-nav .button-link[aria-current=\"page\"]" in styles
+    assert ".combat-workspace-button--active {" in styles
+
+
 def test_character_navigation_card_uses_flask_style_chrome_in_source() -> None:
     source = Path("frontend/src/components/CharacterNavigationCard.tsx").read_text(encoding="utf-8")
 
