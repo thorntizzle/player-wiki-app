@@ -406,29 +406,31 @@ export function SystemsEntryPage() {
             ) : (
               <>
                 <p className="meta">This entry has been imported into the systems library, but it does not have rendered content yet.</p>
-                <p className="meta">Entry key: {entry.entry_key}</p>
               </>
             )}
           </article>
           <aside className="sidebar systems-entry-sidebar">
             <section className="card sidebar-card systems-sidebar-card">
-              <h2>Entry Metadata</h2>
-              <p className="meta">Type: {entry.entry_type_label}</p>
-              <p className="meta">Source: {entry.source_id}</p>
-              <p className="meta">Entry key: {entry.entry_key}</p>
-              {entry.source_page ? <p className="meta">Source page: {entry.source_page}</p> : null}
-            </section>
-            <section className="card sidebar-card systems-sidebar-card">
-              <h2>Navigation</h2>
-              <ul className="plain-list systems-entry-navigation">
-                <li><a href={systemsIndexHref(resolvedCampaignSlug)}>Systems landing</a></li>
-                <li><a href={systemsSourceHref(resolvedCampaignSlug, entry.source_id)}>Source page</a></li>
-                <li><a href={systemsSourceCategoryHref(resolvedCampaignSlug, entry.source_id, entry.entry_type)}>Source category</a></li>
-              </ul>
+              <h2>Entry Reference</h2>
+              <section className="sidebar-card-section">
+                <h3>Metadata</h3>
+                <p className="meta">Type: {entry.entry_type_label}</p>
+                <p className="meta">Source: {entry.source_id}</p>
+                {entry.source_page ? <p className="meta">Source page: {entry.source_page}</p> : null}
+              </section>
+              <section className="sidebar-card-section">
+                <h3>Navigation</h3>
+                <ul className="plain-list systems-entry-navigation">
+                  <li><a href={systemsIndexHref(resolvedCampaignSlug)}>Systems landing</a></li>
+                  <li><a href={systemsSourceHref(resolvedCampaignSlug, entry.source_id)}>Source page</a></li>
+                  <li><a href={systemsSourceCategoryHref(resolvedCampaignSlug, entry.source_id, entry.entry_type)}>Source category</a></li>
+                </ul>
+              </section>
             </section>
             {data?.permissions.can_manage_systems ? (
               <section className="card sidebar-card systems-sidebar-card" id="systems-entry-management">
                 <h2>Entry Management</h2>
+                <p className="meta">Entry key: {entry.entry_key}</p>
                 <p className="meta">
                   Shared library entry. Campaign DMs normally use overrides; app admins can allow trusted campaign DMs to edit shared/core content directly.
                 </p>

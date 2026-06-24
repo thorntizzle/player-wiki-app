@@ -1279,10 +1279,18 @@ def test_systems_entry_navigation_removes_open_flask_entry_link() -> None:
     systems_entry_markup = source[systems_entry_start:]
 
     assert "Open Flask entry" not in systems_entry_markup
+    assert "Entry Metadata" not in systems_entry_markup
+    assert "Entry Reference" in systems_entry_markup
+    assert 'className="sidebar-card-section"' in systems_entry_markup
     assert "Systems landing" in systems_entry_markup
     assert "Source page" in systems_entry_markup
     assert "Source category" in systems_entry_markup
     assert "Entry Management" in systems_entry_markup
+    management_start = systems_entry_markup.index('<section className="card sidebar-card systems-sidebar-card" id="systems-entry-management">')
+    before_management = systems_entry_markup[:management_start]
+    management_markup = systems_entry_markup[management_start:]
+    assert "Entry key: {entry.entry_key}" not in before_management
+    assert "Entry key: {entry.entry_key}" in management_markup
 
 
 def test_systems_shared_chrome_lives_in_component_module() -> None:
