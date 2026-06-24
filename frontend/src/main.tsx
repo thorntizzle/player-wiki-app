@@ -5,8 +5,6 @@ import {
   createRoute,
   createRouter,
   RouterProvider,
-  useLocation,
-  useParams,
 } from "@tanstack/react-router";
 import { QueryClientProvider } from "@tanstack/react-query";
 import "./styles.css";
@@ -32,45 +30,18 @@ import {
   CharacterRetrainingPage,
   CharacterXianxiaManualImportPage,
 } from "./routes/CharacterAuthoringRoutes";
-import { CharacterPane } from "./routes/CharacterPane";
+import { CharacterDetailPage } from "./routes/CharacterDetailPage";
 import { DmContentPage } from "./routes/DmContentPage";
 import { CombatPage } from "./routes/CombatPage";
 import { SessionPage } from "./routes/SessionPage";
 import { AppShell } from "./AppShell";
 import { CharacterRosterPage } from "./routes/CharacterRosterPage";
-import { normalizeCharacterSection } from "./characterPaneUtils";
 
 declare global {
   interface Window {
     __cpwAppLoadingBegin?: () => void;
     __cpwAppLoadingReady?: () => void;
   }
-}
-
-function CharacterDetailPage() {
-  const params = useParams({
-    from: "/campaigns/$campaignSlug/characters/$characterSlug",
-  });
-  const location = useLocation();
-  const campaignSlug = params.campaignSlug ?? "";
-  const characterSlug = params.characterSlug ?? "";
-  const initialSection = normalizeCharacterSection(new URLSearchParams(location.search).get("page"));
-
-  return (
-    <CharacterPane
-      campaignSlug={campaignSlug}
-      initialCharacterSlug={characterSlug}
-      initialSection={initialSection}
-      surface="read"
-      onSelectedCharacterChange={(nextSlug) => {
-        window.history.pushState(
-          null,
-          "",
-          `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters/${encodeURIComponent(nextSlug)}`,
-        );
-      }}
-    />
-  );
 }
 
 const rootRoute = createRootRoute({

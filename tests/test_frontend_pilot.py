@@ -425,6 +425,25 @@ def test_character_read_section_url_helpers_live_in_shared_utils() -> None:
     assert "readSurfaceSectionBaseUrl" not in route_source
 
 
+def test_character_detail_route_wrapper_lives_in_route_module() -> None:
+    main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/routes/CharacterDetailPage.tsx").read_text(encoding="utf-8")
+
+    assert 'import { CharacterDetailPage } from "./routes/CharacterDetailPage";' in main_source
+    assert "function CharacterDetailPage" not in main_source
+    assert "useParams" not in main_source
+    assert "useLocation" not in main_source
+    assert "normalizeCharacterSection" not in main_source
+    assert 'component: CharacterDetailPage' in main_source
+
+    assert "export function CharacterDetailPage()" in route_source
+    assert 'from: "/campaigns/$campaignSlug/characters/$characterSlug"' in route_source
+    assert "normalizeCharacterSection(new URLSearchParams(location.search).get(\"page\"))" in route_source
+    assert "<CharacterPane" in route_source
+    assert 'surface="read"' in route_source
+    assert "onSelectedCharacterChange" in route_source
+
+
 def test_character_section_policy_helpers_live_in_shared_utils() -> None:
     source = Path("frontend/src/characterPaneUtils.ts").read_text(encoding="utf-8")
     route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
