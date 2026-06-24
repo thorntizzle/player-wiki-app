@@ -536,17 +536,38 @@ def test_character_retraining_route_lives_in_route_module() -> None:
     assert "expected_revision: retraining.state_revision" in retraining_source
 
 
+def test_character_level_up_route_lives_in_route_module() -> None:
+    main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    authoring_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
+
+    assert 'import { CharacterLevelUpPage } from "./routes/CharacterLevelUpPage";' in main_source
+    assert "function CharacterLevelUpPage" not in authoring_source
+    assert "CharacterLevelUpPayload" not in authoring_source
+    assert "characterLevelUpValuesFromContext" not in authoring_source
+    assert 'component: CharacterLevelUpPage' in main_source
+
+    assert "export function CharacterLevelUpPage()" in level_up_source
+    assert 'from: "/campaigns/$campaignSlug/characters/$characterSlug/level-up"' in level_up_source
+    assert "apiClient.getCharacterLevelUp(campaignSlug, characterSlug, contextValues)" in level_up_source
+    assert "apiClient.submitCharacterLevelUp(campaignSlug, characterSlug, payload)" in level_up_source
+    assert "characterLevelUpValuesFromContext(levelUp)" in level_up_source
+    assert "expected_revision: levelUp.state_revision" in level_up_source
+
+
 def test_character_authoring_preview_lists_live_in_component_module() -> None:
     route_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
+    level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
     preview_source = Path("frontend/src/components/CharacterAuthoringPreview.tsx").read_text(encoding="utf-8")
 
-    assert 'import { CharacterLevelUpPreviewList } from "../components/CharacterAuthoringPreview";' in route_source
+    assert 'import { CharacterLevelUpPreviewList } from "../components/CharacterAuthoringPreview";' in level_up_source
     assert 'import { CharacterPreviewList } from "../components/CharacterAuthoringPreview";' in create_source
     assert "function CharacterPreviewList" not in route_source
     assert "function CharacterLevelUpPreviewList" not in route_source
+    assert "function CharacterLevelUpPreviewList" not in level_up_source
     assert "<CharacterPreviewList preview={create.preview} />" in create_source
-    assert "<CharacterLevelUpPreviewList preview={levelUp.preview ?? {}} />" in route_source
+    assert "<CharacterLevelUpPreviewList preview={levelUp.preview ?? {}} />" in level_up_source
 
     assert "function PreviewSidebar(" in preview_source
     assert "export function CharacterPreviewList" in preview_source
@@ -561,12 +582,14 @@ def test_character_authoring_preview_lists_live_in_component_module() -> None:
 def test_character_authoring_dnd_choice_select_lives_in_field_component() -> None:
     route_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
+    level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
     field_source = Path("frontend/src/components/CharacterAuthoringFields.tsx").read_text(encoding="utf-8")
 
-    assert 'import { CharacterDndChoiceSelect } from "../components/CharacterAuthoringFields";' in route_source
+    assert 'import { CharacterDndChoiceSelect } from "../components/CharacterAuthoringFields";' in level_up_source
     assert 'import { CharacterDndChoiceSelect } from "../components/CharacterAuthoringFields";' in create_source
     assert "function CharacterDndChoiceSelect" not in route_source
     assert "function CharacterDndChoiceSelect" not in create_source
+    assert "function CharacterDndChoiceSelect" not in level_up_source
     assert "export function CharacterDndChoiceSelect" in field_source
     assert "field: CharacterDndChoiceField;" in field_source
     assert "refreshContext(nextValues);" in field_source
@@ -577,6 +600,7 @@ def test_character_authoring_shared_helpers_live_in_utility_module() -> None:
     route_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     editor_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
     import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
+    level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
     helper_source = Path("frontend/src/characterAuthoringUtils.tsx").read_text(encoding="utf-8")
 
     assert "from \"../characterAuthoringUtils\";" in route_source
@@ -584,6 +608,8 @@ def test_character_authoring_shared_helpers_live_in_utility_module() -> None:
     assert "function classLevelTextFromRecord" not in route_source
     assert "function characterNameFromRecord" not in editor_source
     assert "function classLevelTextFromRecord" not in editor_source
+    assert "function characterNameFromRecord" not in level_up_source
+    assert "function classLevelTextFromRecord" not in level_up_source
     assert "function optionValue" not in route_source
     assert "function optionLabel" not in route_source
     assert "function draftString(" not in route_source
@@ -593,7 +619,9 @@ def test_character_authoring_shared_helpers_live_in_utility_module() -> None:
     assert "function editorSelectOptions" not in route_source
     assert "function editorValuesFromContext" not in route_source
     assert "function characterLevelUpValuesFromContext" not in route_source
+    assert "function characterLevelUpValuesFromContext" not in level_up_source
     assert "function characterAuthoringStringValues" not in route_source
+    assert "function characterAuthoringStringValues" not in level_up_source
     assert "function characterProgressionRepairValuesFromContext" not in route_source
     assert "function characterRetrainingValuesFromContext" not in route_source
     assert "function manualImportRows" not in route_source
@@ -1161,10 +1189,12 @@ def test_combat_conditions_chrome_in_source() -> None:
 def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
+    level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
     progression_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
     retraining_source = Path("frontend/src/routes/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
     route_sources = {
         "CharacterAdvancedEditorPage": advanced_source,
+        "CharacterLevelUpPage": level_up_source,
         "CharacterProgressionRepairPage": progression_source,
         "CharacterRetrainingPage": retraining_source,
     }
@@ -1246,12 +1276,14 @@ def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
 def test_character_supported_form_action_chrome_in_source() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
+    level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
     progression_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
     retraining_source = Path("frontend/src/routes/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
     manual_import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
     route_sources = {
         "CharacterAdvancedEditorPage": advanced_source,
+        "CharacterLevelUpPage": level_up_source,
         "CharacterProgressionRepairPage": progression_source,
         "CharacterRetrainingPage": retraining_source,
     }
@@ -1355,12 +1387,14 @@ def test_character_supported_form_action_chrome_in_source() -> None:
 def test_character_supported_hero_links_preserve_supported_nav_while_hiding_flask_fallbacks() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
+    level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
     progression_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
     retraining_source = Path("frontend/src/routes/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
     manual_import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
     route_sources = {
         "CharacterAdvancedEditorPage": advanced_source,
+        "CharacterLevelUpPage": level_up_source,
         "CharacterProgressionRepairPage": progression_source,
         "CharacterRetrainingPage": retraining_source,
     }
@@ -1525,10 +1559,12 @@ def test_grid_minimum_card_size_is_flask_260px_and_character_roster_grid_selecto
 def test_character_form_actions_do_not_convert_non_targeted_builder_rows() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
+    level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
     manual_import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
 
     def component_source(component_name: str) -> str:
-        return _extract_function_component_source(source, component_name)
+        component_owner = level_up_source if component_name == "CharacterLevelUpPage" else source
+        return _extract_function_component_source(component_owner, component_name)
 
     create_markup = _extract_function_component_source(create_source, "CharacterCreatePage")
     assert re.search(r'<div className="builder-actions">[\s\S]*?<button\s+type="submit"\s+disabled={!create\.builder_ready \|\| createMutation\.isPending}>', create_markup) is not None
