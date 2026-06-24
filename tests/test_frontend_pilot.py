@@ -608,6 +608,25 @@ def test_character_cultivation_route_lives_in_route_module_and_aggregate_is_reti
     assert "expected_revision: data.character.state_record.revision" in cultivation_source
 
 
+def test_character_cultivation_realm_ascension_lives_in_component_module() -> None:
+    route_source = Path("frontend/src/routes/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
+    realm_source = Path("frontend/src/components/CharacterCultivationRealmAscension.tsx").read_text(encoding="utf-8")
+
+    assert "export function CharacterCultivationRealmAscension" in realm_source
+    assert "function CultivationHistoryRecords" in realm_source
+    assert "recordFromUnknown(context.realm_ascension)" in realm_source
+    assert 'name="realm_ascension_gm_review_note"' in realm_source
+    assert 'name="realm_ascension_gm_confirmation_note"' in realm_source
+    assert "pre_ascension_snapshot" in realm_source
+    assert "post_ascension_snapshot" in realm_source
+
+    assert 'from "../components/CharacterCultivationRealmAscension";' in route_source
+    assert "<CharacterCultivationRealmAscension context={cultivation} renderActionForm={renderActionForm} />" in route_source
+    assert "const renderRealmAscension" not in route_source
+    assert "function CultivationHistoryRecords" not in route_source
+    assert 'name="realm_ascension_gm_review_note"' not in route_source
+
+
 def test_gen2_route_modules_are_lazy_loaded_without_dropping_loading_cover_early() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     shell_source = Path("frontend/src/AppShell.tsx").read_text(encoding="utf-8")
