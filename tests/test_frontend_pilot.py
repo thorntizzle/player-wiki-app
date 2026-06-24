@@ -2254,6 +2254,7 @@ def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_sour
     card_source = Path("frontend/src/components/DmContentCards.tsx").read_text(encoding="utf-8")
     statblocks_lane_source = Path("frontend/src/components/DmStatblocksLane.tsx").read_text(encoding="utf-8")
     conditions_lane_source = Path("frontend/src/components/DmConditionsLane.tsx").read_text(encoding="utf-8")
+    source_css = Path("frontend/src/styles.css").read_text(encoding="utf-8")
 
     assert 'import { DmConditionsLane } from "../components/DmConditionsLane";' in source
     assert 'import { DmStatblocksLane } from "../components/DmStatblocksLane";' in source
@@ -2265,6 +2266,9 @@ def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_sour
     assert '<section className="card dm-statblock-create">' not in source
     assert "<DmContentConditionCard" in conditions_lane_source
     assert "<DmContentStatblockCard" in statblocks_lane_source
+    assert 'className="dm-content-list dm-condition-list"' in conditions_lane_source
+    assert ".dm-condition-list" in source_css
+    assert "grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));" in source_css
 
     statblock_edit_start = card_source.index("export function DmContentStatblockCard(")
     statblock_edit_end = card_source.index("export function DmContentConditionCard(", statblock_edit_start)

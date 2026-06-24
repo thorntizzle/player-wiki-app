@@ -2622,6 +2622,11 @@ a:hover {
   gap: 1rem;
 }
 
+.dm-condition-list {
+  align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+}
+
 .dm-content-item {
   display: grid;
   gap: 1rem;
