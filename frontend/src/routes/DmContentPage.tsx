@@ -26,13 +26,13 @@ import { getApiErrorMessage } from "../apiErrors";
 import { ApiErrorNotice } from "../components/feedback";
 import { DmContentSystemsLane } from "./DmContentSystemsLane";
 import { DmArticleCreator } from "../components/DmArticleCreator";
-import { DmContentConditionCard, DmContentStatblockCard } from "../components/DmContentCards";
+import { DmContentConditionCard } from "../components/DmContentCards";
 import { DmPlayerWikiPageCard } from "../components/DmPlayerWikiPageCard";
 import { DmPlayerWikiDraftFields } from "../components/DmPlayerWikiDraftFields";
 import { DmStagedArticleQueue } from "../components/DmStagedArticleQueue";
+import { DmStatblocksLane } from "../components/DmStatblocksLane";
 import {
   buildEmptyManualArticleDraft,
-  readTextFile,
   type ArticleMode,
   type EmbeddedImageInput,
   type ManualArticleDraftState,
@@ -636,23 +636,6 @@ export function DmContentPage() {
     }));
   };
 
-  const renderStatblockCard = (statblock: DmContentStatblock) => {
-    const draft = statblockDrafts[statblock.id] ?? buildInitialStatblockDraft(statblock);
-    return (
-      <DmContentStatblockCard
-        key={statblock.id}
-        statblock={statblock}
-        draft={draft}
-        canManageDmContent={canManageDmContent}
-        isUpdating={updateStatblockMutation.isPending}
-        isDeleting={deleteStatblockMutation.isPending}
-        onDraftChange={updateStatblockDraft}
-        onUpdate={(id, payload) => updateStatblockMutation.mutate({ id, payload })}
-        onDelete={(id) => deleteStatblockMutation.mutate(id)}
-      />
-    );
-  };
-
   const renderConditionCard = (condition: DmContentConditionDefinition) => {
     const draft = conditionDrafts[condition.id] ?? buildInitialConditionDraft(condition);
     return (
@@ -790,158 +773,29 @@ export function DmContentPage() {
       ) : null}
 
       {activeLane === "statblocks" ? (
-        <div className="split-grid dm-content-staged-grid">
-          <section className="card dm-statblock-create">
-            <div className="section-heading">
-              <h2>Create statblock</h2>
-              <p className="meta">Upload or paste markdown for DM-side encounter prep.</p>
-            </div>
-            <form
-              className="stack-form"
-              onSubmit={(event: FormEvent<HTMLFormElement>) => {
-                event.preventDefault();
-                const formData = new FormData(event.currentTarget);
-                createStatblockMutation.mutate({
-                  filename: String(formData.get("filename") || "gen2-statblock.md").trim() || "gen2-statblock.md",
-                  subsection: String(formData.get("subsection") || ""),
-                  markdown_text: String(formData.get("markdown_text") || ""),
-                });
-              }}
-            >
-              <label className="field">
-                <span>Import markdown file</span>
-                <input
-                  id="dm-statblock-create-file-import"
-                  type="file"
-                  accept=".md,.markdown,text/markdown,text/plain"
-                  disabled={!canManageDmContent}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                    const file = event.currentTarget.files?.item(0);
-                    if (!file) {
-                      return;
-                    }
-                    readTextFile(file, (payload) => {
-                      if (!payload) {
-                        setPaneError("Unable to read that markdown file.");
-                        setUiMessage(null);
-                        return;
-                      }
-                      setPaneError(null);
-                      setUiMessage(null);
-                      setStatblockCreateDraft((current) => ({
-                        ...current,
-                        filename: payload.filename,
-                        markdown: payload.text,
-                      }));
-                    });
-                  }}
-                />
-              </label>
-              <label className="field">
-                <span>Source filename</span>
-                <input
-                  id="dm-statblock-create-filename"
-                  name="filename"
-                  value={statblockCreateDraft.filename}
-                  disabled={!canManageDmContent}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                    const filename = event.currentTarget.value;
-                    setStatblockCreateDraft((current) => ({
-                      ...current,
-                      filename,
-                    }));
-                  }}
-                />
-              </label>
-              <label className="field">
-                <span>Subsection</span>
-                <input
-                  id="dm-statblock-create-subsection"
-                  name="subsection"
-                  maxLength={80}
-                  value={statblockCreateDraft.subsection}
-                  disabled={!canManageDmContent}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                    const subsection = event.currentTarget.value;
-                    setStatblockCreateDraft((current) => ({
-                      ...current,
-                      subsection,
-                    }));
-                  }}
-                />
-              </label>
-              <label className="field">
-                <span>Source markdown body</span>
-                <textarea
-                  id="dm-statblock-create-markdown"
-                  name="markdown_text"
-                  rows={16}
-                  value={statblockCreateDraft.markdown}
-                  disabled={!canManageDmContent}
-                  onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-                    const markdown = event.currentTarget.value;
-                    setStatblockCreateDraft((current) => ({
-                      ...current,
-                      markdown,
-                    }));
-                  }}
-                />
-              </label>
-              <button type="submit" disabled={!canManageDmContent || createStatblockMutation.isPending}>
-                {createStatblockMutation.isPending ? "Saving..." : "Save statblock"}
-              </button>
-            </form>
-          </section>
-
-          <section className="card dm-statblock-library">
-            <div className="section-heading">
-              <div>
-                <h2>Statblock library</h2>
-                <p className="meta">Uploaded here for DM-side encounter prep. Campaigns can pull these directly into Combat.</p>
-              </div>
-            </div>
-            <form
-              className="search-form dm-statblock-search"
-              onSubmit={(event: FormEvent<HTMLFormElement>) => event.preventDefault()}
-            >
-              <label htmlFor="dm-statblock-search">Search statblocks</label>
-              <input
-                id="dm-statblock-search"
-                type="search"
-                value={statblockQuery}
-                placeholder="Title, subsection, source, text"
-                onChange={(event: ChangeEvent<HTMLInputElement>) => setStatblockQuery(event.currentTarget.value)}
-              />
-            </form>
-            {dmContentQuery.isLoading ? <p className="status status-neutral">Loading statblocks ...</p> : null}
-            {!dmContentQuery.isLoading && filteredStatblocks.length ? (
-              <div className="dm-content-list dm-statblock-groups">
-                {topLevelStatblocks.map(renderStatblockCard)}
-                {statblockSubsectionGroups.map((group) => (
-                  <details className="section-block section-block--collapsible" key={group.name} open>
-                    <summary className="section-toggle-summary">
-                      <span className="section-toggle-summary__content">
-                        <span className="section-title">{group.name}</span>
-                        <span className="meta">{group.statblocks.length} statblock{group.statblocks.length === 1 ? "" : "s"}</span>
-                      </span>
-                      <span className="section-toggle-chevron" aria-hidden="true" />
-                    </summary>
-                    <div className="section-block__body">
-                      <div className="dm-content-list">
-                        {group.statblocks.map(renderStatblockCard)}
-                      </div>
-                    </div>
-                  </details>
-                ))}
-              </div>
-            ) : null}
-            {!dmContentQuery.isLoading && !filteredStatblocks.length ? (
-              <p className="status status-neutral">
-                {statblockQuery ? "No statblocks matched that search." : "No DM statblocks have been uploaded yet."}
-              </p>
-            ) : null}
-          </section>
-        </div>
+        <DmStatblocksLane
+          canManageDmContent={canManageDmContent}
+          filteredStatblocks={filteredStatblocks}
+          isCreating={createStatblockMutation.isPending}
+          isDeleting={deleteStatblockMutation.isPending}
+          isLoading={dmContentQuery.isLoading}
+          isUpdating={updateStatblockMutation.isPending}
+          onCreate={(payload) => createStatblockMutation.mutate(payload)}
+          onDelete={(id) => deleteStatblockMutation.mutate(id)}
+          onDraftChange={updateStatblockDraft}
+          onFileReadStatus={(errorMessage) => {
+            setPaneError(errorMessage);
+            setUiMessage(null);
+          }}
+          onUpdate={(id, payload) => updateStatblockMutation.mutate({ id, payload })}
+          setStatblockCreateDraft={setStatblockCreateDraft}
+          setStatblockQuery={setStatblockQuery}
+          statblockCreateDraft={statblockCreateDraft}
+          statblockDrafts={statblockDrafts}
+          statblockQuery={statblockQuery}
+          statblockSubsectionGroups={statblockSubsectionGroups}
+          topLevelStatblocks={topLevelStatblocks}
+        />
       ) : activeLane === "conditions" ? (
         <div className="split-grid dm-content-staged-grid">
           <section className="card dm-condition-create">
