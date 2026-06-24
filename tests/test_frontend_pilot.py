@@ -2889,15 +2889,20 @@ def test_dm_session_revealed_articles_panel_uses_session_article_row_chrome_in_s
 
 
 def test_dm_content_staged_articles_edit_form_uses_flask_style_file_field_markup() -> None:
-    source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
-    queue_start = source.index('<article className="card" id="dm-content-staged-articles-queue">')
-    queue_end = source.index("</article>", queue_start) + len("</article>")
-    queue_markup = source[queue_start:queue_end]
+    route_source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
+    queue_markup = Path("frontend/src/components/DmStagedArticleQueue.tsx").read_text(encoding="utf-8")
+
+    assert 'import { DmStagedArticleQueue } from "../components/DmStagedArticleQueue";' in route_source
+    assert "<DmStagedArticleQueue" in route_source
+    assert 'id="dm-content-staged-articles-queue"' in queue_markup
 
     assert 'className="session-article-stack"' in queue_markup
     assert 'className="feature-detail session-article-detail"' in queue_markup
+    assert "data-session-article-id={article.id}" in queue_markup
     assert 'className="session-article-edit-detail"' in queue_markup
     assert 'className="stack-form session-article-edit-form"' in queue_markup
+    assert 'renderArticleBody(article, "article-body--compact")' in queue_markup
+    assert "SessionArticleReferenceActions article={article} includePromotionLinks />" in queue_markup
 
     form_match = re.search(
         r'<form\s+className="stack-form session-article-edit-form"[\s\S]*?>',

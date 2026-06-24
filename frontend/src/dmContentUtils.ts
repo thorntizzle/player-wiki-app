@@ -8,6 +8,7 @@ import type {
   DmContentConditionDefinition,
   DmContentStatblock,
   DmContentSystemsResponse,
+  SessionArticle,
 } from "./api/types";
 import type { EmbeddedImageInput } from "./sessionArticleDrafts";
 
@@ -59,6 +60,16 @@ export interface DmContentSystemsCustomDraftState {
   provenance: string;
   searchMetadata: string;
   bodyMarkdown: string;
+}
+
+export function buildInitialStagedArticleDraft(article: SessionArticle): StagedArticleDraftState {
+  return {
+    title: article.title,
+    body: article.body_markdown,
+    imageAltText: article.image?.alt_text || "",
+    imageCaption: article.image?.caption || "",
+    image: null,
+  };
 }
 
 export const PLAYER_WIKI_SECTION_CHOICES = [
