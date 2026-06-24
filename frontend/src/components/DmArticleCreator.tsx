@@ -62,6 +62,7 @@ export function DmArticleCreator({
   const manualModeLabel = `${idSeed}-manual`;
   const uploadModeLabel = `${idSeed}-upload`;
   const wikiModeLabel = `${idSeed}-wiki`;
+  const modeHelpId = `${idSeed}-article-mode-help`;
   const manualImageInputId = `${idSeed}-manual-image-file`;
   const uploadReferencedImageInputId = `${idSeed}-upload-referenced-image-file`;
   const wikiSearchInputId = `${idSeed}-wiki-search`;
@@ -107,6 +108,7 @@ export function DmArticleCreator({
           name={`${idSeed}-article-mode`}
           value="manual"
           checked={mode === "manual"}
+          aria-describedby={modeHelpId}
           onChange={() => setMode("manual")}
         />
         <input
@@ -116,6 +118,7 @@ export function DmArticleCreator({
           name={`${idSeed}-article-mode`}
           value="upload"
           checked={mode === "upload"}
+          aria-describedby={modeHelpId}
           onChange={() => setMode("upload")}
         />
         <input
@@ -125,12 +128,14 @@ export function DmArticleCreator({
           name={`${idSeed}-article-mode`}
           value="wiki"
           checked={mode === "wiki"}
+          aria-describedby={modeHelpId}
           onChange={() => setMode("wiki")}
         />
         <div
           className="session-form-mode-toggle"
           role="radiogroup"
           aria-label={id === "dm-content-staged-article-store" ? "Staged article input mode" : "Session article input mode"}
+          aria-describedby={modeHelpId}
         >
           <label className="ghost-button" htmlFor={manualModeRadioId}>
             Manual
@@ -142,7 +147,7 @@ export function DmArticleCreator({
             Lookup
           </label>
         </div>
-        <p className="status status-neutral">{instructions}</p>
+        <p id={modeHelpId} className="meta session-article-mode-help">{instructions}</p>
 
         {mode === "manual" ? (
           <div className="session-article-mode-panel session-article-mode-panel--manual" data-session-article-mode-panel="manual">

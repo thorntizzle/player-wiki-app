@@ -30,6 +30,17 @@ import {
 import { useSessionDmMutations } from "../sessionDmMutations";
 import { formatTimestamp } from "../timeFormatting";
 
+function formatSourceSearchStatus(message: string | undefined, resultCount: number): string {
+  const trimmedMessage = message?.trim();
+  if (trimmedMessage) {
+    return trimmedMessage;
+  }
+  if (resultCount > 0) {
+    return `Found ${resultCount} matching article${resultCount === 1 ? "" : "s"}.`;
+  }
+  return "No published wiki or Systems articles matched that search.";
+}
+
 export function DmPane({
   campaignSlug,
   payload,
@@ -175,7 +186,7 @@ export function DmPane({
     try {
       const response = await apiClient.searchSessionArticleSources(campaignSlug, query);
       setSourceResults(response.results);
-      setSourceStatus(response.message || "Search complete.");
+      setSourceStatus(formatSourceSearchStatus(response.message, response.results.length));
       if (!response.results.length) {
         setSelectedSourceRef("");
       }

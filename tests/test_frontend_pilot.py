@@ -2226,14 +2226,19 @@ def test_character_summary_card_chrome_in_source() -> None:
 
 def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
     source = Path("frontend/src/components/DmArticleCreator.tsx").read_text(encoding="utf-8")
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     component_start = source.index("function DmArticleCreator({")
     creator_markup = source[component_start:]
 
+    assert 'const modeHelpId = `${idSeed}-article-mode-help`;' in creator_markup
+    assert "aria-describedby={modeHelpId}" in creator_markup
     assert 'className="stack-form"' in creator_markup
     assert 'className="session-form-mode-radio session-form-mode-radio--manual"' in creator_markup
     assert 'className="session-form-mode-radio session-form-mode-radio--upload"' in creator_markup
     assert 'className="session-form-mode-radio session-form-mode-radio--wiki"' in creator_markup
     assert 'className="session-form-mode-toggle"' in creator_markup
+    assert 'id={modeHelpId} className="meta session-article-mode-help"' in creator_markup
+    assert 'className="status status-neutral">{instructions}</p>' not in creator_markup
     assert 'className="session-article-mode-panel session-article-mode-panel--manual"' in creator_markup
     assert 'className="session-article-mode-panel session-article-mode-panel--upload"' in creator_markup
     assert 'className="session-article-mode-panel session-article-mode-panel--wiki"' in creator_markup
@@ -2247,6 +2252,16 @@ def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
     assert 'className="chat-label"' not in creator_markup
     assert "Search wiki / systems" not in creator_markup
     assert "Lookup" in creator_markup
+    assert ".session-article-mode-help" in styles
+
+
+def test_session_dm_article_source_search_status_is_specific() -> None:
+    source = Path("frontend/src/pages/SessionDmPane.tsx").read_text(encoding="utf-8")
+
+    assert "function formatSourceSearchStatus" in source
+    assert "Search complete." not in source
+    assert 'return `Found ${resultCount} matching article${resultCount === 1 ? "" : "s"}.`;' in source
+    assert 'setSourceStatus(formatSourceSearchStatus(response.message, response.results.length));' in source
 
 
 def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> None:
