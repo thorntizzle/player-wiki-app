@@ -1,29 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import type { ChangeEvent, FocusEvent, FormEvent, MouseEvent } from "react";
-import { apiErrorMessage } from "../api/client";
 import type {
   CharacterCurrencyPatchPayload,
   CharacterDetailResponse,
   CharacterEquipmentRow,
-  CharacterEquipmentStatePatchPayload,
-  CharacterFeatureStatePatchPayload,
-  CharacterInventoryPatchPayload,
   CharacterPresentedSpell,
-  CharacterPortraitUpsertPayload,
-  CharacterRecord,
-  CharacterXianxiaDaoUseRecordPayload,
-  CharacterXianxiaDaoUseRequestPayload,
   CharacterXianxiaInventoryItem,
-  CharacterXianxiaInventoryItemPayload,
   CharacterXianxiaNamedRecord,
-  CharacterNotesPatchPayload,
-  CharacterResourcePatchPayload,
-  CharacterRestApplyResponse,
   CharacterRestPreviewResponse,
-  CharacterSpellSlotsPatchPayload,
   CharacterSummary,
-  CharacterVitalsPatchPayload,
 } from "../api/types";
 import type {
   CharacterEquipmentDraft,
@@ -32,12 +18,13 @@ import {
   useCharacterPaneDraftState,
 } from "../characterPaneDrafts";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
-import { queryClient, useApiClient } from "../apiClientContext";
+import { useApiClient } from "../apiClientContext";
 import { TOAST_DISMISS_MS, ToastNotice } from "../components/feedback";
 import {
   CharacterDetailDialog,
   type CharacterDetailDialogState,
 } from "../components/CharacterDetailDialog";
+import { useCharacterPaneMutations } from "../characterPaneMutations";
 import { CharacterControlsSection } from "../components/CharacterControlsSection";
 import { CharacterEmbeddedSectionNav } from "../components/CharacterEmbeddedSectionNav";
 import { CharacterHeader } from "../components/CharacterHeader";
@@ -300,217 +287,46 @@ export function CharacterPane({
     selectCharacterSection(section);
   };
 
-  const handleMutationSuccess = (response: { character: CharacterRecord }, message: string) => {
-    if (selectedSlug) {
-      const previousDetail = queryClient.getQueryData<CharacterDetailResponse>(["character-detail", campaignSlug, selectedSlug]);
-      queryClient.setQueryData<CharacterDetailResponse>(["character-detail", campaignSlug, selectedSlug], {
-        ok: true,
-        character: response.character,
-        links: previousDetail?.links,
-      });
-    }
-    void listQuery.refetch();
-    setStatusMessage(message);
-    setErrorMessage(null);
-  };
-
-  const handleMutationError = (error: unknown) => {
-    if (isAuthError(error)) {
-      setAuthRequired(true);
-    }
-    setStatusMessage(null);
-    setErrorMessage(apiErrorMessage(error));
-  };
-
-  const patchVitals = useMutation({
-    mutationFn: (payload: CharacterVitalsPatchPayload) =>
-      apiClient.patchCharacterVitals(campaignSlug, selectedSlug || "", payload),
-    onSuccess: (response) => handleMutationSuccess(response, "Vitals saved."),
-    onError: handleMutationError,
-  });
-
-  const patchResource = useMutation({
-    mutationFn: ({ resourceId, payload }: { resourceId: string; payload: CharacterResourcePatchPayload }) =>
-      apiClient.patchCharacterResource(campaignSlug, selectedSlug || "", resourceId, payload),
-    onSuccess: (response) => handleMutationSuccess(response, "Resource saved."),
-    onError: handleMutationError,
-  });
-
-  const patchSpellSlot = useMutation({
-    mutationFn: ({ level, payload }: { level: number; payload: CharacterSpellSlotsPatchPayload }) =>
-      apiClient.patchCharacterSpellSlots(campaignSlug, selectedSlug || "", level, payload),
-    onSuccess: (response) => handleMutationSuccess(response, "Spell slots saved."),
-    onError: handleMutationError,
-  });
-
-  const patchInventory = useMutation({
-    mutationFn: ({ itemId, payload }: { itemId: string; payload: CharacterInventoryPatchPayload }) =>
-      apiClient.patchCharacterInventory(campaignSlug, selectedSlug || "", itemId, payload),
-    onSuccess: (response) => handleMutationSuccess(response, "Inventory saved."),
-    onError: handleMutationError,
-  });
-
-  const patchEquipmentState = useMutation({
-    mutationFn: ({ itemId, payload }: { itemId: string; payload: CharacterEquipmentStatePatchPayload }) =>
-      apiClient.patchCharacterEquipmentState(campaignSlug, selectedSlug || "", itemId, payload),
-    onSuccess: (response) => handleMutationSuccess(response, "Equipment state saved."),
-    onError: handleMutationError,
-  });
-
-  const patchFeatureState = useMutation({
-    mutationFn: ({ featureKey, payload }: { featureKey: string; payload: CharacterFeatureStatePatchPayload }) =>
-      apiClient.patchCharacterFeatureState(campaignSlug, selectedSlug || "", featureKey, payload),
-    onSuccess: (response) => handleMutationSuccess(response, "Feature state saved."),
-    onError: handleMutationError,
-  });
-
-  const patchXianxiaActiveState = useMutation({
-    mutationFn: (payload: { expected_revision: number; active_stance_name?: string; active_aura_name?: string }) =>
-      apiClient.patchCharacterXianxiaActiveState(campaignSlug, selectedSlug || "", payload),
-    onSuccess: (response) => handleMutationSuccess(response, "Active Stance and Aura saved."),
-    onError: handleMutationError,
-  });
-
-  const postXianxiaDaoUseRequest = useMutation({
-    mutationFn: (payload: CharacterXianxiaDaoUseRequestPayload) =>
-      apiClient.postCharacterXianxiaDaoUseRequest(campaignSlug, selectedSlug || "", payload),
-    onSuccess: (response) => {
-      setXianxiaDaoRequestDraft({ requestName: "", notes: "", preparedRecordIndex: "" });
-      handleMutationSuccess(response, "Dao Immolating use request recorded.");
-    },
-    onError: handleMutationError,
-  });
-
-  const postXianxiaDaoUseRecord = useMutation({
-    mutationFn: (payload: CharacterXianxiaDaoUseRecordPayload) =>
-      apiClient.postCharacterXianxiaDaoUseRecord(campaignSlug, selectedSlug || "", payload),
-    onSuccess: (response) => handleMutationSuccess(response, "Dao Immolating one-use spend recorded."),
-    onError: handleMutationError,
-  });
-
-  const addXianxiaInventoryItem = useMutation({
-    mutationFn: (payload: { expected_revision: number; item: CharacterXianxiaInventoryItemPayload }) =>
-      apiClient.addCharacterXianxiaInventoryItem(campaignSlug, selectedSlug || "", payload),
-    onSuccess: (response) => {
-      setNewXianxiaInventoryDraft(xianxiaInventoryDraftFromItem());
-      handleMutationSuccess(response, "Inventory item added.");
-    },
-    onError: handleMutationError,
-  });
-
-  const patchXianxiaInventoryItem = useMutation({
-    mutationFn: ({ itemId, payload }: { itemId: string; payload: { expected_revision: number; item: CharacterXianxiaInventoryItemPayload } }) =>
-      apiClient.patchCharacterXianxiaInventoryItem(campaignSlug, selectedSlug || "", itemId, payload),
-    onSuccess: (response) => handleMutationSuccess(response, "Inventory item saved."),
-    onError: handleMutationError,
-  });
-
-  const removeXianxiaInventoryItem = useMutation({
-    mutationFn: ({ itemId, payload }: { itemId: string; payload: { expected_revision: number } }) =>
-      apiClient.removeCharacterXianxiaInventoryItem(campaignSlug, selectedSlug || "", itemId, payload),
-    onSuccess: (response) => handleMutationSuccess(response, "Inventory item removed."),
-    onError: handleMutationError,
-  });
-
-  const patchXianxiaInventoryEquipped = useMutation({
-    mutationFn: ({ itemId, payload }: { itemId: string; payload: { expected_revision: number; is_equipped: boolean } }) =>
-      apiClient.patchCharacterXianxiaInventoryEquipped(campaignSlug, selectedSlug || "", itemId, payload),
-    onSuccess: (response) => handleMutationSuccess(response, "Equipment state saved."),
-    onError: handleMutationError,
-  });
-
-  const patchCurrency = useMutation({
-    mutationFn: (payload: CharacterCurrencyPatchPayload) =>
-      apiClient.patchCharacterCurrency(campaignSlug, selectedSlug || "", payload),
-    onSuccess: (response) => handleMutationSuccess(response, "Currency saved."),
-    onError: handleMutationError,
-  });
-
-  const patchNotes = useMutation({
-    mutationFn: (payload: CharacterNotesPatchPayload) =>
-      apiClient.patchCharacterNotes(campaignSlug, selectedSlug || "", payload),
-    onSuccess: (response) => handleMutationSuccess(response, "Notes saved."),
-    onError: handleMutationError,
-  });
-
-  const upsertPortrait = useMutation({
-    mutationFn: (payload: CharacterPortraitUpsertPayload) =>
-      apiClient.upsertCharacterPortrait(campaignSlug, selectedSlug || "", payload),
-    onSuccess: (response) => {
-      handleMutationSuccess(response, "Portrait saved.");
-      setPortraitDraft((current) => ({ ...current, file: null, fileName: "" }));
-      if (portraitFileInputRef.current) {
-        portraitFileInputRef.current.value = "";
-      }
-    },
-    onError: handleMutationError,
-  });
-
-  const deletePortrait = useMutation({
-    mutationFn: (payload: { expected_revision: number }) =>
-      apiClient.deleteCharacterPortrait(campaignSlug, selectedSlug || "", payload),
-    onSuccess: (response) => {
-      handleMutationSuccess(response, "Portrait removed.");
-      setPortraitDraft({ file: null, fileName: "", altText: "", caption: "" });
-      if (portraitFileInputRef.current) {
-        portraitFileInputRef.current.value = "";
-      }
-    },
-    onError: handleMutationError,
+  const {
+    addXianxiaInventoryItem,
+    applyRest,
+    assignCharacterOwner,
+    clearCharacterOwner,
+    deleteCharacterMutation,
+    deletePortrait,
+    patchCurrency,
+    patchEquipmentState,
+    patchFeatureState,
+    patchInventory,
+    patchNotes,
+    patchResource,
+    patchSpellSlot,
+    patchVitals,
+    patchXianxiaActiveState,
+    patchXianxiaInventoryEquipped,
+    patchXianxiaInventoryItem,
+    postXianxiaDaoUseRecord,
+    postXianxiaDaoUseRequest,
+    previewRest,
+    removeXianxiaInventoryItem,
+    upsertPortrait,
+  } = useCharacterPaneMutations({
+    campaignSlug,
+    selectedSlug,
+    refetchCharacterList: listQuery.refetch,
+    setControlsDraft,
+    setErrorMessage,
+    setNewXianxiaInventoryDraft,
+    setPortraitDraft,
+    setRestPreview,
+    setStatusMessage,
+    setXianxiaDaoRequestDraft,
+    portraitFileInputRef,
   });
 
   const portraitMutationPending = upsertPortrait.isPending || deletePortrait.isPending;
-
-  const assignCharacterOwner = useMutation({
-    mutationFn: (payload: { user_id: number }) =>
-      apiClient.assignCharacterOwner(campaignSlug, selectedSlug || "", payload),
-    onSuccess: (response) => handleMutationSuccess(response, response.message || "Assignment saved."),
-    onError: handleMutationError,
-  });
-
-  const clearCharacterOwner = useMutation({
-    mutationFn: () => apiClient.clearCharacterOwner(campaignSlug, selectedSlug || ""),
-    onSuccess: (response) => {
-      setControlsDraft((current) => ({ ...current, assignedUserId: "" }));
-      handleMutationSuccess(response, response.message || "Assignment cleared.");
-    },
-    onError: handleMutationError,
-  });
-
-  const deleteCharacterMutation = useMutation({
-    mutationFn: (payload: { confirm_character_slug: string }) =>
-      apiClient.deleteCharacter(campaignSlug, selectedSlug || "", payload),
-    onSuccess: (response) => {
-      setStatusMessage(response.message || "Character deleted.");
-      setErrorMessage(null);
-      void queryClient.invalidateQueries({ queryKey: ["characters", campaignSlug] });
-      window.location.assign(response.links?.gen2_roster_url || `/app-next/campaigns/${encodeURIComponent(campaignSlug)}/characters`);
-    },
-    onError: handleMutationError,
-  });
-
   const controlsMutationPending =
     assignCharacterOwner.isPending || clearCharacterOwner.isPending || deleteCharacterMutation.isPending;
-
-  const previewRest = useMutation({
-    mutationFn: (restType: "short" | "long") => apiClient.getCharacterRestPreview(campaignSlug, selectedSlug || "", restType),
-    onSuccess: (response) => {
-      setRestPreview(response.preview);
-      setStatusMessage(null);
-      setErrorMessage(null);
-    },
-    onError: handleMutationError,
-  });
-
-  const applyRest = useMutation({
-    mutationFn: ({ restType, payload }: { restType: "short" | "long"; payload: { expected_revision: number } }) =>
-      apiClient.applyCharacterRest(campaignSlug, selectedSlug || "", restType, payload),
-    onSuccess: (response: CharacterRestApplyResponse) => {
-      setRestPreview(null);
-      handleMutationSuccess(response, "Rest applied.");
-    },
-    onError: handleMutationError,
-  });
 
   const parseNumberInput = (value: string, label: string): number | null => {
     const result = parseCharacterNumberInput(value, label);

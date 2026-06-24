@@ -2599,6 +2599,7 @@ def test_character_generic_system_summary_section_uses_detail_grid_cards() -> No
 
 def test_character_pane_status_messages_use_toast_overlay() -> None:
     source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    mutation_source = Path("frontend/src/characterPaneMutations.ts").read_text(encoding="utf-8")
     feedback_source = Path("frontend/src/components/feedback.tsx").read_text(encoding="utf-8")
     styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     pane_start = source.index("export function CharacterPane(")
@@ -2609,9 +2610,10 @@ def test_character_pane_status_messages_use_toast_overlay() -> None:
     assert 'className={`toast-notice toast-notice--${tone}`}' in feedback_source
     assert 'role="status" aria-live="polite"' in feedback_source
     assert "window.setTimeout(() => setStatusMessage(null), TOAST_DISMISS_MS)" in pane_markup
-    assert "setRestPreview(response.preview);" in pane_markup
-    assert 'setStatusMessage(`${response.preview.label} preview loaded.`);' not in pane_markup
+    assert "setRestPreview(response.preview);" in mutation_source
+    assert 'setStatusMessage(`${response.preview.label} preview loaded.`);' not in mutation_source
     assert "preview loaded." not in pane_markup
+    assert "preview loaded." not in mutation_source
     assert "<ToastNotice message={statusMessage} />" in pane_markup
     assert 'statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null' not in pane_markup
     assert ".toast-notice {" in styles
@@ -2663,6 +2665,28 @@ def test_character_pane_common_dnd_model_lives_in_shared_helper() -> None:
     assert "const overviewStatRowPayload = detailRecord?.overview_stat_rows;" not in route_source
     assert "const presentedSpells = collectPresentedSpells(detailRecord);" not in route_source
     assert "const presentedInventoryByKey = useMemo(() => {" not in route_source
+
+
+def test_character_pane_mutations_live_in_shared_hook() -> None:
+    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    mutation_source = Path("frontend/src/characterPaneMutations.ts").read_text(encoding="utf-8")
+
+    assert "export function useCharacterPaneMutations" in mutation_source
+    assert "const handleMutationSuccess" in mutation_source
+    assert "const handleMutationError" in mutation_source
+    assert "apiClient.patchCharacterVitals" in mutation_source
+    assert "apiClient.patchCharacterXianxiaActiveState" in mutation_source
+    assert "apiClient.postCharacterXianxiaDaoUseRecord" in mutation_source
+    assert "queryClient.setQueryData<CharacterDetailResponse>" in mutation_source
+    assert "emptyCharacterXianxiaDaoUseRequestDraft()" in mutation_source
+
+    assert 'import { useCharacterPaneMutations } from "../characterPaneMutations";' in route_source
+    assert "useCharacterPaneMutations({" in route_source
+    assert "const handleMutationSuccess" not in route_source
+    assert "const handleMutationError" not in route_source
+    assert "useMutation({" not in route_source
+    assert "apiErrorMessage(error)" not in route_source
+    assert "queryClient.setQueryData" not in route_source
 
 
 def test_character_dnd_overview_section_uses_flask_style_glance_rows() -> None:
