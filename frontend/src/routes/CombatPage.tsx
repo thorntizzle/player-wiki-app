@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { FormEvent } from "react";
@@ -20,7 +20,7 @@ import { queryClient, useApiClient } from "../apiClientContext";
 import { getApiErrorMessage } from "../apiErrors";
 import { ApiErrorNotice } from "../components/feedback";
 import { readNumber } from "../characterValueUtils";
-import { CharacterPane } from "./CharacterPane";
+import { CombatPlayerWorkspace } from "../components/CombatPlayerWorkspace";
 import { resolveCombatLivePayload } from "../combatLiveUtils";
 import {
   CombatantCarousel,
@@ -1272,49 +1272,6 @@ export function CombatPage() {
     );
   };
 
-  const renderPlayerWorkspace = () => (
-    <section className="combat-pc-workspace">
-      <div className="section-heading">
-        <div>
-          <p className="meta">Selected PC workspace</p>
-          <h2>{selectedPlayerCharacter?.name ?? "No tracked PC in combat"}</h2>
-        </div>
-        {payload?.player_character_targets.length ? (
-          <div className="combat-target-list">
-            {payload.player_character_targets.map((target) => (
-              <React.Fragment key={target.combatant_id}>
-                <button
-                  type="button"
-                  className={target.is_selected ? "button-link" : "ghost-button"}
-                  onClick={() => selectCombatant(target.combatant_id)}
-                >
-                  {target.name}
-                </button>
-                {target.subtitle ? <p className="meta">{target.subtitle}</p> : null}
-              </React.Fragment>
-            ))}
-          </div>
-        ) : null}
-      </div>
-      {selectedCharacterSlug ? (
-        <CharacterPane
-          campaignSlug={campaignSlug}
-          initialCharacterSlug={selectedCharacterSlug}
-          surface="combat"
-          onSelectedCharacterChange={selectCharacterTarget}
-        />
-      ) : (
-        <section className="card auth-card">
-          <h2>No tracked player character available</h2>
-          <p>
-            There is not currently a tracked player character you can open from combat.
-            Once a DM adds your character to the tracker, it will appear here.
-          </p>
-        </section>
-      )}
-    </section>
-  );
-
   return (
     <>
       <section className="hero compact combat-hero">
@@ -1435,7 +1392,16 @@ export function CombatPage() {
 
           {effectiveCombatView === "status" ? renderDmStatus() : null}
           {effectiveCombatView === "controls" ? renderDmControls() : null}
-          {effectiveCombatView === "player" ? renderPlayerWorkspace() : null}
+          {effectiveCombatView === "player" ? (
+            <CombatPlayerWorkspace
+              campaignSlug={campaignSlug}
+              selectedCharacterSlug={selectedCharacterSlug}
+              selectedPlayerCharacter={selectedPlayerCharacter}
+              playerCharacterTargets={payload?.player_character_targets ?? []}
+              onSelectCombatant={selectCombatant}
+              onSelectedCharacterChange={selectCharacterTarget}
+            />
+          ) : null}
         </>
       ) : null}
     </>

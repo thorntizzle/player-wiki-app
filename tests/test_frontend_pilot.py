@@ -1132,7 +1132,10 @@ def test_gen2_combat_dm_resolves_away_from_player_workspace_in_source() -> None:
         '      : "status"\n'
         '    : "player";'
     ) in combat_page_source
-    assert '{effectiveCombatView === "player" ? renderPlayerWorkspace() : null}' in combat_page_source
+    assert 'import { CombatPlayerWorkspace } from "../components/CombatPlayerWorkspace";' in source
+    assert '<CombatPlayerWorkspace' in combat_page_source
+    assert 'onSelectCombatant={selectCombatant}' in combat_page_source
+    assert 'onSelectedCharacterChange={selectCharacterTarget}' in combat_page_source
 
 
 def test_gen2_combat_dm_status_omits_nested_selected_pc_detail_in_source() -> None:
@@ -1213,16 +1216,15 @@ def test_combat_dm_status_tactical_forms_chrome_in_source() -> None:
 
 def test_combat_player_workspace_target_chrome_in_source() -> None:
     source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
-    workspace_match = re.search(
-        r"const renderPlayerWorkspace = \(\) => \([\s\S]*?\n  \);(?=\n\n  return \()",
-        source,
-    )
-    assert workspace_match is not None
-    workspace_markup = workspace_match.group(0)
+    workspace_markup = Path("frontend/src/components/CombatPlayerWorkspace.tsx").read_text(encoding="utf-8")
+
+    assert 'import { CombatPlayerWorkspace } from "../components/CombatPlayerWorkspace";' in source
+    assert "const renderPlayerWorkspace" not in source
+    assert "<CombatPlayerWorkspace" in source
 
     assert 'className="combat-target-list"' in workspace_markup
     assert 'className={target.is_selected ? "button-link" : "ghost-button"}' in workspace_markup
-    assert 'onClick={() => selectCombatant(target.combatant_id)}' in workspace_markup
+    assert 'onClick={() => onSelectCombatant(target.combatant_id)}' in workspace_markup
     assert '<p className="meta">{target.subtitle}' in workspace_markup
 
     assert 'className="tab-button' not in workspace_markup
