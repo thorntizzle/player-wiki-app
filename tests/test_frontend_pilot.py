@@ -3075,7 +3075,9 @@ def test_character_xianxia_inventory_section_uses_flask_style_row_form_chrome() 
     assert 'className="currency-grid"' in currency_controls_markup
     assert 'className="currency-form currency-box"' in currency_controls_markup
     assert 'className="currency-box__header"' in currency_controls_markup
+    assert 'id={`currency-${entry.key}-label`}' in currency_controls_markup
     assert 'className="currency-box__amount"' in currency_controls_markup
+    assert 'aria-labelledby={`currency-${entry.key}-label`}' in currency_controls_markup
     assert "onBlur={submitCurrencyOnBlur}" in currency_controls_markup
     assert 'className="visually-hidden"' in currency_controls_markup
     assert 'Update {entry.label}' in currency_controls_markup
@@ -3579,7 +3581,9 @@ def test_character_dnd_inventory_currency_section_uses_flask_style_row_form_chro
     assert 'className="currency-grid" id="session-currency"' in currency_controls_markup
     assert 'className="currency-form currency-box"' in currency_controls_markup
     assert 'className="currency-box__header"' in currency_controls_markup
+    assert 'id={`currency-${key}-label`}' in currency_controls_markup
     assert 'className="currency-box__amount"' in currency_controls_markup
+    assert 'aria-labelledby={`currency-${key}-label`}' in currency_controls_markup
     assert "onBlur={submitCurrencyOnBlur}" in currency_controls_markup
     assert 'className="visually-hidden"' in currency_controls_markup
     assert 'Update {key.toUpperCase()}' in currency_controls_markup

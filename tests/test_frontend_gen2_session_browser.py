@@ -96,6 +96,71 @@ def _assert_character_detail_trigger_classes(surface: object) -> None:
         )
 
 
+def _assert_visible_form_controls_have_accessible_names(page) -> None:
+    missing = page.evaluate(
+        """() => {
+            const labelText = (label) => (label?.textContent || "").replace(/\\s+/g, " ").trim();
+            const labelledByText = (control) => {
+                const labelledBy = control.getAttribute("aria-labelledby") || "";
+                return labelledBy
+                    .split(/\\s+/)
+                    .map((id) => id && document.getElementById(id))
+                    .map(labelText)
+                    .filter(Boolean)
+                    .join(" ")
+                    .trim();
+            };
+            const hasAccessibleName = (control) => {
+                const ariaLabel = (control.getAttribute("aria-label") || "").trim();
+                if (ariaLabel || labelledByText(control)) {
+                    return true;
+                }
+                const id = control.getAttribute("id");
+                if (id) {
+                    const explicitLabel = document.querySelector(`label[for="${CSS.escape(id)}"]`);
+                    if (labelText(explicitLabel)) {
+                        return true;
+                    }
+                }
+                if (labelText(control.closest("label"))) {
+                    return true;
+                }
+                if ((control.getAttribute("title") || "").trim()) {
+                    return true;
+                }
+                const type = (control.getAttribute("type") || "").toLowerCase();
+                if (["button", "submit", "reset"].includes(type) && (control.getAttribute("value") || "").trim()) {
+                    return true;
+                }
+                return false;
+            };
+            const isVisible = (control) => {
+                if (control.closest("[hidden], [aria-hidden='true']")) {
+                    return false;
+                }
+                const type = (control.getAttribute("type") || "").toLowerCase();
+                if (type === "hidden") {
+                    return false;
+                }
+                const style = window.getComputedStyle(control);
+                const rect = control.getBoundingClientRect();
+                return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+            };
+            return Array.from(document.querySelectorAll("input, select, textarea"))
+                .filter(isVisible)
+                .filter((control) => !hasAccessibleName(control))
+                .map((control) => ({
+                    tag: control.tagName.toLowerCase(),
+                    type: (control.getAttribute("type") || "").toLowerCase(),
+                    id: control.getAttribute("id") || "",
+                    name: control.getAttribute("name") || "",
+                    html: control.outerHTML.slice(0, 180),
+                }));
+        }"""
+    )
+    assert missing == []
+
+
 def _configure_xianxia_campaign(app) -> None:
     campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
     payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
@@ -716,6 +781,7 @@ def test_gen2_shell_and_session_visual_parity_smoke(
                 re.compile(r"/app-next/campaigns/linden-pass/characters$"),
             )
             expect(desktop_page.locator(".session-tab-strip .button-link", has_text="Session")).to_be_visible()
+            _assert_visible_form_controls_have_accessible_names(desktop_page)
 
             desktop_metrics = desktop_page.evaluate(
                 """() => {
@@ -795,6 +861,7 @@ def test_gen2_shell_and_session_visual_parity_smoke(
             mobile_page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
             expect(mobile_page.locator(".topbar-campaign")).to_be_visible(timeout=10000)
             expect(mobile_page.locator(".session-tab-strip")).to_be_visible()
+            _assert_visible_form_controls_have_accessible_names(mobile_page)
             mobile_metrics = mobile_page.evaluate(
                 """() => {
                     const globalSearchForm = document.querySelector(".campaign-global-search__form");
@@ -2618,6 +2685,7 @@ def test_gen2_character_visual_parity_smoke(
             _sign_in(desktop_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters")
             expect(desktop_page.get_by_role("heading", name="Characters")).to_be_visible(timeout=10000)
+            _assert_visible_form_controls_have_accessible_names(desktop_page)
             expect(desktop_page.locator("main > section.hero.compact.character-roster-hero")).to_be_visible()
             expect(desktop_page.locator("main > section.hero.compact.character-roster-hero > p.eyebrow")).to_be_visible()
             assert desktop_page.locator(".character-roster-page").count() == 0
@@ -2689,6 +2757,7 @@ def test_gen2_character_visual_parity_smoke(
 
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/arden-march")
             expect(desktop_page.get_by_role("heading", level=1, name="Arden March", exact=True)).to_be_visible(timeout=10000)
+            _assert_visible_form_controls_have_accessible_names(desktop_page)
             expect(desktop_page.locator("article.character-read-shell.character-sheet.card")).to_be_visible()
             expect(desktop_page.locator("header.character-header")).to_be_visible()
             expect(desktop_page.locator("section.panel.character-read-shell")).to_have_count(0)
@@ -2753,6 +2822,7 @@ def test_gen2_character_visual_parity_smoke(
                 if section_link.count() > 0:
                     section_link.click()
                     expect(character_read_shell.locator(f"section#{section_id}")).to_be_visible(timeout=10000)
+                    _assert_visible_form_controls_have_accessible_names(desktop_page)
                     if section_name in {"Resources", "Spells"}:
                         desktop_grid_metrics = desktop_page.evaluate(
                             """(sectionName) => {
@@ -2828,6 +2898,7 @@ def test_gen2_character_visual_parity_smoke(
             ):
                 mobile_page.goto(f"{base_url}{path}")
                 expect(mobile_page.get_by_role("link", name="Campaign Player Wiki")).to_be_visible(timeout=10000)
+                _assert_visible_form_controls_have_accessible_names(mobile_page)
                 mobile_metrics = mobile_page.evaluate(
                     """() => {
                         const route = document.querySelector(".character-roster-hero, .character-read-shell");
@@ -2865,6 +2936,7 @@ def test_gen2_character_visual_parity_smoke(
                         if section_link.count() > 0:
                             section_link.click()
                             expect(mobile_character_shell.locator("section.read-section")).to_be_visible(timeout=10000)
+                            _assert_visible_form_controls_have_accessible_names(mobile_page)
                             mobile_grid_metrics = mobile_page.evaluate(
                                 """(selector) => {
                                     const elements = Array.from(document.querySelectorAll(selector));
@@ -3787,6 +3859,7 @@ def test_gen2_dm_content_browser_visual_parity_smoke(
                     expect(page.get_by_role("heading", name="Shared Source Imports")).to_be_visible()
                     expect(page.get_by_role("heading", name="Import History")).to_be_visible()
 
+                _assert_visible_form_controls_have_accessible_names(page)
                 expect(dm_content_nav.get_by_role("link", name="Statblocks")).to_be_visible()
                 expect(dm_content_nav.get_by_role("link", name="Staged Articles")).to_be_visible()
                 expect(dm_content_nav.get_by_role("link", name="Conditions")).to_be_visible()

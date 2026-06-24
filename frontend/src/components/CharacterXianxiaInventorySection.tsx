@@ -347,11 +347,12 @@ export function CharacterXianxiaInventorySection({
             {currencyEntries.map((entry) => (
               <form key={entry.key} onSubmit={submitCurrency} className="currency-form currency-box">
                 <div className="currency-box__header">
-                  <span>{entry.label}</span>
+                  <span id={`currency-${entry.key}-label`}>{entry.label}</span>
                 </div>
                 <input
                   className="currency-box__amount"
                   id={`currency-${entry.key}`}
+                  aria-labelledby={`currency-${entry.key}-label`}
                   type="number"
                   min="0"
                   value={currencyDraft[entry.key] ?? String(entry.amount ?? 0)}

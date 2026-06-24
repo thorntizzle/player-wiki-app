@@ -124,11 +124,12 @@ export function CharacterDndInventorySection({
             {["cp", "sp", "ep", "gp", "pp"].map((key) => (
               <form key={key} onSubmit={submitCurrency} className="currency-form currency-box">
                 <div className="currency-box__header">
-                  <span>{key.toUpperCase()}</span>
+                  <span id={`currency-${key}-label`}>{key.toUpperCase()}</span>
                 </div>
                 <input
                   className="currency-box__amount"
                   id={`currency-${key}`}
+                  aria-labelledby={`currency-${key}-label`}
                   type="number"
                   min="0"
                   value={currencyDraft[key] ?? "0"}
