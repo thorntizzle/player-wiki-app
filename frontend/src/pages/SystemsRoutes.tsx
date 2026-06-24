@@ -24,7 +24,7 @@ import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 
 export function SystemsIndexPage() {
   const { campaignSlug } = useParams({
-    from: "/campaigns/$campaignSlug/systems",
+    from: "/campaigns/$campaignSlug/systems/",
   });
   const resolvedCampaignSlug = campaignSlug ?? "";
   const { apiClient, setAuthRequired } = useApiClient();
@@ -165,7 +165,7 @@ export function SystemsIndexPage() {
 
 export function SystemsSourcePage() {
   const { campaignSlug, sourceId } = useParams({
-    from: "/campaigns/$campaignSlug/systems/sources/$sourceId",
+    from: "/campaigns/$campaignSlug/systems/sources/$sourceId/",
   });
   const resolvedCampaignSlug = campaignSlug ?? "";
   const resolvedSourceId = sourceId ?? "";

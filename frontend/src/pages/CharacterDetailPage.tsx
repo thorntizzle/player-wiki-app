@@ -5,7 +5,7 @@ import { CharacterPane } from "./CharacterPane";
 
 export function CharacterDetailPage() {
   const params = useParams({
-    from: "/campaigns/$campaignSlug/characters/$characterSlug",
+    from: "/campaigns/$campaignSlug/characters/$characterSlug/",
   });
   const location = useLocation();
   const campaignSlug = params.campaignSlug ?? "";

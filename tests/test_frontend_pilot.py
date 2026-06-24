@@ -50,7 +50,7 @@ def test_gen2_topbar_account_controls_use_flask_chrome_classes_in_source() -> No
 
 
 def test_campaign_picker_grid_and_empty_state_are_mutually_exclusive_in_source() -> None:
-    campaign_list_source = Path("frontend/src/routes/CampaignPickerPage.tsx").read_text(encoding="utf-8")
+    campaign_list_source = Path("frontend/src/pages/CampaignPickerPage.tsx").read_text(encoding="utf-8")
 
     assert (
         re.search(
@@ -298,7 +298,7 @@ def test_frontend_pilot_without_build_returns_not_found(client, app, tmp_path):
 
 
 def test_session_pane_no_player_wiki_lookup_widget_in_source() -> None:
-    source = Path("frontend/src/routes/SessionRoutes.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/SessionRoutes.tsx").read_text(encoding="utf-8")
     shell_source = Path("frontend/src/AppShell.tsx").read_text(encoding="utf-8")
     search_source = Path("frontend/src/components/CampaignGlobalSearch.tsx").read_text(encoding="utf-8")
     session_pane_source = source[source.index("export function SessionPane({"):]
@@ -418,7 +418,7 @@ def test_character_vitals_bar_uses_flask_style_chrome_in_source() -> None:
 
 def test_character_detail_dialog_state_builders_live_in_shared_utils() -> None:
     source = Path("frontend/src/characterPaneUtils.ts").read_text(encoding="utf-8")
-    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
 
     assert "export function itemDetailDialogState" in source
     assert 'eyebrow: "Item details"' in source
@@ -436,7 +436,7 @@ def test_character_detail_dialog_state_builders_live_in_shared_utils() -> None:
 
 def test_character_number_input_parser_lives_in_shared_utils() -> None:
     source = Path("frontend/src/characterPaneUtils.ts").read_text(encoding="utf-8")
-    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
     submit_handler_source = Path("frontend/src/characterPaneSubmitHandlers.ts").read_text(encoding="utf-8")
 
     assert "export function parseCharacterNumberInput" in source
@@ -452,7 +452,7 @@ def test_character_number_input_parser_lives_in_shared_utils() -> None:
 
 def test_character_read_section_url_helpers_live_in_shared_utils() -> None:
     source = Path("frontend/src/characterPaneUtils.ts").read_text(encoding="utf-8")
-    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
 
     assert "export function defaultCharacterReadSection" in source
     assert 'return isXianxia ? "quick-reference" : "overview";' in source
@@ -470,18 +470,22 @@ def test_character_read_section_url_helpers_live_in_shared_utils() -> None:
 
 def test_character_detail_route_wrapper_lives_in_route_module() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    route_source = Path("frontend/src/routes/CharacterDetailPage.tsx").read_text(encoding="utf-8")
+    file_route_source = Path(
+        "frontend/src/routes/campaigns/$campaignSlug/characters/$characterSlug/index.tsx"
+    ).read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CharacterDetailPage.tsx").read_text(encoding="utf-8")
 
-    assert "const CharacterDetailPage = React.lazy(() =>" in main_source
-    assert 'import("./routes/CharacterDetailPage")' in main_source
+    assert 'import { routeTree } from "./routeTree.gen";' in main_source
     assert "function CharacterDetailPage" not in main_source
     assert "useParams" not in main_source
     assert "useLocation" not in main_source
     assert "normalizeCharacterSection" not in main_source
-    assert 'component: CharacterDetailPage' in main_source
+    assert 'from "../../../../../pages/CharacterDetailPage";' in file_route_source
+    assert 'createFileRoute("/campaigns/$campaignSlug/characters/$characterSlug/")' in file_route_source
+    assert "component: CharacterDetailPage" in file_route_source
 
     assert "export function CharacterDetailPage()" in route_source
-    assert 'from: "/campaigns/$campaignSlug/characters/$characterSlug"' in route_source
+    assert 'from: "/campaigns/$campaignSlug/characters/$characterSlug/"' in route_source
     assert "normalizeCharacterSection(new URLSearchParams(location.search).get(\"page\"))" in route_source
     assert "<CharacterPane" in route_source
     assert 'surface="read"' in route_source
@@ -490,14 +494,15 @@ def test_character_detail_route_wrapper_lives_in_route_module() -> None:
 
 def test_character_create_route_lives_in_route_module() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
-    create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
+    file_route_source = Path("frontend/src/routes/campaigns/$campaignSlug/characters/new.tsx").read_text(
+        encoding="utf-8"
+    )
+    create_source = Path("frontend/src/pages/CharacterCreatePage.tsx").read_text(encoding="utf-8")
 
-    assert "const CharacterCreatePage = React.lazy(() =>" in main_source
-    assert 'import("./routes/CharacterCreatePage")' in main_source
-    assert "function CharacterCreatePage" not in authoring_source
-    assert "CharacterCreateSubmitPayload" not in authoring_source
-    assert 'component: CharacterCreatePage' in main_source
+    assert 'import { routeTree } from "./routeTree.gen";' in main_source
+    assert 'from "../../../../pages/CharacterCreatePage";' in file_route_source
+    assert 'createFileRoute("/campaigns/$campaignSlug/characters/new")' in file_route_source
+    assert "component: CharacterCreatePage" in file_route_source
 
     assert "export function CharacterCreatePage()" in create_source
     assert 'from: "/campaigns/$campaignSlug/characters/new"' in create_source
@@ -508,14 +513,15 @@ def test_character_create_route_lives_in_route_module() -> None:
 
 def test_character_xianxia_manual_import_route_lives_in_route_module() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
-    import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
+    file_route_source = Path(
+        "frontend/src/routes/campaigns/$campaignSlug/characters/import/xianxia-manual.tsx"
+    ).read_text(encoding="utf-8")
+    import_source = Path("frontend/src/pages/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
 
-    assert "const CharacterXianxiaManualImportPage = React.lazy(() =>" in main_source
-    assert 'import("./routes/CharacterXianxiaManualImportPage")' in main_source
-    assert "function CharacterXianxiaManualImportPage" not in authoring_source
-    assert "CharacterXianxiaManualImportContext" not in authoring_source
-    assert 'component: CharacterXianxiaManualImportPage' in main_source
+    assert 'import { routeTree } from "./routeTree.gen";' in main_source
+    assert 'from "../../../../../pages/CharacterXianxiaManualImportPage";' in file_route_source
+    assert 'createFileRoute("/campaigns/$campaignSlug/characters/import/xianxia-manual")' in file_route_source
+    assert "component: CharacterXianxiaManualImportPage" in file_route_source
 
     assert "export function CharacterXianxiaManualImportPage()" in import_source
     assert 'from: "/campaigns/$campaignSlug/characters/import/xianxia-manual"' in import_source
@@ -526,16 +532,15 @@ def test_character_xianxia_manual_import_route_lives_in_route_module() -> None:
 
 def test_character_advanced_editor_route_lives_in_route_module() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
-    editor_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
+    file_route_source = Path(
+        "frontend/src/routes/campaigns/$campaignSlug/characters/$characterSlug/edit.tsx"
+    ).read_text(encoding="utf-8")
+    editor_source = Path("frontend/src/pages/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
 
-    assert "const CharacterAdvancedEditorPage = React.lazy(() =>" in main_source
-    assert 'import("./routes/CharacterAdvancedEditorPage")' in main_source
-    assert "function CharacterAdvancedEditorPage" not in authoring_source
-    assert "CharacterEditorRecoverablePenaltyRow" not in authoring_source
-    assert "editorValuesFromContext" not in authoring_source
-    assert "editorSelectOptions" not in authoring_source
-    assert 'component: CharacterAdvancedEditorPage' in main_source
+    assert 'import { routeTree } from "./routeTree.gen";' in main_source
+    assert 'from "../../../../../pages/CharacterAdvancedEditorPage";' in file_route_source
+    assert 'createFileRoute("/campaigns/$campaignSlug/characters/$characterSlug/edit")' in file_route_source
+    assert "component: CharacterAdvancedEditorPage" in file_route_source
 
     assert "export function CharacterAdvancedEditorPage()" in editor_source
     assert 'from: "/campaigns/$campaignSlug/characters/$characterSlug/edit"' in editor_source
@@ -547,15 +552,15 @@ def test_character_advanced_editor_route_lives_in_route_module() -> None:
 
 def test_character_progression_repair_route_lives_in_route_module() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
-    repair_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
+    file_route_source = Path(
+        "frontend/src/routes/campaigns/$campaignSlug/characters/$characterSlug/progression-repair.tsx"
+    ).read_text(encoding="utf-8")
+    repair_source = Path("frontend/src/pages/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
 
-    assert "const CharacterProgressionRepairPage = React.lazy(() =>" in main_source
-    assert 'import("./routes/CharacterProgressionRepairPage")' in main_source
-    assert "function CharacterProgressionRepairPage" not in authoring_source
-    assert "CharacterProgressionRepairPayload" not in authoring_source
-    assert "characterProgressionRepairValuesFromContext" not in authoring_source
-    assert 'component: CharacterProgressionRepairPage' in main_source
+    assert 'import { routeTree } from "./routeTree.gen";' in main_source
+    assert 'from "../../../../../pages/CharacterProgressionRepairPage";' in file_route_source
+    assert 'createFileRoute("/campaigns/$campaignSlug/characters/$characterSlug/progression-repair")' in file_route_source
+    assert "component: CharacterProgressionRepairPage" in file_route_source
 
     assert "export function CharacterProgressionRepairPage()" in repair_source
     assert 'from: "/campaigns/$campaignSlug/characters/$characterSlug/progression-repair"' in repair_source
@@ -567,15 +572,15 @@ def test_character_progression_repair_route_lives_in_route_module() -> None:
 
 def test_character_retraining_route_lives_in_route_module() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
-    retraining_source = Path("frontend/src/routes/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
+    file_route_source = Path(
+        "frontend/src/routes/campaigns/$campaignSlug/characters/$characterSlug/retraining.tsx"
+    ).read_text(encoding="utf-8")
+    retraining_source = Path("frontend/src/pages/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
 
-    assert "const CharacterRetrainingPage = React.lazy(() =>" in main_source
-    assert 'import("./routes/CharacterRetrainingPage")' in main_source
-    assert "function CharacterRetrainingPage" not in authoring_source
-    assert "CharacterRetrainingPayload" not in authoring_source
-    assert "characterRetrainingValuesFromContext" not in authoring_source
-    assert 'component: CharacterRetrainingPage' in main_source
+    assert 'import { routeTree } from "./routeTree.gen";' in main_source
+    assert 'from "../../../../../pages/CharacterRetrainingPage";' in file_route_source
+    assert 'createFileRoute("/campaigns/$campaignSlug/characters/$characterSlug/retraining")' in file_route_source
+    assert "component: CharacterRetrainingPage" in file_route_source
 
     assert "export function CharacterRetrainingPage()" in retraining_source
     assert 'from: "/campaigns/$campaignSlug/characters/$characterSlug/retraining"' in retraining_source
@@ -587,15 +592,15 @@ def test_character_retraining_route_lives_in_route_module() -> None:
 
 def test_character_level_up_route_lives_in_route_module() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
-    level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
+    file_route_source = Path(
+        "frontend/src/routes/campaigns/$campaignSlug/characters/$characterSlug/level-up.tsx"
+    ).read_text(encoding="utf-8")
+    level_up_source = Path("frontend/src/pages/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
 
-    assert "const CharacterLevelUpPage = React.lazy(() =>" in main_source
-    assert 'import("./routes/CharacterLevelUpPage")' in main_source
-    assert "function CharacterLevelUpPage" not in authoring_source
-    assert "CharacterLevelUpPayload" not in authoring_source
-    assert "characterLevelUpValuesFromContext" not in authoring_source
-    assert 'component: CharacterLevelUpPage' in main_source
+    assert 'import { routeTree } from "./routeTree.gen";' in main_source
+    assert 'from "../../../../../pages/CharacterLevelUpPage";' in file_route_source
+    assert 'createFileRoute("/campaigns/$campaignSlug/characters/$characterSlug/level-up")' in file_route_source
+    assert "component: CharacterLevelUpPage" in file_route_source
 
     assert "export function CharacterLevelUpPage()" in level_up_source
     assert 'from: "/campaigns/$campaignSlug/characters/$characterSlug/level-up"' in level_up_source
@@ -607,13 +612,17 @@ def test_character_level_up_route_lives_in_route_module() -> None:
 
 def test_character_cultivation_route_lives_in_route_module_and_aggregate_is_retired() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
-    authoring_path = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx")
-    cultivation_source = Path("frontend/src/routes/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
+    authoring_path = Path("frontend/src/pages/CharacterAuthoringRoutes.tsx")
+    file_route_source = Path(
+        "frontend/src/routes/campaigns/$campaignSlug/characters/$characterSlug/cultivation.tsx"
+    ).read_text(encoding="utf-8")
+    cultivation_source = Path("frontend/src/pages/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
 
     assert not authoring_path.exists()
-    assert "const CharacterCultivationPage = React.lazy(() =>" in main_source
-    assert 'import("./routes/CharacterCultivationPage")' in main_source
-    assert 'component: CharacterCultivationPage' in main_source
+    assert 'import { routeTree } from "./routeTree.gen";' in main_source
+    assert 'from "../../../../../pages/CharacterCultivationPage";' in file_route_source
+    assert 'createFileRoute("/campaigns/$campaignSlug/characters/$characterSlug/cultivation")' in file_route_source
+    assert "component: CharacterCultivationPage" in file_route_source
     assert "export function CharacterCultivationPage()" in cultivation_source
     assert 'from: "/campaigns/$campaignSlug/characters/$characterSlug/cultivation"' in cultivation_source
     assert "apiClient.getCharacterCultivation(campaignSlug, characterSlug)" in cultivation_source
@@ -622,7 +631,7 @@ def test_character_cultivation_route_lives_in_route_module_and_aggregate_is_reti
 
 
 def test_character_cultivation_realm_ascension_lives_in_component_module() -> None:
-    route_source = Path("frontend/src/routes/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
     realm_source = Path("frontend/src/components/CharacterCultivationRealmAscension.tsx").read_text(encoding="utf-8")
 
     assert "export function CharacterCultivationRealmAscension" in realm_source
@@ -642,21 +651,25 @@ def test_character_cultivation_realm_ascension_lives_in_component_module() -> No
 
 def test_gen2_route_modules_are_lazy_loaded_without_dropping_loading_cover_early() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    vite_source = Path("frontend/vite.config.ts").read_text(encoding="utf-8")
+    route_tree_source = Path("frontend/src/routeTree.gen.ts").read_text(encoding="utf-8")
     shell_source = Path("frontend/src/AppShell.tsx").read_text(encoding="utf-8")
     loading_source = Path("frontend/src/appLoadingReadiness.tsx").read_text(encoding="utf-8")
 
-    assert "const CampaignListPage = React.lazy(() =>" in main_source
-    assert "const SessionPage = React.lazy(() =>" in main_source
-    assert "const CombatPage = React.lazy(() =>" in main_source
-    assert "const DmContentPage = React.lazy(() =>" in main_source
-    assert "const CharacterDetailPage = React.lazy(() =>" in main_source
-    assert "const CharacterCultivationPage = React.lazy(() =>" in main_source
-    assert "const SystemsEntryPage = React.lazy(() =>" in main_source
-    assert "const WikiArticlePage = React.lazy(() =>" in main_source
-    assert 'import { SessionPage } from "./routes/SessionPage";' not in main_source
-    assert 'import { CombatPage } from "./routes/CombatPage";' not in main_source
-    assert 'import { DmContentPage } from "./routes/DmContentPage";' not in main_source
-    assert 'import { CharacterDetailPage } from "./routes/CharacterDetailPage";' not in main_source
+    assert 'import { routeTree } from "./routeTree.gen";' in main_source
+    assert "React.lazy" not in main_source
+    assert 'import { SessionPage } from "./pages/SessionPage";' not in main_source
+    assert 'import { CombatPage } from "./pages/CombatPage";' not in main_source
+    assert 'import { DmContentPage } from "./pages/DmContentPage";' not in main_source
+    assert 'import { CharacterDetailPage } from "./pages/CharacterDetailPage";' not in main_source
+    assert "tanstackRouter({" in vite_source
+    assert "autoCodeSplitting: true" in vite_source
+    assert "CampaignsCampaignSlugSessionRouteImport" in route_tree_source
+    assert "CampaignsCampaignSlugCombatRouteImport" in route_tree_source
+    assert "CampaignsCampaignSlugDmContentRouteImport" in route_tree_source
+    assert "CampaignsCampaignSlugCharactersCharacterSlugIndexRouteImport" in route_tree_source
+    assert "CampaignsCampaignSlugSystemsEntriesEntrySlugRouteImport" in route_tree_source
+    assert "CampaignsCampaignSlugPagesSplatRouteImport" in route_tree_source
 
     assert "export function RouteSuspenseFallback" in loading_source
     assert "setRouteSuspensePending(true);" in loading_source
@@ -668,15 +681,13 @@ def test_gen2_route_modules_are_lazy_loaded_without_dropping_loading_cover_early
 
 
 def test_character_authoring_preview_lists_live_in_component_module() -> None:
-    route_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
-    create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
-    level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
+    create_source = Path("frontend/src/pages/CharacterCreatePage.tsx").read_text(encoding="utf-8")
+    level_up_source = Path("frontend/src/pages/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
     preview_source = Path("frontend/src/components/CharacterAuthoringPreview.tsx").read_text(encoding="utf-8")
 
     assert 'import { CharacterLevelUpPreviewList } from "../components/CharacterAuthoringPreview";' in level_up_source
     assert 'import { CharacterPreviewList } from "../components/CharacterAuthoringPreview";' in create_source
-    assert "function CharacterPreviewList" not in route_source
-    assert "function CharacterLevelUpPreviewList" not in route_source
+    assert "function CharacterPreviewList" not in create_source
     assert "function CharacterLevelUpPreviewList" not in level_up_source
     assert "<CharacterPreviewList preview={create.preview} />" in create_source
     assert "<CharacterLevelUpPreviewList preview={levelUp.preview ?? {}} />" in level_up_source
@@ -692,14 +703,12 @@ def test_character_authoring_preview_lists_live_in_component_module() -> None:
 
 
 def test_character_authoring_dnd_choice_select_lives_in_field_component() -> None:
-    route_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
-    create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
-    level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
+    create_source = Path("frontend/src/pages/CharacterCreatePage.tsx").read_text(encoding="utf-8")
+    level_up_source = Path("frontend/src/pages/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
     field_source = Path("frontend/src/components/CharacterAuthoringFields.tsx").read_text(encoding="utf-8")
 
     assert 'import { CharacterDndChoiceSelect } from "../components/CharacterAuthoringFields";' in level_up_source
     assert 'import { CharacterDndChoiceSelect } from "../components/CharacterAuthoringFields";' in create_source
-    assert "function CharacterDndChoiceSelect" not in route_source
     assert "function CharacterDndChoiceSelect" not in create_source
     assert "function CharacterDndChoiceSelect" not in level_up_source
     assert "export function CharacterDndChoiceSelect" in field_source
@@ -709,38 +718,34 @@ def test_character_authoring_dnd_choice_select_lives_in_field_component() -> Non
 
 
 def test_character_authoring_shared_helpers_live_in_utility_module() -> None:
-    route_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
-    cultivation_source = Path("frontend/src/routes/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
-    editor_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
-    import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
-    level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
+    cultivation_source = Path("frontend/src/pages/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
+    editor_source = Path("frontend/src/pages/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
+    import_source = Path("frontend/src/pages/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
+    level_up_source = Path("frontend/src/pages/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
+    repair_source = Path("frontend/src/pages/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
+    retraining_source = Path("frontend/src/pages/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
     helper_source = Path("frontend/src/characterAuthoringUtils.tsx").read_text(encoding="utf-8")
 
     assert "from \"../characterAuthoringUtils\";" in cultivation_source
     assert "from \"../characterAuthoringUtils\";" in level_up_source
-    assert "function characterNameFromRecord" not in route_source
-    assert "function classLevelTextFromRecord" not in route_source
     assert "function characterNameFromRecord" not in cultivation_source
     assert "function classLevelTextFromRecord" not in cultivation_source
     assert "function characterNameFromRecord" not in editor_source
     assert "function classLevelTextFromRecord" not in editor_source
     assert "function characterNameFromRecord" not in level_up_source
     assert "function classLevelTextFromRecord" not in level_up_source
-    assert "function optionValue" not in route_source
-    assert "function optionLabel" not in route_source
-    assert "function draftString(" not in route_source
-    assert "function draftStringArray" not in route_source
-    assert "function updateAuthoringValue" not in route_source
-    assert "function selectOptions" not in route_source
-    assert "function editorSelectOptions" not in route_source
-    assert "function editorValuesFromContext" not in route_source
-    assert "function characterLevelUpValuesFromContext" not in route_source
+    assert "function optionValue" not in level_up_source
+    assert "function optionLabel" not in level_up_source
+    assert "function draftString(" not in cultivation_source
+    assert "function draftStringArray" not in cultivation_source
+    assert "function updateAuthoringValue" not in level_up_source
+    assert "function selectOptions" not in level_up_source
+    assert "function editorSelectOptions" not in editor_source
+    assert "function editorValuesFromContext" not in editor_source
     assert "function characterLevelUpValuesFromContext" not in level_up_source
-    assert "function characterAuthoringStringValues" not in route_source
     assert "function characterAuthoringStringValues" not in level_up_source
-    assert "function characterProgressionRepairValuesFromContext" not in route_source
-    assert "function characterRetrainingValuesFromContext" not in route_source
-    assert "function manualImportRows" not in route_source
+    assert "function characterProgressionRepairValuesFromContext" not in repair_source
+    assert "function characterRetrainingValuesFromContext" not in retraining_source
     assert "function manualImportRows" not in import_source
     assert "manualImportRows(context, rowCount, draftValues)" in import_source
 
@@ -769,7 +774,7 @@ def test_character_authoring_shared_helpers_live_in_utility_module() -> None:
 
 def test_character_section_policy_helpers_live_in_shared_utils() -> None:
     source = Path("frontend/src/characterPaneUtils.ts").read_text(encoding="utf-8")
-    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
 
     assert "export function visibleCharacterSectionsForSystem" in source
     assert "const baseSections = isDnd ? dndCharacterSections : xianxiaCharacterSections;" in source
@@ -788,7 +793,7 @@ def test_character_section_policy_helpers_live_in_shared_utils() -> None:
 
 
 def test_admin_user_detail_action_button_chrome_in_source() -> None:
-    source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/AdminRoutes.tsx").read_text(encoding="utf-8")
     admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]
 
     remove_on_click = 'onClick={() => removeMembership.mutate(membership)}'
@@ -815,7 +820,7 @@ def test_admin_user_detail_action_button_chrome_in_source() -> None:
 
 
 def test_admin_activity_chrome_lives_in_component_module() -> None:
-    route_source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/AdminRoutes.tsx").read_text(encoding="utf-8")
     activity_source = Path("frontend/src/components/AdminActivity.tsx").read_text(encoding="utf-8")
 
     assert 'import { AdminActivityFilters, AdminActivityList, AdminPagination } from "../components/AdminActivity";' in route_source
@@ -835,7 +840,7 @@ def test_admin_activity_chrome_lives_in_component_module() -> None:
 
 
 def test_admin_mutations_live_in_shared_hook() -> None:
-    route_source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/AdminRoutes.tsx").read_text(encoding="utf-8")
     hook_source = Path("frontend/src/adminMutations.ts").read_text(encoding="utf-8")
 
     assert 'import { useAdminDashboardMutations, useAdminUserDetailMutations } from "../adminMutations";' in route_source
@@ -860,7 +865,7 @@ def test_admin_mutations_live_in_shared_hook() -> None:
 
 
 def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
-    source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/AdminRoutes.tsx").read_text(encoding="utf-8")
     admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]
 
     delete_on_click = 'onClick={() => deleteUser.mutate()}'
@@ -879,7 +884,7 @@ def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
 
 
 def test_admin_user_account_actions_are_flat_stack_in_source() -> None:
-    source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/AdminRoutes.tsx").read_text(encoding="utf-8")
     admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]
 
     heading_index = admin_user_detail_source.index("<h2>Account actions</h2>")
@@ -924,7 +929,7 @@ def test_admin_user_account_actions_are_flat_stack_in_source() -> None:
 
 
 def test_session_chat_logs_card_uses_flask_style_row_hooks_in_source() -> None:
-    source = Path("frontend/src/routes/SessionDmPane.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/SessionDmPane.tsx").read_text(encoding="utf-8")
     chat_logs_start = source.index('<article className="card session-sidebar-card" id="session-chat-logs">')
     chat_logs_end = source.index('<aside className="session-sidebar">', chat_logs_start)
     chat_logs_source = source[chat_logs_start:chat_logs_end]
@@ -959,7 +964,7 @@ def test_session_chat_logs_card_uses_flask_style_row_hooks_in_source() -> None:
 
 
 def test_session_log_detail_delete_button_uses_ghost_button_class_in_source() -> None:
-    source = Path("frontend/src/routes/SessionDmPane.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/SessionDmPane.tsx").read_text(encoding="utf-8")
 
     delete_on_click = "onClick={() => deleteLogMutation.mutate(logQuery.data.session.id)}"
     delete_button_start = source.rfind("<button", 0, source.index(delete_on_click))
@@ -974,7 +979,7 @@ def test_session_log_detail_delete_button_uses_ghost_button_class_in_source() ->
 
 
 def test_session_dm_mutations_live_in_shared_hook() -> None:
-    pane_source = Path("frontend/src/routes/SessionDmPane.tsx").read_text(encoding="utf-8")
+    pane_source = Path("frontend/src/pages/SessionDmPane.tsx").read_text(encoding="utf-8")
     hook_source = Path("frontend/src/sessionDmMutations.ts").read_text(encoding="utf-8")
 
     assert 'import { useSessionDmMutations } from "../sessionDmMutations";' in pane_source
@@ -993,7 +998,7 @@ def test_session_dm_mutations_live_in_shared_hook() -> None:
 
 
 def test_combat_action_chrome_in_source() -> None:
-    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/CombatPage.tsx").read_text(encoding="utf-8")
     status_panel_source = Path("frontend/src/components/CombatDmStatusPanel.tsx").read_text(encoding="utf-8")
     controls_panel_source = Path("frontend/src/components/CombatDmControlsPanel.tsx").read_text(encoding="utf-8")
     combat_page_source = _extract_function_component_source(source, "CombatPage")
@@ -1019,7 +1024,7 @@ def test_combat_action_chrome_in_source() -> None:
 
 
 def test_combat_chrome_components_preserve_summary_carousel_and_view_switch() -> None:
-    route_source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CombatPage.tsx").read_text(encoding="utf-8")
     chrome_source = Path("frontend/src/components/CombatChrome.tsx").read_text(encoding="utf-8")
 
     assert "CombatantCarousel" in route_source
@@ -1074,7 +1079,7 @@ def test_combat_chrome_components_preserve_summary_carousel_and_view_switch() ->
 
 
 def test_combat_dm_controls_add_and_cleanup_chrome_in_source() -> None:
-    route_source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CombatPage.tsx").read_text(encoding="utf-8")
     controls_panel_source = Path("frontend/src/components/CombatDmControlsPanel.tsx").read_text(encoding="utf-8")
     combat_page_source = _extract_function_component_source(route_source, "CombatPage")
 
@@ -1126,7 +1131,7 @@ def test_combat_dm_controls_add_and_cleanup_chrome_in_source() -> None:
 
 
 def test_campaign_control_page_cleanup_removes_flask_control_fallback_link() -> None:
-    control_markup = Path("frontend/src/routes/CampaignControlPage.tsx").read_text(encoding="utf-8")
+    control_markup = Path("frontend/src/pages/CampaignControlPage.tsx").read_text(encoding="utf-8")
 
     assert "Flask Control" not in control_markup
     assert "Flask Control panel" not in control_markup
@@ -1178,7 +1183,7 @@ def test_campaign_control_page_cleanup_removes_flask_control_fallback_link() -> 
 
 
 def test_account_settings_page_removes_flask_account_fallback_link() -> None:
-    account_settings_markup = Path("frontend/src/routes/AccountSettingsPage.tsx").read_text(encoding="utf-8")
+    account_settings_markup = Path("frontend/src/pages/AccountSettingsPage.tsx").read_text(encoding="utf-8")
 
     assert "Flask account" not in account_settings_markup
     assert 'className="ghost-button" href="/campaigns">' in account_settings_markup
@@ -1228,7 +1233,7 @@ def test_account_option_css_matches_flask_parity() -> None:
 
 
 def test_campaign_help_page_removes_flask_help_fallback() -> None:
-    help_markup = Path("frontend/src/routes/CampaignHelpPage.tsx").read_text(encoding="utf-8")
+    help_markup = Path("frontend/src/pages/CampaignHelpPage.tsx").read_text(encoding="utf-8")
 
     assert "Flask Help" not in help_markup
     assert "help-anchor-row" not in help_markup
@@ -1254,7 +1259,7 @@ def test_campaign_help_page_removes_flask_help_fallback() -> None:
 
 
 def test_systems_entry_navigation_removes_open_flask_entry_link() -> None:
-    source = Path("frontend/src/routes/SystemsRoutes.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/SystemsRoutes.tsx").read_text(encoding="utf-8")
     systems_entry_start = source.index("export function SystemsEntryPage() {")
     systems_entry_markup = source[systems_entry_start:]
 
@@ -1266,7 +1271,7 @@ def test_systems_entry_navigation_removes_open_flask_entry_link() -> None:
 
 
 def test_systems_shared_chrome_lives_in_component_module() -> None:
-    route_source = Path("frontend/src/routes/SystemsRoutes.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/SystemsRoutes.tsx").read_text(encoding="utf-8")
     chrome_source = Path("frontend/src/components/SystemsChrome.tsx").read_text(encoding="utf-8")
 
     assert 'from "../components/SystemsChrome";' in route_source
@@ -1286,7 +1291,7 @@ def test_systems_shared_chrome_lives_in_component_module() -> None:
 
 
 def test_combat_empty_tracker_prompt_uses_current_surface_wording() -> None:
-    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/CombatPage.tsx").read_text(encoding="utf-8")
     combat_page_source = _extract_function_component_source(source, "CombatPage")
 
     assert "Use the Encounter controls or DM controls to seed the encounter for now." in combat_page_source
@@ -1294,7 +1299,7 @@ def test_combat_empty_tracker_prompt_uses_current_surface_wording() -> None:
 
 
 def test_gen2_combat_focus_changes_preserve_mounted_payload_in_source() -> None:
-    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/CombatPage.tsx").read_text(encoding="utf-8")
     combat_page_source = _extract_function_component_source(source, "CombatPage")
 
     assert "const navigate = useNavigate();" in combat_page_source
@@ -1306,7 +1311,7 @@ def test_gen2_combat_focus_changes_preserve_mounted_payload_in_source() -> None:
 
 
 def test_gen2_combat_dm_resolves_away_from_player_workspace_in_source() -> None:
-    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/CombatPage.tsx").read_text(encoding="utf-8")
     combat_page_source = _extract_function_component_source(source, "CombatPage")
 
     assert (
@@ -1325,7 +1330,7 @@ def test_gen2_combat_dm_resolves_away_from_player_workspace_in_source() -> None:
 
 
 def test_gen2_combat_dm_status_omits_nested_selected_pc_detail_in_source() -> None:
-    route_source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CombatPage.tsx").read_text(encoding="utf-8")
     dm_status_source = Path("frontend/src/components/CombatDmStatusPanel.tsx").read_text(encoding="utf-8")
 
     assert "const renderDmStatus" not in route_source
@@ -1335,7 +1340,7 @@ def test_gen2_combat_dm_status_omits_nested_selected_pc_detail_in_source() -> No
 
 
 def test_combat_mutations_live_in_shared_hook() -> None:
-    route_source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CombatPage.tsx").read_text(encoding="utf-8")
     hook_source = Path("frontend/src/combatMutations.ts").read_text(encoding="utf-8")
 
     assert 'import { useCombatMutations, type CombatConditionDraft } from "../combatMutations";' in route_source
@@ -1417,7 +1422,7 @@ def test_combat_dm_status_tactical_forms_chrome_in_source() -> None:
 
 
 def test_combat_player_workspace_target_chrome_in_source() -> None:
-    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/CombatPage.tsx").read_text(encoding="utf-8")
     workspace_markup = Path("frontend/src/components/CombatPlayerWorkspace.tsx").read_text(encoding="utf-8")
 
     assert 'import { CombatPlayerWorkspace } from "../components/CombatPlayerWorkspace";' in source
@@ -1469,11 +1474,11 @@ def test_combat_conditions_chrome_in_source() -> None:
 
 
 def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
-    source = Path("frontend/src/routes/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
-    advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
-    level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
-    progression_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
-    retraining_source = Path("frontend/src/routes/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
+    advanced_source = Path("frontend/src/pages/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
+    level_up_source = Path("frontend/src/pages/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
+    progression_source = Path("frontend/src/pages/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
+    retraining_source = Path("frontend/src/pages/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
     route_sources = {
         "CharacterAdvancedEditorPage": advanced_source,
         "CharacterLevelUpPage": level_up_source,
@@ -1556,13 +1561,13 @@ def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
 
 
 def test_character_supported_form_action_chrome_in_source() -> None:
-    source = Path("frontend/src/routes/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
-    advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
-    level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
-    progression_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
-    retraining_source = Path("frontend/src/routes/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
-    create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
-    manual_import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
+    advanced_source = Path("frontend/src/pages/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
+    level_up_source = Path("frontend/src/pages/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
+    progression_source = Path("frontend/src/pages/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
+    retraining_source = Path("frontend/src/pages/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
+    create_source = Path("frontend/src/pages/CharacterCreatePage.tsx").read_text(encoding="utf-8")
+    manual_import_source = Path("frontend/src/pages/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
     route_sources = {
         "CharacterAdvancedEditorPage": advanced_source,
         "CharacterLevelUpPage": level_up_source,
@@ -1667,13 +1672,13 @@ def test_character_supported_form_action_chrome_in_source() -> None:
 
 
 def test_character_supported_hero_links_preserve_supported_nav_while_hiding_flask_fallbacks() -> None:
-    source = Path("frontend/src/routes/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
-    advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
-    level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
-    progression_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
-    retraining_source = Path("frontend/src/routes/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
-    create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
-    manual_import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
+    advanced_source = Path("frontend/src/pages/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
+    level_up_source = Path("frontend/src/pages/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
+    progression_source = Path("frontend/src/pages/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
+    retraining_source = Path("frontend/src/pages/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
+    create_source = Path("frontend/src/pages/CharacterCreatePage.tsx").read_text(encoding="utf-8")
+    manual_import_source = Path("frontend/src/pages/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
     route_sources = {
         "CharacterAdvancedEditorPage": advanced_source,
         "CharacterLevelUpPage": level_up_source,
@@ -1734,7 +1739,7 @@ def test_character_supported_hero_links_preserve_supported_nav_while_hiding_flas
 
 
 def test_character_roster_page_copy_and_grid_class_parity_in_source() -> None:
-    roster_source = Path("frontend/src/routes/CharacterRosterPage.tsx").read_text(encoding="utf-8")
+    roster_source = Path("frontend/src/pages/CharacterRosterPage.tsx").read_text(encoding="utf-8")
 
     assert (
         "Open a player sheet in read mode for play, or start a new in-app PHB level 1 character when you need native sheet data instead of an imported PDF."
@@ -1757,7 +1762,7 @@ def test_character_roster_page_copy_and_grid_class_parity_in_source() -> None:
 
 
 def test_character_roster_heading_visibility_is_gated_by_create_or_unsupported_system_in_source() -> None:
-    roster_source = Path("frontend/src/routes/CharacterRosterPage.tsx").read_text(encoding="utf-8")
+    roster_source = Path("frontend/src/pages/CharacterRosterPage.tsx").read_text(encoding="utf-8")
 
     assert re.search(
         r"const shouldShowRosterToolsHeading\s*=\s*hasCreateCharacterLink \|\| data\?\.tools\?\.native_character_create_supported === false;",
@@ -1783,7 +1788,7 @@ def test_character_roster_heading_visibility_is_gated_by_create_or_unsupported_s
 
 
 def test_character_roster_card_meta_join_and_stats_divs_in_source() -> None:
-    roster_source = Path("frontend/src/routes/CharacterRosterPage.tsx").read_text(encoding="utf-8")
+    roster_source = Path("frontend/src/pages/CharacterRosterPage.tsx").read_text(encoding="utf-8")
 
     card_start = roster_source.index('<article className="card character-card"')
     card_end = roster_source.index("</article>", card_start) + len("</article>")
@@ -1801,7 +1806,7 @@ def test_character_roster_card_meta_join_and_stats_divs_in_source() -> None:
 
 
 def test_character_roster_empty_state_copy_is_exact_in_source() -> None:
-    source = Path("frontend/src/routes/CharacterRosterPage.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/CharacterRosterPage.tsx").read_text(encoding="utf-8")
     assert (
         "This campaign does not currently have any active player sheets available in the app."
         in source
@@ -1839,10 +1844,10 @@ def test_grid_minimum_card_size_is_flask_260px_and_character_roster_grid_selecto
 
 
 def test_character_form_actions_do_not_convert_non_targeted_builder_rows() -> None:
-    source = Path("frontend/src/routes/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
-    create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
-    level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
-    manual_import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
+    create_source = Path("frontend/src/pages/CharacterCreatePage.tsx").read_text(encoding="utf-8")
+    level_up_source = Path("frontend/src/pages/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
+    manual_import_source = Path("frontend/src/pages/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
 
     def component_source(component_name: str) -> str:
         component_owner = level_up_source if component_name == "CharacterLevelUpPage" else source
@@ -1880,7 +1885,7 @@ def test_character_form_actions_do_not_convert_non_targeted_builder_rows() -> No
 
 
 def test_combat_unsupported_system_fallback_chrome_in_source() -> None:
-    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/CombatPage.tsx").read_text(encoding="utf-8")
     combat_page_source = _extract_function_component_source(source, "CombatPage")
 
     unsupported_match = re.search(
@@ -2011,7 +2016,7 @@ def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
 
 
 def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> None:
-    source = Path("frontend/src/routes/WikiRoutes.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/WikiRoutes.tsx").read_text(encoding="utf-8")
     chrome_source = Path("frontend/src/components/WikiChrome.tsx").read_text(encoding="utf-8")
     nav_source = _extract_component_source(
         chrome_source,
@@ -2079,7 +2084,7 @@ def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> N
 
 
 def test_dm_content_player_wiki_editor_fields_use_flask_style_labels_in_source() -> None:
-    source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/DmContentPage.tsx").read_text(encoding="utf-8")
     lane_source = Path("frontend/src/components/DmPlayerWikiLane.tsx").read_text(encoding="utf-8")
     card_source = Path("frontend/src/components/DmPlayerWikiPageCard.tsx").read_text(encoding="utf-8")
     fields_source = Path("frontend/src/components/DmPlayerWikiDraftFields.tsx").read_text(encoding="utf-8")
@@ -2139,7 +2144,7 @@ def test_dm_content_player_wiki_editor_fields_use_flask_style_labels_in_source()
 
 
 def test_dm_content_hero_nav_lives_in_component_module() -> None:
-    route_source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/DmContentPage.tsx").read_text(encoding="utf-8")
     hero_source = Path("frontend/src/components/DmContentHero.tsx").read_text(encoding="utf-8")
 
     assert 'import { DmContentHero } from "../components/DmContentHero";' in route_source
@@ -2160,7 +2165,7 @@ def test_dm_content_hero_nav_lives_in_component_module() -> None:
 
 
 def test_dm_content_mutations_live_in_shared_hook() -> None:
-    route_source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/DmContentPage.tsx").read_text(encoding="utf-8")
     hook_source = Path("frontend/src/dmContentMutations.ts").read_text(encoding="utf-8")
 
     assert 'import { useDmContentMutations } from "../dmContentMutations";' in route_source
@@ -2179,7 +2184,7 @@ def test_dm_content_mutations_live_in_shared_hook() -> None:
 
 
 def test_dm_content_systems_management_form_field_chrome() -> None:
-    source = Path("frontend/src/routes/DmContentSystemsLane.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/DmContentSystemsLane.tsx").read_text(encoding="utf-8")
     helper_start = source.index("const renderCustomFields = ({")
     helper_end = source.index("  if (systemsQuery.isLoading)", helper_start)
     helper_markup = source[helper_start:helper_end]
@@ -2220,7 +2225,7 @@ def test_dm_content_systems_management_form_field_chrome() -> None:
 
 
 def test_dm_content_systems_mutations_live_in_shared_hook() -> None:
-    lane_source = Path("frontend/src/routes/DmContentSystemsLane.tsx").read_text(encoding="utf-8")
+    lane_source = Path("frontend/src/pages/DmContentSystemsLane.tsx").read_text(encoding="utf-8")
     hook_source = Path("frontend/src/dmContentSystemsMutations.ts").read_text(encoding="utf-8")
 
     assert "useDmContentSystemsMutations" in lane_source
@@ -2239,7 +2244,7 @@ def test_dm_content_systems_mutations_live_in_shared_hook() -> None:
 
 
 def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_source() -> None:
-    source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/DmContentPage.tsx").read_text(encoding="utf-8")
     card_source = Path("frontend/src/components/DmContentCards.tsx").read_text(encoding="utf-8")
     statblocks_lane_source = Path("frontend/src/components/DmStatblocksLane.tsx").read_text(encoding="utf-8")
     conditions_lane_source = Path("frontend/src/components/DmConditionsLane.tsx").read_text(encoding="utf-8")
@@ -2733,7 +2738,7 @@ def test_character_generic_system_summary_section_uses_detail_grid_cards() -> No
 
 
 def test_character_pane_status_messages_use_toast_overlay() -> None:
-    source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
     mutation_source = Path("frontend/src/characterPaneMutations.ts").read_text(encoding="utf-8")
     feedback_source = Path("frontend/src/components/feedback.tsx").read_text(encoding="utf-8")
     styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
@@ -2759,7 +2764,7 @@ def test_character_pane_status_messages_use_toast_overlay() -> None:
 
 
 def test_character_pane_draft_state_lives_in_shared_hook() -> None:
-    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
     draft_source = Path("frontend/src/characterPaneDrafts.ts").read_text(encoding="utf-8")
 
     assert "export function useCharacterPaneDraftState" in draft_source
@@ -2772,7 +2777,7 @@ def test_character_pane_draft_state_lives_in_shared_hook() -> None:
 
 
 def test_character_pane_xianxia_reference_model_lives_in_shared_helper() -> None:
-    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
     model_source = Path("frontend/src/characterPaneXianxiaModel.ts").read_text(encoding="utf-8")
 
     assert "export function buildCharacterPaneXianxiaModel" in model_source
@@ -2787,7 +2792,7 @@ def test_character_pane_xianxia_reference_model_lives_in_shared_helper() -> None
 
 
 def test_character_pane_common_dnd_model_lives_in_shared_helper() -> None:
-    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
     model_source = Path("frontend/src/characterPaneModel.ts").read_text(encoding="utf-8")
 
     assert "export function buildCharacterPaneModel" in model_source
@@ -2803,7 +2808,7 @@ def test_character_pane_common_dnd_model_lives_in_shared_helper() -> None:
 
 
 def test_character_pane_mutations_live_in_shared_hook() -> None:
-    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
     mutation_source = Path("frontend/src/characterPaneMutations.ts").read_text(encoding="utf-8")
 
     assert "export function useCharacterPaneMutations" in mutation_source
@@ -2825,7 +2830,7 @@ def test_character_pane_mutations_live_in_shared_hook() -> None:
 
 
 def test_character_pane_submit_handlers_live_in_shared_hook() -> None:
-    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
     handler_source = Path("frontend/src/characterPaneSubmitHandlers.ts").read_text(encoding="utf-8")
 
     assert "export function useCharacterPaneSubmitHandlers" in handler_source
@@ -3215,7 +3220,7 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
 
 
 def test_character_pane_delegates_dnd_section_composition() -> None:
-    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
     dnd_sections_source = Path("frontend/src/components/CharacterDndSections.tsx").read_text(encoding="utf-8")
 
     assert 'import { CharacterDndSections } from "../components/CharacterDndSections";' in route_source
@@ -3247,7 +3252,7 @@ def test_character_pane_delegates_dnd_section_composition() -> None:
 
 
 def test_character_pane_delegates_xianxia_section_composition() -> None:
-    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
     xianxia_sections_source = Path("frontend/src/components/CharacterXianxiaSections.tsx").read_text(encoding="utf-8")
 
     assert 'import { CharacterXianxiaSections } from "../components/CharacterXianxiaSections";' in route_source
@@ -3309,7 +3314,7 @@ def test_character_notes_section_uses_flask_style_reference_stack_and_edit_chrom
 
 
 def test_dm_session_revealed_articles_panel_uses_session_article_row_chrome_in_source() -> None:
-    source = Path("frontend/src/routes/SessionDmPane.tsx").read_text(encoding="utf-8")
+    source = Path("frontend/src/pages/SessionDmPane.tsx").read_text(encoding="utf-8")
     panel_id_start = source.index('id="session-revealed-articles"')
     panel_start = source.rfind("<article", 0, panel_id_start)
     panel_end = source.index('<article className="card session-sidebar-card" id="session-chat-logs">', panel_start)
@@ -3335,7 +3340,7 @@ def test_dm_session_revealed_articles_panel_uses_session_article_row_chrome_in_s
 
 
 def test_dm_content_staged_articles_edit_form_uses_flask_style_file_field_markup() -> None:
-    route_source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
+    route_source = Path("frontend/src/pages/DmContentPage.tsx").read_text(encoding="utf-8")
     lane_source = Path("frontend/src/components/DmStagedArticlesLane.tsx").read_text(encoding="utf-8")
     queue_markup = Path("frontend/src/components/DmStagedArticleQueue.tsx").read_text(encoding="utf-8")
 

@@ -17,6 +17,7 @@ Missing built assets and missing `index.html` still return 404. The default prom
 - `GET /api/v1/me/settings` keeps the compatibility `preferences.frontend_mode` field, but it no longer advertises `frontend_mode_choices`.
 - `PATCH /api/v1/me/settings` rejects `frontend_mode` writes with a validation error.
 - Gen2 navigation keeps shell, campaign-picker, and published wiki links inside `/app-next`.
+- Gen2 uses TanStack Router file-based route generation: `frontend/src/routes/**` owns thin route wrappers, `frontend/src/pages/**` owns page implementations, `frontend/src/routeTree.gen.ts` is committed generated output, and `frontend/src/main.tsx` bootstraps the generated route tree at the `/app-next` basepath.
 - Direct Flask URLs such as `/campaigns/<slug>`, Flask picker links when Gen2 hosting is disabled, and explicit `flask_*` API link fields remain compatibility paths.
 
 ## Historical State
@@ -32,6 +33,8 @@ On 2026-06-18, preview hosting was validated against a rebuilt Vite bundle after
 The Gen2 browser acceptance suite was then refreshed and re-enabled. `tests/test_frontend_gen2_session_browser.py` has browser tests covering route loading, Session/Combat/DM Content/Systems/Character write flows, Account/Admin/Help/Control surfaces, route-mode preservation inside `/app-next`, desktop/mobile visual overflow checks, and visible Flask-fallback cleanup.
 
 On 2026-06-24, the default promotion changed `/app-next` hosting to default-on, normalized the retired frontend preference to Gen2, and changed root/campaign-picker entry paths to prefer Gen2 while preserving Flask direct-route fallback.
+
+Later on 2026-06-24, the Gen2 router was standardized around TanStack Router's file-based generator. The old manual route tree in `frontend/src/main.tsx` was replaced with the generated route tree, route wrappers moved to `frontend/src/routes/**`, and implementation-heavy route modules moved to `frontend/src/pages/**`. Verification for that pass included a Vite production build and the combined frontend/auth/API pytest suite.
 
 ## Resumption Checklist
 

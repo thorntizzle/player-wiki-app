@@ -27,7 +27,7 @@ import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 
 export function WikiHomePage() {
   const { campaignSlug } = useParams({
-    from: "/campaigns/$campaignSlug",
+    from: "/campaigns/$campaignSlug/",
   });
   const resolvedCampaignSlug = campaignSlug ?? "";
   const { apiClient, setAuthRequired, preferredFrontendMode } = useApiClient();

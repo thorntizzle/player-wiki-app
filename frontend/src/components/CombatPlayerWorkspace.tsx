@@ -1,7 +1,7 @@
 import { Fragment } from "react";
 
 import type { CombatantSummary, CombatPlayerCharacterTarget } from "../api/types";
-import { CharacterPane } from "../routes/CharacterPane";
+import { CharacterPane } from "../pages/CharacterPane";
 
 interface CombatPlayerWorkspaceProps {
   campaignSlug: string;

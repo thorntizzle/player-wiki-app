@@ -10,7 +10,7 @@ import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 
 export function CharacterRosterPage() {
   const { campaignSlug } = useParams({
-    from: "/campaigns/$campaignSlug/characters",
+    from: "/campaigns/$campaignSlug/characters/",
   });
   const resolvedCampaignSlug = campaignSlug ?? "";
   const { apiClient, setAuthRequired } = useApiClient();
