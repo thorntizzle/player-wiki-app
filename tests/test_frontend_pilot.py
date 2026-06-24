@@ -821,6 +821,31 @@ def test_admin_activity_chrome_lives_in_component_module() -> None:
     assert 'className="ghost-button" href={data.export_url}' in activity_source
 
 
+def test_admin_mutations_live_in_shared_hook() -> None:
+    route_source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
+    hook_source = Path("frontend/src/adminMutations.ts").read_text(encoding="utf-8")
+
+    assert 'import { useAdminDashboardMutations, useAdminUserDetailMutations } from "../adminMutations";' in route_source
+    assert "useAdminDashboardMutations({" in route_source
+    assert "useAdminUserDetailMutations({" in route_source
+    assert "export function useAdminDashboardMutations(" in hook_source
+    assert "export function useAdminUserDetailMutations(" in hook_source
+    assert "apiClient.inviteAdminUser" in hook_source
+    assert "apiClient.setAdminUserMembership" in hook_source
+    assert "apiClient.removeAdminUserMembership" in hook_source
+    assert "apiClient.assignAdminUserCharacter" in hook_source
+    assert "apiClient.removeAdminUserCharacterAssignment" in hook_source
+    assert "apiClient.issueAdminUserInvite" in hook_source
+    assert "apiClient.issueAdminUserPasswordReset" in hook_source
+    assert "apiClient.disableAdminUser" in hook_source
+    assert "apiClient.enableAdminUser" in hook_source
+    assert "apiClient.deleteAdminUser" in hook_source
+    assert "queryClient.setQueryData" in hook_source
+    assert "useMutation(" not in route_source
+    assert "apiClient.inviteAdminUser" not in route_source
+    assert "apiClient.deleteAdminUser" not in route_source
+
+
 def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
     source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
     admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]

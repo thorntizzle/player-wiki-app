@@ -1,17 +1,12 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useLocation, useParams } from "@tanstack/react-router";
 import type { FormEvent } from "react";
 
-import { apiErrorMessage } from "../api/client";
-import type {
-  AdminAssignment,
-  AdminInvitePayload,
-  AdminMembership,
-  AdminUserDetailResponse,
-} from "../api/types";
+import type { AdminInvitePayload } from "../api/types";
 import { getApiErrorMessage } from "../apiErrors";
-import { queryClient, useApiClient } from "../apiClientContext";
+import { useApiClient } from "../apiClientContext";
+import { useAdminDashboardMutations, useAdminUserDetailMutations } from "../adminMutations";
 import { AdminActivityFilters, AdminActivityList, AdminPagination } from "../components/AdminActivity";
 import { ApiErrorNotice } from "../components/feedback";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
@@ -57,26 +52,12 @@ export function AdminDashboardPage() {
     }));
   }, [dashboardQuery.data?.invite_form_defaults]);
 
-  const inviteMutation = useMutation({
-    mutationFn: (payload: AdminInvitePayload) => apiClient.inviteAdminUser(payload),
-    onSuccess: (response) => {
-      setErrorMessage("");
-      setStatusMessage(response.message || "Invite created.");
-      setInviteDraft((current) => ({
-        ...current,
-        email: "",
-        display_name: "",
-      }));
-      queryClient.setQueryData(["admin-user", response.managed_user.id, ""], response);
-      void queryClient.invalidateQueries({ queryKey: ["admin-dashboard"] });
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setStatusMessage("");
-      setErrorMessage(apiErrorMessage(error));
-    },
+  const { inviteMutation } = useAdminDashboardMutations({
+    apiClient,
+    setAuthRequired,
+    setStatusMessage,
+    setErrorMessage,
+    setInviteDraft,
   });
 
   const queryError = getApiErrorMessage(dashboardQuery.error);
@@ -267,74 +248,26 @@ export function AdminUserDetailPage() {
     setAssignmentDraft(userQuery.data.assignment_form_defaults);
   }, [userQuery.data?.membership_form_defaults, userQuery.data?.assignment_form_defaults]);
 
-  const handleDetailSuccess = (response: AdminUserDetailResponse) => {
-    setErrorMessage("");
-    setStatusMessage(response.message || "Admin user saved.");
-    queryClient.setQueryData(["admin-user", response.managed_user.id, currentSearch], response);
-    void queryClient.invalidateQueries({ queryKey: ["admin-dashboard"] });
-    void queryClient.invalidateQueries({ queryKey: ["me"] });
-  };
-
-  const handleMutationError = (error: unknown) => {
-    if (isAuthError(error)) {
-      setAuthRequired(true);
-    }
-    setStatusMessage("");
-    setErrorMessage(apiErrorMessage(error));
-  };
-
-  const setMembership = useMutation({
-    mutationFn: () => apiClient.setAdminUserMembership(userId, membershipDraft),
-    onSuccess: handleDetailSuccess,
-    onError: handleMutationError,
-  });
-  const removeMembership = useMutation({
-    mutationFn: (membership: AdminMembership) => apiClient.removeAdminUserMembership(userId, { campaign_slug: membership.campaign_slug }),
-    onSuccess: handleDetailSuccess,
-    onError: handleMutationError,
-  });
-  const assignCharacter = useMutation({
-    mutationFn: () => apiClient.assignAdminUserCharacter(userId, assignmentDraft),
-    onSuccess: handleDetailSuccess,
-    onError: handleMutationError,
-  });
-  const removeAssignment = useMutation({
-    mutationFn: (assignment: AdminAssignment) => apiClient.removeAdminUserCharacterAssignment(userId, {
-      campaign_slug: assignment.campaign_slug,
-      character_slug: assignment.character_slug,
-    }),
-    onSuccess: handleDetailSuccess,
-    onError: handleMutationError,
-  });
-  const issueInvite = useMutation({
-    mutationFn: () => apiClient.issueAdminUserInvite(userId),
-    onSuccess: handleDetailSuccess,
-    onError: handleMutationError,
-  });
-  const issuePasswordReset = useMutation({
-    mutationFn: () => apiClient.issueAdminUserPasswordReset(userId),
-    onSuccess: handleDetailSuccess,
-    onError: handleMutationError,
-  });
-  const disableUser = useMutation({
-    mutationFn: () => apiClient.disableAdminUser(userId),
-    onSuccess: handleDetailSuccess,
-    onError: handleMutationError,
-  });
-  const enableUser = useMutation({
-    mutationFn: () => apiClient.enableAdminUser(userId),
-    onSuccess: handleDetailSuccess,
-    onError: handleMutationError,
-  });
-  const deleteUser = useMutation({
-    mutationFn: () => apiClient.deleteAdminUser(userId, { confirm_email: deleteConfirm }),
-    onSuccess: (response) => {
-      setErrorMessage("");
-      setStatusMessage(response.message || "User deleted.");
-      void queryClient.invalidateQueries({ queryKey: ["admin-dashboard"] });
-      window.location.assign("/app-next/admin");
-    },
-    onError: handleMutationError,
+  const {
+    assignCharacter,
+    deleteUser,
+    disableUser,
+    enableUser,
+    issueInvite,
+    issuePasswordReset,
+    removeAssignment,
+    removeMembership,
+    setMembership,
+  } = useAdminUserDetailMutations({
+    apiClient,
+    userId,
+    currentSearch,
+    membershipDraft,
+    assignmentDraft,
+    deleteConfirm,
+    setAuthRequired,
+    setStatusMessage,
+    setErrorMessage,
   });
 
   const data = userQuery.data;
