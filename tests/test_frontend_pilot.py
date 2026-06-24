@@ -1327,14 +1327,22 @@ def test_campaign_help_page_removes_flask_help_fallback() -> None:
     assert 'className="help-panel"' in help_markup
     assert 'href={data.links.account_url}>Open Account</a>' in help_markup
     assert "href={data.links.sign_in_url}>Sign in</a>" in help_markup
+    assert "and which first-pass limits still shape the workflow." not in help_markup
+    assert "and which workflow constraints still shape the experience." in help_markup
+    assert '<p><strong>{surface.status_label}</strong></p>' not in help_markup
+    assert 'tabIndex={-1}' in help_markup
 
     help_css = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     assert ".help-panel" in help_css
     assert ".help-panel h4" in help_css
     assert ".help-detail-card" not in help_css
+    assert ".campaign-help-surface:target" in help_css
+    assert ".campaign-help-surface:focus-visible" in help_css
+    assert ".button-link:focus-visible" in help_css
+    assert ".ghost-button:focus-visible" in help_css
 
     top_help_row_match = re.search(
-        r'<div className="hero-actions" aria-label="Help sections">([\s\S]*?)</div>',
+        r'<nav className="hero-actions campaign-help-section-nav" aria-label="Help sections">([\s\S]*?)</nav>',
         help_markup,
     )
     assert top_help_row_match is not None
@@ -1347,7 +1355,7 @@ def test_campaign_help_page_removes_flask_help_fallback() -> None:
     for tag in top_help_anchor_tags:
         class_match = re.search(r'className="([^"]+)"', tag)
         assert class_match is not None
-        assert class_match.group(1) == "ghost-button"
+        assert class_match.group(1) == "ghost-button campaign-help-section-link"
 
 
 def test_systems_entry_navigation_removes_open_flask_entry_link() -> None:

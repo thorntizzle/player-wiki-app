@@ -1464,6 +1464,16 @@ a:hover {
   gap: 0.9rem;
 }
 
+.campaign-help-surface {
+  scroll-margin-top: 1rem;
+}
+
+.campaign-help-surface:target,
+.campaign-help-surface:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
 .sidebar-card-section {
   display: grid;
   gap: 0.45rem;
@@ -1486,6 +1496,13 @@ a:hover {
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
+}
+
+.campaign-help-section-link {
+  min-height: 2.25rem;
+  padding: 0.42rem 0.78rem;
+  font-size: 0.92rem;
+  line-height: 1.15;
 }
 
 .help-detail-grid,
@@ -1632,6 +1649,12 @@ a:hover {
 
 .button-link:hover {
   filter: brightness(0.95);
+}
+
+.button-link:focus-visible,
+.ghost-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .button-link:disabled,

@@ -54,16 +54,20 @@ export function CampaignHelpPage() {
         <h1>Help</h1>
         <p className="lede">
           Use this page for what each app surface is for, what the current access rules allow,
-          and which first-pass limits still shape the workflow.
+          and which workflow constraints still shape the experience.
         </p>
         {data?.surfaces.length ? (
-          <div className="hero-actions" aria-label="Help sections">
+          <nav className="hero-actions campaign-help-section-nav" aria-label="Help sections">
             {data.surfaces.map((surface) => (
-              <a className="ghost-button" href={`#${surface.anchor}`} key={surface.anchor}>
+              <a
+                className="ghost-button campaign-help-section-link"
+                href={`#${surface.anchor}`}
+                key={surface.anchor}
+              >
                 {surface.label}
               </a>
             ))}
-          </div>
+          </nav>
         ) : null}
       </section>
 
@@ -102,7 +106,12 @@ export function CampaignHelpPage() {
             </article>
 
             {data.surfaces.map((surface) => (
-              <article className="card campaign-help-surface" id={surface.anchor} key={surface.anchor}>
+              <article
+                className="card campaign-help-surface"
+                id={surface.anchor}
+                key={surface.anchor}
+                tabIndex={-1}
+              >
                 <div className="section-heading">
                   <div>
                     <h2>{surface.label}</h2>
@@ -136,7 +145,6 @@ export function CampaignHelpPage() {
                   </article>
                   <article className="help-panel">
                     <h3>Access</h3>
-                    <p><strong>{surface.status_label}</strong></p>
                     <p className="meta">{surface.access_note}</p>
                   </article>
                 </div>
