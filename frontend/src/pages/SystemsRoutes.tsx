@@ -270,17 +270,6 @@ export function SystemsSourcePage() {
               <p className="meta">Default visibility: {data.source.default_visibility}</p>
               <p className="meta">Available entries: {data.entry_count}</p>
             </section>
-            {data.entry_groups.length ? (
-              <section className="card sidebar-card">
-                <h2>Content Categories</h2>
-                <SystemsCategoryList
-                  campaignSlug={resolvedCampaignSlug}
-                  sourceId={data.source.source_id}
-                  groups={data.entry_groups}
-                  emptyText="No categories are visible."
-                />
-              </section>
-            ) : null}
           </aside>
         </div>
       ) : null}

@@ -1279,6 +1279,7 @@ def test_systems_entry_navigation_removes_open_flask_entry_link() -> None:
 def test_systems_shared_chrome_lives_in_component_module() -> None:
     route_source = Path("frontend/src/pages/SystemsRoutes.tsx").read_text(encoding="utf-8")
     chrome_source = Path("frontend/src/components/SystemsChrome.tsx").read_text(encoding="utf-8")
+    source_page_source = _extract_function_component_source(route_source, "SystemsSourcePage")
 
     assert 'from "../components/SystemsChrome";' in route_source
     assert "function SystemsEntryList" not in route_source
@@ -1294,6 +1295,8 @@ def test_systems_shared_chrome_lives_in_component_module() -> None:
     assert "export function SystemsManageLink" in chrome_source
     assert 'className="plain-list systems-entry-list"' in chrome_source
     assert "Systems settings" in chrome_source
+    assert "Browse This Source" in source_page_source
+    assert "Content Categories" not in source_page_source
 
 
 def test_combat_empty_tracker_prompt_uses_current_surface_wording() -> None:
