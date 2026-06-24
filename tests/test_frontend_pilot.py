@@ -476,6 +476,12 @@ def test_character_authoring_shared_helpers_live_in_utility_module() -> None:
     assert "function updateAuthoringValue" not in route_source
     assert "function selectOptions" not in route_source
     assert "function editorSelectOptions" not in route_source
+    assert "function editorValuesFromContext" not in route_source
+    assert "function characterLevelUpValuesFromContext" not in route_source
+    assert "function characterAuthoringStringValues" not in route_source
+    assert "function characterProgressionRepairValuesFromContext" not in route_source
+    assert "function characterRetrainingValuesFromContext" not in route_source
+    assert "function manualImportRows" not in route_source
 
     assert "export type CharacterAuthoringValues" in helper_source
     assert "export function optionValue" in helper_source
@@ -485,8 +491,17 @@ def test_character_authoring_shared_helpers_live_in_utility_module() -> None:
     assert "export function updateAuthoringValue" in helper_source
     assert "export function selectOptions" in helper_source
     assert "export function editorSelectOptions" in helper_source
+    assert "export function editorValuesFromContext" in helper_source
+    assert "export function characterLevelUpValuesFromContext" in helper_source
+    assert "export function characterAuthoringStringValues" in helper_source
+    assert "export function characterProgressionRepairValuesFromContext" in helper_source
+    assert "export function characterRetrainingValuesFromContext" in helper_source
+    assert "export function manualImportRows" in helper_source
     assert 'return option.source_id ? `${label} (${option.source_id})` : label;' in helper_source
     assert '<option key={value || optionLabel(option)} value={value}>' in helper_source
+    assert "values[`custom_feature_name_${row.index}`]" in helper_source
+    assert "values.advancement_mode = draftString(values, \"advancement_mode\"" in helper_source
+    assert "slug_input_name: `martial_art_${index}_slug`" in helper_source
 
 
 def test_character_section_policy_helpers_live_in_shared_utils() -> None:
