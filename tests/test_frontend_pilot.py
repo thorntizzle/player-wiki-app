@@ -782,6 +782,26 @@ def test_admin_user_detail_action_button_chrome_in_source() -> None:
     assert "className=\"button button-secondary\"" not in disable_button_block
 
 
+def test_admin_activity_chrome_lives_in_component_module() -> None:
+    route_source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
+    activity_source = Path("frontend/src/components/AdminActivity.tsx").read_text(encoding="utf-8")
+
+    assert 'import { AdminActivityFilters, AdminActivityList, AdminPagination } from "../components/AdminActivity";' in route_source
+    assert "function AdminActivityFilters" not in route_source
+    assert "function AdminActivityList" not in route_source
+    assert "function AdminPagination" not in route_source
+    assert "<AdminActivityFilters" in route_source
+    assert "<AdminActivityList" in route_source
+    assert "<AdminPagination" in route_source
+    assert "export function AdminActivityFilters" in activity_source
+    assert "export function AdminActivityList" in activity_source
+    assert "export function AdminPagination" in activity_source
+    assert 'className="audit-filter-form admin-filter-form"' in activity_source
+    assert 'className="plain-list audit-list admin-audit-list"' in activity_source
+    assert 'className="pagination-bar admin-pagination"' in activity_source
+    assert 'className="ghost-button" href={data.export_url}' in activity_source
+
+
 def test_admin_user_delete_button_uses_ghost_button_class_in_source() -> None:
     source = Path("frontend/src/routes/AdminRoutes.tsx").read_text(encoding="utf-8")
     admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]
