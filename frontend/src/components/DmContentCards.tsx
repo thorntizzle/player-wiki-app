@@ -47,7 +47,6 @@ export function DmContentStatblockCard({
       <div className="dm-content-item__header">
         <div>
           <h3>{statblock.title}</h3>
-          <p className="meta">Source file: {statblock.source_filename}</p>
         </div>
         <div className="badge-list dm-statblock-badges">
           {statblock.armor_class !== null ? <span className="meta-badge">AC {statblock.armor_class}</span> : null}
@@ -56,6 +55,10 @@ export function DmContentStatblockCard({
           <span className="meta-badge">Init {formatInitiativeBonus(statblock.initiative_bonus)}</span>
         </div>
       </div>
+      <details className="feature-detail dm-maintenance-detail">
+        <summary>Maintenance details</summary>
+        <p className="meta">Source filename: {statblock.source_filename}</p>
+      </details>
       <p className="status status-neutral">{statblock.parser_feedback.summary}</p>
       <details className="feature-detail">
         <summary>View statblock text</summary>

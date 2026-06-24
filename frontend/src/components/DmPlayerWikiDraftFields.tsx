@@ -44,7 +44,7 @@ export function DmPlayerWikiDraftFields({
       {includeSlug ? (
         <>
           <label htmlFor={`${idPrefix}-slug`} className="field">
-            <span>Slug</span>
+            <span>URL name</span>
             <input
               id={`${idPrefix}-slug`}
               name="slug_leaf"
@@ -55,7 +55,7 @@ export function DmPlayerWikiDraftFields({
               onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ slugLeaf: event.currentTarget.value })}
             />
           </label>
-          <p className="meta">Page file: {targetPageRef}.md</p>
+          <p className="meta">Publish location: {targetPageRef}.md</p>
         </>
       ) : null}
       <label htmlFor={`${idPrefix}-section`} className="field">
@@ -162,7 +162,7 @@ export function DmPlayerWikiDraftFields({
         Published
       </label>
       <label htmlFor={`${idPrefix}-source-ref`} className="field">
-        <span>Source reference</span>
+        <span>Original source</span>
         <input
           id={`${idPrefix}-source-ref`}
           name="source_ref"
@@ -172,7 +172,7 @@ export function DmPlayerWikiDraftFields({
         />
       </label>
       <label htmlFor={`${idPrefix}-image`} className="field">
-        <span>Image path</span>
+        <span>Image asset</span>
         <input
           id={`${idPrefix}-image`}
           name="image"

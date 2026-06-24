@@ -129,7 +129,7 @@ export function CharacterXianxiaManualImportPage() {
               <div className="builder-field-grid">
                 {[
                   ["name", "Character Name", ""],
-                  ["character_slug", "Character Slug", ""],
+                  ["character_slug", "Character URL name", ""],
                   ["reputation", "Reputation", "Unknown"],
                 ].map(([key, label, fallback]) => (
                   <label className="field" key={key}>

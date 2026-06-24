@@ -74,6 +74,10 @@ export function DmArticleCreator({
         : "Search and select a source, then pull into staged articles.";
   const mergedClassName = Array.from(new Set(`card ${className ?? ""}`.split(/\s+/).filter(Boolean))).join(" ");
   const wikiSearchStatusText = sourceStatus ?? "Type at least 2 letters to search published wiki pages and Systems entries.";
+  const selectedSource = selectedSourceRef
+    ? sourceResults.find((result) => result.source_ref === selectedSourceRef)
+    : null;
+  const selectedSourceLabel = selectedSource?.select_label || selectedSource?.title || "";
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -340,7 +344,13 @@ export function DmArticleCreator({
               {wikiSearchStatusText}
             </p>
             <div className="wiki-selection">
-              <p className="status status-neutral">{selectedSourceRef ? `Source selected: ${selectedSourceRef}` : "No source selected"}</p>
+              <p className="status status-neutral">
+                {selectedSourceRef
+                  ? selectedSourceLabel
+                    ? `Selected source: ${selectedSourceLabel}`
+                    : "Selected source ready."
+                  : "No source selected"}
+              </p>
               <button
                 type="button"
                 disabled={isCreating || !selectedSourceRef}

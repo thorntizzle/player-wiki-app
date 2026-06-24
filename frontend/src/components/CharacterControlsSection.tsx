@@ -124,12 +124,12 @@ export function CharacterControlsSection({
             <h3>Delete character</h3>
             <p>
               Deleting a character removes the file-backed definition/import metadata, the live character state, and any
-              current assignment for this character slug.
+              current player assignment.
             </p>
             <form onSubmit={submitCharacterDelete} className="stack-form">
               <label className="field">
                 <span>
-                  Type <code>{characterSlug}</code> to confirm
+                  Type this character's URL name to confirm: <code>{characterSlug}</code>
                 </span>
                 <input
                   id="character-delete-confirmation"

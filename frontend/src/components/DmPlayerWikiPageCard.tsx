@@ -56,7 +56,6 @@ export function DmPlayerWikiPageCard({
       <div className="dm-content-item__header">
         <div>
           <h3>{pageFile.page.title || pageFile.page_ref}</h3>
-          <p className="meta">{pageFile.page_ref}.md</p>
           {pageFile.page.summary ? <p className="meta">{pageFile.page.summary}</p> : null}
         </div>
         <div className="badge-list">
@@ -67,7 +66,11 @@ export function DmPlayerWikiPageCard({
           <span className="meta-badge">{safety.removal_status_label}</span>
         </div>
       </div>
-      {pageFile.page.source_ref ? <p className="meta">Source: {pageFile.page.source_ref}</p> : null}
+      <details className="feature-detail dm-maintenance-detail">
+        <summary>Maintenance details</summary>
+        <p className="meta">Publish location: {pageFile.page_ref}.md</p>
+        {pageFile.page.source_ref ? <p className="meta">Original source: {pageFile.page.source_ref}</p> : null}
+      </details>
       <div className="dm-content-removal-safety">
         <p className="meta">
           <strong>Removal safety:</strong> {safety.removal_guidance}
@@ -139,7 +142,7 @@ export function DmPlayerWikiPageCard({
             onSaveEditDraft(pageFile.page_ref, editDraft);
           }}
         >
-          <p className="meta">Page file: {pageFile.page_ref}.md</p>
+          <p className="meta">Editing publish location: {pageFile.page_ref}.md</p>
           <DmPlayerWikiDraftFields
             idPrefix={`dm-player-wiki-edit-${simpleSlug(pageFile.page_ref)}`}
             draft={editDraft}

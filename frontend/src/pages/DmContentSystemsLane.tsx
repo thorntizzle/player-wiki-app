@@ -163,7 +163,7 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
           </label>
           {includeSlug ? (
             <label htmlFor={`${idPrefix}-slug`} className="field">
-              <span>URL slug</span>
+              <span>URL name</span>
               <input
                 id={`${idPrefix}-slug`}
                 value={draft.slugLeaf}

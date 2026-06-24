@@ -141,7 +141,7 @@ export function CharacterCreatePage() {
               <div className="builder-field-grid">
                 {[
                   ["name", "Character Name", "Zigzag Blackscar"],
-                  ["character_slug", "Character Slug", "Auto-generated from name if blank"],
+                  ["character_slug", "Character URL name", "Auto-generated from name if blank"],
                   ["alignment", "Alignment", "Neutral Good"],
                   ["experience_model", "Experience Model", "Milestone"],
                 ].map(([key, label, placeholder]) => (
@@ -278,7 +278,7 @@ export function CharacterCreatePage() {
                   <input type="text" name="name" value={draftString(draftValues, "name")} onChange={(event) => updateValue("name", event.currentTarget.value)} required />
                 </label>
                 <label className="field">
-                  <span>Character Slug</span>
+                  <span>Character URL name</span>
                   <input type="text" name="character_slug" value={draftString(draftValues, "character_slug")} onChange={(event) => updateValue("character_slug", event.currentTarget.value)} />
                 </label>
               </div>
