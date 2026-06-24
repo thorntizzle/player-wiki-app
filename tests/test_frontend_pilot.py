@@ -1143,7 +1143,8 @@ def test_campaign_control_page_cleanup_removes_flask_control_fallback_link() -> 
     assert 'name={`${row.scope}_visibility`}' in control_markup
     assert "Save visibility" in control_markup
     assert "using default visibility" in control_markup
-    assert "statusMessage ? <p className=\"status status-neutral\">{statusMessage}</p> : null" in control_markup
+    assert "<ToastNotice message={toastMessage} tone={toastTone} />" in control_markup
+    assert "statusMessage ?" not in control_markup
     assert "saveError ? <p className=\"status status-error\">{saveError}</p> : null" in control_markup
     assert "className=\"button-link\"" not in control_markup
     assert "className=\"hero-actions\"" not in control_markup
@@ -1169,6 +1170,10 @@ def test_campaign_control_page_cleanup_removes_flask_control_fallback_link() -> 
         flags=re.MULTILINE | re.DOTALL,
     ) is not None
     assert "{rule.label}: {rule.description}" in control_markup
+    assert "<h2>Visibility guidance</h2>" in control_markup
+    assert "<h3>Visibility rules</h3>" in control_markup
+    assert "<h3>Notes</h3>" in control_markup
+    assert 'className="sidebar-card-section"' in control_markup
 
     source_css = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     assert ".campaign-control-layout" not in source_css
@@ -1181,6 +1186,7 @@ def test_campaign_control_page_cleanup_removes_flask_control_fallback_link() -> 
     assert ".campaign-control-row__label" not in source_css
     assert ".campaign-control-row__meta" not in source_css
     assert ".campaign-control-hero" in source_css
+    assert ".sidebar-card-section" in source_css
 
 
 def test_account_settings_page_removes_flask_account_fallback_link() -> None:

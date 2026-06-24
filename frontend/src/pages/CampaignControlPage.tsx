@@ -159,25 +159,27 @@ export function CampaignControlPage() {
 
           <aside className="sidebar">
             <section className="card sidebar-card">
-              <h2>Visibility rules</h2>
-              {data.rules.map((rule) => (
-                <p className="meta" key={rule.label}>
-                  {rule.label}: {rule.description}
-                </p>
-              ))}
-            </section>
-
-            <section className="card sidebar-card">
-              <h2>Notes</h2>
-              {data.notes.length ? (
-                data.notes.map((note) => (
-                  <p className="meta" key={note}>
-                    {note}
+              <h2>Visibility guidance</h2>
+              <section className="sidebar-card-section">
+                <h3>Visibility rules</h3>
+                {data.rules.map((rule) => (
+                  <p className="meta" key={rule.label}>
+                    {rule.label}: {rule.description}
                   </p>
-                ))
-              ) : (
-                <p className="meta">No additional visibility notes are available.</p>
-              )}
+                ))}
+              </section>
+              <section className="sidebar-card-section">
+                <h3>Notes</h3>
+                {data.notes.length ? (
+                  data.notes.map((note) => (
+                    <p className="meta" key={note}>
+                      {note}
+                    </p>
+                  ))
+                ) : (
+                  <p className="meta">No additional visibility notes are available.</p>
+                )}
+              </section>
             </section>
           </aside>
         </div>
