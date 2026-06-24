@@ -485,6 +485,9 @@ def test_admin_user_detail_supports_csv_export_prefill_and_removal_actions(app, 
     assert 'option value="player" selected' in prefill_html
     assert 'option value="active" selected' in prefill_html
     assert 'option value="linden-pass::selene-brook" selected' in prefill_html
+    assert "Account status:" in prefill_html
+    assert "Selene Brook | Owner" in prefill_html
+    assert "selene-brook | owner" not in prefill_html
 
     assert export_response.status_code == 200
     assert "character_assignment_created,Character assigned" in export_text

@@ -15,6 +15,12 @@ function adminSearch(search: string): string {
   return search.startsWith("?") ? search : search ? `?${search}` : "";
 }
 
+function formatAdminValue(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 export function AdminDashboardPage() {
   const { apiClient, setAuthRequired } = useApiClient();
   useLocation();
@@ -184,7 +190,7 @@ export function AdminDashboardPage() {
               {data.user_cards.map((user) => (
                 <article key={user.id} className="card admin-user-card">
                   <p className="card-kicker">
-                    {user.status}
+                    {formatAdminValue(user.status)}
                     {user.is_admin ? " | Admin" : ""}
                   </p>
                   <h3>
@@ -295,7 +301,7 @@ export function AdminUserDetailPage() {
           <>
             <p className="lede">{data.managed_user.email}</p>
             <p className="meta">
-              Status: {data.managed_user.status}
+              Account status: {formatAdminValue(data.managed_user.status)}
               {data.managed_user.is_admin ? " | App admin" : ""}
             </p>
             <div className="hero-actions">
@@ -430,7 +436,7 @@ export function AdminUserDetailPage() {
                     <li key={membership.id} className="admin-item-row">
                       <div>
                         <strong>{membership.campaign_title}</strong>
-                        <span className="meta"> {membership.role} | {membership.status}</span>
+                        <span className="meta"> {formatAdminValue(membership.role)} | {formatAdminValue(membership.status)}</span>
                       </div>
                       <div className="admin-item-actions">
                         <a className="ghost-button" href={`${data.links.gen2_user_url}?edit_membership_campaign_slug=${encodeURIComponent(membership.campaign_slug)}`}>
@@ -481,7 +487,7 @@ export function AdminUserDetailPage() {
                     <li key={assignment.id} className="admin-item-row">
                       <div>
                         <strong>{assignment.campaign_title}</strong>
-                        <span className="meta"> {assignment.character_slug} | {assignment.assignment_type}</span>
+                        <span className="meta"> {assignment.character_label} | {formatAdminValue(assignment.assignment_type)}</span>
                       </div>
                       <div className="admin-item-actions">
                         <a

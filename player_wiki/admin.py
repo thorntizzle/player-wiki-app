@@ -18,9 +18,11 @@ from .admin_audit import (
     summarize_audit_event,
 )
 from .admin_context import (
+    build_character_assignment_label_lookup,
     build_campaign_lookup,
     build_user_card_summaries,
     build_user_reference_payload,
+    get_assignment_character_label,
     get_assignment_form_defaults,
     get_invite_form_defaults,
     get_membership_form_defaults,
@@ -112,6 +114,8 @@ def register_admin(app: Flask) -> None:
         repository = get_repository()
         users = store.list_users()
         campaign_choices = list_campaign_choices(repository)
+        character_choices = list_character_choices(repository, get_character_repository())
+        assignment_label_lookup = build_character_assignment_label_lookup(character_choices)
         campaign_lookup = build_campaign_lookup(repository)
 
         dashboard_audit_context = load_dashboard_audit_context(
@@ -127,7 +131,12 @@ def register_admin(app: Flask) -> None:
             "campaign_choices": campaign_choices,
             "invite_form_defaults": get_invite_form_defaults(campaign_choices),
             "audit_event_type_choices": list_audit_event_type_choices(),
-            "user_cards": build_user_card_summaries(store, users, campaign_lookup),
+            "user_cards": build_user_card_summaries(
+                store,
+                users,
+                campaign_lookup,
+                assignment_label_lookup=assignment_label_lookup,
+            ),
             **dashboard_audit_context,
         }
 
@@ -136,6 +145,7 @@ def register_admin(app: Flask) -> None:
         repository = get_repository()
         campaigns = list_campaign_choices(repository)
         character_choices = list_character_choices(repository, get_character_repository())
+        assignment_label_lookup = build_character_assignment_label_lookup(character_choices)
         campaign_lookup = build_campaign_lookup(repository)
         memberships = store.list_memberships_for_user(
             user.id,
@@ -169,6 +179,10 @@ def register_admin(app: Flask) -> None:
             "character_choices": character_choices,
             "memberships": memberships,
             "assignments": assignments,
+            "assignment_character_labels": {
+                assignment.id: get_assignment_character_label(assignment, assignment_label_lookup)
+                for assignment in assignments
+            },
             "campaign_lookup": campaign_lookup,
             "audit_event_type_choices": list_audit_event_type_choices(),
             "membership_form_defaults": get_membership_form_defaults(request.args, store, user.id, campaigns),
@@ -439,6 +453,8 @@ def register_admin(app: Flask) -> None:
         if record is None:
             flash("Choose a valid visible character.", "error")
             return redirect(url_for("admin_user_detail", user_id=user.id))
+        campaign_title = build_campaign_lookup(get_repository()).get(campaign_slug, campaign_slug)
+        character_label = record.definition.name
 
         membership = store.get_membership(user.id, campaign_slug, statuses=("active",))
         if membership is None or membership.role != "player":
@@ -461,7 +477,7 @@ def register_admin(app: Flask) -> None:
                 "source": "admin_screen",
             },
         )
-        flash(f"Assigned {character_slug} in {campaign_slug} to {user.email}.", "success")
+        flash(f"Assigned {character_label} in {campaign_title} to {user.email}.", "success")
         return redirect(url_for("admin_user_detail", user_id=user.id))
 
     @app.post("/admin/users/<int:user_id>/assignment/remove")
@@ -471,6 +487,9 @@ def register_admin(app: Flask) -> None:
         store = get_auth_store()
         campaign_slug = request.form.get("campaign_slug", "").strip()
         character_slug = request.form.get("character_slug", "").strip()
+        campaign_title = build_campaign_lookup(get_repository()).get(campaign_slug, campaign_slug)
+        record = get_character_repository().get_visible_character(campaign_slug, character_slug)
+        character_label = record.definition.name if record is not None else character_slug
         assignment = store.get_character_assignment(campaign_slug, character_slug)
         if assignment is None or assignment.user_id != user.id:
             flash("Choose a valid character assignment to remove.", "error")
@@ -494,7 +513,7 @@ def register_admin(app: Flask) -> None:
                 "source": "admin_screen",
             },
         )
-        flash(f"Cleared assignment for {character_slug} in {campaign_slug}.", "success")
+        flash(f"Cleared assignment for {character_label} in {campaign_title}.", "success")
         return redirect(url_for("admin_user_detail", user_id=user.id))
 
     @app.post("/admin/users/<int:user_id>/invite")

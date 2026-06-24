@@ -685,7 +685,11 @@ def test_api_admin_user_management_context_actions_and_permissions(client, app, 
     assert any(
         assignment["campaign_slug"] == "linden-pass"
         and assignment["character_slug"] == "selene-brook"
+        and assignment["character_label"] == "Selene Brook"
         for assignment in assignment_payload["assignments"]
+    )
+    assert assignment_payload["message"] == (
+        "Assigned Selene Brook in Echoes of the Alloy Coast to gen2-admin-api@example.com."
     )
 
     filtered_detail = client.get(

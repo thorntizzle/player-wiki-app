@@ -30,6 +30,33 @@ def list_character_choices(repository: Any, character_repository: Any) -> list[d
     return choices
 
 
+def build_character_assignment_label_lookup(character_choices: list[dict[str, str]]) -> dict[str, str]:
+    return {
+        str(choice.get("value") or ""): str(choice.get("label") or "").strip()
+        for choice in character_choices
+        if str(choice.get("value") or "").strip()
+    }
+
+
+def get_assignment_character_label(assignment: Any, assignment_label_lookup: Mapping[str, str] | None = None) -> str:
+    assignment_label_lookup = assignment_label_lookup or {}
+    assignment_ref = f"{assignment.campaign_slug}::{assignment.character_slug}"
+    choice_label = assignment_label_lookup.get(assignment_ref, "").strip()
+    if choice_label:
+        _campaign_prefix, separator, character_label = choice_label.partition(" | ")
+        return character_label.strip() if separator else choice_label
+    return str(assignment.character_slug)
+
+
+def format_assignment_summary(
+    assignment: Any,
+    campaign_lookup: Mapping[str, str],
+    assignment_label_lookup: Mapping[str, str] | None = None,
+) -> str:
+    campaign_title = campaign_lookup.get(assignment.campaign_slug, assignment.campaign_slug)
+    return f"{campaign_title} | {get_assignment_character_label(assignment, assignment_label_lookup)}"
+
+
 def get_membership_form_defaults(
     args: Mapping[str, Any],
     store: Any,
@@ -107,6 +134,7 @@ def build_user_card_summaries(
     users: list[Any],
     campaign_lookup: dict[str, str],
     *,
+    assignment_label_lookup: Mapping[str, str] | None = None,
     build_links: Callable[[Any], Mapping[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     user_cards: list[dict[str, Any]] = []
@@ -128,7 +156,8 @@ def build_user_card_summaries(
                 for membership in memberships
             ],
             "assignment_summary": [
-                f"{assignment.campaign_slug}/{assignment.character_slug}" for assignment in assignments
+                format_assignment_summary(assignment, campaign_lookup, assignment_label_lookup)
+                for assignment in assignments
             ],
         }
         if build_links is not None:

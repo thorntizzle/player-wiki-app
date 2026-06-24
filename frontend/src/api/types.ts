@@ -205,6 +205,7 @@ export interface AdminAssignment {
   campaign_slug: string;
   campaign_title: string;
   character_slug: string;
+  character_label: string;
   assignment_type: string;
   created_at: string | null;
   updated_at: string | null;

@@ -1607,8 +1607,8 @@ def test_gen2_admin_user_management_route_and_permissions(
 
             admin_page.locator("#admin-assignment-character-ref").select_option("linden-pass::selene-brook")
             admin_page.get_by_role("button", name="Assign character").click()
-            expect(admin_page.get_by_text("Assigned selene-brook in linden-pass")).to_be_visible(timeout=10000)
-            expect(admin_page.get_by_text("selene-brook | owner")).to_be_visible()
+            expect(admin_page.get_by_text("Assigned Selene Brook in Echoes of the Alloy Coast")).to_be_visible(timeout=10000)
+            expect(admin_page.get_by_text("Selene Brook | Owner")).to_be_visible()
 
             admin_user_detail_metrics = admin_page.evaluate(
                 """() => ({

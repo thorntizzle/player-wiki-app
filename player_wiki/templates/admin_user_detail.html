@@ -8,7 +8,7 @@
     <h1>{{ managed_user.display_name }}</h1>
     <p class="lede">{{ managed_user.email }}</p>
     <p class="meta">
-      Status: {{ managed_user.status | title }}
+      Account status: {{ managed_user.status | title }}
       {% if managed_user.is_admin %} | App admin{% endif %}
     </p>
     <div class="hero-actions">
@@ -80,7 +80,7 @@
             <li class="admin-item-row">
               <div>
                 <strong>{{ campaign_lookup.get(membership.campaign_slug, membership.campaign_slug) }}</strong>
-                <span class="meta">{{ membership.role }} | {{ membership.status }}</span>
+                <span class="meta">{{ membership.role | title }} | {{ membership.status | title }}</span>
               </div>
               <div class="admin-item-actions">
                 <a class="ghost-button" href="{{ url_for('admin_user_detail', user_id=managed_user.id, edit_membership_campaign_slug=membership.campaign_slug) }}">Edit</a>
@@ -107,7 +107,7 @@
             <li class="admin-item-row">
               <div>
                 <strong>{{ campaign_lookup.get(assignment.campaign_slug, assignment.campaign_slug) }}</strong>
-                <span class="meta">{{ assignment.character_slug }} | {{ assignment.assignment_type }}</span>
+                <span class="meta">{{ assignment_character_labels.get(assignment.id, assignment.character_slug) }} | {{ assignment.assignment_type | title }}</span>
               </div>
               <div class="admin-item-actions">
                 <a class="ghost-button" href="{{ url_for('admin_user_detail', user_id=managed_user.id, edit_assignment_campaign_slug=assignment.campaign_slug, edit_assignment_character_slug=assignment.character_slug) }}">Edit</a>

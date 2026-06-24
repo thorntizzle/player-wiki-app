@@ -869,6 +869,24 @@ def test_admin_user_detail_action_button_chrome_in_source() -> None:
         assert 'className="button button-secondary"' not in action_block
 
 
+def test_admin_user_detail_labels_use_display_values_in_source() -> None:
+    route_source = Path("frontend/src/pages/AdminRoutes.tsx").read_text(encoding="utf-8")
+    api_types = Path("frontend/src/api/types.ts").read_text(encoding="utf-8")
+    admin_context = Path("player_wiki/admin_context.py").read_text(encoding="utf-8")
+    api_source = Path("player_wiki/api.py").read_text(encoding="utf-8")
+
+    assert "function formatAdminValue(value: string): string" in route_source
+    assert "Account status: {formatAdminValue(data.managed_user.status)}" in route_source
+    assert "{formatAdminValue(user.status)}" in route_source
+    assert "{formatAdminValue(membership.role)} | {formatAdminValue(membership.status)}" in route_source
+    assert "{assignment.character_label} | {formatAdminValue(assignment.assignment_type)}" in route_source
+    assert "assignment.character_slug} | {assignment.assignment_type}" not in route_source
+    assert "character_label: string;" in api_types
+    assert "def build_character_assignment_label_lookup(" in admin_context
+    assert "def get_assignment_character_label(" in admin_context
+    assert '"character_label": get_assignment_character_label(assignment, assignment_label_lookup)' in api_source
+
+
 def test_admin_activity_chrome_lives_in_component_module() -> None:
     route_source = Path("frontend/src/pages/AdminRoutes.tsx").read_text(encoding="utf-8")
     activity_source = Path("frontend/src/components/AdminActivity.tsx").read_text(encoding="utf-8")

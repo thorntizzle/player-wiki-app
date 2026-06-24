@@ -22,9 +22,11 @@ from .admin_audit import (
     load_user_audit_context,
 )
 from .admin_context import (
+    build_character_assignment_label_lookup,
     build_campaign_lookup,
     build_user_card_summaries,
     build_user_reference_payload,
+    get_assignment_character_label,
     get_assignment_form_defaults,
     get_invite_form_defaults,
     get_membership_form_defaults,
@@ -498,13 +500,18 @@ def register_api(app) -> None:
         payload["campaign_title"] = campaign_lookup.get(membership.campaign_slug, membership.campaign_slug)
         return payload
 
-    def serialize_admin_assignment(assignment, campaign_lookup: dict[str, str]) -> dict[str, Any]:
+    def serialize_admin_assignment(
+        assignment,
+        campaign_lookup: dict[str, str],
+        assignment_label_lookup: dict[str, str],
+    ) -> dict[str, Any]:
         return {
             "id": assignment.id,
             "user_id": assignment.user_id,
             "campaign_slug": assignment.campaign_slug,
             "campaign_title": campaign_lookup.get(assignment.campaign_slug, assignment.campaign_slug),
             "character_slug": assignment.character_slug,
+            "character_label": get_assignment_character_label(assignment, assignment_label_lookup),
             "assignment_type": assignment.assignment_type,
             "created_at": serialize_datetime(assignment.created_at),
             "updated_at": serialize_datetime(assignment.updated_at),
@@ -515,6 +522,8 @@ def register_api(app) -> None:
         repository = get_repository()
         users = store.list_users()
         campaign_choices = list_campaign_choices(repository)
+        character_choices = list_character_choices(repository, get_character_repository())
+        assignment_label_lookup = build_character_assignment_label_lookup(character_choices)
         campaign_lookup = build_campaign_lookup(repository)
 
         dashboard_audit_context = load_dashboard_audit_context(
@@ -541,6 +550,7 @@ def register_api(app) -> None:
                 store,
                 users,
                 campaign_lookup,
+                assignment_label_lookup=assignment_label_lookup,
                 build_links=lambda user: {
                     "href": f"/app-next/admin/users/{user.id}",
                     "flask_href": url_for("admin_user_detail", user_id=user.id),
@@ -564,6 +574,7 @@ def register_api(app) -> None:
         repository = get_repository()
         campaigns = list_campaign_choices(repository)
         character_choices = list_character_choices(repository, get_character_repository())
+        assignment_label_lookup = build_character_assignment_label_lookup(character_choices)
         campaign_lookup = build_campaign_lookup(repository)
         memberships = store.list_memberships_for_user(
             user.id,
@@ -596,7 +607,10 @@ def register_api(app) -> None:
             "campaign_choices": campaigns,
             "character_choices": character_choices,
             "memberships": [serialize_admin_membership(membership, campaign_lookup) for membership in memberships],
-            "assignments": [serialize_admin_assignment(assignment, campaign_lookup) for assignment in assignments],
+            "assignments": [
+                serialize_admin_assignment(assignment, campaign_lookup, assignment_label_lookup)
+                for assignment in assignments
+            ],
             "audit_event_type_choices": list_audit_event_type_choices(),
             "membership_form_defaults": get_membership_form_defaults(request.args, store, user.id, campaigns),
             "assignment_form_defaults": get_assignment_form_defaults(request.args, character_choices),
@@ -5183,6 +5197,8 @@ def register_api(app) -> None:
         record = get_character_repository().get_visible_character(campaign_slug, character_slug)
         if record is None:
             return json_error("Choose a valid visible character.", 400, code="validation_error")
+        campaign_title = build_campaign_lookup(get_repository()).get(campaign_slug, campaign_slug)
+        character_label = record.definition.name
 
         store = get_auth_store()
         membership = store.get_membership(user.id, campaign_slug, statuses=("active",))
@@ -5210,7 +5226,7 @@ def register_api(app) -> None:
             },
         )
         context = build_admin_user_detail_context(user)
-        context["message"] = f"Assigned {character_slug} in {campaign_slug} to {user.email}."
+        context["message"] = f"Assigned {character_label} in {campaign_title} to {user.email}."
         return jsonify(context)
 
     @api.delete("/admin/users/<int:user_id>/assignment")
@@ -5225,6 +5241,9 @@ def register_api(app) -> None:
 
         campaign_slug = str(payload.get("campaign_slug") or "").strip()
         character_slug = str(payload.get("character_slug") or "").strip()
+        campaign_title = build_campaign_lookup(get_repository()).get(campaign_slug, campaign_slug)
+        record = get_character_repository().get_visible_character(campaign_slug, character_slug)
+        character_label = record.definition.name if record is not None else character_slug
         store = get_auth_store()
         assignment = store.get_character_assignment(campaign_slug, character_slug)
         if assignment is None or assignment.user_id != user.id:
@@ -5248,7 +5267,7 @@ def register_api(app) -> None:
             },
         )
         context = build_admin_user_detail_context(user)
-        context["message"] = f"Cleared assignment for {character_slug} in {campaign_slug}."
+        context["message"] = f"Cleared assignment for {character_label} in {campaign_title}."
         return jsonify(context)
 
     @api.post("/admin/users/<int:user_id>/invite")
