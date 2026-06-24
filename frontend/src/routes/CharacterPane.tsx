@@ -54,7 +54,6 @@ import { CharacterXianxiaSections } from "../components/CharacterXianxiaSections
 import {
   asRecord,
   asRecordArray,
-  asStringArray,
   readNumber,
   readString,
 } from "../characterValueUtils";
@@ -68,7 +67,6 @@ import {
   itemDetailDialogState,
   isDndCharacter,
   isXianxiaCharacter,
-  joinDisplay,
   normalizeActiveCharacterSectionForSystem,
   parseCharacterNumberInput,
   spellDetailDialogState,
@@ -80,6 +78,7 @@ import {
   type CharacterSection,
   type CharacterXianxiaInventoryDraft,
 } from "../characterPaneUtils";
+import { buildCharacterPaneXianxiaModel } from "../characterPaneXianxiaModel";
 import { readBinaryAsBase64 } from "../sessionArticleDrafts";
 
 export function CharacterPane({
@@ -268,48 +267,7 @@ export function CharacterPane({
   const arcaneArmorState = detailRecord?.arcane_armor_state ?? equipmentState?.arcane_armor_state;
   const revision = detailRecord?.state_record.revision ?? 0;
   const presentedXianxia: CharacterPresentedXianxia = detailRecord?.presented_xianxia ?? {};
-  const xianxiaInventory = presentedXianxia.inventory?.quantities ?? [];
-  const xianxiaCurrency = presentedXianxia.inventory?.currency ?? [];
-  const xianxiaDurability = presentedXianxia.resources?.durability ?? [];
-  const xianxiaEnergies = presentedXianxia.resources?.energies ?? [];
-  const xianxiaYinYang = presentedXianxia.resources?.yin_yang ?? [];
-  const xianxiaDao = presentedXianxia.resources?.dao;
-  const xianxiaInsight = presentedXianxia.resources?.insight;
-  const xianxiaActionReference = asRecord(presentedXianxia.quick_reference?.actions);
-  const xianxiaDefenseReference = asRecord(presentedXianxia.quick_reference?.defense);
-  const skillUseGuardrails = asRecord(presentedXianxia.quick_reference?.skill_use_guardrails);
-  const skillUseGuardrailRuleHref = readString(skillUseGuardrails.rule_href);
-  const skillUseGuardrailRuleTitle = readString(skillUseGuardrails.rule_title, "Skills");
-  const skillUseGuardrailReferenceLines = asStringArray(skillUseGuardrails.reference_lines);
-  const hasSkillUseGuardrail = Boolean(skillUseGuardrailRuleHref) || skillUseGuardrailReferenceLines.length > 0;
-  const xianxiaHonorInteractions = asRecord(presentedXianxia.quick_reference?.honor_interactions);
-  const xianxiaHonorContexts = asRecordArray(xianxiaHonorInteractions.contexts);
-  const xianxiaHonorReferenceLines = asStringArray(xianxiaHonorInteractions.reference_lines);
-  const hasXianxiaHonorInteractions = Boolean(
-    xianxiaHonorContexts.length ||
-      xianxiaHonorReferenceLines.length ||
-      readString(xianxiaHonorInteractions.summary) ||
-      readString(xianxiaHonorInteractions.rule_href) ||
-      readString(xianxiaHonorInteractions.status_label) ||
-      readString(xianxiaHonorInteractions.status) ||
-      readString(xianxiaHonorInteractions.support) ||
-      readString(xianxiaHonorInteractions.support_label),
-  );
-  const xianxiaRuleTextReferences = asRecordArray(presentedXianxia.quick_reference?.rule_text_references);
-  const xianxiaStanceBreak = asRecord(presentedXianxia.quick_reference?.stance_break);
-  const xianxiaStanceBreakReferenceLines = asStringArray(xianxiaStanceBreak.reference_lines);
-  const xianxiaStanceBreakRecoveryLines = asStringArray(xianxiaStanceBreak.recovery_lines);
-  const hasXianxiaStanceBreak = Boolean(
-    xianxiaStanceBreakReferenceLines.length ||
-      xianxiaStanceBreakRecoveryLines.length ||
-      readString(xianxiaStanceBreak.status_label) ||
-      readString(xianxiaStanceBreak.status) ||
-      readString(xianxiaStanceBreak.rule_href),
-  );
-  const xianxiaActiveStateStatus = joinDisplay([
-    readString(presentedXianxia.active_state?.stance?.status_label),
-    readString(presentedXianxia.active_state?.aura?.status_label),
-  ]);
+  const xianxiaModel = buildCharacterPaneXianxiaModel(presentedXianxia);
   const presentedSpells = collectPresentedSpells(detailRecord);
   const presentedSpellGroups = groupSpellsByLevel(presentedSpells, (spell) => spell.level_label);
   const rawSpellGroups = groupSpellsByLevel(spells, (spell) => readString(spell.level_label));
@@ -1156,14 +1114,14 @@ export function CharacterPane({
               <CharacterXianxiaSections
                 activeCharacterSection={activeCharacterSection}
                 equipment={{
-                  defenseReference: xianxiaDefenseReference,
+                  defenseReference: xianxiaModel.defenseReference,
                   equipment: presentedXianxia.equipment,
                 }}
                 inventory={{
                   canEdit,
                   currency,
                   currencyDraft,
-                  inventory: xianxiaInventory,
+                  inventory: xianxiaModel.inventory,
                   isAddingInventoryItem: addXianxiaInventoryItem.isPending,
                   isCurrencySaving: patchCurrency.isPending,
                   isRemovingInventoryItem: removeXianxiaInventoryItem.isPending,
@@ -1178,7 +1136,7 @@ export function CharacterPane({
                   submitXianxiaInventoryAdd,
                   submitXianxiaInventoryUpdate,
                   toggleXianxiaInventoryEquipped,
-                  xianxiaCurrency,
+                  xianxiaCurrency: xianxiaModel.currency,
                   xianxiaInventoryDrafts,
                 }}
                 martialArts={{
@@ -1190,42 +1148,42 @@ export function CharacterPane({
                   portrait: detailRecord?.portrait,
                 }}
                 quickReference={{
-                  hasSkillUseGuardrail,
-                  hasXianxiaHonorInteractions,
-                  hasXianxiaStanceBreak,
+                  hasSkillUseGuardrail: xianxiaModel.hasSkillUseGuardrail,
+                  hasXianxiaHonorInteractions: xianxiaModel.hasHonorInteractions,
+                  hasXianxiaStanceBreak: xianxiaModel.hasStanceBreak,
                   presentedXianxia,
-                  skillUseGuardrailReferenceLines,
-                  skillUseGuardrailRuleHref,
-                  skillUseGuardrailRuleTitle,
-                  xianxiaActionReference,
-                  xianxiaDefenseReference,
-                  xianxiaHonorContexts,
-                  xianxiaHonorInteractions,
-                  xianxiaHonorReferenceLines,
-                  xianxiaInsight,
-                  xianxiaRuleTextReferences,
-                  xianxiaStanceBreak,
-                  xianxiaStanceBreakRecoveryLines,
-                  xianxiaStanceBreakReferenceLines,
+                  skillUseGuardrailReferenceLines: xianxiaModel.skillUseGuardrailReferenceLines,
+                  skillUseGuardrailRuleHref: xianxiaModel.skillUseGuardrailRuleHref,
+                  skillUseGuardrailRuleTitle: xianxiaModel.skillUseGuardrailRuleTitle,
+                  xianxiaActionReference: xianxiaModel.actionReference,
+                  xianxiaDefenseReference: xianxiaModel.defenseReference,
+                  xianxiaHonorContexts: xianxiaModel.honorContexts,
+                  xianxiaHonorInteractions: xianxiaModel.honorInteractions,
+                  xianxiaHonorReferenceLines: xianxiaModel.honorReferenceLines,
+                  xianxiaInsight: xianxiaModel.insight,
+                  xianxiaRuleTextReferences: xianxiaModel.ruleTextReferences,
+                  xianxiaStanceBreak: xianxiaModel.stanceBreak,
+                  xianxiaStanceBreakRecoveryLines: xianxiaModel.stanceBreakRecoveryLines,
+                  xianxiaStanceBreakReferenceLines: xianxiaModel.stanceBreakReferenceLines,
                 }}
                 resources={{
-                  activeStateStatus: xianxiaActiveStateStatus,
+                  activeStateStatus: xianxiaModel.activeStateStatus,
                   canEdit,
-                  durability: xianxiaDurability,
-                  energies: xianxiaEnergies,
-                  insight: xianxiaInsight,
+                  durability: xianxiaModel.durability,
+                  energies: xianxiaModel.energies,
+                  insight: xianxiaModel.insight,
                   isActiveStateSaving: patchXianxiaActiveState.isPending,
                   setXianxiaActiveDraft,
                   submitXianxiaActiveState,
                   xianxiaActiveDraft,
-                  xianxiaDao,
-                  yinYang: xianxiaYinYang,
+                  xianxiaDao: xianxiaModel.dao,
+                  yinYang: xianxiaModel.yinYang,
                 }}
                 skills={{
-                  hasSkillUseGuardrail,
-                  skillUseGuardrailReferenceLines,
-                  skillUseGuardrailRuleHref,
-                  skillUseGuardrailRuleTitle,
+                  hasSkillUseGuardrail: xianxiaModel.hasSkillUseGuardrail,
+                  skillUseGuardrailReferenceLines: xianxiaModel.skillUseGuardrailReferenceLines,
+                  skillUseGuardrailRuleHref: xianxiaModel.skillUseGuardrailRuleHref,
+                  skillUseGuardrailRuleTitle: xianxiaModel.skillUseGuardrailRuleTitle,
                   trainedSkills: presentedXianxia.skills?.trained ?? [],
                 }}
                 techniques={{
@@ -1242,7 +1200,7 @@ export function CharacterPane({
                   submitXianxiaDaoUseRequest,
                   xianxiaDaoRequestDraft,
                   xianxiaDaoUseNotesDrafts,
-                  xianxiaInsight,
+                  xianxiaInsight: xianxiaModel.insight,
                 }}
               />
             ) : null}

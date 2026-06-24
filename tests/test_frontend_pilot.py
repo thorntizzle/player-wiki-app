@@ -2508,6 +2508,21 @@ def test_character_pane_draft_state_lives_in_shared_hook() -> None:
     assert "setEquipmentDrafts(draftSnapshot.equipmentDrafts)" not in route_source
 
 
+def test_character_pane_xianxia_reference_model_lives_in_shared_helper() -> None:
+    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    model_source = Path("frontend/src/characterPaneXianxiaModel.ts").read_text(encoding="utf-8")
+
+    assert "export function buildCharacterPaneXianxiaModel" in model_source
+    assert "presentedXianxia.quick_reference?.skill_use_guardrails" in model_source
+    assert "presentedXianxia.quick_reference?.honor_interactions" in model_source
+    assert "presentedXianxia.quick_reference?.stance_break" in model_source
+    assert "activeStateStatus: joinDisplay([" in model_source
+    assert "const xianxiaModel = buildCharacterPaneXianxiaModel(presentedXianxia);" in route_source
+    assert "const skillUseGuardrails = asRecord(presentedXianxia.quick_reference?.skill_use_guardrails);" not in route_source
+    assert "const xianxiaHonorInteractions = asRecord(presentedXianxia.quick_reference?.honor_interactions);" not in route_source
+    assert "const xianxiaStanceBreak = asRecord(presentedXianxia.quick_reference?.stance_break);" not in route_source
+
+
 def test_character_dnd_overview_section_uses_flask_style_glance_rows() -> None:
     route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
     section_markup = Path("frontend/src/components/CharacterDndOverviewSection.tsx").read_text(encoding="utf-8")
