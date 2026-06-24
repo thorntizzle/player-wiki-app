@@ -444,14 +444,33 @@ def test_character_detail_route_wrapper_lives_in_route_module() -> None:
     assert "onSelectedCharacterChange" in route_source
 
 
+def test_character_create_route_lives_in_route_module() -> None:
+    main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    authoring_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
+
+    assert 'import { CharacterCreatePage } from "./routes/CharacterCreatePage";' in main_source
+    assert "function CharacterCreatePage" not in authoring_source
+    assert "CharacterCreateSubmitPayload" not in authoring_source
+    assert 'component: CharacterCreatePage' in main_source
+
+    assert "export function CharacterCreatePage()" in create_source
+    assert 'from: "/campaigns/$campaignSlug/characters/new"' in create_source
+    assert "apiClient.getCharacterCreateContext(resolvedCampaignSlug, contextValues)" in create_source
+    assert "apiClient.createCharacter(resolvedCampaignSlug, payload)" in create_source
+    assert "<CharacterPreviewList preview={create.preview} />" in create_source
+
+
 def test_character_authoring_preview_lists_live_in_component_module() -> None:
     route_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
     preview_source = Path("frontend/src/components/CharacterAuthoringPreview.tsx").read_text(encoding="utf-8")
 
-    assert 'import { CharacterLevelUpPreviewList, CharacterPreviewList } from "../components/CharacterAuthoringPreview";' in route_source
+    assert 'import { CharacterLevelUpPreviewList } from "../components/CharacterAuthoringPreview";' in route_source
+    assert 'import { CharacterPreviewList } from "../components/CharacterAuthoringPreview";' in create_source
     assert "function CharacterPreviewList" not in route_source
     assert "function CharacterLevelUpPreviewList" not in route_source
-    assert "<CharacterPreviewList preview={create.preview} />" in route_source
+    assert "<CharacterPreviewList preview={create.preview} />" in create_source
     assert "<CharacterLevelUpPreviewList preview={levelUp.preview ?? {}} />" in route_source
 
     assert "function PreviewSidebar(" in preview_source
@@ -462,6 +481,21 @@ def test_character_authoring_preview_lists_live_in_component_module() -> None:
     assert 'className="card sidebar-card character-authoring-preview-section"' in preview_source
     assert "asStringArray(preview.saving_throws)" in preview_source
     assert "asStringArray(preview.new_spells)" in preview_source
+
+
+def test_character_authoring_dnd_choice_select_lives_in_field_component() -> None:
+    route_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
+    field_source = Path("frontend/src/components/CharacterAuthoringFields.tsx").read_text(encoding="utf-8")
+
+    assert 'import { CharacterDndChoiceSelect } from "../components/CharacterAuthoringFields";' in route_source
+    assert 'import { CharacterDndChoiceSelect } from "../components/CharacterAuthoringFields";' in create_source
+    assert "function CharacterDndChoiceSelect" not in route_source
+    assert "function CharacterDndChoiceSelect" not in create_source
+    assert "export function CharacterDndChoiceSelect" in field_source
+    assert "field: CharacterDndChoiceField;" in field_source
+    assert "refreshContext(nextValues);" in field_source
+    assert "{selectOptions(field.options ?? [])}" in field_source
 
 
 def test_character_authoring_shared_helpers_live_in_utility_module() -> None:
@@ -1117,6 +1151,7 @@ def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
 
 def test_character_supported_form_action_chrome_in_source() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
 
     def component_source(component_name: str) -> str:
         return _extract_function_component_source(source, component_name)
@@ -1128,7 +1163,7 @@ def test_character_supported_form_action_chrome_in_source() -> None:
             return component.split(unsupported_marker, 1)[1].split(") : null}", 1)[1]
         return component
 
-    create_markup = component_source("CharacterCreatePage")
+    create_markup = _extract_function_component_source(create_source, "CharacterCreatePage")
     assert (
         re.search(
             r'<button\s+type="button"\s+className="ghost-button"\s+onClick=\{\(\) => refreshContext\(\)\}>\s*'
@@ -1215,6 +1250,7 @@ def test_character_supported_form_action_chrome_in_source() -> None:
 
 def test_character_supported_hero_links_preserve_supported_nav_while_hiding_flask_fallbacks() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
 
     def component_source(component_name: str) -> str:
         return _extract_function_component_source(source, component_name)
@@ -1225,7 +1261,9 @@ def test_character_supported_hero_links_preserve_supported_nav_while_hiding_flas
         hero_end = component.index("</section>", hero_start) + len("</section>")
         return component[hero_start:hero_end]
 
-    create_hero = hero_section("CharacterCreatePage")
+    create_component = _extract_function_component_source(create_source, "CharacterCreatePage")
+    create_hero_start = create_component.index('<section className="hero')
+    create_hero = create_component[create_hero_start:create_component.index("</section>", create_hero_start) + len("</section>")]
     assert "Flask create" not in create_hero
     assert "Back to roster" in create_hero
     assert "Import existing" in create_hero
@@ -1370,11 +1408,12 @@ def test_grid_minimum_card_size_is_flask_260px_and_character_roster_grid_selecto
 
 def test_character_form_actions_do_not_convert_non_targeted_builder_rows() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
 
     def component_source(component_name: str) -> str:
         return _extract_function_component_source(source, component_name)
 
-    create_markup = component_source("CharacterCreatePage")
+    create_markup = _extract_function_component_source(create_source, "CharacterCreatePage")
     assert re.search(r'<div className="builder-actions">[\s\S]*?<button\s+type="submit"\s+disabled={!create\.builder_ready \|\| createMutation\.isPending}>', create_markup) is not None
     assert (
         re.search(

@@ -23,13 +23,13 @@ import { AdminDashboardPage, AdminUserDetailPage } from "./routes/AdminRoutes";
 import { CampaignListPage } from "./routes/CampaignPickerPage";
 import {
   CharacterAdvancedEditorPage,
-  CharacterCreatePage,
   CharacterCultivationPage,
   CharacterLevelUpPage,
   CharacterProgressionRepairPage,
   CharacterRetrainingPage,
   CharacterXianxiaManualImportPage,
 } from "./routes/CharacterAuthoringRoutes";
+import { CharacterCreatePage } from "./routes/CharacterCreatePage";
 import { CharacterDetailPage } from "./routes/CharacterDetailPage";
 import { DmContentPage } from "./routes/DmContentPage";
 import { CombatPage } from "./routes/CombatPage";
