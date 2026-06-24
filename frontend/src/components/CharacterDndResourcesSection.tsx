@@ -71,7 +71,9 @@ export function CharacterDndResourcesSection({
           })}
         </div>
       ) : (
-        <p className="status status-neutral">No tracked resources.</p>
+        <article className="detail-card character-empty-state">
+          <p className="meta">No tracked resources.</p>
+        </article>
       )}
     </section>
   );

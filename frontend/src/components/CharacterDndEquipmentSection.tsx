@@ -217,7 +217,9 @@ export function CharacterDndEquipmentSection({
           })}
         </div>
       ) : (
-        <p className="status status-neutral">No equipment state rows.</p>
+        <article className="detail-card character-empty-state">
+          <p className="meta">No equipment state rows.</p>
+        </article>
       )}
     </section>
   );

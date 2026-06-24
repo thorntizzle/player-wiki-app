@@ -230,7 +230,9 @@ export function CharacterXianxiaInventorySection({
           })}
         </div>
       ) : (
-        <p className="status status-neutral">No Xianxia inventory items.</p>
+        <article className="detail-card character-empty-state">
+          <p className="meta">No Xianxia inventory items.</p>
+        </article>
       )}
       {canEdit ? (
         <article className="detail-card session-card" id="xianxia-inventory-add">

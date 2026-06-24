@@ -2034,6 +2034,38 @@ def test_character_roster_card_meta_join_and_stats_divs_in_source() -> None:
     assert 'aria-current={isActive ? "page" : undefined}' in navigation_source
 
 
+def test_character_section_empty_states_are_not_status_alerts() -> None:
+    section_paths = [
+        Path("frontend/src/components/CharacterDndResourcesSection.tsx"),
+        Path("frontend/src/components/CharacterDndEquipmentSection.tsx"),
+        Path("frontend/src/components/CharacterXianxiaInventorySection.tsx"),
+    ]
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+
+    for section_path in section_paths:
+        source = section_path.read_text(encoding="utf-8")
+        assert 'className="detail-card character-empty-state"' in source
+        assert 'className="status status-neutral"' not in source
+
+    assert ".character-empty-state p {" in styles
+
+
+def test_session_character_identity_uses_names_not_slugs_or_status_fields() -> None:
+    pane_source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
+    header_source = Path("frontend/src/components/CharacterHeader.tsx").read_text(encoding="utf-8")
+    navigation_source = Path("frontend/src/components/CharacterNavigationCard.tsx").read_text(encoding="utf-8")
+    summary_source = Path("frontend/src/components/CharacterSummaryCard.tsx").read_text(encoding="utf-8")
+
+    assert "selectedName={selected?.name}" in pane_source
+    assert "{selectedName || surfaceHeading}" in header_source
+    assert "{item.name}" in navigation_source
+    assert "<h3>{selected.name}</h3>" in summary_source
+    assert ">{selected.slug}</" not in summary_source
+    assert ">{item.slug}</" not in navigation_source
+    assert "Status:" not in summary_source
+    assert "Status:" not in header_source
+
+
 def test_character_roster_empty_state_copy_is_exact_in_source() -> None:
     source = Path("frontend/src/pages/CharacterRosterPage.tsx").read_text(encoding="utf-8")
     assert (

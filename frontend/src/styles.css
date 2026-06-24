@@ -3286,6 +3286,10 @@ textarea {
   margin: 0.2rem 0 0;
 }
 
+.character-empty-state p {
+  margin: 0;
+}
+
 .feature-stack {
   display: grid;
   gap: 1rem;
