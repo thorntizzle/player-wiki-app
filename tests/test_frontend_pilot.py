@@ -1523,14 +1523,22 @@ def test_combat_empty_tracker_prompt_uses_current_surface_wording() -> None:
 
 def test_gen2_combat_focus_changes_preserve_mounted_payload_in_source() -> None:
     source = Path("frontend/src/pages/CombatPage.tsx").read_text(encoding="utf-8")
+    workspace_source = Path("frontend/src/components/CombatPlayerWorkspace.tsx").read_text(encoding="utf-8")
     combat_page_source = _extract_function_component_source(source, "CombatPage")
 
     assert "const navigate = useNavigate();" in combat_page_source
+    assert "const setCombatUrl = (view: CombatView, combatantId: number | null) => {" in combat_page_source
+    assert 'params.set("combatant", String(combatantId));' in combat_page_source
     assert "void navigate({ to: nextPath as never });" in combat_page_source
     assert "window.history.pushState" not in combat_page_source
+    assert "window.location.assign" not in combat_page_source
+    assert "window.location.href =" not in combat_page_source
     assert "placeholderData: (previousData) => previousData" in combat_page_source
     assert "focusedCombatantFromTracker" in combat_page_source
     assert "syncCombatantDrafts(focusedCombatant);" in combat_page_source
+    assert 'onClick={() => onSelectCombatant(target.combatant_id)}' in workspace_source
+    assert 'href={target' not in workspace_source
+    assert 'href={`${target' not in workspace_source
 
 
 def test_gen2_combat_dm_resolves_away_from_player_workspace_in_source() -> None:
