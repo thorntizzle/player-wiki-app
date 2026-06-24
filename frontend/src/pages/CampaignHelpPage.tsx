@@ -80,17 +80,17 @@ export function CampaignHelpPage() {
                 </div>
               </div>
               <div className="detail-grid help-detail-grid">
-                <article className="detail-card help-detail-card">
+                <article className="help-panel">
                   <h3>Viewer role</h3>
                   <p><strong>{data.viewer_role_label}</strong></p>
                   <p className="meta">{data.viewer_role_summary}</p>
                 </article>
-                <article className="detail-card help-detail-card">
+                <article className="help-panel">
                   <h3>Campaign system</h3>
                   <p><strong>{data.campaign_system_label}</strong></p>
                   <p className="meta">Some workflows below stay narrower when the campaign is not using DND-5E.</p>
                 </article>
-                <article className="detail-card help-detail-card">
+                <article className="help-panel">
                   <h3>Open now</h3>
                   {data.available_surface_labels.length ? (
                     <p>{data.available_surface_labels.join(", ")}</p>
@@ -126,15 +126,15 @@ export function CampaignHelpPage() {
                 ) : null}
 
                 <div className="detail-grid help-detail-grid">
-                  <article className="detail-card help-detail-card">
+                  <article className="help-panel">
                     <h3>Use it for</h3>
                     <HelpList items={surface.capabilities} emptyText="No capabilities are listed for this surface." />
                   </article>
-                  <article className="detail-card help-detail-card">
+                  <article className="help-panel">
                     <h3>Current limits</h3>
                     <HelpList items={surface.limits} emptyText="No limits are listed for this surface." />
                   </article>
-                  <article className="detail-card help-detail-card">
+                  <article className="help-panel">
                     <h3>Access</h3>
                     <p><strong>{surface.status_label}</strong></p>
                     <p className="meta">{surface.access_note}</p>
@@ -144,7 +144,7 @@ export function CampaignHelpPage() {
                 {surface.guidance_cards.length ? (
                   <div className="detail-grid help-detail-grid">
                     {surface.guidance_cards.map((card) => (
-                      <article className="detail-card help-detail-card" key={`${surface.anchor}-${card.title}`}>
+                      <article className="help-panel" key={`${surface.anchor}-${card.title}`}>
                         <h3>{card.title}</h3>
                         {card.body ? <p>{card.body}</p> : null}
                         <HelpList items={card.items} emptyText="" />
@@ -167,7 +167,7 @@ export function CampaignHelpPage() {
               </div>
               <div className="reference-stack">
                 {data.visibility_rows.map((row) => (
-                  <article className="detail-card help-detail-card" key={row.label}>
+                  <article className="help-panel" key={row.label}>
                     <div className="section-heading">
                       <h3>{row.label}</h3>
                       <span className="meta-badge">{row.visibility_label}</span>

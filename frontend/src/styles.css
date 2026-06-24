@@ -1483,18 +1483,16 @@ a:hover {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
-.help-detail-card,
-.detail-card.help-detail-card {
-  background: var(--surface-soft);
-  border: 1px solid var(--border);
-  border-radius: 18px;
+.help-panel {
+  border-left: 3px solid var(--border-accent);
   display: grid;
   gap: 0.45rem;
-  padding: 1rem;
+  min-width: 0;
+  padding: 0.15rem 0 0.15rem 0.75rem;
 }
 
-.help-detail-card h3,
-.help-detail-card p,
+.help-panel h3,
+.help-panel p,
 .help-list {
   margin: 0;
 }

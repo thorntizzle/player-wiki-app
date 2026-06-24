@@ -1238,8 +1238,14 @@ def test_campaign_help_page_removes_flask_help_fallback() -> None:
     assert "Flask Help" not in help_markup
     assert "help-anchor-row" not in help_markup
     assert "campaign-help-account-actions" not in help_markup
+    assert "detail-card help-detail-card" not in help_markup
+    assert 'className="help-panel"' in help_markup
     assert 'href={data.links.account_url}>Open Account</a>' in help_markup
     assert "href={data.links.sign_in_url}>Sign in</a>" in help_markup
+
+    help_css = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+    assert ".help-panel" in help_css
+    assert ".help-detail-card" not in help_css
 
     top_help_row_match = re.search(
         r'<div className="hero-actions" aria-label="Help sections">([\s\S]*?)</div>',
