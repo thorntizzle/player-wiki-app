@@ -710,6 +710,7 @@ def test_gen2_shell_and_session_visual_parity_smoke(
             assert desktop_page.locator("text=/Gen2 companion/i").count() == 0
             expect(desktop_page.locator(".campaign-nav-link.is-active", has_text="Session")).to_be_visible()
             assert desktop_page.locator(".campaign-nav-link.is-active").count() == 1
+            expect(desktop_page.locator(".campaign-nav-link.is-active", has_text="Session")).to_have_attribute("aria-current", "page")
             expect(desktop_page.locator(".campaign-nav-link", has_text="Characters")).to_have_attribute(
                 "href",
                 re.compile(r"/app-next/campaigns/linden-pass/characters$"),

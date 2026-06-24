@@ -292,27 +292,31 @@ export function AppShell() {
         {campaign ? (
           <div className="campaign-nav-row">
             <nav className="campaign-nav-strip" aria-label="Campaign navigation">
-              {visibleNavItems.map((item) => (
-                <a
-                  key={item.label}
-                  className={isNavItemActive(item.label, item.href) ? "campaign-nav-link is-active" : "campaign-nav-link"}
-                  href={item.href}
-                  onClick={(event) => {
-                    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-                      return;
-                    }
-                    if (item.isGen2) {
-                      event.preventDefault();
-                      window.__cpwAppLoadingBegin?.();
-                      void navigate({ to: appNextHrefToRouterPath(item.href) as never });
-                    } else {
-                      setNavigationLabel(item.label);
-                    }
-                  }}
-                >
-                  {item.label}
-                </a>
-              ))}
+              {visibleNavItems.map((item) => {
+                const isActive = isNavItemActive(item.label, item.href);
+                return (
+                  <a
+                    key={item.label}
+                    className={isActive ? "campaign-nav-link is-active" : "campaign-nav-link"}
+                    href={item.href}
+                    aria-current={isActive ? "page" : undefined}
+                    onClick={(event) => {
+                      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                        return;
+                      }
+                      if (item.isGen2) {
+                        event.preventDefault();
+                        window.__cpwAppLoadingBegin?.();
+                        void navigate({ to: appNextHrefToRouterPath(item.href) as never });
+                      } else {
+                        setNavigationLabel(item.label);
+                      }
+                    }}
+                  >
+                    {item.label}
+                  </a>
+                );
+              })}
             </nav>
             {navigationLabel ? (
               <p className="navigation-status" role="status">

@@ -314,6 +314,8 @@ def test_frontend_app_signals_loading_readiness_from_query_state_source() -> Non
     assert "window.__cpwAppLoadingBegin?.();" in loading_source
     assert "window.__cpwAppLoadingReady?.();" in loading_source
     assert "void navigate({ to: appNextHrefToRouterPath(item.href) as never });" in source
+    assert "const isActive = isNavItemActive(item.label, item.href);" in source
+    assert 'aria-current={isActive ? "page" : undefined}' in source
     assert "activeFetchCount > 0" in loading_source
     assert "queryClient.isFetching() === 0" in loading_source
 
