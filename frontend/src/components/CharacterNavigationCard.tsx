@@ -33,18 +33,22 @@ export function CharacterNavigationCard({
     >
       {isReadSurface ? (
         <nav className="character-subpage-nav" aria-label="Character subpages">
-          {visibleCharacterSections.map((section) => (
-            <a
-              key={section.id}
-              href={readSurfaceSectionUrl(section.id)}
-              className={activeCharacterSection === section.id ? "button-link" : "ghost-button"}
-              data-character-read-subpage-link
-              data-character-read-target-subpage={section.id}
-              onClick={handleReadSurfaceSectionNavClick(section.id)}
-            >
-              {section.label}
-            </a>
-          ))}
+          {visibleCharacterSections.map((section) => {
+            const isActive = activeCharacterSection === section.id;
+            return (
+              <a
+                key={section.id}
+                href={readSurfaceSectionUrl(section.id)}
+                className={isActive ? "button-link" : "ghost-button"}
+                aria-current={isActive ? "page" : undefined}
+                data-character-read-subpage-link
+                data-character-read-target-subpage={section.id}
+                onClick={handleReadSurfaceSectionNavClick(section.id)}
+              >
+                {section.label}
+              </a>
+            );
+          })}
         </nav>
       ) : (
         <label className="field" htmlFor="character-selector">

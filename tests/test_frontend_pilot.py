@@ -387,7 +387,9 @@ def test_character_navigation_card_uses_flask_style_chrome_in_source() -> None:
     assert "data-character-subpage-nav-card={isReadSurface ? \"\" : undefined}" in source
     assert '<nav className="character-subpage-nav" aria-label="Character subpages">' in source
     assert "href={readSurfaceSectionUrl(section.id)}" in source
-    assert 'className={activeCharacterSection === section.id ? "button-link" : "ghost-button"}' in source
+    assert "const isActive = activeCharacterSection === section.id;" in source
+    assert 'className={isActive ? "button-link" : "ghost-button"}' in source
+    assert 'aria-current={isActive ? "page" : undefined}' in source
     assert "data-character-read-subpage-link" in source
     assert "data-character-read-target-subpage={section.id}" in source
     assert "onClick={handleReadSurfaceSectionNavClick(section.id)}" in source
@@ -1866,6 +1868,7 @@ def test_character_roster_heading_visibility_is_gated_by_create_or_unsupported_s
 
 def test_character_roster_card_meta_join_and_stats_divs_in_source() -> None:
     roster_source = Path("frontend/src/pages/CharacterRosterPage.tsx").read_text(encoding="utf-8")
+    navigation_source = Path("frontend/src/components/CharacterNavigationCard.tsx").read_text(encoding="utf-8")
 
     card_start = roster_source.index('<article className="card character-card"')
     card_end = roster_source.index("</article>", card_start) + len("</article>")
@@ -1880,6 +1883,11 @@ def test_character_roster_card_meta_join_and_stats_divs_in_source() -> None:
     assert '<div className="character-card__stats">' in stats_markup
     assert card_markup.count("className=\"character-card__top\"") == 1
     assert 'className="button-link"' in card_markup
+    assert "{character.name}" in card_markup
+    assert ">{character.slug}</" not in card_markup
+    assert "Status:" not in card_markup
+    assert "{item.name}" in navigation_source
+    assert 'aria-current={isActive ? "page" : undefined}' in navigation_source
 
 
 def test_character_roster_empty_state_copy_is_exact_in_source() -> None:
