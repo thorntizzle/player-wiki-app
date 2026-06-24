@@ -149,7 +149,10 @@ export function AccountSettingsPage() {
                 <div className="theme-grid">
                   {themePresets.map((theme) => {
                     const inputId = `account-theme-${theme.key}`;
+                    const descriptionId = `${inputId}-description`;
+                    const currentStatusId = `${inputId}-current-status`;
                     const checked = draftThemeKey === theme.key;
+                    const isCurrent = preferences?.theme_key === theme.key;
                     return (
                       <label className={checked ? "theme-option is-selected" : "theme-option"} htmlFor={inputId} key={theme.key}>
                         <input
@@ -159,12 +162,13 @@ export function AccountSettingsPage() {
                           name="theme_key"
                           value={theme.key}
                           checked={checked}
+                          aria-describedby={isCurrent ? `${descriptionId} ${currentStatusId}` : descriptionId}
                           onChange={() => setDraftThemeKey(theme.key)}
                         />
                         <span className="theme-option__header">
                           <span>
                             <strong>{theme.label}</strong>
-                            {preferences?.theme_key === theme.key ? <span className="meta theme-option__status">Current</span> : null}
+                            {isCurrent ? <span id={currentStatusId} className="meta theme-option__status">Current</span> : null}
                           </span>
                           <span className="theme-option__swatches" aria-hidden="true">
                             {theme.preview_colors.map((color) => (
@@ -172,7 +176,7 @@ export function AccountSettingsPage() {
                             ))}
                           </span>
                         </span>
-                        <span className="meta">{theme.description}</span>
+                        <span id={descriptionId} className="meta theme-option__description">{theme.description}</span>
                       </label>
                     );
                   })}
@@ -201,7 +205,10 @@ export function AccountSettingsPage() {
                 <div className="theme-grid">
                   {chatOrderChoices.map((choice) => {
                     const inputId = `account-chat-order-${choice.value}`;
+                    const descriptionId = `${inputId}-description`;
+                    const currentStatusId = `${inputId}-current-status`;
                     const checked = draftChatOrder === choice.value;
+                    const isCurrent = preferences?.session_chat_order === choice.value;
                     return (
                       <label className={checked ? "theme-option is-selected" : "theme-option"} htmlFor={inputId} key={choice.value}>
                         <input
@@ -211,17 +218,18 @@ export function AccountSettingsPage() {
                           name="session_chat_order"
                           value={choice.value}
                           checked={checked}
+                          aria-describedby={isCurrent ? `${descriptionId} ${currentStatusId}` : descriptionId}
                           onChange={() => setDraftChatOrder(choice.value)}
                         />
                         <span className="theme-option__header">
                           <span>
                             <strong>{choice.label}</strong>
-                            {preferences?.session_chat_order === choice.value ? (
-                              <span className="meta theme-option__status">Current</span>
+                            {isCurrent ? (
+                              <span id={currentStatusId} className="meta theme-option__status">Current</span>
                             ) : null}
                           </span>
                         </span>
-                        <span className="meta">{choice.description}</span>
+                        <span id={descriptionId} className="meta theme-option__description">{choice.description}</span>
                       </label>
                     );
                   })}

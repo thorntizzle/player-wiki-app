@@ -1246,6 +1246,13 @@ def test_account_settings_page_removes_flask_account_fallback_link() -> None:
     assert "Save chat order" in account_settings_markup
     assert "Save account settings" not in account_settings_markup
     assert "account-settings-actions" not in account_settings_markup
+    assert "const descriptionId = `${inputId}-description`;" in account_settings_markup
+    assert "const currentStatusId = `${inputId}-current-status`;" in account_settings_markup
+    assert "const isCurrent = preferences?.theme_key === theme.key;" in account_settings_markup
+    assert "const isCurrent = preferences?.session_chat_order === choice.value;" in account_settings_markup
+    assert 'aria-describedby={isCurrent ? `${descriptionId} ${currentStatusId}` : descriptionId}' in account_settings_markup
+    assert '<span id={currentStatusId} className="meta theme-option__status">Current</span>' in account_settings_markup
+    assert 'className="meta theme-option__description"' in account_settings_markup
     assert (
         'aria-describedby={isThemeUnchanged && !saveThemeSettings.isPending ? "account-theme-save-hint" : undefined}'
         in account_settings_markup
@@ -1288,7 +1295,14 @@ def test_account_option_css_matches_flask_parity() -> None:
 
     theme_header_block = css_block(".theme-option__header")
     assert "align-items: center;" in theme_header_block
+    assert "flex-wrap: wrap;" in theme_header_block
     assert "gap: 1rem;" in theme_header_block
+
+    theme_header_text_match = re.search(r"\.theme-option__header > span:first-child,\s*\.theme-option__description\s*\{([\s\S]*?)\}", source)
+    assert theme_header_text_match is not None
+    theme_header_text_block = theme_header_text_match.group(1)
+    assert "min-width: 0;" in theme_header_text_block
+    assert "overflow-wrap: anywhere;" in theme_header_text_block
 
     theme_status_block = css_block(".theme-option__status")
     assert "margin-left: 0.45rem;" in theme_status_block
