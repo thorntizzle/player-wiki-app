@@ -1996,6 +1996,27 @@ def test_dm_content_player_wiki_editor_fields_use_flask_style_labels_in_source()
     assert "dm-player-wiki-edit-form" not in card_source
 
 
+def test_dm_content_hero_nav_lives_in_component_module() -> None:
+    route_source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
+    hero_source = Path("frontend/src/components/DmContentHero.tsx").read_text(encoding="utf-8")
+
+    assert 'import { DmContentHero } from "../components/DmContentHero";' in route_source
+    assert "<DmContentHero" in route_source
+    assert "laneCounts={dmContentLaneCounts}" in route_source
+    assert "lede={dmContentLede}" in route_source
+    assert 'className="hero compact dm-content-hero"' not in route_source
+    assert 'className="hero compact dm-content-hero"' in hero_source
+    assert 'className="character-subpage-nav dm-content-subpage-nav"' in hero_source
+    assert 'aria-label="DM Content subpages"' in hero_source
+    assert "laneCounts.statblocks" in hero_source
+    assert "laneCounts.stagedArticles" in hero_source
+    assert "laneCounts.conditions" in hero_source
+    assert "laneCounts.playerWiki" in hero_source
+    assert "laneCounts.systems" in hero_source
+    assert "subpage_counts?.statblocks" in route_source
+    assert "subpage_counts?.staged_articles" in route_source
+
+
 def test_dm_content_systems_management_form_field_chrome() -> None:
     source = Path("frontend/src/routes/DmContentSystemsLane.tsx").read_text(encoding="utf-8")
     helper_start = source.index("const renderCustomFields = ({")

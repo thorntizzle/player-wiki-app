@@ -26,6 +26,7 @@ import { getApiErrorMessage } from "../apiErrors";
 import { ApiErrorNotice } from "../components/feedback";
 import { DmContentSystemsLane } from "./DmContentSystemsLane";
 import { DmConditionsLane } from "../components/DmConditionsLane";
+import { DmContentHero } from "../components/DmContentHero";
 import { DmPlayerWikiLane } from "../components/DmPlayerWikiLane";
 import { DmStagedArticlesLane } from "../components/DmStagedArticlesLane";
 import { DmStatblocksLane } from "../components/DmStatblocksLane";
@@ -662,48 +663,12 @@ export function DmContentPage(): ReactElement {
 
   return (
     <>
-      <section className="hero compact dm-content-hero">
-        <p className="eyebrow">DM content</p>
-        <h1>DM Content</h1>
-        <p className="lede">{dmContentLede}</p>
-        <nav className="character-subpage-nav dm-content-subpage-nav" aria-label="DM Content subpages">
-          <a
-            className={activeLane === "statblocks" ? "button-link" : "ghost-button"}
-            href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content`}
-          >
-            <span>Statblocks</span>
-            <span className="meta-badge">{dmContentLaneCounts.statblocks}</span>
-          </a>
-          <a
-            className={activeLane === "staged-articles" ? "button-link" : "ghost-button"}
-            href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=staged-articles`}
-          >
-            <span>Staged Articles</span>
-            <span className="meta-badge">{dmContentLaneCounts.stagedArticles}</span>
-          </a>
-          <a
-            className={activeLane === "conditions" ? "button-link" : "ghost-button"}
-            href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=conditions`}
-          >
-            <span>Conditions</span>
-            <span className="meta-badge">{dmContentLaneCounts.conditions}</span>
-          </a>
-          <a
-            className={activeLane === "player-wiki" ? "button-link" : "ghost-button"}
-            href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=player-wiki`}
-          >
-            <span>Player Wiki</span>
-            <span className="meta-badge">{dmContentLaneCounts.playerWiki}</span>
-          </a>
-          <a
-            className={activeLane === "systems" ? "button-link" : "ghost-button"}
-            href={`/app-next/campaigns/${encodedCampaignSlug}/dm-content?lane=systems`}
-          >
-            <span>Systems</span>
-            <span className="meta-badge">{dmContentLaneCounts.systems}</span>
-          </a>
-        </nav>
-      </section>
+      <DmContentHero
+        activeLane={activeLane}
+        encodedCampaignSlug={encodedCampaignSlug}
+        laneCounts={dmContentLaneCounts}
+        lede={dmContentLede}
+      />
 
       <ApiErrorNotice
         isLoading={pageIsLoading}
