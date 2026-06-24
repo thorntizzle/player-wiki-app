@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type {
   CombatCondition,
   CombatResourcesPatchPayload,
@@ -91,6 +92,8 @@ export function CombatDmStatusPanel({
   onAdvanceTurn,
   onDeleteCombatant,
 }: CombatDmStatusPanelProps) {
+  const [deleteCombatantConfirmed, setDeleteCombatantConfirmed] = useState(false);
+
   if (!canManageCombat) {
     return (
       <article className="card">
@@ -398,9 +401,27 @@ export function CombatDmStatusPanel({
           <p className="meta">Cleanup</p>
           <h3>Selected combatant</h3>
         </div>
-        <button type="button" className="ghost-button" onClick={onDeleteCombatant}>
-          {isDeletingCombatant ? "Removing..." : "Remove selected combatant"}
-        </button>
+        <form
+          className="confirmed-action"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onDeleteCombatant();
+            setDeleteCombatantConfirmed(false);
+          }}
+        >
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={deleteCombatantConfirmed}
+              disabled={isDeletingCombatant}
+              onChange={(event) => setDeleteCombatantConfirmed(event.currentTarget.checked)}
+            />
+            Confirm removal
+          </label>
+          <button type="submit" className="ghost-button" disabled={!deleteCombatantConfirmed || isDeletingCombatant}>
+            {isDeletingCombatant ? "Removing..." : "Remove selected combatant"}
+          </button>
+        </form>
       </section>
     </>
   );

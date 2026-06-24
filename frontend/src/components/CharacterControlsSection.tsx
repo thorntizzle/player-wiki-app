@@ -1,4 +1,4 @@
-import type { Dispatch, FormEvent, SetStateAction } from "react";
+import { useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
 import type { CharacterControls } from "../api/types";
 import type { CharacterControlsDraft } from "../characterPaneDrafts";
 
@@ -29,6 +29,8 @@ export function CharacterControlsSection({
   submitCharacterAssignment: (event: FormEvent<HTMLFormElement>) => void;
   submitCharacterDelete: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const [clearAssignmentConfirmed, setClearAssignmentConfirmed] = useState(false);
+
   return (
     <section className="read-section character-controls-panel">
       <div className="section-heading">
@@ -103,13 +105,23 @@ export function CharacterControlsSection({
             )}
             {controls.assignment ? (
               <form
-                className="stack-form"
+                className="confirmed-action"
                 onSubmit={(event) => {
                   event.preventDefault();
                   clearCharacterAssignment();
+                  setClearAssignmentConfirmed(false);
                 }}
               >
-                <button type="submit" disabled={controlsMutationPending}>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={clearAssignmentConfirmed}
+                    disabled={controlsMutationPending}
+                    onChange={(event) => setClearAssignmentConfirmed(event.currentTarget.checked)}
+                  />
+                  Confirm clear
+                </label>
+                <button type="submit" className="ghost-button" disabled={controlsMutationPending || !clearAssignmentConfirmed}>
                   {isClearingOwner ? "Clearing..." : "Clear assignment"}
                 </button>
               </form>

@@ -2532,6 +2532,28 @@ a:hover {
   margin-top: 1rem;
 }
 
+.confirmed-action {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  max-width: 100%;
+  border: 1px dashed var(--error-border);
+  border-radius: 16px;
+  background: var(--error-bg);
+  padding: 0.5rem 0.65rem;
+}
+
+.confirmed-action .checkbox-label,
+.confirmed-action .checkbox-row {
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+  margin: 0;
+  color: var(--ink);
+  font-weight: 700;
+}
+
 .dm-content-systems-lane {
   display: grid;
   gap: 0.9rem;
@@ -2577,16 +2599,7 @@ a:hover {
 }
 
 .dm-content-delete-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  align-items: center;
   width: fit-content;
-  max-width: 100%;
-  border: 1px dashed var(--error-border);
-  border-radius: 16px;
-  background: var(--error-bg);
-  padding: 0.5rem 0.65rem;
 }
 
 .dm-content-list {

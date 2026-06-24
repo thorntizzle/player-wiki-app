@@ -1,4 +1,4 @@
-import type { ChangeEvent, FormEvent } from "react";
+import { useState, type ChangeEvent, type FormEvent } from "react";
 
 import type { ContentPageFileSummary } from "../api/types";
 import {
@@ -44,6 +44,7 @@ export function DmPlayerWikiPageCard({
   onLoadEditDraft,
   onSaveEditDraft,
 }: DmPlayerWikiPageCardProps) {
+  const [archiveConfirmed, setArchiveConfirmed] = useState(false);
   const safety = playerWikiRemovalSafety(pageFile);
   const encodedPageRef = pageFile.page_ref
     .split("/")
@@ -102,16 +103,35 @@ export function DmPlayerWikiPageCard({
             Open
           </a>
         ) : null}
-        <button
-          type="button"
-          className="ghost-button"
-          disabled={!canManagePlayerWiki || isArchiving || !pageFile.page.published}
-          onClick={() => onArchive(pageFile.page_ref)}
-        >
-          {isArchiving ? "Archiving..." : "Unpublish/archive"}
-        </button>
+        {pageFile.page.published ? (
+          <form
+            className="confirmed-action"
+            onSubmit={(event: FormEvent<HTMLFormElement>) => {
+              event.preventDefault();
+              onArchive(pageFile.page_ref);
+              setArchiveConfirmed(false);
+            }}
+          >
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={archiveConfirmed}
+                disabled={!canManagePlayerWiki || isArchiving}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => setArchiveConfirmed(event.currentTarget.checked)}
+              />
+              Confirm unpublish
+            </label>
+            <button
+              type="submit"
+              className="ghost-button"
+              disabled={!canManagePlayerWiki || isArchiving || !archiveConfirmed}
+            >
+              {isArchiving ? "Archiving..." : "Unpublish/archive"}
+            </button>
+          </form>
+        ) : null}
         {safety.can_hard_delete ? (
-          <form className="dm-content-delete-form">
+          <form className="dm-content-delete-form confirmed-action">
             <label className="checkbox-label">
               <input
                 type="checkbox"

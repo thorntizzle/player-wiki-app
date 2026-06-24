@@ -224,6 +224,9 @@ export function AdminUserDetailPage() {
   const [membershipDraft, setMembershipDraft] = useState({ campaign_slug: "", role: "player", status: "active" });
   const [assignmentDraft, setAssignmentDraft] = useState({ character_ref: "" });
   const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [membershipRemoveConfirm, setMembershipRemoveConfirm] = useState<Record<number, boolean>>({});
+  const [assignmentRemoveConfirm, setAssignmentRemoveConfirm] = useState<Record<number, boolean>>({});
+  const [disableUserConfirmed, setDisableUserConfirmed] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const { showToast, toastMessage, toastTone } = useToastNotice();
 
@@ -434,9 +437,32 @@ export function AdminUserDetailPage() {
                           Edit
                         </a>
                         {membership.status !== "removed" ? (
-                          <button type="button" className="button" disabled={mutationPending} onClick={() => removeMembership.mutate(membership)}>
-                            Remove
-                          </button>
+                          <form
+                            className="confirmed-action"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              removeMembership.mutate(membership);
+                              setMembershipRemoveConfirm((current) => ({ ...current, [membership.id]: false }));
+                            }}
+                          >
+                            <label className="checkbox-label">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(membershipRemoveConfirm[membership.id])}
+                                disabled={mutationPending}
+                                onChange={(event) =>
+                                  setMembershipRemoveConfirm((current) => ({
+                                    ...current,
+                                    [membership.id]: event.currentTarget.checked,
+                                  }))
+                                }
+                              />
+                              Confirm remove
+                            </label>
+                            <button type="submit" className="ghost-button" disabled={mutationPending || !membershipRemoveConfirm[membership.id]}>
+                              Remove
+                            </button>
+                          </form>
                         ) : null}
                       </div>
                     </li>
@@ -464,9 +490,32 @@ export function AdminUserDetailPage() {
                         >
                           Edit
                         </a>
-                        <button type="button" className="button" disabled={mutationPending} onClick={() => removeAssignment.mutate(assignment)}>
-                          Clear
-                        </button>
+                        <form
+                          className="confirmed-action"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            removeAssignment.mutate(assignment);
+                            setAssignmentRemoveConfirm((current) => ({ ...current, [assignment.id]: false }));
+                          }}
+                        >
+                          <label className="checkbox-label">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(assignmentRemoveConfirm[assignment.id])}
+                              disabled={mutationPending}
+                              onChange={(event) =>
+                                setAssignmentRemoveConfirm((current) => ({
+                                  ...current,
+                                  [assignment.id]: event.currentTarget.checked,
+                                }))
+                              }
+                            />
+                            Confirm clear
+                          </label>
+                          <button type="submit" className="ghost-button" disabled={mutationPending || !assignmentRemoveConfirm[assignment.id]}>
+                            Clear
+                          </button>
+                        </form>
                       </div>
                     </li>
                   ))}
@@ -497,9 +546,27 @@ export function AdminUserDetailPage() {
                   </button>
                 ) : null}
                 {data.can_manage_account && data.managed_user.status !== "disabled" ? (
-                  <button type="button" className="button" disabled={mutationPending} onClick={() => disableUser.mutate()}>
-                    {disableUser.isPending ? "Saving..." : "Disable user"}
-                  </button>
+                  <form
+                    className="confirmed-action"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      disableUser.mutate();
+                      setDisableUserConfirmed(false);
+                    }}
+                  >
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={disableUserConfirmed}
+                        disabled={mutationPending}
+                        onChange={(event) => setDisableUserConfirmed(event.currentTarget.checked)}
+                      />
+                      Confirm disable
+                    </label>
+                    <button type="submit" className="ghost-button" disabled={mutationPending || !disableUserConfirmed}>
+                      {disableUser.isPending ? "Saving..." : "Disable user"}
+                    </button>
+                  </form>
                 ) : null}
                 {data.can_manage_account ? (
                   <>

@@ -1,4 +1,4 @@
-import type { ChangeEvent, FormEvent } from "react";
+import { useState, type ChangeEvent, type FormEvent } from "react";
 
 import type {
   DmContentConditionDefinition,
@@ -33,6 +33,8 @@ export function DmContentStatblockCard({
   onUpdate,
   onDelete,
 }: DmContentStatblockCardProps) {
+  const [deleteConfirmed, setDeleteConfirmed] = useState(false);
+
   const submitUpdate = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
@@ -100,16 +102,31 @@ export function DmContentStatblockCard({
               </button>
             </form>
           </details>
-          <div className="dm-content-item__actions">
+          <form
+            className="dm-content-delete-form confirmed-action"
+            onSubmit={(event: FormEvent<HTMLFormElement>) => {
+              event.preventDefault();
+              onDelete(statblock.id);
+              setDeleteConfirmed(false);
+            }}
+          >
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={deleteConfirmed}
+                disabled={!canManageDmContent || isDeleting}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => setDeleteConfirmed(event.currentTarget.checked)}
+              />
+              Confirm delete
+            </label>
             <button
-              type="button"
+              type="submit"
               className="ghost-button"
-              disabled={!canManageDmContent || isDeleting}
-              onClick={() => onDelete(statblock.id)}
+              disabled={!canManageDmContent || !deleteConfirmed || isDeleting}
             >
               {isDeleting ? "Deleting..." : "Delete statblock"}
             </button>
-          </div>
+          </form>
         </>
       ) : null}
     </article>
@@ -137,6 +154,7 @@ export function DmContentConditionCard({
   onUpdate,
   onDelete,
 }: DmContentConditionCardProps) {
+  const [deleteConfirmed, setDeleteConfirmed] = useState(false);
   const hasDescription = condition.description_markdown.trim().length > 0;
   const submitUpdate = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -197,16 +215,31 @@ export function DmContentConditionCard({
         </details>
       ) : null}
       {canManageDmContent ? (
-        <div className="dm-content-item__actions">
+        <form
+          className="dm-content-delete-form confirmed-action"
+          onSubmit={(event: FormEvent<HTMLFormElement>) => {
+            event.preventDefault();
+            onDelete(condition.id);
+            setDeleteConfirmed(false);
+          }}
+        >
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={deleteConfirmed}
+              disabled={!canManageDmContent || isDeleting}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setDeleteConfirmed(event.currentTarget.checked)}
+            />
+            Confirm delete
+          </label>
           <button
-            type="button"
+            type="submit"
             className="ghost-button"
-            disabled={!canManageDmContent || isDeleting}
-            onClick={() => onDelete(condition.id)}
+            disabled={!canManageDmContent || !deleteConfirmed || isDeleting}
           >
             {isDeleting ? "Deleting..." : "Delete condition"}
           </button>
-        </div>
+        </form>
       ) : null}
     </article>
   );

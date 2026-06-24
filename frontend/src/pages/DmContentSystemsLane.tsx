@@ -29,6 +29,7 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
   });
   const [customCreateDraft, setCustomCreateDraft] = useState<DmContentSystemsCustomDraftState>(() => buildInitialSystemsCustomDraft());
   const [customEditDrafts, setCustomEditDrafts] = useState<Record<string, DmContentSystemsCustomDraftState>>({});
+  const [customArchiveConfirm, setCustomArchiveConfirm] = useState<Record<string, boolean>>({});
   const [customQuery, setCustomQuery] = useState("");
   const [systemsError, setSystemsError] = useState<string | null>(null);
   const { showToast, toastMessage, toastTone } = useToastNotice();
@@ -522,14 +523,36 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
                         {restoreCustomMutation.isPending ? "Restoring..." : "Restore"}
                       </button>
                     ) : (
-                      <button
-                        type="button"
-                        className="ghost-button"
-                        disabled={!canManageSystems || archiveCustomMutation.isPending}
-                        onClick={() => archiveCustomMutation.mutate(entry)}
+                      <form
+                        className="confirmed-action"
+                        onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                          event.preventDefault();
+                          archiveCustomMutation.mutate(entry);
+                          setCustomArchiveConfirm((current) => ({ ...current, [entry.slug]: false }));
+                        }}
                       >
-                        {archiveCustomMutation.isPending ? "Archiving..." : "Archive"}
-                      </button>
+                        <label className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(customArchiveConfirm[entry.slug])}
+                            disabled={!canManageSystems || archiveCustomMutation.isPending}
+                            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                              setCustomArchiveConfirm((current) => ({
+                                ...current,
+                                [entry.slug]: event.currentTarget.checked,
+                              }))
+                            }
+                          />
+                          Confirm archive
+                        </label>
+                        <button
+                          type="submit"
+                          className="ghost-button"
+                          disabled={!canManageSystems || archiveCustomMutation.isPending || !customArchiveConfirm[entry.slug]}
+                        >
+                          {archiveCustomMutation.isPending ? "Archiving..." : "Archive"}
+                        </button>
+                      </form>
                     )}
                   </div>
                   <details className="feature-detail">

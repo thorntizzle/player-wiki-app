@@ -59,6 +59,10 @@ export function DmPane({
   const [uiMessage, setUiMessage] = useState<string | null>(null);
   const [paneError, setPaneError] = useState<string | null>(null);
   const [selectedLogSessionId, setSelectedLogSessionId] = useState<number | null>(null);
+  const [deleteArticleConfirm, setDeleteArticleConfirm] = useState<Record<number, boolean>>({});
+  const [deleteLogConfirm, setDeleteLogConfirm] = useState<Record<number, boolean>>({});
+  const [clearRevealedConfirmed, setClearRevealedConfirmed] = useState(false);
+  const [closeSessionConfirmed, setCloseSessionConfirmed] = useState(false);
 
   useEffect(() => {
     setStagedDrafts((current) => {
@@ -124,6 +128,40 @@ export function DmPane({
       setAuthRequired(true);
     }
   }, [logQuery.error, setAuthRequired]);
+
+  const setArticleDeleteConfirmed = (articleId: number, confirmed: boolean) => {
+    setDeleteArticleConfirm((current) => ({
+      ...current,
+      [articleId]: confirmed,
+    }));
+  };
+
+  const deleteArticle = (articleId: number) => {
+    deleteArticleMutation.mutate(articleId);
+    setArticleDeleteConfirmed(articleId, false);
+  };
+
+  const setLogDeleteConfirmed = (sessionId: number, confirmed: boolean) => {
+    setDeleteLogConfirm((current) => ({
+      ...current,
+      [sessionId]: confirmed,
+    }));
+  };
+
+  const deleteLog = (sessionId: number) => {
+    deleteLogMutation.mutate(sessionId);
+    setLogDeleteConfirmed(sessionId, false);
+  };
+
+  const clearRevealedArticles = () => {
+    clearRevealedMutation.mutate();
+    setClearRevealedConfirmed(false);
+  };
+
+  const closeSession = () => {
+    closeSessionMutation.mutate();
+    setCloseSessionConfirmed(false);
+  };
 
   const searchSources = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -221,6 +259,7 @@ export function DmPane({
                   imageAltText: article.image?.alt_text || "",
                   imageCaption: article.image?.caption || "",
                 };
+                const deleteConfirmed = Boolean(deleteArticleConfirm[article.id]);
 
                 return (
                   <details className="feature-detail session-article-detail" data-session-article-id={article.id} key={article.id}>
@@ -349,14 +388,30 @@ export function DmPane({
                       ) : (
                         <p className="meta">Begin a session before revealing this article.</p>
                       )}
-                      <button
-                        type="button"
-                        className="ghost-button"
-                        disabled={deleteArticleMutation.isPending}
-                        onClick={() => deleteArticleMutation.mutate(article.id)}
+                      <form
+                        className="confirmed-action"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          deleteArticle(article.id);
+                        }}
                       >
-                        {deleteArticleMutation.isPending ? "Deleting..." : "Delete article"}
-                      </button>
+                        <label className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={deleteConfirmed}
+                            disabled={deleteArticleMutation.isPending}
+                            onChange={(event) => setArticleDeleteConfirmed(article.id, event.currentTarget.checked)}
+                          />
+                          Confirm delete
+                        </label>
+                        <button
+                          type="submit"
+                          className="ghost-button"
+                          disabled={!deleteConfirmed || deleteArticleMutation.isPending}
+                        >
+                          {deleteArticleMutation.isPending ? "Deleting..." : "Delete article"}
+                        </button>
+                      </form>
                     </div>
                   </details>
                 );
@@ -374,14 +429,30 @@ export function DmPane({
                 <h2>Revealed articles</h2>
                 <p className="meta">{revealedArticles.length}</p>
               </div>
-              <button
-                type="button"
-                className="ghost-button"
-                disabled={clearRevealedMutation.isPending || !revealedArticles.length}
-                onClick={() => clearRevealedMutation.mutate()}
+              <form
+                className="confirmed-action"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  clearRevealedArticles();
+                }}
               >
-                {clearRevealedMutation.isPending ? "Clearing..." : "Clear all"}
-              </button>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={clearRevealedConfirmed}
+                    disabled={clearRevealedMutation.isPending || !revealedArticles.length}
+                    onChange={(event) => setClearRevealedConfirmed(event.currentTarget.checked)}
+                  />
+                  Confirm clear
+                </label>
+                <button
+                  type="submit"
+                  className="ghost-button"
+                  disabled={clearRevealedMutation.isPending || !revealedArticles.length || !clearRevealedConfirmed}
+                >
+                  {clearRevealedMutation.isPending ? "Clearing..." : "Clear all"}
+                </button>
+              </form>
             </div>
             <div className="session-article-stack">
               {revealedArticles.map((article) => {
@@ -390,6 +461,7 @@ export function DmPane({
                   : article.created_at
                     ? `Revealed ${formatTimestamp(article.created_at)}`
                     : null;
+                const deleteConfirmed = Boolean(deleteArticleConfirm[article.id]);
                 return (
                   <details className="feature-detail session-article-detail" data-session-article-id={article.id} key={article.id}>
                     <summary>
@@ -410,14 +482,30 @@ export function DmPane({
                     {renderArticleBody(article, "article-body--compact")}
                     <div className="session-article-detail__actions">
                       <SessionArticleReferenceActions article={article} includePromotionLinks />
-                      <button
-                        type="button"
-                        className="ghost-button"
-                        onClick={() => deleteArticleMutation.mutate(article.id)}
-                        disabled={deleteArticleMutation.isPending}
+                      <form
+                        className="confirmed-action"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          deleteArticle(article.id);
+                        }}
                       >
-                        {deleteArticleMutation.isPending ? "Deleting..." : "Delete article"}
-                      </button>
+                        <label className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={deleteConfirmed}
+                            disabled={deleteArticleMutation.isPending}
+                            onChange={(event) => setArticleDeleteConfirmed(article.id, event.currentTarget.checked)}
+                          />
+                          Confirm delete
+                        </label>
+                        <button
+                          type="submit"
+                          className="ghost-button"
+                          disabled={!deleteConfirmed || deleteArticleMutation.isPending}
+                        >
+                          {deleteArticleMutation.isPending ? "Deleting..." : "Delete article"}
+                        </button>
+                      </form>
                     </div>
                   </details>
                 );
@@ -439,6 +527,7 @@ export function DmPane({
                     ? `Session log from ${formatTimestamp(entry.session.started_at)}`
                     : `Session ${entry.session.id}`;
                   const messageMeta = `${entry.message_count} message${entry.message_count === 1 ? "" : "s"}`;
+                  const deleteConfirmed = Boolean(deleteLogConfirm[entry.session.id]);
                   return (
                     <li key={entry.session.id}>
                       <div className="session-log-list__row">
@@ -453,14 +542,30 @@ export function DmPane({
                             {entry.last_message_at ? ` | Last message ${formatTimestamp(entry.last_message_at)}` : null}
                           </p>
                         </button>
-                        <button
-                          type="button"
-                          className="ghost-button"
-                          onClick={() => deleteLogMutation.mutate(entry.session.id)}
-                          disabled={deleteLogMutation.isPending}
+                        <form
+                          className="confirmed-action"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            deleteLog(entry.session.id);
+                          }}
                         >
-                          {deleteLogMutation.isPending ? "Deleting..." : "Delete log"}
-                        </button>
+                          <label className="checkbox-label">
+                            <input
+                              type="checkbox"
+                              checked={deleteConfirmed}
+                              disabled={deleteLogMutation.isPending}
+                              onChange={(event) => setLogDeleteConfirmed(entry.session.id, event.currentTarget.checked)}
+                            />
+                            Confirm delete
+                          </label>
+                          <button
+                            type="submit"
+                            className="ghost-button"
+                            disabled={!deleteConfirmed || deleteLogMutation.isPending}
+                          >
+                            {deleteLogMutation.isPending ? "Deleting..." : "Delete log"}
+                          </button>
+                        </form>
                       </div>
                     </li>
                   );
@@ -475,14 +580,30 @@ export function DmPane({
                   <div>
                     <div className="session-log-detail-head">
                       <h4>Messages</h4>
-                      <button
-                        type="button"
-                        className="ghost-button"
-                        onClick={() => deleteLogMutation.mutate(logQuery.data.session.id)}
-                        disabled={deleteLogMutation.isPending}
+                      <form
+                        className="confirmed-action"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          deleteLog(logQuery.data.session.id);
+                        }}
                       >
-                        {deleteLogMutation.isPending ? "Deleting..." : "Delete log"}
-                      </button>
+                        <label className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(deleteLogConfirm[logQuery.data.session.id])}
+                            disabled={deleteLogMutation.isPending}
+                            onChange={(event) => setLogDeleteConfirmed(logQuery.data.session.id, event.currentTarget.checked)}
+                          />
+                          Confirm delete
+                        </label>
+                        <button
+                          type="submit"
+                          className="ghost-button"
+                          disabled={!deleteLogConfirm[logQuery.data.session.id] || deleteLogMutation.isPending}
+                        >
+                          {deleteLogMutation.isPending ? "Deleting..." : "Delete log"}
+                        </button>
+                      </form>
                     </div>
                     <ol className="log-messages">
                       {logQuery.data.messages.map((entry) => (
@@ -538,9 +659,26 @@ export function DmPane({
           </div>
           <div className="session-actions-row">
             {activeSession ? (
-              <button type="button" onClick={() => closeSessionMutation.mutate()} disabled={closeSessionMutation.isPending}>
-                {closeSessionMutation.isPending ? "Closing..." : "Close session"}
-              </button>
+              <form
+                className="confirmed-action"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  closeSession();
+                }}
+              >
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={closeSessionConfirmed}
+                    disabled={closeSessionMutation.isPending}
+                    onChange={(event) => setCloseSessionConfirmed(event.currentTarget.checked)}
+                  />
+                  Confirm close
+                </label>
+                <button type="submit" className="ghost-button" disabled={closeSessionMutation.isPending || !closeSessionConfirmed}>
+                  {closeSessionMutation.isPending ? "Closing..." : "Close session"}
+                </button>
+              </form>
             ) : (
               <button type="button" onClick={() => startSessionMutation.mutate()} disabled={startSessionMutation.isPending}>
                 {startSessionMutation.isPending ? "Starting..." : "Begin session"}

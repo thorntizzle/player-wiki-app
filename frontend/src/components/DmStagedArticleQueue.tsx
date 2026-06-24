@@ -1,4 +1,4 @@
-import type { ChangeEvent, FormEvent } from "react";
+import { useState, type ChangeEvent, type FormEvent } from "react";
 
 import type { SessionArticle } from "../api/types";
 import {
@@ -41,6 +41,15 @@ export function DmStagedArticleQueue({
   onUpdateArticle,
   onDeleteArticle,
 }: DmStagedArticleQueueProps) {
+  const [deleteConfirmByArticle, setDeleteConfirmByArticle] = useState<Record<number, boolean>>({});
+
+  const setDeleteConfirmed = (articleId: number, confirmed: boolean) => {
+    setDeleteConfirmByArticle((current) => ({
+      ...current,
+      [articleId]: confirmed,
+    }));
+  };
+
   return (
     <article className="card" id="dm-content-staged-articles-queue">
       <div className="section-heading">
@@ -55,6 +64,7 @@ export function DmStagedArticleQueue({
           {stagedArticles.map((article) => {
             const draft = stagedDrafts[article.id] ?? buildInitialStagedArticleDraft(article);
             const savedLabel = article.created_at ? `Saved ${formatTimestamp(article.created_at)}` : null;
+            const deleteConfirmed = Boolean(deleteConfirmByArticle[article.id]);
             return (
               <details
                 className="feature-detail session-article-detail"
@@ -185,14 +195,33 @@ export function DmStagedArticleQueue({
                 </details>
                 <div className="session-article-detail__actions">
                   <SessionArticleReferenceActions article={article} includePromotionLinks />
-                  <button
-                    type="button"
-                    className="ghost-button"
-                    disabled={!canManageSession || isDeleting}
-                    onClick={() => onDeleteArticle(article.id)}
+                  <form
+                    className="confirmed-action"
+                    onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                      event.preventDefault();
+                      onDeleteArticle(article.id);
+                      setDeleteConfirmed(article.id, false);
+                    }}
                   >
-                    {isDeleting ? "Deleting..." : "Delete article"}
-                  </button>
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={deleteConfirmed}
+                        disabled={!canManageSession || isDeleting}
+                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                          setDeleteConfirmed(article.id, event.currentTarget.checked)
+                        }
+                      />
+                      Confirm delete
+                    </label>
+                    <button
+                      type="submit"
+                      className="ghost-button"
+                      disabled={!canManageSession || !deleteConfirmed || isDeleting}
+                    >
+                      {isDeleting ? "Deleting..." : "Delete article"}
+                    </button>
+                  </form>
                 </div>
               </details>
             );
