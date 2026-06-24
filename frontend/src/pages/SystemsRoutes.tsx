@@ -403,11 +403,7 @@ export function SystemsEntryPage() {
         <section className="hero compact systems-hero">
           <p className="eyebrow">Systems entry</p>
           <h1>{entry.title}</h1>
-          <p className="lede">
-            {entry.entry_type_label}
-            {sourceState?.title ? ` | ${sourceState.title}` : ""}
-            {sourceState?.license_class_label ? ` | ${sourceState.license_class_label}` : ""}
-          </p>
+          <p className="lede">{entry.entry_type_label}</p>
         </section>
       ) : null}
       <ApiErrorNotice isLoading={entryQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
@@ -430,6 +426,7 @@ export function SystemsEntryPage() {
                 <p className="meta">Type: {entry.entry_type_label}</p>
                 {sourceState?.title ? <p className="meta">Source: {sourceState.title}</p> : null}
                 {entry.source_page ? <p className="meta">Source page: {entry.source_page}</p> : null}
+                {sourceState?.license_class_label ? <p className="meta">Source policy: {sourceState.license_class_label}</p> : null}
               </section>
               <section className="sidebar-card-section">
                 <h3>Navigation</h3>

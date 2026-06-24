@@ -1564,9 +1564,19 @@ def test_systems_player_browse_hides_raw_source_metadata() -> None:
 
     management_start = entry_page_source.index('<section className="card sidebar-card systems-sidebar-card" id="systems-entry-management">')
     entry_viewer_source = entry_page_source[:management_start]
+    entry_hero_start = entry_page_source.index('<section className="hero compact systems-hero">')
+    entry_hero_end = entry_page_source.index("</section>", entry_hero_start)
+    entry_hero_source = entry_page_source[entry_hero_start:entry_hero_end]
+    entry_body_start = entry_page_source.index('<article className="article card systems-entry-band">')
+    entry_sidebar_start = entry_page_source.index('<aside className="sidebar systems-entry-sidebar">')
+    assert '<p className="lede">{entry.entry_type_label}</p>' in entry_hero_source
+    assert "sourceState?.title" not in entry_hero_source
+    assert "sourceState?.license_class_label" not in entry_hero_source
+    assert entry_body_start < entry_sidebar_start
     assert "{entry.entry_type_label} | {entry.source_id}" not in entry_viewer_source
     assert '<p className="meta">Source: {entry.source_id}</p>' not in entry_viewer_source
     assert "Source: {sourceState.title}" in entry_viewer_source
+    assert "Source policy: {sourceState.license_class_label}" in entry_viewer_source
     assert "Entry key: {entry.entry_key}" not in entry_viewer_source
 
     assert "{entry.source_id} | {entry.entry_type_label}" not in chrome_source
