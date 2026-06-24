@@ -9,9 +9,7 @@ import type {
   CharacterEquipmentStatePatchPayload,
   CharacterFeatureStatePatchPayload,
   CharacterInventoryPatchPayload,
-  CharacterPresentedInventoryItem,
   CharacterPresentedSpell,
-  CharacterPresentedXianxia,
   CharacterPortraitUpsertPayload,
   CharacterRecord,
   CharacterXianxiaDaoUseRecordPayload,
@@ -52,18 +50,14 @@ import { CharacterDndSections } from "../components/CharacterDndSections";
 import { CharacterNotesSection } from "../components/CharacterNotesSection";
 import { CharacterXianxiaSections } from "../components/CharacterXianxiaSections";
 import {
-  asRecord,
-  asRecordArray,
   readNumber,
   readString,
 } from "../characterValueUtils";
 import {
   characterSystem,
   characterReadSectionUrl,
-  collectPresentedSpells,
   defaultCharacterReadSection,
   draftKey,
-  groupSpellsByLevel,
   itemDetailDialogState,
   isDndCharacter,
   isXianxiaCharacter,
@@ -78,6 +72,7 @@ import {
   type CharacterSection,
   type CharacterXianxiaInventoryDraft,
 } from "../characterPaneUtils";
+import { buildCharacterPaneModel } from "../characterPaneModel";
 import { buildCharacterPaneXianxiaModel } from "../characterPaneXianxiaModel";
 import { readBinaryAsBase64 } from "../sessionArticleDrafts";
 
@@ -238,51 +233,36 @@ export function CharacterPane({
   );
   const isDnd = isDndCharacter(detailRecord);
   const isXianxia = isXianxiaCharacter(detailRecord);
-  const definition = asRecord(detailRecord?.definition);
-  const stats = asRecord(definition.stats);
-  const spellcasting = asRecord(definition.spellcasting);
-  const state = asRecord(detailRecord?.state_record.state);
-  const overviewStatRowPayload = detailRecord?.overview_stat_rows;
-  const rawOverviewStatRows = Array.isArray(overviewStatRowPayload) ? overviewStatRowPayload : [];
-  const hasOverviewStatRows = rawOverviewStatRows.length > 0;
-  const overviewStatRows = rawOverviewStatRows.map((row) => asRecordArray(row));
-  const overviewStats = asRecordArray(detailRecord?.overview_stats);
-  const xianxiaState = asRecord(state.xianxia);
-  const vitals = asRecord(state.vitals);
-  const resources = asRecordArray(state.resources);
-  const spellSlots = asRecordArray(state.spell_slots);
-  const inventory = asRecordArray(state.inventory);
-  const currency = isXianxia ? asRecord(xianxiaState.currency) : asRecord(state.currency);
-  const playerNotesHtml = readString(detailRecord?.player_notes_html);
-  const physicalDescriptionHtml = readString(detailRecord?.physical_description_html);
-  const personalBackgroundHtml = readString(detailRecord?.personal_background_html);
-  const referenceSections = asRecordArray(detailRecord?.reference_sections);
-  const dndAbilities = asRecordArray(detailRecord?.abilities);
-  const dndSkills = asRecordArray(detailRecord?.skills);
-  const dndProficiencyGroups = asRecordArray(detailRecord?.proficiency_groups);
-  const hasDndAbilitySkillsContent = Boolean(dndAbilities.length || dndSkills.length || dndProficiencyGroups.length);
-  const spells = asRecordArray(spellcasting.spells);
-  const equipmentState = detailRecord?.equipment_state;
-  const equipmentRows = equipmentState?.rows ?? [];
-  const arcaneArmorState = detailRecord?.arcane_armor_state ?? equipmentState?.arcane_armor_state;
+  const {
+    arcaneArmorState,
+    currency,
+    dndAbilities,
+    dndProficiencyGroups,
+    equipmentRows,
+    equipmentState,
+    hasDndAbilitySkillsContent,
+    hasOverviewStatRows,
+    inventory,
+    overviewStatRows,
+    overviewStats,
+    personalBackgroundHtml,
+    physicalDescriptionHtml,
+    playerNotesHtml,
+    presentedInventoryByKey,
+    presentedSpellGroups,
+    presentedSpells,
+    presentedXianxia,
+    rawSpellGroups,
+    referenceSections,
+    resources,
+    spellcasting,
+    spells,
+    spellSlots,
+    stats,
+    vitals,
+  } = useMemo(() => buildCharacterPaneModel(detailRecord, { isXianxia }), [detailRecord, isXianxia]);
   const revision = detailRecord?.state_record.revision ?? 0;
-  const presentedXianxia: CharacterPresentedXianxia = detailRecord?.presented_xianxia ?? {};
   const xianxiaModel = buildCharacterPaneXianxiaModel(presentedXianxia);
-  const presentedSpells = collectPresentedSpells(detailRecord);
-  const presentedSpellGroups = groupSpellsByLevel(presentedSpells, (spell) => spell.level_label);
-  const rawSpellGroups = groupSpellsByLevel(spells, (spell) => readString(spell.level_label));
-  const presentedInventory = detailRecord?.presented_inventory ?? [];
-  const presentedInventoryByKey = useMemo(() => {
-    const lookup = new Map<string, CharacterPresentedInventoryItem>();
-    for (const item of presentedInventory) {
-      for (const key of [item.id, item.item_ref]) {
-        if (key) {
-          lookup.set(key, item);
-        }
-      }
-    }
-    return lookup;
-  }, [presentedInventory]);
 
   const isReadSurface = surface === "read";
   const isCombatSurface = surface === "combat";

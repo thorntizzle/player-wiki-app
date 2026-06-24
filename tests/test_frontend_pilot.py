@@ -2523,8 +2523,24 @@ def test_character_pane_xianxia_reference_model_lives_in_shared_helper() -> None
     assert "const xianxiaStanceBreak = asRecord(presentedXianxia.quick_reference?.stance_break);" not in route_source
 
 
-def test_character_dnd_overview_section_uses_flask_style_glance_rows() -> None:
+def test_character_pane_common_dnd_model_lives_in_shared_helper() -> None:
     route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    model_source = Path("frontend/src/characterPaneModel.ts").read_text(encoding="utf-8")
+
+    assert "export function buildCharacterPaneModel" in model_source
+    assert "rawOverviewStatRows.length > 0" in model_source
+    assert "collectPresentedSpells(character)" in model_source
+    assert "groupSpellsByLevel(presentedSpells" in model_source
+    assert "function buildPresentedInventoryLookup" in model_source
+    assert "const presentedInventory = character?.presented_inventory ?? [];" in model_source
+    assert "useMemo(() => buildCharacterPaneModel(detailRecord, { isXianxia })" in route_source
+    assert "const overviewStatRowPayload = detailRecord?.overview_stat_rows;" not in route_source
+    assert "const presentedSpells = collectPresentedSpells(detailRecord);" not in route_source
+    assert "const presentedInventoryByKey = useMemo(() => {" not in route_source
+
+
+def test_character_dnd_overview_section_uses_flask_style_glance_rows() -> None:
+    model_source = Path("frontend/src/characterPaneModel.ts").read_text(encoding="utf-8")
     section_markup = Path("frontend/src/components/CharacterDndOverviewSection.tsx").read_text(encoding="utf-8")
 
     assert '<h2>At a glance</h2>' in section_markup
@@ -2534,7 +2550,7 @@ def test_character_dnd_overview_section_uses_flask_style_glance_rows() -> None:
     assert "readString(stat.value, \"--\")" in section_markup
     assert '<h2>Overview</h2>' not in section_markup
     assert 'className="stat-grid"' not in section_markup
-    assert "rawOverviewStatRows.length > 0" in route_source
+    assert "rawOverviewStatRows.length > 0" in model_source
     assert "hasOverviewStatRows ? (" in section_markup
     assert 'className="glance-grid">' in section_markup
 
@@ -2760,7 +2776,7 @@ def test_character_dnd_resources_section_uses_flask_style_row_form_chrome() -> N
 
 
 def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() -> None:
-    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    model_source = Path("frontend/src/characterPaneModel.ts").read_text(encoding="utf-8")
     source = Path("frontend/src/components/CharacterDndSpellsSection.tsx").read_text(encoding="utf-8")
     styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     section_markup = source
@@ -2810,7 +2826,7 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
     assert "Save DC:" in section_markup
     assert "Attack:" in section_markup
 
-    assert "groupSpellsByLevel" in route_source
+    assert "groupSpellsByLevel" in model_source
     assert "presentedSpellGroups" in section_markup
     assert "rawSpellGroups" in section_markup
     assert 'className="spell-level-groups"' in section_markup
