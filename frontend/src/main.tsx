@@ -9,31 +9,83 @@ import {
 import { QueryClientProvider } from "@tanstack/react-query";
 import "./styles.css";
 import { queryClient } from "./apiClientContext";
-import { AccountSettingsPage } from "./routes/AccountSettingsPage";
-import { CampaignControlPage } from "./routes/CampaignControlPage";
-import { CampaignHelpPage } from "./routes/CampaignHelpPage";
-import { WikiArticlePage, WikiHomePage, WikiSectionPage } from "./routes/WikiRoutes";
-import {
-  SystemsEntryPage,
-  SystemsIndexPage,
-  SystemsSourceCategoryPage,
-  SystemsSourcePage,
-} from "./routes/SystemsRoutes";
-import { AdminDashboardPage, AdminUserDetailPage } from "./routes/AdminRoutes";
-import { CampaignListPage } from "./routes/CampaignPickerPage";
-import { CharacterAdvancedEditorPage } from "./routes/CharacterAdvancedEditorPage";
-import { CharacterCreatePage } from "./routes/CharacterCreatePage";
-import { CharacterCultivationPage } from "./routes/CharacterCultivationPage";
-import { CharacterDetailPage } from "./routes/CharacterDetailPage";
-import { CharacterLevelUpPage } from "./routes/CharacterLevelUpPage";
-import { CharacterProgressionRepairPage } from "./routes/CharacterProgressionRepairPage";
-import { CharacterRetrainingPage } from "./routes/CharacterRetrainingPage";
-import { CharacterXianxiaManualImportPage } from "./routes/CharacterXianxiaManualImportPage";
-import { DmContentPage } from "./routes/DmContentPage";
-import { CombatPage } from "./routes/CombatPage";
-import { SessionPage } from "./routes/SessionPage";
 import { AppShell } from "./AppShell";
-import { CharacterRosterPage } from "./routes/CharacterRosterPage";
+
+const AccountSettingsPage = React.lazy(() =>
+  import("./routes/AccountSettingsPage").then((module) => ({ default: module.AccountSettingsPage })),
+);
+const CampaignControlPage = React.lazy(() =>
+  import("./routes/CampaignControlPage").then((module) => ({ default: module.CampaignControlPage })),
+);
+const CampaignHelpPage = React.lazy(() =>
+  import("./routes/CampaignHelpPage").then((module) => ({ default: module.CampaignHelpPage })),
+);
+const WikiArticlePage = React.lazy(() =>
+  import("./routes/WikiRoutes").then((module) => ({ default: module.WikiArticlePage })),
+);
+const WikiHomePage = React.lazy(() =>
+  import("./routes/WikiRoutes").then((module) => ({ default: module.WikiHomePage })),
+);
+const WikiSectionPage = React.lazy(() =>
+  import("./routes/WikiRoutes").then((module) => ({ default: module.WikiSectionPage })),
+);
+const SystemsEntryPage = React.lazy(() =>
+  import("./routes/SystemsRoutes").then((module) => ({ default: module.SystemsEntryPage })),
+);
+const SystemsIndexPage = React.lazy(() =>
+  import("./routes/SystemsRoutes").then((module) => ({ default: module.SystemsIndexPage })),
+);
+const SystemsSourceCategoryPage = React.lazy(() =>
+  import("./routes/SystemsRoutes").then((module) => ({ default: module.SystemsSourceCategoryPage })),
+);
+const SystemsSourcePage = React.lazy(() =>
+  import("./routes/SystemsRoutes").then((module) => ({ default: module.SystemsSourcePage })),
+);
+const AdminDashboardPage = React.lazy(() =>
+  import("./routes/AdminRoutes").then((module) => ({ default: module.AdminDashboardPage })),
+);
+const AdminUserDetailPage = React.lazy(() =>
+  import("./routes/AdminRoutes").then((module) => ({ default: module.AdminUserDetailPage })),
+);
+const CampaignListPage = React.lazy(() =>
+  import("./routes/CampaignPickerPage").then((module) => ({ default: module.CampaignListPage })),
+);
+const CharacterAdvancedEditorPage = React.lazy(() =>
+  import("./routes/CharacterAdvancedEditorPage").then((module) => ({ default: module.CharacterAdvancedEditorPage })),
+);
+const CharacterCreatePage = React.lazy(() =>
+  import("./routes/CharacterCreatePage").then((module) => ({ default: module.CharacterCreatePage })),
+);
+const CharacterCultivationPage = React.lazy(() =>
+  import("./routes/CharacterCultivationPage").then((module) => ({ default: module.CharacterCultivationPage })),
+);
+const CharacterDetailPage = React.lazy(() =>
+  import("./routes/CharacterDetailPage").then((module) => ({ default: module.CharacterDetailPage })),
+);
+const CharacterLevelUpPage = React.lazy(() =>
+  import("./routes/CharacterLevelUpPage").then((module) => ({ default: module.CharacterLevelUpPage })),
+);
+const CharacterProgressionRepairPage = React.lazy(() =>
+  import("./routes/CharacterProgressionRepairPage").then((module) => ({ default: module.CharacterProgressionRepairPage })),
+);
+const CharacterRetrainingPage = React.lazy(() =>
+  import("./routes/CharacterRetrainingPage").then((module) => ({ default: module.CharacterRetrainingPage })),
+);
+const CharacterXianxiaManualImportPage = React.lazy(() =>
+  import("./routes/CharacterXianxiaManualImportPage").then((module) => ({ default: module.CharacterXianxiaManualImportPage })),
+);
+const CharacterRosterPage = React.lazy(() =>
+  import("./routes/CharacterRosterPage").then((module) => ({ default: module.CharacterRosterPage })),
+);
+const CombatPage = React.lazy(() =>
+  import("./routes/CombatPage").then((module) => ({ default: module.CombatPage })),
+);
+const DmContentPage = React.lazy(() =>
+  import("./routes/DmContentPage").then((module) => ({ default: module.DmContentPage })),
+);
+const SessionPage = React.lazy(() =>
+  import("./routes/SessionPage").then((module) => ({ default: module.SessionPage })),
+);
 
 declare global {
   interface Window {

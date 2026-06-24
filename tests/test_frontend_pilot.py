@@ -434,7 +434,8 @@ def test_character_detail_route_wrapper_lives_in_route_module() -> None:
     main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
     route_source = Path("frontend/src/routes/CharacterDetailPage.tsx").read_text(encoding="utf-8")
 
-    assert 'import { CharacterDetailPage } from "./routes/CharacterDetailPage";' in main_source
+    assert "const CharacterDetailPage = React.lazy(() =>" in main_source
+    assert 'import("./routes/CharacterDetailPage")' in main_source
     assert "function CharacterDetailPage" not in main_source
     assert "useParams" not in main_source
     assert "useLocation" not in main_source
@@ -454,7 +455,8 @@ def test_character_create_route_lives_in_route_module() -> None:
     authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
 
-    assert 'import { CharacterCreatePage } from "./routes/CharacterCreatePage";' in main_source
+    assert "const CharacterCreatePage = React.lazy(() =>" in main_source
+    assert 'import("./routes/CharacterCreatePage")' in main_source
     assert "function CharacterCreatePage" not in authoring_source
     assert "CharacterCreateSubmitPayload" not in authoring_source
     assert 'component: CharacterCreatePage' in main_source
@@ -471,7 +473,8 @@ def test_character_xianxia_manual_import_route_lives_in_route_module() -> None:
     authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
     import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
 
-    assert 'import { CharacterXianxiaManualImportPage } from "./routes/CharacterXianxiaManualImportPage";' in main_source
+    assert "const CharacterXianxiaManualImportPage = React.lazy(() =>" in main_source
+    assert 'import("./routes/CharacterXianxiaManualImportPage")' in main_source
     assert "function CharacterXianxiaManualImportPage" not in authoring_source
     assert "CharacterXianxiaManualImportContext" not in authoring_source
     assert 'component: CharacterXianxiaManualImportPage' in main_source
@@ -488,7 +491,8 @@ def test_character_advanced_editor_route_lives_in_route_module() -> None:
     authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
     editor_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
 
-    assert 'import { CharacterAdvancedEditorPage } from "./routes/CharacterAdvancedEditorPage";' in main_source
+    assert "const CharacterAdvancedEditorPage = React.lazy(() =>" in main_source
+    assert 'import("./routes/CharacterAdvancedEditorPage")' in main_source
     assert "function CharacterAdvancedEditorPage" not in authoring_source
     assert "CharacterEditorRecoverablePenaltyRow" not in authoring_source
     assert "editorValuesFromContext" not in authoring_source
@@ -508,7 +512,8 @@ def test_character_progression_repair_route_lives_in_route_module() -> None:
     authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
     repair_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
 
-    assert 'import { CharacterProgressionRepairPage } from "./routes/CharacterProgressionRepairPage";' in main_source
+    assert "const CharacterProgressionRepairPage = React.lazy(() =>" in main_source
+    assert 'import("./routes/CharacterProgressionRepairPage")' in main_source
     assert "function CharacterProgressionRepairPage" not in authoring_source
     assert "CharacterProgressionRepairPayload" not in authoring_source
     assert "characterProgressionRepairValuesFromContext" not in authoring_source
@@ -527,7 +532,8 @@ def test_character_retraining_route_lives_in_route_module() -> None:
     authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
     retraining_source = Path("frontend/src/routes/CharacterRetrainingPage.tsx").read_text(encoding="utf-8")
 
-    assert 'import { CharacterRetrainingPage } from "./routes/CharacterRetrainingPage";' in main_source
+    assert "const CharacterRetrainingPage = React.lazy(() =>" in main_source
+    assert 'import("./routes/CharacterRetrainingPage")' in main_source
     assert "function CharacterRetrainingPage" not in authoring_source
     assert "CharacterRetrainingPayload" not in authoring_source
     assert "characterRetrainingValuesFromContext" not in authoring_source
@@ -546,7 +552,8 @@ def test_character_level_up_route_lives_in_route_module() -> None:
     authoring_source = _read_optional_source("frontend/src/routes/CharacterAuthoringRoutes.tsx")
     level_up_source = Path("frontend/src/routes/CharacterLevelUpPage.tsx").read_text(encoding="utf-8")
 
-    assert 'import { CharacterLevelUpPage } from "./routes/CharacterLevelUpPage";' in main_source
+    assert "const CharacterLevelUpPage = React.lazy(() =>" in main_source
+    assert 'import("./routes/CharacterLevelUpPage")' in main_source
     assert "function CharacterLevelUpPage" not in authoring_source
     assert "CharacterLevelUpPayload" not in authoring_source
     assert "characterLevelUpValuesFromContext" not in authoring_source
@@ -566,13 +573,40 @@ def test_character_cultivation_route_lives_in_route_module_and_aggregate_is_reti
     cultivation_source = Path("frontend/src/routes/CharacterCultivationPage.tsx").read_text(encoding="utf-8")
 
     assert not authoring_path.exists()
-    assert 'import { CharacterCultivationPage } from "./routes/CharacterCultivationPage";' in main_source
+    assert "const CharacterCultivationPage = React.lazy(() =>" in main_source
+    assert 'import("./routes/CharacterCultivationPage")' in main_source
     assert 'component: CharacterCultivationPage' in main_source
     assert "export function CharacterCultivationPage()" in cultivation_source
     assert 'from: "/campaigns/$campaignSlug/characters/$characterSlug/cultivation"' in cultivation_source
     assert "apiClient.getCharacterCultivation(campaignSlug, characterSlug)" in cultivation_source
     assert "apiClient.runCharacterCultivationAction(campaignSlug, characterSlug" in cultivation_source
     assert "expected_revision: data.character.state_record.revision" in cultivation_source
+
+
+def test_gen2_route_modules_are_lazy_loaded_without_dropping_loading_cover_early() -> None:
+    main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    shell_source = Path("frontend/src/AppShell.tsx").read_text(encoding="utf-8")
+
+    assert "const CampaignListPage = React.lazy(() =>" in main_source
+    assert "const SessionPage = React.lazy(() =>" in main_source
+    assert "const CombatPage = React.lazy(() =>" in main_source
+    assert "const DmContentPage = React.lazy(() =>" in main_source
+    assert "const CharacterDetailPage = React.lazy(() =>" in main_source
+    assert "const CharacterCultivationPage = React.lazy(() =>" in main_source
+    assert "const SystemsEntryPage = React.lazy(() =>" in main_source
+    assert "const WikiArticlePage = React.lazy(() =>" in main_source
+    assert 'import { SessionPage } from "./routes/SessionPage";' not in main_source
+    assert 'import { CombatPage } from "./routes/CombatPage";' not in main_source
+    assert 'import { DmContentPage } from "./routes/DmContentPage";' not in main_source
+    assert 'import { CharacterDetailPage } from "./routes/CharacterDetailPage";' not in main_source
+
+    assert "function RouteSuspenseFallback" in shell_source
+    assert "setRouteSuspensePending(true);" in shell_source
+    assert "return () => setRouteSuspensePending(false);" in shell_source
+    assert "function useAppLoadingReadiness(locationPathname: string, routeSuspensePending: boolean)" in shell_source
+    assert "if (activeFetchCount > 0 || routeSuspensePending)" in shell_source
+    assert "<React.Suspense fallback={<RouteSuspenseFallback setRouteSuspensePending={setRouteSuspensePending} />}>" in shell_source
+    assert "useAppLoadingReadiness(location.pathname, routeSuspensePending);" in shell_source
 
 
 def test_character_authoring_preview_lists_live_in_component_module() -> None:

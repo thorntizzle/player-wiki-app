@@ -348,7 +348,20 @@ function AuthNotice() {
     </section>
   );
 }
-function useAppLoadingReadiness(locationPathname: string) {
+function RouteSuspenseFallback({
+  setRouteSuspensePending,
+}: {
+  setRouteSuspensePending: (isPending: boolean) => void;
+}) {
+  useEffect(() => {
+    setRouteSuspensePending(true);
+    return () => setRouteSuspensePending(false);
+  }, [setRouteSuspensePending]);
+
+  return <p className="status status-neutral">Loading view...</p>;
+}
+
+function useAppLoadingReadiness(locationPathname: string, routeSuspensePending: boolean) {
   const activeFetchCount = useIsFetching();
   const previousLocationPathname = useRef<string | null>(null);
   const readyTimerRef = useRef<number | null>(null);
@@ -370,7 +383,7 @@ function useAppLoadingReadiness(locationPathname: string) {
       readyTimerRef.current = null;
     }
 
-    if (activeFetchCount > 0) {
+    if (activeFetchCount > 0 || routeSuspensePending) {
       return undefined;
     }
 
@@ -387,13 +400,14 @@ function useAppLoadingReadiness(locationPathname: string) {
         readyTimerRef.current = null;
       }
     };
-  }, [activeFetchCount, locationPathname]);
+  }, [activeFetchCount, locationPathname, routeSuspensePending]);
 }
 
 export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
-  useAppLoadingReadiness(location.pathname);
+  const [routeSuspensePending, setRouteSuspensePending] = useState(false);
+  useAppLoadingReadiness(location.pathname, routeSuspensePending);
   const [apiToken, setApiToken] = useState(() => {
     try {
       return localStorage.getItem("cpw-pilot-api-token") || "";
@@ -685,7 +699,9 @@ export function AppShell() {
         {campaign ? <CampaignGlobalSearch campaignSlug={campaignSlug} /> : null}
         <AuthNotice />
         <main className="main-shell">
-          <Outlet />
+          <React.Suspense fallback={<RouteSuspenseFallback setRouteSuspensePending={setRouteSuspensePending} />}>
+            <Outlet />
+          </React.Suspense>
         </main>
       </div>
     </ApiClientContext.Provider>

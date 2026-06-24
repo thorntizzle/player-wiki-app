@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactElement } from "react";
 import { apiErrorMessage } from "../api/client";
 import type {
   ContentPageFileSummary,
@@ -50,7 +50,7 @@ import {
   type DmPlayerWikiDraftState,
   type StagedArticleDraftState,
 } from "../dmContentUtils";
-export function DmContentPage() {
+export function DmContentPage(): ReactElement {
   const { campaignSlug } = useParams({
     from: "/campaigns/$campaignSlug/dm-content",
   });
