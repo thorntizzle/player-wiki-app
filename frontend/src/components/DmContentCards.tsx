@@ -60,8 +60,8 @@ export function DmContentStatblockCard({
       <details className="feature-detail dm-maintenance-detail">
         <summary>Maintenance details</summary>
         <p className="meta">Source filename: {statblock.source_filename}</p>
+        <p className="meta">Parser summary: {statblock.parser_feedback.summary}</p>
       </details>
-      <p className="status status-neutral">{statblock.parser_feedback.summary}</p>
       <details className="feature-detail">
         <summary>View statblock text</summary>
         <pre className="dm-content-preview">{statblock.body_markdown}</pre>
