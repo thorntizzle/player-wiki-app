@@ -78,7 +78,7 @@ export function SystemsIndexPage() {
               </label>
               <button type="submit">Search</button>
             </form>
-            <p className="meta">Search matches titles, entry types, and source IDs only.</p>
+            <p className="meta">Search matches titles and entry types.</p>
             {data.query ? (
               <>
                 <h3>Search Results</h3>
@@ -147,8 +147,8 @@ export function SystemsIndexPage() {
                   {data.sources.map((source) => (
                     <li className="systems-list-row" key={source.source_id}>
                       <a href={systemsSourceHref(resolvedCampaignSlug, source.source_id)}>{source.title}</a>
-                      <p className="meta">{source.source_id} | {source.license_class_label}</p>
-                      <p className="meta">{source.default_visibility} visibility | {source.entry_count} available entries</p>
+                      <p className="meta">Source policy: {source.license_class_label}</p>
+                      <p className="meta">{source.entry_count} available entr{source.entry_count === 1 ? "y" : "ies"}</p>
                     </li>
                   ))}
                 </ul>
@@ -195,7 +195,11 @@ export function SystemsSourcePage() {
         <div>
           <p className="eyebrow">Systems source</p>
           <h1>{data?.source.title ?? resolvedSourceId}</h1>
-          {data ? <p className="lede">{data.source.source_id} | {data.source.license_class_label} | {data.source.default_visibility} visibility</p> : null}
+          {data ? (
+            <p className="lede">
+              {data.source.license_class_label} | {data.browsable_entry_count} visible entr{data.browsable_entry_count === 1 ? "y" : "ies"}
+            </p>
+          ) : null}
         </div>
         {data ? (
           data.permissions.can_manage_systems ? (
@@ -265,10 +269,10 @@ export function SystemsSourcePage() {
           </section>
           <aside className="sidebar systems-browse-sidebar">
             <section className="card sidebar-card">
-              <h2>Source Details</h2>
-              <p className="meta">Source ID: {data.source.source_id}</p>
-              <p className="meta">Default visibility: {data.source.default_visibility}</p>
-              <p className="meta">Available entries: {data.entry_count}</p>
+              <h2>Browse Summary</h2>
+              <p className="meta">Source policy: {data.source.license_class_label}</p>
+              <p className="meta">Visible entries: {data.browsable_entry_count}</p>
+              <p className="meta">Categories: {data.entry_groups.length}</p>
             </section>
           </aside>
         </div>
@@ -310,7 +314,7 @@ export function SystemsSourceCategoryPage() {
         <div>
           <p className="eyebrow">Systems source category</p>
           <h1>{data ? `${data.source.title}: ${data.entry_type_label}` : resolvedEntryType}</h1>
-          {data ? <p className="lede">{data.source.source_id} | {data.source.license_class_label} | {data.source.default_visibility} visibility</p> : null}
+          {data ? <p className="lede">{data.source.license_class_label} | {data.entry_count} entr{data.entry_count === 1 ? "y" : "ies"}</p> : null}
         </div>
         {data ? (
           data.permissions.can_manage_systems ? (
@@ -347,8 +351,8 @@ export function SystemsSourceCategoryPage() {
           </section>
           <aside className="sidebar systems-browse-sidebar">
             <section className="card sidebar-card">
-              <h2>Category Details</h2>
-              <p className="meta">Source ID: {data.source.source_id}</p>
+              <h2>Category Summary</h2>
+              <p className="meta">Source: {data.source.title}</p>
               <p className="meta">Category: {data.entry_type_label}</p>
               <p className="meta">Available entries: {data.entry_count}</p>
             </section>
@@ -392,7 +396,8 @@ export function SystemsEntryPage() {
           <p className="eyebrow">Systems entry</p>
           <h1>{entry.title}</h1>
           <p className="lede">
-            {entry.entry_type_label} | {entry.source_id}
+            {entry.entry_type_label}
+            {sourceState?.title ? ` | ${sourceState.title}` : ""}
             {sourceState?.license_class_label ? ` | ${sourceState.license_class_label}` : ""}
           </p>
         </section>
@@ -415,7 +420,7 @@ export function SystemsEntryPage() {
               <section className="sidebar-card-section">
                 <h3>Metadata</h3>
                 <p className="meta">Type: {entry.entry_type_label}</p>
-                <p className="meta">Source: {entry.source_id}</p>
+                {sourceState?.title ? <p className="meta">Source: {sourceState.title}</p> : null}
                 {entry.source_page ? <p className="meta">Source page: {entry.source_page}</p> : null}
               </section>
               <section className="sidebar-card-section">

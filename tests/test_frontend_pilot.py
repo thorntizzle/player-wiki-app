@@ -1369,6 +1369,44 @@ def test_systems_shared_chrome_lives_in_component_module() -> None:
     assert "Content Categories" not in source_page_source
 
 
+def test_systems_player_browse_hides_raw_source_metadata() -> None:
+    route_source = Path("frontend/src/pages/SystemsRoutes.tsx").read_text(encoding="utf-8")
+    chrome_source = Path("frontend/src/components/SystemsChrome.tsx").read_text(encoding="utf-8")
+    index_source = _extract_function_component_source(route_source, "SystemsIndexPage")
+    source_page_source = _extract_function_component_source(route_source, "SystemsSourcePage")
+    category_page_source = _extract_function_component_source(route_source, "SystemsSourceCategoryPage")
+    entry_page_source = _extract_function_component_source(route_source, "SystemsEntryPage")
+
+    assert "source IDs only" not in index_source
+    assert "{source.source_id} | {source.license_class_label}" not in index_source
+    assert "{source.default_visibility} visibility" not in index_source
+    assert "Source policy: {source.license_class_label}" in index_source
+
+    assert "Source ID:" not in source_page_source
+    assert "Default visibility:" not in source_page_source
+    assert "{data.source.source_id} | {data.source.license_class_label}" not in source_page_source
+    assert "{data.source.default_visibility} visibility" not in source_page_source
+    assert "<h2>Browse Summary</h2>" in source_page_source
+    assert "Source policy: {data.source.license_class_label}" in source_page_source
+    assert "Visible entries: {data.browsable_entry_count}" in source_page_source
+
+    assert "Source ID:" not in category_page_source
+    assert "{data.source.source_id} | {data.source.license_class_label}" not in category_page_source
+    assert "{data.source.default_visibility} visibility" not in category_page_source
+    assert "<h2>Category Summary</h2>" in category_page_source
+    assert "Source: {data.source.title}" in category_page_source
+
+    management_start = entry_page_source.index('<section className="card sidebar-card systems-sidebar-card" id="systems-entry-management">')
+    entry_viewer_source = entry_page_source[:management_start]
+    assert "{entry.entry_type_label} | {entry.source_id}" not in entry_viewer_source
+    assert '<p className="meta">Source: {entry.source_id}</p>' not in entry_viewer_source
+    assert "Source: {sourceState.title}" in entry_viewer_source
+    assert "Entry key: {entry.entry_key}" not in entry_viewer_source
+
+    assert "{entry.source_id} | {entry.entry_type_label}" not in chrome_source
+    assert "{entry.source_id} |" not in chrome_source
+
+
 def test_combat_empty_tracker_prompt_uses_current_surface_wording() -> None:
     source = Path("frontend/src/pages/CombatPage.tsx").read_text(encoding="utf-8")
     combat_page_source = _extract_function_component_source(source, "CombatPage")

@@ -52,7 +52,7 @@ export function SystemsEntryList({
           <a href={systemsEntryHref(campaignSlug, entry.slug)}>{entry.title}</a>
           {showMeta ? (
             <span className="meta systems-list-row__meta">
-              {entry.source_id} | {entry.entry_type_label}
+              {entry.entry_type_label}
               {entry.source_page ? ` | p. ${entry.source_page}` : ""}
             </span>
           ) : null}
@@ -80,7 +80,7 @@ export function SystemsRulesReferenceList({
         <li className="systems-list-row" key={`${entry.source_id}-${entry.slug}`}>
           <a href={systemsEntryHref(campaignSlug, entry.slug)}>{entry.title}</a>
           <span className="meta systems-list-row__meta">
-            {entry.source_id} | {entry.entry_type_label}
+            {entry.entry_type_label}
             {entry.reference_scope ? ` | ${entry.reference_scope}` : ""}
           </span>
         </li>
