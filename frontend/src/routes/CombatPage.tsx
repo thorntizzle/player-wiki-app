@@ -20,6 +20,7 @@ import { queryClient, useApiClient } from "../apiClientContext";
 import { getApiErrorMessage } from "../apiErrors";
 import { ApiErrorNotice } from "../components/feedback";
 import { readNumber } from "../characterValueUtils";
+import { CombatDmStatusPanel } from "../components/CombatDmStatusPanel";
 import { CombatPlayerWorkspace } from "../components/CombatPlayerWorkspace";
 import { resolveCombatLivePayload } from "../combatLiveUtils";
 import {
@@ -534,333 +535,6 @@ export function CombatPage() {
       setSystemsSearchResults([]);
       setSystemsSearchStatus(null);
     }
-  };
-
-  const renderDmStatus = () => {
-    if (!canManageCombat) {
-      return (
-        <article className="card">
-          <p>DM combat status requires combat management access.</p>
-        </article>
-      );
-    }
-    if (!selectedCombatant) {
-      return (
-        <article className="card">
-          <h3>No selected combatant</h3>
-          <p>Add combatants in DM Controls, then select one from the turn order.</p>
-        </article>
-      );
-    }
-    const isPlayerCharacter = Boolean(selectedCombatant.character_slug);
-    const vitalsPayload = (): CombatVitalsPatchPayload => {
-      const base: CombatVitalsPatchPayload = {
-        current_hp: vitalsDraft.currentHp,
-        temp_hp: vitalsDraft.tempHp,
-      };
-      if (isPlayerCharacter) {
-        base.expected_revision = selectedCombatant.state_revision;
-      } else {
-        base.expected_combatant_revision = selectedCombatant.combatant_revision;
-        base.max_hp = vitalsDraft.maxHp;
-        base.movement_total = vitalsDraft.movementTotal;
-      }
-      return base;
-    };
-
-    return (
-      <>
-        <section className="combat-dm-grid" aria-label="DM tactical controls">
-          <article className="card combat-control-card">
-            <div className="section-heading combat-status-snapshot__heading">
-              <div>
-                <p className="card-kicker">Authority</p>
-                <h2>Turn Focus</h2>
-              </div>
-              <div className="combatant-badges">
-                <span className="combat-badge">Round {tracker?.round_number ?? "?"}</span>
-                <span className="combat-badge">Turn {selectedCombatant.turn_value}</span>
-                {selectedCombatant.is_current_turn ? (
-                  <span className="combat-badge combat-badge--active">Current turn</span>
-                ) : (
-                  <button
-                    type="button"
-                    className="combat-badge combat-badge--button combat-status-snapshot__set-current"
-                    onClick={() => setCurrentMutation.mutate()}
-                    disabled={setCurrentMutation.isPending}
-                  >
-                    {setCurrentMutation.isPending ? "Setting..." : "Set current"}
-                  </button>
-                )}
-              </div>
-            </div>
-            <form
-              className="stack-form combat-status-authority-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                updateTurnMutation.mutate({
-                  expected_combatant_revision: selectedCombatant.combatant_revision,
-                  turn_value: turnDraft.turnValue,
-                  initiative_priority: turnDraft.initiativePriority,
-                });
-              }}
-            >
-              <label className="field">
-                <span>Turn value</span>
-                <input
-                  type="number"
-                  value={turnDraft.turnValue}
-                  onChange={(event) => setTurnDraft({ ...turnDraft, turnValue: event.currentTarget.value })}
-                />
-              </label>
-              <label className="field">
-                <span>Priority</span>
-                <input
-                  type="number"
-                  min="1"
-                  value={turnDraft.initiativePriority}
-                  onChange={(event) =>
-                    setTurnDraft({ ...turnDraft, initiativePriority: event.currentTarget.value })
-                  }
-                />
-              </label>
-              <button type="submit" disabled={updateTurnMutation.isPending}>
-                {updateTurnMutation.isPending ? "Saving..." : "Save turn"}
-              </button>
-            </form>
-            <div className="hero-actions combat-turn-actions">
-              <button type="button" onClick={() => advanceTurnMutation.mutate()} disabled={advanceTurnMutation.isPending}>
-                {advanceTurnMutation.isPending ? "Advancing..." : "Advance turn"}
-              </button>
-            </div>
-          </article>
-
-          <article className="card combat-control-card">
-            <div>
-              <p className="meta">Snapshot</p>
-              <h3>Vitals</h3>
-            </div>
-            <div className="combat-summary-grid combat-summary-grid--snapshot">
-              <form
-                className="combat-stat combat-stat--editable"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  updateVitalsMutation.mutate(vitalsPayload());
-                }}
-              >
-                <span className="meta">HP</span>
-                <div className="combat-inline-value">
-                  <input
-                    className="combat-stat-input combat-stat-input--number"
-                    aria-label="DM Current HP"
-                    type="number"
-                    value={vitalsDraft.currentHp}
-                    onChange={(event) => setVitalsDraft({ ...vitalsDraft, currentHp: event.currentTarget.value })}
-                  />
-                  <span className="combat-inline-divider">/</span>
-                  <strong>{vitalsDraft.maxHp}</strong>
-                </div>
-              </form>
-              <form
-                className="combat-stat combat-stat--editable"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  updateVitalsMutation.mutate(vitalsPayload());
-                }}
-              >
-                <span className="meta">Temp HP</span>
-                <input
-                  className="combat-stat-input combat-stat-input--single"
-                  aria-label="DM Temp HP"
-                  type="number"
-                  min="0"
-                  value={vitalsDraft.tempHp}
-                  onChange={(event) => setVitalsDraft({ ...vitalsDraft, tempHp: event.currentTarget.value })}
-                />
-              </form>
-              {!isPlayerCharacter ? (
-                <>
-                  <label className="field">
-                    <span>Max HP</span>
-                    <input
-                      aria-label="DM Max HP"
-                      type="number"
-                      min="0"
-                      value={vitalsDraft.maxHp}
-                      onChange={(event) => setVitalsDraft({ ...vitalsDraft, maxHp: event.currentTarget.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Movement total</span>
-                    <input
-                      aria-label="DM Movement total"
-                      type="number"
-                      min="0"
-                      value={vitalsDraft.movementTotal}
-                      onChange={(event) =>
-                        setVitalsDraft({ ...vitalsDraft, movementTotal: event.currentTarget.value })
-                      }
-                    />
-                  </label>
-                </>
-              ) : null}
-              <button type="button" onClick={() => updateVitalsMutation.mutate(vitalsPayload())} aria-label="Save DM vitals" disabled={updateVitalsMutation.isPending}>
-                {updateVitalsMutation.isPending ? "Saving..." : "Save vitals"}
-              </button>
-            </div>
-          </article>
-
-          <article className="card combat-control-card">
-            <div>
-              <p className="meta">Round tools</p>
-              <h3>Action Economy</h3>
-            </div>
-            <form
-              className="combat-resource-strip combat-inline-resource-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                updateResourcesMutation.mutate({
-                  expected_combatant_revision: selectedCombatant.combatant_revision,
-                  movement_remaining: resourcesDraft.movementRemaining,
-                  has_action: resourcesDraft.hasAction,
-                  has_bonus_action: resourcesDraft.hasBonusAction,
-                  has_reaction: resourcesDraft.hasReaction,
-                });
-              }}
-            >
-              <label className="combat-stat">
-                <span className="meta">Movement</span>
-                <div className="combat-inline-value">
-                  <input
-                    className="combat-stat-input combat-stat-input--number"
-                    aria-label="DM Movement Remaining"
-                    type="number"
-                    min="0"
-                    value={resourcesDraft.movementRemaining}
-                    onChange={(event) =>
-                      setResourcesDraft({ ...resourcesDraft, movementRemaining: event.currentTarget.value })
-                    }
-                  />
-                  <span className="combat-inline-divider">/</span>
-                  <strong>{vitalsDraft.movementTotal}</strong>
-                </div>
-              </label>
-              <label className="combat-resource-toggle">
-                <input
-                  type="checkbox"
-                  checked={resourcesDraft.hasAction}
-                  onChange={(event) => setResourcesDraft({ ...resourcesDraft, hasAction: event.currentTarget.checked })}
-                />
-                <span className="combat-resource">Action</span>
-              </label>
-              <label className="combat-resource-toggle">
-                <input
-                  type="checkbox"
-                  checked={resourcesDraft.hasBonusAction}
-                  onChange={(event) =>
-                    setResourcesDraft({ ...resourcesDraft, hasBonusAction: event.currentTarget.checked })
-                  }
-                />
-                <span className="combat-resource">Bonus action</span>
-              </label>
-              <label className="combat-resource-toggle">
-                <input
-                  type="checkbox"
-                  checked={resourcesDraft.hasReaction}
-                  onChange={(event) =>
-                    setResourcesDraft({ ...resourcesDraft, hasReaction: event.currentTarget.checked })
-                  }
-                />
-                <span className="combat-resource">Reaction</span>
-              </label>
-              <button type="submit" disabled={updateResourcesMutation.isPending}>
-                {updateResourcesMutation.isPending ? "Saving..." : "Save economy"}
-              </button>
-            </form>
-          </article>
-
-          <article className="card combat-control-card">
-            <datalist id="gen2-combat-condition-options">
-              {conditionOptions.map((option) => (
-                <option key={option} value={option} />
-              ))}
-            </datalist>
-            <section className="combat-conditions combat-conditions--compact combat-status-conditions">
-              <div className="section-heading">
-                <h3>Conditions</h3>
-                <details className="combat-condition-editor combat-condition-editor--add">
-                  <summary>Add condition</summary>
-                  <form
-                    className="combat-condition-editor__form"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      addConditionMutation.mutate(conditionDraft);
-                    }}
-                  >
-                    <label className="field">
-                      <span>Condition</span>
-                      <input
-                        type="text"
-                        list="gen2-combat-condition-options"
-                        value={conditionDraft.name}
-                        onChange={(event) => setConditionDraft({ ...conditionDraft, name: event.currentTarget.value })}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Duration</span>
-                      <input
-                        type="text"
-                        value={conditionDraft.durationText}
-                        onChange={(event) =>
-                          setConditionDraft({ ...conditionDraft, durationText: event.currentTarget.value })
-                        }
-                      />
-                    </label>
-                    <button type="submit" disabled={addConditionMutation.isPending}>
-                      {addConditionMutation.isPending ? "Adding..." : "Add condition"}
-                    </button>
-                  </form>
-                </details>
-              </div>
-              {selectedCombatant.conditions.length ? (
-                <div className="combat-condition-list">
-                  {selectedCombatant.conditions.map((condition) => (
-                    <div className="combat-condition-item" key={condition.id}>
-                      <div>
-                        <strong>{condition.name}</strong>
-                        {condition.duration_text ? <p className="meta">{condition.duration_text}</p> : null}
-                      </div>
-                      <div className="combat-condition-actions">
-                        <button
-                          type="button"
-                          className="ghost-button"
-                          onClick={() => deleteConditionMutation.mutate(condition)}
-                          disabled={deleteConditionMutation.isPending}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="meta">No conditions are active on this combatant.</p>
-              )}
-            </section>
-          </article>
-        </section>
-
-        <section className="card combat-danger-card">
-          <div>
-            <p className="meta">Cleanup</p>
-            <h3>Selected combatant</h3>
-          </div>
-          <button type="button" className="ghost-button" onClick={() => deleteCombatantMutation.mutate()}>
-            {deleteCombatantMutation.isPending ? "Removing..." : "Remove selected combatant"}
-          </button>
-        </section>
-      </>
-    );
   };
 
   const renderDmControls = () => {
@@ -1390,7 +1064,38 @@ export function CombatPage() {
             </section>
           ) : null}
 
-          {effectiveCombatView === "status" ? renderDmStatus() : null}
+          {effectiveCombatView === "status" ? (
+            <CombatDmStatusPanel
+              canManageCombat={canManageCombat}
+              selectedCombatant={selectedCombatant}
+              trackerRoundNumber={tracker?.round_number ?? null}
+              conditionOptions={conditionOptions}
+              turnDraft={turnDraft}
+              vitalsDraft={vitalsDraft}
+              resourcesDraft={resourcesDraft}
+              conditionDraft={conditionDraft}
+              isUpdatingTurn={updateTurnMutation.isPending}
+              isUpdatingVitals={updateVitalsMutation.isPending}
+              isUpdatingResources={updateResourcesMutation.isPending}
+              isAddingCondition={addConditionMutation.isPending}
+              isDeletingCondition={deleteConditionMutation.isPending}
+              isSettingCurrent={setCurrentMutation.isPending}
+              isAdvancingTurn={advanceTurnMutation.isPending}
+              isDeletingCombatant={deleteCombatantMutation.isPending}
+              onTurnDraftChange={(updates) => setTurnDraft((current) => ({ ...current, ...updates }))}
+              onVitalsDraftChange={(updates) => setVitalsDraft((current) => ({ ...current, ...updates }))}
+              onResourcesDraftChange={(updates) => setResourcesDraft((current) => ({ ...current, ...updates }))}
+              onConditionDraftChange={(updates) => setConditionDraft((current) => ({ ...current, ...updates }))}
+              onUpdateTurn={(draft) => updateTurnMutation.mutate(draft)}
+              onUpdateVitals={(draft) => updateVitalsMutation.mutate(draft)}
+              onUpdateResources={(draft) => updateResourcesMutation.mutate(draft)}
+              onAddCondition={(draft) => addConditionMutation.mutate(draft)}
+              onDeleteCondition={(condition) => deleteConditionMutation.mutate(condition)}
+              onSetCurrent={() => setCurrentMutation.mutate()}
+              onAdvanceTurn={() => advanceTurnMutation.mutate()}
+              onDeleteCombatant={() => deleteCombatantMutation.mutate()}
+            />
+          ) : null}
           {effectiveCombatView === "controls" ? renderDmControls() : null}
           {effectiveCombatView === "player" ? (
             <CombatPlayerWorkspace

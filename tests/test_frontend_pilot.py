@@ -838,17 +838,19 @@ def test_session_log_detail_delete_button_uses_ghost_button_class_in_source() ->
 
 def test_combat_action_chrome_in_source() -> None:
     source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    status_panel_source = Path("frontend/src/components/CombatDmStatusPanel.tsx").read_text(encoding="utf-8")
     combat_page_source = _extract_function_component_source(source, "CombatPage")
 
-    remove_on_click = "onClick={() => deleteCombatantMutation.mutate()}"
+    remove_on_click = "onClick={onDeleteCombatant}"
     clear_on_click = "onClick={() => clearCombatMutation.mutate()}"
 
-    remove_button_start = combat_page_source.rfind("<button", 0, combat_page_source.index(remove_on_click))
-    remove_button_end = combat_page_source.index("</button>", remove_button_start) + len("</button>")
-    remove_button_block = combat_page_source[remove_button_start:remove_button_end]
+    assert "onDeleteCombatant={() => deleteCombatantMutation.mutate()}" in combat_page_source
+    remove_button_start = status_panel_source.rfind("<button", 0, status_panel_source.index(remove_on_click))
+    remove_button_end = status_panel_source.index("</button>", remove_button_start) + len("</button>")
+    remove_button_block = status_panel_source[remove_button_start:remove_button_end]
     assert 'className="ghost-button"' in remove_button_block
     assert "className=\"button button-secondary\"" not in remove_button_block
-    assert "onClick={() => deleteCombatantMutation.mutate()}" in remove_button_block
+    assert remove_on_click in remove_button_block
 
     clear_button_start = combat_page_source.rfind("<button", 0, combat_page_source.index(clear_on_click))
     clear_button_end = combat_page_source.index("</button>", clear_button_start) + len("</button>")
@@ -1136,35 +1138,33 @@ def test_gen2_combat_dm_resolves_away_from_player_workspace_in_source() -> None:
     assert '<CombatPlayerWorkspace' in combat_page_source
     assert 'onSelectCombatant={selectCombatant}' in combat_page_source
     assert 'onSelectedCharacterChange={selectCharacterTarget}' in combat_page_source
+    assert 'import { CombatDmStatusPanel } from "../components/CombatDmStatusPanel";' in source
+    assert '<CombatDmStatusPanel' in combat_page_source
 
 
 def test_gen2_combat_dm_status_omits_nested_selected_pc_detail_in_source() -> None:
-    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
-    dm_status_match = re.search(
-        r"const renderDmStatus = \(\) => \{[\s\S]*?\n  \};(?=\n\n  const renderDmControls)",
-        source,
-    )
-    assert dm_status_match is not None
-    dm_status_source = dm_status_match.group(0)
+    route_source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    dm_status_source = Path("frontend/src/components/CombatDmStatusPanel.tsx").read_text(encoding="utf-8")
 
+    assert "const renderDmStatus" not in route_source
+    assert "<CombatDmStatusPanel" in route_source
     assert "Selected PC detail" not in dm_status_source
     assert "initialCharacterSlug={selectedCombatant.character_slug}" not in dm_status_source
 
 
 def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
-    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
-    combat_page_source = _extract_function_component_source(source, "CombatPage")
+    source = Path("frontend/src/components/CombatDmStatusPanel.tsx").read_text(encoding="utf-8")
 
     turn_focus_match = re.search(
         r'<article className="card combat-control-card">\s*<div className="section-heading combat-status-snapshot__heading"[\s\S]*?</article>',
-        combat_page_source,
+        source,
     )
     assert turn_focus_match is not None
     turn_focus_markup = turn_focus_match.group(0)
 
     assert 'className="section-heading combat-status-snapshot__heading"' in turn_focus_markup
     assert '<div className="combatant-badges">' in turn_focus_markup
-    assert 'className="combat-badge">Round {tracker?.round_number ?? "?"}</span>' in turn_focus_markup
+    assert 'className="combat-badge">Round {trackerRoundNumber ?? "?"}</span>' in turn_focus_markup
     assert 'className="combat-badge">Turn {selectedCombatant.turn_value}</span>' in turn_focus_markup
     assert '<span className="combat-badge combat-badge--active">Current turn</span>' in turn_focus_markup
     assert (
@@ -1174,12 +1174,12 @@ def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
     assert (
         re.search(
             r'<button[^>]*className="combat-badge combat-badge--button combat-status-snapshot__set-current"[^>]*'
-            r'onClick=\{\(\) => setCurrentMutation\.mutate\(\)\}[^>]*disabled=\{setCurrentMutation\.isPending\}\s*>',
+            r'onClick=\{onSetCurrent\}[^>]*disabled=\{isSettingCurrent\}\s*>',
             turn_focus_markup,
         )
         is not None
     )
-    assert "{setCurrentMutation.isPending ? \"Setting...\" : \"Set current\"}" in turn_focus_markup
+    assert '{isSettingCurrent ? "Setting..." : "Set current"}' in turn_focus_markup
 
     assert 'className="stack-form combat-status-authority-form"' in turn_focus_markup
     assert re.search(r'<label className="field">\s*<span>Turn value</span>', turn_focus_markup) is not None
@@ -1187,15 +1187,14 @@ def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
     assert "className=\"chat-label\"" not in turn_focus_markup
 
     assert 'className="hero-actions combat-turn-actions"' in turn_focus_markup
-    assert '{advanceTurnMutation.isPending ? "Advancing..." : "Advance turn"}' in turn_focus_markup
-    assert '<button type="button" onClick={() => advanceTurnMutation.mutate()} disabled={advanceTurnMutation.isPending}>' in turn_focus_markup
+    assert '{isAdvancingTurn ? "Advancing..." : "Advance turn"}' in turn_focus_markup
+    assert '<button type="button" onClick={onAdvanceTurn} disabled={isAdvancingTurn}>' in turn_focus_markup
 
     assert '<div className="button-row">' not in turn_focus_markup
 
 
 def test_combat_dm_status_tactical_forms_chrome_in_source() -> None:
-    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
-    combat_page_source = _extract_function_component_source(source, "CombatPage")
+    combat_page_source = Path("frontend/src/components/CombatDmStatusPanel.tsx").read_text(encoding="utf-8")
 
     tactical_start = combat_page_source.index('<section className="combat-dm-grid" aria-label="DM tactical controls">')
     tactical_end = combat_page_source.index('<section className="card combat-danger-card">', tactical_start)
@@ -1240,8 +1239,7 @@ def test_combat_player_workspace_target_chrome_in_source() -> None:
 
 
 def test_combat_conditions_chrome_in_source() -> None:
-    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
-    combat_page_source = _extract_function_component_source(source, "CombatPage")
+    combat_page_source = Path("frontend/src/components/CombatDmStatusPanel.tsx").read_text(encoding="utf-8")
 
     condition_section_match = re.search(
         r'<section className="combat-conditions combat-conditions--compact combat-status-conditions">([\s\S]*?)</section>',
@@ -1261,7 +1259,7 @@ def test_combat_conditions_chrome_in_source() -> None:
     assert 'className="combat-condition-item"' in condition_section_markup
     assert 'className="combat-condition-actions"' in condition_section_markup
     assert re.search(
-        r'<button\s+type="button"\s+className="ghost-button"[^>]*onClick=\{\(\) => deleteConditionMutation\.mutate\(condition\)\}[^>]*>\s*Remove\s*</button>',
+        r'<button\s+type="button"\s+className="ghost-button"[^>]*onClick=\{\(\) => onDeleteCondition\(condition\)\}[^>]*>\s*Remove\s*</button>',
         condition_section_markup,
     ) is not None
     assert "className=\"button button-secondary\"" not in condition_section_markup
