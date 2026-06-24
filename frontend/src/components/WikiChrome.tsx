@@ -366,9 +366,6 @@ export function WikiSectionBrowse({
                 <p>
                   {section.page_count} page{section.page_count === 1 ? "" : "s"} available in this section.
                 </p>
-                <p>
-                  <a href={preferredCampaignLink(section.href, campaignSlug, frontendMode)}>Open {section.section_name}</a>
-                </p>
               </article>
             ),
           )}

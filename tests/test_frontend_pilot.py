@@ -2108,6 +2108,7 @@ def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> N
     assert 'aria-label="Campaign wiki sections"' in nav_source
     assert 'className="card wiki-home-section-card"' in nav_source
     assert 'className="wiki-home-section-card__icon"' in nav_source
+    assert "Open {section.section_name}" not in nav_source
     assert "WIKI_SECTION_ICON_BY_SLUG" in nav_source
     assert "overview: \"book\"" not in nav_source
     assert "spells: \"wand\"" in nav_source
