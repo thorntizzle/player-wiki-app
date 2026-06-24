@@ -1358,6 +1358,59 @@ def test_campaign_help_page_removes_flask_help_fallback() -> None:
         assert class_match.group(1) == "ghost-button campaign-help-section-link"
 
 
+def test_shared_focus_and_field_contracts_use_theme_tokens() -> None:
+    source = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+
+    shared_focus_match = re.search(
+        r"\.button:focus-visible,\s*"
+        r"\.button-link:focus-visible,\s*"
+        r"\.button-danger:focus-visible,\s*"
+        r"\.ghost-button:focus-visible,\s*"
+        r"\.link-like-button:focus-visible,\s*"
+        r"\.tab-button:focus-visible,\s*"
+        r"input:focus-visible,\s*"
+        r"select:focus-visible,\s*"
+        r"textarea:focus-visible\s*\{([\s\S]*?)\}",
+        source,
+    )
+    assert shared_focus_match is not None
+    shared_focus_block = shared_focus_match.group(1)
+    assert "outline: 2px solid var(--focus-ring);" in shared_focus_block
+    assert "outline-offset: 2px;" in shared_focus_block
+    assert "var(--accent)" not in shared_focus_block
+
+    help_target_match = re.search(
+        r"\.campaign-help-surface:target,\s*"
+        r"\.campaign-help-surface:focus-visible\s*\{([\s\S]*?)\}",
+        source,
+    )
+    assert help_target_match is not None
+    assert "outline: 2px solid var(--focus-ring);" in help_target_match.group(1)
+
+    field_match = re.search(r"\.field\s*\{([\s\S]*?)\}", source)
+    assert field_match is not None
+    assert "color: var(--ink);" in field_match.group(1)
+
+    field_control_match = re.search(
+        r"\.field input,\s*"
+        r"\.field select,\s*"
+        r"\.field textarea\s*\{([\s\S]*?)\}",
+        source,
+    )
+    assert field_control_match is not None
+    field_control_block = field_control_match.group(1)
+    assert "border: 1px solid var(--border);" in field_control_block
+    assert "color: var(--ink);" in field_control_block
+    assert "background: var(--input-bg);" in field_control_block
+    assert "#cfd9e8" not in field_control_block
+    assert "#182437" not in field_control_block
+    assert "#fff" not in field_control_block
+
+    field_small_match = re.search(r"\.field small\s*\{([\s\S]*?)\}", source)
+    assert field_small_match is not None
+    assert "color: var(--muted);" in field_small_match.group(1)
+
+
 def test_systems_entry_navigation_removes_open_flask_entry_link() -> None:
     source = Path("frontend/src/pages/SystemsRoutes.tsx").read_text(encoding="utf-8")
     systems_entry_start = source.index("export function SystemsEntryPage() {")
