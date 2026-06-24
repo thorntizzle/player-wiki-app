@@ -839,10 +839,11 @@ def test_session_log_detail_delete_button_uses_ghost_button_class_in_source() ->
 def test_combat_action_chrome_in_source() -> None:
     source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
     status_panel_source = Path("frontend/src/components/CombatDmStatusPanel.tsx").read_text(encoding="utf-8")
+    controls_panel_source = Path("frontend/src/components/CombatDmControlsPanel.tsx").read_text(encoding="utf-8")
     combat_page_source = _extract_function_component_source(source, "CombatPage")
 
     remove_on_click = "onClick={onDeleteCombatant}"
-    clear_on_click = "onClick={() => clearCombatMutation.mutate()}"
+    clear_on_click = "onClick={onClearCombat}"
 
     assert "onDeleteCombatant={() => deleteCombatantMutation.mutate()}" in combat_page_source
     remove_button_start = status_panel_source.rfind("<button", 0, status_panel_source.index(remove_on_click))
@@ -852,12 +853,13 @@ def test_combat_action_chrome_in_source() -> None:
     assert "className=\"button button-secondary\"" not in remove_button_block
     assert remove_on_click in remove_button_block
 
-    clear_button_start = combat_page_source.rfind("<button", 0, combat_page_source.index(clear_on_click))
-    clear_button_end = combat_page_source.index("</button>", clear_button_start) + len("</button>")
-    clear_button_block = combat_page_source[clear_button_start:clear_button_end]
+    assert "onClearCombat={() => clearCombatMutation.mutate()}" in combat_page_source
+    clear_button_start = controls_panel_source.rfind("<button", 0, controls_panel_source.index(clear_on_click))
+    clear_button_end = controls_panel_source.index("</button>", clear_button_start) + len("</button>")
+    clear_button_block = controls_panel_source[clear_button_start:clear_button_end]
     assert 'className="ghost-button"' in clear_button_block
     assert "className=\"button button-secondary\"" not in clear_button_block
-    assert "onClick={() => clearCombatMutation.mutate()}" in clear_button_block
+    assert clear_on_click in clear_button_block
 
 
 def test_combat_chrome_components_preserve_summary_carousel_and_view_switch() -> None:
@@ -916,13 +918,17 @@ def test_combat_chrome_components_preserve_summary_carousel_and_view_switch() ->
 
 
 def test_combat_dm_controls_add_and_cleanup_chrome_in_source() -> None:
-    source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
-    combat_page_source = _extract_function_component_source(source, "CombatPage")
+    route_source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
+    controls_panel_source = Path("frontend/src/components/CombatDmControlsPanel.tsx").read_text(encoding="utf-8")
+    combat_page_source = _extract_function_component_source(route_source, "CombatPage")
 
-    add_heading_index = combat_page_source.index("<h2>Add combatant</h2>")
-    add_card_start = combat_page_source.rfind('<section className="card sidebar-card">', 0, add_heading_index)
-    add_card_end = combat_page_source.index("</section>", add_heading_index) + len("</section>")
-    add_card_markup = combat_page_source[add_card_start:add_card_end]
+    assert "<CombatDmControlsPanel" in combat_page_source
+    assert "onAddSystemsMonster={(entryKey) => addSystemsMonsterMutation.mutate(entryKey)}" in combat_page_source
+
+    add_heading_index = controls_panel_source.index("<h2>Add combatant</h2>")
+    add_card_start = controls_panel_source.rfind('<section className="card sidebar-card">', 0, add_heading_index)
+    add_card_end = controls_panel_source.index("</section>", add_heading_index) + len("</section>")
+    add_card_markup = controls_panel_source[add_card_start:add_card_end]
 
     assert add_card_start >= 0
     assert add_card_markup.count('<section className="card sidebar-card">') == 1
@@ -950,15 +956,15 @@ def test_combat_dm_controls_add_and_cleanup_chrome_in_source() -> None:
     assert '<h3>Add Statblock</h3>' not in add_card_markup
     assert '<h3>Add Systems Monster</h3>' not in add_card_markup
 
-    cleanup_heading_index = combat_page_source.index("<h2>Encounter cleanup</h2>")
-    cleanup_card_start = combat_page_source.rfind('<section className="card sidebar-card">', 0, cleanup_heading_index)
-    cleanup_card_end = combat_page_source.index("</section>", cleanup_heading_index) + len("</section>")
-    cleanup_card_markup = combat_page_source[cleanup_card_start:cleanup_card_end]
+    cleanup_heading_index = controls_panel_source.index("<h2>Encounter cleanup</h2>")
+    cleanup_card_start = controls_panel_source.rfind('<section className="card sidebar-card">', 0, cleanup_heading_index)
+    cleanup_card_end = controls_panel_source.index("</section>", cleanup_heading_index) + len("</section>")
+    cleanup_card_markup = controls_panel_source[cleanup_card_start:cleanup_card_end]
 
     assert cleanup_card_start >= 0
     assert 'className="card sidebar-card"' in cleanup_card_markup
     assert "className=\"ghost-button\"" in cleanup_card_markup
-    assert "onClick={() => clearCombatMutation.mutate()}" in cleanup_card_markup
+    assert "onClick={onClearCombat}" in cleanup_card_markup
     assert "Clear tracker" in cleanup_card_markup
     assert 'className="button-row"' not in cleanup_card_markup
 

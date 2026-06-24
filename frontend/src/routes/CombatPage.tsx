@@ -1,11 +1,8 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { FormEvent } from "react";
 import { apiErrorMessage } from "../api/client";
 import type {
-  CombatAvailableCharacterChoice,
-  CombatAvailableStatblockChoice,
   CombatSystemsMonsterSearchResult,
   CombatPayload,
   CombatCondition,
@@ -29,6 +26,14 @@ import {
   CombatViewSwitch,
   type CombatView,
 } from "../components/CombatChrome";
+import {
+  CombatDmControlsPanel,
+  type CombatAddMode,
+  type CombatNpcSeedDraft,
+  type CombatPlayerSeedDraft,
+  type CombatStatblockSeedDraft,
+  type CombatSystemsSeedDraft,
+} from "../components/CombatDmControlsPanel";
 
 interface CombatVitalsDraft {
   currentHp: string;
@@ -53,39 +58,6 @@ interface CombatConditionDraft {
   name: string;
   durationText: string;
 }
-
-interface CombatPlayerSeedDraft {
-  characterSlug: string;
-  turnValue: string;
-  initiativePriority: string;
-}
-
-interface CombatNpcSeedDraft {
-  displayName: string;
-  turnValue: string;
-  initiativeBonus: string;
-  dexterityModifier: string;
-  initiativePriority: string;
-  currentHp: string;
-  maxHp: string;
-  tempHp: string;
-  movementTotal: string;
-}
-
-interface CombatStatblockSeedDraft {
-  statblockId: string;
-  displayName: string;
-  turnValue: string;
-  initiativePriority: string;
-}
-
-interface CombatSystemsSeedDraft {
-  entryKey: string;
-  displayName: string;
-  turnValue: string;
-  initiativePriority: string;
-}
-
 
 export function CombatPage() {
   const params = useParams({
@@ -151,9 +123,7 @@ export function CombatPage() {
     turnValue: "",
     initiativePriority: "1",
   });
-  const [combatAddMode, setCombatAddMode] = useState<"player" | "systems" | "dm-content" | "custom">(
-    "player",
-  );
+  const [combatAddMode, setCombatAddMode] = useState<CombatAddMode>("player");
   const [systemsSearchQuery, setSystemsSearchQuery] = useState("");
   const [systemsSearchStatus, setSystemsSearchStatus] = useState<string | null>(null);
   const [systemsSearchResults, setSystemsSearchResults] = useState<CombatSystemsMonsterSearchResult[]>([]);
@@ -231,8 +201,8 @@ export function CombatPage() {
       : "status"
     : "player";
   const paneError = getApiErrorMessage(combatQuery.error);
-  const availableCharacters: CombatAvailableCharacterChoice[] = payload?.available_character_choices ?? [];
-  const availableStatblocks: CombatAvailableStatblockChoice[] = payload?.available_statblock_choices ?? [];
+  const availableCharacters = payload?.available_character_choices ?? [];
+  const availableStatblocks = payload?.available_statblock_choices ?? [];
   const conditionOptions = payload?.combat_condition_options ?? [];
   const encodedCampaignSlug = encodeURIComponent(campaignSlug);
 
@@ -516,8 +486,7 @@ export function CombatPage() {
     onError: handleCombatMutationError,
   });
 
-  const searchSystemsMonsters = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const searchSystemsMonsters = async () => {
     const query = systemsSearchQuery.trim();
     if (query.length < 2) {
       setSystemsSearchStatus("Type at least 2 letters to search Systems monsters.");
@@ -537,414 +506,44 @@ export function CombatPage() {
     }
   };
 
-  const renderDmControls = () => {
-    if (!canManageCombat) {
-      return (
-        <article className="card">
-          <p>DM combat controls require combat management access.</p>
-        </article>
-      );
-    }
-    return (
-      <section className="combat-controls-layout" aria-label="DM combat controls">
-        <article className="card combat-control-card">
-          <div>
-            <p className="meta">Encounter controls</p>
-            <h3>Tracker</h3>
-          </div>
-          <button type="button" onClick={() => advanceTurnMutation.mutate()} disabled={advanceTurnMutation.isPending}>
-            {advanceTurnMutation.isPending ? "Advancing..." : "Advance turn"}
-          </button>
-        </article>
-
-        <section className="card sidebar-card">
-          <h2>Add combatant</h2>
-          <div className="combat-add-combatant-mode-switcher" role="radiogroup" aria-label="Add combatant type">
-            <input
-              className="combat-add-combatant-mode-radio combat-add-combatant-mode-radio--player"
-              id="combat-add-mode-player"
-              name="combat-add-mode"
-              type="radio"
-              value="player"
-              checked={combatAddMode === "player"}
-              onChange={() => setCombatAddMode("player")}
-            />
-            {canAccessSystems ? (
-              <input
-                className="combat-add-combatant-mode-radio combat-add-combatant-mode-radio--systems"
-                id="combat-add-mode-systems"
-                name="combat-add-mode"
-                type="radio"
-                value="systems"
-                checked={combatAddMode === "systems"}
-                onChange={() => setCombatAddMode("systems")}
-              />
-            ) : null}
-            {canAccessDmContent ? (
-              <input
-                className="combat-add-combatant-mode-radio combat-add-combatant-mode-radio--dm-content"
-                id="combat-add-mode-dm-content"
-                name="combat-add-mode"
-                type="radio"
-                value="dm-content"
-                checked={combatAddMode === "dm-content"}
-                onChange={() => setCombatAddMode("dm-content")}
-              />
-            ) : null}
-            <input
-              className="combat-add-combatant-mode-radio combat-add-combatant-mode-radio--custom"
-              id="combat-add-mode-custom"
-              name="combat-add-mode"
-              type="radio"
-              value="custom"
-              checked={combatAddMode === "custom"}
-              onChange={() => setCombatAddMode("custom")}
-            />
-            <div className="combat-add-combatant-mode-toggle">
-              <label className="ghost-button" htmlFor="combat-add-mode-player">
-                Add player character
-              </label>
-              {canAccessSystems ? (
-                <label className="ghost-button" htmlFor="combat-add-mode-systems">
-                  Add NPC from Systems
-                </label>
-              ) : null}
-              {canAccessDmContent ? (
-                <label className="ghost-button" htmlFor="combat-add-mode-dm-content">
-                  Add NPC from DM Content
-                </label>
-              ) : null}
-              <label className="ghost-button" htmlFor="combat-add-mode-custom">
-                Add custom combatant
-              </label>
-            </div>
-
-            <div
-              className={`combat-add-combatant-mode-panel combat-add-combatant-mode-panel--player ${
-                combatAddMode === "player" ? "combat-add-combatant-mode-panel--active" : ""
-              }`}
-            >
-              {availableCharacters.length ? (
-                <form
-                  className="stack-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    addPlayerMutation.mutate();
-                  }}
-                >
-                  <label className="field">
-                    <span>Character</span>
-                    <select
-                      value={playerSeedDraft.characterSlug}
-                      onChange={(event) => setPlayerSeedDraft({ ...playerSeedDraft, characterSlug: event.currentTarget.value })}
-                    >
-                      <option value="">Choose character</option>
-                      {availableCharacters.map((choice) => (
-                        <option key={choice.slug} value={choice.slug}>
-                          {choice.name} {choice.subtitle ? `- ${choice.subtitle}` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>Turn value</span>
-                    <input
-                      type="number"
-                      value={playerSeedDraft.turnValue}
-                      onChange={(event) => setPlayerSeedDraft({ ...playerSeedDraft, turnValue: event.currentTarget.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Priority</span>
-                    <input
-                      type="number"
-                      min="1"
-                      value={playerSeedDraft.initiativePriority}
-                      onChange={(event) =>
-                        setPlayerSeedDraft({ ...playerSeedDraft, initiativePriority: event.currentTarget.value })
-                      }
-                    />
-                  </label>
-                  <button type="submit" disabled={addPlayerMutation.isPending}>
-                    {addPlayerMutation.isPending ? "Adding..." : "Add player character"}
-                  </button>
-                </form>
-              ) : (
-                <p className="meta">All visible player characters are already in the tracker.</p>
-              )}
-            </div>
-
-            {canAccessSystems ? (
-              <div
-                className={`combat-add-combatant-mode-panel combat-add-combatant-mode-panel--systems ${
-                  combatAddMode === "systems" ? "combat-add-combatant-mode-panel--active" : ""
-                }`}
-              >
-                <form className="stack-form" onSubmit={searchSystemsMonsters}>
-                  <label className="field">
-                    <span>Search monsters</span>
-                    <input
-                      type="search"
-                      value={systemsSearchQuery}
-                      onChange={(event) => setSystemsSearchQuery(event.currentTarget.value)}
-                    />
-                  </label>
-                  <button type="submit">Search</button>
-                </form>
-                {systemsSearchStatus ? <p className="status status-neutral">{systemsSearchStatus}</p> : null}
-                <div className="combat-systems-results">
-                  {systemsSearchResults.map((result) => (
-                    <article className="compact-card" key={result.entry_key}>
-                      <div>
-                        <strong>{result.title}</strong>
-                        <p className="meta">
-                          {result.source_id} - {result.subtitle} - Init {result.initiative_bonus}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => addSystemsMonsterMutation.mutate(result.entry_key)}
-                        disabled={addSystemsMonsterMutation.isPending}
-                      >
-                        Add
-                      </button>
-                    </article>
-                  ))}
-                </div>
-                <div className="stack-form">
-                  <label className="field">
-                    <span>Display name</span>
-                    <input
-                      type="text"
-                      value={systemsSeedDraft.displayName}
-                      onChange={(event) =>
-                        setSystemsSeedDraft({ ...systemsSeedDraft, displayName: event.currentTarget.value })
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Turn value</span>
-                    <input
-                      type="number"
-                      value={systemsSeedDraft.turnValue}
-                      onChange={(event) =>
-                        setSystemsSeedDraft({ ...systemsSeedDraft, turnValue: event.currentTarget.value })
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Priority</span>
-                    <input
-                      type="number"
-                      min="1"
-                      value={systemsSeedDraft.initiativePriority}
-                      onChange={(event) =>
-                        setSystemsSeedDraft({ ...systemsSeedDraft, initiativePriority: event.currentTarget.value })
-                      }
-                    />
-                  </label>
-                </div>
-              </div>
-            ) : null}
-
-            {canAccessDmContent ? (
-              <div
-                className={`combat-add-combatant-mode-panel combat-add-combatant-mode-panel--dm-content ${
-                  combatAddMode === "dm-content" ? "combat-add-combatant-mode-panel--active" : ""
-                }`}
-              >
-                {availableStatblocks.length ? (
-                  <form
-                    className="stack-form"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      addStatblockMutation.mutate();
-                    }}
-                  >
-                    <label className="field">
-                      <span>Statblock</span>
-                      <select
-                        value={statblockSeedDraft.statblockId}
-                        onChange={(event) =>
-                          setStatblockSeedDraft({ ...statblockSeedDraft, statblockId: event.currentTarget.value })
-                        }
-                      >
-                        <option value="">Choose statblock</option>
-                        {availableStatblocks.map((choice) => (
-                          <option key={choice.id} value={choice.id}>
-                            {choice.title} - {choice.subtitle}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>Display name override</span>
-                      <input
-                        type="text"
-                        value={statblockSeedDraft.displayName}
-                        onChange={(event) =>
-                          setStatblockSeedDraft({ ...statblockSeedDraft, displayName: event.currentTarget.value })
-                        }
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Turn override</span>
-                      <input
-                        type="number"
-                        value={statblockSeedDraft.turnValue}
-                        onChange={(event) =>
-                          setStatblockSeedDraft({ ...statblockSeedDraft, turnValue: event.currentTarget.value })
-                        }
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Priority</span>
-                      <input
-                        type="number"
-                        min="1"
-                        value={statblockSeedDraft.initiativePriority}
-                        onChange={(event) =>
-                          setStatblockSeedDraft({ ...statblockSeedDraft, initiativePriority: event.currentTarget.value })
-                        }
-                      />
-                    </label>
-                    <button type="submit" disabled={addStatblockMutation.isPending}>
-                      {addStatblockMutation.isPending ? "Adding..." : "Add statblock"}
-                    </button>
-                  </form>
-                ) : (
-                  <p className="meta">Upload statblocks on the DM Content page to use them here.</p>
-                )}
-              </div>
-            ) : null}
-
-            <div
-              className={`combat-add-combatant-mode-panel combat-add-combatant-mode-panel--custom ${
-                combatAddMode === "custom" ? "combat-add-combatant-mode-panel--active" : ""
-              }`}
-            >
-              <form
-                className="stack-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  addNpcMutation.mutate();
-                }}
-              >
-                <label className="field">
-                  <span>Name</span>
-                  <input
-                    type="text"
-                    value={npcSeedDraft.displayName}
-                    onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, displayName: event.currentTarget.value })}
-                  />
-                </label>
-                <label className="field">
-                  <span>Turn value</span>
-                  <input
-                    type="number"
-                    value={npcSeedDraft.turnValue}
-                    onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, turnValue: event.currentTarget.value })}
-                  />
-                </label>
-                <label className="field">
-                  <span>Initiative bonus</span>
-                  <input
-                    type="number"
-                    value={npcSeedDraft.initiativeBonus}
-                    onChange={(event) =>
-                      setNpcSeedDraft({ ...npcSeedDraft, initiativeBonus: event.currentTarget.value })
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Dex mod</span>
-                  <input
-                    type="number"
-                    value={npcSeedDraft.dexterityModifier}
-                    onChange={(event) =>
-                      setNpcSeedDraft({ ...npcSeedDraft, dexterityModifier: event.currentTarget.value })
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Current HP</span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={npcSeedDraft.currentHp}
-                    onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, currentHp: event.currentTarget.value })}
-                  />
-                </label>
-                <label className="field">
-                  <span>Max HP</span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={npcSeedDraft.maxHp}
-                    onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, maxHp: event.currentTarget.value })}
-                  />
-                </label>
-                <label className="field">
-                  <span>Temp HP</span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={npcSeedDraft.tempHp}
-                    onChange={(event) => setNpcSeedDraft({ ...npcSeedDraft, tempHp: event.currentTarget.value })}
-                  />
-                </label>
-                <label className="field">
-                  <span>Movement</span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={npcSeedDraft.movementTotal}
-                    onChange={(event) =>
-                      setNpcSeedDraft({ ...npcSeedDraft, movementTotal: event.currentTarget.value })
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Priority</span>
-                  <input
-                    type="number"
-                    min="1"
-                    value={npcSeedDraft.initiativePriority}
-                    onChange={(event) =>
-                      setNpcSeedDraft({ ...npcSeedDraft, initiativePriority: event.currentTarget.value })
-                    }
-                  />
-                </label>
-                <button type="submit" disabled={addNpcMutation.isPending}>
-                  {addNpcMutation.isPending ? "Adding..." : "Add NPC combatant"}
-                </button>
-              </form>
-            </div>
-          </div>
-        </section>
-
-        <section className="card sidebar-card">
-          <h2>Encounter cleanup</h2>
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={confirmClearTracker}
-              onChange={(event) => setConfirmClearTracker(event.currentTarget.checked)}
-            />
-            Confirm clear tracker
-          </label>
-          <button
-            type="button"
-            className="ghost-button"
-            onClick={() => clearCombatMutation.mutate()}
-            disabled={!confirmClearTracker || clearCombatMutation.isPending}
-          >
-            {clearCombatMutation.isPending ? "Clearing..." : "Clear tracker"}
-          </button>
-        </section>
-      </section>
-    );
-  };
+  const renderDmControls = () => (
+    <CombatDmControlsPanel
+      canManageCombat={canManageCombat}
+      canAccessSystems={canAccessSystems}
+      canAccessDmContent={canAccessDmContent}
+      combatAddMode={combatAddMode}
+      availableCharacters={availableCharacters}
+      availableStatblocks={availableStatblocks}
+      playerSeedDraft={playerSeedDraft}
+      npcSeedDraft={npcSeedDraft}
+      statblockSeedDraft={statblockSeedDraft}
+      systemsSeedDraft={systemsSeedDraft}
+      systemsSearchQuery={systemsSearchQuery}
+      systemsSearchStatus={systemsSearchStatus}
+      systemsSearchResults={systemsSearchResults}
+      confirmClearTracker={confirmClearTracker}
+      isAdvancingTurn={advanceTurnMutation.isPending}
+      isAddingPlayer={addPlayerMutation.isPending}
+      isAddingNpc={addNpcMutation.isPending}
+      isAddingStatblock={addStatblockMutation.isPending}
+      isAddingSystemsMonster={addSystemsMonsterMutation.isPending}
+      isClearingCombat={clearCombatMutation.isPending}
+      onCombatAddModeChange={setCombatAddMode}
+      onPlayerSeedDraftChange={(updates) => setPlayerSeedDraft((current) => ({ ...current, ...updates }))}
+      onNpcSeedDraftChange={(updates) => setNpcSeedDraft((current) => ({ ...current, ...updates }))}
+      onStatblockSeedDraftChange={(updates) => setStatblockSeedDraft((current) => ({ ...current, ...updates }))}
+      onSystemsSeedDraftChange={(updates) => setSystemsSeedDraft((current) => ({ ...current, ...updates }))}
+      onSystemsSearchQueryChange={setSystemsSearchQuery}
+      onConfirmClearTrackerChange={setConfirmClearTracker}
+      onAdvanceTurn={() => advanceTurnMutation.mutate()}
+      onAddPlayer={() => addPlayerMutation.mutate()}
+      onAddNpc={() => addNpcMutation.mutate()}
+      onAddStatblock={() => addStatblockMutation.mutate()}
+      onAddSystemsMonster={(entryKey) => addSystemsMonsterMutation.mutate(entryKey)}
+      onSearchSystemsMonsters={searchSystemsMonsters}
+      onClearCombat={() => clearCombatMutation.mutate()}
+    />
+  );
 
   return (
     <>
