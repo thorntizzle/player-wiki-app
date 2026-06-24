@@ -30,7 +30,11 @@
             <p class="meta">System: {{ entry.campaign.system }}</p>
           {% endif %}
           <p class="meta">Visible through session {{ entry.campaign.current_session }}</p>
-          {% set campaign_href = url_for("campaign_view", campaign_slug=entry.campaign.slug) %}
+          {% if app_next_available %}
+            {% set campaign_href = url_for("app_next_path", asset_path="campaigns/" ~ entry.campaign.slug) %}
+          {% else %}
+            {% set campaign_href = url_for("campaign_view", campaign_slug=entry.campaign.slug) %}
+          {% endif %}
           <a class="button-link" href="{{ campaign_href }}">Open campaign</a>
         </article>
       {% endfor %}

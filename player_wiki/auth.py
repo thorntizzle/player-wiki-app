@@ -424,9 +424,15 @@ def register_auth(app: Flask) -> None:
             entries = get_public_campaign_entries()
         else:
             entries = get_accessible_campaign_entries()
+        app_next_dist_dir = current_app.config["APP_NEXT_DIST_DIR"]
+        app_next_available = (
+            current_app.config["APP_NEXT_PREVIEW_ENABLED"]
+            and (app_next_dist_dir / "index.html").is_file()
+        )
         return render_template(
             "campaign_picker.html",
             campaign_entries=entries,
+            app_next_available=app_next_available,
         )
 
 

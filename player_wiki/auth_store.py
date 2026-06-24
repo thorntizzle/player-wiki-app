@@ -16,7 +16,7 @@ SESSION_CHAT_ORDER_OLDEST_FIRST = "oldest_first"
 DEFAULT_SESSION_CHAT_ORDER = SESSION_CHAT_ORDER_NEWEST_FIRST
 FRONTEND_MODE_FLASK = "flask"
 FRONTEND_MODE_GEN2 = "gen2"
-DEFAULT_FRONTEND_MODE = FRONTEND_MODE_FLASK
+DEFAULT_FRONTEND_MODE = FRONTEND_MODE_GEN2
 SESSION_CHAT_ORDER_LABELS = {
     SESSION_CHAT_ORDER_NEWEST_FIRST: "Newest first",
     SESSION_CHAT_ORDER_OLDEST_FIRST: "Oldest first",
@@ -39,7 +39,7 @@ VALID_SESSION_CHAT_ORDERS = frozenset(
         SESSION_CHAT_ORDER_OLDEST_FIRST,
     }
 )
-VALID_FRONTEND_MODES = frozenset({FRONTEND_MODE_FLASK})
+VALID_FRONTEND_MODES = frozenset({FRONTEND_MODE_GEN2})
 
 
 def utcnow() -> datetime:
@@ -240,7 +240,7 @@ class AuthStore:
             connection.execute(
                 """
                 ALTER TABLE user_preferences
-                ADD COLUMN frontend_mode TEXT NOT NULL DEFAULT 'flask'
+                ADD COLUMN frontend_mode TEXT NOT NULL DEFAULT 'gen2'
                 """
             )
             migrated = True

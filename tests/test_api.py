@@ -502,7 +502,7 @@ def test_api_me_and_campaigns_use_bearer_token_auth(client, app, users):
     assert me_payload["user"]["email"] == users["dm"]["email"]
     assert me_payload["preferences"]["theme_key"] is not None
     assert me_payload["preferences"]["session_chat_order"] is not None
-    assert me_payload["preferences"]["frontend_mode"] == "flask"
+    assert me_payload["preferences"]["frontend_mode"] == "gen2"
 
     campaigns_response = client.get("/api/v1/campaigns", headers=api_headers(token))
 
@@ -535,7 +535,7 @@ def test_api_account_settings_reads_and_updates_user_preferences(client, app, us
     assert settings_payload["preferences"] == {
         "theme_key": "parchment",
         "session_chat_order": "newest_first",
-        "frontend_mode": "flask",
+        "frontend_mode": "gen2",
     }
     assert [theme["key"] for theme in settings_payload["theme_presets"]] == [
         "parchment",
@@ -560,7 +560,7 @@ def test_api_account_settings_reads_and_updates_user_preferences(client, app, us
     assert update_payload["preferences"] == {
         "theme_key": "moonlit",
         "session_chat_order": "oldest_first",
-        "frontend_mode": "flask",
+        "frontend_mode": "gen2",
     }
 
     me_response = client.get("/api/v1/me", headers=api_headers(token))
@@ -571,7 +571,7 @@ def test_api_account_settings_reads_and_updates_user_preferences(client, app, us
         preferences = AuthStore().get_user_preferences(users["party"]["id"])
         assert preferences.theme_key == "moonlit"
         assert preferences.session_chat_order == "oldest_first"
-        assert preferences.frontend_mode == "flask"
+        assert preferences.frontend_mode == "gen2"
 
 
 def test_api_account_settings_rejects_invalid_preferences(client, app, users):
@@ -615,7 +615,7 @@ def test_api_account_settings_rejects_invalid_preferences(client, app, users):
         preferences = AuthStore().get_user_preferences(users["party"]["id"])
         assert preferences.theme_key == "parchment"
         assert preferences.session_chat_order == "newest_first"
-        assert preferences.frontend_mode == "flask"
+        assert preferences.frontend_mode == "gen2"
 
 
 def test_api_admin_user_management_context_actions_and_permissions(client, app, users):
@@ -859,18 +859,18 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert home_response.status_code == 200
     home_payload = home_response.get_json()
     assert home_payload["ok"] is True
-    assert home_payload["frontend_mode"] == "flask"
+    assert home_payload["frontend_mode"] == "gen2"
     assert home_payload["can_view_wiki"] is True
     assert home_payload["overview_page"] is None
     assert all(section["section_name"] != "Overview" for section in home_payload["grouped_sections"])
     assert all(section["section_name"] != "Overview" for section in home_payload["section_navigation"])
     locations_group = next(section for section in home_payload["grouped_sections"] if section["section_name"] == "Locations")
-    assert locations_group["href"] == "/campaigns/linden-pass/sections/locations"
+    assert locations_group["href"] == "/app-next/campaigns/linden-pass/sections/locations"
     locations_nav_item = next(section for section in home_payload["section_navigation"] if section["section_name"] == "Locations")
     assert locations_nav_item == {
         "section_name": "Locations",
         "section_slug": "locations",
-        "href": "/campaigns/linden-pass/sections/locations",
+        "href": "/app-next/campaigns/linden-pass/sections/locations",
         "page_count": locations_group["page_count"],
     }
 
@@ -889,7 +889,7 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
         for page in section["pages"]
     ]
     captain = next(page for page in search_pages if page["page_ref"] == "npcs/captain-lyra-vale")
-    assert captain["href"] == "/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
+    assert captain["href"] == "/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
     assert "source_ref" not in captain
     assert "aliases" not in captain
     assert any(section["section_name"] == "Locations" for section in search_payload["section_navigation"])
@@ -901,10 +901,10 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert section_response.status_code == 200
     section_payload = section_response.get_json()
     assert section_payload["section_name"] == "Locations"
-    assert section_payload["frontend_mode"] == "flask"
+    assert section_payload["frontend_mode"] == "gen2"
     assert section_payload["show_subsections"] is True
     assert section_payload["top_level_pages"][0]["title"] == "Port Meridian"
-    assert section_payload["top_level_pages"][0]["href"].startswith("/campaigns/linden-pass/pages/")
+    assert section_payload["top_level_pages"][0]["href"].startswith("/app-next/campaigns/linden-pass/pages/")
     subsection_names = [group["subsection_name"] for group in section_payload["subsection_groups"]]
     assert "Civic and Institutional Sites" in subsection_names
     assert "Venues and Residences" in subsection_names
@@ -921,8 +921,8 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert page_payload["page"]["image"]["caption"] == "Harbor watch captain and trusted ally of the crew."
     assert "Captain Lyra Vale coordinates inspections" in page_payload["page"]["body_html"]
     assert page_payload["links"]["flask_page_url"] == "/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
-    assert page_payload["links"]["campaign_url"] == "/campaigns/linden-pass"
-    assert page_payload["links"]["section_url"] == "/campaigns/linden-pass/sections/npcs"
+    assert page_payload["links"]["campaign_url"] == "/app-next/campaigns/linden-pass"
+    assert page_payload["links"]["section_url"] == "/app-next/campaigns/linden-pass/sections/npcs"
     assert page_payload["links"]["gen2_campaign_url"] == "/app-next/campaigns/linden-pass"
     assert any(section["section_slug"] == "npcs" for section in page_payload["section_navigation"])
 
@@ -932,10 +932,10 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     )
     assert note_response.status_code == 200
     note_body = note_response.get_json()["page"]["body_html"]
-    assert 'href="/campaigns/linden-pass/pages/npcs/captain-lyra-vale"' in note_body
-    assert 'href="/campaigns/linden-pass/pages/locations/harbor-row"' in note_body
+    assert 'href="/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale"' in note_body
+    assert 'href="/app-next/campaigns/linden-pass/pages/locations/harbor-row"' in note_body
     assert "/app-next/app-next/" not in note_body
-    assert 'href="/app-next/campaigns/linden-pass/pages/' not in note_body
+    assert 'href="/campaigns/linden-pass/pages/' not in note_body
 
     overview_section_response = client.get(
         "/api/v1/campaigns/linden-pass/wiki/sections/overview",
@@ -949,21 +949,21 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert overview_page_response.status_code == 404
 
     with app.app_context():
-        AuthStore().set_user_frontend_mode(users["party"]["id"], "gen2")
+        AuthStore().set_user_frontend_mode(users["party"]["id"], "flask")
 
     legacy_home_response = client.get("/api/v1/campaigns/linden-pass/wiki", headers=api_headers(player_token))
     assert legacy_home_response.status_code == 200
     legacy_home_payload = legacy_home_response.get_json()
-    assert legacy_home_payload["frontend_mode"] == "flask"
+    assert legacy_home_payload["frontend_mode"] == "gen2"
     assert legacy_home_payload["overview_page"] is None
     assert all(section["section_name"] != "Overview" for section in legacy_home_payload["grouped_sections"])
     assert all(section["section_name"] != "Overview" for section in legacy_home_payload["section_navigation"])
     legacy_locations_group = next(section for section in legacy_home_payload["grouped_sections"] if section["section_name"] == "Locations")
-    assert legacy_locations_group["href"] == "/campaigns/linden-pass/sections/locations"
+    assert legacy_locations_group["href"] == "/app-next/campaigns/linden-pass/sections/locations"
     legacy_locations_nav_item = next(
         section for section in legacy_home_payload["section_navigation"] if section["section_name"] == "Locations"
     )
-    assert legacy_locations_nav_item["href"] == "/campaigns/linden-pass/sections/locations"
+    assert legacy_locations_nav_item["href"] == "/app-next/campaigns/linden-pass/sections/locations"
 
     legacy_search_response = client.get(
         "/api/v1/campaigns/linden-pass/wiki?q=capt",
@@ -976,7 +976,7 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
         for page in section["pages"]
     ]
     legacy_captain = next(page for page in legacy_search_pages if page["page_ref"] == "npcs/captain-lyra-vale")
-    assert legacy_captain["href"] == "/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
+    assert legacy_captain["href"] == "/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
 
     legacy_page_response = client.get(
         "/api/v1/campaigns/linden-pass/wiki/pages/npcs/captain-lyra-vale",
@@ -984,8 +984,8 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     )
     assert legacy_page_response.status_code == 200
     legacy_page_payload = legacy_page_response.get_json()
-    assert legacy_page_payload["links"]["campaign_url"] == "/campaigns/linden-pass"
-    assert legacy_page_payload["links"]["section_url"] == "/campaigns/linden-pass/sections/npcs"
+    assert legacy_page_payload["links"]["campaign_url"] == "/app-next/campaigns/linden-pass"
+    assert legacy_page_payload["links"]["section_url"] == "/app-next/campaigns/linden-pass/sections/npcs"
     assert legacy_page_payload["links"]["flask_page_url"] == "/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
 
 

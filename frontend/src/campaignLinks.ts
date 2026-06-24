@@ -1,7 +1,7 @@
 import type { FrontendMode } from "./apiClientContext";
 
 export function normalizeFrontendMode(value: string | null | undefined): FrontendMode {
-  return value === "gen2" ? "gen2" : "flask";
+  return value === "flask" ? "flask" : "gen2";
 }
 
 export function routeFrontendMode(preferredMode: FrontendMode): FrontendMode {
@@ -9,7 +9,7 @@ export function routeFrontendMode(preferredMode: FrontendMode): FrontendMode {
   return browserPathname === "/app-next" || browserPathname.startsWith("/app-next/") ? "gen2" : preferredMode;
 }
 
-export function campaignRouteHref(campaignSlug: string, suffix = "", frontendMode: FrontendMode = "flask"): string {
+export function campaignRouteHref(campaignSlug: string, suffix = "", frontendMode: FrontendMode = "gen2"): string {
   const normalizedCampaignSlug = encodeURIComponent(campaignSlug);
   const base = frontendMode === "gen2" ? `/app-next/campaigns/${normalizedCampaignSlug}` : `/campaigns/${normalizedCampaignSlug}`;
   const normalizedSuffix = suffix.replace(/^\/+/, "");

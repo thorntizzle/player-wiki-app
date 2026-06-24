@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     user_id INTEGER PRIMARY KEY,
     theme_key TEXT NOT NULL DEFAULT 'parchment',
     session_chat_order TEXT NOT NULL DEFAULT 'newest_first' CHECK (session_chat_order IN ('newest_first', 'oldest_first')),
-    frontend_mode TEXT NOT NULL DEFAULT 'flask' CHECK (frontend_mode IN ('flask', 'gen2')),
+    frontend_mode TEXT NOT NULL DEFAULT 'gen2' CHECK (frontend_mode IN ('flask', 'gen2')),
     updated_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -771,7 +771,7 @@ def _migrate_user_preferences_for_frontend_mode(connection: sqlite3.Connection) 
     connection.execute(
         """
         ALTER TABLE user_preferences
-        ADD COLUMN frontend_mode TEXT NOT NULL DEFAULT 'flask'
+        ADD COLUMN frontend_mode TEXT NOT NULL DEFAULT 'gen2'
         """
     )
 

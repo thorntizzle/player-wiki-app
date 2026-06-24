@@ -693,12 +693,12 @@ def register_api(app) -> None:
             return f"/app-next/campaigns/{campaign_slug}/{suffix}"
         return f"/app-next/campaigns/{campaign_slug}"
 
-    def preferred_campaign_href(campaign_slug: str, suffix: str = "", frontend_mode: str = "flask") -> str:
+    def preferred_campaign_href(campaign_slug: str, suffix: str = "", frontend_mode: str = "gen2") -> str:
         if normalize_frontend_mode(frontend_mode) == "gen2":
             return gen2_campaign_href(campaign_slug, suffix)
         return flask_campaign_href(campaign_slug, suffix)
 
-    def preferred_wiki_body_html(campaign_slug: str, body_html: str, frontend_mode: str = "flask") -> str:
+    def preferred_wiki_body_html(campaign_slug: str, body_html: str, frontend_mode: str = "gen2") -> str:
         normalized_frontend_mode = normalize_frontend_mode(frontend_mode)
         base = "/app-next/campaigns" if normalized_frontend_mode == "gen2" else "/campaigns"
         rewritten = re.sub(
@@ -738,7 +738,7 @@ def register_api(app) -> None:
         page,
         *,
         include_image: bool = False,
-        frontend_mode: str = "flask",
+        frontend_mode: str = "gen2",
     ) -> dict[str, Any]:
         payload = {
             "page_ref": page.route_slug,
@@ -773,7 +773,7 @@ def register_api(app) -> None:
         page,
         body_html: str,
         *,
-        frontend_mode: str = "flask",
+        frontend_mode: str = "gen2",
     ) -> dict[str, Any]:
         return {
             **serialize_public_wiki_page(
@@ -790,7 +790,7 @@ def register_api(app) -> None:
         section_name: str,
         pages: list[Any],
         *,
-        frontend_mode: str = "flask",
+        frontend_mode: str = "gen2",
     ) -> dict[str, Any]:
         return {
             "section_name": section_name,
@@ -811,7 +811,7 @@ def register_api(app) -> None:
         campaign,
         pages: list[Any],
         *,
-        frontend_mode: str = "flask",
+        frontend_mode: str = "gen2",
     ) -> list[dict[str, Any]]:
         grouped_pages_map: dict[str, list[Any]] = defaultdict(list)
         for page in pages:
@@ -835,7 +835,7 @@ def register_api(app) -> None:
         section_name: str,
         pages: list[Any],
         *,
-        frontend_mode: str = "flask",
+        frontend_mode: str = "gen2",
     ) -> dict[str, Any]:
         top_level_pages = [page for page in pages if not page.subsection]
         subsection_groups: dict[str, list[Any]] = defaultdict(list)

@@ -157,8 +157,7 @@ def test_frontend_pilot_routes_are_closed(client, app, tmp_path):
     assert missing_asset_response.status_code == 404
 
 
-def test_frontend_pilot_routes_are_available_with_preview_and_index(app, client, tmp_path):
-    app.config["APP_NEXT_PREVIEW_ENABLED"] = True
+def test_frontend_pilot_routes_are_available_by_default_with_index(app, client, tmp_path):
     dist_dir = tmp_path / "frontend-dist-preview"
     assets_dir = dist_dir / "assets"
     dist_dir.mkdir(parents=True)
@@ -224,6 +223,18 @@ def test_frontend_pilot_routes_are_available_with_preview_and_index(app, client,
 
     missing_asset_response = client.get("/app-next/assets/missing.js")
     assert missing_asset_response.status_code == 404
+
+
+def test_home_redirects_to_gen2_campaign_when_built_index_is_available(app, client, tmp_path):
+    dist_dir = tmp_path / "frontend-dist-default"
+    dist_dir.mkdir(parents=True)
+    (dist_dir / "index.html").write_text("<!doctype html><html><body>gen2</body></html>", encoding="utf-8")
+    app.config["APP_NEXT_DIST_DIR"] = dist_dir
+
+    response = client.get("/", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/app-next/campaigns/linden-pass")
 
 
 def test_frontend_index_includes_app_loading_shell_source() -> None:
