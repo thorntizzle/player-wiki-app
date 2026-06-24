@@ -2693,6 +2693,7 @@ def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_sour
     assert 'className="feature-detail dm-maintenance-detail"' in statblock_edit_markup
     assert "Source filename: {statblock.source_filename}" in statblock_edit_markup
     assert "Parser summary: {statblock.parser_feedback.summary}" in statblock_edit_markup
+    assert "Combat seed source" not in statblock_edit_markup
     assert '<p className="status status-neutral">{statblock.parser_feedback.summary}</p>' not in statblock_edit_markup
     assert re.search(r'<label className="field">\s*<span>Subsection</span>', statblock_edit_markup) is not None
     assert re.search(r'<label className="field">\s*<span>Source markdown body</span>', statblock_edit_markup) is not None
