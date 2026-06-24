@@ -5,14 +5,24 @@ import type {
   CharacterBuilderOption,
   CharacterEditorChoiceField,
   CharacterEditorField,
+  CharacterRecord,
   CharacterLevelUpContext,
   CharacterProgressionRepairContext,
   CharacterRetrainingContext,
   CharacterXianxiaManualImportContext,
   CharacterXianxiaManualImportRow,
 } from "./api/types";
+import { asRecord, readString } from "./characterValueUtils";
 
 export type CharacterAuthoringValues = Record<string, string | string[]>;
+
+export function characterNameFromRecord(character: CharacterRecord | undefined): string {
+  return readString(asRecord(character?.definition?.profile).name, readString(character?.definition?.name, "Character"));
+}
+
+export function classLevelTextFromRecord(character: CharacterRecord | undefined): string {
+  return readString(asRecord(character?.definition?.profile).class_level_text);
+}
 
 export function optionValue(option: CharacterBuilderOption): string {
   return String(option.value || option.slug || option.entry_key || option.key || "");

@@ -478,6 +478,26 @@ def test_character_xianxia_manual_import_route_lives_in_route_module() -> None:
     assert "manualImportRows(context, rowCount, draftValues)" in import_source
 
 
+def test_character_advanced_editor_route_lives_in_route_module() -> None:
+    main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    authoring_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    editor_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
+
+    assert 'import { CharacterAdvancedEditorPage } from "./routes/CharacterAdvancedEditorPage";' in main_source
+    assert "function CharacterAdvancedEditorPage" not in authoring_source
+    assert "CharacterEditorRecoverablePenaltyRow" not in authoring_source
+    assert "editorValuesFromContext" not in authoring_source
+    assert "editorSelectOptions" not in authoring_source
+    assert 'component: CharacterAdvancedEditorPage' in main_source
+
+    assert "export function CharacterAdvancedEditorPage()" in editor_source
+    assert 'from: "/campaigns/$campaignSlug/characters/$characterSlug/edit"' in editor_source
+    assert "apiClient.getCharacterAdvancedEditor(campaignSlug, characterSlug)" in editor_source
+    assert "apiClient.updateCharacterAdvancedEditor(campaignSlug, characterSlug" in editor_source
+    assert "editorValuesFromContext(editor)" in editor_source
+    assert "expected_revision: editor.state_revision" in editor_source
+
+
 def test_character_authoring_preview_lists_live_in_component_module() -> None:
     route_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
@@ -517,10 +537,15 @@ def test_character_authoring_dnd_choice_select_lives_in_field_component() -> Non
 
 def test_character_authoring_shared_helpers_live_in_utility_module() -> None:
     route_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    editor_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
     import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
     helper_source = Path("frontend/src/characterAuthoringUtils.tsx").read_text(encoding="utf-8")
 
     assert "from \"../characterAuthoringUtils\";" in route_source
+    assert "function characterNameFromRecord" not in route_source
+    assert "function classLevelTextFromRecord" not in route_source
+    assert "function characterNameFromRecord" not in editor_source
+    assert "function classLevelTextFromRecord" not in editor_source
     assert "function optionValue" not in route_source
     assert "function optionLabel" not in route_source
     assert "function draftString(" not in route_source
@@ -538,6 +563,8 @@ def test_character_authoring_shared_helpers_live_in_utility_module() -> None:
     assert "manualImportRows(context, rowCount, draftValues)" in import_source
 
     assert "export type CharacterAuthoringValues" in helper_source
+    assert "export function characterNameFromRecord" in helper_source
+    assert "export function classLevelTextFromRecord" in helper_source
     assert "export function optionValue" in helper_source
     assert "export function optionLabel" in helper_source
     assert "export function draftString" in helper_source
@@ -1095,9 +1122,11 @@ def test_combat_conditions_chrome_in_source() -> None:
 
 def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
 
     def component_source(component_name: str) -> str:
-        return _extract_function_component_source(source, component_name)
+        component_owner = advanced_source if component_name == "CharacterAdvancedEditorPage" else source
+        return _extract_function_component_source(component_owner, component_name)
 
     def unsupported_card(component_name: str) -> str:
         component_markup = component_source(component_name)
@@ -1171,11 +1200,13 @@ def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
 
 def test_character_supported_form_action_chrome_in_source() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
     manual_import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
 
     def component_source(component_name: str) -> str:
-        return _extract_function_component_source(source, component_name)
+        component_owner = advanced_source if component_name == "CharacterAdvancedEditorPage" else source
+        return _extract_function_component_source(component_owner, component_name)
 
     def supported_component(component_name: str) -> str:
         component = component_source(component_name)
@@ -1271,11 +1302,13 @@ def test_character_supported_form_action_chrome_in_source() -> None:
 
 def test_character_supported_hero_links_preserve_supported_nav_while_hiding_flask_fallbacks() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
     manual_import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
 
     def component_source(component_name: str) -> str:
-        return _extract_function_component_source(source, component_name)
+        component_owner = advanced_source if component_name == "CharacterAdvancedEditorPage" else source
+        return _extract_function_component_source(component_owner, component_name)
 
     def hero_section(component_name: str) -> str:
         component = component_source(component_name)

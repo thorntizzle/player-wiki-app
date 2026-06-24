@@ -21,8 +21,8 @@ import {
 } from "./routes/SystemsRoutes";
 import { AdminDashboardPage, AdminUserDetailPage } from "./routes/AdminRoutes";
 import { CampaignListPage } from "./routes/CampaignPickerPage";
+import { CharacterAdvancedEditorPage } from "./routes/CharacterAdvancedEditorPage";
 import {
-  CharacterAdvancedEditorPage,
   CharacterCultivationPage,
   CharacterLevelUpPage,
   CharacterProgressionRepairPage,
