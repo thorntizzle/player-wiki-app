@@ -1,5 +1,5 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 
 import { apiErrorMessage } from "../api/client";
 import type {
@@ -26,6 +26,7 @@ import {
   type EmbeddedImageInput,
   type ManualArticleDraftState,
 } from "../sessionArticleDrafts";
+import { useSessionDmMutations } from "../sessionDmMutations";
 import { formatTimestamp } from "../timeFormatting";
 
 export function DmPane({
@@ -85,137 +86,25 @@ export function DmPane({
     }
   }, [sessionLogs, selectedLogSessionId]);
 
-  const startSessionMutation = useMutation({
-    mutationFn: () => apiClient.startSession(campaignSlug),
-    onSuccess: () => {
-      setPaneError(null);
-      setUiMessage("Session started.");
-      void refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setUiMessage(null);
-      setPaneError(apiErrorMessage(error));
-    },
-  });
-
-  const closeSessionMutation = useMutation({
-    mutationFn: () => apiClient.closeSession(campaignSlug),
-    onSuccess: () => {
-      setPaneError(null);
-      setUiMessage("Session closed.");
-      void refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setUiMessage(null);
-      setPaneError(apiErrorMessage(error));
-    },
-  });
-
-  const createArticleMutation = useMutation({
-    mutationFn: (payload: SessionArticleCreatePayload) => apiClient.createSessionArticle(campaignSlug, payload),
-    onSuccess: () => {
-      setUiMessage("Article created.");
-      setPaneError(null);
-      setManualDraft(buildEmptyManualArticleDraft());
-      void refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    },
-  });
-
-  const updateArticleMutation = useMutation({
-    mutationFn: (args: { id: number; payload: { title: string; body_markdown: string; image_alt_text?: string; image_caption?: string } }) =>
-      apiClient.updateSessionArticle(campaignSlug, args.id, args.payload),
-    onSuccess: () => {
-      setUiMessage("Article updated.");
-      setPaneError(null);
-      void refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setUiMessage(null);
-      setPaneError(apiErrorMessage(error));
-    },
-  });
-
-  const revealArticleMutation = useMutation({
-    mutationFn: (articleId: number) => apiClient.revealSessionArticle(campaignSlug, articleId),
-    onSuccess: () => {
-      setUiMessage("Article revealed.");
-      setPaneError(null);
-      void refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    },
-  });
-
-  const deleteArticleMutation = useMutation({
-    mutationFn: (articleId: number) => apiClient.deleteSessionArticle(campaignSlug, articleId),
-    onSuccess: () => {
-      setUiMessage("Article deleted.");
-      setPaneError(null);
-      void refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    },
-  });
-
-  const clearRevealedMutation = useMutation({
-    mutationFn: () => apiClient.clearRevealedSessionArticles(campaignSlug),
-    onSuccess: () => {
-      setUiMessage("Revealed articles cleared.");
-      setPaneError(null);
-      void refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    },
-  });
-
-  const deleteLogMutation = useMutation({
-    mutationFn: (sessionId: number) => apiClient.deleteSessionLog(campaignSlug, sessionId),
-    onSuccess: (_data, sessionId) => {
-      setUiMessage("Session log deleted.");
-      setPaneError(null);
-      if (selectedLogSessionId === sessionId) {
-        setSelectedLogSessionId(null);
-      }
-      void refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    },
+  const {
+    clearRevealedMutation,
+    closeSessionMutation,
+    createArticleMutation,
+    deleteArticleMutation,
+    deleteLogMutation,
+    revealArticleMutation,
+    startSessionMutation,
+    updateArticleMutation,
+  } = useSessionDmMutations({
+    apiClient,
+    campaignSlug,
+    selectedLogSessionId,
+    setAuthRequired,
+    setUiMessage,
+    setPaneError,
+    setManualDraft,
+    setSelectedLogSessionId,
+    refetch,
   });
 
   const logQuery = useQuery({

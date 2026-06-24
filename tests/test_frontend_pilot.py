@@ -935,6 +935,25 @@ def test_session_log_detail_delete_button_uses_ghost_button_class_in_source() ->
     assert "disabled={deleteLogMutation.isPending}" in delete_button_block
 
 
+def test_session_dm_mutations_live_in_shared_hook() -> None:
+    pane_source = Path("frontend/src/routes/SessionDmPane.tsx").read_text(encoding="utf-8")
+    hook_source = Path("frontend/src/sessionDmMutations.ts").read_text(encoding="utf-8")
+
+    assert 'import { useSessionDmMutations } from "../sessionDmMutations";' in pane_source
+    assert "} = useSessionDmMutations({" in pane_source
+    assert 'import { useMutation } from "@tanstack/react-query";' not in pane_source
+    assert "apiClient.startSession(campaignSlug)" not in pane_source
+    assert "apiClient.revealSessionArticle(campaignSlug, articleId)" not in pane_source
+    assert "apiClient.deleteSessionLog(campaignSlug, sessionId)" not in pane_source
+
+    assert "export function useSessionDmMutations(" in hook_source
+    assert "const startSessionMutation = useMutation({" in hook_source
+    assert "const revealArticleMutation = useMutation({" in hook_source
+    assert "const deleteLogMutation = useMutation({" in hook_source
+    assert 'setUiMessage("Revealed articles cleared.");' in hook_source
+    assert "setManualDraft(buildEmptyManualArticleDraft());" in hook_source
+
+
 def test_combat_action_chrome_in_source() -> None:
     source = Path("frontend/src/routes/CombatPage.tsx").read_text(encoding="utf-8")
     status_panel_source = Path("frontend/src/components/CombatDmStatusPanel.tsx").read_text(encoding="utf-8")
