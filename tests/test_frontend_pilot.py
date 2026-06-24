@@ -363,6 +363,7 @@ def test_app_shell_search_auth_and_loading_live_in_shared_modules() -> None:
     search_source = Path("frontend/src/components/CampaignGlobalSearch.tsx").read_text(encoding="utf-8")
     auth_source = Path("frontend/src/components/AuthNotice.tsx").read_text(encoding="utf-8")
     loading_source = Path("frontend/src/appLoadingReadiness.tsx").read_text(encoding="utf-8")
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
 
     assert 'import { CampaignGlobalSearch } from "./components/CampaignGlobalSearch";' in shell_source
     assert 'import { AuthNotice } from "./components/AuthNotice";' in shell_source
@@ -372,8 +373,15 @@ def test_app_shell_search_auth_and_loading_live_in_shared_modules() -> None:
     assert "function RouteSuspenseFallback" not in shell_source
     assert "function useAppLoadingReadiness" not in shell_source
     assert "export function CampaignGlobalSearch" in search_source
+    assert "function formatSearchStatus" in search_source
+    assert "Search complete." not in search_source
+    assert 'return `Found ${resultCount} matching reference${resultCount === 1 ? "" : "s"}.`;' in search_source
     assert 'className="campaign-global-search"' in search_source
     assert "previewCampaignReference" in search_source
+    assert ".campaign-global-search-result:focus-visible" in styles
+    assert "outline: 2px solid var(--focus-ring);" in styles[
+        styles.index(".campaign-global-search-result:hover,"):styles.index(".campaign-global-search-result__title")
+    ]
     assert "export function AuthNotice" in auth_source
     assert 'className="card auth-notice"' in auth_source
     assert "export function RouteSuspenseFallback" in loading_source
@@ -1362,6 +1370,7 @@ def test_shared_focus_and_field_contracts_use_theme_tokens() -> None:
     source = Path("frontend/src/styles.css").read_text(encoding="utf-8")
 
     shared_focus_match = re.search(
+        r"button:focus-visible,\s*"
         r"\.button:focus-visible,\s*"
         r"\.button-link:focus-visible,\s*"
         r"\.button-danger:focus-visible,\s*"

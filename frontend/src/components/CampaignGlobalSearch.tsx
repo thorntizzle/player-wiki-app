@@ -5,6 +5,17 @@ import type { CampaignReferenceSearchResult } from "../api/types";
 import { useApiClient } from "../apiClientContext";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 
+function formatSearchStatus(message: string | undefined, resultCount: number): string {
+  const trimmedMessage = message?.trim();
+  if (trimmedMessage) {
+    return trimmedMessage;
+  }
+  if (resultCount > 0) {
+    return `Found ${resultCount} matching reference${resultCount === 1 ? "" : "s"}.`;
+  }
+  return "No visible wiki pages or Systems entries matched that search.";
+}
+
 export function CampaignGlobalSearch({ campaignSlug }: { campaignSlug: string }) {
   const { apiClient, setAuthRequired } = useApiClient();
   const [query, setQuery] = useState("");
@@ -65,7 +76,7 @@ export function CampaignGlobalSearch({ campaignSlug }: { campaignSlug: string })
       }
       setResults(response.results);
       setShowResults(response.results.length > 0);
-      setStatusMessage(response.message || "Search complete.");
+      setStatusMessage(formatSearchStatus(response.message, response.results.length));
     } catch (error) {
       if (controller.signal.aborted) {
         return;

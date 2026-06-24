@@ -440,7 +440,8 @@ a:hover {
 .campaign-global-search-result:focus-visible {
   border-color: var(--border-accent);
   background: var(--surface-soft-strong);
-  outline: none;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .campaign-global-search-result__title {
@@ -2435,6 +2436,7 @@ a:hover {
   color: var(--accent);
 }
 
+button:focus-visible,
 .button:focus-visible,
 .button-link:focus-visible,
 .button-danger:focus-visible,
