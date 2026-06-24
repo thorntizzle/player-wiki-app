@@ -25,11 +25,11 @@ import { CharacterAdvancedEditorPage } from "./routes/CharacterAdvancedEditorPag
 import {
   CharacterCultivationPage,
   CharacterLevelUpPage,
-  CharacterProgressionRepairPage,
   CharacterRetrainingPage,
 } from "./routes/CharacterAuthoringRoutes";
 import { CharacterCreatePage } from "./routes/CharacterCreatePage";
 import { CharacterDetailPage } from "./routes/CharacterDetailPage";
+import { CharacterProgressionRepairPage } from "./routes/CharacterProgressionRepairPage";
 import { CharacterXianxiaManualImportPage } from "./routes/CharacterXianxiaManualImportPage";
 import { DmContentPage } from "./routes/DmContentPage";
 import { CombatPage } from "./routes/CombatPage";

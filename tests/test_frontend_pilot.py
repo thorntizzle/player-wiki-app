@@ -498,6 +498,25 @@ def test_character_advanced_editor_route_lives_in_route_module() -> None:
     assert "expected_revision: editor.state_revision" in editor_source
 
 
+def test_character_progression_repair_route_lives_in_route_module() -> None:
+    main_source = Path("frontend/src/main.tsx").read_text(encoding="utf-8")
+    authoring_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
+    repair_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
+
+    assert 'import { CharacterProgressionRepairPage } from "./routes/CharacterProgressionRepairPage";' in main_source
+    assert "function CharacterProgressionRepairPage" not in authoring_source
+    assert "CharacterProgressionRepairPayload" not in authoring_source
+    assert "characterProgressionRepairValuesFromContext" not in authoring_source
+    assert 'component: CharacterProgressionRepairPage' in main_source
+
+    assert "export function CharacterProgressionRepairPage()" in repair_source
+    assert 'from: "/campaigns/$campaignSlug/characters/$characterSlug/progression-repair"' in repair_source
+    assert "apiClient.getCharacterProgressionRepair(campaignSlug, characterSlug)" in repair_source
+    assert "apiClient.submitCharacterProgressionRepair(campaignSlug, characterSlug, payload)" in repair_source
+    assert "characterProgressionRepairValuesFromContext(repair)" in repair_source
+    assert "expected_revision: repair.state_revision" in repair_source
+
+
 def test_character_authoring_preview_lists_live_in_component_module() -> None:
     route_source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
@@ -1123,9 +1142,14 @@ def test_combat_conditions_chrome_in_source() -> None:
 def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
+    progression_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
+    route_sources = {
+        "CharacterAdvancedEditorPage": advanced_source,
+        "CharacterProgressionRepairPage": progression_source,
+    }
 
     def component_source(component_name: str) -> str:
-        component_owner = advanced_source if component_name == "CharacterAdvancedEditorPage" else source
+        component_owner = route_sources.get(component_name, source)
         return _extract_function_component_source(component_owner, component_name)
 
     def unsupported_card(component_name: str) -> str:
@@ -1201,11 +1225,16 @@ def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
 def test_character_supported_form_action_chrome_in_source() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
+    progression_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
     manual_import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
+    route_sources = {
+        "CharacterAdvancedEditorPage": advanced_source,
+        "CharacterProgressionRepairPage": progression_source,
+    }
 
     def component_source(component_name: str) -> str:
-        component_owner = advanced_source if component_name == "CharacterAdvancedEditorPage" else source
+        component_owner = route_sources.get(component_name, source)
         return _extract_function_component_source(component_owner, component_name)
 
     def supported_component(component_name: str) -> str:
@@ -1303,11 +1332,16 @@ def test_character_supported_form_action_chrome_in_source() -> None:
 def test_character_supported_hero_links_preserve_supported_nav_while_hiding_flask_fallbacks() -> None:
     source = Path("frontend/src/routes/CharacterAuthoringRoutes.tsx").read_text(encoding="utf-8")
     advanced_source = Path("frontend/src/routes/CharacterAdvancedEditorPage.tsx").read_text(encoding="utf-8")
+    progression_source = Path("frontend/src/routes/CharacterProgressionRepairPage.tsx").read_text(encoding="utf-8")
     create_source = Path("frontend/src/routes/CharacterCreatePage.tsx").read_text(encoding="utf-8")
     manual_import_source = Path("frontend/src/routes/CharacterXianxiaManualImportPage.tsx").read_text(encoding="utf-8")
+    route_sources = {
+        "CharacterAdvancedEditorPage": advanced_source,
+        "CharacterProgressionRepairPage": progression_source,
+    }
 
     def component_source(component_name: str) -> str:
-        component_owner = advanced_source if component_name == "CharacterAdvancedEditorPage" else source
+        component_owner = route_sources.get(component_name, source)
         return _extract_function_component_source(component_owner, component_name)
 
     def hero_section(component_name: str) -> str:
