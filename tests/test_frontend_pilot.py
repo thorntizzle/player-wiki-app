@@ -2364,6 +2364,15 @@ def test_dm_content_systems_mutations_live_in_shared_hook() -> None:
     assert "const createCustomMutation = useMutation({" in hook_source
     assert "apiClient.restoreSystemsCustomEntry(campaignSlug, entry.slug)" in hook_source
     assert 'setSystemsMessage("Systems source policy saved.");' in hook_source
+    assert "<ToastNotice message={toastMessage} tone={toastTone} />" in lane_source
+    assert "Flask form" not in lane_source
+    assert "for this slice" not in lane_source
+    assert "Import-Run History" not in lane_source
+    assert "Open admin import form" not in lane_source
+    assert "<h2>Import History</h2>" in lane_source
+    assert "Open import form" in lane_source
+    assert "review import history and manage campaign policy" in lane_source
+    assert "No Systems imports have been recorded yet." in lane_source
 
 
 def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_source() -> None:

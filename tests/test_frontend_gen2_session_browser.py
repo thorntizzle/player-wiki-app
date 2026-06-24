@@ -3514,7 +3514,7 @@ def test_gen2_dm_content_browser_visual_parity_smoke(
                     expect(page.get_by_role("heading", name="Entry Overrides")).to_be_visible()
                     expect(page.get_by_role("heading", name="Custom Entries")).to_be_visible()
                     expect(page.get_by_role("heading", name="Shared Source Imports")).to_be_visible()
-                    expect(page.get_by_role("heading", name="Import-Run History")).to_be_visible()
+                    expect(page.get_by_role("heading", name="Import History")).to_be_visible()
 
                 expect(dm_content_nav.get_by_role("link", name="Statblocks")).to_be_visible()
                 expect(dm_content_nav.get_by_role("link", name="Staged Articles")).to_be_visible()
@@ -3979,7 +3979,7 @@ def test_gen2_dm_content_browser_systems_custom_entry_workflow(
             expect(page.get_by_role("heading", name="Entry Overrides")).to_be_visible()
             expect(page.get_by_role("heading", name="Custom Entries")).to_be_visible()
             expect(page.get_by_role("heading", name="Shared Source Imports")).to_be_visible()
-            expect(page.get_by_role("heading", name="Import-Run History")).to_be_visible()
+            expect(page.get_by_role("heading", name="Import History")).to_be_visible()
 
             source_panel = page.locator("#systems-source-enablement")
             expect(source_panel.locator("form.session-form")).to_have_count(0)

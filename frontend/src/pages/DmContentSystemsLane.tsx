@@ -595,23 +595,23 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
       <section className="card" id="systems-shared-imports">
         <div className="section-heading">
           <h2>Shared Source Imports</h2>
-          <p className="meta">DND-5E ZIP import remains on the permission-gated Flask form for this slice.</p>
+          <p className="meta">Use the admin import form to add or refresh shared DND-5E source data.</p>
         </div>
         {payload.permissions.can_import_shared_systems && payload.supports_dnd5e_import ? (
           <a className="ghost-button" href={`${payload.links.flask_systems_lane_url}#systems-shared-imports`}>
-            Open admin import form
+            Open import form
           </a>
         ) : (
           <p className="status status-neutral">
-            Shared-source ZIP imports are limited to app admins. Campaign DMs can review import runs and manage campaign policy here.
+            Shared-source ZIP imports are limited to app admins. Campaign DMs can review import history and manage campaign policy here.
           </p>
         )}
       </section>
 
       <section className="card" id="systems-import-history">
         <div className="section-heading">
-          <h2>Import-Run History</h2>
-          <p className="meta">{payload.import_run_count} recent shared-library run{payload.import_run_count === 1 ? "" : "s"}</p>
+          <h2>Import History</h2>
+          <p className="meta">{payload.import_run_count} recent shared-library import{payload.import_run_count === 1 ? "" : "s"}</p>
         </div>
         {payload.import_run_rows.length ? (
           <div className="dm-content-list systems-import-history">
@@ -645,7 +645,7 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
             ))}
           </div>
         ) : (
-          <p className="status status-neutral">No Systems import runs have been recorded yet.</p>
+          <p className="status status-neutral">No Systems imports have been recorded yet.</p>
         )}
       </section>
     </div>
