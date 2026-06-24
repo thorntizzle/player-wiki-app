@@ -159,53 +159,56 @@ export function CampaignHelpPage() {
 
           <aside className="session-sidebar campaign-help-sidebar">
             <article className="card sidebar-card session-sidebar-card">
-              <div className="section-heading">
-                <div>
-                  <h2>Visibility by scope</h2>
-                  <p className="meta">The effective visibility here is the current floor after campaign-level and scope-level rules combine.</p>
+              <h2>Help reference</h2>
+              <section className="sidebar-card-section">
+                <div className="section-heading">
+                  <div>
+                    <h3>Visibility by scope</h3>
+                    <p className="meta">The effective visibility here is the current floor after campaign-level and scope-level rules combine.</p>
+                  </div>
                 </div>
-              </div>
-              <div className="reference-stack">
-                {data.visibility_rows.map((row) => (
-                  <article className="help-panel" key={row.label}>
-                    <div className="section-heading">
-                      <h3>{row.label}</h3>
-                      <span className="meta-badge">{row.visibility_label}</span>
-                    </div>
-                    <p className="meta">
-                      {row.viewer_can_open
-                        ? "This viewer can currently open this scope."
-                        : "This viewer cannot currently open this scope."}
-                    </p>
-                  </article>
-                ))}
-              </div>
-            </article>
+                <div className="reference-stack">
+                  {data.visibility_rows.map((row) => (
+                    <article className="help-panel" key={row.label}>
+                      <div className="section-heading">
+                        <h4>{row.label}</h4>
+                        <span className="meta-badge">{row.visibility_label}</span>
+                      </div>
+                      <p className="meta">
+                        {row.viewer_can_open
+                          ? "This viewer can currently open this scope."
+                          : "This viewer cannot currently open this scope."}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              </section>
 
-            <article className="card sidebar-card session-sidebar-card">
-              <div className="section-heading">
-                <div>
-                  <h2>Cross-cutting limits</h2>
-                  <p className="meta">These are the app-level constraints most likely to affect multiple surfaces.</p>
+              <section className="sidebar-card-section">
+                <div className="section-heading">
+                  <div>
+                    <h3>Cross-cutting limits</h3>
+                    <p className="meta">These are the app-level constraints most likely to affect multiple surfaces.</p>
+                  </div>
                 </div>
-              </div>
-              <HelpList items={data.cross_cutting_limits} emptyText="No cross-cutting limits are visible for this viewer." />
-            </article>
+                <HelpList items={data.cross_cutting_limits} emptyText="No cross-cutting limits are visible for this viewer." />
+              </section>
 
-            <article className="card sidebar-card session-sidebar-card">
-              <div className="section-heading">
-                <div>
-                  <h2>Account settings</h2>
-                  <p className="meta">{data.account_note}</p>
+              <section className="sidebar-card-section">
+                <div className="section-heading">
+                  <div>
+                    <h3>Account settings</h3>
+                    <p className="meta">{data.account_note}</p>
+                  </div>
                 </div>
-              </div>
-              <div className="hero-actions">
-                {data.is_authenticated ? (
-                  <a className="button-link" href={data.links.account_url}>Open Account</a>
-                ) : (
-                  <a className="button-link" href={data.links.sign_in_url}>Sign in</a>
-                )}
-              </div>
+                <div className="hero-actions">
+                  {data.is_authenticated ? (
+                    <a className="button-link" href={data.links.account_url}>Open Account</a>
+                  ) : (
+                    <a className="button-link" href={data.links.sign_in_url}>Sign in</a>
+                  )}
+                </div>
+              </section>
             </article>
           </aside>
         </div>

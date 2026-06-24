@@ -875,7 +875,7 @@ def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
             )
             help_link.click()
             expect(player_page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/help$"))
-            expect(player_page.get_by_role("heading", name="Help")).to_be_visible(timeout=10000)
+            expect(player_page.get_by_role("heading", name="Help", exact=True)).to_be_visible(timeout=10000)
             assert player_page.evaluate("window.__cpwGen2TopNavMarker") == "alive"
             assert player_page.evaluate("window.__cpwGen2TopNavLoadingBeginCount") >= 1
             expect(player_page.get_by_role("heading", name="Current access")).to_be_visible()
@@ -883,14 +883,16 @@ def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
             expect(player_page.locator("#systems").get_by_role("heading", name="Systems")).to_be_visible()
             expect(player_page.locator("#session").get_by_role("heading", name="Session")).to_be_visible()
             expect(player_page.locator("#combat").get_by_role("heading", name="Combat")).to_be_visible()
+            expect(player_page.get_by_role("heading", name="Help reference")).to_be_visible()
             expect(player_page.get_by_role("heading", name="Cross-cutting limits")).to_be_visible()
             expect(player_page.get_by_role("heading", name="Visibility by scope")).to_be_visible()
+            expect(player_page.get_by_role("heading", name="Account settings")).to_be_visible()
             expect(player_page.get_by_role("link", name="Flask Help")).to_have_count(0)
             assert player_page.locator("#dm-content").count() == 0
             assert player_page.locator("#control").count() == 0
             assert player_page.locator("main .campaign-help-page").count() == 0
             player_hero = player_page.locator(".campaign-help-hero")
-            expect(player_hero.get_by_role("heading", name="Help")).to_be_visible()
+            expect(player_hero.get_by_role("heading", name="Help", exact=True)).to_be_visible()
             expect(player_hero.get_by_role("link", name="Systems")).to_be_visible()
             hero_metrics = player_page.evaluate(
                 """() => {
@@ -960,7 +962,7 @@ def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
             assert hero_metrics["hasSessionColumnClass"] is True
             assert hero_metrics["hasSessionSidebarClass"] is True
             assert hero_metrics["detailGridCount"] >= 4
-            assert hero_metrics["sidebarCardCount"] >= 3
+            assert hero_metrics["sidebarCardCount"] == 1
             assert hero_metrics["heroRadius"] == 0
             assert hero_metrics["heroShadow"] == "none"
             assert hero_metrics["scrollWidth"] <= hero_metrics["innerWidth"] + 1
@@ -971,7 +973,7 @@ def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
 
             _sign_in(player_mobile_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
             player_mobile_page.goto(f"{base_url}/app-next/campaigns/linden-pass/help")
-            expect(player_mobile_page.get_by_role("heading", name="Help")).to_be_visible(timeout=10000)
+            expect(player_mobile_page.get_by_role("heading", name="Help", exact=True)).to_be_visible(timeout=10000)
             mobile_metrics = player_mobile_page.evaluate(
                 """() => {
                     const main = document.querySelector("main");
@@ -1031,14 +1033,14 @@ def test_gen2_campaign_help_uses_gen2_nav_and_campaign_guidance(
             assert mobile_metrics["hasSessionColumnClass"] is True
             assert mobile_metrics["hasSessionSidebarClass"] is True
             assert mobile_metrics["detailGridCount"] >= 4
-            assert mobile_metrics["sidebarCardCount"] >= 3
+            assert mobile_metrics["sidebarCardCount"] == 1
             assert mobile_metrics["sidebarTop"] > mobile_metrics["mainTop"]
             assert mobile_metrics["mainWidth"] <= mobile_metrics["innerWidth"]
             assert mobile_metrics["sidebarWidth"] <= mobile_metrics["innerWidth"]
 
             _sign_in(dm_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
             dm_page.goto(f"{base_url}/app-next/campaigns/linden-pass/help")
-            expect(dm_page.get_by_role("heading", name="Help")).to_be_visible(timeout=10000)
+            expect(dm_page.get_by_role("heading", name="Help", exact=True)).to_be_visible(timeout=10000)
             expect(dm_page.locator("#dm-content").get_by_role("heading", name="DM Content")).to_be_visible()
             expect(dm_page.locator("#characters").get_by_role("heading", name="Characters")).to_be_visible()
             expect(dm_page.locator("#control").get_by_role("heading", name="Control")).to_be_visible()

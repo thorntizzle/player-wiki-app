@@ -1248,12 +1248,20 @@ def test_campaign_help_page_removes_flask_help_fallback() -> None:
     assert "help-anchor-row" not in help_markup
     assert "campaign-help-account-actions" not in help_markup
     assert "detail-card help-detail-card" not in help_markup
+    assert "<h2>Help reference</h2>" in help_markup
+    assert help_markup.count('className="card sidebar-card session-sidebar-card"') == 1
+    assert 'className="sidebar-card-section"' in help_markup
+    assert "<h3>Visibility by scope</h3>" in help_markup
+    assert "<h3>Cross-cutting limits</h3>" in help_markup
+    assert "<h3>Account settings</h3>" in help_markup
+    assert "<h4>{row.label}</h4>" in help_markup
     assert 'className="help-panel"' in help_markup
     assert 'href={data.links.account_url}>Open Account</a>' in help_markup
     assert "href={data.links.sign_in_url}>Sign in</a>" in help_markup
 
     help_css = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     assert ".help-panel" in help_css
+    assert ".help-panel h4" in help_css
     assert ".help-detail-card" not in help_css
 
     top_help_row_match = re.search(
