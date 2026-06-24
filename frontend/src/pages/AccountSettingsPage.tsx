@@ -177,10 +177,17 @@ export function AccountSettingsPage() {
                     );
                   })}
                 </div>
-                <button type="submit" className="button" disabled={saveThemeSettings.isPending || isThemeUnchanged}>
+                <button
+                  type="submit"
+                  className="button"
+                  disabled={saveThemeSettings.isPending || isThemeUnchanged}
+                  aria-describedby={isThemeUnchanged && !saveThemeSettings.isPending ? "account-theme-save-hint" : undefined}
+                >
                   {saveThemeSettings.isPending ? "Saving..." : "Save theme"}
                 </button>
-                {isThemeUnchanged && !saveThemeSettings.isPending ? <p className="meta">Theme is already current.</p> : null}
+                {isThemeUnchanged && !saveThemeSettings.isPending ? (
+                  <p id="account-theme-save-hint" className="meta">Theme is already current.</p>
+                ) : null}
                 {themeSaveError ? <p className="status status-error">{themeSaveError}</p> : null}
               </form>
             </section>
@@ -223,10 +230,13 @@ export function AccountSettingsPage() {
                   type="submit"
                   className="button"
                   disabled={saveChatSettings.isPending || isChatOrderUnchanged}
+                  aria-describedby={isChatOrderUnchanged && !saveChatSettings.isPending ? "account-chat-order-save-hint" : undefined}
                 >
                   {saveChatSettings.isPending ? "Saving..." : "Save chat order"}
                 </button>
-                {isChatOrderUnchanged && !saveChatSettings.isPending ? <p className="meta">Chat order is already current.</p> : null}
+                {isChatOrderUnchanged && !saveChatSettings.isPending ? (
+                  <p id="account-chat-order-save-hint" className="meta">Chat order is already current.</p>
+                ) : null}
                 {chatSaveError ? <p className="status status-error">{chatSaveError}</p> : null}
               </form>
             </section>

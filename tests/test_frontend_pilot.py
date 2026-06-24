@@ -1246,6 +1246,16 @@ def test_account_settings_page_removes_flask_account_fallback_link() -> None:
     assert "Save chat order" in account_settings_markup
     assert "Save account settings" not in account_settings_markup
     assert "account-settings-actions" not in account_settings_markup
+    assert (
+        'aria-describedby={isThemeUnchanged && !saveThemeSettings.isPending ? "account-theme-save-hint" : undefined}'
+        in account_settings_markup
+    )
+    assert '<p id="account-theme-save-hint" className="meta">Theme is already current.</p>' in account_settings_markup
+    assert (
+        'aria-describedby={isChatOrderUnchanged && !saveChatSettings.isPending ? "account-chat-order-save-hint" : undefined}'
+        in account_settings_markup
+    )
+    assert '<p id="account-chat-order-save-hint" className="meta">Chat order is already current.</p>' in account_settings_markup
     theme_submit_match = re.search(
         r"const handleThemeSubmit[\s\S]*?saveThemeSettings\.mutate\((\{[\s\S]*?\})\);",
         account_settings_markup,
