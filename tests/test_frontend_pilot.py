@@ -472,6 +472,7 @@ def test_character_vitals_bar_uses_flask_style_chrome_in_source() -> None:
 def test_character_detail_dialog_state_builders_live_in_shared_utils() -> None:
     source = Path("frontend/src/characterPaneUtils.ts").read_text(encoding="utf-8")
     route_source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
+    dialog_source = Path("frontend/src/components/CharacterDetailDialog.tsx").read_text(encoding="utf-8")
 
     assert "export function itemDetailDialogState" in source
     assert 'eyebrow: "Item details"' in source
@@ -483,8 +484,21 @@ def test_character_detail_dialog_state_builders_live_in_shared_utils() -> None:
     assert 'notes: spell.management_note || ""' in source
     assert 'facts: [...spellDetailFacts(spell), ...(source ? [{ label: "Source", value: source }] : [])]' in source
     assert "badges: spell.badges ?? []" in source
+    assert 'role="dialog"' in dialog_source
+    assert 'aria-modal="true"' in dialog_source
+    assert 'aria-labelledby={titleId}' in dialog_source
+    assert '<h3 id={titleId}>{detail.title}</h3>' in dialog_source
+    assert 'ref={closeButtonRef}' in dialog_source
+    assert 'closeButtonRef.current?.focus({ preventScroll: true });' in dialog_source
+    assert 'className="ghost-button"' in dialog_source
+    assert "aria-label={detail.title}" not in dialog_source
+    assert "detailDialogReturnFocusRef" in route_source
+    assert "rememberDetailDialogTrigger();" in route_source
+    assert "const closeDetailDialog = () =>" in route_source
+    assert "focusTarget.focus({ preventScroll: true });" in route_source
     assert "setDetailDialog(itemDetailDialogState(item));" in route_source
     assert "setDetailDialog(spellDetailDialogState(spell));" in route_source
+    assert "onClose={closeDetailDialog}" in route_source
 
 
 def test_character_number_input_parser_lives_in_shared_utils() -> None:

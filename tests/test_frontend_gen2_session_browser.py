@@ -2802,6 +2802,18 @@ def test_gen2_character_visual_parity_smoke(
                             assert {"Available", "Used", "Max"}.issubset(set(desktop_slot_value_metrics["labels"]))
                             assert desktop_slot_value_metrics["groupsFit"]
                             assert desktop_slot_value_metrics["valuesFit"]
+                            spell_detail_trigger = character_read_shell.locator(
+                                "section#session-spell-slots button[aria-haspopup='dialog']"
+                            ).first
+                            if spell_detail_trigger.count() > 0:
+                                spell_detail_trigger.click()
+                                detail_dialog = desktop_page.get_by_role("dialog")
+                                expect(detail_dialog).to_be_visible(timeout=10000)
+                                close_button = detail_dialog.get_by_role("button", name="Close")
+                                expect(close_button).to_be_focused()
+                                desktop_page.keyboard.press("Escape")
+                                expect(desktop_page.get_by_role("dialog")).to_have_count(0)
+                                expect(spell_detail_trigger).to_be_focused()
                         if desktop_grid_metrics["spellColumns"]:
                             assert desktop_grid_metrics["spellColumns"] == 3
                     _assert_character_detail_trigger_classes(character_read_shell)

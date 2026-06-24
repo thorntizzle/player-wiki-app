@@ -1,3 +1,5 @@
+import { useEffect, useId, useRef } from "react";
+
 export interface DetailFact {
   label: string;
   value: string;
@@ -20,6 +22,18 @@ export function CharacterDetailDialog({
   detail: CharacterDetailDialogState | null;
   onClose: () => void;
 }) {
+  const titleId = useId();
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!detail) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      closeButtonRef.current?.focus({ preventScroll: true });
+    });
+  }, [detail]);
+
   if (!detail) {
     return null;
   }
@@ -29,15 +43,15 @@ export function CharacterDetailDialog({
         className="detail-modal"
         role="dialog"
         aria-modal="true"
-        aria-label={detail.title}
+        aria-labelledby={titleId}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="detail-modal-header">
           <div>
             <p className="meta">{detail.eyebrow}</p>
-            <h3>{detail.title}</h3>
+            <h3 id={titleId}>{detail.title}</h3>
           </div>
-          <button type="button" onClick={onClose}>
+          <button type="button" className="ghost-button" ref={closeButtonRef} onClick={onClose}>
             Close
           </button>
         </header>

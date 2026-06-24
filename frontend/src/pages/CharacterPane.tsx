@@ -68,6 +68,7 @@ export function CharacterPane({
   const [restPreview, setRestPreview] = useState<CharacterRestPreviewResponse["preview"] | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [detailDialog, setDetailDialog] = useState<CharacterDetailDialogState | null>(null);
+  const detailDialogReturnFocusRef = useRef<HTMLElement | null>(null);
   const portraitFileInputRef = useRef<HTMLInputElement | null>(null);
   const {
     clearToast,
@@ -84,6 +85,22 @@ export function CharacterPane({
   });
 
   const characterList: CharacterSummary[] = listQuery.data?.characters ?? [];
+
+  const rememberDetailDialogTrigger = () => {
+    const activeElement = document.activeElement;
+    detailDialogReturnFocusRef.current = activeElement instanceof HTMLElement ? activeElement : null;
+  };
+
+  const closeDetailDialog = () => {
+    setDetailDialog(null);
+    const focusTarget = detailDialogReturnFocusRef.current;
+    detailDialogReturnFocusRef.current = null;
+    if (focusTarget && document.contains(focusTarget)) {
+      window.requestAnimationFrame(() => {
+        focusTarget.focus({ preventScroll: true });
+      });
+    }
+  };
 
   useEffect(() => {
     if (initialCharacterSlug !== selectedSlug) {
@@ -172,7 +189,7 @@ export function CharacterPane({
     }
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setDetailDialog(null);
+        closeDetailDialog();
       }
     };
     window.addEventListener("keydown", closeOnEscape);
@@ -312,10 +329,12 @@ export function CharacterPane({
     assignCharacterOwner.isPending || clearCharacterOwner.isPending || deleteCharacterMutation.isPending;
 
   const openItemDetail = (item: CharacterItemDetailInput) => {
+    rememberDetailDialogTrigger();
     setDetailDialog(itemDetailDialogState(item));
   };
 
   const openSpellDetail = (spell: CharacterPresentedSpell) => {
+    rememberDetailDialogTrigger();
     setDetailDialog(spellDetailDialogState(spell));
   };
 
@@ -716,7 +735,7 @@ export function CharacterPane({
         {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
       </article>
       <ToastNotice message={statusMessage} tone={toastTone} />
-      <CharacterDetailDialog detail={detailDialog} onClose={() => setDetailDialog(null)} />
+      <CharacterDetailDialog detail={detailDialog} onClose={closeDetailDialog} />
     </div>
   );
 }
