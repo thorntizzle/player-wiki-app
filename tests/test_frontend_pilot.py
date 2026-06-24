@@ -1817,9 +1817,14 @@ def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> N
 
 def test_dm_content_player_wiki_editor_fields_use_flask_style_labels_in_source() -> None:
     source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
-    helper_start = source.index("const renderPlayerWikiDraftFields = ({")
-    helper_end = source.index("const renderStatblockCard =", helper_start)
-    helper_markup = source[helper_start:helper_end]
+    fields_source = Path("frontend/src/components/DmPlayerWikiDraftFields.tsx").read_text(encoding="utf-8")
+
+    assert 'import { DmPlayerWikiDraftFields } from "../components/DmPlayerWikiDraftFields";' in source
+    assert "<DmPlayerWikiDraftFields" in source
+    assert "const renderPlayerWikiDraftFields = ({" not in source
+
+    helper_start = fields_source.index("export function DmPlayerWikiDraftFields(")
+    helper_markup = fields_source[helper_start:]
 
     assert "className=\"chat-label\"" not in helper_markup
     assert "dm-content-image-edit-row" not in helper_markup
