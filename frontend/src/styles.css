@@ -2925,6 +2925,18 @@ textarea {
   width: 100%;
 }
 
+.session-message-target-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.session-message-form textarea {
+  min-height: 7rem;
+  resize: vertical;
+}
+
 .chat-actions button,
 .session-message-form button,
 .session-actions-row button,

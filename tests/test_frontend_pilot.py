@@ -3069,6 +3069,30 @@ def test_session_player_message_success_uses_toast_overlay() -> None:
     assert "window.setTimeout(" not in source
 
 
+def test_session_player_composer_uses_compact_target_row_and_labels() -> None:
+    source = Path("frontend/src/pages/SessionRoutes.tsx").read_text(encoding="utf-8")
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+    composer_markup = source[
+        source.index("function SessionPaneMessageComposer"):
+        source.index("export function SessionPane")
+    ]
+
+    assert 'className="stack-form session-message-form"' in composer_markup
+    assert 'className="session-message-target-row"' in composer_markup
+    assert 'htmlFor="session-message-audience"' in composer_markup
+    assert 'id="session-message-audience"' in composer_markup
+    assert '{recipientScope === "player" ? (' in composer_markup
+    assert 'htmlFor="session-message-player"' in composer_markup
+    assert 'id="session-message-player"' in composer_markup
+    assert 'disabled={!recipientPlayerChoices.length}' in composer_markup
+    assert 'disabled={recipientScope !== "player" || !recipientPlayerChoices.length}' not in composer_markup
+    assert 'htmlFor="session-message-body"' in composer_markup
+    assert 'id="session-message-body"' in composer_markup
+    assert ".session-message-target-row {" in styles
+    assert "grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));" in styles
+    assert ".session-message-form textarea {" in styles
+
+
 def test_mutation_heavy_gen2_routes_use_shared_toast_notice() -> None:
     toast_route_paths = [
         "frontend/src/pages/AccountSettingsPage.tsx",

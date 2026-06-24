@@ -75,45 +75,52 @@ function SessionPaneMessageComposer({
       <h2>Send message</h2>
       {payload?.permissions.can_post_messages ? (
         <form onSubmit={onSend} className="stack-form session-message-form">
-          <label className="field">
-            <span>Audience</span>
-            <select
-              value={recipientScope}
-              onChange={(event: ChangeEvent<HTMLSelectElement>) => {
-                setRecipientScope(event.currentTarget.value as "global" | "dm_only" | "player");
-              }}
-            >
-              <option value="global">Global</option>
-              <option value="dm_only">DM only</option>
-              <option value="player">Specific player</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Player</span>
-            <select
-              value={recipientPlayerId}
-              disabled={recipientScope !== "player" || !recipientPlayerChoices.length}
-              onChange={(event: ChangeEvent<HTMLSelectElement>) => {
-                setRecipientPlayerId(event.currentTarget.value);
-              }}
-            >
-              {recipientPlayerChoices.length ? (
-                recipientPlayerChoices.map((choice) => (
-                  <option key={choice.user_id} value={String(choice.user_id)}>
-                    {choice.label}
-                  </option>
-                ))
-              ) : (
-                <option value="">No players available</option>
-              )}
-            </select>
-          </label>
+          <div className="session-message-target-row">
+            <label className="field" htmlFor="session-message-audience">
+              <span>Audience</span>
+              <select
+                id="session-message-audience"
+                value={recipientScope}
+                onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                  setRecipientScope(event.currentTarget.value as "global" | "dm_only" | "player");
+                }}
+              >
+                <option value="global">Global</option>
+                <option value="dm_only">DM only</option>
+                <option value="player">Specific player</option>
+              </select>
+            </label>
+            {recipientScope === "player" ? (
+              <label className="field" htmlFor="session-message-player">
+                <span>Player</span>
+                <select
+                  id="session-message-player"
+                  value={recipientPlayerId}
+                  disabled={!recipientPlayerChoices.length}
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                    setRecipientPlayerId(event.currentTarget.value);
+                  }}
+                >
+                  {recipientPlayerChoices.length ? (
+                    recipientPlayerChoices.map((choice) => (
+                      <option key={choice.user_id} value={String(choice.user_id)}>
+                        {choice.label}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">No players available</option>
+                  )}
+                </select>
+              </label>
+            ) : null}
+          </div>
           {recipientScope === "player" && !recipientPlayerChoices.length ? (
             <p className="meta">No specific player recipients are available.</p>
           ) : null}
-          <label className="field">
+          <label className="field" htmlFor="session-message-body">
             <span>Message</span>
             <textarea
+              id="session-message-body"
               rows={5}
               value={messageDraft}
               placeholder="Type chat text"
