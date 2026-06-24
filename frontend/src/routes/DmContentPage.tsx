@@ -26,7 +26,7 @@ import { getApiErrorMessage } from "../apiErrors";
 import { ApiErrorNotice } from "../components/feedback";
 import { DmContentSystemsLane } from "./DmContentSystemsLane";
 import { DmArticleCreator } from "../components/DmArticleCreator";
-import { DmContentConditionCard } from "../components/DmContentCards";
+import { DmConditionsLane } from "../components/DmConditionsLane";
 import { DmPlayerWikiPageCard } from "../components/DmPlayerWikiPageCard";
 import { DmPlayerWikiDraftFields } from "../components/DmPlayerWikiDraftFields";
 import { DmStagedArticleQueue } from "../components/DmStagedArticleQueue";
@@ -636,23 +636,6 @@ export function DmContentPage() {
     }));
   };
 
-  const renderConditionCard = (condition: DmContentConditionDefinition) => {
-    const draft = conditionDrafts[condition.id] ?? buildInitialConditionDraft(condition);
-    return (
-      <DmContentConditionCard
-        key={condition.id}
-        condition={condition}
-        draft={draft}
-        canManageDmContent={canManageDmContent}
-        isUpdating={updateConditionMutation.isPending}
-        isDeleting={deleteConditionMutation.isPending}
-        onDraftChange={updateConditionDraft}
-        onUpdate={(id, payload) => updateConditionMutation.mutate({ id, payload })}
-        onDelete={(id) => deleteConditionMutation.mutate(id)}
-      />
-    );
-  };
-
   const submitPlayerWikiEditDraft = (pageRef: string, draft: DmPlayerWikiDraftState) => {
     if (!draft.title.trim()) {
       setPaneError("Player Wiki page title is required.");
@@ -797,102 +780,27 @@ export function DmContentPage() {
           topLevelStatblocks={topLevelStatblocks}
         />
       ) : activeLane === "conditions" ? (
-        <div className="split-grid dm-content-staged-grid">
-          <section className="card dm-condition-create">
-            <div className="section-heading">
-              <h2>Create condition</h2>
-              <p className="meta">Custom combat condition reminder.</p>
-            </div>
-            <form
-              className="stack-form"
-              onSubmit={(event: FormEvent<HTMLFormElement>) => {
-                event.preventDefault();
-                const formData = new FormData(event.currentTarget);
-                const name = String(formData.get("name") || "").trim();
-                const description = String(formData.get("description_markdown") || "");
-                if (!name) {
-                  setPaneError("Condition name is required.");
-                  setUiMessage(null);
-                  return;
-                }
-                createConditionMutation.mutate({
-                  name,
-                  description_markdown: description,
-                });
-              }}
-            >
-              <label className="field">
-                <span>Condition name</span>
-                <input
-                  id="dm-condition-create-name"
-                  name="name"
-                  value={conditionCreateDraft.name}
-                  disabled={!canManageDmContent}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                    const name = event.currentTarget.value;
-                    setConditionCreateDraft((current) => ({
-                      ...current,
-                      name,
-                    }));
-                  }}
-                />
-              </label>
-              <label className="field">
-                <span>Description</span>
-                <textarea
-                  id="dm-condition-create-description"
-                  name="description_markdown"
-                  rows={10}
-                  value={conditionCreateDraft.description}
-                  disabled={!canManageDmContent}
-                  onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-                    const description = event.currentTarget.value;
-                    setConditionCreateDraft((current) => ({
-                      ...current,
-                      description,
-                    }));
-                  }}
-                />
-              </label>
-              <button type="submit" disabled={!canManageDmContent || createConditionMutation.isPending}>
-                {createConditionMutation.isPending ? "Saving..." : "Save condition"}
-              </button>
-            </form>
-          </section>
-
-          <section className="card dm-condition-library">
-            <div className="section-heading">
-              <div>
-                <h2>Custom conditions</h2>
-                <p className="meta">These names appear in the combat condition picker alongside the standard DND-5E condition list.</p>
-              </div>
-            </div>
-            <form
-              className="search-form dm-condition-search"
-              onSubmit={(event: FormEvent<HTMLFormElement>) => event.preventDefault()}
-            >
-              <label htmlFor="dm-condition-search">Search conditions</label>
-              <input
-                id="dm-condition-search"
-                type="search"
-                value={conditionQuery}
-                placeholder="Name or description"
-                onChange={(event: ChangeEvent<HTMLInputElement>) => setConditionQuery(event.currentTarget.value)}
-              />
-            </form>
-            {dmContentQuery.isLoading ? <p className="status status-neutral">Loading conditions ...</p> : null}
-            {!dmContentQuery.isLoading && filteredConditions.length ? (
-              <div className="dm-content-list dm-condition-list">
-                {filteredConditions.map(renderConditionCard)}
-              </div>
-            ) : null}
-            {!dmContentQuery.isLoading && !filteredConditions.length ? (
-              <p className="status status-neutral">
-                {conditionQuery ? "No conditions matched that search." : "No custom conditions have been created yet."}
-              </p>
-            ) : null}
-          </section>
-        </div>
+        <DmConditionsLane
+          canManageDmContent={canManageDmContent}
+          conditionCreateDraft={conditionCreateDraft}
+          conditionDrafts={conditionDrafts}
+          conditionQuery={conditionQuery}
+          filteredConditions={filteredConditions}
+          isCreating={createConditionMutation.isPending}
+          isDeleting={deleteConditionMutation.isPending}
+          isLoading={dmContentQuery.isLoading}
+          isUpdating={updateConditionMutation.isPending}
+          onCreate={(payload) => createConditionMutation.mutate(payload)}
+          onDelete={(id) => deleteConditionMutation.mutate(id)}
+          onDraftChange={updateConditionDraft}
+          onUpdate={(id, payload) => updateConditionMutation.mutate({ id, payload })}
+          onValidationError={(message) => {
+            setPaneError(message);
+            setUiMessage(null);
+          }}
+          setConditionCreateDraft={setConditionCreateDraft}
+          setConditionQuery={setConditionQuery}
+        />
       ) : activeLane === "player-wiki" ? (
         <div className="split-grid dm-content-staged-grid">
           <section className="card dm-player-wiki-create">

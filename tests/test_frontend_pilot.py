@@ -1972,19 +1972,18 @@ def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_sour
     source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
     card_source = Path("frontend/src/components/DmContentCards.tsx").read_text(encoding="utf-8")
     statblocks_lane_source = Path("frontend/src/components/DmStatblocksLane.tsx").read_text(encoding="utf-8")
+    conditions_lane_source = Path("frontend/src/components/DmConditionsLane.tsx").read_text(encoding="utf-8")
 
-    assert 'import { DmContentConditionCard } from "../components/DmContentCards";' in source
+    assert 'import { DmConditionsLane } from "../components/DmConditionsLane";' in source
     assert 'import { DmStatblocksLane } from "../components/DmStatblocksLane";' in source
+    assert "<DmConditionsLane" in source
     assert "<DmStatblocksLane" in source
+    assert "const renderConditionCard = (" not in source
     assert "const renderStatblockCard = (" not in source
+    assert '<section className="card dm-condition-create">' not in source
     assert '<section className="card dm-statblock-create">' not in source
+    assert "<DmContentConditionCard" in conditions_lane_source
     assert "<DmContentStatblockCard" in statblocks_lane_source
-
-    condition_wrapper_start = source.index("const renderConditionCard = (")
-    condition_wrapper_end = source.index("const renderPlayerWikiPageCard =", condition_wrapper_start)
-    condition_wrapper_markup = source[condition_wrapper_start:condition_wrapper_end]
-    assert "<DmContentConditionCard" in condition_wrapper_markup
-    assert 'className="stack-form"' not in condition_wrapper_markup
 
     statblock_edit_start = card_source.index("export function DmContentStatblockCard(")
     statblock_edit_end = card_source.index("export function DmContentConditionCard(", statblock_edit_start)
@@ -2025,9 +2024,9 @@ def test_dm_content_statblock_and_condition_forms_use_flask_field_labels_in_sour
     assert 'name="markdown_text"' in statblock_create_markup
     assert 'type="file"' in statblock_create_markup
 
-    condition_create_start = source.index('<section className="card dm-condition-create">')
-    condition_create_end = source.index('<section className="card dm-condition-library">', condition_create_start)
-    condition_create_markup = source[condition_create_start:condition_create_end]
+    condition_create_start = conditions_lane_source.index('<section className="card dm-condition-create">')
+    condition_create_end = conditions_lane_source.index('<section className="card dm-condition-library">', condition_create_start)
+    condition_create_markup = conditions_lane_source[condition_create_start:condition_create_end]
 
     assert 'className="stack-form"' in condition_create_markup
     assert 'className="session-form"' not in condition_create_markup
