@@ -2081,6 +2081,25 @@ def test_dm_content_hero_nav_lives_in_component_module() -> None:
     assert "subpage_counts?.staged_articles" in route_source
 
 
+def test_dm_content_mutations_live_in_shared_hook() -> None:
+    route_source = Path("frontend/src/routes/DmContentPage.tsx").read_text(encoding="utf-8")
+    hook_source = Path("frontend/src/dmContentMutations.ts").read_text(encoding="utf-8")
+
+    assert 'import { useDmContentMutations } from "../dmContentMutations";' in route_source
+    assert "} = useDmContentMutations({" in route_source
+    assert 'import { useMutation } from "@tanstack/react-query";' not in route_source
+    assert "apiClient.createDmContentStatblock" not in route_source
+    assert "apiClient.upsertContentPage" not in route_source
+    assert "apiClient.createSessionArticle" not in route_source
+
+    assert "export function useDmContentMutations(" in hook_source
+    assert "const createStatblockMutation = useMutation({" in hook_source
+    assert "const savePlayerWikiPageMutation = useMutation({" in hook_source
+    assert "const createArticleMutation = useMutation({" in hook_source
+    assert "buildPlayerWikiAssetRef(args.pageRef, args.draft.imageUpload)" in hook_source
+    assert 'setUiMessage("Article staged.");' in hook_source
+
+
 def test_dm_content_systems_management_form_field_chrome() -> None:
     source = Path("frontend/src/routes/DmContentSystemsLane.tsx").read_text(encoding="utf-8")
     helper_start = source.index("const renderCustomFields = ({")

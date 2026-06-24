@@ -1,21 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useParams } from "@tanstack/react-router";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import type { FormEvent, ReactElement } from "react";
 import { apiErrorMessage } from "../api/client";
 import type {
   ContentPageFileSummary,
-  ContentPageUpsertPayload,
   DmContentStatblock,
-  DmContentStatblockCreatePayload,
-  DmContentStatblockUpdatePayload,
-  DmContentConditionCreatePayload,
   DmContentConditionDefinition,
-  DmContentConditionUpdatePayload,
   SessionArticle,
-  SessionArticleCreatePayload,
   SessionArticleSourceResult,
-  SessionArticleUpdatePayload,
 } from "../api/types";
 import {
   isAuthRequiredFromError as isAuthError,
@@ -42,15 +35,14 @@ import {
   buildInitialStatblockDraft,
   buildInitialStagedArticleDraft,
   buildPageRefFromDraft,
-  buildPlayerWikiAssetRef,
-  buildPlayerWikiDraftFromRecord,
-  buildPlayerWikiMetadata,
   type DmContentConditionDraftState,
   type DmContentLane,
   type DmContentStatblockDraftState,
   type DmPlayerWikiDraftState,
   type StagedArticleDraftState,
 } from "../dmContentUtils";
+import { useDmContentMutations } from "../dmContentMutations";
+
 export function DmContentPage(): ReactElement {
   const { campaignSlug } = useParams({
     from: "/campaigns/$campaignSlug/dm-content",
@@ -237,298 +229,43 @@ export function DmContentPage(): ReactElement {
     });
   }, [playerWikiPages, playerWikiQuery]);
 
-  const createStatblockMutation = useMutation({
-    mutationFn: (payload: DmContentStatblockCreatePayload) => apiClient.createDmContentStatblock(resolvedCampaignSlug, payload),
-    onSuccess: (response) => {
-      setUiMessage(`Statblock saved: ${response.statblock.title}. ${response.statblock.parser_feedback.summary}`);
-      setPaneError(null);
-      setStatblockCreateDraft({ filename: "gen2-statblock.md", subsection: "", markdown: "" });
+  const {
+    archivePlayerWikiPageMutation,
+    createArticleMutation,
+    createConditionMutation,
+    createStatblockMutation,
+    deleteArticleMutation,
+    deleteConditionMutation,
+    deletePlayerWikiPageMutation,
+    deleteStatblockMutation,
+    loadPlayerWikiEditDraft,
+    savePlayerWikiPageMutation,
+    updateArticleMutation,
+    updateConditionMutation,
+    updateStatblockMutation,
+  } = useDmContentMutations({
+    apiClient,
+    campaignSlug: resolvedCampaignSlug,
+    setAuthRequired,
+    setUiMessage,
+    setPaneError,
+    setStatblockCreateDraft,
+    setConditionCreateDraft,
+    setPlayerWikiCreateDraft,
+    setPlayerWikiEditDrafts,
+    setPlayerWikiDeleteConfirm,
+    setManualDraft,
+    setUploadDraft,
+    setSelectedSourceRef,
+    setStagedDrafts,
+    refetchDmContent: () => {
       void dmContentQuery.refetch();
     },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    },
-  });
-
-  const updateStatblockMutation = useMutation({
-    mutationFn: (args: { id: number; payload: DmContentStatblockUpdatePayload }) =>
-      apiClient.updateDmContentStatblock(resolvedCampaignSlug, args.id, args.payload),
-    onSuccess: (response) => {
-      setUiMessage(`Statblock updated: ${response.statblock.title}. ${response.statblock.parser_feedback.summary}`);
-      setPaneError(null);
-      void dmContentQuery.refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    },
-  });
-
-  const deleteStatblockMutation = useMutation({
-    mutationFn: (statblockId: number) => apiClient.deleteDmContentStatblock(resolvedCampaignSlug, statblockId),
-    onSuccess: (response) => {
-      setUiMessage(`Statblock deleted: ${response.statblock.title}.`);
-      setPaneError(null);
-      void dmContentQuery.refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    },
-  });
-
-  const createConditionMutation = useMutation({
-    mutationFn: (payload: DmContentConditionCreatePayload) => apiClient.createDmContentCondition(resolvedCampaignSlug, payload),
-    onSuccess: (response) => {
-      setUiMessage(`Condition saved: ${response.condition.name}.`);
-      setPaneError(null);
-      setConditionCreateDraft({ name: "", description: "" });
-      void dmContentQuery.refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    },
-  });
-
-  const updateConditionMutation = useMutation({
-    mutationFn: (args: { id: number; payload: DmContentConditionUpdatePayload }) =>
-      apiClient.updateDmContentCondition(resolvedCampaignSlug, args.id, args.payload),
-    onSuccess: (response) => {
-      setUiMessage(`Condition updated: ${response.condition.name}.`);
-      setPaneError(null);
-      void dmContentQuery.refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    },
-  });
-
-  const deleteConditionMutation = useMutation({
-    mutationFn: (conditionId: number) => apiClient.deleteDmContentCondition(resolvedCampaignSlug, conditionId),
-    onSuccess: (response) => {
-      setUiMessage(`Condition deleted: ${response.condition.name}.`);
-      setPaneError(null);
-      void dmContentQuery.refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    },
-  });
-
-  const savePlayerWikiPageMutation = useMutation({
-    mutationFn: async (args: { mode: "create" | "edit"; pageRef: string; draft: DmPlayerWikiDraftState }) => {
-      let imageRef = args.draft.image.trim();
-      if (args.draft.imageUpload) {
-        imageRef = buildPlayerWikiAssetRef(args.pageRef, args.draft.imageUpload);
-        await apiClient.upsertContentAsset(resolvedCampaignSlug, imageRef, {
-          asset_file: {
-            filename: args.draft.imageUpload.filename,
-            data_base64: args.draft.imageUpload.data_base64,
-            media_type: args.draft.imageUpload.media_type,
-          },
-        });
-      }
-      const payload: ContentPageUpsertPayload = {
-        metadata: buildPlayerWikiMetadata(args.draft, args.pageRef, imageRef),
-        body_markdown: args.draft.bodyMarkdown,
-      };
-      return apiClient.upsertContentPage(resolvedCampaignSlug, args.pageRef, payload);
-    },
-    onSuccess: (response, args) => {
-      const title = response.page_file.page.title || args.pageRef;
-      setUiMessage(args.mode === "create" ? `Player Wiki page created: ${title}.` : `Player Wiki page updated: ${title}.`);
-      setPaneError(null);
-      if (args.mode === "create") {
-        setPlayerWikiCreateDraft(buildInitialPlayerWikiDraft());
-      }
-      setPlayerWikiEditDrafts((current) => ({
-        ...current,
-        [response.page_file.page_ref]: buildPlayerWikiDraftFromRecord(response.page_file),
-      }));
+    refetchContentPages: () => {
       void contentPagesQuery.refetch();
     },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    },
-  });
-
-  const archivePlayerWikiPageMutation = useMutation({
-    mutationFn: async (pageRef: string) => {
-      const detail = await apiClient.getContentPage(resolvedCampaignSlug, pageRef);
-      const draft = {
-        ...buildPlayerWikiDraftFromRecord(detail.page_file),
-        published: false,
-        imageUpload: null,
-      };
-      const payload: ContentPageUpsertPayload = {
-        metadata: buildPlayerWikiMetadata(draft, detail.page_file.page_ref, draft.image),
-        body_markdown: draft.bodyMarkdown,
-      };
-      return apiClient.upsertContentPage(resolvedCampaignSlug, detail.page_file.page_ref, payload);
-    },
-    onSuccess: (response) => {
-      setUiMessage(`Player Wiki page archived: ${response.page_file.page.title}.`);
-      setPaneError(null);
-      setPlayerWikiEditDrafts((current) => ({
-        ...current,
-        [response.page_file.page_ref]: buildPlayerWikiDraftFromRecord(response.page_file),
-      }));
-      void contentPagesQuery.refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    },
-  });
-
-  const deletePlayerWikiPageMutation = useMutation({
-    mutationFn: (pageRef: string) => apiClient.deleteContentPage(resolvedCampaignSlug, pageRef),
-    onSuccess: (response) => {
-      const pageRef = response.deleted.page_ref;
-      setUiMessage(`Player Wiki page deleted: ${pageRef}.`);
-      setPaneError(null);
-      setPlayerWikiDeleteConfirm((current) => ({
-        ...current,
-        [pageRef]: false,
-      }));
-      setPlayerWikiEditDrafts((current) => {
-        const next = { ...current };
-        delete next[pageRef];
-        return next;
-      });
-      void contentPagesQuery.refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    },
-  });
-
-  const loadPlayerWikiEditDraft = async (pageRef: string) => {
-    setPaneError(null);
-    setUiMessage("Loading Player Wiki editor...");
-    try {
-      const response = await apiClient.getContentPage(resolvedCampaignSlug, pageRef);
-      setPlayerWikiEditDrafts((current) => ({
-        ...current,
-        [response.page_file.page_ref]: buildPlayerWikiDraftFromRecord(response.page_file),
-      }));
-      setUiMessage(`Editor loaded: ${response.page_file.page.title}.`);
-    } catch (error) {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    }
-  };
-
-  const createArticleMutation = useMutation({
-    mutationFn: (payload: SessionArticleCreatePayload) => apiClient.createSessionArticle(resolvedCampaignSlug, payload),
-    onSuccess: () => {
-      setUiMessage("Article staged.");
-      setPaneError(null);
-      setManualDraft(buildEmptyManualArticleDraft());
-      setUploadDraft({ filename: "", markdown: "", image: null });
-      setSelectedSourceRef("");
+    refetchSession: () => {
       void sessionQuery.refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    },
-  });
-
-  const updateArticleMutation = useMutation({
-    mutationFn: (args: { id: number; payload: StagedArticleDraftState; hasExistingImage: boolean }) => {
-      const imagePayload = args.payload.image
-        ? {
-            ...args.payload.image,
-            alt_text: args.payload.imageAltText || null,
-            caption: args.payload.imageCaption || null,
-          }
-        : undefined;
-      const articlePayload: SessionArticleUpdatePayload = {
-        title: args.payload.title,
-        body_markdown: args.payload.body,
-      };
-      if (imagePayload) {
-        articlePayload.image = imagePayload;
-      } else if (args.hasExistingImage) {
-        articlePayload.image_alt_text = args.payload.imageAltText || "";
-        articlePayload.image_caption = args.payload.imageCaption || "";
-      }
-      return apiClient.updateSessionArticle(resolvedCampaignSlug, args.id, articlePayload);
-    },
-    onSuccess: (_response, args) => {
-      setUiMessage("Article updated.");
-      setPaneError(null);
-      setStagedDrafts((current) => ({
-        ...current,
-        [args.id]: {
-          ...current[args.id],
-          image: null,
-        },
-      }));
-      void sessionQuery.refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
-    },
-  });
-
-  const deleteArticleMutation = useMutation({
-    mutationFn: (articleId: number) => apiClient.deleteSessionArticle(resolvedCampaignSlug, articleId),
-    onSuccess: () => {
-      setUiMessage("Article removed.");
-      setPaneError(null);
-      void sessionQuery.refetch();
-    },
-    onError: (error) => {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-      }
-      setPaneError(apiErrorMessage(error));
-      setUiMessage(null);
     },
   });
 
