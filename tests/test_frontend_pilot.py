@@ -3781,14 +3781,15 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
     presented_markup = section_markup[presented_start:presented_fallback_start]
 
     assert 'className="spell-slot-editor-list spell-slot-editor-list--compact"' in slot_controls_markup
-    assert '<article className="detail-card"' in slot_controls_markup
+    assert '<article className="detail-card spell-slot-card"' in slot_controls_markup
     assert 'onSubmit={(event) => submitSpellSlot(event, slot)}' in slot_controls_markup
     assert 'className="session-inline-form"' in slot_controls_markup
     assert 'data-character-autosubmit' in slot_controls_markup
     assert 'data-character-sheet-edit-form="spell-slot"' in slot_controls_markup
     assert 'data-character-sheet-edit-level={level}' in slot_controls_markup
     assert 'data-character-sheet-edit-slot-lane-id={slotLaneId}' in slot_controls_markup
-    assert 'className="session-field" htmlFor={`spell-slot-${key}`}' in slot_controls_markup
+    assert 'className="spell-slot-values" role="group" aria-label={`${slotLabel} usage`}' in slot_controls_markup
+    assert 'className="spell-slot-value spell-slot-value--input" htmlFor={`spell-slot-${key}`}' in slot_controls_markup
     assert 'onBlur={submitSpellSlotOnBlur}' in slot_controls_markup
     assert (
         re.search(
@@ -3801,9 +3802,12 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
     assert 'Update {slotLabel}' in slot_controls_markup
     assert 'className="section-heading"' in slot_controls_markup
     assert '<h3>{slotLabel}</h3>' in slot_controls_markup
-    assert (
-        re.search(r'className="meta">\s*\{available\} available / \{max\}\s*</span>', slot_controls_markup) is not None
-    )
+    assert slot_controls_markup.count('className="spell-slot-value"') >= 4
+    assert "<span>Available</span>" in slot_controls_markup
+    assert "<span>Used</span>" in slot_controls_markup
+    assert "<span>Max</span>" in slot_controls_markup
+    assert "{available} available / {max}" not in slot_controls_markup
+    assert "Used {used} / {max}" not in slot_controls_markup
 
     assert 'className="character-card-grid"' not in slot_controls_markup
     assert 'className="compact-state-form"' not in slot_controls_markup
@@ -3834,6 +3838,10 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
     assert 'className="spell-level-group__heading"' in section_markup
     assert 'className="spell-card-grid spell-card-grid--level"' in section_markup
     assert ".spell-slot-editor-list {" in styles
+    assert ".spell-slot-values {" in styles
+    assert ".spell-slot-value {" in styles
+    assert ".spell-slot-value strong {" in styles
+    assert ".spell-slot-value input {" in styles
     assert ".spellcasting-summary-values {" in styles
     assert "grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr));" in styles
     assert ".spellcasting-summary-value {" in styles

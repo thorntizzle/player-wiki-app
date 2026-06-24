@@ -77,7 +77,7 @@ export function CharacterDndSpellsSection({
             const available = readNumber(slot.available, Math.max(0, max - used));
             const slotLabel = readString(slot.label, `Level ${level}`);
             return (
-              <article className="detail-card" key={key}>
+              <article className="detail-card spell-slot-card" key={key}>
                 {canEdit ? (
                   <form
                     onSubmit={(event) => submitSpellSlot(event, slot)}
@@ -89,24 +89,31 @@ export function CharacterDndSpellsSection({
                   >
                     <div className="section-heading">
                       <h3>{slotLabel}</h3>
-                      <span className="meta">
-                        {available} available / {max}
+                    </div>
+                    <div className="spell-slot-values" role="group" aria-label={`${slotLabel} usage`}>
+                      <span className="spell-slot-value">
+                        <span>Available</span>
+                        <strong>{available}</strong>
+                      </span>
+                      <label className="spell-slot-value spell-slot-value--input" htmlFor={`spell-slot-${key}`}>
+                        <span>Used</span>
+                        <input
+                          id={`spell-slot-${key}`}
+                          type="number"
+                          min="0"
+                          max={max}
+                          value={spellSlotDrafts[key] ?? ""}
+                          onChange={(event) =>
+                            setSpellSlotDrafts({ ...spellSlotDrafts, [key]: event.currentTarget.value })
+                          }
+                          onBlur={submitSpellSlotOnBlur}
+                        />
+                      </label>
+                      <span className="spell-slot-value">
+                        <span>Max</span>
+                        <strong>{max}</strong>
                       </span>
                     </div>
-                    <label className="session-field" htmlFor={`spell-slot-${key}`}>
-                      <span>Used</span>
-                      <input
-                        id={`spell-slot-${key}`}
-                        type="number"
-                        min="0"
-                        max={max}
-                        value={spellSlotDrafts[key] ?? ""}
-                        onChange={(event) =>
-                          setSpellSlotDrafts({ ...spellSlotDrafts, [key]: event.currentTarget.value })
-                        }
-                        onBlur={submitSpellSlotOnBlur}
-                      />
-                    </label>
                     <button type="submit" className="visually-hidden" disabled={isSaving || !canEdit}>
                       Update {slotLabel}
                     </button>
@@ -115,11 +122,21 @@ export function CharacterDndSpellsSection({
                   <>
                     <div className="section-heading">
                       <h3>{slotLabel}</h3>
-                      <span className="meta">
-                        {available} available / {max}
+                    </div>
+                    <div className="spell-slot-values" role="group" aria-label={`${slotLabel} usage`}>
+                      <span className="spell-slot-value">
+                        <span>Available</span>
+                        <strong>{available}</strong>
+                      </span>
+                      <span className="spell-slot-value">
+                        <span>Used</span>
+                        <strong>{used}</strong>
+                      </span>
+                      <span className="spell-slot-value">
+                        <span>Max</span>
+                        <strong>{max}</strong>
                       </span>
                     </div>
-                    <p>Used {used} / {max}</p>
                   </>
                 )}
               </article>
