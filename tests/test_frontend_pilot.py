@@ -1875,10 +1875,11 @@ def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
 
 def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> None:
     source = Path("frontend/src/routes/WikiRoutes.tsx").read_text(encoding="utf-8")
+    chrome_source = Path("frontend/src/components/WikiChrome.tsx").read_text(encoding="utf-8")
     nav_source = _extract_component_source(
-        source,
-        "function WikiSectionNav({",
-        "function WikiSectionBrowse({",
+        chrome_source,
+        "export function WikiSectionNav({",
+        "export function WikiSectionBrowse({",
     )
     home_page_source = _extract_component_source(
         source,
@@ -1893,13 +1894,17 @@ def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> N
     article_page_source = source[source.index("export function WikiArticlePage() {"):]
     styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
 
+    assert 'from "../components/WikiChrome"' in source
+    assert "function WikiSectionNav({" not in source
+    assert "function WikiHomeSectionGrid({" not in source
+    assert "function WikiSectionBrowse({" not in source
     assert 'className="wiki-section-nav"' in nav_source
     assert 'aria-label="Wiki sections"' in nav_source
     assert 'href={preferredCampaignLink(section.href, campaignSlug, frontendMode)}' in nav_source
     assert 'aria-current={isActive ? "page" : undefined}' in nav_source
     assert 'title={`${section.page_count} page${section.page_count === 1 ? "" : "s"}`}' in nav_source
 
-    assert "function WikiHomeSectionGrid({" in nav_source
+    assert "export function WikiHomeSectionGrid({" in nav_source
     assert 'className="wiki-home-section-grid"' in nav_source
     assert 'aria-label="Campaign wiki sections"' in nav_source
     assert 'className="card wiki-home-section-card"' in nav_source
