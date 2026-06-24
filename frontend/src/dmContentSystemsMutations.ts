@@ -11,6 +11,8 @@ import {
   type DmContentSystemsCustomDraftState,
 } from "./dmContentUtils";
 
+type StatusReporter = (message: string | null) => void;
+
 export interface DmContentSystemsSourceDraftState {
   isEnabled: boolean;
   defaultVisibility: string;
@@ -32,7 +34,7 @@ interface UseDmContentSystemsMutationsOptions {
   customCreateDraft: DmContentSystemsCustomDraftState;
   customEditDrafts: Record<string, DmContentSystemsCustomDraftState>;
   setAuthRequired: (required: boolean) => void;
-  setSystemsMessage: Dispatch<SetStateAction<string | null>>;
+  setSystemsMessage: StatusReporter;
   setSystemsError: Dispatch<SetStateAction<string | null>>;
   setAcknowledgeProprietary: Dispatch<SetStateAction<boolean>>;
   setOverrideDraft: Dispatch<SetStateAction<DmContentSystemsOverrideDraftState>>;

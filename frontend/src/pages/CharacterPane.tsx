@@ -12,7 +12,7 @@ import {
 } from "../characterPaneDrafts";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 import { useApiClient } from "../apiClientContext";
-import { TOAST_DISMISS_MS, ToastNotice } from "../components/feedback";
+import { ToastNotice, useToastNotice } from "../components/feedback";
 import {
   CharacterDetailDialog,
   type CharacterDetailDialogState,
@@ -66,18 +66,15 @@ export function CharacterPane({
   const [selectedSlug, setSelectedSlug] = useState<string | null>(initialCharacterSlug);
   const [activeCharacterSection, setActiveCharacterSection] = useState<CharacterSection>(initialSection ?? "overview");
   const [restPreview, setRestPreview] = useState<CharacterRestPreviewResponse["preview"] | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [detailDialog, setDetailDialog] = useState<CharacterDetailDialogState | null>(null);
   const portraitFileInputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (!statusMessage) {
-      return undefined;
-    }
-    const timer = window.setTimeout(() => setStatusMessage(null), TOAST_DISMISS_MS);
-    return () => window.clearTimeout(timer);
-  }, [statusMessage]);
+  const {
+    clearToast,
+    setToastMessage: setStatusMessage,
+    toastMessage: statusMessage,
+    toastTone,
+  } = useToastNotice();
 
   const listQuery = useQuery({
     queryKey: ["characters", campaignSlug, ""],
@@ -385,7 +382,7 @@ export function CharacterPane({
     setSelectedSlug(nextSlug);
     setActiveCharacterSection("overview");
     setRestPreview(null);
-    setStatusMessage(null);
+    clearToast();
     setErrorMessage(null);
     setDetailDialog(null);
     if (nextSlug) {
@@ -718,7 +715,7 @@ export function CharacterPane({
 
         {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
       </article>
-      <ToastNotice message={statusMessage} />
+      <ToastNotice message={statusMessage} tone={toastTone} />
       <CharacterDetailDialog detail={detailDialog} onClose={() => setDetailDialog(null)} />
     </div>
   );

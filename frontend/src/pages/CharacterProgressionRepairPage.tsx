@@ -6,7 +6,7 @@ import type { FormEvent } from "react";
 import type { CharacterProgressionRepairPayload } from "../api/types";
 import { getApiErrorMessage } from "../apiErrors";
 import { queryClient, useApiClient } from "../apiClientContext";
-import { ApiErrorNotice, type ApiMessageEnvelope } from "../components/feedback";
+import { ApiErrorNotice, ToastNotice, useToastNotice, type ApiMessageEnvelope } from "../components/feedback";
 import {
   characterAuthoringStringValues,
   characterNameFromRecord,
@@ -28,8 +28,8 @@ export function CharacterProgressionRepairPage() {
   const { apiClient, setAuthRequired } = useApiClient();
   const [draftValues, setDraftValues] = useState<CharacterAuthoringValues>({});
   const [loadedRevision, setLoadedRevision] = useState<number | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<ApiMessageEnvelope | null>(null);
+  const { clearToast, showToast, toastMessage, toastTone } = useToastNotice({ defaultTone: "success" });
 
   const repairQuery = useQuery({
     queryKey: ["character-progression-repair", campaignSlug, characterSlug],
@@ -72,7 +72,7 @@ export function CharacterProgressionRepairPage() {
       });
       setDraftValues(characterProgressionRepairValuesFromContext(response.repair));
       setLoadedRevision(response.repair?.state_revision ?? null);
-      setStatusMessage(response.message || "Progression repair saved.");
+      showToast(response.message || "Progression repair saved.", "success");
       setErrorMessage(null);
       if (!response.supported && response.links.level_up_url) {
         window.location.assign(response.links.level_up_url);
@@ -92,7 +92,7 @@ export function CharacterProgressionRepairPage() {
       setErrorMessage({ status: 400, message: "The progression repair context has not loaded yet." });
       return;
     }
-    setStatusMessage(null);
+    clearToast();
     setErrorMessage(null);
     submitRepair.mutate({
       expected_revision: repair.state_revision,
@@ -125,7 +125,7 @@ export function CharacterProgressionRepairPage() {
       </section>
 
       <ApiErrorNotice isLoading={repairQuery.isLoading} message={loadingError || errorMessage} onAuth={() => setAuthRequired(true)} />
-      {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
+      <ToastNotice message={toastMessage} tone={toastTone} />
 
       {data && !data.supported ? (
         <section className="card auth-card">

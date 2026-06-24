@@ -8,7 +8,7 @@ import { getApiErrorMessage } from "../apiErrors";
 import { queryClient, useApiClient } from "../apiClientContext";
 import { CharacterDndChoiceSelect } from "../components/CharacterAuthoringFields";
 import { CharacterLevelUpPreviewList } from "../components/CharacterAuthoringPreview";
-import { ApiErrorNotice, type ApiMessageEnvelope } from "../components/feedback";
+import { ApiErrorNotice, ToastNotice, useToastNotice, type ApiMessageEnvelope } from "../components/feedback";
 import {
   characterAuthoringStringValues,
   characterNameFromRecord,
@@ -30,8 +30,8 @@ export function CharacterLevelUpPage() {
   const [draftValues, setDraftValues] = useState<CharacterAuthoringValues>({});
   const [contextValues, setContextValues] = useState<CharacterAuthoringValues>({});
   const [loadedRevision, setLoadedRevision] = useState<number | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<ApiMessageEnvelope | null>(null);
+  const { clearToast, showToast, toastMessage, toastTone } = useToastNotice({ defaultTone: "success" });
 
   const levelUpQuery = useQuery({
     queryKey: ["character-level-up", campaignSlug, characterSlug, JSON.stringify(contextValues)],
@@ -81,7 +81,7 @@ export function CharacterLevelUpPage() {
       });
       setDraftValues(characterLevelUpValuesFromContext(response.level_up));
       setLoadedRevision(response.level_up?.state_revision ?? null);
-      setStatusMessage(response.message || "Character advanced.");
+      showToast(response.message || "Character advanced.", "success");
       setErrorMessage(null);
       if (response.links.character_url) {
         window.location.assign(response.links.character_url);
@@ -101,7 +101,7 @@ export function CharacterLevelUpPage() {
       setErrorMessage({ status: 400, message: "The level-up context has not loaded yet." });
       return;
     }
-    setStatusMessage(null);
+    clearToast();
     setErrorMessage(null);
     submitLevelUp.mutate({
       expected_revision: levelUp.state_revision,
@@ -130,7 +130,7 @@ export function CharacterLevelUpPage() {
       </section>
 
       <ApiErrorNotice isLoading={levelUpQuery.isLoading} message={loadingError || errorMessage} onAuth={() => setAuthRequired(true)} />
-      {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
+      <ToastNotice message={toastMessage} tone={toastTone} />
 
       {data && !data.supported ? (
         <section className="card auth-card">

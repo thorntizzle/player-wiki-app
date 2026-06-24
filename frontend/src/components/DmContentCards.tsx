@@ -57,7 +57,6 @@ export function DmContentStatblockCard({
         </div>
       </div>
       <p className="status status-neutral">{statblock.parser_feedback.summary}</p>
-      <p className="meta">Combat seed source: dm_statblock:{statblock.id}.</p>
       <details className="feature-detail">
         <summary>View statblock text</summary>
         <pre className="dm-content-preview">{statblock.body_markdown}</pre>

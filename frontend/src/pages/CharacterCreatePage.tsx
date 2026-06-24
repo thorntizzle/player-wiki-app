@@ -13,7 +13,7 @@ import { getApiErrorMessage } from "../apiErrors";
 import { useApiClient } from "../apiClientContext";
 import { CharacterDndChoiceSelect } from "../components/CharacterAuthoringFields";
 import { CharacterPreviewList } from "../components/CharacterAuthoringPreview";
-import { ApiErrorNotice } from "../components/feedback";
+import { ApiErrorNotice, ToastNotice, useToastNotice } from "../components/feedback";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 import {
   draftString,
@@ -39,7 +39,7 @@ export function CharacterCreatePage() {
   const { apiClient, setAuthRequired } = useApiClient();
   const [draftValues, setDraftValues] = useState<CharacterAuthoringValues>({});
   const [contextValues, setContextValues] = useState<CharacterAuthoringValues>({});
-  const [statusMessage, setStatusMessage] = useState("");
+  const { clearToast, showToast, toastMessage, toastTone } = useToastNotice({ defaultTone: "success" });
 
   const createQuery = useQuery({
     queryKey: ["character-create", resolvedCampaignSlug, JSON.stringify(contextValues)],
@@ -79,7 +79,7 @@ export function CharacterCreatePage() {
   const createMutation = useMutation({
     mutationFn: (payload: CharacterCreateSubmitPayload) => apiClient.createCharacter(resolvedCampaignSlug, payload),
     onSuccess: (payload) => {
-      setStatusMessage(payload.message);
+      showToast(payload.message, "success");
       if (payload.links.character_url) {
         window.location.assign(payload.links.character_url);
       }
@@ -96,7 +96,7 @@ export function CharacterCreatePage() {
 
   const submitCreate = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setStatusMessage("");
+    clearToast();
     createMutation.mutate({ values: draftValues });
   };
 
@@ -128,7 +128,7 @@ export function CharacterCreatePage() {
         </div>
       </section>
       <ApiErrorNotice isLoading={createQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
-      {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
+      <ToastNotice message={toastMessage} tone={toastTone} />
 
       {isDndCreateContext(create) ? (
         <div className="character-authoring-layout">

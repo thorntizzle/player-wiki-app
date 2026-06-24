@@ -16,7 +16,7 @@ import {
 } from "../sessionRouteState";
 import { useApiClient } from "../apiClientContext";
 import { getApiErrorMessage } from "../apiErrors";
-import { ApiErrorNotice } from "../components/feedback";
+import { ApiErrorNotice, ToastNotice, useToastNotice } from "../components/feedback";
 import { DmContentSystemsLane } from "./DmContentSystemsLane";
 import { DmConditionsLane } from "../components/DmConditionsLane";
 import { DmContentHero } from "../components/DmContentHero";
@@ -92,6 +92,7 @@ export function DmContentPage(): ReactElement {
   const [playerWikiDeleteConfirm, setPlayerWikiDeleteConfirm] = useState<Record<string, boolean>>({});
   const [uiMessage, setUiMessage] = useState<string | null>(null);
   const [paneError, setPaneError] = useState<string | null>(null);
+  const { showToast, toastMessage, toastTone } = useToastNotice();
 
   const dmContentQuery = useQuery({
     queryKey: ["dm-content", resolvedCampaignSlug],
@@ -247,6 +248,7 @@ export function DmContentPage(): ReactElement {
     apiClient,
     campaignSlug: resolvedCampaignSlug,
     setAuthRequired,
+    showToastMessage: showToast,
     setUiMessage,
     setPaneError,
     setStatblockCreateDraft,
@@ -415,6 +417,7 @@ export function DmContentPage(): ReactElement {
 
       {paneError ? <p className="status status-error">{paneError}</p> : null}
       {uiMessage ? <p className="status status-neutral">{uiMessage}</p> : null}
+      <ToastNotice message={toastMessage} tone={toastTone} />
       {activeLane === "statblocks" && !canManageDmContent && !dmContentQuery.isLoading ? (
         <p className="status status-error">You do not have permission to manage DM Content statblocks.</p>
       ) : null}

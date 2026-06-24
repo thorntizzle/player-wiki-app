@@ -6,7 +6,7 @@ import type { FormEvent } from "react";
 import type { CharacterRetrainingPayload } from "../api/types";
 import { getApiErrorMessage } from "../apiErrors";
 import { queryClient, useApiClient } from "../apiClientContext";
-import { ApiErrorNotice, type ApiMessageEnvelope } from "../components/feedback";
+import { ApiErrorNotice, ToastNotice, useToastNotice, type ApiMessageEnvelope } from "../components/feedback";
 import {
   characterAuthoringStringValues,
   characterNameFromRecord,
@@ -27,8 +27,8 @@ export function CharacterRetrainingPage() {
   const { apiClient, setAuthRequired } = useApiClient();
   const [draftValues, setDraftValues] = useState<CharacterAuthoringValues>({});
   const [loadedRevision, setLoadedRevision] = useState<number | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<ApiMessageEnvelope | null>(null);
+  const { clearToast, showToast, toastMessage, toastTone } = useToastNotice({ defaultTone: "success" });
 
   const retrainingQuery = useQuery({
     queryKey: ["character-retraining", campaignSlug, characterSlug],
@@ -70,7 +70,7 @@ export function CharacterRetrainingPage() {
       });
       setDraftValues(characterRetrainingValuesFromContext(response.retraining));
       setLoadedRevision(response.retraining?.state_revision ?? null);
-      setStatusMessage(response.message || "Retraining saved.");
+      showToast(response.message || "Retraining saved.", "success");
       setErrorMessage(null);
       if (response.links.character_url) {
         window.location.assign(`${response.links.character_url}?page=features`);
@@ -90,7 +90,7 @@ export function CharacterRetrainingPage() {
       setErrorMessage({ status: 400, message: "The retraining context has not loaded yet." });
       return;
     }
-    setStatusMessage(null);
+    clearToast();
     setErrorMessage(null);
     submitRetraining.mutate({
       expected_revision: retraining.state_revision,
@@ -123,7 +123,7 @@ export function CharacterRetrainingPage() {
       </section>
 
       <ApiErrorNotice isLoading={retrainingQuery.isLoading} message={loadingError || errorMessage} onAuth={() => setAuthRequired(true)} />
-      {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
+      <ToastNotice message={toastMessage} tone={toastTone} />
 
       {data && !data.supported ? (
         <section className="card auth-card">

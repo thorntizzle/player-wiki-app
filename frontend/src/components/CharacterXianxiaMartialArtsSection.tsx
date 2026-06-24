@@ -52,16 +52,7 @@ export function CharacterXianxiaMartialArtsSection({
                       </h3>
                       <p className="meta">
                         {joinDisplay([
-                          readString(art.systems_slug)
-                            ? `Source: ${readString(art.systems_slug)}${
-                                readString(art.systems_source_id) ? ` (${readString(art.systems_source_id)})` : ""
-                              }`
-                            : "",
                           readString(art.current_rank) ? `Current rank: ${readString(art.current_rank)}` : "Rank not recorded",
-                          readString(art.current_rank_key) ? `Current rank key: ${readString(art.current_rank_key)}` : "",
-                          readString(art.rank_records_status)
-                            ? readString(art.rank_records_status).replace(/_/g, " ")
-                            : "",
                           boolFromUnknown(art.starting_package) ? "Starting package" : "",
                           boolFromUnknown(art.custom) ? "Custom Martial Art" : "",
                         ])}
@@ -152,7 +143,6 @@ export function CharacterXianxiaMartialArtsSection({
                                     <strong>{`${rankLabel} Rank`}</strong>
                                   </p>
                                   <ul className="plain-list">
-                                    {readString(rank.rank_ref) ? <li className="meta">{`Rank ref: ${readString(rank.rank_ref)}`}</li> : null}
                                     {readString(rank.energy_bonus_text) ? (
                                       <li className="meta">{`Energy bonuses: ${readString(rank.energy_bonus_text)}`}</li>
                                     ) : null}
@@ -195,11 +185,6 @@ export function CharacterXianxiaMartialArtsSection({
                                           </div>
                                         </summary>
                                         <article>
-                                          {readString(ability.source_ref) ? (
-                                            <p className="meta">
-                                              <strong>Ability ref:</strong> {readString(ability.source_ref)}
-                                            </p>
-                                          ) : null}
                                           {readString(ability.resource_cost_text) ? (
                                             <p className="meta">
                                               <strong>Costs:</strong> {readString(ability.resource_cost_text)}

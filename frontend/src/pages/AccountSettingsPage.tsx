@@ -9,17 +9,16 @@ import type {
 } from "../api/types";
 import { getApiErrorMessage } from "../apiErrors";
 import { queryClient, useApiClient } from "../apiClientContext";
-import { ApiErrorNotice } from "../components/feedback";
+import { ApiErrorNotice, ToastNotice, useToastNotice } from "../components/feedback";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 
 export function AccountSettingsPage() {
   const { apiClient, setAuthRequired } = useApiClient();
   const [draftThemeKey, setDraftThemeKey] = useState("");
   const [draftChatOrder, setDraftChatOrder] = useState("");
-  const [themeStatusMessage, setThemeStatusMessage] = useState<string | null>(null);
   const [themeErrorMessage, setThemeErrorMessage] = useState<string | null>(null);
-  const [chatStatusMessage, setChatStatusMessage] = useState<string | null>(null);
   const [chatErrorMessage, setChatErrorMessage] = useState<string | null>(null);
+  const { clearToast, showToast, toastMessage, toastTone } = useToastNotice();
 
   const settingsQuery = useQuery({
     queryKey: ["account-settings"],
@@ -58,12 +57,12 @@ export function AccountSettingsPage() {
   const saveThemeSettings = useMutation({
     mutationFn: (payload: AccountSettingsUpdatePayload) => apiClient.patchAccountSettings(payload),
     onSuccess: (response) => {
-      setThemeStatusMessage("Theme saved.");
+      showToast("Theme saved.");
       setThemeErrorMessage(null);
       applySavedSettings(response);
     },
     onError: (error) => {
-      setThemeStatusMessage(null);
+      clearToast();
       if (isAuthError(error)) {
         setAuthRequired(true);
       }
@@ -73,12 +72,12 @@ export function AccountSettingsPage() {
   const saveChatSettings = useMutation({
     mutationFn: (payload: AccountSettingsUpdatePayload) => apiClient.patchAccountSettings(payload),
     onSuccess: (response) => {
-      setChatStatusMessage("Chat order saved.");
+      showToast("Chat order saved.");
       setChatErrorMessage(null);
       applySavedSettings(response);
     },
     onError: (error) => {
-      setChatStatusMessage(null);
+      clearToast();
       if (isAuthError(error)) {
         setAuthRequired(true);
       }
@@ -101,7 +100,7 @@ export function AccountSettingsPage() {
     if (isThemeUnchanged) {
       return;
     }
-    setThemeStatusMessage(null);
+    clearToast();
     setThemeErrorMessage(null);
     saveThemeSettings.mutate({
       theme_key: draftThemeKey,
@@ -113,7 +112,7 @@ export function AccountSettingsPage() {
     if (isChatOrderUnchanged) {
       return;
     }
-    setChatStatusMessage(null);
+    clearToast();
     setChatErrorMessage(null);
     saveChatSettings.mutate({
       session_chat_order: draftChatOrder,
@@ -133,6 +132,7 @@ export function AccountSettingsPage() {
       </section>
 
       <ApiErrorNotice isLoading={settingsQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
+      <ToastNotice message={toastMessage} tone={toastTone} />
 
       {settingsQuery.data ? (
         <section className="page-layout account-layout">
@@ -175,7 +175,6 @@ export function AccountSettingsPage() {
                 <button type="submit" className="button" disabled={saveThemeSettings.isPending || isThemeUnchanged}>
                   {saveThemeSettings.isPending ? "Saving..." : "Save theme"}
                 </button>
-                {themeStatusMessage ? <p className="status status-neutral">{themeStatusMessage}</p> : null}
                 {themeSaveError ? <p className="status status-error">{themeSaveError}</p> : null}
               </form>
             </section>
@@ -221,7 +220,6 @@ export function AccountSettingsPage() {
                 >
                   {saveChatSettings.isPending ? "Saving..." : "Save chat order"}
                 </button>
-                {chatStatusMessage ? <p className="status status-neutral">{chatStatusMessage}</p> : null}
                 {chatSaveError ? <p className="status status-error">{chatSaveError}</p> : null}
               </form>
             </section>

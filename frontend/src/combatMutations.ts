@@ -27,6 +27,8 @@ export interface CombatConditionDraft {
   durationText: string;
 }
 
+type StatusReporter = (message: string | null) => void;
+
 interface UseCombatMutationsOptions {
   apiClient: CampaignApiClient;
   campaignSlug: string;
@@ -39,7 +41,7 @@ interface UseCombatMutationsOptions {
   systemsSeedDraft: CombatSystemsSeedDraft;
   systemsSearchQuery: string;
   setAuthRequired: (required: boolean) => void;
-  setStatusMessage: Dispatch<SetStateAction<string | null>>;
+  setStatusMessage: StatusReporter;
   setErrorMessage: Dispatch<SetStateAction<string | null>>;
   setConditionDraft: Dispatch<SetStateAction<CombatConditionDraft>>;
   setSelectedCombatantId: Dispatch<SetStateAction<number | null>>;

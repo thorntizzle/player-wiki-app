@@ -8,7 +8,7 @@ import { getApiErrorMessage } from "../apiErrors";
 import { useApiClient } from "../apiClientContext";
 import { useAdminDashboardMutations, useAdminUserDetailMutations } from "../adminMutations";
 import { AdminActivityFilters, AdminActivityList, AdminPagination } from "../components/AdminActivity";
-import { ApiErrorNotice } from "../components/feedback";
+import { ApiErrorNotice, ToastNotice, useToastNotice } from "../components/feedback";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 
 function adminSearch(search: string): string {
@@ -25,8 +25,8 @@ export function AdminDashboardPage() {
     user_type: "player",
     campaign_slug: "",
   });
-  const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const { showToast, toastMessage, toastTone } = useToastNotice();
 
   const dashboardQuery = useQuery({
     queryKey: ["admin-dashboard", currentSearch],
@@ -55,7 +55,7 @@ export function AdminDashboardPage() {
   const { inviteMutation } = useAdminDashboardMutations({
     apiClient,
     setAuthRequired,
-    setStatusMessage,
+    setStatusMessage: showToast,
     setErrorMessage,
     setInviteDraft,
   });
@@ -73,7 +73,7 @@ export function AdminDashboardPage() {
 
       <ApiErrorNotice isLoading={dashboardQuery.isLoading} message={queryError} onAuth={() => setAuthRequired(true)} />
       {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
-      {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
+      <ToastNotice message={toastMessage} tone={toastTone} />
 
       {data ? (
         <>
@@ -224,8 +224,8 @@ export function AdminUserDetailPage() {
   const [membershipDraft, setMembershipDraft] = useState({ campaign_slug: "", role: "player", status: "active" });
   const [assignmentDraft, setAssignmentDraft] = useState({ character_ref: "" });
   const [deleteConfirm, setDeleteConfirm] = useState("");
-  const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const { showToast, toastMessage, toastTone } = useToastNotice();
 
   const userQuery = useQuery({
     queryKey: ["admin-user", userId, currentSearch],
@@ -266,7 +266,7 @@ export function AdminUserDetailPage() {
     assignmentDraft,
     deleteConfirm,
     setAuthRequired,
-    setStatusMessage,
+    setStatusMessage: showToast,
     setErrorMessage,
   });
 
@@ -306,7 +306,7 @@ export function AdminUserDetailPage() {
 
       <ApiErrorNotice isLoading={userQuery.isLoading} message={queryError} onAuth={() => setAuthRequired(true)} />
       {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
-      {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
+      <ToastNotice message={toastMessage} tone={toastTone} />
 
       {data ? (
         <>

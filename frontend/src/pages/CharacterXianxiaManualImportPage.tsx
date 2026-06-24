@@ -6,7 +6,7 @@ import type { FormEvent } from "react";
 import type { CharacterXianxiaManualImportContext } from "../api/types";
 import { getApiErrorMessage } from "../apiErrors";
 import { useApiClient } from "../apiClientContext";
-import { ApiErrorNotice } from "../components/feedback";
+import { ApiErrorNotice, ToastNotice, useToastNotice } from "../components/feedback";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 import {
   draftString,
@@ -29,7 +29,7 @@ export function CharacterXianxiaManualImportPage() {
   const [contextValues, setContextValues] = useState<Record<string, string>>({});
   const [manualContext, setManualContext] = useState<CharacterXianxiaManualImportContext | null>(null);
   const [rowCount, setRowCount] = useState(3);
-  const [statusMessage, setStatusMessage] = useState("");
+  const { clearToast, showToast, toastMessage, toastTone } = useToastNotice({ defaultTone: "success" });
 
   const importQuery = useQuery({
     queryKey: ["character-xianxia-import", resolvedCampaignSlug, JSON.stringify(contextValues)],
@@ -57,7 +57,7 @@ export function CharacterXianxiaManualImportPage() {
         confirm_import: confirm,
       }),
     onSuccess: (payload) => {
-      setStatusMessage(payload.message || "");
+      showToast(payload.message || "", "success");
       if ("character" in payload) {
         if (payload.links.character_url) {
           window.location.assign(payload.links.character_url);
@@ -79,12 +79,12 @@ export function CharacterXianxiaManualImportPage() {
 
   const submitPreview = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setStatusMessage("");
+    clearToast();
     importMutation.mutate({ confirm: false });
   };
 
   const confirmImport = () => {
-    setStatusMessage("");
+    clearToast();
     importMutation.mutate({ confirm: true });
   };
 
@@ -103,7 +103,7 @@ export function CharacterXianxiaManualImportPage() {
         </div>
       </section>
       <ApiErrorNotice isLoading={importQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
-      {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
+      <ToastNotice message={toastMessage} tone={toastTone} />
       {context?.preview ? (
         <section className="card character-authoring-preview-card">
           <h2>Review Import</h2>

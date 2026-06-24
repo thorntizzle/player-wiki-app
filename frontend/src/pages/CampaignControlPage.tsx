@@ -10,7 +10,7 @@ import type {
 } from "../api/types";
 import { getApiErrorMessage } from "../apiErrors";
 import { queryClient, useApiClient } from "../apiClientContext";
-import { ApiErrorNotice } from "../components/feedback";
+import { ApiErrorNotice, ToastNotice, useToastNotice } from "../components/feedback";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 
 function buildControlVisibilityDraft(rows: CampaignControlVisibilityRow[]): Record<string, string> {
@@ -34,7 +34,7 @@ export function CampaignControlPage() {
   const resolvedCampaignSlug = campaignSlug ?? "";
   const { apiClient, setAuthRequired } = useApiClient();
   const [draftVisibility, setDraftVisibility] = useState<Record<string, string>>({});
-  const [statusMessage, setStatusMessage] = useState("");
+  const { clearToast, showToast, toastMessage, toastTone } = useToastNotice();
 
   const controlQuery = useQuery({
     queryKey: ["campaign-control", resolvedCampaignSlug],
@@ -60,13 +60,13 @@ export function CampaignControlPage() {
   const saveVisibility = useMutation({
     mutationFn: () => apiClient.patchCampaignControlVisibility(resolvedCampaignSlug, { visibility: draftVisibility }),
     onSuccess: (response) => {
-      setStatusMessage(response.message);
+      showToast(response.message);
       setDraftVisibility(buildControlVisibilityDraft(response.visibility_rows));
       void queryClient.invalidateQueries({ queryKey: ["campaign-control", resolvedCampaignSlug] });
       void queryClient.invalidateQueries({ queryKey: ["campaign", resolvedCampaignSlug] });
     },
     onError: (error) => {
-      setStatusMessage("");
+      clearToast();
       if (isAuthError(error)) {
         setAuthRequired(true);
       }
@@ -83,7 +83,7 @@ export function CampaignControlPage() {
       ...previous,
       [scope]: value,
     }));
-    setStatusMessage("");
+    clearToast();
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -91,7 +91,7 @@ export function CampaignControlPage() {
     if (!data) {
       return;
     }
-    setStatusMessage("");
+    clearToast();
     saveVisibility.mutate();
   };
 
@@ -106,6 +106,7 @@ export function CampaignControlPage() {
       </section>
 
       <ApiErrorNotice isLoading={controlQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
+      <ToastNotice message={toastMessage} tone={toastTone} />
 
       {data ? (
         <div className="page-layout">
@@ -151,7 +152,6 @@ export function CampaignControlPage() {
               <button type="submit" disabled={saveVisibility.isPending || isUnchanged}>
                 {saveVisibility.isPending ? "Saving..." : "Save visibility"}
               </button>
-              {statusMessage ? <p className="status status-neutral">{statusMessage}</p> : null}
               {saveError ? <p className="status status-error">{saveError}</p> : null}
             </form>
           </section>

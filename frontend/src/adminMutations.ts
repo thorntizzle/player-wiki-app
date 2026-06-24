@@ -11,10 +11,12 @@ import type {
 import { queryClient } from "./apiClientContext";
 import { isAuthRequiredFromError as isAuthError } from "./sessionRouteState";
 
+type StatusReporter = (message: string) => void;
+
 interface UseAdminDashboardMutationsOptions {
   apiClient: CampaignApiClient;
   setAuthRequired: (required: boolean) => void;
-  setStatusMessage: Dispatch<SetStateAction<string>>;
+  setStatusMessage: StatusReporter;
   setErrorMessage: Dispatch<SetStateAction<string>>;
   setInviteDraft: Dispatch<SetStateAction<AdminInvitePayload>>;
 }
@@ -63,7 +65,7 @@ interface UseAdminUserDetailMutationsOptions {
   assignmentDraft: { character_ref: string };
   deleteConfirm: string;
   setAuthRequired: (required: boolean) => void;
-  setStatusMessage: Dispatch<SetStateAction<string>>;
+  setStatusMessage: StatusReporter;
   setErrorMessage: Dispatch<SetStateAction<string>>;
 }
 

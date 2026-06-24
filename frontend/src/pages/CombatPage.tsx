@@ -9,7 +9,7 @@ import type {
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 import { queryClient, useApiClient } from "../apiClientContext";
 import { getApiErrorMessage } from "../apiErrors";
-import { ApiErrorNotice } from "../components/feedback";
+import { ApiErrorNotice, ToastNotice, useToastNotice } from "../components/feedback";
 import { readNumber } from "../characterValueUtils";
 import { CombatDmStatusPanel } from "../components/CombatDmStatusPanel";
 import { CombatPlayerWorkspace } from "../components/CombatPlayerWorkspace";
@@ -69,8 +69,8 @@ export function CombatPage() {
     return readSearchCombatantId(window.location.search);
   });
   const [activeCombatView, setActiveCombatView] = useState<CombatView>(() => readSearchView(window.location.search));
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { showToast, toastMessage, toastTone } = useToastNotice({ defaultTone: "success" });
   const [vitalsDraft, setVitalsDraft] = useState<CombatVitalsDraft>({
     currentHp: "",
     maxHp: "",
@@ -302,7 +302,7 @@ export function CombatPage() {
     systemsSeedDraft,
     systemsSearchQuery,
     setAuthRequired,
-    setStatusMessage,
+    setStatusMessage: showToast,
     setErrorMessage,
     setConditionDraft,
     setSelectedCombatantId,
@@ -389,8 +389,8 @@ export function CombatPage() {
         message={paneError}
         onAuth={() => setAuthRequired(true)}
       />
-      {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
       {errorMessage ? <p className="status status-error">{errorMessage}</p> : null}
+      <ToastNotice message={toastMessage} tone={toastTone} />
 
       {payload && !payload.combat_system_supported ? (
         <section className="card auth-card">

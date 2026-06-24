@@ -9,7 +9,7 @@ import type {
 } from "../api/types";
 import { getApiErrorMessage } from "../apiErrors";
 import { queryClient, useApiClient } from "../apiClientContext";
-import { ApiErrorNotice, type ApiMessageEnvelope } from "../components/feedback";
+import { ApiErrorNotice, ToastNotice, useToastNotice, type ApiMessageEnvelope } from "../components/feedback";
 import { CharacterCultivationRealmAscension } from "../components/CharacterCultivationRealmAscension";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 import {
@@ -31,8 +31,8 @@ export function CharacterCultivationPage() {
   const campaignSlug = params.campaignSlug ?? "";
   const characterSlug = params.characterSlug ?? "";
   const { apiClient, setAuthRequired } = useApiClient();
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<ApiMessageEnvelope | null>(null);
+  const { clearToast, showToast, toastMessage, toastTone } = useToastNotice({ defaultTone: "success" });
 
   const cultivationQuery = useQuery({
     queryKey: ["character-cultivation", campaignSlug, characterSlug],
@@ -60,7 +60,7 @@ export function CharacterCultivationPage() {
         character: response.character,
         links: response.links,
       });
-      setStatusMessage(response.message || "Cultivation updated.");
+      showToast(response.message || "Cultivation updated.", "success");
       setErrorMessage(null);
       if (response.anchor) {
         window.requestAnimationFrame(() => {
@@ -84,7 +84,7 @@ export function CharacterCultivationPage() {
         values[key] = value;
       }
     });
-    setStatusMessage(null);
+    clearToast();
     setErrorMessage(null);
     actionMutation.mutate({ action, values });
   };
@@ -322,7 +322,7 @@ export function CharacterCultivationPage() {
       </section>
 
       <ApiErrorNotice isLoading={cultivationQuery.isLoading} message={loadingError || errorMessage} onAuth={() => setAuthRequired(true)} />
-      {statusMessage ? <p className="status status-success">{statusMessage}</p> : null}
+      <ToastNotice message={toastMessage} tone={toastTone} />
 
       {data && !data.supported ? (
         <section className="card auth-card">

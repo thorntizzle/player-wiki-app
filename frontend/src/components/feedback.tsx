@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useState } from "react";
+
 export interface ApiMessageEnvelope {
   status: number;
   message: string;
@@ -32,13 +34,54 @@ export function ApiErrorNotice({
 }
 
 export const TOAST_DISMISS_MS = 3600;
+export type ToastTone = "neutral" | "success";
+
+export function useToastNotice({
+  defaultTone = "neutral",
+  dismissMs = TOAST_DISMISS_MS,
+}: {
+  defaultTone?: ToastTone;
+  dismissMs?: number;
+} = {}) {
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastTone, setToastTone] = useState<ToastTone>(defaultTone);
+
+  useEffect(() => {
+    if (!toastMessage) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setToastMessage(null), dismissMs);
+    return () => window.clearTimeout(timer);
+  }, [dismissMs, toastMessage]);
+
+  const showToast = useCallback(
+    (message: string | null | undefined, tone: ToastTone = defaultTone) => {
+      const nextMessage = message?.trim() || null;
+      setToastTone(tone);
+      setToastMessage(nextMessage);
+    },
+    [defaultTone],
+  );
+
+  const clearToast = useCallback(() => {
+    setToastMessage(null);
+  }, []);
+
+  return {
+    clearToast,
+    setToastMessage,
+    showToast,
+    toastMessage,
+    toastTone,
+  };
+}
 
 export function ToastNotice({
   message,
   tone = "neutral",
 }: {
   message: string | null;
-  tone?: "neutral" | "success";
+  tone?: ToastTone;
 }) {
   if (!message) {
     return null;

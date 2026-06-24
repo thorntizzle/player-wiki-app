@@ -28,6 +28,8 @@ import {
   type StagedArticleDraftState,
 } from "./dmContentUtils";
 
+type StatusReporter = (message: string | null) => void;
+
 export interface DmContentUploadDraftState {
   filename: string;
   markdown: string;
@@ -38,6 +40,7 @@ interface UseDmContentMutationsOptions {
   apiClient: CampaignApiClient;
   campaignSlug: string;
   setAuthRequired: (required: boolean) => void;
+  showToastMessage: StatusReporter;
   setUiMessage: Dispatch<SetStateAction<string | null>>;
   setPaneError: Dispatch<SetStateAction<string | null>>;
   setStatblockCreateDraft: Dispatch<SetStateAction<DmContentStatblockDraftState>>;
@@ -58,6 +61,7 @@ export function useDmContentMutations({
   apiClient,
   campaignSlug,
   setAuthRequired,
+  showToastMessage,
   setUiMessage,
   setPaneError,
   setStatblockCreateDraft,
@@ -79,12 +83,14 @@ export function useDmContentMutations({
     }
     setPaneError(apiErrorMessage(error));
     setUiMessage(null);
+    showToastMessage(null);
   };
 
   const createStatblockMutation = useMutation({
     mutationFn: (payload: DmContentStatblockCreatePayload) => apiClient.createDmContentStatblock(campaignSlug, payload),
     onSuccess: (response) => {
-      setUiMessage(`Statblock saved: ${response.statblock.title}. ${response.statblock.parser_feedback.summary}`);
+      showToastMessage(`Statblock saved: ${response.statblock.title}. ${response.statblock.parser_feedback.summary}`);
+      setUiMessage(null);
       setPaneError(null);
       setStatblockCreateDraft({ filename: "gen2-statblock.md", subsection: "", markdown: "" });
       refetchDmContent();
@@ -96,7 +102,8 @@ export function useDmContentMutations({
     mutationFn: (args: { id: number; payload: DmContentStatblockUpdatePayload }) =>
       apiClient.updateDmContentStatblock(campaignSlug, args.id, args.payload),
     onSuccess: (response) => {
-      setUiMessage(`Statblock updated: ${response.statblock.title}. ${response.statblock.parser_feedback.summary}`);
+      showToastMessage(`Statblock updated: ${response.statblock.title}. ${response.statblock.parser_feedback.summary}`);
+      setUiMessage(null);
       setPaneError(null);
       refetchDmContent();
     },
@@ -106,7 +113,8 @@ export function useDmContentMutations({
   const deleteStatblockMutation = useMutation({
     mutationFn: (statblockId: number) => apiClient.deleteDmContentStatblock(campaignSlug, statblockId),
     onSuccess: (response) => {
-      setUiMessage(`Statblock deleted: ${response.statblock.title}.`);
+      showToastMessage(`Statblock deleted: ${response.statblock.title}.`);
+      setUiMessage(null);
       setPaneError(null);
       refetchDmContent();
     },
@@ -116,7 +124,8 @@ export function useDmContentMutations({
   const createConditionMutation = useMutation({
     mutationFn: (payload: DmContentConditionCreatePayload) => apiClient.createDmContentCondition(campaignSlug, payload),
     onSuccess: (response) => {
-      setUiMessage(`Condition saved: ${response.condition.name}.`);
+      showToastMessage(`Condition saved: ${response.condition.name}.`);
+      setUiMessage(null);
       setPaneError(null);
       setConditionCreateDraft({ name: "", description: "" });
       refetchDmContent();
@@ -128,7 +137,8 @@ export function useDmContentMutations({
     mutationFn: (args: { id: number; payload: DmContentConditionUpdatePayload }) =>
       apiClient.updateDmContentCondition(campaignSlug, args.id, args.payload),
     onSuccess: (response) => {
-      setUiMessage(`Condition updated: ${response.condition.name}.`);
+      showToastMessage(`Condition updated: ${response.condition.name}.`);
+      setUiMessage(null);
       setPaneError(null);
       refetchDmContent();
     },
@@ -138,7 +148,8 @@ export function useDmContentMutations({
   const deleteConditionMutation = useMutation({
     mutationFn: (conditionId: number) => apiClient.deleteDmContentCondition(campaignSlug, conditionId),
     onSuccess: (response) => {
-      setUiMessage(`Condition deleted: ${response.condition.name}.`);
+      showToastMessage(`Condition deleted: ${response.condition.name}.`);
+      setUiMessage(null);
       setPaneError(null);
       refetchDmContent();
     },
@@ -166,7 +177,8 @@ export function useDmContentMutations({
     },
     onSuccess: (response, args) => {
       const title = response.page_file.page.title || args.pageRef;
-      setUiMessage(args.mode === "create" ? `Player Wiki page created: ${title}.` : `Player Wiki page updated: ${title}.`);
+      showToastMessage(args.mode === "create" ? `Player Wiki page created: ${title}.` : `Player Wiki page updated: ${title}.`);
+      setUiMessage(null);
       setPaneError(null);
       if (args.mode === "create") {
         setPlayerWikiCreateDraft(buildInitialPlayerWikiDraft());
@@ -195,7 +207,8 @@ export function useDmContentMutations({
       return apiClient.upsertContentPage(campaignSlug, detail.page_file.page_ref, payload);
     },
     onSuccess: (response) => {
-      setUiMessage(`Player Wiki page archived: ${response.page_file.page.title}.`);
+      showToastMessage(`Player Wiki page archived: ${response.page_file.page.title}.`);
+      setUiMessage(null);
       setPaneError(null);
       setPlayerWikiEditDrafts((current) => ({
         ...current,
@@ -210,7 +223,8 @@ export function useDmContentMutations({
     mutationFn: (pageRef: string) => apiClient.deleteContentPage(campaignSlug, pageRef),
     onSuccess: (response) => {
       const pageRef = response.deleted.page_ref;
-      setUiMessage(`Player Wiki page deleted: ${pageRef}.`);
+      showToastMessage(`Player Wiki page deleted: ${pageRef}.`);
+      setUiMessage(null);
       setPaneError(null);
       setPlayerWikiDeleteConfirm((current) => ({
         ...current,
@@ -228,6 +242,7 @@ export function useDmContentMutations({
 
   const loadPlayerWikiEditDraft = async (pageRef: string) => {
     setPaneError(null);
+    showToastMessage(null);
     setUiMessage("Loading Player Wiki editor...");
     try {
       const response = await apiClient.getContentPage(campaignSlug, pageRef);
@@ -235,7 +250,8 @@ export function useDmContentMutations({
         ...current,
         [response.page_file.page_ref]: buildPlayerWikiDraftFromRecord(response.page_file),
       }));
-      setUiMessage(`Editor loaded: ${response.page_file.page.title}.`);
+      showToastMessage(`Editor loaded: ${response.page_file.page.title}.`);
+      setUiMessage(null);
     } catch (error) {
       handleMutationError(error);
     }
@@ -244,7 +260,8 @@ export function useDmContentMutations({
   const createArticleMutation = useMutation({
     mutationFn: (payload: SessionArticleCreatePayload) => apiClient.createSessionArticle(campaignSlug, payload),
     onSuccess: () => {
-      setUiMessage("Article staged.");
+      showToastMessage("Article staged.");
+      setUiMessage(null);
       setPaneError(null);
       setManualDraft(buildEmptyManualArticleDraft());
       setUploadDraft({ filename: "", markdown: "", image: null });
@@ -276,7 +293,8 @@ export function useDmContentMutations({
       return apiClient.updateSessionArticle(campaignSlug, args.id, articlePayload);
     },
     onSuccess: (_response, args) => {
-      setUiMessage("Article updated.");
+      showToastMessage("Article updated.");
+      setUiMessage(null);
       setPaneError(null);
       setStagedDrafts((current) => ({
         ...current,
@@ -293,7 +311,8 @@ export function useDmContentMutations({
   const deleteArticleMutation = useMutation({
     mutationFn: (articleId: number) => apiClient.deleteSessionArticle(campaignSlug, articleId),
     onSuccess: () => {
-      setUiMessage("Article removed.");
+      showToastMessage("Article removed.");
+      setUiMessage(null);
       setPaneError(null);
       refetchSession();
     },

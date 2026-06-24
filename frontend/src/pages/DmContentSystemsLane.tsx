@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { SystemsSourceRow } from "../api/types";
 import { getApiErrorMessage } from "../apiErrors";
 import { useApiClient } from "../apiClientContext";
-import { ApiErrorNotice } from "../components/feedback";
+import { ApiErrorNotice, ToastNotice, useToastNotice } from "../components/feedback";
 import {
   buildInitialSystemsCustomDraft,
   buildSystemsCustomDraftFromEntry,
@@ -30,8 +30,8 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
   const [customCreateDraft, setCustomCreateDraft] = useState<DmContentSystemsCustomDraftState>(() => buildInitialSystemsCustomDraft());
   const [customEditDrafts, setCustomEditDrafts] = useState<Record<string, DmContentSystemsCustomDraftState>>({});
   const [customQuery, setCustomQuery] = useState("");
-  const [systemsMessage, setSystemsMessage] = useState<string | null>(null);
   const [systemsError, setSystemsError] = useState<string | null>(null);
+  const { showToast, toastMessage, toastTone } = useToastNotice();
 
   const systemsQuery = useQuery({
     queryKey: ["dm-content-systems", campaignSlug],
@@ -102,7 +102,7 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
     customCreateDraft,
     customEditDrafts,
     setAuthRequired,
-    setSystemsMessage,
+    setSystemsMessage: showToast,
     setSystemsError,
     setAcknowledgeProprietary,
     setOverrideDraft,
@@ -256,7 +256,7 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
   return (
     <div className="dm-content-systems-lane">
       {systemsError ? <p className="status status-error">{systemsError}</p> : null}
-      {systemsMessage ? <p className="status status-neutral">{systemsMessage}</p> : null}
+      <ToastNotice message={toastMessage} tone={toastTone} />
 
       <section className="card" id="systems-source-enablement">
         <div className="section-heading">
