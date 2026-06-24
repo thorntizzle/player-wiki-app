@@ -195,6 +195,9 @@ export function CombatPage() {
   const availableStatblocks = payload?.available_statblock_choices ?? [];
   const conditionOptions = payload?.combat_condition_options ?? [];
   const encodedCampaignSlug = encodeURIComponent(campaignSlug);
+  const campaignHomeHref = `/app-next/campaigns/${encodedCampaignSlug}`;
+  const campaignCharactersHref = `${campaignHomeHref}/characters`;
+  const campaignSessionHref = `${campaignHomeHref}/session`;
 
   useEffect(() => {
     if (!canAccessSystems && combatAddMode === "systems") {
@@ -400,19 +403,15 @@ export function CombatPage() {
             DND-5E-only, so no encounter automation is available here for {payload.campaign.system || "this system"} yet.
           </p>
           <div className="hero-actions">
-            <a className="button-link" href={payload.links?.flask_campaign_url || `/campaigns/${encodeURIComponent(campaignSlug)}`}>
+            <a className="button-link" href={campaignHomeHref}>
               Open Campaign Home
             </a>
-            {payload.links?.flask_characters_url ? (
-              <a className="ghost-button" href={payload.links.flask_characters_url}>
-                Open Characters
-              </a>
-            ) : null}
-            {payload.links?.flask_session_url ? (
-              <a className="ghost-button" href={payload.links.flask_session_url}>
-                Open Session
-              </a>
-            ) : null}
+            <a className="ghost-button" href={campaignCharactersHref}>
+              Open Characters
+            </a>
+            <a className="ghost-button" href={campaignSessionHref}>
+              Open Session
+            </a>
           </div>
         </section>
       ) : null}

@@ -1977,37 +1977,18 @@ def test_combat_unsupported_system_fallback_chrome_in_source() -> None:
         is not None
     )
     assert 'className="hero-actions"' in unsupported_markup
-    assert (
-        re.search(
-            r'<a className="button-link" href=\{payload\.links\?\.flask_campaign_url[^}]*\}',
-            unsupported_markup,
-        ) is not None
-        and "Open Campaign Home" in unsupported_markup
-    )
-    assert (
-        re.search(
-            r'<a className="ghost-button" href=\{payload\.links\.flask_characters_url\}\>Open Characters</a>',
-            unsupported_markup,
-        )
-        is not None
-        or re.search(
-            r'<a className="ghost-button" href=\{payload\.links\.flask_characters_url\}\>\s*Open Characters\s*</a>',
-            unsupported_markup,
-        )
-        is not None
-    )
-    assert (
-        re.search(
-            r'<a className="ghost-button" href=\{payload\.links\.flask_session_url\}\>Open Session</a>',
-            unsupported_markup,
-        )
-        is not None
-        or re.search(
-            r'<a className="ghost-button" href=\{payload\.links\.flask_session_url\}\>\s*Open Session\s*</a>',
-            unsupported_markup,
-        )
-        is not None
-    )
+    assert "const campaignHomeHref = `/app-next/campaigns/${encodedCampaignSlug}`;" in combat_page_source
+    assert "const campaignCharactersHref = `${campaignHomeHref}/characters`;" in combat_page_source
+    assert "const campaignSessionHref = `${campaignHomeHref}/session`;" in combat_page_source
+    assert '<a className="button-link" href={campaignHomeHref}>' in unsupported_markup
+    assert '<a className="ghost-button" href={campaignCharactersHref}>' in unsupported_markup
+    assert '<a className="ghost-button" href={campaignSessionHref}>' in unsupported_markup
+    assert "flask_campaign_url" not in unsupported_markup
+    assert "flask_characters_url" not in unsupported_markup
+    assert "flask_session_url" not in unsupported_markup
+    assert "Open Campaign Home" in unsupported_markup
+    assert "Open Characters" in unsupported_markup
+    assert "Open Session" in unsupported_markup
     assert "Open Flask Combat" not in unsupported_markup
     assert "button button-secondary" not in unsupported_markup
 
