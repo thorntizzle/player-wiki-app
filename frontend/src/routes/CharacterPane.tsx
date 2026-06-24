@@ -62,12 +62,7 @@ import { CharacterPortraitManager } from "../components/CharacterPortraitManager
 import { CharacterSummaryCard } from "../components/CharacterSummaryCard";
 import { CharacterSystemSummarySection } from "../components/CharacterSystemSummarySection";
 import { CharacterVitalsBar } from "../components/CharacterVitalsBar";
-import { CharacterDndAbilitySkillsSection } from "../components/CharacterDndAbilitySkillsSection";
-import { CharacterDndEquipmentSection } from "../components/CharacterDndEquipmentSection";
-import { CharacterDndInventorySection } from "../components/CharacterDndInventorySection";
-import { CharacterDndOverviewSection } from "../components/CharacterDndOverviewSection";
-import { CharacterDndResourcesSection } from "../components/CharacterDndResourcesSection";
-import { CharacterDndSpellsSection } from "../components/CharacterDndSpellsSection";
+import { CharacterDndSections } from "../components/CharacterDndSections";
 import { CharacterNotesSection } from "../components/CharacterNotesSection";
 import { CharacterPersonalSection } from "../components/CharacterPersonalSection";
 import { CharacterXianxiaEquipmentSection } from "../components/CharacterXianxiaEquipmentSection";
@@ -1300,89 +1295,76 @@ export function CharacterPane({
               />
             ) : null}
 
-            {isDnd && activeCharacterSection === "overview" ? (
-              <CharacterDndOverviewSection
-                hasOverviewStatRows={hasOverviewStatRows}
-                overviewStatRows={overviewStatRows}
-                overviewStats={overviewStats}
-              />
-            ) : null}
-
-            {isDnd && activeCharacterSection === "resources" ? (
-              <CharacterDndResourcesSection
-                canEdit={canEdit}
-                isSaving={patchResource.isPending}
-                resourceDrafts={resourceDrafts}
-                resources={resources}
-                setResourceDrafts={setResourceDrafts}
-                submitResource={submitResource}
-                submitResourceOnBlur={submitResourceOnBlur}
-              />
-            ) : null}
-
-            {isDnd && activeCharacterSection === "spells" ? (
-              <CharacterDndSpellsSection
-                canEdit={canEdit}
-                isSaving={patchSpellSlot.isPending}
-                openSpellDetail={openSpellDetail}
-                presentedSpellGroups={presentedSpellGroups}
-                presentedSpells={presentedSpells}
-                rawSpellGroups={rawSpellGroups}
-                spellcasting={spellcasting}
-                spells={spells}
-                spellSlotDrafts={spellSlotDrafts}
-                spellSlots={spellSlots}
-                setSpellSlotDrafts={setSpellSlotDrafts}
-                submitSpellSlot={submitSpellSlot}
-                submitSpellSlotOnBlur={submitSpellSlotOnBlur}
-              />
-            ) : null}
-
-
-            {isDnd && activeCharacterSection === "equipment" ? (
-              <CharacterDndEquipmentSection
-                arcaneArmorDraft={arcaneArmorDraft}
-                arcaneArmorState={arcaneArmorState}
-                canEdit={canEdit}
-                equipmentDrafts={equipmentDrafts}
-                equipmentRows={equipmentRows}
-                equipmentState={equipmentState}
-                isCombatSurface={isCombatSurface}
-                isEquipmentStateSaving={patchEquipmentState.isPending}
-                isFeatureStateSaving={patchFeatureState.isPending}
-                openItemDetail={openItemDetail}
-                setArcaneArmorDraft={setArcaneArmorDraft}
-                setEquipmentDrafts={setEquipmentDrafts}
-                submitArcaneArmorState={submitArcaneArmorState}
-                submitEquipmentState={submitEquipmentState}
-                submitEquipmentStatePatch={submitEquipmentStatePatch}
-              />
-            ) : null}
-
-            {isDnd && activeCharacterSection === "inventory" ? (
-              <CharacterDndInventorySection
-                canEdit={canEdit}
-                currencyDraft={currencyDraft}
-                inventory={inventory}
-                inventoryDrafts={inventoryDrafts}
-                isCurrencySaving={patchCurrency.isPending}
-                isInventorySaving={patchInventory.isPending}
-                openItemDetail={openItemDetail}
-                presentedInventoryByKey={presentedInventoryByKey}
-                setCurrencyDraft={setCurrencyDraft}
-                setInventoryDrafts={setInventoryDrafts}
-                submitCurrency={submitCurrency}
-                submitCurrencyOnBlur={submitCurrencyOnBlur}
-                submitInventory={submitInventory}
-                submitInventoryOnBlur={submitInventoryOnBlur}
-              />
-            ) : null}
-
-            {isDnd && activeCharacterSection === "abilities" ? (
-              <CharacterDndAbilitySkillsSection
-                abilities={dndAbilities}
-                hasContent={hasDndAbilitySkillsContent}
-                proficiencyGroups={dndProficiencyGroups}
+            {isDnd ? (
+              <CharacterDndSections
+                activeCharacterSection={activeCharacterSection}
+                abilitySkills={{
+                  abilities: dndAbilities,
+                  hasContent: hasDndAbilitySkillsContent,
+                  proficiencyGroups: dndProficiencyGroups,
+                }}
+                equipment={{
+                  arcaneArmorDraft,
+                  arcaneArmorState,
+                  canEdit,
+                  equipmentDrafts,
+                  equipmentRows,
+                  equipmentState,
+                  isCombatSurface,
+                  isEquipmentStateSaving: patchEquipmentState.isPending,
+                  isFeatureStateSaving: patchFeatureState.isPending,
+                  openItemDetail,
+                  setArcaneArmorDraft,
+                  setEquipmentDrafts,
+                  submitArcaneArmorState,
+                  submitEquipmentState,
+                  submitEquipmentStatePatch,
+                }}
+                inventory={{
+                  canEdit,
+                  currencyDraft,
+                  inventory,
+                  inventoryDrafts,
+                  isCurrencySaving: patchCurrency.isPending,
+                  isInventorySaving: patchInventory.isPending,
+                  openItemDetail,
+                  presentedInventoryByKey,
+                  setCurrencyDraft,
+                  setInventoryDrafts,
+                  submitCurrency,
+                  submitCurrencyOnBlur,
+                  submitInventory,
+                  submitInventoryOnBlur,
+                }}
+                overview={{
+                  hasOverviewStatRows,
+                  overviewStatRows,
+                  overviewStats,
+                }}
+                resources={{
+                  canEdit,
+                  isSaving: patchResource.isPending,
+                  resourceDrafts,
+                  resources,
+                  setResourceDrafts,
+                  submitResource,
+                  submitResourceOnBlur,
+                }}
+                spells={{
+                  canEdit,
+                  isSaving: patchSpellSlot.isPending,
+                  openSpellDetail,
+                  presentedSpellGroups,
+                  presentedSpells,
+                  rawSpellGroups,
+                  spellcasting,
+                  spells,
+                  spellSlotDrafts,
+                  spellSlots,
+                  setSpellSlotDrafts,
+                  submitSpellSlot,
+                  submitSpellSlotOnBlur,
+                }}
               />
             ) : null}
 

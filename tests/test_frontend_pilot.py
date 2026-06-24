@@ -2844,6 +2844,38 @@ def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() ->
     assert 'className="inline-two-col"' not in section_markup
 
 
+def test_character_pane_delegates_dnd_section_composition() -> None:
+    route_source = Path("frontend/src/routes/CharacterPane.tsx").read_text(encoding="utf-8")
+    dnd_sections_source = Path("frontend/src/components/CharacterDndSections.tsx").read_text(encoding="utf-8")
+
+    assert 'import { CharacterDndSections } from "../components/CharacterDndSections";' in route_source
+    assert "<CharacterDndSections" in route_source
+    assert "activeCharacterSection={activeCharacterSection}" in route_source
+    assert "CharacterDndOverviewSection" not in route_source
+    assert "CharacterDndResourcesSection" not in route_source
+    assert "CharacterDndSpellsSection" not in route_source
+    assert "CharacterDndEquipmentSection" not in route_source
+    assert "CharacterDndInventorySection" not in route_source
+    assert "CharacterDndAbilitySkillsSection" not in route_source
+
+    for section_name in [
+        "CharacterDndOverviewSection",
+        "CharacterDndResourcesSection",
+        "CharacterDndSpellsSection",
+        "CharacterDndEquipmentSection",
+        "CharacterDndInventorySection",
+        "CharacterDndAbilitySkillsSection",
+    ]:
+        assert section_name in dnd_sections_source
+
+    assert 'activeCharacterSection === "overview"' in dnd_sections_source
+    assert 'activeCharacterSection === "resources"' in dnd_sections_source
+    assert 'activeCharacterSection === "spells"' in dnd_sections_source
+    assert 'activeCharacterSection === "equipment"' in dnd_sections_source
+    assert 'activeCharacterSection === "inventory"' in dnd_sections_source
+    assert 'activeCharacterSection === "abilities"' in dnd_sections_source
+
+
 def test_character_notes_section_uses_flask_style_reference_stack_and_edit_chrome() -> None:
     source = Path("frontend/src/components/CharacterNotesSection.tsx").read_text(encoding="utf-8")
     notes_section_markup = source
