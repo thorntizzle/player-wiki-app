@@ -839,27 +839,23 @@ def test_admin_user_detail_action_button_chrome_in_source() -> None:
     source = Path("frontend/src/pages/AdminRoutes.tsx").read_text(encoding="utf-8")
     admin_user_detail_source = source[source.index("export function AdminUserDetailPage() {"):]
 
-    remove_on_click = 'onClick={() => removeMembership.mutate(membership)}'
-    clear_on_click = 'onClick={() => removeAssignment.mutate(assignment)}'
-    disable_on_click = 'onClick={() => disableUser.mutate()}'
+    destructive_actions = [
+        ("removeMembership.mutate(membership);", "Confirm remove", "Remove"),
+        ("removeAssignment.mutate(assignment);", "Confirm clear", "Clear"),
+        ("disableUser.mutate();", "Confirm disable", "Disable user"),
+    ]
 
-    remove_start = admin_user_detail_source.rfind("<button", 0, admin_user_detail_source.index(remove_on_click))
-    remove_end = admin_user_detail_source.index("</button>", remove_start) + len("</button>")
-    remove_button_block = admin_user_detail_source[remove_start:remove_end]
-    assert "className=\"button\"" in remove_button_block
-    assert "className=\"button button-secondary\"" not in remove_button_block
-
-    clear_start = admin_user_detail_source.rfind("<button", 0, admin_user_detail_source.index(clear_on_click))
-    clear_end = admin_user_detail_source.index("</button>", clear_start) + len("</button>")
-    clear_button_block = admin_user_detail_source[clear_start:clear_end]
-    assert "className=\"button\"" in clear_button_block
-    assert "className=\"button button-secondary\"" not in clear_button_block
-
-    disable_start = admin_user_detail_source.rfind("<button", 0, admin_user_detail_source.index(disable_on_click))
-    disable_end = admin_user_detail_source.index("</button>", disable_start) + len("</button>")
-    disable_button_block = admin_user_detail_source[disable_start:disable_end]
-    assert "className=\"button\"" in disable_button_block
-    assert "className=\"button button-secondary\"" not in disable_button_block
+    for mutation_call, confirmation_label, button_label in destructive_actions:
+        action_start = admin_user_detail_source.rfind("<form", 0, admin_user_detail_source.index(mutation_call))
+        action_end = admin_user_detail_source.index("</form>", action_start) + len("</form>")
+        action_block = admin_user_detail_source[action_start:action_end]
+        assert 'className="confirmed-action"' in action_block
+        assert 'className="checkbox-label"' in action_block
+        assert confirmation_label in action_block
+        assert button_label in action_block
+        assert 'className="ghost-button"' in action_block
+        assert 'className="button-danger"' not in action_block
+        assert 'className="button button-secondary"' not in action_block
 
 
 def test_admin_activity_chrome_lives_in_component_module() -> None:
@@ -953,7 +949,8 @@ def test_admin_user_account_actions_are_flat_stack_in_source() -> None:
     assert "Re-enable user" in account_actions_block
     assert "onClick={() => enableUser.mutate()}" in account_actions_block
     assert "Disable user" in account_actions_block
-    assert "onClick={() => disableUser.mutate()}" in account_actions_block
+    assert "disableUser.mutate();" in account_actions_block
+    assert "Confirm disable" in account_actions_block
 
     assert '<label className="field">' in account_actions_block
     assert "id=\"admin-delete-confirm-email\"" in account_actions_block
@@ -985,40 +982,43 @@ def test_session_chat_logs_card_uses_flask_style_row_hooks_in_source() -> None:
     assert "Closed sessions will appear here after the first live run." in chat_logs_source
     assert "session-log-list-row" not in chat_logs_source
 
-    row_delete_on_click = "onClick={() => deleteLogMutation.mutate(entry.session.id)}"
-    row_delete_button_start = chat_logs_source.rfind("<button", 0, chat_logs_source.index(row_delete_on_click))
-    row_delete_button_end = chat_logs_source.index("</button>", row_delete_button_start) + len("</button>")
-    row_delete_button_block = chat_logs_source[row_delete_button_start:row_delete_button_end]
+    row_delete_call = "deleteLog(entry.session.id);"
+    row_delete_form_start = chat_logs_source.rfind("<form", 0, chat_logs_source.index(row_delete_call))
+    row_delete_form_end = chat_logs_source.index("</form>", row_delete_form_start) + len("</form>")
+    row_delete_button_block = chat_logs_source[row_delete_form_start:row_delete_form_end]
+    assert 'className="confirmed-action"' in row_delete_button_block
     assert "className=\"ghost-button\"" in row_delete_button_block
     assert "className=\"button-danger\"" not in row_delete_button_block
-    assert row_delete_on_click in row_delete_button_block
+    assert row_delete_call in row_delete_button_block
     assert "{deleteLogMutation.isPending ? \"Deleting...\" : \"Delete log\"}" in row_delete_button_block
-    assert "disabled={deleteLogMutation.isPending}" in row_delete_button_block
+    assert "disabled={!deleteConfirmed || deleteLogMutation.isPending}" in row_delete_button_block
 
-    detail_delete_on_click = "onClick={() => deleteLogMutation.mutate(logQuery.data.session.id)}"
-    detail_delete_button_start = chat_logs_source.rfind("<button", 0, chat_logs_source.index(detail_delete_on_click))
-    detail_delete_button_end = chat_logs_source.index("</button>", detail_delete_button_start) + len("</button>")
-    detail_delete_button_block = chat_logs_source[detail_delete_button_start:detail_delete_button_end]
+    detail_delete_call = "deleteLog(logQuery.data.session.id);"
+    detail_delete_form_start = chat_logs_source.rfind("<form", 0, chat_logs_source.index(detail_delete_call))
+    detail_delete_form_end = chat_logs_source.index("</form>", detail_delete_form_start) + len("</form>")
+    detail_delete_button_block = chat_logs_source[detail_delete_form_start:detail_delete_form_end]
+    assert 'className="confirmed-action"' in detail_delete_button_block
     assert "{deleteLogMutation.isPending ? \"Deleting...\" : \"Delete log\"}" in detail_delete_button_block
     assert 'className="ghost-button"' in detail_delete_button_block
     assert "className=\"button-danger\"" not in detail_delete_button_block
-    assert detail_delete_on_click in detail_delete_button_block
-    assert "disabled={deleteLogMutation.isPending}" in detail_delete_button_block
+    assert detail_delete_call in detail_delete_button_block
+    assert "disabled={!deleteLogConfirm[logQuery.data.session.id] || deleteLogMutation.isPending}" in detail_delete_button_block
 
 
 def test_session_log_detail_delete_button_uses_ghost_button_class_in_source() -> None:
     source = Path("frontend/src/pages/SessionDmPane.tsx").read_text(encoding="utf-8")
 
-    delete_on_click = "onClick={() => deleteLogMutation.mutate(logQuery.data.session.id)}"
-    delete_button_start = source.rfind("<button", 0, source.index(delete_on_click))
-    delete_button_end = source.index("</button>", delete_button_start) + len("</button>")
-    delete_button_block = source[delete_button_start:delete_button_end]
+    delete_call = "deleteLog(logQuery.data.session.id);"
+    delete_form_start = source.rfind("<form", 0, source.index(delete_call))
+    delete_form_end = source.index("</form>", delete_form_start) + len("</form>")
+    delete_button_block = source[delete_form_start:delete_form_end]
 
+    assert 'className="confirmed-action"' in delete_button_block
     assert "{deleteLogMutation.isPending ? \"Deleting...\" : \"Delete log\"}" in delete_button_block
     assert 'className="ghost-button"' in delete_button_block
     assert 'className="button-danger"' not in delete_button_block
-    assert delete_on_click in delete_button_block
-    assert "disabled={deleteLogMutation.isPending}" in delete_button_block
+    assert delete_call in delete_button_block
+    assert "disabled={!deleteLogConfirm[logQuery.data.session.id] || deleteLogMutation.isPending}" in delete_button_block
 
 
 def test_session_dm_mutations_live_in_shared_hook() -> None:
@@ -1036,7 +1036,7 @@ def test_session_dm_mutations_live_in_shared_hook() -> None:
     assert "const startSessionMutation = useMutation({" in hook_source
     assert "const revealArticleMutation = useMutation({" in hook_source
     assert "const deleteLogMutation = useMutation({" in hook_source
-    assert 'setUiMessage("Revealed articles cleared.");' in hook_source
+    assert 'showToastMessage("Revealed articles cleared.");' in hook_source
     assert "setManualDraft(buildEmptyManualArticleDraft());" in hook_source
 
 
@@ -1046,16 +1046,17 @@ def test_combat_action_chrome_in_source() -> None:
     controls_panel_source = Path("frontend/src/components/CombatDmControlsPanel.tsx").read_text(encoding="utf-8")
     combat_page_source = _extract_function_component_source(source, "CombatPage")
 
-    remove_on_click = "onClick={onDeleteCombatant}"
+    remove_call = "onDeleteCombatant();"
     clear_on_click = "onClick={onClearCombat}"
 
     assert "onDeleteCombatant={() => deleteCombatantMutation.mutate()}" in combat_page_source
-    remove_button_start = status_panel_source.rfind("<button", 0, status_panel_source.index(remove_on_click))
-    remove_button_end = status_panel_source.index("</button>", remove_button_start) + len("</button>")
-    remove_button_block = status_panel_source[remove_button_start:remove_button_end]
+    remove_form_start = status_panel_source.rfind("<form", 0, status_panel_source.index(remove_call))
+    remove_form_end = status_panel_source.index("</form>", remove_form_start) + len("</form>")
+    remove_button_block = status_panel_source[remove_form_start:remove_form_end]
+    assert 'className="confirmed-action"' in remove_button_block
     assert 'className="ghost-button"' in remove_button_block
     assert "className=\"button button-secondary\"" not in remove_button_block
-    assert remove_on_click in remove_button_block
+    assert remove_call in remove_button_block
 
     assert "onClearCombat={() => clearCombatMutation.mutate()}" in combat_page_source
     clear_button_start = controls_panel_source.rfind("<button", 0, controls_panel_source.index(clear_on_click))
@@ -1872,7 +1873,7 @@ def test_character_roster_card_meta_join_and_stats_divs_in_source() -> None:
     stats_markup = card_markup[card_markup.index('<div className="character-card__stats">'): card_markup.index("</a>", card_markup.index("className=\"button-link\""))]
 
     assert 'className="character-card__meta"' in card_markup
-    assert 'join(" · ")' in card_markup
+    assert 'join(" / ")' in card_markup
     assert 'join(" | ")' not in card_markup
 
     assert "<article>" not in stats_markup
@@ -2172,7 +2173,7 @@ def test_dm_content_player_wiki_editor_fields_use_flask_style_labels_in_source()
 
     expected_player_wiki_fields = [
         ("title", "Title"),
-        ("slug", "Slug"),
+        ("slug", "URL name"),
         ("section", "Section"),
         ("type", "Page type"),
         ("subsection", "Subsection"),
@@ -2180,8 +2181,8 @@ def test_dm_content_player_wiki_editor_fields_use_flask_style_labels_in_source()
         ("aliases", "Aliases"),
         ("reveal-after-session", "Reveal after session"),
         ("display-order", "Display order"),
-        ("source-ref", "Source reference"),
-        ("image", "Image path"),
+        ("source-ref", "Original source"),
+        ("image", "Image asset"),
         ("image-upload", "Upload image"),
         ("image-alt", "Image alt text"),
         ("image-caption", "Image caption"),
@@ -2238,7 +2239,7 @@ def test_dm_content_mutations_live_in_shared_hook() -> None:
     assert "const savePlayerWikiPageMutation = useMutation({" in hook_source
     assert "const createArticleMutation = useMutation({" in hook_source
     assert "buildPlayerWikiAssetRef(args.pageRef, args.draft.imageUpload)" in hook_source
-    assert 'setUiMessage("Article staged.");' in hook_source
+    assert 'showToastMessage("Article staged.");' in hook_source
 
 
 def test_dm_content_systems_management_form_field_chrome() -> None:
@@ -2249,7 +2250,7 @@ def test_dm_content_systems_management_form_field_chrome() -> None:
 
     expected_systems_custom_fields = [
         ("title", "Title"),
-        ("slug", "URL slug"),
+        ("slug", "URL name"),
         ("type", "Entry type"),
         ("visibility", "Visibility"),
         ("provenance", "Source/provenance"),
@@ -3100,7 +3101,7 @@ def test_character_controls_section_keeps_flask_card_form_chrome() -> None:
     assert "Clear assignment" in source
     assert 'className="detail-card character-controls-card--danger"' in source
     assert "Delete character" in source
-    assert "Type <code>{characterSlug}</code> to confirm" in source
+    assert "Type this character's URL name to confirm: <code>{characterSlug}</code>" in source
 
     assert 'className="character-state-card"' not in source
     assert 'className="button-row"' not in source
