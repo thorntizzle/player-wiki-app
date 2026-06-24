@@ -2974,6 +2974,50 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             page.get_by_role("button", name="Create character").click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/characters/browser-gen2-crane$"), timeout=10000)
             expect(page.get_by_role("heading", level=1, name="Browser Gen2 Crane", exact=True)).to_be_visible(timeout=10000)
+            xianxia_shell = page.locator("article.character-read-shell.character-sheet.card")
+            expect(xianxia_shell).to_be_visible()
+            expect(xianxia_shell.locator(".character-summary h3")).to_have_text("Browser Gen2 Crane")
+            xianxia_shell_text = xianxia_shell.inner_text()
+            assert "browser-gen2-crane" not in xianxia_shell_text
+            assert "Status:" not in xianxia_shell_text
+            xianxia_nav = page.locator("nav.character-subpage-nav[aria-label='Character subpages']")
+            expect(xianxia_nav).to_be_visible()
+            for section_name, section_id, value_selector in (
+                ("Quick Reference", "xianxia-quick-reference", ".glance-card strong"),
+                ("Resources", "xianxia-resources", ".resource-card__value"),
+                ("Skills", "xianxia-skills", ".skill-pill--proficient"),
+                ("Equipment", "xianxia-equipment", ".detail-card strong"),
+            ):
+                section_link = xianxia_nav.get_by_role("link", name=section_name)
+                if section_link.count() > 0:
+                    section_link.click()
+                    expect(xianxia_shell.locator(f"section#{section_id}")).to_be_visible(timeout=10000)
+                    expect(xianxia_shell.locator(value_selector).first).to_be_visible()
+                    xianxia_section_metrics = page.evaluate(
+                        """(valueSelector) => {
+                            const shell = document.querySelector("article.character-read-shell.character-sheet.card");
+                            const value = shell ? shell.querySelector(valueSelector) : null;
+                            const label =
+                                shell?.querySelector(".glance-card .meta, .resource-card .meta, .skill-pill .meta") || null;
+                            const skillPill = shell?.querySelector(".skill-pill--proficient") || null;
+                            const valueStyle = value ? window.getComputedStyle(value) : null;
+                            const labelStyle = label ? window.getComputedStyle(label) : null;
+                            const skillStyle = skillPill ? window.getComputedStyle(skillPill) : null;
+                            return {
+                                scrollWidth: document.documentElement.scrollWidth,
+                                innerWidth: window.innerWidth,
+                                valueFontSize: valueStyle ? Number.parseFloat(valueStyle.fontSize) : 0,
+                                labelFontSize: labelStyle ? Number.parseFloat(labelStyle.fontSize) : 0,
+                                skillBorderWidth: skillStyle ? Number.parseFloat(skillStyle.borderTopWidth) : 0,
+                            };
+                        }""",
+                        value_selector,
+                    )
+                    assert xianxia_section_metrics["scrollWidth"] <= xianxia_section_metrics["innerWidth"] + 1
+                    if section_name in {"Quick Reference", "Resources"}:
+                        assert xianxia_section_metrics["valueFontSize"] > xianxia_section_metrics["labelFontSize"]
+                    if section_name == "Skills":
+                        assert xianxia_section_metrics["skillBorderWidth"] >= 1
             cultivation_link = page.get_by_role("link", name="Cultivation", exact=True)
             expect(cultivation_link).to_have_attribute(
                 "href",
@@ -3100,6 +3144,33 @@ def test_gen2_xianxia_character_authoring_create_and_import(
             page.get_by_role("button", name="Confirm import").click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/characters/browser-imported-lotus$"), timeout=10000)
             expect(page.get_by_role("heading", level=1, name="Browser Imported Lotus", exact=True)).to_be_visible(timeout=10000)
+            imported_xianxia_shell = page.locator("article.character-read-shell.character-sheet.card")
+            expect(imported_xianxia_shell).to_be_visible()
+            imported_xianxia_text = imported_xianxia_shell.inner_text()
+            assert "browser-imported-lotus" not in imported_xianxia_text
+            assert "Status:" not in imported_xianxia_text
+            imported_nav = page.locator("nav.character-subpage-nav[aria-label='Character subpages']")
+            imported_nav.get_by_role("link", name="Resources").click()
+            expect(imported_xianxia_shell.locator("section#xianxia-resources .resource-card__value").first).to_be_visible(
+                timeout=10000
+            )
+            imported_resource_metrics = page.evaluate(
+                """() => {
+                    const shell = document.querySelector("article.character-read-shell.character-sheet.card");
+                    const value = shell?.querySelector("#xianxia-resources .resource-card__value") || null;
+                    const label = shell?.querySelector("#xianxia-resources .resource-card h3") || null;
+                    const valueStyle = value ? window.getComputedStyle(value) : null;
+                    const labelStyle = label ? window.getComputedStyle(label) : null;
+                    return {
+                        scrollWidth: document.documentElement.scrollWidth,
+                        innerWidth: window.innerWidth,
+                        valueFontSize: valueStyle ? Number.parseFloat(valueStyle.fontSize) : 0,
+                        labelFontSize: labelStyle ? Number.parseFloat(labelStyle.fontSize) : 0,
+                    };
+                }"""
+            )
+            assert imported_resource_metrics["scrollWidth"] <= imported_resource_metrics["innerWidth"] + 1
+            assert imported_resource_metrics["valueFontSize"] > imported_resource_metrics["labelFontSize"]
         finally:
             page.close()
             player_page.close()
