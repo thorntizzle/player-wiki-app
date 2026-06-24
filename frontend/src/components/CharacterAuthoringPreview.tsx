@@ -25,19 +25,19 @@ function PreviewSidebar({
         ) : emptyMessage ? (
           <p className="meta">{emptyMessage}</p>
         ) : null}
+        {listSections.map(([label, values]) => (
+          <section className="character-authoring-preview-section" key={label}>
+            <h3>{label}</h3>
+            <ul className="plain-list resource-preview-list">
+              {values.map((item) => (
+                <li key={`${label}-${item}`}>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
       </section>
-      {listSections.map(([label, values]) => (
-        <section className="card sidebar-card character-authoring-preview-section" key={label}>
-          <h3>{label}</h3>
-          <ul className="plain-list resource-preview-list">
-            {values.map((item) => (
-              <li key={`${label}-${item}`}>
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
     </aside>
   );
 }

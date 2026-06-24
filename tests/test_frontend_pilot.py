@@ -697,7 +697,8 @@ def test_character_authoring_preview_lists_live_in_component_module() -> None:
     assert "export function CharacterLevelUpPreviewList" in preview_source
     assert 'emptyMessage="Choose core options to populate the preview."' in preview_source
     assert 'className="builder-preview-list"' in preview_source
-    assert 'className="card sidebar-card character-authoring-preview-section"' in preview_source
+    assert 'className="character-authoring-preview-section"' in preview_source
+    assert 'card sidebar-card character-authoring-preview-section' not in preview_source
     assert "asStringArray(preview.saving_throws)" in preview_source
     assert "asStringArray(preview.new_spells)" in preview_source
 

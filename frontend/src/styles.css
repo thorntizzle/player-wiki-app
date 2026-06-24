@@ -1031,6 +1031,8 @@ a:hover {
 .character-authoring-preview-section {
   display: grid;
   gap: 0.4rem;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 0.7rem;
 }
 
 .character-authoring-preview-card {
