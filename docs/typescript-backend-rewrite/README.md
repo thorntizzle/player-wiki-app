@@ -15,6 +15,10 @@ This folder tracks the deliberate TypeScript backend rewrite path for Campaign P
 - `docs/current-state/INDEX.md`: current product contract index. Use it to confirm present behavior before porting any workflow.
 - `docs/api-v1.md`: current JSON API contract.
 
+### Stack Evidence
+
+- `stack-spike.md`: architecture decision record for the TypeScript backend stack evaluation and proof checklist.
+
 ## Working Rules
 
 - Python/Flask remains the production authority until TypeScript passes parity gates and a cutover rehearsal.
