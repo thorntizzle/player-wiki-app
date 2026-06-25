@@ -115,6 +115,7 @@ import type {
   SystemsEntryOverrideResponse,
   SystemsSourceUpdatePayload,
   SystemsSourceUpdateResponse,
+  ViewAsUpdateResponse,
   WikiHomeResponse,
   WikiPageResponse,
   WikiSectionResponse,
@@ -262,6 +263,19 @@ export class CampaignApiClient {
 
   async getMe(): Promise<MeResponse> {
     return this.requestJson<MeResponse>("/api/v1/me");
+  }
+
+  async setViewAsUser(userId: number): Promise<ViewAsUpdateResponse> {
+    return this.requestJson<ViewAsUpdateResponse>("/api/v1/me/view-as", {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
+    });
+  }
+
+  async clearViewAsUser(): Promise<ViewAsUpdateResponse> {
+    return this.requestJson<ViewAsUpdateResponse>("/api/v1/me/view-as", {
+      method: "DELETE",
+    });
   }
 
   async getAccountSettings(): Promise<AccountSettingsResponse> {

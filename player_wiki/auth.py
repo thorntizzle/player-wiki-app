@@ -5,7 +5,7 @@ from datetime import timedelta
 from functools import wraps
 from urllib.parse import urljoin, urlsplit
 
-from flask import Flask, abort, current_app, flash, g, redirect, render_template, request, session, url_for
+from flask import Flask, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .auth_store import (
@@ -41,12 +41,31 @@ from .repository_store import RepositoryStore
 from .themes import ThemePreset, get_theme_preset, is_valid_theme_key, list_theme_presets, normalize_theme_key
 
 AUTH_SESSION_KEY = "auth_session_token"
+VIEW_AS_SESSION_KEY = "view_as_user_id"
+VIEW_AS_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
 @dataclass(slots=True)
 class CampaignAccessEntry:
     campaign: Campaign
     role: str
+
+
+def _coerce_view_as_user_id(value: object) -> int | None:
+    try:
+        user_id = int(value)
+    except (TypeError, ValueError):
+        return None
+    return user_id if user_id > 0 else None
+
+
+def _path_supports_view_as(path: str) -> bool:
+    return (
+        path == "/api/v1/campaigns"
+        or path.startswith("/api/v1/campaigns/")
+        or path.startswith("/app-next/campaigns")
+        or path.startswith("/campaigns/")
+    )
 
 
 def register_auth(app: Flask) -> None:
@@ -59,13 +78,58 @@ def register_auth(app: Flask) -> None:
         api_token_record: ApiTokenRecord | None = None,
     ) -> None:
         preferences = get_auth_store().get_user_preferences(user.id)
+        g.authenticated_user = user
+        g.authenticated_memberships = memberships
         g.current_user = user
         g.current_memberships = memberships
+        g.view_as_user = None
+        g.view_as_memberships = []
         g.current_session_record = session_record
         g.current_api_token_record = api_token_record
         g.current_auth_source = auth_source
         g.current_user_preferences = preferences
         g.current_theme = get_theme_preset(preferences.theme_key)
+
+    def apply_view_as_identity_if_requested(store: AuthStore):
+        requested_user_id = _coerce_view_as_user_id(session.get(VIEW_AS_SESSION_KEY))
+        if requested_user_id is None:
+            session.pop(VIEW_AS_SESSION_KEY, None)
+            return None
+
+        actor = get_authenticated_user()
+        if actor is None or not actor.is_admin:
+            session.pop(VIEW_AS_SESSION_KEY, None)
+            return None
+
+        target = store.get_user_by_id(requested_user_id)
+        if target is None or not target.is_active:
+            session.pop(VIEW_AS_SESSION_KEY, None)
+            return None
+
+        if not _path_supports_view_as(request.path):
+            return None
+
+        if request.method not in VIEW_AS_SAFE_METHODS:
+            if request.path.startswith("/api/"):
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": {
+                            "code": "view_as_read_only",
+                            "message": "View As mode is read-only for campaign API writes. Exit View As before making changes.",
+                            "details": {},
+                        },
+                    }
+                ), 403
+            abort(403)
+
+        memberships = store.list_memberships_for_user(target.id, statuses=("active",))
+        g.view_as_user = target
+        g.view_as_memberships = memberships
+        g.current_user = target
+        g.current_memberships = memberships
+        g.current_auth_source = "view_as"
+        return None
 
     def extract_api_bearer_token() -> str | None:
         raw_header = request.headers.get("Authorization", "").strip()
@@ -95,7 +159,11 @@ def register_auth(app: Flask) -> None:
             return
 
         g.current_user = None
+        g.authenticated_user = None
         g.current_memberships = []
+        g.authenticated_memberships = []
+        g.view_as_user = None
+        g.view_as_memberships = []
         g.current_session_record = None
         g.current_api_token_record = None
         g.current_auth_source = "anonymous"
@@ -160,6 +228,10 @@ def register_auth(app: Flask) -> None:
         touch_after_seconds = current_app.config["SESSION_TOUCH_INTERVAL_SECONDS"]
         if (utcnow() - session_record.last_seen_at).total_seconds() >= touch_after_seconds:
             store.touch_session(session_record.id)
+
+        view_as_response = apply_view_as_identity_if_requested(store)
+        if view_as_response is not None:
+            return view_as_response
 
     @app.context_processor
     def inject_auth_context() -> dict[str, object]:
@@ -455,6 +527,37 @@ def get_systems_service():
 def get_current_user() -> UserAccount | None:
     user = getattr(g, "current_user", None)
     return user if isinstance(user, UserAccount) else None
+
+
+def get_authenticated_user() -> UserAccount | None:
+    user = getattr(g, "authenticated_user", None)
+    return user if isinstance(user, UserAccount) else None
+
+
+def get_view_as_user() -> UserAccount | None:
+    user = getattr(g, "view_as_user", None)
+    return user if isinstance(user, UserAccount) else None
+
+
+def get_requested_view_as_user() -> UserAccount | None:
+    actor = get_authenticated_user()
+    if actor is None or not actor.is_admin:
+        return None
+
+    requested_user_id = _coerce_view_as_user_id(session.get(VIEW_AS_SESSION_KEY))
+    if requested_user_id is None:
+        return None
+
+    target = get_auth_store().get_user_by_id(requested_user_id)
+    return target if target is not None and target.is_active else None
+
+
+def set_requested_view_as_user_id(user_id: int) -> None:
+    session[VIEW_AS_SESSION_KEY] = int(user_id)
+
+
+def clear_requested_view_as_user_id() -> None:
+    session.pop(VIEW_AS_SESSION_KEY, None)
 
 
 def get_current_memberships() -> list[CampaignMembership]:

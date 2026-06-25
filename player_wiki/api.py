@@ -45,7 +45,9 @@ from .auth import (
     can_manage_campaign_systems,
     can_post_campaign_session_messages,
     clear_campaign_visibility_cache,
+    clear_requested_view_as_user_id,
     get_accessible_campaign_entries,
+    get_authenticated_user,
     get_auth_store,
     get_campaign_default_scope_visibility,
     get_campaign_role,
@@ -54,10 +56,12 @@ from .auth import (
     get_current_user_preferences,
     get_current_memberships,
     get_current_user,
+    get_requested_view_as_user,
     get_effective_campaign_visibility,
     get_public_campaign_entries,
     get_repository,
     has_session_mode_access,
+    set_requested_view_as_user_id,
 )
 from .auth_store import (
     SESSION_CHAT_ORDER_CHOICES,
@@ -470,6 +474,32 @@ def register_api(app) -> None:
             "status": membership.status,
             "created_at": serialize_datetime(membership.created_at),
             "updated_at": serialize_datetime(membership.updated_at),
+        }
+
+    def serialize_view_as_choice(user) -> dict[str, Any]:
+        return {
+            "id": user.id,
+            "email": user.email,
+            "display_name": user.display_name,
+            "is_admin": user.is_admin,
+            "status": user.status,
+        }
+
+    def serialize_view_as_state() -> dict[str, Any]:
+        actor = get_authenticated_user()
+        can_view_as = bool(actor and actor.is_admin)
+        active_user = get_requested_view_as_user() if can_view_as else None
+        choices = []
+        if can_view_as:
+            choices = [
+                serialize_view_as_choice(user)
+                for user in get_auth_store().list_users()
+                if user.is_active and (actor is None or user.id != actor.id)
+            ]
+        return {
+            "can_view_as": can_view_as,
+            "active_user": serialize_view_as_choice(active_user) if active_user is not None else None,
+            "user_choices": choices,
         }
 
     def serialize_campaign(campaign) -> dict[str, Any]:
@@ -5183,7 +5213,7 @@ def register_api(app) -> None:
     @api.get("/me")
     @api_login_required
     def me():
-        user = get_current_user()
+        user = get_authenticated_user()
         if user is None:
             return json_error("Authentication required.", 401, code="auth_required")
         return jsonify(
@@ -5198,8 +5228,55 @@ def register_api(app) -> None:
                     "session_chat_order": get_current_user_preferences().session_chat_order,
                     "frontend_mode": get_current_user_preferences().frontend_mode,
                 },
+                "view_as": serialize_view_as_state(),
             }
         )
+
+    @api.post("/me/view-as")
+    @api_login_required
+    def me_view_as_update():
+        user = get_authenticated_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+        if not user.is_admin:
+            return json_error("Only app admins can use View As.", 403, code="forbidden")
+
+        try:
+            payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        raw_user_id = payload.get("user_id")
+        if raw_user_id in (None, ""):
+            clear_requested_view_as_user_id()
+            return jsonify({"ok": True, "view_as": serialize_view_as_state()})
+
+        try:
+            target_user_id = int(raw_user_id)
+        except (TypeError, ValueError):
+            return json_error("Choose a valid user to view as.", 400, code="validation_error")
+
+        if target_user_id == user.id:
+            clear_requested_view_as_user_id()
+            return jsonify({"ok": True, "view_as": serialize_view_as_state()})
+
+        target_user = get_auth_store().get_user_by_id(target_user_id)
+        if target_user is None or not target_user.is_active:
+            return json_error("Choose an active user to view as.", 400, code="validation_error")
+
+        set_requested_view_as_user_id(target_user.id)
+        return jsonify({"ok": True, "view_as": serialize_view_as_state()})
+
+    @api.delete("/me/view-as")
+    @api_login_required
+    def me_view_as_clear():
+        user = get_authenticated_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+        if not user.is_admin:
+            return json_error("Only app admins can use View As.", 403, code="forbidden")
+        clear_requested_view_as_user_id()
+        return jsonify({"ok": True, "view_as": serialize_view_as_state()})
 
     @api.get("/me/settings")
     @api_login_required

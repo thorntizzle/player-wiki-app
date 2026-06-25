@@ -76,6 +76,20 @@ export interface UserProfile {
   updated_at: string | null;
 }
 
+export interface ViewAsUserChoice {
+  id: number;
+  email: string;
+  display_name: string;
+  is_admin: boolean;
+  status: string;
+}
+
+export interface ViewAsState {
+  can_view_as: boolean;
+  active_user: ViewAsUserChoice | null;
+  user_choices: ViewAsUserChoice[];
+}
+
 export interface UserPreferences {
   theme_key?: string | null;
   session_chat_order?: string | null;
@@ -101,6 +115,11 @@ export interface MeResponse extends ApiResponseBase {
   user: UserProfile;
   memberships: UserMembership[];
   preferences?: UserPreferences;
+  view_as?: ViewAsState;
+}
+
+export interface ViewAsUpdateResponse extends ApiResponseBase {
+  view_as: ViewAsState;
 }
 
 export interface AccountSettingsResponse extends ApiResponseBase {

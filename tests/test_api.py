@@ -61,6 +61,66 @@ def issue_api_token(app, user_email: str, *, label: str = "test-token") -> str:
         return raw_token
 
 
+def test_api_admin_view_as_uses_target_permissions_and_blocks_campaign_writes(client, sign_in, users):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+
+    me_response = client.get("/api/v1/me")
+    assert me_response.status_code == 200
+    me_payload = me_response.get_json()
+    assert me_payload["user"]["email"] == users["admin"]["email"]
+    assert me_payload["view_as"]["can_view_as"] is True
+    assert me_payload["view_as"]["active_user"] is None
+    choice_emails = {choice["email"] for choice in me_payload["view_as"]["user_choices"]}
+    assert users["party"]["email"] in choice_emails
+
+    set_response = client.post(
+        "/api/v1/me/view-as",
+        json={"user_id": users["party"]["id"]},
+    )
+    assert set_response.status_code == 200
+    set_payload = set_response.get_json()
+    assert set_payload["view_as"]["active_user"]["email"] == users["party"]["email"]
+
+    me_after = client.get("/api/v1/me")
+    assert me_after.status_code == 200
+    me_after_payload = me_after.get_json()
+    assert me_after_payload["user"]["email"] == users["admin"]["email"]
+    assert me_after_payload["view_as"]["active_user"]["email"] == users["party"]["email"]
+
+    campaign_response = client.get("/api/v1/campaigns/linden-pass")
+    assert campaign_response.status_code == 200
+    campaign_payload = campaign_response.get_json()
+    assert campaign_payload["role"] == "player"
+    assert campaign_payload["permissions"]["can_manage_dm_content"] is False
+    assert campaign_payload["visibility"]["dm_content"]["can_access"] is False
+
+    blocked_dm_content = client.get("/api/v1/campaigns/linden-pass/dm-content")
+    assert blocked_dm_content.status_code == 403
+
+    blocked_write = client.post("/api/v1/campaigns/linden-pass/session/start")
+    assert blocked_write.status_code == 403
+    assert blocked_write.get_json()["error"]["code"] == "view_as_read_only"
+
+    clear_response = client.delete("/api/v1/me/view-as")
+    assert clear_response.status_code == 200
+    assert clear_response.get_json()["view_as"]["active_user"] is None
+
+    admin_dm_content = client.get("/api/v1/campaigns/linden-pass/dm-content")
+    assert admin_dm_content.status_code == 200
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+    forbidden_set = client.post(
+        "/api/v1/me/view-as",
+        json={"user_id": users["admin"]["id"]},
+    )
+    assert forbidden_set.status_code == 403
+
+    player_me = client.get("/api/v1/me")
+    assert player_me.status_code == 200
+    assert player_me.get_json()["view_as"]["can_view_as"] is False
+
+
 def _write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

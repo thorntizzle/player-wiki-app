@@ -13,6 +13,8 @@ The API also now manages the live file-backed content stored on the campaign vol
 
 API access uses bearer tokens tied to existing app users. Tokens inherit the same admin flag, campaign memberships, ownership rules, and visibility checks as the browser UI.
 
+Browser-session app admins can also use the Gen2 `View As` mode. `GET /api/v1/me` continues to report the real authenticated admin user and includes a `view_as` block with availability, active target, and selectable active users. While active, campaign-facing safe reads under `/api/v1/campaigns...` use the selected user's effective role, memberships, and visibility; campaign API writes are blocked with `403 view_as_read_only` until the admin exits `View As`.
+
 Issue a token:
 
 ```powershell
@@ -47,6 +49,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 - `GET /api/v1/systems/import-runs/<import_run_id>`
 - `POST /api/v1/systems/imports/dnd5e`
 - `GET /api/v1/me`
+- `POST /api/v1/me/view-as`
+- `DELETE /api/v1/me/view-as`
 - `GET /api/v1/me/settings`
 - `PATCH /api/v1/me/settings`
 - `GET /api/v1/admin`
@@ -188,7 +192,8 @@ Use the browser Player Wiki lane when you want the built-in removal guidance, ar
 - `POST /api/v1/systems/imports/dnd5e` also accepts optional `import_version` and `source_path_label` overrides if you want import-run history to show a custom source label instead of the uploaded archive name.
 - `GET /api/v1/systems/import-runs` and `GET /api/v1/systems/import-runs/<import_run_id>` expose the recorded shared-library ingest history, including import summaries and source file lists.
 - Custom campaign Systems entry create/edit/archive/restore is exposed through DM/admin JSON endpoints under `/api/v1/campaigns/<campaign_slug>/systems/custom-entries`. Each mutation returns both the saved `entry` and a refreshed `systems` management payload for API clients. Imported shared-library Systems entries remain read-only at the content level; use campaign source policy or entry overrides for campaign-specific changes unless a shared-library edit model is deliberately added later.
-- `GET /api/v1/me` now includes the same app metadata block alongside the authenticated user payload, memberships, and user preferences such as `theme_key`, `session_chat_order`, and the compatibility `frontend_mode` field. Gen2 is the default frontend and no longer account-selectable, so `frontend_mode` reads normalize to `gen2`; direct Flask URLs remain compatibility routes.
+- `GET /api/v1/me` now includes the same app metadata block alongside the authenticated user payload, memberships, user preferences such as `theme_key`, `session_chat_order`, and the compatibility `frontend_mode` field, plus the admin-only `view_as` state. Gen2 is the default frontend and no longer account-selectable, so `frontend_mode` reads normalize to `gen2`; direct Flask URLs remain compatibility routes.
+- `POST /api/v1/me/view-as` and `DELETE /api/v1/me/view-as` are browser-session admin-only endpoints for setting or clearing the active `View As` target. Non-admin users receive `403`; blank or self targets clear the mode; inactive or missing users are rejected. The active target affects only campaign-facing safe reads and Gen2 campaign pages, while `/api/v1/me` and account/admin routes keep the real authenticated admin identity.
 - `GET /api/v1/me/settings` returns the authenticated user's account-settings payload, including theme presets with preview colors, live-session chat-order choices, and current preferences. `PATCH /api/v1/me/settings` accepts `theme_key` and/or `session_chat_order`, validates them with the same account helpers as Flask, persists the preferences, and returns the refreshed preference values used by `/api/v1/me` theme hydration. `frontend_mode` writes are rejected because the preferred-frontend account setting is retired.
 - `GET /api/v1/admin` and `GET /api/v1/admin/users/<user_id>` are app-admin-only Admin reads originally added for the Gen2 surface. They expose dashboard and user-detail context, user cards, campaign and character choices, audit filter choices, paginated audit rows, and Flask CSV export URLs.
 - Admin mutations under `/api/v1/admin/users...` reuse the same auth-store operations and audit events as Flask for invites, membership save/remove, character assignment/clear, invite links, password reset links, disable/enable, and checked user deletion. Deletion requires a matching `confirm_email`; anonymous users receive `401`, non-admin users receive `403`, and one-shot invite/reset URLs are returned only in mutation responses rather than audit rows.

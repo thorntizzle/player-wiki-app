@@ -284,6 +284,68 @@ a:hover {
   white-space: nowrap;
 }
 
+.view-as-details {
+  position: relative;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.view-as-details summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2.35rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 700;
+  list-style: none;
+}
+
+.view-as-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.view-as-details summary::after {
+  content: " +";
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.view-as-details[open] summary::after {
+  content: " -";
+}
+
+.view-as-details--active summary {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 58%, var(--surface));
+}
+
+.view-as-details[open] .view-as-form {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.5rem);
+  z-index: 25;
+  display: grid;
+  gap: 0.65rem;
+  width: min(24rem, calc(100vw - 2rem));
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+}
+
+.view-as-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .user-badge {
   display: inline-flex;
   align-items: center;

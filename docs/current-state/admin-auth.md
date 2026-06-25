@@ -13,6 +13,7 @@ Last updated: 2026-06-25
 - User-level live-session chat order is stored in SQLite and controls the signed-in viewer's live Session chat order.
 - Current theme presets are `Parchment`, `Moonlit Ledger`, `Verdant Archive`, and `Ember Court`.
 - App admins can access Admin dashboard/user-detail surfaces and campaign-wide controls.
+- App admins can use the Gen2 header `View as` control to preview campaign pages as another active user. The real admin remains the authenticated actor for `/me`, account, and admin surfaces, while campaign-facing safe reads use the selected user's effective role, memberships, and visibility.
 - Campaign DMs can manage campaign content and scoped surfaces according to campaign permissions.
 
 ## Role And Visibility Contract
@@ -29,6 +30,7 @@ Last updated: 2026-06-25
 - Admin dashboard and user detail share context helpers for campaign titles, campaign select choices, character assignment choices, invite defaults, membership edit defaults, assignment edit defaults, audit user references, and dashboard user-card summaries.
 - Audit/activity presentation is shared between Flask Admin and the Gen2 Admin API.
 - Account-action and destructive admin workflows should keep checked/confirmed flows where needed.
+- `View as` is admin-only, cannot be enabled by non-admin users, clears stale or invalid targets, and blocks campaign API writes while active with `403 view_as_read_only` so previewing another user's access does not accidentally mutate campaign state.
 
 ## Current Tests Or Verification
 

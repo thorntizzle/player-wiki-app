@@ -369,6 +369,165 @@ def test_gen2_loading_cover_keeps_prepared_media_during_navigation(
             browser.close()
 
 
+def _assert_gen2_shell_ready(page) -> None:
+    page.wait_for_function(
+        """() => {
+          const root = document.documentElement;
+          const appRoot = document.querySelector('#root');
+          if (!appRoot) {
+            return false;
+          }
+          const rootStyle = getComputedStyle(appRoot);
+          return !root.classList.contains('app-loading')
+            && !root.classList.contains('app-loading-closing')
+            && rootStyle.visibility === 'visible'
+            && rootStyle.opacity === '1'
+            && appRoot.textContent.trim().length > 0;
+        }""",
+        timeout=10000,
+    )
+    snapshot = page.evaluate(
+        """() => {
+          const root = document.documentElement;
+          const appRoot = document.querySelector('#root');
+          const cover = document.querySelector('.app-loading-cover');
+          const main = document.querySelector('.main-shell');
+          const coverStyle = cover ? getComputedStyle(cover) : null;
+          const appRootStyle = appRoot ? getComputedStyle(appRoot) : null;
+          return {
+            hasLoadingClass: root.classList.contains('app-loading'),
+            hasClosingClass: root.classList.contains('app-loading-closing'),
+            rootVisibility: appRootStyle ? appRootStyle.visibility : '',
+            rootOpacity: appRootStyle ? appRootStyle.opacity : '',
+            coverVisibility: coverStyle ? coverStyle.visibility : '',
+            coverOpacity: coverStyle ? coverStyle.opacity : '',
+            mainTextLength: main ? main.textContent.trim().length : 0,
+          };
+        }"""
+    )
+    assert snapshot["hasLoadingClass"] is False
+    assert snapshot["hasClosingClass"] is False
+    assert snapshot["rootVisibility"] == "visible"
+    assert snapshot["rootOpacity"] == "1"
+    assert snapshot["coverVisibility"] == "hidden"
+    assert snapshot["coverOpacity"] == "0"
+    assert snapshot["mainTextLength"] > 0
+
+
+def test_gen2_representative_routes_keep_shell_stable_on_first_render_and_navigation(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+    route_expectations = [
+        ("/app-next/campaigns/linden-pass", re.compile(r"^Campaign Home$")),
+        ("/app-next/campaigns/linden-pass/pages/locations/tidewatch-hall", re.compile(r"^Tidewatch Hall$")),
+        ("/app-next/campaigns/linden-pass/systems", re.compile(r"^Systems$")),
+        ("/app-next/campaigns/linden-pass/characters", re.compile(r"^Characters$")),
+        ("/app-next/campaigns/linden-pass/session", re.compile(r"^Session$")),
+        ("/app-next/campaigns/linden-pass/combat", re.compile(r"^(?:Combat|DM status|Encounter controls)$")),
+        ("/app-next/campaigns/linden-pass/dm-content", re.compile(r"^DM Content$")),
+    ]
+    nav_expectations = [
+        ("Systems", re.compile(r"^Systems$")),
+        ("Characters", re.compile(r"^Characters$")),
+        ("Session", re.compile(r"^Session$")),
+        ("Combat", re.compile(r"^(?:Combat|DM status|Encounter controls)$")),
+        ("DM Content", re.compile(r"^DM Content$")),
+        ("Campaign Home", re.compile(r"^Campaign Home$")),
+    ]
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1280, "height": 900})
+            page = context.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+
+            for path, heading in route_expectations:
+                page.goto(f"{base_url}{path}", wait_until="commit")
+                expect(page.get_by_role("heading", name=heading).first).to_be_visible(timeout=10000)
+                _assert_gen2_shell_ready(page)
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass", wait_until="load")
+            expect(page.get_by_role("heading", name=re.compile(r"^Campaign Home$")).first).to_be_visible(timeout=10000)
+            _assert_gen2_shell_ready(page)
+
+            for nav_label, heading in nav_expectations:
+                page.locator(".campaign-nav-link", has_text=nav_label).click()
+                expect(page.get_by_role("heading", name=heading).first).to_be_visible(timeout=10000)
+                _assert_gen2_shell_ready(page)
+        finally:
+            page.close()
+            context.close()
+            browser.close()
+
+
+def test_gen2_header_admin_view_as_updates_visible_campaign_context(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            admin_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            player_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            admin_page = admin_context.new_page()
+            player_page = player_context.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(admin_page, base_url, email=users["admin"]["email"], password=users["admin"]["password"])
+            admin_page.goto(f"{base_url}/app-next/campaigns/linden-pass")
+            expect(admin_page.get_by_role("heading", name="Campaign Home")).to_be_visible(timeout=10000)
+            expect(admin_page.locator(".campaign-nav-link", has_text="DM Content")).to_be_visible()
+            expect(admin_page.locator(".campaign-nav-link", has_text="Control")).to_be_visible()
+
+            admin_page.locator(".view-as-details summary").click()
+            admin_page.locator("#view-as-user").select_option(str(users["party"]["id"]))
+            admin_page.locator(".view-as-form").get_by_role("button", name="Apply").click()
+            expect(admin_page.locator(".user-badge")).to_contain_text("Viewing as Party Player", timeout=10000)
+            expect(admin_page.locator(".view-as-details summary")).to_contain_text("Party Player")
+            expect(admin_page.locator(".campaign-nav-link", has_text="DM Content")).to_have_count(0)
+            expect(admin_page.locator(".campaign-nav-link", has_text="Control")).to_have_count(0)
+
+            view_as_is_open = admin_page.locator(".view-as-details").evaluate("(details) => details.open")
+            if not view_as_is_open:
+                admin_page.locator(".view-as-details summary").click()
+            admin_page.locator(".view-as-form").get_by_role("button", name="Exit").click()
+            expect(admin_page.locator(".user-badge")).not_to_contain_text("Viewing as", timeout=10000)
+            expect(admin_page.locator(".campaign-nav-link", has_text="DM Content")).to_be_visible(timeout=10000)
+            expect(admin_page.locator(".campaign-nav-link", has_text="Control")).to_be_visible()
+
+            _sign_in(player_page, base_url, email=users["party"]["email"], password=users["party"]["password"])
+            player_page.goto(f"{base_url}/app-next/campaigns/linden-pass")
+            expect(player_page.get_by_role("heading", name="Campaign Home")).to_be_visible(timeout=10000)
+            expect(player_page.locator(".view-as-details")).to_have_count(0)
+        finally:
+            admin_page.close()
+            player_page.close()
+            admin_context.close()
+            player_context.close()
+            browser.close()
+
+
 def test_gen2_session_browser_exposes_flask_session_capabilities(
     frontend_gen2_session_live_server,
     users,

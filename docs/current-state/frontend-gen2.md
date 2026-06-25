@@ -12,6 +12,7 @@ Last updated: 2026-06-25
 - Direct Flask routes remain compatibility fallbacks and no-JS or unsupported-slice exits.
 - `/app-next` serves the built `frontend/dist` bundle when present and uses SPA fallback for Gen2 document routes. Missing builds and missing assets still return 404.
 - The app shell exposes a two-row campaign header with global brand/account/admin controls, campaign navigation, and a shared campaign global search row.
+- App admins have a compact `View as` control in the header account area. It can select an active user context for campaign pages, shows the active viewed user in the header, and provides an `Exit` action without adding controls for non-admin users.
 - Global search covers visible published wiki pages plus accessible Systems entries and opens previews in an in-page dialog with a dedicated-page link.
 - Gen2 Campaign Home renders a latest-session-summary news card above the section-card grid when a visible published `Sessions`/`session` page exists.
 - Gen2 top-nav left-clicks use TanStack Router navigation while preserving real hrefs for fallback and new-tab behavior.
@@ -46,6 +47,8 @@ Last updated: 2026-06-25
 
 - Frontend changes usually need the smallest relevant TypeScript, Vite build, route source audit, browser test, or screenshot/manual Gen2 check.
 - For `/app-next` browser checks, ensure `frontend/dist/index.html` exists or build the bundle first.
+- The June 25, 2026 Gen2 browser verification includes a representative hard-load and same-app navigation sweep across Campaign Home, a wiki page, Systems, Characters, Session, Combat, and DM Content to confirm the styled shell is visible and the loading cover is dismissed on first render.
+- The June 25, 2026 Gen2 browser verification also covers admin header `View as`: selecting a party user updates visible campaign permissions, hides admin-only campaign links, exposes a clear active-state badge, and remains absent for ordinary players.
 
 ## Known Limits
 

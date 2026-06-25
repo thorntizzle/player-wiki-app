@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type { ChangeEvent } from "react";
 
 import { CampaignApiClient } from "./api/client";
@@ -42,6 +42,8 @@ export function AppShell() {
   });
   const [authRequired, setAuthRequired] = useState(false);
   const [navigationLabel, setNavigationLabel] = useState<string | null>(null);
+  const [viewAsDraftUserId, setViewAsDraftUserId] = useState("");
+  const [viewAsStatus, setViewAsStatus] = useState<string | null>(null);
   const hasMounted = useRef(false);
 
   const apiClient = useMemo(() => {
@@ -112,6 +114,41 @@ export function AppShell() {
   }, [meQuery.data?.preferences?.theme_key]);
 
   const user = meQuery.data?.user ?? null;
+  const viewAsState = meQuery.data?.view_as;
+  const activeViewAsUser = viewAsState?.active_user ?? null;
+  useEffect(() => {
+    setViewAsDraftUserId(activeViewAsUser ? String(activeViewAsUser.id) : "");
+  }, [activeViewAsUser?.id]);
+
+  const viewAsMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      const trimmed = userId.trim();
+      if (!trimmed) {
+        return apiClient.clearViewAsUser();
+      }
+      return apiClient.setViewAsUser(Number(trimmed));
+    },
+    onSuccess: async (payload) => {
+      const activeUser = payload.view_as.active_user;
+      setViewAsStatus(activeUser ? `Viewing as ${activeUser.display_name}.` : "View As cleared.");
+      await queryClient.invalidateQueries();
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : "View As update failed.";
+      setViewAsStatus(message);
+    },
+  });
+
+  const submitViewAs = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    viewAsMutation.mutate(viewAsDraftUserId);
+  };
+
+  const clearViewAs = () => {
+    setViewAsDraftUserId("");
+    viewAsMutation.mutate("");
+  };
+
   const preferredFrontendMode = normalizeFrontendMode(meQuery.data?.preferences?.frontend_mode);
   const campaign = campaignQuery.data?.campaign;
   const campaignPermissions = campaignQuery.data?.permissions;
@@ -268,12 +305,65 @@ export function AppShell() {
                       Admin
                     </a>
                   ) : null}
+                  {viewAsState?.can_view_as ? (
+                    <details className={activeViewAsUser ? "view-as-details view-as-details--active" : "view-as-details"}>
+                      <summary>
+                        {activeViewAsUser ? (
+                          <>
+                            View as <span>{activeViewAsUser.display_name}</span>
+                          </>
+                        ) : (
+                          "View as"
+                        )}
+                      </summary>
+                      <form className="view-as-form" onSubmit={submitViewAs}>
+                        <label className="field" htmlFor="view-as-user">
+                          <span>User context</span>
+                          <select
+                            id="view-as-user"
+                            value={viewAsDraftUserId}
+                            onChange={(event) => {
+                              setViewAsDraftUserId(event.currentTarget.value);
+                              setViewAsStatus(null);
+                            }}
+                            disabled={viewAsMutation.isPending}
+                          >
+                            <option value="">Admin view</option>
+                            {viewAsState.user_choices.map((choice) => (
+                              <option key={choice.id} value={choice.id}>
+                                {choice.display_name} ({choice.email})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <div className="view-as-actions">
+                          <button type="submit" disabled={viewAsMutation.isPending}>
+                            {viewAsMutation.isPending ? "Applying..." : "Apply"}
+                          </button>
+                          {activeViewAsUser ? (
+                            <button
+                              type="button"
+                              className="ghost-button"
+                              onClick={clearViewAs}
+                              disabled={viewAsMutation.isPending}
+                            >
+                              Exit
+                            </button>
+                          ) : null}
+                        </div>
+                        <p className="meta" role="status">
+                          {viewAsStatus || "Preview campaign pages and APIs with another user's permissions."}
+                        </p>
+                      </form>
+                    </details>
+                  ) : null}
                   <a className="header-link" href="/app-next/account">
                     Account
                   </a>
                   <span className="user-badge">
                     {user.display_name}
                     {user.is_admin ? <span className="meta">Admin</span> : null}
+                    {activeViewAsUser ? <span className="meta">Viewing as {activeViewAsUser.display_name}</span> : null}
                   </span>
                   <form method="post" action="/sign-out">
                     <button type="submit" className="ghost-button">
