@@ -1,6 +1,93 @@
 import type { WikiHomeResponse, WikiPageSummary, WikiSectionNavItem } from "../api/types";
 import type { FrontendMode } from "../apiClientContext";
-import { preferredCampaignLink } from "../campaignLinks";
+import { useNavigate } from "@tanstack/react-router";
+import { appNextHrefToRouterPath, preferredCampaignLink } from "../campaignLinks";
+import type { AnchorHTMLAttributes, MouseEvent } from "react";
+
+export type WikiLinkProps = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & {
+  href: string;
+  frontendMode: FrontendMode;
+};
+
+function appNextWikiRouterTarget(href: string): string | null {
+  if (!href) {
+    return null;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(href, window.location.origin);
+  } catch {
+    return null;
+  }
+
+  if (url.origin !== window.location.origin || !url.pathname.startsWith("/app-next/campaigns/")) {
+    return null;
+  }
+  if (!url.pathname.includes("/sections/") && !url.pathname.includes("/pages/")) {
+    return null;
+  }
+  return `${appNextHrefToRouterPath(url.pathname)}${url.search}${url.hash}`;
+}
+
+function isPlainLocalClick(event: MouseEvent<HTMLElement>): boolean {
+  return (
+    !event.defaultPrevented
+    && event.button === 0
+    && !event.metaKey
+    && !event.ctrlKey
+    && !event.shiftKey
+    && !event.altKey
+  );
+}
+
+function useWikiAnchorNavigation(frontendMode: FrontendMode) {
+  const navigate = useNavigate();
+  return (event: MouseEvent<HTMLElement>, href: string | null | undefined, anchor?: HTMLAnchorElement | null) => {
+    if (frontendMode !== "gen2" || !isPlainLocalClick(event) || !href) {
+      return;
+    }
+
+    const target = anchor?.getAttribute("target");
+    if ((target && target !== "_self") || anchor?.hasAttribute("download")) {
+      return;
+    }
+
+    const routerTarget = appNextWikiRouterTarget(href);
+    if (!routerTarget) {
+      return;
+    }
+
+    event.preventDefault();
+    void navigate({ to: routerTarget as never });
+  };
+}
+
+export function WikiLink({ href, frontendMode, onClick, children, ...props }: WikiLinkProps) {
+  const navigateAnchor = useWikiAnchorNavigation(frontendMode);
+  const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    onClick?.(event);
+    navigateAnchor(event, href, event.currentTarget);
+  };
+
+  return (
+    <a {...props} href={href} onClick={handleClick}>
+      {children}
+    </a>
+  );
+}
+
+export function useWikiBodyLinkNavigation(frontendMode: FrontendMode) {
+  const navigateAnchor = useWikiAnchorNavigation(frontendMode);
+  return (event: MouseEvent<HTMLElement>) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const anchor = target?.closest("a[href]") as HTMLAnchorElement | null;
+    if (!anchor || !event.currentTarget.contains(anchor)) {
+      return;
+    }
+    navigateAnchor(event, anchor.getAttribute("href"), anchor);
+  };
+}
 
 export function splitPinnedPages(pages: WikiPageSummary[]): { pinned: WikiPageSummary[]; regular: WikiPageSummary[] } {
   return {
@@ -34,7 +121,12 @@ function WikiPageCard({
     <article className={featured ? "card page-card page-card--featured" : "card page-card"}>
       <p className="card-kicker">{cardKicker}</p>
       <TitleElement>
-        <a href={preferredCampaignLink(page.href, campaignSlug, frontendMode)}>{page.title}</a>
+        <WikiLink
+          href={preferredCampaignLink(page.href, campaignSlug, frontendMode)}
+          frontendMode={frontendMode}
+        >
+          {page.title}
+        </WikiLink>
       </TitleElement>
       {page.summary ? <p className={featured ? "page-card__summary" : ""}>{page.summary}</p> : null}
     </article>
@@ -95,15 +187,16 @@ export function WikiSectionNav({
       {sections.map((section) => {
         const isActive = section.section_slug === activeSectionSlug;
         return (
-          <a
+          <WikiLink
             key={section.section_slug}
             className={isActive ? "button-link" : "ghost-button"}
             href={preferredCampaignLink(section.href, campaignSlug, frontendMode)}
             aria-current={isActive ? "page" : undefined}
             title={`${section.page_count} page${section.page_count === 1 ? "" : "s"}`}
+            frontendMode={frontendMode}
           >
             {section.section_name}
-          </a>
+          </WikiLink>
         );
       })}
     </nav>
@@ -316,7 +409,12 @@ export function WikiLatestSessionCard({
       <article className="card page-card page-card--featured wiki-latest-session-card">
         <p className="card-kicker">Latest session summary</p>
         <h2>
-          <a href={preferredCampaignLink(page.href, campaignSlug, frontendMode)}>{page.title}</a>
+          <WikiLink
+            href={preferredCampaignLink(page.href, campaignSlug, frontendMode)}
+            frontendMode={frontendMode}
+          >
+            {page.title}
+          </WikiLink>
         </h2>
         <p className="meta">{sessionLabel}</p>
         {page.summary ? <p className="page-card__summary">{page.summary}</p> : null}
@@ -340,11 +438,12 @@ export function WikiHomeSectionGrid({
   return (
     <section className="wiki-home-section-grid" aria-label="Campaign wiki sections">
       {sections.map((section) => (
-        <a
+        <WikiLink
           className="card wiki-home-section-card"
           href={preferredCampaignLink(section.href, campaignSlug, frontendMode)}
           key={section.section_slug}
           title={`${section.page_count} page${section.page_count === 1 ? "" : "s"}`}
+          frontendMode={frontendMode}
         >
           <span className="wiki-home-section-card__icon">
             <WikiSectionIcon icon={getWikiSectionIconName(section)} />
@@ -352,7 +451,7 @@ export function WikiHomeSectionGrid({
           <span className="wiki-home-section-card__body">
             <span className="wiki-home-section-card__label">{section.section_name}</span>
           </span>
-        </a>
+        </WikiLink>
       ))}
     </section>
   );
@@ -398,7 +497,12 @@ export function WikiSectionBrowse({
               <article className="card page-card section-card" key={section.section_slug}>
                 <p className="card-kicker">Section</p>
                 <h3>
-                  <a href={preferredCampaignLink(section.href, campaignSlug, frontendMode)}>{section.section_name}</a>
+                  <WikiLink
+                    href={preferredCampaignLink(section.href, campaignSlug, frontendMode)}
+                    frontendMode={frontendMode}
+                  >
+                    {section.section_name}
+                  </WikiLink>
                 </h3>
                 <p>
                   {section.page_count} page{section.page_count === 1 ? "" : "s"} available in this section.

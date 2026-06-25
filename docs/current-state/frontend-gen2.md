@@ -16,6 +16,7 @@ Last updated: 2026-06-25
 - Global search covers visible published wiki pages plus accessible Systems entries and opens previews in an in-page dialog with a dedicated-page link.
 - Gen2 Campaign Home renders a latest-session-summary news card above the section-card grid when a visible published `Sessions`/`session` page exists.
 - Gen2 top-nav left-clicks use TanStack Router navigation while preserving real hrefs for fallback and new-tab behavior.
+- Gen2 wiki section/article links use the same principle: real `href`s remain available, while ordinary internal section/page clicks inside wiki chrome or rendered article bodies route in place through TanStack.
 - Gen2 Session uses mounted Session/Character/DM panes under the compact hero tab strip. The player Session pane shows a compact inactive-state card until a live session exists, then shows chat plus composer. The DM pane uses URL-backed `dm_view` subviews and preserves scroll on subview query changes.
 - Gen2 Combat treats player combatant inspection as local route state so card/dropdown selection does not rewrite `combatant=` or trigger a scroll reset. DM Combat `status` and `controls` query changes keep canonical `combatant=` focus while requesting TanStack navigation with scroll preservation.
 - The loading cover is shared across Flask hard navigations and Gen2 client-side route changes. It should not reveal raw unstyled HTML, should not swap loading media during an active transition, and should wait for the React route/query readiness signal before dismissing.
@@ -49,6 +50,7 @@ Last updated: 2026-06-25
 - For `/app-next` browser checks, ensure `frontend/dist/index.html` exists or build the bundle first.
 - The June 25, 2026 Gen2 browser verification includes a representative hard-load and same-app navigation sweep across Campaign Home, a wiki page, Systems, Characters, Session, Combat, and DM Content to confirm the styled shell is visible and the loading cover is dismissed on first render.
 - The June 25, 2026 Gen2 browser verification also covers admin header `View as`: selecting a party user updates visible campaign permissions, hides admin-only campaign links, exposes a clear active-state badge, and remains absent for ordinary players.
+- The June 25, 2026 Gen2 browser verification covers same-document wiki navigation across section cards, section nav, page cards, and rendered article-body internal links.
 
 ## Known Limits
 

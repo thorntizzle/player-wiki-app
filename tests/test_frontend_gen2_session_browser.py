@@ -2473,6 +2473,55 @@ def test_gen2_wiki_browser_exposes_home_section_page_and_assets(
             browser.close()
 
 
+def test_gen2_wiki_navigation_reuses_single_document(
+    frontend_gen2_session_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["party"]["email"], password=users["party"]["password"])
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass")
+            expect(page.get_by_role("heading", name="Campaign Home")).to_be_visible(timeout=10000)
+            page.evaluate("window.__cpwWikiNavMarker = 'alive'")
+
+            page.locator(".wiki-home-section-grid").get_by_role("link", name="Locations").click()
+            expect(page.get_by_role("heading", name="Locations")).to_be_visible(timeout=10000)
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/sections/locations$"))
+            assert page.evaluate("window.__cpwWikiNavMarker") == "alive"
+
+            page.locator("nav.wiki-section-nav").get_by_role("link", name="Sessions").click()
+            expect(page.get_by_role("heading", name="Sessions")).to_be_visible(timeout=10000)
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/sections/sessions$"))
+            assert page.evaluate("window.__cpwWikiNavMarker") == "alive"
+
+            page.get_by_role("link", name="Session 2 - The Brass Vault").click()
+            expect(page.get_by_role("heading", name="Session 2 - The Brass Vault")).to_be_visible(timeout=10000)
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/pages/sessions/session-2-the-brass-vault$"))
+            assert page.evaluate("window.__cpwWikiNavMarker") == "alive"
+
+            page.locator(".article-body").get_by_role("link", name="Dock Charter").click()
+            expect(page.get_by_role("heading", name="Dock Charter")).to_be_visible(timeout=10000)
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/pages/notes/dock-charter$"))
+            assert page.evaluate("window.__cpwWikiNavMarker") == "alive"
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_gen2_wiki_visual_parity_smoke(
     frontend_gen2_session_live_server,
     users,

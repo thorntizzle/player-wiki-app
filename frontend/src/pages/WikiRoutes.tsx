@@ -20,9 +20,11 @@ import {
   splitPinnedPages,
   WikiHomeSectionGrid,
   WikiLatestSessionCard,
+  WikiLink,
   WikiPageGrid,
   WikiSectionBrowse,
   WikiSectionNav,
+  useWikiBodyLinkNavigation,
 } from "../components/WikiChrome";
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 
@@ -284,6 +286,7 @@ export function WikiArticlePage() {
   const wikiFrontendMode = routeFrontendMode(normalizeFrontendMode(data?.frontend_mode ?? preferredFrontendMode));
   const showSummary = page?.summary && !["item", "spell", "mechanic"].includes(page.page_type);
   const hasBacklinks = Boolean(data?.backlinks.length);
+  const handleArticleBodyClick = useWikiBodyLinkNavigation(wikiFrontendMode);
 
   return (
     <>
@@ -302,7 +305,12 @@ export function WikiArticlePage() {
               <ul className="wiki-backlink-list">
                 {data?.backlinks.map((backlink) => (
                   <li key={backlink.page_ref}>
-                    <a href={preferredCampaignLink(backlink.href, campaignSlug, wikiFrontendMode)}>{backlink.title}</a>
+                    <WikiLink
+                      href={preferredCampaignLink(backlink.href, campaignSlug, wikiFrontendMode)}
+                      frontendMode={wikiFrontendMode}
+                    >
+                      {backlink.title}
+                    </WikiLink>
                   </li>
                 ))}
               </ul>
@@ -320,6 +328,7 @@ export function WikiArticlePage() {
               ) : null}
               <div
                 className="article-body html-body"
+                onClick={handleArticleBodyClick}
                 dangerouslySetInnerHTML={{
                   __html: preferredCampaignHtml(page.body_html, campaignSlug, wikiFrontendMode),
                 }}

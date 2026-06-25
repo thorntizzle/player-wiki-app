@@ -10,6 +10,7 @@ Last updated: 2026-06-25
 
 - Published wiki pages are read-only for players and manageable by DMs/admins through DM Content -> `Player Wiki` or the content API.
 - Campaign Home is the player-facing landing view for a campaign. Unfiltered Flask and Gen2 Campaign Home show the latest visible published session summary as a news-style card above the section list; Gen2 uses section-card browsing below it, while section and article pages use section navigation and backlinks.
+- In Gen2, Campaign Home section cards, wiki section navigation, page cards, backlinks, and rendered internal article-body links keep real `href` values but route ordinary internal `/app-next` section/page clicks through TanStack so sections and articles swap in place under the mounted wiki surface.
 - The shared global search row is the ordinary ad hoc lookup path for visible wiki pages and accessible Systems entries. Flask Campaign Home no longer owns a visible page-local search form, though old `?q=` URLs remain compatible.
 - Page detail views lead with article title and optional summary. They can render an optional image between summary and body.
 - Article images are campaign-owned protected assets, not public static files. PNG/JPG image uploads are converted to WebP by the shared image-publishing helper, while GIF/WebP uploads pass through validation; character portrait uploads reuse that same conversion rule.
@@ -36,6 +37,7 @@ Last updated: 2026-06-25
 ## Current Tests Or Verification
 
 - Publishing/wiki changes usually need focused route/API tests around section grouping, visibility, content API writes, image serving, removal safety, and Gen2/Flask page rendering.
+- The June 25, 2026 Gen2 browser verification covers Campaign Home -> section, section -> section, section -> article, and rendered article-body article -> article navigation while preserving a same-document marker.
 - Live content writes through the API do not update local content mirrors automatically; sync down from Fly when local state must match live.
 
 ## Known Limits
