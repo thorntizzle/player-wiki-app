@@ -41,7 +41,8 @@ Last updated: 2026-06-25
 - `.local/roadmaps/dm-content-backlog.md`
 - `.local/roadmaps/publishing-backlog.md`
 - `.local/roadmaps/systems-backlog.md`
-- `.local/roadmaps/live-combat-backlog.md`
+- `.local/roadmaps/session-backlog.md`
+- `.local/roadmaps/combat-backlog.md`
 
 ## Source Pointers
 

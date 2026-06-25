@@ -9,6 +9,7 @@ This directory is the fast reference layer for the current Campaign Player Wiki 
 - Start here when a task asks how a surface currently works.
 - Open only the docs that match the surface being changed or audited.
 - Treat `.local/roadmaps/*.md` as active backlog, not as source of current behavior.
+- Current-state docs own the present app contract only. They may describe current boundaries in present-tense terms, but future implementation goals, unresolved follow-up, and desired behavior belong in the active backlog files.
 - When a backlog item ships, update the matching current-state doc before closing or archiving that item.
 - Keep historical roadmap files as audit trails. Do not rely on completed historical checklist prose as current truth unless the current-state doc points back to it.
 
@@ -44,7 +45,8 @@ Local roadmaps are intentionally not tracked:
 - `.local/roadmaps/publishing-backlog.md`
 - `.local/roadmaps/dm-content-backlog.md`
 - `.local/roadmaps/systems-backlog.md`
-- `.local/roadmaps/live-combat-backlog.md`
+- `.local/roadmaps/session-backlog.md`
+- `.local/roadmaps/combat-backlog.md`
 - `.local/roadmaps/character-backlog.md`
 - `.local/roadmaps/xianxia-backlog.md`
 - `.local/roadmaps/ops-backlog.md`

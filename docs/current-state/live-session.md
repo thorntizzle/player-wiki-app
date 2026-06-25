@@ -11,7 +11,7 @@ Last updated: 2026-06-25
 - Live Session is distinct from published `Sessions` recap pages.
 - `/session`, `/session/character`, and `/session/dm` share one Session shell. Enhanced tab clicks switch panes through History API without full document navigation.
 - Player Session owns live chat, message composition, visible revealed article chat entries, and player-facing active/inactive state. In Gen2, inactive sessions render a compact inactive-state card instead of the chat window and composer; chat appears only while a session is active.
-- DM Session owns live lifecycle controls, staged articles, revealed articles, passive score cards, Session article store, and chat logs. In Gen2 these are split into mounted `dm_view` subviews: `DM Tools`, `Staged Articles`, `Revealed Articles`, `Stage Session Articles`, and `Chat Logs`. `DM Tools` contains passive scores, a future DM references card, and live-session controls.
+- DM Session owns live lifecycle controls, staged articles, revealed articles, passive score cards, Session article store, and chat logs. In Gen2 these are split into mounted `dm_view` subviews: `DM Tools`, `Staged Articles`, `Revealed Articles`, `Stage Session Articles`, and `Chat Logs`. `DM Tools` contains passive scores and live-session controls.
 - Session message specific-player labels use character-first display when possible: `Character Name (username)`. Players without assigned characters fall back to username, duplicate labels are disambiguated with the user id, and emails are not shown in the picker.
 - Session Character can mount inside the player Session shell and also remains available as a full-page/no-JS fallback. In Gen2, the Session Character picker sits below the Session/Character/DM navigation and outside the character card, with `Open full character page` in the same row; the duplicate `Session Character` header is omitted inside the embedded sheet.
 - DND-5E Session Character uses DND sheet sections and active-session controls for HP/temp HP/Hit Dice, resources, spell slots, equipment state, inventory quantities, currency, notes, and rests. Editable resource cards use the shared resource mutation and include a visible per-card `Save` action in addition to blur autosave. Rest confirmations can set final Current HP and current Hit Dice before applying the rest.
@@ -47,7 +47,7 @@ Last updated: 2026-06-25
 
 ## Related Backlog
 
-- `.local/roadmaps/live-combat-backlog.md`
+- `.local/roadmaps/session-backlog.md`
 - `.local/roadmaps/dm-content-backlog.md`
 - `.local/roadmaps/publishing-backlog.md`
 
