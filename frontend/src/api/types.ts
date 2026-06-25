@@ -652,6 +652,22 @@ export interface CombatCondition {
   duration_text: string;
 }
 
+export interface CombatNpcResourceCounter {
+  resource_key: string;
+  label: string;
+  current_value: number;
+  max_value: number;
+  reset_label: string;
+  source_label: string;
+  can_edit: boolean;
+}
+
+export interface CombatNpcResourceNote {
+  label: string;
+  note: string;
+  source_label: string;
+}
+
 export interface CombatantSummary {
   id: number;
   name: string;
@@ -688,6 +704,8 @@ export interface CombatantSummary {
   can_manage_combat: boolean;
   combatant_revision: number;
   state_revision?: number | null;
+  npc_resource_counters: CombatNpcResourceCounter[];
+  npc_resource_notes: CombatNpcResourceNote[];
   conditions: CombatCondition[];
 }
 
@@ -866,6 +884,16 @@ export interface CombatResourcesPatchPayload {
   has_bonus_action?: boolean;
   has_reaction?: boolean;
   movement_remaining?: number | string | null;
+}
+
+export interface CombatNpcResourceCounterPatchPayload {
+  resource_key: string;
+  current_value: number | string | null;
+}
+
+export interface CombatNpcResourcesPatchPayload {
+  expected_combatant_revision?: number | string | null;
+  counters: CombatNpcResourceCounterPatchPayload[];
 }
 
 export interface CombatConditionAddPayload {

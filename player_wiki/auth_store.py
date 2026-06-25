@@ -604,6 +604,18 @@ class AuthStore:
                 (user_id,),
             )
             connection.execute(
+                "UPDATE campaign_combatant_resource_counters SET created_by_user_id = NULL WHERE created_by_user_id = ?",
+                (user_id,),
+            )
+            connection.execute(
+                "UPDATE campaign_combatant_resource_counters SET updated_by_user_id = NULL WHERE updated_by_user_id = ?",
+                (user_id,),
+            )
+            connection.execute(
+                "UPDATE campaign_combatant_resource_notes SET created_by_user_id = NULL WHERE created_by_user_id = ?",
+                (user_id,),
+            )
+            connection.execute(
                 "UPDATE systems_import_runs SET started_by_user_id = NULL WHERE started_by_user_id = ?",
                 (user_id,),
             )

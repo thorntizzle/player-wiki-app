@@ -106,6 +106,7 @@ Use these external standards as the baseline:
 - Skill proficiency should be a visual marker rather than extra cramped text where possible. Thin border can indicate proficiency; thicker border can indicate expertise.
 - Spell cards should separate name, level/school, tags, and action/range/duration facts into distinct lines.
 - Spell and resource grids should reduce vertical footprint without compressing text into unreadable rows.
+- Combat source-resource controls should present compact current/max rows with the mechanic label, reset cadence, and source label together. Unsupported mechanics should remain visible as read-only notes instead of disappearing behind disabled controls.
 
 ## Accessibility Floor
 

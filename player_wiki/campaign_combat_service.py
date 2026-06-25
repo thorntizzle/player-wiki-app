@@ -23,8 +23,11 @@ from .combat_models import (
     COMBAT_SOURCE_KINDS,
     CampaignCombatConditionRecord,
     CampaignCombatantRecord,
+    CampaignCombatantResourceCounterRecord,
+    CampaignCombatantResourceNoteRecord,
     CampaignCombatTrackerRecord,
 )
+from .combat_npc_resources import NpcResourceCounterSeed, NpcResourceNoteSeed
 
 MOVEMENT_VALUE_PATTERN = re.compile(r"(?P<distance>\d+)")
 
@@ -110,6 +113,34 @@ class CampaignCombatService:
         grouped: dict[int, list[CampaignCombatConditionRecord]] = defaultdict(list)
         for condition in conditions:
             grouped[condition.combatant_id].append(condition)
+        return dict(grouped)
+
+    def list_resource_counters_by_combatant(
+        self,
+        campaign_slug: str,
+    ) -> dict[int, list[CampaignCombatantResourceCounterRecord]]:
+        combatants = self.store.list_combatants(campaign_slug)
+        counters = self.store.list_resource_counters(
+            campaign_slug,
+            combatant_ids=[combatant.id for combatant in combatants],
+        )
+        grouped: dict[int, list[CampaignCombatantResourceCounterRecord]] = defaultdict(list)
+        for counter in counters:
+            grouped[counter.combatant_id].append(counter)
+        return dict(grouped)
+
+    def list_resource_notes_by_combatant(
+        self,
+        campaign_slug: str,
+    ) -> dict[int, list[CampaignCombatantResourceNoteRecord]]:
+        combatants = self.store.list_combatants(campaign_slug)
+        notes = self.store.list_resource_notes(
+            campaign_slug,
+            combatant_ids=[combatant.id for combatant in combatants],
+        )
+        grouped: dict[int, list[CampaignCombatantResourceNoteRecord]] = defaultdict(list)
+        for note in notes:
+            grouped[note.combatant_id].append(note)
         return dict(grouped)
 
     def list_available_player_characters(self, campaign_slug: str):
@@ -202,6 +233,8 @@ class CampaignCombatService:
         movement_total: Any | None = 0,
         source_kind: str = COMBAT_SOURCE_KIND_MANUAL_NPC,
         source_ref: str = "",
+        resource_counter_seeds: list[object] | None = None,
+        resource_note_seeds: list[object] | None = None,
         created_by_user_id: int | None = None,
     ) -> CampaignCombatantRecord:
         normalized_name = (display_name or "").strip()
@@ -247,6 +280,11 @@ class CampaignCombatService:
             normalized_source_ref = ""
         if normalized_current_hp > normalized_max_hp:
             raise CampaignCombatValidationError("Current HP cannot exceed max HP.")
+        normalized_counter_seeds = self._normalize_resource_counter_seeds(resource_counter_seeds or [])
+        normalized_note_seeds = self._normalize_resource_note_seeds(resource_note_seeds or [])
+        if normalized_source_kind == COMBAT_SOURCE_KIND_MANUAL_NPC:
+            normalized_counter_seeds = []
+            normalized_note_seeds = []
 
         with get_db() as connection:
             self.store.ensure_tracker(
@@ -270,6 +308,18 @@ class CampaignCombatService:
                 temp_hp=normalized_temp_hp,
                 movement_total=normalized_movement_total,
                 movement_remaining=normalized_movement_total,
+                created_by_user_id=created_by_user_id,
+                commit=False,
+            )
+            self.store.create_resource_counters(
+                combatant.id,
+                normalized_counter_seeds,
+                created_by_user_id=created_by_user_id,
+                commit=False,
+            )
+            self.store.create_resource_notes(
+                combatant.id,
+                normalized_note_seeds,
                 created_by_user_id=created_by_user_id,
                 commit=False,
             )
@@ -486,6 +536,74 @@ class CampaignCombatService:
             raise
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("Those combat resources could not be saved.") from exc
+
+    def update_npc_resource_counters(
+        self,
+        campaign_slug: str,
+        combatant_id: int,
+        *,
+        expected_revision: int | None = None,
+        counter_values: list[dict[str, Any]],
+        updated_by_user_id: int | None = None,
+    ) -> list[CampaignCombatantResourceCounterRecord]:
+        combatant = self._require_combatant(campaign_slug, combatant_id)
+        if not combatant.is_npc:
+            raise CampaignCombatValidationError("Only NPC source resources can be edited here.")
+        if not isinstance(counter_values, list):
+            raise CampaignCombatValidationError("NPC resource counters must be sent as a list.")
+
+        existing_counters = self.store.list_resource_counters(campaign_slug, combatant_ids=[combatant_id])
+        counters_by_key = {counter.resource_key: counter for counter in existing_counters}
+        if not counters_by_key:
+            raise CampaignCombatValidationError("This NPC has no supported source-backed resource counters.")
+
+        values_by_key: dict[str, int] = {}
+        for index, counter_value in enumerate(counter_values, start=1):
+            if not isinstance(counter_value, dict):
+                raise CampaignCombatValidationError(f"NPC resource row {index} must be an object.")
+            resource_key = str(counter_value.get("resource_key") or "").strip()
+            if not resource_key or resource_key not in counters_by_key:
+                raise CampaignCombatValidationError("Choose a valid NPC resource counter.")
+            counter = counters_by_key[resource_key]
+            current_value = self._parse_int(
+                counter_value.get("current_value"),
+                label=f"{counter.label} current value",
+                default=counter.current_value,
+                minimum=0,
+            )
+            if current_value > counter.max_value:
+                raise CampaignCombatValidationError(f"{counter.label} cannot exceed {counter.max_value}.")
+            values_by_key[resource_key] = current_value
+
+        if not values_by_key:
+            raise CampaignCombatValidationError("Choose at least one NPC resource counter to update.")
+
+        try:
+            with get_db() as connection:
+                self.store.update_combatant(
+                    campaign_slug,
+                    combatant_id,
+                    expected_revision=expected_revision,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
+                updated_counters = self.store.update_resource_counter_values(
+                    campaign_slug,
+                    combatant_id,
+                    values_by_key,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
+                self.store.bump_tracker_revision(
+                    campaign_slug,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
+            return updated_counters
+        except CampaignCombatRevisionConflictError:
+            raise
+        except CampaignCombatConflictError as exc:
+            raise CampaignCombatValidationError("Those NPC resources could not be saved.") from exc
 
     def update_player_detail_visibility(
         self,
@@ -912,6 +1030,68 @@ class CampaignCombatService:
         if parsed < 1:
             raise CampaignCombatValidationError("Priority must be 1 or higher.")
         return parsed
+
+    def _normalize_resource_counter_seeds(
+        self,
+        seeds: list[object],
+    ) -> list[NpcResourceCounterSeed]:
+        normalized_seeds: list[NpcResourceCounterSeed] = []
+        seen_keys: set[str] = set()
+        for seed in seeds:
+            resource_key = str(getattr(seed, "resource_key", "") or "").strip()
+            label = str(getattr(seed, "label", "") or "").strip()
+            if not resource_key or not label or resource_key in seen_keys:
+                continue
+            max_value = self._parse_int(
+                getattr(seed, "max_value", None),
+                label=f"{label} maximum",
+                default=None,
+                minimum=1,
+            )
+            current_value = self._parse_int(
+                getattr(seed, "current_value", None),
+                label=f"{label} current value",
+                default=max_value,
+                minimum=0,
+            )
+            if current_value > max_value:
+                current_value = max_value
+            seen_keys.add(resource_key)
+            normalized_seeds.append(
+                NpcResourceCounterSeed(
+                    resource_key=resource_key[:80],
+                    label=label[:120],
+                    current_value=current_value,
+                    max_value=max_value,
+                    reset_label=str(getattr(seed, "reset_label", "") or "").strip()[:80],
+                    source_label=str(getattr(seed, "source_label", "") or "").strip()[:120],
+                )
+            )
+        return normalized_seeds
+
+    def _normalize_resource_note_seeds(
+        self,
+        seeds: list[object],
+    ) -> list[NpcResourceNoteSeed]:
+        normalized_seeds: list[NpcResourceNoteSeed] = []
+        seen_notes: set[tuple[str, str]] = set()
+        for seed in seeds:
+            label = str(getattr(seed, "label", "") or "").strip()
+            note = str(getattr(seed, "note", "") or "").strip()
+            if not label or not note:
+                continue
+            note_key = (label.lower(), note.lower())
+            if note_key in seen_notes:
+                continue
+            seen_notes.add(note_key)
+            normalized_seeds.append(
+                NpcResourceNoteSeed(
+                    label=label[:120],
+                    note=note[:300],
+                    source_label=str(getattr(seed, "source_label", "") or "").strip()[:120],
+                )
+            )
+        return normalized_seeds
 
     def _parse_int(
         self,

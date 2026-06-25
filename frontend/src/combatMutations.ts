@@ -5,6 +5,7 @@ import { apiErrorMessage, type CampaignApiClient } from "./api/client";
 import type {
   CombatAddNpcPayload,
   CombatCondition,
+  CombatNpcResourcesPatchPayload,
   CombatPayload,
   CombatResourcesPatchPayload,
   CombatSystemsMonsterSearchResult,
@@ -125,6 +126,17 @@ export function useCombatMutations({
       return apiClient.patchCombatantResources(campaignSlug, selectedCombatant.id, draft);
     },
     onSuccess: (response) => replaceCombatPayload(response, "Action economy saved."),
+    onError: handleCombatMutationError,
+  });
+
+  const updateNpcResourcesMutation = useMutation({
+    mutationFn: (draft: CombatNpcResourcesPatchPayload) => {
+      if (!selectedCombatant) {
+        throw new Error("Choose a combatant first.");
+      }
+      return apiClient.patchCombatantNpcResources(campaignSlug, selectedCombatant.id, draft);
+    },
+    onSuccess: (response) => replaceCombatPayload(response, "NPC resources saved."),
     onError: handleCombatMutationError,
   });
 
@@ -313,6 +325,7 @@ export function useCombatMutations({
     deleteConditionMutation,
     searchSystemsMonsters,
     setCurrentMutation,
+    updateNpcResourcesMutation,
     updateResourcesMutation,
     updateTurnMutation,
     updateVitalsMutation,

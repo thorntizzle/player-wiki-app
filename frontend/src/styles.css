@@ -4729,6 +4729,16 @@ button.spell-card__main:focus-visible .spell-card__name {
   background: var(--surface-soft);
 }
 
+.combat-selected-snapshot__npc-resources {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-soft);
+}
+
 .combat-stat-tile {
   display: grid;
   gap: 0.2rem;
@@ -5053,6 +5063,97 @@ button.spell-card__main:focus-visible .spell-card__name {
 
 .combat-status-conditions .combat-condition-item strong {
   overflow-wrap: anywhere;
+}
+
+.combat-npc-resource-panel {
+  align-content: start;
+}
+
+.combat-npc-resource-form,
+.combat-npc-resource-list,
+.combat-npc-resource-notes {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.combat-npc-resource-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(7.5rem, auto);
+  gap: 0.75rem;
+  align-items: center;
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-raised);
+}
+
+.combat-npc-resource-row__identity,
+.combat-npc-resource-row__value {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.combat-npc-resource-row__identity strong {
+  overflow-wrap: anywhere;
+}
+
+.combat-npc-resource-row__value {
+  grid-template-columns: minmax(0, 4.75rem) auto auto;
+  align-items: center;
+  justify-content: end;
+}
+
+.combat-npc-resource-row__value input {
+  width: 100%;
+  min-width: 0;
+}
+
+.combat-npc-resource-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.combat-npc-resource-chip,
+.combat-npc-resource-note {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-raised);
+}
+
+.combat-npc-resource-chip strong,
+.combat-npc-resource-note strong {
+  overflow-wrap: anywhere;
+}
+
+.combat-npc-resource-chip span {
+  font-weight: 800;
+}
+
+.combat-npc-resource-note p {
+  margin: 0;
+}
+
+.combat-npc-resource-notes--snapshot {
+  gap: 0.55rem;
+}
+
+@media (max-width: 560px) {
+  .combat-npc-resource-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .combat-npc-resource-row__value {
+    justify-content: start;
+  }
 }
 
 .combat-systems-results {

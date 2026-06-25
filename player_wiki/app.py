@@ -129,6 +129,10 @@ from .xianxia_character_builder import (
 )
 from .xianxia_character_importer import build_xianxia_manual_import_character
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
+from .combat_npc_resources import (
+    build_npc_resource_seeds_from_markdown,
+    build_npc_resource_seeds_from_systems_entry,
+)
 from .character_presenter import (
     XIANXIA_READ_SUBPAGE_LABELS,
     build_character_entry_href,
@@ -6976,6 +6980,8 @@ def create_app() -> Flask:
                 tracker,
                 combatants,
                 conditions_by_combatant,
+                combat_service.list_resource_counters_by_combatant(campaign_slug),
+                combat_service.list_resource_notes_by_combatant(campaign_slug),
                 character_records_by_slug=character_records_by_slug,
                 owned_character_slugs=get_owned_character_slugs(campaign_slug),
                 can_manage_combat=can_manage_combat,
@@ -11531,6 +11537,10 @@ def create_app() -> Flask:
                 anchor="combat-tracker",
             )
 
+        resource_counter_seeds, resource_note_seeds = build_npc_resource_seeds_from_markdown(
+            statblock.body_markdown,
+            source_label="DM Content",
+        )
         mutation_succeeded = False
         try:
             get_campaign_combat_service().add_npc_combatant(
@@ -11546,6 +11556,8 @@ def create_app() -> Flask:
                 movement_total=statblock.movement_total,
                 source_kind=COMBAT_SOURCE_KIND_DM_STATBLOCK,
                 source_ref=str(statblock.id),
+                resource_counter_seeds=resource_counter_seeds,
+                resource_note_seeds=resource_note_seeds,
                 created_by_user_id=user.id,
             )
         except CampaignCombatValidationError as exc:
@@ -11589,6 +11601,10 @@ def create_app() -> Flask:
             )
 
         monster_seed = get_systems_service().build_monster_combat_seed(monster_entry)
+        resource_counter_seeds, resource_note_seeds = build_npc_resource_seeds_from_systems_entry(
+            monster_entry,
+            source_label=f"Systems {monster_entry.source_id}",
+        )
 
         mutation_succeeded = False
         try:
@@ -11605,6 +11621,8 @@ def create_app() -> Flask:
                 movement_total=monster_seed.movement_total,
                 source_kind=COMBAT_SOURCE_KIND_SYSTEMS_MONSTER,
                 source_ref=monster_entry.entry_key,
+                resource_counter_seeds=resource_counter_seeds,
+                resource_note_seeds=resource_note_seeds,
                 created_by_user_id=user.id,
             )
         except CampaignCombatValidationError as exc:

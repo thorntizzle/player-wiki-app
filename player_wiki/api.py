@@ -169,6 +169,10 @@ from .character_service import CharacterStateValidationError, build_initial_stat
 from .character_store import CharacterStateConflictError
 from .character_repository import load_campaign_character_config
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
+from .combat_npc_resources import (
+    build_npc_resource_seeds_from_markdown,
+    build_npc_resource_seeds_from_systems_entry,
+)
 from .models import section_sort_key, subsection_sort_key
 from .player_choices import build_active_player_choices
 from .repository import slugify
@@ -2451,6 +2455,8 @@ def register_api(app) -> None:
                 tracker,
                 combatants,
                 combat_service.list_conditions_by_combatant(campaign_slug),
+                combat_service.list_resource_counters_by_combatant(campaign_slug),
+                combat_service.list_resource_notes_by_combatant(campaign_slug),
                 character_records_by_slug=character_records_by_slug,
                 owned_character_slugs=get_owned_character_slugs(campaign_slug),
                 can_manage_combat=can_manage_combat,
@@ -8169,6 +8175,10 @@ def register_api(app) -> None:
         if statblock is None:
             return json_error("Choose a valid DM Content statblock to add.", 400, code="validation_error")
 
+        resource_counter_seeds, resource_note_seeds = build_npc_resource_seeds_from_markdown(
+            statblock.body_markdown,
+            source_label="DM Content",
+        )
         try:
             current_app.extensions["campaign_combat_service"].add_npc_combatant(
                 campaign_slug,
@@ -8183,6 +8193,8 @@ def register_api(app) -> None:
                 movement_total=statblock.movement_total,
                 source_kind="dm_statblock",
                 source_ref=str(statblock.id),
+                resource_counter_seeds=resource_counter_seeds,
+                resource_note_seeds=resource_note_seeds,
                 created_by_user_id=user.id,
             )
         except CampaignCombatValidationError as exc:
@@ -8215,6 +8227,10 @@ def register_api(app) -> None:
             return json_error("Choose a valid Systems monster to add.", 400, code="validation_error")
 
         monster_seed = current_app.extensions["systems_service"].build_monster_combat_seed(monster_entry)
+        resource_counter_seeds, resource_note_seeds = build_npc_resource_seeds_from_systems_entry(
+            monster_entry,
+            source_label=f"Systems {monster_entry.source_id}",
+        )
         try:
             current_app.extensions["campaign_combat_service"].add_npc_combatant(
                 campaign_slug,
@@ -8229,6 +8245,8 @@ def register_api(app) -> None:
                 movement_total=monster_seed.movement_total,
                 source_kind="systems_monster",
                 source_ref=monster_entry.entry_key,
+                resource_counter_seeds=resource_counter_seeds,
+                resource_note_seeds=resource_note_seeds,
                 created_by_user_id=user.id,
             )
         except CampaignCombatValidationError as exc:
@@ -8439,6 +8457,51 @@ def register_api(app) -> None:
                 has_bonus_action=coerce_bool(payload["has_bonus_action"], label="has_bonus_action") if "has_bonus_action" in payload else combatant.has_bonus_action,
                 has_reaction=coerce_bool(payload["has_reaction"], label="has_reaction") if "has_reaction" in payload else combatant.has_reaction,
                 movement_remaining=payload.get("movement_remaining", combatant.movement_remaining),
+                updated_by_user_id=user.id,
+            )
+        except CampaignCombatRevisionConflictError:
+            return json_error(
+                "This combatant changed in another combat view. Refresh and try again.",
+                409,
+                code="state_conflict",
+            )
+        except (CampaignCombatValidationError, ValueError) as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        return jsonify({"ok": True, **build_combat_payload(campaign_slug)})
+
+    @api.patch("/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/npc-resources")
+    @api_campaign_scope_access_required("combat")
+    @api_login_required
+    def combat_npc_resources_update(campaign_slug: str, combatant_id: int):
+        if not can_manage_campaign_combat(campaign_slug):
+            return json_error("You do not have permission to manage combat.", 403, code="forbidden")
+
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        combat_service = current_app.extensions["campaign_combat_service"]
+        combatant = combat_service.get_combatant(campaign_slug, combatant_id)
+        if combatant is None:
+            abort(404)
+
+        try:
+            payload = load_json_object()
+            require_supported_combat_campaign(campaign_slug)
+            expected_combatant_revision = payload.get("expected_combatant_revision")
+            counters = payload.get("counters")
+            if not isinstance(counters, list):
+                raise CampaignCombatValidationError("NPC resource counters must be sent as a list.")
+            combat_service.update_npc_resource_counters(
+                campaign_slug,
+                combatant_id,
+                expected_revision=(
+                    int(expected_combatant_revision)
+                    if expected_combatant_revision is not None and str(expected_combatant_revision).strip()
+                    else None
+                ),
+                counter_values=counters,
                 updated_by_user_id=user.id,
             )
         except CampaignCombatRevisionConflictError:

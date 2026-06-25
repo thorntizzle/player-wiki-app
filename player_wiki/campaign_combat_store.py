@@ -6,6 +6,8 @@ from .auth_store import isoformat, parse_timestamp, utcnow
 from .combat_models import (
     CampaignCombatConditionRecord,
     CampaignCombatantRecord,
+    CampaignCombatantResourceCounterRecord,
+    CampaignCombatantResourceNoteRecord,
     CampaignCombatTrackerRecord,
 )
 from .db import get_db
@@ -587,6 +589,277 @@ class CampaignCombatStore:
             connection.commit()
         return condition
 
+    def list_resource_counters(
+        self,
+        campaign_slug: str,
+        *,
+        combatant_ids: list[int] | None = None,
+    ) -> list[CampaignCombatantResourceCounterRecord]:
+        filters = ["e.campaign_slug = ?"]
+        parameters: list[object] = [campaign_slug]
+        if combatant_ids is not None:
+            if not combatant_ids:
+                return []
+            filters.append(f"c.combatant_id IN ({', '.join('?' for _ in combatant_ids)})")
+            parameters.extend(combatant_ids)
+
+        rows = get_db().execute(
+            f"""
+            SELECT
+                c.id,
+                c.combatant_id,
+                e.campaign_slug,
+                c.resource_key,
+                c.label,
+                c.current_value,
+                c.max_value,
+                c.reset_label,
+                c.source_label,
+                c.created_at,
+                c.updated_at,
+                c.created_by_user_id,
+                c.updated_by_user_id
+            FROM campaign_combatant_resource_counters AS c
+            JOIN campaign_combatants AS e ON e.id = c.combatant_id
+            WHERE {' AND '.join(filters)}
+            ORDER BY c.id ASC
+            """,
+            parameters,
+        ).fetchall()
+        return [self._map_resource_counter(row) for row in rows]
+
+    def list_resource_notes(
+        self,
+        campaign_slug: str,
+        *,
+        combatant_ids: list[int] | None = None,
+    ) -> list[CampaignCombatantResourceNoteRecord]:
+        filters = ["e.campaign_slug = ?"]
+        parameters: list[object] = [campaign_slug]
+        if combatant_ids is not None:
+            if not combatant_ids:
+                return []
+            filters.append(f"n.combatant_id IN ({', '.join('?' for _ in combatant_ids)})")
+            parameters.extend(combatant_ids)
+
+        rows = get_db().execute(
+            f"""
+            SELECT
+                n.id,
+                n.combatant_id,
+                e.campaign_slug,
+                n.label,
+                n.note,
+                n.source_label,
+                n.created_at,
+                n.created_by_user_id
+            FROM campaign_combatant_resource_notes AS n
+            JOIN campaign_combatants AS e ON e.id = n.combatant_id
+            WHERE {' AND '.join(filters)}
+            ORDER BY n.id ASC
+            """,
+            parameters,
+        ).fetchall()
+        return [self._map_resource_note(row) for row in rows]
+
+    def create_resource_counters(
+        self,
+        combatant_id: int,
+        counter_seeds: list[object],
+        *,
+        created_by_user_id: int | None = None,
+        commit: bool = True,
+    ) -> list[CampaignCombatantResourceCounterRecord]:
+        if not counter_seeds:
+            return []
+
+        connection = get_db()
+        now = isoformat(utcnow())
+        created_ids: list[int] = []
+        try:
+            for seed in counter_seeds:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO campaign_combatant_resource_counters (
+                        combatant_id,
+                        resource_key,
+                        label,
+                        current_value,
+                        max_value,
+                        reset_label,
+                        source_label,
+                        created_at,
+                        updated_at,
+                        created_by_user_id,
+                        updated_by_user_id
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        combatant_id,
+                        str(getattr(seed, "resource_key")),
+                        str(getattr(seed, "label")),
+                        int(getattr(seed, "current_value")),
+                        int(getattr(seed, "max_value")),
+                        str(getattr(seed, "reset_label")),
+                        str(getattr(seed, "source_label")),
+                        now,
+                        now,
+                        created_by_user_id,
+                        created_by_user_id,
+                    ),
+                )
+                created_ids.append(int(cursor.lastrowid))
+        except sqlite3.IntegrityError as exc:
+            raise CampaignCombatConflictError(
+                f"Unable to create resource counters for combatant {combatant_id}."
+            ) from exc
+
+        if commit:
+            connection.commit()
+
+        if not created_ids:
+            return []
+        rows = get_db().execute(
+            f"""
+            SELECT
+                c.id,
+                c.combatant_id,
+                e.campaign_slug,
+                c.resource_key,
+                c.label,
+                c.current_value,
+                c.max_value,
+                c.reset_label,
+                c.source_label,
+                c.created_at,
+                c.updated_at,
+                c.created_by_user_id,
+                c.updated_by_user_id
+            FROM campaign_combatant_resource_counters AS c
+            JOIN campaign_combatants AS e ON e.id = c.combatant_id
+            WHERE c.id IN ({', '.join('?' for _ in created_ids)})
+            ORDER BY c.id ASC
+            """,
+            created_ids,
+        ).fetchall()
+        return [self._map_resource_counter(row) for row in rows]
+
+    def create_resource_notes(
+        self,
+        combatant_id: int,
+        note_seeds: list[object],
+        *,
+        created_by_user_id: int | None = None,
+        commit: bool = True,
+    ) -> list[CampaignCombatantResourceNoteRecord]:
+        if not note_seeds:
+            return []
+
+        connection = get_db()
+        now = isoformat(utcnow())
+        created_ids: list[int] = []
+        try:
+            for seed in note_seeds:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO campaign_combatant_resource_notes (
+                        combatant_id,
+                        label,
+                        note,
+                        source_label,
+                        created_at,
+                        created_by_user_id
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        combatant_id,
+                        str(getattr(seed, "label")),
+                        str(getattr(seed, "note")),
+                        str(getattr(seed, "source_label")),
+                        now,
+                        created_by_user_id,
+                    ),
+                )
+                created_ids.append(int(cursor.lastrowid))
+        except sqlite3.IntegrityError as exc:
+            raise CampaignCombatConflictError(
+                f"Unable to create resource notes for combatant {combatant_id}."
+            ) from exc
+
+        if commit:
+            connection.commit()
+
+        if not created_ids:
+            return []
+        rows = get_db().execute(
+            f"""
+            SELECT
+                n.id,
+                n.combatant_id,
+                e.campaign_slug,
+                n.label,
+                n.note,
+                n.source_label,
+                n.created_at,
+                n.created_by_user_id
+            FROM campaign_combatant_resource_notes AS n
+            JOIN campaign_combatants AS e ON e.id = n.combatant_id
+            WHERE n.id IN ({', '.join('?' for _ in created_ids)})
+            ORDER BY n.id ASC
+            """,
+            created_ids,
+        ).fetchall()
+        return [self._map_resource_note(row) for row in rows]
+
+    def update_resource_counter_values(
+        self,
+        campaign_slug: str,
+        combatant_id: int,
+        values_by_key: dict[str, int],
+        *,
+        updated_by_user_id: int | None = None,
+        commit: bool = True,
+    ) -> list[CampaignCombatantResourceCounterRecord]:
+        if not values_by_key:
+            return self.list_resource_counters(campaign_slug, combatant_ids=[combatant_id])
+
+        connection = get_db()
+        now = isoformat(utcnow())
+        for resource_key, current_value in values_by_key.items():
+            cursor = connection.execute(
+                """
+                UPDATE campaign_combatant_resource_counters
+                SET current_value = ?,
+                    updated_at = ?,
+                    updated_by_user_id = ?
+                WHERE combatant_id = ?
+                  AND resource_key = ?
+                  AND EXISTS (
+                    SELECT 1
+                    FROM campaign_combatants AS e
+                    WHERE e.id = campaign_combatant_resource_counters.combatant_id
+                      AND e.campaign_slug = ?
+                  )
+                """,
+                (
+                    current_value,
+                    now,
+                    updated_by_user_id,
+                    combatant_id,
+                    resource_key,
+                    campaign_slug,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise CampaignCombatConflictError(
+                    f"Unable to update resource counter {campaign_slug}/{combatant_id}/{resource_key}."
+                )
+        if commit:
+            connection.commit()
+        return self.list_resource_counters(campaign_slug, combatant_ids=[combatant_id])
+
     def _map_tracker(self, row: sqlite3.Row | None) -> CampaignCombatTrackerRecord | None:
         if row is None:
             return None
@@ -649,6 +922,52 @@ class CampaignCombatStore:
             campaign_slug=str(row["campaign_slug"]),
             name=str(row["name"]),
             duration_text=str(row["duration_text"] or ""),
+            created_at=created_at,
+            created_by_user_id=int(row["created_by_user_id"]) if row["created_by_user_id"] is not None else None,
+        )
+
+    def _map_resource_counter(
+        self,
+        row: sqlite3.Row | None,
+    ) -> CampaignCombatantResourceCounterRecord:
+        if row is None:
+            raise RuntimeError("Failed to map combat resource counter.")
+        created_at = parse_timestamp(row["created_at"])
+        updated_at = parse_timestamp(row["updated_at"])
+        if created_at is None or updated_at is None:
+            raise RuntimeError("Failed to map combat resource counter timestamps.")
+        return CampaignCombatantResourceCounterRecord(
+            id=int(row["id"]),
+            combatant_id=int(row["combatant_id"]),
+            campaign_slug=str(row["campaign_slug"]),
+            resource_key=str(row["resource_key"]),
+            label=str(row["label"]),
+            current_value=int(row["current_value"] or 0),
+            max_value=int(row["max_value"] or 0),
+            reset_label=str(row["reset_label"] or ""),
+            source_label=str(row["source_label"] or ""),
+            created_at=created_at,
+            updated_at=updated_at,
+            created_by_user_id=int(row["created_by_user_id"]) if row["created_by_user_id"] is not None else None,
+            updated_by_user_id=int(row["updated_by_user_id"]) if row["updated_by_user_id"] is not None else None,
+        )
+
+    def _map_resource_note(
+        self,
+        row: sqlite3.Row | None,
+    ) -> CampaignCombatantResourceNoteRecord:
+        if row is None:
+            raise RuntimeError("Failed to map combat resource note.")
+        created_at = parse_timestamp(row["created_at"])
+        if created_at is None:
+            raise RuntimeError("Failed to map combat resource note timestamp.")
+        return CampaignCombatantResourceNoteRecord(
+            id=int(row["id"]),
+            combatant_id=int(row["combatant_id"]),
+            campaign_slug=str(row["campaign_slug"]),
+            label=str(row["label"]),
+            note=str(row["note"]),
+            source_label=str(row["source_label"] or ""),
             created_at=created_at,
             created_by_user_id=int(row["created_by_user_id"]) if row["created_by_user_id"] is not None else None,
         )

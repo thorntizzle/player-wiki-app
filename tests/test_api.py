@@ -5784,6 +5784,100 @@ STR 10 (+0)  DEX 14 (+2)  CON 12 (+1)  INT 10 (+0)  WIS 10 (+0)  CHA 10 (+0)
     assert combatant["dexterity_modifier_label"] == "+2"
 
 
+def test_api_combat_statblock_npc_resources_seed_patch_and_gate_permissions(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-combat-npc-resources-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="player-combat-npc-resources-api")
+    with app.app_context():
+        statblock = app.extensions["campaign_dm_content_service"].create_statblock(
+            "linden-pass",
+            filename="hex-adept.md",
+            data_blob=b"""---
+title: Hex Adept
+armor_class: 13
+hp: 33
+speed: 30 ft.
+initiative_bonus: 2
+---
+
+STR 10 (+0)  DEX 14 (+2)  CON 12 (+1)  INT 10 (+0)  WIS 10 (+0)  CHA 16 (+3)
+
+## Traits
+
+### Innate Spellcasting
+
+At will: detect magic, mage hand.
+3/day each: misty step, charm person.
+1/day: dimension door.
+
+### Legendary Resistance (3/Day)
+
+If the adept fails a saving throw, it can choose to succeed instead.
+
+## Actions
+
+### Fire Breath (Recharge 5-6)
+
+The adept exhales fire in a 15-foot cone.
+""",
+            created_by_user_id=users["dm"]["id"],
+        )
+
+    add_response = client.post(
+        "/api/v1/campaigns/linden-pass/combat/statblock-combatants",
+        headers=api_headers(dm_token),
+        json={"statblock_id": statblock.id},
+    )
+    assert add_response.status_code == 200
+    adept = _find_tracker_combatant(add_response.get_json(), name="Hex Adept")
+    assert adept is not None
+    counters = {counter["label"].lower(): counter for counter in adept["npc_resource_counters"]}
+    assert counters["misty step"]["current_value"] == 3
+    assert counters["misty step"]["max_value"] == 3
+    assert counters["misty step"]["reset_label"] == "Per day"
+    assert counters["misty step"]["can_edit"] is True
+    assert counters["charm person"]["max_value"] == 3
+    assert counters["dimension door"]["max_value"] == 1
+    assert counters["legendary resistance"]["max_value"] == 3
+    notes = {(note["label"], note["note"]) for note in adept["npc_resource_notes"]}
+    assert ("At-will spellcasting", "detect magic, mage hand") in notes
+    assert ("Fire Breath", "Recharge 5-6") in notes
+
+    player_blocked = client.patch(
+        f"/api/v1/campaigns/linden-pass/combat/combatants/{adept['id']}/npc-resources",
+        headers=api_headers(player_token),
+        json={
+            "expected_combatant_revision": adept["combatant_revision"],
+            "counters": [{"resource_key": counters["misty step"]["resource_key"], "current_value": 2}],
+        },
+    )
+    assert player_blocked.status_code == 403
+
+    update_response = client.patch(
+        f"/api/v1/campaigns/linden-pass/combat/combatants/{adept['id']}/npc-resources?combatant={adept['id']}",
+        headers=api_headers(dm_token),
+        json={
+            "expected_combatant_revision": adept["combatant_revision"],
+            "counters": [{"resource_key": counters["misty step"]["resource_key"], "current_value": 1}],
+        },
+    )
+    assert update_response.status_code == 200
+    updated_adept = update_response.get_json()["selected_combatant"]
+    updated_counters = {counter["label"].lower(): counter for counter in updated_adept["npc_resource_counters"]}
+    assert updated_counters["misty step"]["current_value"] == 1
+    assert updated_adept["combatant_revision"] == adept["combatant_revision"] + 1
+
+    stale_response = client.patch(
+        f"/api/v1/campaigns/linden-pass/combat/combatants/{adept['id']}/npc-resources",
+        headers=api_headers(dm_token),
+        json={
+            "expected_combatant_revision": adept["combatant_revision"],
+            "counters": [{"resource_key": counters["misty step"]["resource_key"], "current_value": 0}],
+        },
+    )
+    assert stale_response.status_code == 409
+    assert stale_response.get_json()["error"]["code"] == "state_conflict"
+
+
 def test_api_combat_resource_update_rejects_stale_combatant_revision(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-combat-conflict-api")
 
@@ -5867,4 +5961,81 @@ def test_api_combat_systems_monster_search_and_add_use_imported_entries(client, 
     assert goblin["turn_value"] == 2
     assert goblin["current_hp"] == 7
     assert goblin["movement_total"] == 30
+
+
+def test_api_combat_systems_monster_resources_seed_from_limited_use_traits(client, app, users, tmp_path):
+    data_root = tmp_path / "api-systems-npc-resources-source"
+    _write_json(
+        data_root / "data/bestiary/bestiary-mm.json",
+        {
+            "monster": [
+                {
+                    "name": "Hex Adept",
+                    "source": "MM",
+                    "page": 999,
+                    "size": ["M"],
+                    "type": {"type": "humanoid"},
+                    "alignment": ["N"],
+                    "ac": [{"ac": 13}],
+                    "hp": {"average": 33, "formula": "6d8 + 6"},
+                    "speed": {"walk": 30},
+                    "str": 10,
+                    "dex": 14,
+                    "con": 12,
+                    "int": 10,
+                    "wis": 10,
+                    "cha": 16,
+                    "trait": [
+                        {
+                            "name": "Innate Spellcasting",
+                            "entries": [
+                                "At will: {@spell detect magic}, {@spell mage hand}.",
+                                "3/day each: {@spell misty step}, {@spell charm person}.",
+                            ],
+                        },
+                        {
+                            "name": "Legendary Resistance (3/Day)",
+                            "entries": ["If the adept fails a saving throw, it can choose to succeed instead."],
+                        },
+                    ],
+                    "action": [
+                        {
+                            "name": "Arcane Burst (Recharge 5-6)",
+                            "entries": ["The adept releases stored force."],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("MM", entry_types=["monster"])
+        entry = next(
+            item
+            for item in app.extensions["systems_service"].list_monster_entries_for_campaign("linden-pass")
+            if item.title == "Hex Adept"
+        )
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-combat-systems-npc-resources-api")
+
+    add_response = client.post(
+        "/api/v1/campaigns/linden-pass/combat/systems-monsters",
+        headers=api_headers(dm_token),
+        json={"entry_key": entry.entry_key},
+    )
+
+    assert add_response.status_code == 200
+    adept = _find_tracker_combatant(add_response.get_json(), name="Hex Adept")
+    assert adept is not None
+    counters = {counter["label"].lower(): counter for counter in adept["npc_resource_counters"]}
+    assert counters["misty step"]["max_value"] == 3
+    assert counters["charm person"]["current_value"] == 3
+    assert counters["legendary resistance"]["source_label"] == "Systems MM"
+    notes = {(note["label"], note["note"]) for note in adept["npc_resource_notes"]}
+    assert ("At-will spellcasting", "detect magic, mage hand") in notes
+    assert ("Arcane Burst", "Recharge 5-6") in notes
 

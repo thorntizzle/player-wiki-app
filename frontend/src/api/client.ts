@@ -73,6 +73,7 @@ import type {
   CombatAddStatblockPayload,
   CombatAddSystemsMonsterPayload,
   CombatConditionAddPayload,
+  CombatNpcResourcesPatchPayload,
   CombatResourcesPatchPayload,
   CombatSystemsMonsterSearchResponse,
   CombatTurnPatchPayload,
@@ -609,6 +610,20 @@ export class CampaignApiClient {
   ): Promise<CombatPayload> {
     return this.requestJson<CombatPayload>(
       `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/combatants/${combatantId}/resources${this.combatFocusSuffix(combatantId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async patchCombatantNpcResources(
+    slug: string,
+    combatantId: number,
+    payload: CombatNpcResourcesPatchPayload,
+  ): Promise<CombatPayload> {
+    return this.requestJson<CombatPayload>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/combatants/${combatantId}/npc-resources${this.combatFocusSuffix(combatantId)}`,
       {
         method: "PATCH",
         body: JSON.stringify(payload),

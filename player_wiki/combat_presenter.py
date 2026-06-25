@@ -10,6 +10,8 @@ from .combat_models import (
     COMBAT_SOURCE_KIND_SYSTEMS_MONSTER,
     CampaignCombatConditionRecord,
     CampaignCombatantRecord,
+    CampaignCombatantResourceCounterRecord,
+    CampaignCombatantResourceNoteRecord,
     CampaignCombatTrackerRecord,
 )
 
@@ -48,11 +50,15 @@ def present_combat_tracker(
     tracker: CampaignCombatTrackerRecord,
     combatants: list[CampaignCombatantRecord],
     conditions_by_combatant: dict[int, list[CampaignCombatConditionRecord]],
+    resource_counters_by_combatant: dict[int, list[CampaignCombatantResourceCounterRecord]] | None = None,
+    resource_notes_by_combatant: dict[int, list[CampaignCombatantResourceNoteRecord]] | None = None,
     *,
     character_records_by_slug: dict[str, CharacterRecord],
     owned_character_slugs: set[str],
     can_manage_combat: bool,
 ) -> dict[str, object]:
+    resource_counters_by_combatant = resource_counters_by_combatant or {}
+    resource_notes_by_combatant = resource_notes_by_combatant or {}
     current_combatant = next(
         (combatant for combatant in combatants if combatant.id == tracker.current_combatant_id),
         None,
@@ -80,6 +86,8 @@ def present_combat_tracker(
             else {"pools": [], "value": "", "full_value": "", "regain_on_long_rest": 0}
         )
         conditions = conditions_by_combatant.get(combatant.id, [])
+        resource_counters = resource_counters_by_combatant.get(combatant.id, []) if show_detail else []
+        resource_notes = resource_notes_by_combatant.get(combatant.id, []) if show_detail else []
         source_kind = combatant.source_kind or (
             COMBAT_SOURCE_KIND_CHARACTER if combatant.character_slug else COMBAT_SOURCE_KIND_MANUAL_NPC
         )
@@ -144,6 +152,26 @@ def present_combat_tracker(
                 "state_revision": (
                     character_record.state_record.revision if character_record is not None else None
                 ),
+                "npc_resource_counters": [
+                    {
+                        "resource_key": counter.resource_key,
+                        "label": counter.label,
+                        "current_value": counter.current_value,
+                        "max_value": counter.max_value,
+                        "reset_label": counter.reset_label,
+                        "source_label": counter.source_label,
+                        "can_edit": can_manage_combat and combatant.is_npc,
+                    }
+                    for counter in resource_counters
+                ],
+                "npc_resource_notes": [
+                    {
+                        "label": note.label,
+                        "note": note.note,
+                        "source_label": note.source_label,
+                    }
+                    for note in resource_notes
+                ],
                 "conditions": [
                     {
                         "id": condition.id,

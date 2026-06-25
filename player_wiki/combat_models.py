@@ -71,3 +71,32 @@ class CampaignCombatConditionRecord:
     duration_text: str
     created_at: datetime
     created_by_user_id: int | None
+
+
+@dataclass(slots=True)
+class CampaignCombatantResourceCounterRecord:
+    id: int
+    combatant_id: int
+    campaign_slug: str
+    resource_key: str
+    label: str
+    current_value: int
+    max_value: int
+    reset_label: str
+    source_label: str
+    created_at: datetime
+    updated_at: datetime
+    created_by_user_id: int | None
+    updated_by_user_id: int | None
+
+
+@dataclass(slots=True)
+class CampaignCombatantResourceNoteRecord:
+    id: int
+    combatant_id: int
+    campaign_slug: str
+    label: str
+    note: str
+    source_label: str
+    created_at: datetime
+    created_by_user_id: int | None

@@ -44,6 +44,8 @@ interface CombatResourcesDraft {
   hasReaction: boolean;
 }
 
+type CombatNpcResourceDrafts = Record<string, string>;
+
 interface CombatTurnDraft {
   turnValue: string;
   initiativePriority: string;
@@ -83,6 +85,7 @@ export function CombatPage() {
     hasBonusAction: false,
     hasReaction: false,
   });
+  const [npcResourceDrafts, setNpcResourceDrafts] = useState<CombatNpcResourceDrafts>({});
   const [turnDraft, setTurnDraft] = useState<CombatTurnDraft>({ turnValue: "", initiativePriority: "1" });
   const [conditionDraft, setConditionDraft] = useState<CombatConditionDraft>({ name: "", durationText: "" });
   const [playerSeedDraft, setPlayerSeedDraft] = useState<CombatPlayerSeedDraft>({
@@ -233,6 +236,14 @@ export function CombatPage() {
       hasBonusAction: Boolean(combatant.has_bonus_action),
       hasReaction: Boolean(combatant.has_reaction),
     });
+    setNpcResourceDrafts(
+      Object.fromEntries(
+        (combatant.npc_resource_counters ?? []).map((counter) => [
+          counter.resource_key,
+          String(readNumber(counter.current_value)),
+        ]),
+      ),
+    );
     setTurnDraft({
       turnValue: String(readNumber(combatant.turn_value)),
       initiativePriority: String(readNumber(combatant.initiative_priority, 1)),
@@ -293,6 +304,7 @@ export function CombatPage() {
     deleteConditionMutation,
     searchSystemsMonsters,
     setCurrentMutation,
+    updateNpcResourcesMutation,
     updateResourcesMutation,
     updateTurnMutation,
     updateVitalsMutation,
@@ -508,6 +520,39 @@ export function CombatPage() {
                   <p className="meta">No active conditions.</p>
                 )}
               </div>
+              {selectedCombatant.show_detail &&
+              ((selectedCombatant.npc_resource_counters ?? []).length ||
+                (selectedCombatant.npc_resource_notes ?? []).length) ? (
+                <div className="combat-selected-snapshot__npc-resources" aria-label="Selected NPC source resources">
+                  <span className="combat-stat-tile__label">Source resources</span>
+                  {(selectedCombatant.npc_resource_counters ?? []).length ? (
+                    <div className="combat-npc-resource-chip-grid">
+                      {(selectedCombatant.npc_resource_counters ?? []).map((counter) => (
+                        <div className="combat-npc-resource-chip" key={counter.resource_key}>
+                          <strong>{counter.label}</strong>
+                          <span>
+                            {readNumber(counter.current_value)} / {readNumber(counter.max_value)}
+                          </span>
+                          <p className="meta">
+                            {[counter.reset_label, counter.source_label].filter(Boolean).join(" | ")}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {(selectedCombatant.npc_resource_notes ?? []).length ? (
+                    <div className="combat-npc-resource-notes combat-npc-resource-notes--snapshot">
+                      {(selectedCombatant.npc_resource_notes ?? []).map((note) => (
+                        <div className="combat-npc-resource-note" key={`${note.label}-${note.note}`}>
+                          <strong>{note.label}</strong>
+                          <p className="meta">{note.note}</p>
+                          {note.source_label ? <span className="meta">{note.source_label}</span> : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               {effectiveCombatView === "status" ? (
                 <CombatDmStatusPanel
                   canManageCombat={canManageCombat}
@@ -517,10 +562,12 @@ export function CombatPage() {
                   turnDraft={turnDraft}
                   vitalsDraft={vitalsDraft}
                   resourcesDraft={resourcesDraft}
+                  npcResourceDrafts={npcResourceDrafts}
                   conditionDraft={conditionDraft}
                   isUpdatingTurn={updateTurnMutation.isPending}
                   isUpdatingVitals={updateVitalsMutation.isPending}
                   isUpdatingResources={updateResourcesMutation.isPending}
+                  isUpdatingNpcResources={updateNpcResourcesMutation.isPending}
                   isAddingCondition={addConditionMutation.isPending}
                   isDeletingCondition={deleteConditionMutation.isPending}
                   isSettingCurrent={setCurrentMutation.isPending}
@@ -529,10 +576,14 @@ export function CombatPage() {
                   onTurnDraftChange={(updates) => setTurnDraft((current) => ({ ...current, ...updates }))}
                   onVitalsDraftChange={(updates) => setVitalsDraft((current) => ({ ...current, ...updates }))}
                   onResourcesDraftChange={(updates) => setResourcesDraft((current) => ({ ...current, ...updates }))}
+                  onNpcResourceDraftChange={(resourceKey, value) =>
+                    setNpcResourceDrafts((current) => ({ ...current, [resourceKey]: value }))
+                  }
                   onConditionDraftChange={(updates) => setConditionDraft((current) => ({ ...current, ...updates }))}
                   onUpdateTurn={(draft) => updateTurnMutation.mutate(draft)}
                   onUpdateVitals={(draft) => updateVitalsMutation.mutate(draft)}
                   onUpdateResources={(draft) => updateResourcesMutation.mutate(draft)}
+                  onUpdateNpcResources={(draft) => updateNpcResourcesMutation.mutate(draft)}
                   onAddCondition={(draft) => addConditionMutation.mutate(draft)}
                   onDeleteCondition={(condition) => deleteConditionMutation.mutate(condition)}
                   onSetCurrent={() => setCurrentMutation.mutate()}

@@ -39,6 +39,7 @@ Last updated: 2026-06-25
 - Gen2 Character Portrait displays the current portrait as a large unframed image on the dedicated Portrait subpage. Character portrait uploads reuse the article-image WebP conversion rule.
 - Gen2 Character Equipment consumes the shared DND equipment-state payload, including Artificer active infusion state. Enhanced Defense shows as an automated active effect, while unsupported active infusions stay visible as note-only active rows.
 - Gen2 Character, Session Character, and Combat selected-PC item lists use compact Inventory and Equipment grids with up to three columns where space allows, then step down to two columns on tablet/narrow layouts and one column on mobile.
+- Gen2 Combat shows visible source-backed NPC resources in the selected-combatant snapshot. DM Status adds compact current/max controls for supported source-backed counters and read-only rows for unsupported mechanics, using the same toast and inline error conventions as other combat mutations.
 
 ## UX And Feedback Conventions
 

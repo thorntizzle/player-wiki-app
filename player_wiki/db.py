@@ -310,11 +310,51 @@ CREATE TABLE IF NOT EXISTS campaign_combat_conditions (
     FOREIGN KEY (created_by_user_id) REFERENCES users(id)
 );
 
+CREATE TABLE IF NOT EXISTS campaign_combatant_resource_counters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    combatant_id INTEGER NOT NULL,
+    resource_key TEXT NOT NULL,
+    label TEXT NOT NULL,
+    current_value INTEGER NOT NULL DEFAULT 0,
+    max_value INTEGER NOT NULL DEFAULT 0,
+    reset_label TEXT NOT NULL DEFAULT '',
+    source_label TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by_user_id INTEGER,
+    updated_by_user_id INTEGER,
+    UNIQUE (combatant_id, resource_key),
+    CHECK (current_value >= 0),
+    CHECK (max_value >= 0),
+    CHECK (current_value <= max_value),
+    FOREIGN KEY (combatant_id) REFERENCES campaign_combatants(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by_user_id) REFERENCES users(id),
+    FOREIGN KEY (updated_by_user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS campaign_combatant_resource_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    combatant_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    note TEXT NOT NULL,
+    source_label TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    created_by_user_id INTEGER,
+    FOREIGN KEY (combatant_id) REFERENCES campaign_combatants(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_campaign_combatants_campaign_order
 ON campaign_combatants(campaign_slug, turn_value DESC, display_name, id);
 
 CREATE INDEX IF NOT EXISTS idx_campaign_combat_conditions_combatant
 ON campaign_combat_conditions(combatant_id, created_at, id);
+
+CREATE INDEX IF NOT EXISTS idx_campaign_combatant_resource_counters_combatant
+ON campaign_combatant_resource_counters(combatant_id, resource_key, id);
+
+CREATE INDEX IF NOT EXISTS idx_campaign_combatant_resource_notes_combatant
+ON campaign_combatant_resource_notes(combatant_id, id);
 
 CREATE TABLE IF NOT EXISTS systems_libraries (
     library_slug TEXT PRIMARY KEY,
@@ -723,6 +763,7 @@ def init_database() -> None:
     _migrate_campaign_combatants_for_revision(connection)
     _migrate_campaign_combatants_for_source_identity(connection)
     _migrate_campaign_combatants_for_tie_breakers(connection)
+    _migrate_campaign_combatant_resource_tables(connection)
     _migrate_campaign_dm_statblocks_for_subsections(connection)
     _migrate_campaign_system_policies_for_dm_shared_core_edits(connection)
     connection.commit()
@@ -1059,6 +1100,61 @@ def _migrate_campaign_combatants_for_tie_breakers(connection: sqlite3.Connection
             display_name,
             id
         )
+        """
+    )
+
+
+def _migrate_campaign_combatant_resource_tables(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS campaign_combatant_resource_counters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            combatant_id INTEGER NOT NULL,
+            resource_key TEXT NOT NULL,
+            label TEXT NOT NULL,
+            current_value INTEGER NOT NULL DEFAULT 0,
+            max_value INTEGER NOT NULL DEFAULT 0,
+            reset_label TEXT NOT NULL DEFAULT '',
+            source_label TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            created_by_user_id INTEGER,
+            updated_by_user_id INTEGER,
+            UNIQUE (combatant_id, resource_key),
+            CHECK (current_value >= 0),
+            CHECK (max_value >= 0),
+            CHECK (current_value <= max_value),
+            FOREIGN KEY (combatant_id) REFERENCES campaign_combatants(id) ON DELETE CASCADE,
+            FOREIGN KEY (created_by_user_id) REFERENCES users(id),
+            FOREIGN KEY (updated_by_user_id) REFERENCES users(id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS campaign_combatant_resource_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            combatant_id INTEGER NOT NULL,
+            label TEXT NOT NULL,
+            note TEXT NOT NULL,
+            source_label TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            created_by_user_id INTEGER,
+            FOREIGN KEY (combatant_id) REFERENCES campaign_combatants(id) ON DELETE CASCADE,
+            FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_campaign_combatant_resource_counters_combatant
+        ON campaign_combatant_resource_counters(combatant_id, resource_key, id)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_campaign_combatant_resource_notes_combatant
+        ON campaign_combatant_resource_notes(combatant_id, id)
         """
     )
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type {
   CombatCondition,
+  CombatNpcResourcesPatchPayload,
   CombatResourcesPatchPayload,
   CombatTurnPatchPayload,
   CombatVitalsPatchPayload,
@@ -21,6 +22,8 @@ interface CombatResourcesDraft {
   hasReaction: boolean;
 }
 
+type CombatNpcResourceDrafts = Record<string, string>;
+
 interface CombatTurnDraft {
   turnValue: string;
   initiativePriority: string;
@@ -39,10 +42,12 @@ interface CombatDmStatusPanelProps {
   turnDraft: CombatTurnDraft;
   vitalsDraft: CombatVitalsDraft;
   resourcesDraft: CombatResourcesDraft;
+  npcResourceDrafts: CombatNpcResourceDrafts;
   conditionDraft: CombatConditionDraft;
   isUpdatingTurn: boolean;
   isUpdatingVitals: boolean;
   isUpdatingResources: boolean;
+  isUpdatingNpcResources: boolean;
   isAddingCondition: boolean;
   isDeletingCondition: boolean;
   isSettingCurrent: boolean;
@@ -51,10 +56,12 @@ interface CombatDmStatusPanelProps {
   onTurnDraftChange: (updates: Partial<CombatTurnDraft>) => void;
   onVitalsDraftChange: (updates: Partial<CombatVitalsDraft>) => void;
   onResourcesDraftChange: (updates: Partial<CombatResourcesDraft>) => void;
+  onNpcResourceDraftChange: (resourceKey: string, value: string) => void;
   onConditionDraftChange: (updates: Partial<CombatConditionDraft>) => void;
   onUpdateTurn: (payload: CombatTurnPatchPayload) => void;
   onUpdateVitals: (payload: CombatVitalsPatchPayload) => void;
   onUpdateResources: (payload: CombatResourcesPatchPayload) => void;
+  onUpdateNpcResources: (payload: CombatNpcResourcesPatchPayload) => void;
   onAddCondition: (draft: CombatConditionDraft) => void;
   onDeleteCondition: (condition: CombatCondition) => void;
   onSetCurrent: () => void;
@@ -70,10 +77,12 @@ export function CombatDmStatusPanel({
   turnDraft,
   vitalsDraft,
   resourcesDraft,
+  npcResourceDrafts,
   conditionDraft,
   isUpdatingTurn,
   isUpdatingVitals,
   isUpdatingResources,
+  isUpdatingNpcResources,
   isAddingCondition,
   isDeletingCondition,
   isSettingCurrent,
@@ -82,10 +91,12 @@ export function CombatDmStatusPanel({
   onTurnDraftChange,
   onVitalsDraftChange,
   onResourcesDraftChange,
+  onNpcResourceDraftChange,
   onConditionDraftChange,
   onUpdateTurn,
   onUpdateVitals,
   onUpdateResources,
+  onUpdateNpcResources,
   onAddCondition,
   onDeleteCondition,
   onSetCurrent,
@@ -111,6 +122,10 @@ export function CombatDmStatusPanel({
   }
 
   const isPlayerCharacter = Boolean(selectedCombatant.character_slug);
+  const npcResourceCounters = selectedCombatant.npc_resource_counters ?? [];
+  const npcResourceNotes = selectedCombatant.npc_resource_notes ?? [];
+  const editableNpcResourceCounters = npcResourceCounters.filter((counter) => counter.can_edit);
+  const hasNpcResourceReference = !isPlayerCharacter && (npcResourceCounters.length > 0 || npcResourceNotes.length > 0);
   const removeCombatantHint = !deleteCombatantConfirmed
     ? "Check Confirm removal to enable this action."
     : isDeletingCombatant
@@ -355,6 +370,75 @@ export function CombatDmStatusPanel({
             </button>
           </form>
         </article>
+
+        {hasNpcResourceReference ? (
+          <article className="combat-snapshot-control-block combat-npc-resource-panel">
+            <div>
+              <p className="meta">Source</p>
+              <h3>NPC Resources</h3>
+            </div>
+            {npcResourceCounters.length ? (
+              <form
+                className="combat-npc-resource-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!editableNpcResourceCounters.length) {
+                    return;
+                  }
+                  onUpdateNpcResources({
+                    expected_combatant_revision: selectedCombatant.combatant_revision,
+                    counters: editableNpcResourceCounters.map((counter) => ({
+                      resource_key: counter.resource_key,
+                      current_value: npcResourceDrafts[counter.resource_key] ?? String(counter.current_value),
+                    })),
+                  });
+                }}
+              >
+                <div className="combat-npc-resource-list">
+                  {npcResourceCounters.map((counter) => (
+                    <label className="combat-npc-resource-row" key={counter.resource_key}>
+                      <span className="combat-npc-resource-row__identity">
+                        <strong>{counter.label}</strong>
+                        <span className="meta">
+                          {[counter.reset_label, counter.source_label].filter(Boolean).join(" | ")}
+                        </span>
+                      </span>
+                      <span className="combat-npc-resource-row__value">
+                        <input
+                          aria-label={`${counter.label} current uses`}
+                          type="number"
+                          min="0"
+                          max={counter.max_value}
+                          value={npcResourceDrafts[counter.resource_key] ?? String(counter.current_value)}
+                          disabled={!counter.can_edit || isUpdatingNpcResources}
+                          onChange={(event) => onNpcResourceDraftChange(counter.resource_key, event.currentTarget.value)}
+                        />
+                        <span className="combat-inline-divider">/</span>
+                        <strong>{counter.max_value}</strong>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                {editableNpcResourceCounters.length ? (
+                  <button type="submit" disabled={isUpdatingNpcResources}>
+                    {isUpdatingNpcResources ? "Saving..." : "Save NPC resources"}
+                  </button>
+                ) : null}
+              </form>
+            ) : null}
+            {npcResourceNotes.length ? (
+              <div className="combat-npc-resource-notes" aria-label="Unsupported source mechanics">
+                {npcResourceNotes.map((note) => (
+                  <div className="combat-npc-resource-note" key={`${note.label}-${note.note}`}>
+                    <strong>{note.label}</strong>
+                    <p className="meta">{note.note}</p>
+                    {note.source_label ? <span className="meta">{note.source_label}</span> : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </article>
+        ) : null}
 
         <article className="combat-snapshot-control-block">
           <datalist id="gen2-combat-condition-options">
