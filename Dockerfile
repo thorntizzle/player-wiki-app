@@ -25,7 +25,8 @@ RUN pip install --no-cache-dir -r requirements-prod.txt
 COPY . .
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
-RUN chmod +x /app/deploy/fly-entrypoint.sh
+RUN sed -i 's/\r$//' /app/deploy/fly-entrypoint.sh \
+    && chmod +x /app/deploy/fly-entrypoint.sh
 
 ENV PLAYER_WIKI_ENV=production \
     PLAYER_WIKI_HOST=0.0.0.0 \
