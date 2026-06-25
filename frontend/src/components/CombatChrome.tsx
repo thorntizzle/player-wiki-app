@@ -1,3 +1,5 @@
+import { useRef } from "react";
+
 import type { CombatantSummary } from "../api/types";
 import { readNumber } from "../characterValueUtils";
 
@@ -33,9 +35,17 @@ interface CombatSummaryBandProps {
   roundNumber: number | null | undefined;
   currentTurnLabel: string | null | undefined;
   combatantCount: number | null | undefined;
+  isAdvancingTurn?: boolean;
+  onAdvanceTurn?: () => void;
 }
 
-export function CombatSummaryBand({ roundNumber, currentTurnLabel, combatantCount }: CombatSummaryBandProps) {
+export function CombatSummaryBand({
+  roundNumber,
+  currentTurnLabel,
+  combatantCount,
+  isAdvancingTurn = false,
+  onAdvanceTurn,
+}: CombatSummaryBandProps) {
   return (
     <section className="combat-summary-band" aria-label="Encounter summary">
       <article>
@@ -50,6 +60,13 @@ export function CombatSummaryBand({ roundNumber, currentTurnLabel, combatantCoun
         <span className="meta">Combatants</span>
         <strong>{combatantCount ?? 0}</strong>
       </article>
+      {onAdvanceTurn ? (
+        <div className="hero-actions combat-summary-band__actions">
+          <button type="button" onClick={onAdvanceTurn} disabled={isAdvancingTurn}>
+            {isAdvancingTurn ? "Advancing..." : "Advance turn"}
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -73,6 +90,7 @@ function CombatantCard({
     <button
       type="button"
       className={isSelected ? "combatant-card combatant-card--selected" : "combatant-card"}
+      data-combatant-id={combatant.id}
       onClick={() => onSelect(combatant.id)}
       aria-pressed={isSelected}
     >
@@ -106,6 +124,17 @@ export function CombatantCarousel({
   selectedCombatantId,
   onSelectCombatant,
 }: CombatantCarouselProps) {
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const selectCombatant = (combatantId: number) => {
+    onSelectCombatant(combatantId);
+    window.requestAnimationFrame(() => {
+      const selectedCard = trackRef.current?.querySelector<HTMLElement>(
+        `[data-combatant-id="${combatantId}"]`,
+      );
+      selectedCard?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+  };
+
   return (
     <section className="combat-carousel" aria-label="Combatant carousel">
       <div className="section-heading">
@@ -114,13 +143,13 @@ export function CombatantCarousel({
           <p className="meta">Initiative is pinned here while the main panel shows your tracked character.</p>
         </div>
       </div>
-      <div className="combat-carousel-track">
+      <div className="combat-carousel-track" ref={trackRef}>
         {combatants.map((combatant) => (
           <CombatantCard
             key={combatant.id}
             combatant={combatant}
             isSelected={selectedCombatantId === combatant.id}
-            onSelect={onSelectCombatant}
+            onSelect={selectCombatant}
           />
         ))}
       </div>
@@ -132,7 +161,7 @@ export function CombatantCarousel({
           id="combat-turn-order-jump-select"
           className="combat-turn-order-jump__select"
           value={selectedCombatantId ?? ""}
-          onChange={(event) => onSelectCombatant(Number(event.currentTarget.value))}
+          onChange={(event) => selectCombatant(Number(event.currentTarget.value))}
         >
           {combatants.map((combatant) => (
             <option key={combatant.id} value={combatant.id}>

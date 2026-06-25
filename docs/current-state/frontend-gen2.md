@@ -15,6 +15,7 @@ Last updated: 2026-06-25
 - Global search covers visible published wiki pages plus accessible Systems entries and opens previews in an in-page dialog with a dedicated-page link.
 - Gen2 Campaign Home renders a latest-session-summary news card above the section-card grid when a visible published `Sessions`/`session` page exists.
 - Gen2 top-nav left-clicks use TanStack Router navigation while preserving real hrefs for fallback and new-tab behavior.
+- Gen2 Combat treats player combatant inspection as local route state so card/dropdown selection does not rewrite `combatant=` or trigger a scroll reset. DM Combat `status` and `controls` query changes keep canonical `combatant=` focus while requesting TanStack navigation with scroll preservation.
 - The loading cover is shared across Flask hard navigations and Gen2 client-side route changes. It should not reveal raw unstyled HTML, should not swap loading media during an active transition, and should wait for the React route/query readiness signal before dismissing.
 
 ## Route And Component Ownership

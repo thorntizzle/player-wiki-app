@@ -690,6 +690,43 @@ export interface CombatPlayerCharacterTarget {
   flask_href: string;
 }
 
+export interface CombatCharacterWorkspaceFeature {
+  name: string;
+  href: string;
+  group_title: string;
+  metadata: string[];
+  description_html: string;
+}
+
+export interface CombatCharacterWorkspaceAttack {
+  name: string;
+  attack_bonus: string;
+  damage: string;
+  range: string;
+  notes: string;
+}
+
+export interface CombatCharacterWorkspaceHiddenAttack {
+  name: string;
+  href: string;
+}
+
+export interface CombatCharacterWorkspaceFeatureGroup {
+  title: string;
+  features: CombatCharacterWorkspaceFeature[];
+}
+
+export interface CombatCharacterWorkspaceSection {
+  slug: string;
+  label: string;
+  count: number;
+  features?: CombatCharacterWorkspaceFeature[];
+  attacks?: CombatCharacterWorkspaceAttack[];
+  hidden_attacks?: CombatCharacterWorkspaceHiddenAttack[];
+  feature_groups?: CombatCharacterWorkspaceFeatureGroup[];
+  empty_message: string;
+}
+
 export interface CombatAvailableCharacterChoice {
   slug: string;
   name: string;
@@ -727,6 +764,7 @@ export interface CombatPayload extends ApiResponseBase {
   selected_combatant_id?: number | null;
   selected_combatant?: CombatantSummary | null;
   selected_player_character?: CombatantSummary | null;
+  selected_player_combat_sections?: CombatCharacterWorkspaceSection[];
   player_character_targets: CombatPlayerCharacterTarget[];
   available_character_choices?: CombatAvailableCharacterChoice[];
   available_statblock_choices?: CombatAvailableStatblockChoice[];

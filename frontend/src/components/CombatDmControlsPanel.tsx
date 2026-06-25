@@ -53,7 +53,6 @@ interface CombatDmControlsPanelProps {
   systemsSearchStatus: string | null;
   systemsSearchResults: CombatSystemsMonsterSearchResult[];
   confirmClearTracker: boolean;
-  isAdvancingTurn: boolean;
   isAddingPlayer: boolean;
   isAddingNpc: boolean;
   isAddingStatblock: boolean;
@@ -66,7 +65,6 @@ interface CombatDmControlsPanelProps {
   onSystemsSeedDraftChange: (updates: Partial<CombatSystemsSeedDraft>) => void;
   onSystemsSearchQueryChange: (query: string) => void;
   onConfirmClearTrackerChange: (confirmed: boolean) => void;
-  onAdvanceTurn: () => void;
   onAddPlayer: () => void;
   onAddNpc: () => void;
   onAddStatblock: () => void;
@@ -90,7 +88,6 @@ export function CombatDmControlsPanel({
   systemsSearchStatus,
   systemsSearchResults,
   confirmClearTracker,
-  isAdvancingTurn,
   isAddingPlayer,
   isAddingNpc,
   isAddingStatblock,
@@ -103,7 +100,6 @@ export function CombatDmControlsPanel({
   onSystemsSeedDraftChange,
   onSystemsSearchQueryChange,
   onConfirmClearTrackerChange,
-  onAdvanceTurn,
   onAddPlayer,
   onAddNpc,
   onAddStatblock,
@@ -127,16 +123,6 @@ export function CombatDmControlsPanel({
 
   return (
     <section className="combat-controls-layout" aria-label="DM combat controls">
-      <article className="card combat-control-card">
-        <div>
-          <p className="meta">Encounter controls</p>
-          <h3>Tracker</h3>
-        </div>
-        <button type="button" onClick={onAdvanceTurn} disabled={isAdvancingTurn}>
-          {isAdvancingTurn ? "Advancing..." : "Advance turn"}
-        </button>
-      </article>
-
       <section className="card combat-control-card">
         <h2>Add combatant</h2>
         <div className="combat-add-combatant-mode-switcher" role="radiogroup" aria-label="Add combatant type">

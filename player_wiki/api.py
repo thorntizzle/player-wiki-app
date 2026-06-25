@@ -2189,6 +2189,150 @@ def register_api(app) -> None:
             )
         return campaign
 
+    COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS = {
+        "actions": "Actions",
+        "bonus_actions": "Bonus Actions",
+        "reactions": "Reactions",
+        "attacks": "Attacks",
+        "features": "Features",
+    }
+
+    def iter_feature_entries(entries: object):
+        for item in list(entries or []):
+            if not isinstance(item, dict):
+                continue
+            yield item
+            yield from iter_feature_entries(item.get("children"))
+
+    def serialize_combat_workspace_feature(feature: dict[str, Any], *, group_title: str) -> dict[str, Any]:
+        return {
+            "name": str(feature.get("name") or "").strip(),
+            "href": str(feature.get("href") or "").strip(),
+            "group_title": group_title,
+            "metadata": [str(item).strip() for item in list(feature.get("metadata") or []) if str(item).strip()],
+            "description_html": str(feature.get("description_html") or "").strip(),
+        }
+
+    def build_combat_character_workspace_sections_payload(
+        campaign_slug: str,
+        campaign,
+        record: CharacterRecord,
+    ) -> list[dict[str, Any]]:
+        campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
+        character_detail = present_character_detail(
+            campaign,
+            record,
+            include_player_notes_section=False,
+            systems_service=current_app.extensions["systems_service"],
+            campaign_page_records=campaign_page_records,
+        )
+        action_features: list[dict[str, Any]] = []
+        bonus_action_features: list[dict[str, Any]] = []
+        reaction_features: list[dict[str, Any]] = []
+        feature_groups = [
+            dict(group or {})
+            for group in list(character_detail.get("feature_groups") or [])
+            if isinstance(group, dict)
+        ]
+        for group in feature_groups:
+            group_title = str(group.get("title") or "Features").strip() or "Features"
+            for feature in iter_feature_entries(group.get("entries")):
+                feature_payload = dict(feature or {})
+                combat_availability = dict(feature_payload.get("combat_availability") or {})
+                if combat_availability and not bool(combat_availability.get("available", True)):
+                    continue
+                activation_type = str(feature_payload.get("activation_type") or "").strip().lower()
+                serialized = serialize_combat_workspace_feature(feature_payload, group_title=group_title)
+                if not serialized["name"]:
+                    continue
+                if activation_type == "action":
+                    action_features.append(serialized)
+                elif activation_type == "bonus_action":
+                    bonus_action_features.append(serialized)
+                elif activation_type == "reaction":
+                    reaction_features.append(serialized)
+
+        attacks = [
+            {
+                "name": str(item.get("name") or "").strip(),
+                "attack_bonus": str(item.get("attack_bonus") or item.get("to_hit") or "").strip(),
+                "damage": str(item.get("damage") or item.get("damage_label") or "").strip(),
+                "range": str(item.get("range") or item.get("range_label") or "").strip(),
+                "notes": str(item.get("notes") or item.get("description") or "").strip(),
+            }
+            for item in list(character_detail.get("attacks") or [])
+            if isinstance(item, dict) and str(item.get("name") or "").strip()
+        ]
+        hidden_attacks = []
+        for item in list(character_detail.get("hidden_attacks") or []):
+            if isinstance(item, dict):
+                name = str(item.get("name") or "").strip()
+                href = str(item.get("href") or "").strip()
+            else:
+                name = str(item or "").strip()
+                href = ""
+            if name:
+                hidden_attacks.append({"name": name, "href": href})
+
+        feature_group_summaries = [
+            {
+                "title": str(group.get("title") or "Features").strip() or "Features",
+                "features": [
+                    serialize_combat_workspace_feature(
+                        dict(feature or {}),
+                        group_title=str(group.get("title") or "Features").strip() or "Features",
+                    )
+                    for feature in iter_feature_entries(group.get("entries"))
+                    if str(dict(feature or {}).get("name") or "").strip()
+                ],
+            }
+            for group in feature_groups
+        ]
+
+        sections = [
+            {
+                "slug": "actions",
+                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["actions"],
+                "count": len(action_features),
+                "features": action_features,
+                "empty_message": "No action-specific features are recorded on this sheet yet.",
+            },
+            {
+                "slug": "bonus_actions",
+                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["bonus_actions"],
+                "count": len(bonus_action_features),
+                "features": bonus_action_features,
+                "empty_message": "No bonus-action features are recorded on this sheet yet.",
+            },
+            {
+                "slug": "reactions",
+                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["reactions"],
+                "count": len(reaction_features),
+                "features": reaction_features,
+                "empty_message": "No reaction features are recorded on this sheet yet.",
+            },
+            {
+                "slug": "attacks",
+                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["attacks"],
+                "count": len(attacks),
+                "attacks": attacks,
+                "hidden_attacks": hidden_attacks,
+                "empty_message": "No attacks are currently active on this sheet.",
+            },
+            {
+                "slug": "features",
+                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["features"],
+                "count": sum(len(group["features"]) for group in feature_group_summaries),
+                "feature_groups": feature_group_summaries,
+                "empty_message": "No feature details are recorded on this sheet yet.",
+            },
+        ]
+        return [
+            section
+            for section in sections
+            if int(section.get("count") or 0) > 0 or section.get("hidden_attacks")
+        ]
+
     def build_combat_payload(campaign_slug: str, *, include_sidebar_choices: bool = True) -> dict[str, Any]:
         campaign = get_repository().get_campaign(campaign_slug)
         if campaign is None:
@@ -2215,6 +2359,7 @@ def register_api(app) -> None:
         requested_combatant_id: int | None = None
         selected_combatant: dict[str, Any] | None = None
         selected_player_character: dict[str, Any] | None = None
+        selected_player_combat_sections: list[dict[str, Any]] = []
         player_character_targets: list[dict[str, Any]] = []
         try:
             requested_combatant_id = int(str(request.args.get("combatant") or "").strip())
@@ -2318,6 +2463,15 @@ def register_api(app) -> None:
                 }
                 for combatant in player_character_cards
             ]
+            if selected_player_character is not None:
+                selected_player_slug = str(selected_player_character.get("character_slug") or "").strip()
+                selected_player_record = character_records_by_slug.get(selected_player_slug)
+                if selected_player_record is not None:
+                    selected_player_combat_sections = build_combat_character_workspace_sections_payload(
+                        campaign_slug,
+                        campaign,
+                        selected_player_record,
+                    )
 
             if can_manage_combat and include_sidebar_choices:
                 available_character_choices = [
@@ -2375,6 +2529,7 @@ def register_api(app) -> None:
             "selected_combatant_id": selected_combatant_id,
             "selected_combatant": selected_combatant,
             "selected_player_character": selected_player_character,
+            "selected_player_combat_sections": selected_player_combat_sections,
             "player_character_targets": player_character_targets,
             "available_character_choices": available_character_choices,
             "available_statblock_choices": available_statblock_choices,

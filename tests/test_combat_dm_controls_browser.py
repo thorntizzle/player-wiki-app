@@ -1,5 +1,6 @@
 import re
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -116,4 +117,40 @@ def test_flask_dm_controls_add_combatant_mode_switcher_browser(
             mobile_page.close()
             desktop_context.close()
             mobile_context.close()
+            browser.close()
+
+
+def test_gen2_combat_controls_advance_turn_lives_in_status_band_browser(
+    combat_dm_controls_live_server,
+    users,
+):
+    if not (Path(__file__).resolve().parents[1] / "frontend" / "dist" / "index.html").exists():
+        pytest.skip("Gen2 build is unavailable.")
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = combat_dm_controls_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        page = context.new_page()
+
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=controls")
+            expect(page.get_by_role("heading", name="Encounter controls")).to_be_visible(timeout=5000)
+            expect(page.locator(".combat-summary-band")).to_be_visible()
+            expect(page.locator(".combat-summary-band").get_by_role("button", name="Advance turn")).to_be_visible()
+            expect(page.locator(".combat-controls-layout").get_by_role("button", name="Advance turn")).to_have_count(0)
+            expect(page.locator(".combat-controls-layout").get_by_role("heading", name="Tracker")).to_have_count(0)
+        finally:
+            page.close()
+            context.close()
             browser.close()

@@ -217,7 +217,7 @@ export function CombatPage() {
     }
     const query = params.toString();
     const nextPath = `/campaigns/${encodedCampaignSlug}/combat${query ? `?${query}` : ""}`;
-    void navigate({ to: nextPath as never });
+    void navigate({ to: nextPath as never, resetScroll: false });
   };
 
   const syncCombatantDrafts = (combatant: CombatantSummary) => {
@@ -263,6 +263,9 @@ export function CombatPage() {
       syncCombatantDrafts(focusedCombatant);
     }
     setSelectedCombatantId(combatantId);
+    if (effectiveCombatView === "player") {
+      return;
+    }
     setCombatUrl(effectiveCombatView, combatantId);
   };
 
@@ -335,7 +338,6 @@ export function CombatPage() {
       systemsSearchStatus={systemsSearchStatus}
       systemsSearchResults={systemsSearchResults}
       confirmClearTracker={confirmClearTracker}
-      isAdvancingTurn={advanceTurnMutation.isPending}
       isAddingPlayer={addPlayerMutation.isPending}
       isAddingNpc={addNpcMutation.isPending}
       isAddingStatblock={addStatblockMutation.isPending}
@@ -348,7 +350,6 @@ export function CombatPage() {
       onSystemsSeedDraftChange={(updates) => setSystemsSeedDraft((current) => ({ ...current, ...updates }))}
       onSystemsSearchQueryChange={setSystemsSearchQuery}
       onConfirmClearTrackerChange={setConfirmClearTracker}
-      onAdvanceTurn={() => advanceTurnMutation.mutate()}
       onAddPlayer={() => addPlayerMutation.mutate()}
       onAddNpc={() => addNpcMutation.mutate()}
       onAddStatblock={() => addStatblockMutation.mutate()}
@@ -422,6 +423,10 @@ export function CombatPage() {
             roundNumber={tracker?.round_number}
             currentTurnLabel={tracker?.current_turn_label}
             combatantCount={tracker?.combatant_count}
+            isAdvancingTurn={advanceTurnMutation.isPending}
+            onAdvanceTurn={
+              effectiveCombatView === "controls" ? () => advanceTurnMutation.mutate() : undefined
+            }
           />
 
           {tracker?.combatants.length ? (
@@ -488,41 +493,56 @@ export function CombatPage() {
               ) : (
                 <p className="meta">Detailed stats are currently hidden from players.</p>
               )}
+              <div className="combat-selected-snapshot__conditions" aria-label="Selected combatant conditions">
+                <span className="combat-stat-tile__label">Conditions</span>
+                {selectedCombatant.conditions.length ? (
+                  <div className="badge-list">
+                    {selectedCombatant.conditions.map((condition) => (
+                      <span className="meta-badge" key={condition.id}>
+                        {condition.name}
+                        {condition.duration_text ? `: ${condition.duration_text}` : ""}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="meta">No active conditions.</p>
+                )}
+              </div>
+              {effectiveCombatView === "status" ? (
+                <CombatDmStatusPanel
+                  canManageCombat={canManageCombat}
+                  selectedCombatant={selectedCombatant}
+                  trackerRoundNumber={tracker?.round_number ?? null}
+                  conditionOptions={conditionOptions}
+                  turnDraft={turnDraft}
+                  vitalsDraft={vitalsDraft}
+                  resourcesDraft={resourcesDraft}
+                  conditionDraft={conditionDraft}
+                  isUpdatingTurn={updateTurnMutation.isPending}
+                  isUpdatingVitals={updateVitalsMutation.isPending}
+                  isUpdatingResources={updateResourcesMutation.isPending}
+                  isAddingCondition={addConditionMutation.isPending}
+                  isDeletingCondition={deleteConditionMutation.isPending}
+                  isSettingCurrent={setCurrentMutation.isPending}
+                  isAdvancingTurn={advanceTurnMutation.isPending}
+                  isDeletingCombatant={deleteCombatantMutation.isPending}
+                  onTurnDraftChange={(updates) => setTurnDraft((current) => ({ ...current, ...updates }))}
+                  onVitalsDraftChange={(updates) => setVitalsDraft((current) => ({ ...current, ...updates }))}
+                  onResourcesDraftChange={(updates) => setResourcesDraft((current) => ({ ...current, ...updates }))}
+                  onConditionDraftChange={(updates) => setConditionDraft((current) => ({ ...current, ...updates }))}
+                  onUpdateTurn={(draft) => updateTurnMutation.mutate(draft)}
+                  onUpdateVitals={(draft) => updateVitalsMutation.mutate(draft)}
+                  onUpdateResources={(draft) => updateResourcesMutation.mutate(draft)}
+                  onAddCondition={(draft) => addConditionMutation.mutate(draft)}
+                  onDeleteCondition={(condition) => deleteConditionMutation.mutate(condition)}
+                  onSetCurrent={() => setCurrentMutation.mutate()}
+                  onAdvanceTurn={() => advanceTurnMutation.mutate()}
+                  onDeleteCombatant={() => deleteCombatantMutation.mutate()}
+                />
+              ) : null}
             </section>
           ) : null}
 
-          {effectiveCombatView === "status" ? (
-            <CombatDmStatusPanel
-              canManageCombat={canManageCombat}
-              selectedCombatant={selectedCombatant}
-              trackerRoundNumber={tracker?.round_number ?? null}
-              conditionOptions={conditionOptions}
-              turnDraft={turnDraft}
-              vitalsDraft={vitalsDraft}
-              resourcesDraft={resourcesDraft}
-              conditionDraft={conditionDraft}
-              isUpdatingTurn={updateTurnMutation.isPending}
-              isUpdatingVitals={updateVitalsMutation.isPending}
-              isUpdatingResources={updateResourcesMutation.isPending}
-              isAddingCondition={addConditionMutation.isPending}
-              isDeletingCondition={deleteConditionMutation.isPending}
-              isSettingCurrent={setCurrentMutation.isPending}
-              isAdvancingTurn={advanceTurnMutation.isPending}
-              isDeletingCombatant={deleteCombatantMutation.isPending}
-              onTurnDraftChange={(updates) => setTurnDraft((current) => ({ ...current, ...updates }))}
-              onVitalsDraftChange={(updates) => setVitalsDraft((current) => ({ ...current, ...updates }))}
-              onResourcesDraftChange={(updates) => setResourcesDraft((current) => ({ ...current, ...updates }))}
-              onConditionDraftChange={(updates) => setConditionDraft((current) => ({ ...current, ...updates }))}
-              onUpdateTurn={(draft) => updateTurnMutation.mutate(draft)}
-              onUpdateVitals={(draft) => updateVitalsMutation.mutate(draft)}
-              onUpdateResources={(draft) => updateResourcesMutation.mutate(draft)}
-              onAddCondition={(draft) => addConditionMutation.mutate(draft)}
-              onDeleteCondition={(condition) => deleteConditionMutation.mutate(condition)}
-              onSetCurrent={() => setCurrentMutation.mutate()}
-              onAdvanceTurn={() => advanceTurnMutation.mutate()}
-              onDeleteCombatant={() => deleteCombatantMutation.mutate()}
-            />
-          ) : null}
           {effectiveCombatView === "controls" ? renderDmControls() : null}
           {effectiveCombatView === "player" ? (
             <CombatPlayerWorkspace
@@ -530,6 +550,7 @@ export function CombatPage() {
               selectedCharacterSlug={selectedCharacterSlug}
               selectedPlayerCharacter={selectedPlayerCharacter}
               playerCharacterTargets={payload?.player_character_targets ?? []}
+              combatSections={payload?.selected_player_combat_sections ?? []}
               onSelectCombatant={selectCombatant}
               onSelectedCharacterChange={selectCharacterTarget}
             />

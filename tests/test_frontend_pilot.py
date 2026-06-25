@@ -1290,12 +1290,14 @@ def test_combat_chrome_components_preserve_summary_carousel_and_view_switch() ->
     assert 'className="combat-turn-order-jump__label"' in carousel_source
     assert 'htmlFor="combat-turn-order-jump-select"' in carousel_source
     assert 'className="combat-turn-order-jump__select"' in carousel_source
-    assert "onSelectCombatant(Number(event.currentTarget.value))" in carousel_source
+    assert "selectCombatant(Number(event.currentTarget.value))" in carousel_source
+    assert "selectedCard?.scrollIntoView({ block: \"nearest\", inline: \"nearest\" });" in carousel_source
 
     card_start = chrome_source.index("function CombatantCard(")
     card_end = chrome_source.index("export function CombatantCarousel(", card_start)
     card_source = chrome_source[card_start:card_end]
     assert 'className={isSelected ? "combatant-card combatant-card--selected" : "combatant-card"}' in card_source
+    assert 'data-combatant-id={combatant.id}' in card_source
     assert "onClick={() => onSelect(combatant.id)}" in card_source
     assert "aria-pressed={isSelected}" in card_source
     assert 'className="combatant-card__topline"' in card_source
@@ -1737,7 +1739,8 @@ def test_gen2_combat_focus_changes_preserve_mounted_payload_in_source() -> None:
     assert "const setCombatUrl = (view: CombatView, combatantId: number | null) => {" in combat_page_source
     assert 'params.set("combatant", String(combatantId));' in combat_page_source
     assert "setCombatUrl(view, selectedCombatantId ?? selectedCombatant?.id ?? null);" in combat_page_source
-    assert "void navigate({ to: nextPath as never });" in combat_page_source
+    assert "void navigate({ to: nextPath as never, resetScroll: false });" in combat_page_source
+    assert 'if (effectiveCombatView === "player")' in combat_page_source
     assert "window.history.pushState" not in combat_page_source
     assert "window.location.assign" not in combat_page_source
     assert "window.location.href =" not in combat_page_source
@@ -1827,7 +1830,7 @@ def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
     source = Path("frontend/src/components/CombatDmStatusPanel.tsx").read_text(encoding="utf-8")
 
     turn_focus_match = re.search(
-        r'<article className="card combat-control-card">\s*<div className="section-heading combat-status-snapshot__heading"[\s\S]*?</article>',
+        r'<article className="combat-snapshot-control-block">\s*<div className="section-heading combat-status-snapshot__heading"[\s\S]*?</article>',
         source,
     )
     assert turn_focus_match is not None
@@ -1870,8 +1873,8 @@ def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
 def test_combat_dm_status_tactical_forms_chrome_in_source() -> None:
     combat_page_source = Path("frontend/src/components/CombatDmStatusPanel.tsx").read_text(encoding="utf-8")
 
-    tactical_start = combat_page_source.index('<section className="combat-dm-grid" aria-label="DM tactical controls">')
-    tactical_end = combat_page_source.index('<section className="card combat-danger-card">', tactical_start)
+    tactical_start = combat_page_source.index('<section className="combat-dm-snapshot-controls" aria-label="DM tactical controls">')
+    tactical_end = combat_page_source.index('<section className="combat-snapshot-control-block combat-danger-card">', tactical_start)
     tactical_markup = combat_page_source[tactical_start:tactical_end]
 
     assert "combat-summary-grid combat-summary-grid--snapshot" in tactical_markup

@@ -1,6 +1,11 @@
 import { Fragment } from "react";
 
-import type { CombatantSummary, CombatPlayerCharacterTarget } from "../api/types";
+import type {
+  CombatCharacterWorkspaceSection,
+  CombatantSummary,
+  CombatPlayerCharacterTarget,
+} from "../api/types";
+import { CombatCharacterSections } from "./CombatCharacterSections";
 import { CharacterPane } from "../pages/CharacterPane";
 
 interface CombatPlayerWorkspaceProps {
@@ -8,6 +13,7 @@ interface CombatPlayerWorkspaceProps {
   selectedCharacterSlug: string | null;
   selectedPlayerCharacter: CombatantSummary | null;
   playerCharacterTargets: CombatPlayerCharacterTarget[];
+  combatSections: CombatCharacterWorkspaceSection[];
   onSelectCombatant: (combatantId: number) => void;
   onSelectedCharacterChange: (characterSlug: string) => void;
 }
@@ -17,6 +23,7 @@ export function CombatPlayerWorkspace({
   selectedCharacterSlug,
   selectedPlayerCharacter,
   playerCharacterTargets,
+  combatSections,
   onSelectCombatant,
   onSelectedCharacterChange,
 }: CombatPlayerWorkspaceProps) {
@@ -45,12 +52,15 @@ export function CombatPlayerWorkspace({
         ) : null}
       </div>
       {selectedCharacterSlug ? (
-        <CharacterPane
-          campaignSlug={campaignSlug}
-          initialCharacterSlug={selectedCharacterSlug}
-          surface="combat"
-          onSelectedCharacterChange={onSelectedCharacterChange}
-        />
+        <>
+          <CombatCharacterSections sections={combatSections} />
+          <CharacterPane
+            campaignSlug={campaignSlug}
+            initialCharacterSlug={selectedCharacterSlug}
+            surface="combat"
+            onSelectedCharacterChange={onSelectedCharacterChange}
+          />
+        </>
       ) : (
         <section className="card auth-card">
           <h2>No tracked player character available</h2>

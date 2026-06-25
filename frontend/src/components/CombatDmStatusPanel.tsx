@@ -133,8 +133,8 @@ export function CombatDmStatusPanel({
 
   return (
     <>
-      <section className="combat-dm-grid" aria-label="DM tactical controls">
-        <article className="card combat-control-card">
+      <section className="combat-dm-snapshot-controls" aria-label="DM tactical controls">
+        <article className="combat-snapshot-control-block">
           <div className="section-heading combat-status-snapshot__heading">
             <div>
               <p className="card-kicker">Authority</p>
@@ -200,7 +200,7 @@ export function CombatDmStatusPanel({
           </div>
         </article>
 
-        <article className="card combat-control-card">
+        <article className="combat-snapshot-control-block">
           <div>
             <p className="meta">Snapshot</p>
             <h3>Vitals</h3>
@@ -288,7 +288,7 @@ export function CombatDmStatusPanel({
           </div>
         </article>
 
-        <article className="card combat-control-card">
+        <article className="combat-snapshot-control-block">
           <div>
             <p className="meta">Round tools</p>
             <h3>Action Economy</h3>
@@ -356,7 +356,7 @@ export function CombatDmStatusPanel({
           </form>
         </article>
 
-        <article className="card combat-control-card">
+        <article className="combat-snapshot-control-block">
           <datalist id="gen2-combat-condition-options">
             {conditionOptions.map((option) => (
               <option key={option} value={option} />
@@ -425,7 +425,7 @@ export function CombatDmStatusPanel({
         </article>
       </section>
 
-      <section className="card combat-danger-card">
+      <section className="combat-snapshot-control-block combat-danger-card">
         <div>
           <p className="meta">Cleanup</p>
           <h3>Selected combatant</h3>

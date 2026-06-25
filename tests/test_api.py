@@ -5302,6 +5302,17 @@ def test_api_combat_read_exposes_gen2_live_selection_and_fallback_links(client, 
     assert payload["selected_combatant"]["name"] == "Clockwork Hound"
     assert payload["selected_combatant_id"] == hound["id"]
     assert payload["selected_player_character"]["character_slug"] == "arden-march"
+    combat_section_labels = [section["label"] for section in payload["selected_player_combat_sections"]]
+    assert "Attacks" in combat_section_labels
+    assert "Features" in combat_section_labels
+    attacks_section = next(
+        section for section in payload["selected_player_combat_sections"] if section["label"] == "Attacks"
+    )
+    assert [attack["name"] for attack in attacks_section["attacks"]] == [
+        "Light Crossbow",
+        "Quarterstaff",
+        "Quarterstaff (two-handed)",
+    ]
     assert payload["player_character_targets"] == [
         {
             "combatant_id": arden["id"],

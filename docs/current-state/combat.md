@@ -9,12 +9,14 @@ Last updated: 2026-06-25
 ## Current User-Facing Behavior
 
 - Combat tracker is currently implemented for DND-5E campaigns.
-- Player-facing `Combat` defaults to the viewer's tracked player character when one exists, keeping turn order in the sidebar and a sectioned character workspace in the main panel.
+- Player-facing Gen2 `Combat` defaults to the viewer's tracked player character when one exists, keeps turn order and the jump selector above the workspace, and treats combatant inspection as local page state rather than rewriting `combatant=` for ordinary player clicks.
 - Compatibility `Combat Character` remains available for tracked PCs.
 - DM-only `Status` owns selected-combatant inspection and tactical editing.
 - DM-only `DM page` / controls owns setup, seeding, and cleanup.
 - `/combat/dm` defaults to the full-width `DM status` selected-combatant workspace, while `?view=controls` is a controls-only setup/seeding/cleanup view.
-- Selected-PC combat workspaces reuse shared character presentation for supported sheet sections and mutable-state edits.
+- The Gen2 selected-combatant snapshot card groups HP, movement, action economy, and active conditions. DM Status folds editable turn focus, vitals, action economy, conditions, and selected-combatant removal into that selected snapshot instead of rendering separate tactical cards.
+- In Gen2 Encounter Controls, the encounter summary/status band owns Round, current turn, combatant count, and `Advance turn`; setup and cleanup controls do not duplicate a separate tracker/status card.
+- Selected-PC combat workspaces expose combat-specific character sections from the presented character data, including Actions, Bonus Actions, Reactions, Attacks, and Features when present, followed by the shared CharacterPane for durable sheet sections and mutable-state edits.
 
 ## Combat State Contract
 
@@ -23,6 +25,8 @@ Last updated: 2026-06-25
 - DM or owner-player users can edit HP/temp HP where permitted.
 - Player resource/spell-slot edits and owner/DM selected-PC equipment-state edits use shared durable character-state paths and can bump combat tracker revision for live refresh.
 - Combat row-owned tactical writes use combatant-row revision where relevant.
+- Gen2 combat payloads include `selected_player_combat_sections` for the selected tracked PC so the frontend can render combat-only Actions/Reactions/Attacks/Features without leaving the combat route.
+- Player-facing Gen2 combat selection preserves the mounted payload and viewport by keeping player inspection local; DM focus and view changes keep `combatant=` but request TanStack navigation without scroll reset.
 
 ## Seeding And Source Detail
 
@@ -34,6 +38,7 @@ Last updated: 2026-06-25
 ## Current Tests Or Verification
 
 - Combat changes usually need route/API tests, browser checks, and focused source-detail or mutation checks around turn flow, selected combatant, conditions, seeding, and selected-PC sheet behavior.
+- Current Gen2 combat verification includes source-contract tests for local/no-scroll selection and folded snapshot controls, API coverage for selected-PC combat sections, frontend typecheck/build, and a Gen2 browser smoke for Encounter Controls status placement.
 
 ## Known Limits
 

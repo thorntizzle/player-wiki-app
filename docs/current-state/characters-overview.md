@@ -16,6 +16,7 @@ Last updated: 2026-06-25
 - The Gen2 character read summary is identity-focused: it can display the portrait image/caption and character identity details, but HP, Temp HP, Hit Dice, System, and resource previews live on their owning sheet sections instead of the header summary.
 - `/session/character` remains the active-session sheet lane. The player-facing Session shell can lazy-load Session Character as a mounted pane; direct `/session/character` remains the full-page and no-JS fallback.
 - Combat and DM status selected-PC views reuse the shared character presentation and state-edit contracts where relevant.
+- Gen2 Combat adds a combat-only selected-PC section layer above the shared CharacterPane, populated from presented character data for Actions, Bonus Actions, Reactions, Attacks, and Features.
 
 ## Current Data Contract
 
@@ -24,6 +25,7 @@ Last updated: 2026-06-25
 - `definition.yaml` carries a normalized top-level `system` discriminator.
 - Mutable play state lives in SQLite. Mutable state must not be written back into `definition.yaml`.
 - Reimports may refresh stable sheet structure, but must preserve live mutable state and safe native-managed overlays.
+- Combat JSON reads expose `selected_player_combat_sections` for the selected tracked PC. Those sections are read-only projections of presented character data; durable combat edits still use the normal combat or character-state mutation lanes.
 
 ## Route And Component Ownership
 
