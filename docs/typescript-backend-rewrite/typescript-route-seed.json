@@ -72,6 +72,24 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/pages",
+      "route_family": "api_v1_content",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/content/pages",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono content page management list endpoint for fixture-only read-only mode."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/pages/<path:page_ref>",
+      "route_family": "api_v1_content",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/content/pages/*",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono content page management detail endpoint for fixture-only read-only mode."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/session/login",
       "route_family": "api_v1",
       "status": "deferred_scratch_proof",

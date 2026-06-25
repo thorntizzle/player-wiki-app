@@ -156,6 +156,112 @@ def _page_summary(page):
     }
 
 
+def _content_page_record_summary(page):
+    return {
+        "page_ref": page["page_ref"],
+        "relative_path": page["relative_path"],
+        "metadata": page["metadata"],
+        "page": {key: page["page"][key] for key in (
+            "title",
+            "route_slug",
+            "section",
+            "subsection",
+            "page_type",
+            "display_order",
+            "published",
+            "aliases",
+            "summary",
+            "image_path",
+            "image_alt",
+            "image_caption",
+            "reveal_after_session",
+            "source_ref",
+            "is_pinned",
+            "is_visible",
+        )},
+    }
+
+
+def _content_page_removal_summary(page):
+    return {
+        "can_hard_delete": page["can_hard_delete"],
+        "hard_delete_blockers": page["hard_delete_blockers"],
+        "removal_status_label": page["removal_status_label"],
+        "removal_guidance": page["removal_guidance"],
+        "removal_safety": {
+            "can_hard_delete": page["removal_safety"]["can_hard_delete"],
+            "blockers_by_type": page["removal_safety"]["blockers_by_type"],
+            "samples": page["removal_safety"]["samples"],
+            "hard_delete_blockers": page["removal_safety"]["hard_delete_blockers"],
+            "page_title": page["removal_safety"]["page_title"],
+            "removal_status_label": page["removal_safety"]["removal_status_label"],
+            "removal_guidance": page["removal_safety"]["removal_guidance"],
+        },
+    }
+
+
+def _normalize_timestamp(value: str) -> None:
+    datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def test_typescript_content_pages_list_matches_flask_contract(typescript_api_server, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    flask_response = client.get("/api/v1/campaigns/linden-pass/content/pages")
+    assert flask_response.status_code == 200
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/pages")
+    assert status == 200
+
+    assert payload["ok"] is True
+    assert isinstance(payload["pages"], list)
+    assert isinstance(flask_payload["pages"], list)
+    assert len(payload["pages"]) == len(flask_payload["pages"]) == 29
+    assert [page["page_ref"] for page in payload["pages"]] == [page["page_ref"] for page in flask_payload["pages"]]
+
+    for flask_page, ts_page in zip(flask_payload["pages"], payload["pages"]):
+        assert "body_markdown" not in ts_page
+        ts_summary = _content_page_record_summary(ts_page)
+        flask_summary = _content_page_record_summary(flask_page)
+        assert ts_summary == flask_summary
+        assert isinstance(ts_page["updated_at"], str) and ts_page["updated_at"]
+        _normalize_timestamp(ts_page["updated_at"])
+
+    sample_ref = "locations/port-meridian"
+    flask_sample = next(page for page in flask_payload["pages"] if page["page_ref"] == sample_ref)
+    ts_sample = next(page for page in payload["pages"] if page["page_ref"] == sample_ref)
+    assert _content_page_record_summary(ts_sample) == _content_page_record_summary(flask_sample)
+    assert ts_sample["can_hard_delete"] is True
+    assert ts_sample["hard_delete_blockers"] == []
+    assert ts_sample["removal_status_label"] == "Hard delete available"
+    assert ts_sample["removal_guidance"] == "Hard delete is available after confirmation."
+    assert _content_page_removal_summary(ts_sample) == _content_page_removal_summary(flask_sample)
+
+
+def test_typescript_content_page_detail_matches_flask_contract(typescript_api_server, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    target_page_ref = "locations/port-meridian"
+    flask_response = client.get(f"/api/v1/campaigns/linden-pass/content/pages/{target_page_ref}")
+    assert flask_response.status_code == 200
+    flask_payload = flask_response.get_json()
+    assert flask_payload["ok"] is True
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/pages/{target_page_ref}"
+    )
+    assert status == 200
+
+    assert payload["ok"] is True
+    flask_page_file = flask_payload["page_file"]
+    ts_page_file = payload["page_file"]
+    assert _content_page_record_summary(ts_page_file) == _content_page_record_summary(flask_page_file)
+    assert _content_page_removal_summary(ts_page_file) == _content_page_removal_summary(flask_page_file)
+    assert "body_markdown" in ts_page_file and isinstance(ts_page_file["body_markdown"], str)
+    assert ts_page_file["body_markdown"].strip()
+    assert isinstance(ts_page_file["updated_at"], str) and ts_page_file["updated_at"]
+    _normalize_timestamp(ts_page_file["updated_at"])
+
+
 def test_typescript_session_matches_flask_contract_readonly_fixture(typescript_api_server, client, users, sign_in):
     sign_in(users["party"]["email"], users["party"]["password"])
     flask_response = client.get("/api/v1/campaigns/linden-pass/session")
@@ -321,3 +427,10 @@ def test_typescript_wiki_missing_resources_return_json(typescript_api_server):
     assert status == 404
     assert payload["ok"] is False
     assert payload["error"]["code"] == "campaign_not_found"
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/pages/definitely-not-a-page"
+    )
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "content_page_not_found"

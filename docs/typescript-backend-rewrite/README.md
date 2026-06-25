@@ -28,7 +28,7 @@ Route parity check command:
 
 - `stack-spike.md`: architecture decision record for the TypeScript backend stack evaluation and proof checklist.
 - `sqlite-migration-spike.md`: migration-layer proof for Drizzle `generate`/`migrate`, runtime probes, and driver comparison.
-- `read-only-compatibility-slice.md`: evidence for the first read-only API compatibility slice (campaign detail + healthz).
+- `read-only-compatibility-slice.md`: evidence for the fixture-backed read-only API compatibility slice.
 
 ## Working Rules
 
@@ -52,6 +52,13 @@ Route parity check command:
 - `apps/api` exists and now serves:
   - `GET /healthz`
   - `GET /api/v1/campaigns/:campaignSlug`
+  - `GET /api/v1/campaigns/:campaignSlug/wiki`
+  - `GET /api/v1/campaigns/:campaignSlug/wiki/sections/:sectionSlug`
+  - `GET /api/v1/campaigns/:campaignSlug/wiki/pages/*`
+  - `GET /api/v1/campaigns/:campaignSlug/session`
+  - `GET /api/v1/campaigns/:campaignSlug/content/config`
+  - `GET /api/v1/campaigns/:campaignSlug/content/pages`
+  - `GET /api/v1/campaigns/:campaignSlug/content/pages/*`
 - Campaign detail uses fixture-backed reads from `tests/fixtures/sample_campaigns` by default and supports
   `CPW_CAMPAIGNS_DIR` override.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.

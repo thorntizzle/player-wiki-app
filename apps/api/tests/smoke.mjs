@@ -127,6 +127,63 @@ if (typeof campaignConfig.payload?.config_file?.updated_at !== "string" || !camp
   throw new Error(`Expected non-empty updated_at string, got ${campaignConfig.payload?.config_file?.updated_at}`);
 }
 
+const contentPages = await requestJson("/api/v1/campaigns/linden-pass/content/pages");
+if (contentPages.status !== 200) {
+  throw new Error(`Expected content pages list endpoint 200, got ${contentPages.status}`);
+}
+if (!Array.isArray(contentPages.payload?.pages) || contentPages.payload.pages.length !== 29) {
+  throw new Error(`Expected 29 fixture content pages, got ${contentPages.payload?.pages?.length}`);
+}
+for (const page of contentPages.payload.pages) {
+  if (Object.hasOwn(page, "body_markdown")) {
+    throw new Error(`Expected content page list payload to omit body_markdown for ${page.page_ref}`);
+  }
+}
+const portMeridianInList = contentPages.payload.pages.find((item) => item.page_ref === "locations/port-meridian");
+if (!portMeridianInList) {
+  throw new Error("Expected Port Meridian content page in fixture list payload.");
+}
+if (portMeridianInList.relative_path !== "locations/port-meridian.md") {
+  throw new Error(`Unexpected Port Meridian relative_path: ${portMeridianInList.relative_path}`);
+}
+if (portMeridianInList.page?.route_slug !== "locations/port-meridian") {
+  throw new Error(`Unexpected Port Meridian route slug: ${portMeridianInList.page?.route_slug}`);
+}
+if (portMeridianInList.can_hard_delete !== true) {
+  throw new Error(`Expected fixture Port Meridian hard-delete to be available, got ${portMeridianInList.can_hard_delete}`);
+}
+if (!Array.isArray(portMeridianInList.hard_delete_blockers) || portMeridianInList.hard_delete_blockers.length !== 0) {
+  throw new Error(`Expected no Port Meridian hard-delete blockers, got ${JSON.stringify(portMeridianInList.hard_delete_blockers)}`);
+}
+if (portMeridianInList.removal_status_label !== "Hard delete available") {
+  throw new Error(`Expected hard delete availability label, got ${portMeridianInList.removal_status_label}`);
+}
+if (portMeridianInList.removal_guidance !== "Hard delete is available after confirmation.") {
+  throw new Error(`Expected hard delete guidance label, got ${portMeridianInList.removal_guidance}`);
+}
+
+const contentPage = await requestJson("/api/v1/campaigns/linden-pass/content/pages/locations/port-meridian");
+if (contentPage.status !== 200) {
+  throw new Error(`Expected content page detail endpoint 200, got ${contentPage.status}`);
+}
+if (!contentPage.payload?.page_file || typeof contentPage.payload.page_file.body_markdown !== "string" || !contentPage.payload.page_file.body_markdown) {
+  throw new Error("Expected content page detail payload to include non-empty body_markdown.");
+}
+if (contentPage.payload.page_file.page?.route_slug !== "locations/port-meridian") {
+  throw new Error(`Expected Port Meridian content detail route slug, got ${contentPage.payload.page_file?.page?.route_slug}`);
+}
+if (!contentPage.payload.page_file.can_hard_delete) {
+  throw new Error(`Expected fixture Port Meridian hard-delete to be available, got ${contentPage.payload.page_file.can_hard_delete}`);
+}
+if (typeof contentPage.payload.page_file.body_markdown !== "string" || !contentPage.payload.page_file.body_markdown.includes("Port Meridian is a layered trade city")) {
+  throw new Error(`Unexpected Port Meridian body markdown: ${contentPage.payload.page_file?.body_markdown}`);
+}
+
+const missingContentPage = await requestJson("/api/v1/campaigns/linden-pass/content/pages/definitely-not-a-page");
+if (missingContentPage.status !== 404 || missingContentPage.payload?.error?.code !== "content_page_not_found") {
+  throw new Error(`Expected missing content page JSON 404, got ${missingContentPage.status} ${missingContentPage.payload?.error?.code}`);
+}
+
 const missing = await requestJson("/api/v1/campaigns/definitely-not-a-campaign");
 if (missing.status !== 404) {
   throw new Error(`Expected missing campaign to return 404, got ${missing.status}`);
@@ -281,6 +338,10 @@ if (missingSession.status !== 404 || missingSession.payload?.error?.code !== "ca
 const missingCampaignConfig = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/content/config");
 if (missingCampaignConfig.status !== 404 || missingCampaignConfig.payload?.error?.code !== "campaign_not_found") {
   throw new Error(`Expected missing content config campaign JSON 404, got ${missingCampaignConfig.status}`);
+}
+const missingContentPages = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/content/pages");
+if (missingContentPages.status !== 404 || missingContentPages.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(`Expected missing content pages campaign JSON 404, got ${missingContentPages.status}`);
 }
 
 ensureStopped();

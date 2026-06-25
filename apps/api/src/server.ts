@@ -10,7 +10,16 @@ import { getCampaignBySlug, listCampaignSlugs } from "./campaigns/repository.js"
 import { ROUTES } from "./routes.js";
 import { buildSessionStatePayload } from "./session/view.js";
 import { getCampaignConfigFile } from "./content/repository.js";
-import { buildCampaignConfigPayload } from "./content/view.js";
+import {
+  getCampaignContentPage,
+  listCampaignContentPages,
+  sanitizeContentPageRef,
+} from "./content/repository.js";
+import {
+  buildCampaignConfigPayload,
+  buildContentPageDetailPayload,
+  buildContentPageListPayload,
+} from "./content/view.js";
 import { campaignWikiRepository, sectionSortKey, setWikiConfig, slugify } from "./wiki/repository.js";
 import {
   serializeCampaign,
@@ -157,6 +166,31 @@ function pageSlugFromWildcard(pathname: string, campaignSlug: string): string {
   } catch {
     return pathname.slice(prefix.length);
   }
+}
+
+function contentPageRefFromWildcard(pathname: string, campaignSlug: string): string {
+  const prefix = `/api/v1/campaigns/${campaignSlug}/content/pages/`;
+  if (!pathname.startsWith(prefix)) {
+    return "";
+  }
+  try {
+    return (
+      sanitizeContentPageRef(
+        pathname.slice(prefix.length),
+      ) || ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+function contentPageNotFound(campaignSlug: string, pageRef: string) {
+  return jsonError(
+    "content_page_not_found",
+    `Could not find content page '${pageRef}' in campaign '${campaignSlug}'.`,
+    404,
+    { campaign_slug: campaignSlug, page_ref: pageRef },
+  );
 }
 
 function parseLiveRevisionHeader(ctx: { req: { header: (name: string) => string | undefined } }): number | null {
@@ -403,6 +437,46 @@ app.get(ROUTES.campaignConfig, async (ctx) => {
   }
 
   return ctx.json(buildCampaignConfigPayload(campaignConfig));
+});
+
+app.get(ROUTES.contentPages, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const pages = await listCampaignContentPages(config, campaignSlug);
+  if (!pages) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildContentPageListPayload(pages));
+});
+
+app.get(ROUTES.contentPage, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const pageRef = contentPageRefFromWildcard(ctx.req.path, campaignSlug);
+  if (!pageRef) {
+    const error = contentPageNotFound(campaignSlug, pageRef);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const page = await getCampaignContentPage(config, campaignSlug, pageRef);
+  if (!page) {
+    const error = contentPageNotFound(campaignSlug, pageRef);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildContentPageDetailPayload(page));
 });
 
 app.notFound((ctx) =>
