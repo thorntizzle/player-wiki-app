@@ -2,101 +2,95 @@
 
 Date: 2026-06-25
 Owner: campaign rewrite slice
-Scope: Bounded evidence spike in `.task-temp/typescript-backend-stack-spike-20260625`
-Status: partial stack evidence; final framework choice deferred until package tooling is available
+Scope: scratch spike at `.task-temp/typescript-backend-framework-spike-20260625`
+Status: complete evidence capture for framework runtime viability; migration layer still open
 
 ## Recommendation
 
-Do not lock the final TypeScript backend framework from this pass alone. This spike proved
-that the local Node runtime can support the app's backend constraints in principle, but it did
-not execute TanStack Start or Hono because neither package is installed and no package manager
-is available in PATH.
+For the TypeScript rewrite spike, Hono is the preferred initial stack because it gives a clear API boundary and the same checked request behaviors with lower runtime coupling to route surfaces. TanStack Start is viable and proved runnable for the same API requirements, but it should be chosen only if the team wants tighter full-stack route coupling.
 
-For the next concrete spike, evaluate a dedicated Hono API first and TanStack Start second
-against the same runnable fixture checklist. Hono maps more directly to the backend replacement
-goal and the Web-standard request/response proof built here. TanStack Start remains a serious
-candidate for a same-origin full-stack app, but it needs stricter package-boundary guardrails
-before it can be selected for backend ownership.
+## Verified package/tooling assumptions
 
-The immediate blocker is local toolchain access, not framework capability:
-- no package manager (`npm`/`corepack`) is available in PATH,
-- repository root has no package manifest,
-- only `frontend/package.json` exists and it currently carries a Vite/TanStack Router pilot shape.
+- `hono` and `@hono/node-server` were installed from npm in a scratch project.
+- `@tanstack/react-start` was installed from npm in a separate scratch project.
+- `better-sqlite3` was used for SQLite reads because the bundled Node runtime did not expose `node:sqlite`.
+- `drizzle-orm` and `drizzle-kit` package versions were checked from npm to confirm availability for later migration work.
 
-When package install tooling is restored, proceed with a second spike branch that wires the
-same fixture checklist into a minimal Hono API app and a real TanStack Start app scaffold.
+## Environment and package-manager bootstrap
 
-## Snapshot of checked options
+The environment had no usable package manager in PATH, so a local runtime path was created:
 
-The following options were evaluated against the same checklist. Only static proof could be
-run for the frameworks themselves because neither framework is installed in the existing
-workspace tree. The runnable scratch proof uses plain Node APIs to prove local constraints
-that either framework must satisfy.
+1. Downloaded npm tooling into scratch: `.task-temp\typescript-backend-framework-spike-20260625\npm`
+2. Downloaded Node 22.12.0 tarball into scratch: `.task-temp\typescript-backend-framework-spike-20260625\node-runtime\node-v22.12.0-win-x64`
+3. Used the bundled npm CLI via `<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe <scratch>/node-runtime/node-v22.12.0-win-x64/node_modules/npm/bin/npm-cli.js`
 
-- Option A: TanStack Start
-  - Pros: tight route + server-function ergonomics for the existing TanStack frontend ecosystem, first-party conventions for same-origin web APIs, cookies, and typed route contracts.
-  - Cons: adds a full-stack coupling risk if service boundaries are not guarded, requires package-manager setup and a separate install of Start tooling.
-- Option B: Hono API + React/TanStack Router frontend
-  - Pros: explicit HTTP API boundary, small web-standard server model, adapter-first deployment options, and clear service package seam.
-  - Cons: additional integration work for SSR/client consistency and route-surface parity once the app moves toward same-origin rendering patterns.
+Observed versions:
+- Node: `v22.12.0`
+- npm CLI: `10.9.0`
 
-## Spike proof checklist
+## Commands and outcomes
 
-| Checklist item | Spike evidence | Result |
-| --- | --- | --- |
-| Route handling | `createTypedRouteTable` with typed handler signatures in spike router table | PASS |
-| API contract typing | typed request/response interfaces and JSON writer in spike server | PASS |
-| Session cookie write/read | `/api/session/login` sets cookie; `/api/session/me` reads cookie | PASS |
-| Protected asset response + media type | `/assets/protected/*` checks cookie and returns `content-type` | PASS |
-| Multipart/form-data upload parse | `/api/upload` parses via `Request.formData()` | PASS |
-| SQLite read | `node:sqlite` and scratch route data return fixture rows | PASS |
-| Local Windows dev command | TypeScript compile and runner execute with bundled Node runtime | PASS for no-install scratch; BLOCKED for real framework scaffold |
-| Production-style build/typecheck | TypeScript compile to `dist` using bundled `tsc` | PASS |
-| Fly deploy shape | not executed in this spike | BLOCKED |
-| Test runner setup | not executed in this spike | BLOCKED |
+### Version and availability checks
 
-## Commands run and observed status
+```powershell
+<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe <scratch>/node-runtime/node-v22.12.0-win-x64/node_modules/npm/bin/npm-cli.js view hono version
+<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe <scratch>/node-runtime/node-v22.12.0-win-x64/node_modules/npm/bin/npm-cli.js view @tanstack/react-start version
+<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe <scratch>/node-runtime/node-v22.12.0-win-x64/node_modules/npm/bin/npm-cli.js view better-sqlite3 version
+<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe <scratch>/node-runtime/node-v22.12.0-win-x64/node_modules/npm/bin/npm-cli.js view drizzle-orm version
+<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe <scratch>/node-runtime/node-v22.12.0-win-x64/node_modules/npm/bin/npm-cli.js view drizzle-kit version
+```
 
-### Runtime/tooling checks
+Observed: `4.12.27`, `1.168.26`, `12.11.1`, `0.45.2`, `0.31.10`.
 
-- `<node-runtime>\node.exe -v`
-  => Node available (`v24.14.0`).
-- `Get-Command npm,corepack` in repo root
-  => no npm/corepack on PATH.
+### Hono spike (`.task-temp\typescript-backend-framework-spike-20260625\hono-spike`)
 
-### Package baseline checks
+```powershell
+<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe <scratch>/node-runtime/node-v22.12.0-win-x64/node_modules/npm/bin/npm-cli.js install hono @hono/node-server
+<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe <scratch>/node-runtime/node-v22.12.0-win-x64/node_modules/npm/bin/npm-cli.js install better-sqlite3
+<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe <scratch>/node-runtime/node-v22.12.0-win-x64/node_modules/npm/bin/npm-cli.js install --save-dev @types/better-sqlite3
+<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe <scratch>/node-runtime/node-v22.12.0-win-x64/node_modules/npm/bin/npm-cli.js run typecheck
+<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe <scratch>/node-runtime/node-v22.12.0-win-x64/node_modules/npm/bin/npm-cli.js run build
+```
 
-- `Get-Content frontend/package.json`
-  => only Vite, React Query, TanStack Router in dependencies.
-- `rg -n "hono|@hono|@tanstack/start" frontend/package.json frontend/package-lock.json`
-  => no matches.
-- `node -e "require.resolve('hono')"`
-  => `Cannot find module 'hono'`.
-- `node -e "require.resolve('@tanstack/start')"`
-  => `Cannot find module '@tanstack/start'`.
+Observed:
+- `typecheck`: pass
+- `build` (tsc): pass
+- Local HTTP probe to Hono app: `SPIKE_OK`
+- SQLite route behavior: returned fixture row via `better-sqlite3`.
 
-### Scratch spike build/run checks
+### TanStack Start spike (`.task-temp\typescript-backend-framework-spike-20260625\tanstack-start-spike`)
 
-- From `.task-temp/typescript-backend-stack-spike-20260625`: `<node-runtime>\node.exe ..\..\frontend\node_modules\typescript\bin\tsc -p tsconfig.json`
-  => pass.
-- From `.task-temp/typescript-backend-stack-spike-20260625`: `<node-runtime>\node.exe dist\spike-runner.js`
-  => pass; logs `STACK_SPIKE_OK` after route, cookie, protected asset, upload, and SQLite checks.
-- `<node-runtime>\node.exe -e "const {DatabaseSync}=require('node:sqlite'); ..."`
-  => SQLite read path executed and rows returned from fixture DB.
+```powershell
+<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe <scratch>/node-runtime/node-v22.12.0-win-x64/node_modules/npm/bin/npm-cli.js run typecheck
+<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe <scratch>/node-runtime/node-v22.12.0-win-x64/node_modules/npm/bin/npm-cli.js install better-sqlite3
+<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe <scratch>/node-runtime/node-v22.12.0-win-x64/node_modules/npm/bin/npm-cli.js install --save-dev @types/better-sqlite3
+<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe <scratch>/node-runtime/node-v22.12.0-win-x64/node_modules/npm/bin/npm-cli.js run build
+<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe node_modules/vite/bin/vite.js dev --host 127.0.0.1 --port 4173
+<scratch>/node-runtime/node-v22.12.0-win-x64/node.exe scripts/verify.mjs
+```
 
-## Tooling gaps and blockers
+Observed:
+- `tsc --noEmit` pass after SQLite shim update
+- `vite build`: pass
+- Dev server started on `http://127.0.0.1:4173`
+- Local HTTP probe: `SPIKE_OK`
 
-- There is no package manager available in PATH in this environment.
-- No root package manifest means no backend package shape exists yet.
-- The repository currently contains only Vite + TanStack Router frontend dependencies.
-- `node:sqlite` works in the bundled Node runtime, but it is still an experimental Node API; production persistence should be decided again once Drizzle and SQLite driver packages can be installed and compared.
-- Real TanStack Start and Hono execution remains unproven until package installation is available.
+## Spike checklist
 
-## Next steps
+| Checklist item | Result |
+| --- | --- |
+| Route handling | Hono: PASS, Start: PASS |
+| API contract typing | PASS |
+| Session cookie write/read | PASS |
+| Protected asset serving + `image/webp` | PASS |
+| Multipart/form-data upload parsing | PASS |
+| SQLite read path | PASS (`better-sqlite3`; `node:sqlite` unavailable in this runtime) |
+| Local Windows run + production-style build | PASS for both |
+| Local package availability checks for `hono`, `@hono/node-server`, `@tanstack/react-start`, `drizzle-orm`, and `drizzle-kit` | PASS |
+| Route-based health and API validation script | PASS (`SPIKE_OK`) |
+| Fly deploy shape | not run (left for integration stack phase) |
 
-1. Install tooling (`npm` or equivalent) into the workspace and add the first concrete `@tanstack/start` and `hono` scratch projects under dedicated temporary folders.
-2. Implement the same `/healthz`, cookie, protected asset, upload, and SQLite routes in both scratch projects and include:
-   - build + typecheck,
-   - one local request test suite,
-   - one deployment-shape smoke command.
-3. Re-open this ADR once both are executed and gate the rewrite stack choice on the same evidence set.
+## Remaining risk / open blocker
+
+- `drizzle` migration command shape and `libsql` path were not executed in this spike; only package availability was confirmed.
+- Drizzle migration and deployment posture are still required before final architecture lock.
