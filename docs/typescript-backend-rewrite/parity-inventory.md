@@ -49,6 +49,7 @@ Generated evidence from the current source shows:
 
 - `player_wiki/api.py` declares 135 `/api/v1` routes: 46 `GET`, 39 `POST`, 21 `PATCH`, 11 `PUT`, and 18 `DELETE`.
 - `player_wiki/app.py` declares 138 Flask browser/compatibility routes: 49 `GET`, 82 `POST`, and 7 `GET,POST` dual-method form routes.
+- `docs/typescript-backend-rewrite/route-snapshots.md` now tracks the source-derived API and Flask route declarations plus a fixture-backed first missing-resource response-shape matrix.
 - `player_wiki/db.py` currently creates 34 unique SQLite tables. The repeated `CREATE TABLE IF NOT EXISTS` blocks for `campaign_session_states`, `campaign_combatant_resource_counters`, and `campaign_combatant_resource_notes` are additive/migration guards, not separate domains.
 - `frontend/src/api/client.ts` is the main Gen2 client. It calls `/api/v1` plus a small set of Flask browser JSON compatibility routes for global search and session wiki lookup.
 - `frontend/src/components/SessionArticleDisplay.tsx` also builds the `/api/v1/campaigns/<slug>/session/articles/<id>/image` URL directly.
@@ -235,7 +236,7 @@ Family names are grouped by behavior and route prefix. Evidence is from route de
   - `frontend/src/api/client.ts`
   - `tests/test_api.py`
 
-Note: the `docs/api-v1.md` core endpoint list is missing a few character routes that are implemented and exercised by Gen2/tests, including `advanced-editor`, `retraining`, `level-up`, `progression-repair`, `cultivation`, `characters/create`, `characters/import/xianxia-manual`, `session/personal`, and `session/artificer-infusions`. The TypeScript rewrite should treat source route declarations plus `frontend/src/api/client.ts` and `tests/test_api.py` as stronger evidence until the API reference is refreshed.
+Note: the `docs/api-v1.md` core endpoint list was refreshed on 2026-06-25 to include the implemented Gen2 character create/import/edit/advancement routes plus `session/personal` and `session/artificer-infusions`. The TypeScript rewrite should still treat source route declarations, `frontend/src/api/client.ts`, `tests/test_api.py`, and `docs/typescript-backend-rewrite/route-snapshots.md` as stronger drift-detection evidence than prose alone.
 
 ## 2) Flask/browser compatibility route families
 
@@ -465,8 +466,7 @@ The rewrite should preserve the current API error envelope unless an explicit AP
 
 These items need explicit follow-up passes before the next migration milestone:
 
-- Refresh `docs/api-v1.md` so its core endpoint list includes the implemented Gen2 character create/import/edit/advancement and session-state endpoints now documented by source/tests.
-- Convert the route-family inventory into generated route snapshots for parity tests before adding TypeScript handlers.
-- Capture route-by-route missing-resource 404 shapes for cutover-critical API paths, because source currently mixes JSON `not_found` with `abort(404)`.
+- Convert the tracked route snapshots into executable parity fixtures after the TypeScript stack/test runner decision.
+- Extend the missing-resource shape matrix when a new cutover-critical route family is selected for TypeScript implementation.
 - Decide whether Flask browser form routes remain long-term compatibility routes, temporary rollback-only routes, or can be retired after TypeScript/Gen2 cutover.
 - Capture exact image conversion parity for Browser Player Wiki publication if TypeScript replaces that browser flow rather than routing all publication through the extension-preserving content asset API.

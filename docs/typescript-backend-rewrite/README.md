@@ -10,6 +10,7 @@ This folder tracks the deliberate TypeScript backend rewrite path for Campaign P
 
 - `charter.md`: scope, freeze rules, cutover gates, rollback requirement, and branch/spec ownership.
 - `parity-inventory.md`: current route, API, data, command, and policy inventory that TypeScript must preserve.
+- `route-snapshots.md`: source-derived route declarations and fixture-backed missing-resource response shapes.
 - `.local/roadmaps/typescript-backend-rewrite-roadmap.md`: local active task queue for the rewrite track.
 - `docs/current-state/INDEX.md`: current product contract index. Use it to confirm present behavior before porting any workflow.
 - `docs/api-v1.md`: current JSON API contract.

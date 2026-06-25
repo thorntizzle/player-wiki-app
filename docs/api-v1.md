@@ -44,6 +44,9 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 
 ## Core Endpoints
 
+For source-derived route evidence used by the TypeScript rewrite, see
+`docs/typescript-backend-rewrite/route-snapshots.md`.
+
 - `GET /api/v1/app`
 - `GET /api/v1/systems/import-runs`
 - `GET /api/v1/systems/import-runs/<import_run_id>`
@@ -139,7 +142,21 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 - `DELETE /api/v1/campaigns/<campaign_slug>/combat/conditions/<condition_id>`
 - `DELETE /api/v1/campaigns/<campaign_slug>/combat/combatants/<combatant_id>`
 - `GET /api/v1/campaigns/<campaign_slug>/characters`
+- `GET /api/v1/campaigns/<campaign_slug>/characters/create`
+- `POST /api/v1/campaigns/<campaign_slug>/characters/create`
+- `GET /api/v1/campaigns/<campaign_slug>/characters/import/xianxia-manual`
+- `POST /api/v1/campaigns/<campaign_slug>/characters/import/xianxia-manual`
 - `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>`
+- `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/advanced-editor`
+- `PUT /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/advanced-editor`
+- `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/retraining`
+- `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/retraining`
+- `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/level-up`
+- `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/level-up`
+- `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair`
+- `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair`
+- `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/cultivation`
+- `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/cultivation`
 - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment`
 - `DELETE /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment`
 - `DELETE /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls`
@@ -159,9 +176,11 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 - `DELETE /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/equipped`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/equipment/<item_id>`
+- `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/artificer-infusions`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/feature-states/<feature_key>`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/currency`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/notes`
+- `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/personal`
 - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>`
 
 ## Session Polling
