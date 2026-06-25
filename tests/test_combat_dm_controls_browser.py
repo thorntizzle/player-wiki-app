@@ -150,6 +150,12 @@ def test_gen2_combat_controls_advance_turn_lives_in_status_band_browser(
             expect(page.locator(".combat-summary-band").get_by_role("button", name="Advance turn")).to_be_visible()
             expect(page.locator(".combat-controls-layout").get_by_role("button", name="Advance turn")).to_have_count(0)
             expect(page.locator(".combat-controls-layout").get_by_role("heading", name="Tracker")).to_have_count(0)
+
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=status")
+            expect(page.get_by_role("heading", name="DM status")).to_be_visible(timeout=5000)
+            expect(page.locator(".combat-summary-band")).to_be_visible()
+            expect(page.locator(".combat-summary-band").get_by_role("button", name="Advance turn")).to_be_visible()
+            expect(page.locator(".combat-dm-snapshot-controls").get_by_role("button", name="Advance turn")).to_have_count(0)
         finally:
             page.close()
             context.close()

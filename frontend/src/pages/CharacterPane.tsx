@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import type {
   CharacterDetailResponse,
   CharacterPresentedSpell,
@@ -78,14 +78,18 @@ function restAdjustmentDraftFromPreview(
 
 export function CharacterPane({
   campaignSlug,
+  combatWorkspaceContent = null,
   initialCharacterSlug = null,
   initialSection = null,
+  showEmbeddedCharacterSelector = true,
   surface = "session",
   onSelectedCharacterChange,
 }: {
   campaignSlug: string;
+  combatWorkspaceContent?: ReactNode;
   initialCharacterSlug?: string | null;
   initialSection?: CharacterSection | null;
+  showEmbeddedCharacterSelector?: boolean;
   surface?: "session" | "read" | "combat";
   onSelectedCharacterChange?: (characterSlug: string) => void;
 }) {
@@ -536,16 +540,18 @@ export function CharacterPane({
               />
             ) : null}
 
-            <CharacterNavigationCard
-              activeCharacterSection={activeCharacterSection}
-              characterList={characterList}
-              handleReadSurfaceSectionNavClick={handleReadSurfaceSectionNavClick}
-              isReadSurface={isReadSurface}
-              readSurfaceSectionUrl={readSurfaceSectionUrl}
-              selectCharacter={selectCharacter}
-              selectedSlug={selectedSlug}
-              visibleCharacterSections={visibleCharacterSections}
-            />
+            {showEmbeddedCharacterSelector ? (
+              <CharacterNavigationCard
+                activeCharacterSection={activeCharacterSection}
+                characterList={characterList}
+                handleReadSurfaceSectionNavClick={handleReadSurfaceSectionNavClick}
+                isReadSurface={isReadSurface}
+                readSurfaceSectionUrl={readSurfaceSectionUrl}
+                selectCharacter={selectCharacter}
+                selectedSlug={selectedSlug}
+                visibleCharacterSections={visibleCharacterSections}
+              />
+            ) : null}
           </>
         ) : null}
 
@@ -593,6 +599,10 @@ export function CharacterPane({
                 vitalsDraft={vitalsDraft}
                 xianxiaVitalsDraft={xianxiaVitalsDraft}
               />
+            ) : null}
+
+            {isCombatSurface && combatWorkspaceContent ? (
+              <div className="combat-character-inline-workspace">{combatWorkspaceContent}</div>
             ) : null}
 
             {isDnd && !isReadSurface ? (

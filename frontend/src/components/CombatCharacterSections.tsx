@@ -142,32 +142,25 @@ export function CombatCharacterSections({
   const activeSection = availableSections.find((section) => section.slug === activeSectionSlug) ?? availableSections[0];
 
   return (
-    <div data-combat-workspace-root>
-      <section className="card combat-workspace-card">
-        <div className="section-heading">
-          <div>
-            <h2>Combat sections</h2>
-          </div>
-        </div>
-        <nav className="combat-workspace-nav" aria-label="Combat workspace sections">
-          {availableSections.map((section) => (
-            <button
-              type="button"
-              className={
-                section.slug === activeSection.slug
-                  ? "ghost-button combat-workspace-button combat-workspace-button--active"
-                  : "ghost-button combat-workspace-button"
-              }
-              aria-pressed={section.slug === activeSection.slug}
-              key={section.slug}
-              onClick={() => setActiveSectionSlug(section.slug)}
-            >
-              <span>{section.label}</span>
-              {section.count ? <span className="meta-badge">{section.count}</span> : null}
-            </button>
-          ))}
-        </nav>
-      </section>
+    <div className="combat-workspace-inline" data-combat-workspace-root>
+      <nav className="combat-workspace-nav" aria-label="Combat character actions">
+        {availableSections.map((section) => (
+          <button
+            type="button"
+            className={
+              section.slug === activeSection.slug
+                ? "ghost-button combat-workspace-button combat-workspace-button--active"
+                : "ghost-button combat-workspace-button"
+            }
+            aria-pressed={section.slug === activeSection.slug}
+            key={section.slug}
+            onClick={() => setActiveSectionSlug(section.slug)}
+          >
+            <span>{section.label}</span>
+            {section.count ? <span className="meta-badge">{section.count}</span> : null}
+          </button>
+        ))}
+      </nav>
       <CombatWorkspacePanel section={activeSection} />
     </div>
   );

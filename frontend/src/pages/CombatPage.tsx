@@ -85,6 +85,18 @@ export function CombatPage() {
     hasBonusAction: false,
     hasReaction: false,
   });
+  const [workspaceVitalsDraft, setWorkspaceVitalsDraft] = useState<CombatVitalsDraft>({
+    currentHp: "",
+    maxHp: "",
+    tempHp: "",
+    movementTotal: "",
+  });
+  const [workspaceResourcesDraft, setWorkspaceResourcesDraft] = useState<CombatResourcesDraft>({
+    movementRemaining: "",
+    hasAction: false,
+    hasBonusAction: false,
+    hasReaction: false,
+  });
   const [npcResourceDrafts, setNpcResourceDrafts] = useState<CombatNpcResourceDrafts>({});
   const [turnDraft, setTurnDraft] = useState<CombatTurnDraft>({ turnValue: "", initiativePriority: "1" });
   const [conditionDraft, setConditionDraft] = useState<CombatConditionDraft>({ name: "", durationText: "" });
@@ -223,19 +235,22 @@ export function CombatPage() {
     void navigate({ to: nextPath as never, resetScroll: false });
   };
 
-  const syncCombatantDrafts = (combatant: CombatantSummary) => {
-    setVitalsDraft({
+  const buildVitalsDraftFromCombatant = (combatant: CombatantSummary): CombatVitalsDraft => ({
       currentHp: String(readNumber(combatant.current_hp)),
       maxHp: String(readNumber(combatant.max_hp)),
       tempHp: String(readNumber(combatant.temp_hp)),
       movementTotal: String(readNumber(combatant.movement_total)),
     });
-    setResourcesDraft({
+  const buildResourcesDraftFromCombatant = (combatant: CombatantSummary): CombatResourcesDraft => ({
       movementRemaining: String(readNumber(combatant.movement_remaining)),
       hasAction: Boolean(combatant.has_action),
       hasBonusAction: Boolean(combatant.has_bonus_action),
       hasReaction: Boolean(combatant.has_reaction),
     });
+
+  const syncCombatantDrafts = (combatant: CombatantSummary) => {
+    setVitalsDraft(buildVitalsDraftFromCombatant(combatant));
+    setResourcesDraft(buildResourcesDraftFromCombatant(combatant));
     setNpcResourceDrafts(
       Object.fromEntries(
         (combatant.npc_resource_counters ?? []).map((counter) => [
@@ -267,6 +282,14 @@ export function CombatPage() {
     }
     syncCombatantDrafts(selectedCombatant);
   }, [selectedCombatant?.id]);
+
+  useEffect(() => {
+    if (!selectedPlayerCharacter) {
+      return;
+    }
+    setWorkspaceVitalsDraft(buildVitalsDraftFromCombatant(selectedPlayerCharacter));
+    setWorkspaceResourcesDraft(buildResourcesDraftFromCombatant(selectedPlayerCharacter));
+  }, [selectedPlayerCharacter?.id]);
 
   const selectCombatant = (combatantId: number) => {
     const focusedCombatant = tracker?.combatants.find((combatant) => combatant.id === combatantId);
@@ -437,7 +460,7 @@ export function CombatPage() {
             combatantCount={tracker?.combatant_count}
             isAdvancingTurn={advanceTurnMutation.isPending}
             onAdvanceTurn={
-              effectiveCombatView === "controls" ? () => advanceTurnMutation.mutate() : undefined
+              canManageCombat && effectiveCombatView !== "player" ? () => advanceTurnMutation.mutate() : undefined
             }
           />
 
@@ -571,7 +594,6 @@ export function CombatPage() {
                   isAddingCondition={addConditionMutation.isPending}
                   isDeletingCondition={deleteConditionMutation.isPending}
                   isSettingCurrent={setCurrentMutation.isPending}
-                  isAdvancingTurn={advanceTurnMutation.isPending}
                   isDeletingCombatant={deleteCombatantMutation.isPending}
                   onTurnDraftChange={(updates) => setTurnDraft((current) => ({ ...current, ...updates }))}
                   onVitalsDraftChange={(updates) => setVitalsDraft((current) => ({ ...current, ...updates }))}
@@ -587,11 +609,33 @@ export function CombatPage() {
                   onAddCondition={(draft) => addConditionMutation.mutate(draft)}
                   onDeleteCondition={(condition) => deleteConditionMutation.mutate(condition)}
                   onSetCurrent={() => setCurrentMutation.mutate()}
-                  onAdvanceTurn={() => advanceTurnMutation.mutate()}
                   onDeleteCombatant={() => deleteCombatantMutation.mutate()}
                 />
               ) : null}
             </section>
+          ) : null}
+
+          {effectiveCombatView === "status" && selectedCombatant?.character_slug ? (
+            <CombatPlayerWorkspace
+              campaignSlug={campaignSlug}
+              selectedCharacterSlug={selectedCombatant.character_slug}
+              selectedCombatant={selectedCombatant}
+              playerCharacterTargets={payload?.player_character_targets ?? []}
+              combatSections={payload?.selected_player_combat_sections ?? []}
+              vitalsDraft={vitalsDraft}
+              resourcesDraft={resourcesDraft}
+              isUpdatingResources={updateResourcesMutation.isPending}
+              onSelectCombatant={selectCombatant}
+              onSelectedCharacterChange={selectCharacterTarget}
+              onResourcesDraftChange={(updates) => setResourcesDraft((current) => ({ ...current, ...updates }))}
+              onUpdateResources={(combatant, payload) =>
+                updateResourcesMutation.mutate({
+                  combatant,
+                  focusCombatantId: selectedCombatant?.id ?? selectedCombatantId,
+                  payload,
+                })
+              }
+            />
           ) : null}
 
           {effectiveCombatView === "controls" ? renderDmControls() : null}
@@ -599,11 +643,24 @@ export function CombatPage() {
             <CombatPlayerWorkspace
               campaignSlug={campaignSlug}
               selectedCharacterSlug={selectedCharacterSlug}
-              selectedPlayerCharacter={selectedPlayerCharacter}
+              selectedCombatant={selectedPlayerCharacter}
               playerCharacterTargets={payload?.player_character_targets ?? []}
               combatSections={payload?.selected_player_combat_sections ?? []}
+              vitalsDraft={workspaceVitalsDraft}
+              resourcesDraft={workspaceResourcesDraft}
+              isUpdatingResources={updateResourcesMutation.isPending}
               onSelectCombatant={selectCombatant}
               onSelectedCharacterChange={selectCharacterTarget}
+              onResourcesDraftChange={(updates) =>
+                setWorkspaceResourcesDraft((current) => ({ ...current, ...updates }))
+              }
+              onUpdateResources={(combatant, payload) =>
+                updateResourcesMutation.mutate({
+                  combatant,
+                  focusCombatantId: selectedCombatant?.id ?? selectedCombatantId,
+                  payload,
+                })
+              }
             />
           ) : null}
         </>

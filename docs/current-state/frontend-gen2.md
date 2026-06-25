@@ -20,7 +20,7 @@ Last updated: 2026-06-25
 - Gen2 top-nav left-clicks use TanStack Router navigation while preserving real hrefs for fallback and new-tab behavior.
 - Gen2 wiki section/article links use the same principle: real `href`s remain available, while ordinary internal section/page clicks inside wiki chrome or rendered article bodies route in place through TanStack.
 - Gen2 Session uses mounted Session/Character/DM panes under the compact hero tab strip. The player Session pane shows a compact inactive-state card until a live session exists, then shows chat plus composer. The DM pane uses URL-backed `dm_view` subviews and preserves scroll on subview query changes.
-- Gen2 Combat treats player combatant inspection as local route state so card/dropdown selection does not rewrite `combatant=` or trigger a scroll reset. DM Combat `status` and `controls` query changes keep canonical `combatant=` focus while requesting TanStack navigation with scroll preservation.
+- Gen2 Combat treats player combatant inspection as local route state so card/dropdown selection does not rewrite `combatant=` or trigger a scroll reset. The player Combat Character workspace is the character card itself, without a separate selected-PC selector or extra Combat Sections card. DM Combat `status` and `controls` query changes keep canonical `combatant=` focus while requesting TanStack navigation with scroll preservation.
 - The loading cover is shared across Flask hard navigations and Gen2 client-side route changes. It should not reveal raw unstyled HTML, should not swap loading media during an active transition, and should wait for the React route/query readiness signal before dismissing.
 
 ## Route And Component Ownership
@@ -39,7 +39,7 @@ Last updated: 2026-06-25
 - Gen2 Character Portrait displays the current portrait as a large unframed image on the dedicated Portrait subpage. Character portrait uploads reuse the article-image WebP conversion rule.
 - Gen2 Character Equipment consumes the shared DND equipment-state payload, including Artificer active infusion state. Enhanced Defense shows as an automated active effect, while unsupported active infusions stay visible as note-only active rows.
 - Gen2 Character, Session Character, and Combat selected-PC item lists use compact Inventory and Equipment grids with up to three columns where space allows, then step down to two columns on tablet/narrow layouts and one column on mobile.
-- Gen2 Combat shows visible source-backed NPC resources in the selected-combatant snapshot. DM Status adds compact current/max controls for supported source-backed counters and read-only rows for unsupported mechanics, using the same toast and inline error conventions as other combat mutations.
+- Gen2 Combat shows visible source-backed NPC resources in the selected-combatant snapshot. DM Status adds compact current/max controls for supported source-backed counters and read-only rows for unsupported mechanics, using the same toast and inline error conventions as other combat mutations. DM Status and Encounter Controls share the same encounter summary band for Round, current turn, combatant count, and `Advance turn`.
 
 ## UX And Feedback Conventions
 

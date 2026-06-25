@@ -56,6 +56,37 @@ interface UseCombatMutationsOptions {
   refetchCombat: () => unknown;
 }
 
+type TargetedCombatMutation<TPayload> =
+  | TPayload
+  | {
+      combatant?: CombatantSummary | null;
+      focusCombatantId?: number | null;
+      payload: TPayload;
+    };
+
+function resolveTargetedCombatMutation<TPayload>(
+  input: TargetedCombatMutation<TPayload>,
+  fallbackCombatant: CombatantSummary | null | undefined,
+): { combatant: CombatantSummary | null | undefined; focusCombatantId: number | null; payload: TPayload } {
+  if (
+    typeof input === "object" &&
+    input !== null &&
+    "payload" in input
+  ) {
+    const combatant = input.combatant ?? fallbackCombatant;
+    return {
+      combatant,
+      focusCombatantId: input.focusCombatantId ?? combatant?.id ?? null,
+      payload: input.payload,
+    };
+  }
+  return {
+    combatant: fallbackCombatant,
+    focusCombatantId: fallbackCombatant?.id ?? null,
+    payload: input,
+  };
+}
+
 export function useCombatMutations({
   apiClient,
   campaignSlug,
@@ -108,22 +139,24 @@ export function useCombatMutations({
   });
 
   const updateVitalsMutation = useMutation({
-    mutationFn: (draft: CombatVitalsPatchPayload) => {
-      if (!selectedCombatant) {
+    mutationFn: (input: TargetedCombatMutation<CombatVitalsPatchPayload>) => {
+      const { combatant, focusCombatantId, payload } = resolveTargetedCombatMutation(input, selectedCombatant);
+      if (!combatant) {
         throw new Error("Choose a combatant first.");
       }
-      return apiClient.patchCombatantVitals(campaignSlug, selectedCombatant.id, draft);
+      return apiClient.patchCombatantVitals(campaignSlug, combatant.id, payload, focusCombatantId);
     },
     onSuccess: (response) => replaceCombatPayload(response, "Vitals saved."),
     onError: handleCombatMutationError,
   });
 
   const updateResourcesMutation = useMutation({
-    mutationFn: (draft: CombatResourcesPatchPayload) => {
-      if (!selectedCombatant) {
+    mutationFn: (input: TargetedCombatMutation<CombatResourcesPatchPayload>) => {
+      const { combatant, focusCombatantId, payload } = resolveTargetedCombatMutation(input, selectedCombatant);
+      if (!combatant) {
         throw new Error("Choose a combatant first.");
       }
-      return apiClient.patchCombatantResources(campaignSlug, selectedCombatant.id, draft);
+      return apiClient.patchCombatantResources(campaignSlug, combatant.id, payload, focusCombatantId);
     },
     onSuccess: (response) => replaceCombatPayload(response, "Action economy saved."),
     onError: handleCombatMutationError,

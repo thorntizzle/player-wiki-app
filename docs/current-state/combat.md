@@ -10,13 +10,15 @@ Last updated: 2026-06-25
 
 - Combat tracker is currently implemented for DND-5E campaigns.
 - Player-facing Gen2 `Combat` defaults to the viewer's tracked player character when one exists, keeps turn order and the jump selector above the workspace, and treats combatant inspection as local page state rather than rewriting `combatant=` for ordinary player clicks.
+- The player-facing Combat Character workspace is a single character card: the normal Combat Character header, HP/rest controls, combat movement/action-economy controls, combat-only action/feature sections, and the shared character sections live in one card flow. Players do not get a separate selected-PC selector in that card.
 - Compatibility `Combat Character` remains available for tracked PCs.
 - DM-only `Status` owns selected-combatant inspection and tactical editing.
 - DM-only `DM page` / controls owns setup, seeding, and cleanup.
 - `/combat/dm` defaults to the full-width `DM status` selected-combatant workspace, while `?view=controls` is a controls-only setup/seeding/cleanup view.
-- The Gen2 selected-combatant snapshot card groups HP, movement, action economy, active conditions, and visible source-backed NPC resources. DM Status folds editable turn focus, vitals, action economy, source-backed NPC resource counters, conditions, and selected-combatant removal into that selected snapshot instead of rendering separate tactical cards.
+- The Gen2 selected-combatant snapshot card groups HP, movement, action economy, active conditions, and visible source-backed NPC resources. DM Status folds editable turn focus, NPC vitals, NPC action economy, source-backed NPC resource counters, conditions, and selected-combatant removal into that selected snapshot instead of rendering separate tactical cards; selected-PC HP and action-economy edits live in the unified Combat Character workspace.
 - The DM Status Conditions editor stays inside the selected-snapshot control card at desktop, tablet, and mobile widths. The `Add condition` disclosure stacks its fields inside the card, condition rows keep readable names/durations, and row actions such as `Remove` stay on one line.
-- In Gen2 Encounter Controls, the encounter summary/status band owns Round, current turn, combatant count, and `Advance turn`; setup and cleanup controls do not duplicate a separate tracker/status card.
+- In Gen2 DM Status and Encounter Controls, the shared encounter summary/status band owns Round, current turn, combatant count, and `Advance turn`; setup, cleanup, and DM tactical controls do not duplicate a separate tracker/status card.
+- When DM Status focuses a player character, it mounts the same unified Combat Character workspace beneath the selected-combatant snapshot. DM/admin users still select characters through the status combatant focus/carousel instead of a separate player-style selector.
 - Selected-PC combat workspaces expose combat-specific character sections from the presented character data, including Actions, Bonus Actions, Reactions, Attacks, and Features when present, followed by the shared CharacterPane for durable sheet sections and mutable-state edits.
 
 ## Combat State Contract
@@ -28,7 +30,7 @@ Last updated: 2026-06-25
 - Combat row-owned tactical writes use combatant-row revision where relevant.
 - Source-backed NPC resource counters are combatant-owned durable rows. DM Content statblocks and Systems monsters can seed supported limited-use counters at combatant creation, and current values persist on the combatant without mutating the underlying source entry.
 - Unsupported source mechanics that are not editable counters, such as recharge and at-will lines, are stored as read-only source notes on the combatant so visible mechanics are not silently hidden.
-- Gen2 combat payloads include `selected_player_combat_sections` for the selected tracked PC so the frontend can render combat-only Actions/Reactions/Attacks/Features without leaving the combat route.
+- Gen2 combat payloads include `selected_player_combat_sections` for the selected tracked PC so the frontend can render combat-only Actions/Reactions/Attacks/Features inside the unified Combat Character workspace without leaving the combat route.
 - Player-facing Gen2 combat selection preserves the mounted payload and viewport by keeping player inspection local; DM focus and view changes keep `combatant=` but request TanStack navigation without scroll reset.
 
 ## Seeding And Source Detail
@@ -42,17 +44,17 @@ Last updated: 2026-06-25
 ## Current Tests Or Verification
 
 - Combat changes usually need route/API tests, browser checks, and focused source-detail or mutation checks around turn flow, selected combatant, conditions, seeding, and selected-PC sheet behavior.
-- Current Gen2 combat verification includes source-contract tests for local/no-scroll selection and folded snapshot controls, API coverage for selected-PC combat sections, source-backed NPC resource seeding/edit/conflict/permission behavior, frontend typecheck/build, and Gen2 browser smoke checks for Encounter Controls and DM Status placement.
+- Current Gen2 combat verification includes source-contract tests for local/no-scroll selection, unified Combat Character workspace structure, summary-band Advance Turn placement, and folded snapshot controls; API coverage for selected-PC combat sections, source-backed NPC resource seeding/edit/conflict/permission behavior; frontend typecheck/build; and Gen2 browser smoke checks for player Combat, DM Status, and Encounter Controls placement.
 
-## Known Limits
+## Current Boundaries
 
-- Source-backed NPC resource support is intentionally limited to explicit current/max counters and common daily limited-use patterns. Richer mechanics such as recharge automation, spell-specific casting rules, shared pools, and automatic rest resets remain future work; unsupported mechanics stay visible as read-only source notes.
-- Xianxia combat automation is not implemented.
-- Encounter presets or saved rosters are future backlog work.
+- Source-backed NPC resource support currently models explicit current/max counters and common daily limited-use patterns. Other source mechanics, including recharge lines, at-will lines, spell-specific casting rules, shared pools, and reset behavior, stay visible as read-only source notes unless they are modeled as supported counters.
+- Combat automation is currently DND-5E-only. Xianxia campaigns keep their character/session surfaces without combat automation.
+- Encounter setup currently seeds individual player, Systems, DM Content, or custom combatants. Saved encounter presets and reusable rosters are not modeled.
 
 ## Related Backlog
 
-- `.local/roadmaps/live-combat-backlog.md`
+- `.local/roadmaps/combat-backlog.md`
 - `.local/roadmaps/xianxia-backlog.md`
 
 ## Source Pointers

@@ -3917,6 +3917,18 @@ textarea {
   gap: 1rem;
 }
 
+.combat-workspace-inline,
+.combat-character-inline-workspace,
+.combat-character-tactical-controls {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.combat-character-inline-workspace {
+  margin-top: 0.2rem;
+}
+
 .combat-workspace-nav {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
@@ -4812,6 +4824,13 @@ button.spell-card__main:focus-visible .spell-card__name {
   padding: 0.85rem 1rem;
   border: 1px solid var(--border);
   border-radius: 18px;
+  background: var(--surface-soft);
+}
+
+.combat-character-tactical-controls {
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
   background: var(--surface-soft);
 }
 

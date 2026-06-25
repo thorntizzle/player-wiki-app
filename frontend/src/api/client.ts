@@ -594,9 +594,10 @@ export class CampaignApiClient {
     slug: string,
     combatantId: number,
     payload: CombatVitalsPatchPayload,
+    focusCombatantId: number | null = combatantId,
   ): Promise<CombatPayload> {
     return this.requestJson<CombatPayload>(
-      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/combatants/${combatantId}/vitals${this.combatFocusSuffix(combatantId)}`,
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/combatants/${combatantId}/vitals${this.combatFocusSuffix(focusCombatantId)}`,
       {
         method: "PATCH",
         body: JSON.stringify(payload),
@@ -608,9 +609,10 @@ export class CampaignApiClient {
     slug: string,
     combatantId: number,
     payload: CombatResourcesPatchPayload,
+    focusCombatantId: number | null = combatantId,
   ): Promise<CombatPayload> {
     return this.requestJson<CombatPayload>(
-      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/combatants/${combatantId}/resources${this.combatFocusSuffix(combatantId)}`,
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/combat/combatants/${combatantId}/resources${this.combatFocusSuffix(focusCombatantId)}`,
       {
         method: "PATCH",
         body: JSON.stringify(payload),

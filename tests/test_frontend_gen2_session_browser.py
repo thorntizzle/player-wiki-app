@@ -1973,14 +1973,11 @@ def test_gen2_combat_browser_opens_player_workspace_and_preserves_focused_draft(
             expect(carousel.get_by_role("button", name=re.compile(r"Arden March", re.I))).to_be_visible()
             expect(carousel.get_by_role("button", name=re.compile(r"Clockwork Hound", re.I))).to_be_visible()
             workspace = page.locator(".combat-pc-workspace")
-            expect(workspace.locator("> .section-heading h2")).to_be_visible()
+            expect(workspace.locator("> .section-heading")).to_have_count(0)
             expect(workspace.locator("> section.card")).to_have_count(0)
             expect(workspace.locator("> .panel, > .panel-nested")).to_have_count(0)
-            target_list = workspace.locator("> .section-heading .combat-target-list")
-            expect(target_list).to_be_visible()
-            assert target_list.locator("button.button-link").count() >= 1
-            expect(target_list.locator("a")).to_have_count(0)
-            expect(target_list.locator(".button.button-secondary")).to_have_count(0)
+            expect(workspace.locator("> .section-heading .combat-target-list")).to_have_count(0)
+            expect(workspace.locator(".character-selector-card")).to_have_count(0)
             combat_character_header = workspace.locator("article.card.character-sheet.session-character-sheet > header.character-header")
             expect(combat_character_header.locator(".eyebrow")).to_have_text("Combat Character")
             expect(combat_character_header.locator(".hero-actions")).to_be_visible()
@@ -1989,6 +1986,9 @@ def test_gen2_combat_browser_opens_player_workspace_and_preserves_focused_draft(
             expect(combat_character_header.locator(".article-actions")).to_have_count(0)
             expect(combat_character_header.locator(".button.button-secondary")).to_have_count(0)
             expect(workspace.locator(".section-tabs")).to_have_count(0)
+            expect(workspace.locator(".combat-character-tactical-controls")).to_be_visible()
+            expect(workspace.locator(".combat-workspace-card")).to_have_count(0)
+            expect(workspace.get_by_text("Combat sections")).to_have_count(0)
             combat_character_nav = workspace.locator("nav.combat-workspace-nav.session-character-section-nav")
             expect(combat_character_nav).to_be_visible()
             expect(combat_character_nav.locator("button[aria-current='page']")).to_have_count(1)
@@ -2003,11 +2003,11 @@ def test_gen2_combat_browser_opens_player_workspace_and_preserves_focused_draft(
             _assert_character_detail_trigger_classes(workspace.locator("article.card.character-sheet.session-character-sheet"))
 
             carousel.get_by_role("button", name=re.compile(r"Clockwork Hound", re.I)).click()
-            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?combatant=\d+"))
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat$"))
             expect(page.get_by_role("heading", name="Clockwork Hound")).to_be_visible()
 
             carousel.get_by_role("button", name=re.compile(r"Arden March", re.I)).click()
-            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?combatant=\d+"))
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat$"))
             expect(combat_character_header.locator(".eyebrow")).to_have_text("Combat Character")
             current_hp = workspace.locator("#character-current-hp")
             expect(current_hp).to_be_visible(timeout=10000)
@@ -2242,7 +2242,7 @@ def test_gen2_combat_visual_parity_smoke(
             expect(desktop_page.locator(".combat-carousel > .section-heading > div > h2")).to_have_text("Turn Order")
             expect(desktop_page.locator(".combat-carousel > .section-heading .meta")).to_contain_text("Initiative is pinned here")
             expect(desktop_page.locator(".combat-carousel").get_by_label("Jump to combatant")).to_be_visible()
-            expect(desktop_page.locator(".combat-pc-workspace > .section-heading h2")).to_be_visible()
+            expect(desktop_page.locator(".combat-pc-workspace article.character-sheet")).to_be_visible()
             player_metrics = desktop_page.evaluate(
                 """() => {
                     const main = document.querySelector("main.main-shell") || document.querySelector("main");

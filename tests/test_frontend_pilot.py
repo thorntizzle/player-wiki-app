@@ -1337,6 +1337,7 @@ def test_combat_chrome_components_preserve_summary_carousel_and_view_switch() ->
     assert "<span className=\"meta\">Round</span>" in summary_source
     assert "<span className=\"meta\">Current turn</span>" in summary_source
     assert "<span className=\"meta\">Combatants</span>" in summary_source
+    assert "{isAdvancingTurn ? \"Advancing...\" : \"Advance turn\"}" in summary_source
 
     carousel_source = chrome_source[chrome_source.index("export function CombatantCarousel") :]
     assert 'className="combat-carousel"' in carousel_source
@@ -1920,10 +1921,8 @@ def test_combat_turn_focus_dm_status_chrome_in_source() -> None:
     assert re.search(r'<label className="field">\s*<span>Priority</span>', turn_focus_markup) is not None
     assert "className=\"chat-label\"" not in turn_focus_markup
 
-    assert 'className="hero-actions combat-turn-actions"' in turn_focus_markup
-    assert '{isAdvancingTurn ? "Advancing..." : "Advance turn"}' in turn_focus_markup
-    assert '<button type="button" onClick={onAdvanceTurn} disabled={isAdvancingTurn}>' in turn_focus_markup
-
+    assert 'className="hero-actions combat-turn-actions"' not in turn_focus_markup
+    assert "Advance turn" not in turn_focus_markup
     assert '<div className="button-row">' not in turn_focus_markup
 
 
@@ -1957,15 +1956,28 @@ def test_combat_dm_status_tactical_forms_chrome_in_source() -> None:
 def test_combat_player_workspace_target_chrome_in_source() -> None:
     source = Path("frontend/src/pages/CombatPage.tsx").read_text(encoding="utf-8")
     workspace_markup = Path("frontend/src/components/CombatPlayerWorkspace.tsx").read_text(encoding="utf-8")
+    character_pane_source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
 
     assert 'import { CombatPlayerWorkspace } from "../components/CombatPlayerWorkspace";' in source
     assert "const renderPlayerWorkspace" not in source
     assert "<CombatPlayerWorkspace" in source
+    assert 'effectiveCombatView === "status" && selectedCombatant?.character_slug' in source
+    assert 'canManageCombat && effectiveCombatView !== "player"' in source
 
     assert 'className="combat-target-list"' in workspace_markup
     assert 'className={target.is_selected ? "button-link" : "ghost-button"}' in workspace_markup
     assert 'onClick={() => onSelectCombatant(target.combatant_id)}' in workspace_markup
     assert '<p className="meta">{target.subtitle}' in workspace_markup
+    assert "CombatCharacterTacticalControls" in workspace_markup
+    assert 'className="combat-character-tactical-controls"' in workspace_markup
+    assert "selectedCombatant.can_edit_resources" in workspace_markup
+    assert "onUpdateResources(selectedCombatant" in workspace_markup
+    assert "showEmbeddedCharacterSelector={showEmbeddedCharacterSelector}" in workspace_markup
+    assert "combatWorkspaceContent=" in workspace_markup
+    assert "Selected PC workspace" not in workspace_markup
+    assert "Combat sections" not in workspace_markup
+    assert "combatWorkspaceContent?: ReactNode" in character_pane_source
+    assert "showEmbeddedCharacterSelector?: boolean" in character_pane_source
 
     assert 'className="tab-button' not in workspace_markup
     assert 'className="button-row"' not in workspace_markup

@@ -23,7 +23,7 @@ Last updated: 2026-06-25
 - Native Flask create and level-up live previews preserve field focus and viewport position while async preview fragments refresh. Normal Character Systems item lookup keeps the current result list visible while a fresh search is in flight.
 - `/session/character` remains the active-session sheet lane. The player-facing Session shell can lazy-load Session Character as a mounted pane; direct `/session/character` remains the full-page and no-JS fallback. In Gen2, the Session Character selector is a row under the Session shell tabs with `Open full character page`; it is outside the sheet card, and the embedded sheet omits the duplicate `Session Character` header.
 - Combat and DM status selected-PC views reuse the shared character presentation and state-edit contracts where relevant.
-- Gen2 Combat adds a combat-only selected-PC section layer above the shared CharacterPane, populated from presented character data for Actions, Bonus Actions, Reactions, Attacks, and Features.
+- Gen2 Combat mounts selected-PC play inside the unified Combat Character card. The card keeps the normal character header, HP/rest controls, movement/action-economy combat controls, combat-only Actions/Bonus Actions/Reactions/Attacks/Features sections, and the shared CharacterPane section model in one flow.
 
 ## Current Data Contract
 
