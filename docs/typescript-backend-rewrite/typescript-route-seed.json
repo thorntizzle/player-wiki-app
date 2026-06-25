@@ -81,6 +81,24 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/assets",
+      "route_family": "api_v1_content",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/content/assets",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono content asset management list endpoint for fixture-only read-only mode."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/assets/<path:asset_ref>",
+      "route_family": "api_v1_content",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/content/assets/*",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono content asset management detail endpoint for fixture-only read-only mode."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/content/pages/<path:page_ref>",
       "route_family": "api_v1_content",
       "status": "implemented_fixture_readonly",

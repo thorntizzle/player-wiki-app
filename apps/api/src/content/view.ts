@@ -1,4 +1,5 @@
 import type {
+  CampaignAssetFileRecord,
   CampaignConfigRecord,
   CampaignPageFileRecord,
   ContentPagePayload,
@@ -90,6 +91,54 @@ export function buildCampaignConfigPayload(record: CampaignConfigRecord): Campai
       config: record.config,
       editable_fields: [...EDITABLE_FIELDS].sort(),
     },
+  };
+}
+
+function buildContentAssetFilePayload(
+  campaignSlug: string,
+  record: CampaignAssetFileRecord,
+  includeData: boolean,
+) {
+  const payload: {
+    asset_ref: string;
+    relative_path: string;
+    size_bytes: number;
+    media_type: string;
+    updated_at: string;
+    url: string;
+    data_base64?: string;
+  } = {
+    asset_ref: record.asset_ref,
+    relative_path: record.relative_path,
+    size_bytes: record.size_bytes,
+    media_type: record.media_type,
+    updated_at: record.updated_at,
+    url: `/campaigns/${campaignSlug}/assets/${record.asset_ref}`,
+  };
+
+  if (includeData) {
+    payload.data_base64 = record.data_base64 || "";
+  }
+  return payload;
+}
+
+export function buildContentAssetListPayload(
+  campaignSlug: string,
+  records: CampaignAssetFileRecord[],
+): { ok: true; assets: ReturnType<typeof buildContentAssetFilePayload>[] } {
+  return {
+    ok: true,
+    assets: records.map((record) => buildContentAssetFilePayload(campaignSlug, record, false)),
+  };
+}
+
+export function buildContentAssetDetailPayload(
+  campaignSlug: string,
+  record: CampaignAssetFileRecord,
+): { ok: true; asset_file: ReturnType<typeof buildContentAssetFilePayload> } {
+  return {
+    ok: true,
+    asset_file: buildContentAssetFilePayload(campaignSlug, record, true),
   };
 }
 

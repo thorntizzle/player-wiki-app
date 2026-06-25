@@ -32,6 +32,16 @@ export interface CampaignPageFileRecord {
   page: ContentPage;
 }
 
+export interface CampaignAssetFileRecord {
+  asset_ref: string;
+  relative_path: string;
+  file_path: string;
+  size_bytes: number;
+  media_type: string;
+  updated_at: string;
+  data_base64?: string;
+}
+
 export interface ContentPageRemovalSafety {
   blockers_by_type: Record<string, string[]>;
   samples: Record<string, string>;

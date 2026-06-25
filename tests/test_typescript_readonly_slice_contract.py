@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from datetime import datetime
 import os
 import re
@@ -182,6 +183,19 @@ def _content_page_record_summary(page):
     }
 
 
+def _content_asset_record_summary(asset):
+    return {
+        key: asset[key]
+        for key in (
+            "asset_ref",
+            "relative_path",
+            "size_bytes",
+            "media_type",
+            "url",
+        )
+    }
+
+
 def _content_page_removal_summary(page):
     return {
         "can_hard_delete": page["can_hard_delete"],
@@ -260,6 +274,53 @@ def test_typescript_content_page_detail_matches_flask_contract(typescript_api_se
     assert ts_page_file["body_markdown"].strip()
     assert isinstance(ts_page_file["updated_at"], str) and ts_page_file["updated_at"]
     _normalize_timestamp(ts_page_file["updated_at"])
+
+
+def test_typescript_content_assets_list_matches_flask_contract(typescript_api_server, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    flask_response = client.get("/api/v1/campaigns/linden-pass/content/assets")
+    assert flask_response.status_code == 200
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/assets")
+    assert status == 200
+
+    assert payload["ok"] is True
+    assert isinstance(payload["assets"], list)
+    assert isinstance(flask_payload["assets"], list)
+    assert len(payload["assets"]) == len(flask_payload["assets"]) == 2
+    assert [asset["asset_ref"] for asset in payload["assets"]] == [
+        asset["asset_ref"] for asset in flask_payload["assets"]
+    ]
+
+    for flask_asset, ts_asset in zip(flask_payload["assets"], payload["assets"]):
+        assert "data_base64" not in ts_asset
+        assert _content_asset_record_summary(ts_asset) == _content_asset_record_summary(flask_asset)
+        assert isinstance(ts_asset["updated_at"], str) and ts_asset["updated_at"]
+        _normalize_timestamp(ts_asset["updated_at"])
+
+
+def test_typescript_content_asset_detail_matches_flask_contract(typescript_api_server, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    target_asset_ref = "npcs/captain-lyra-vale.png"
+    flask_response = client.get(f"/api/v1/campaigns/linden-pass/content/assets/{target_asset_ref}")
+    assert flask_response.status_code == 200
+    flask_payload = flask_response.get_json()
+    assert flask_payload["ok"] is True
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/assets/{target_asset_ref}"
+    )
+    assert status == 200
+
+    assert payload["ok"] is True
+    flask_asset_file = flask_payload["asset_file"]
+    ts_asset_file = payload["asset_file"]
+    assert _content_asset_record_summary(ts_asset_file) == _content_asset_record_summary(flask_asset_file)
+    assert ts_asset_file["data_base64"] == flask_asset_file["data_base64"]
+    assert len(base64.b64decode(ts_asset_file["data_base64"])) == ts_asset_file["size_bytes"]
+    assert isinstance(ts_asset_file["updated_at"], str) and ts_asset_file["updated_at"]
+    _normalize_timestamp(ts_asset_file["updated_at"])
 
 
 def test_typescript_session_matches_flask_contract_readonly_fixture(typescript_api_server, client, users, sign_in):
@@ -434,3 +495,17 @@ def test_typescript_wiki_missing_resources_return_json(typescript_api_server):
     assert status == 404
     assert payload["ok"] is False
     assert payload["error"]["code"] == "content_page_not_found"
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/definitely-not-a-campaign/content/assets"
+    )
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "campaign_not_found"
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/assets/definitely-not-an-asset.png"
+    )
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "content_asset_not_found"

@@ -5,7 +5,12 @@ import { parse } from "yaml";
 
 import type { ApiConfig } from "../config.js";
 import { getCampaignBySlug } from "../campaigns/repository.js";
-import type { CampaignPageFileRecord, CampaignConfigRecord, ContentPage } from "./types.js";
+import type {
+  CampaignAssetFileRecord,
+  CampaignPageFileRecord,
+  CampaignConfigRecord,
+  ContentPage,
+} from "./types.js";
 
 const FRONTMATTER_PATTERN = /^---\s*\n([\s\S]*?)\n---\s*\n?/;
 const SECTION_ORDER: Record<string, number> = {
@@ -67,6 +72,11 @@ const DEFAULT_DISPLAY_ORDER = 10_000;
 interface CampaignContentContext {
   currentSession: number;
   contentDir: string;
+  assetsDir: string;
+}
+
+interface CampaignContentContextOptions {
+  requireContentDir?: boolean;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -251,9 +261,52 @@ function normalizeContentRef(value: string): string | null {
   return normalized;
 }
 
+function normalizeAssetRef(value: string): string | null {
+  const normalized = value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  if (!normalized) {
+    return null;
+  }
+  const segments = normalized.split("/");
+  if (segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
+    return null;
+  }
+  return segments.join("/");
+}
+
+function resolveSafeAssetPath(assetsDir: string, assetRef: string): string | null {
+  const safeAssetRef = normalizeAssetRef(assetRef);
+  if (!safeAssetRef) {
+    return null;
+  }
+
+  const assetsRoot = path.resolve(assetsDir);
+  const resolvedPath = path.resolve(assetsRoot, ...safeAssetRef.split("/"));
+  if (resolvedPath !== assetsRoot && !resolvedPath.startsWith(`${assetsRoot}${path.sep}`)) {
+    return null;
+  }
+  return resolvedPath;
+}
+
+const ASSET_MEDIA_TYPE_BY_EXTENSION: Record<string, string> = {
+  ".gif": "image/gif",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".json": "application/json",
+  ".md": "text/markdown",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".txt": "text/plain",
+  ".webp": "image/webp",
+};
+
+function guessAssetMediaType(filePath: string): string {
+  return ASSET_MEDIA_TYPE_BY_EXTENSION[path.extname(filePath).toLowerCase()] || "application/octet-stream";
+}
+
 async function loadCampaignContentContext(
   config: ApiConfig,
   campaignSlug: string,
+  options: CampaignContentContextOptions = {},
 ): Promise<CampaignContentContext | null> {
   const safeCampaign = await getCampaignBySlug(config, campaignSlug);
   if (!safeCampaign) {
@@ -285,17 +338,23 @@ async function loadCampaignContentContext(
     campaignDir,
     asStringOrDefault((source as Record<string, unknown>).player_content_dir, "content"),
   );
+  const assetsDir = path.resolve(
+    campaignDir,
+    asStringOrDefault((source as Record<string, unknown>).asset_dir, "assets"),
+  );
 
-  try {
-    const contentStats = await fs.stat(contentDir);
-    if (!contentStats.isDirectory()) {
+  if (options.requireContentDir ?? true) {
+    try {
+      const contentStats = await fs.stat(contentDir);
+      if (!contentStats.isDirectory()) {
+        return null;
+      }
+    } catch {
       return null;
     }
-  } catch {
-    return null;
   }
 
-  return { currentSession, contentDir };
+  return { currentSession, contentDir, assetsDir };
 }
 
 async function listCampaignMarkdownFiles(contentDir: string): Promise<string[]> {
@@ -322,6 +381,48 @@ async function listCampaignMarkdownFiles(contentDir: string): Promise<string[]> 
         continue;
       }
       if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
+        found.push(child);
+      }
+    }
+  }
+
+  found.sort();
+  return found;
+}
+
+async function listCampaignAssetFiles(assetsDir: string): Promise<string[]> {
+  const stack: string[] = [assetsDir];
+  const found: string[] = [];
+
+  try {
+    const assetsStats = await fs.stat(assetsDir);
+    if (!assetsStats.isDirectory()) {
+      return [];
+    }
+  } catch {
+    return [];
+  }
+
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    if (!dir) {
+      continue;
+    }
+
+    let entries: { isDirectory: () => boolean; isFile: () => boolean; name: string }[] = [];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const child = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(child);
+        continue;
+      }
+      if (entry.isFile()) {
         found.push(child);
       }
     }
@@ -400,6 +501,22 @@ function toPageFromFile(
     metadata: metadataRecord,
     body_markdown: body.trim(),
     page,
+  };
+}
+
+function toAssetFileRecord(
+  filePath: string,
+  assetsDir: string,
+  stats: { mtime: Date; size: number },
+): CampaignAssetFileRecord {
+  const relativePath = path.relative(assetsDir, filePath).replace(/\\/g, "/");
+  return {
+    asset_ref: relativePath,
+    relative_path: relativePath,
+    file_path: filePath,
+    size_bytes: stats.size,
+    media_type: guessAssetMediaType(filePath),
+    updated_at: toIsoTimestamp(stats.mtime),
   };
 }
 
@@ -517,6 +634,29 @@ export async function listCampaignContentPages(
   return stripDuplicateContentRefs(records);
 }
 
+export async function listCampaignContentAssets(
+  config: ApiConfig,
+  campaignSlug: string,
+): Promise<CampaignAssetFileRecord[] | null> {
+  const campaign = await loadCampaignContentContext(config, campaignSlug, { requireContentDir: false });
+  if (!campaign) {
+    return null;
+  }
+
+  const filePaths = await listCampaignAssetFiles(campaign.assetsDir);
+  const records: CampaignAssetFileRecord[] = [];
+  for (const filePath of filePaths) {
+    let fileStats;
+    try {
+      fileStats = await fs.stat(filePath);
+    } catch {
+      continue;
+    }
+    records.push(toAssetFileRecord(filePath, campaign.assetsDir, fileStats));
+  }
+  return records;
+}
+
 export async function getCampaignContentPage(
   config: ApiConfig,
   campaignSlug: string,
@@ -539,10 +679,55 @@ export async function getCampaignContentPage(
   return found ?? null;
 }
 
+export async function getCampaignContentAsset(
+  config: ApiConfig,
+  campaignSlug: string,
+  rawAssetRef: string,
+): Promise<CampaignAssetFileRecord | null> {
+  let assetRef = rawAssetRef;
+  try {
+    assetRef = decodeURIComponent(rawAssetRef);
+  } catch {
+    // keep raw value to preserve failure semantics.
+  }
+
+  const campaign = await loadCampaignContentContext(config, campaignSlug, { requireContentDir: false });
+  if (!campaign) {
+    return null;
+  }
+
+  const assetPath = resolveSafeAssetPath(campaign.assetsDir, assetRef);
+  if (!assetPath) {
+    return null;
+  }
+
+  let fileStats;
+  try {
+    fileStats = await fs.stat(assetPath);
+    if (!fileStats.isFile()) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  const record = toAssetFileRecord(assetPath, campaign.assetsDir, fileStats);
+  record.data_base64 = (await fs.readFile(assetPath)).toString("base64");
+  return record;
+}
+
 export function sanitizeContentPageRef(rawPageRef: string): string | null {
   try {
     return normalizeContentRef(decodeURIComponent(rawPageRef));
   } catch {
     return normalizeContentRef(rawPageRef);
+  }
+}
+
+export function sanitizeContentAssetRef(rawAssetRef: string): string | null {
+  try {
+    return normalizeAssetRef(decodeURIComponent(rawAssetRef));
+  } catch {
+    return normalizeAssetRef(rawAssetRef);
   }
 }

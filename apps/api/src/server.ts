@@ -11,12 +11,17 @@ import { ROUTES } from "./routes.js";
 import { buildSessionStatePayload } from "./session/view.js";
 import { getCampaignConfigFile } from "./content/repository.js";
 import {
+  getCampaignContentAsset,
   getCampaignContentPage,
+  listCampaignContentAssets,
   listCampaignContentPages,
+  sanitizeContentAssetRef,
   sanitizeContentPageRef,
 } from "./content/repository.js";
 import {
   buildCampaignConfigPayload,
+  buildContentAssetDetailPayload,
+  buildContentAssetListPayload,
   buildContentPageDetailPayload,
   buildContentPageListPayload,
 } from "./content/view.js";
@@ -184,12 +189,37 @@ function contentPageRefFromWildcard(pathname: string, campaignSlug: string): str
   }
 }
 
+function contentAssetRefFromWildcard(pathname: string, campaignSlug: string): string {
+  const prefix = `/api/v1/campaigns/${campaignSlug}/content/assets/`;
+  if (!pathname.startsWith(prefix)) {
+    return "";
+  }
+  try {
+    return (
+      sanitizeContentAssetRef(
+        pathname.slice(prefix.length),
+      ) || ""
+    );
+  } catch {
+    return "";
+  }
+}
+
 function contentPageNotFound(campaignSlug: string, pageRef: string) {
   return jsonError(
     "content_page_not_found",
     `Could not find content page '${pageRef}' in campaign '${campaignSlug}'.`,
     404,
     { campaign_slug: campaignSlug, page_ref: pageRef },
+  );
+}
+
+function contentAssetNotFound(campaignSlug: string, assetRef: string) {
+  return jsonError(
+    "content_asset_not_found",
+    `Could not find content asset '${assetRef}' in campaign '${campaignSlug}'.`,
+    404,
+    { campaign_slug: campaignSlug, asset_ref: assetRef },
   );
 }
 
@@ -437,6 +467,46 @@ app.get(ROUTES.campaignConfig, async (ctx) => {
   }
 
   return ctx.json(buildCampaignConfigPayload(campaignConfig));
+});
+
+app.get(ROUTES.contentAssets, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const assets = await listCampaignContentAssets(config, campaignSlug);
+  if (!assets) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildContentAssetListPayload(campaignSlug, assets));
+});
+
+app.get(ROUTES.contentAsset, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const assetRef = contentAssetRefFromWildcard(ctx.req.path, campaignSlug);
+  if (!assetRef) {
+    const error = contentAssetNotFound(campaignSlug, assetRef);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const asset = await getCampaignContentAsset(config, campaignSlug, assetRef);
+  if (!asset) {
+    const error = contentAssetNotFound(campaignSlug, assetRef);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildContentAssetDetailPayload(campaignSlug, asset));
 });
 
 app.get(ROUTES.contentPages, async (ctx) => {

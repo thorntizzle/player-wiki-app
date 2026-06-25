@@ -127,6 +127,55 @@ if (typeof campaignConfig.payload?.config_file?.updated_at !== "string" || !camp
   throw new Error(`Expected non-empty updated_at string, got ${campaignConfig.payload?.config_file?.updated_at}`);
 }
 
+const contentAssets = await requestJson("/api/v1/campaigns/linden-pass/content/assets");
+if (contentAssets.status !== 200) {
+  throw new Error(`Expected content assets list endpoint 200, got ${contentAssets.status}`);
+}
+if (!Array.isArray(contentAssets.payload?.assets) || contentAssets.payload.assets.length !== 2) {
+  throw new Error(`Expected 2 fixture content assets, got ${contentAssets.payload?.assets?.length}`);
+}
+const lyraAsset = contentAssets.payload.assets.find((item) => item.asset_ref === "npcs/captain-lyra-vale.png");
+if (!lyraAsset) {
+  throw new Error("Expected Captain Lyra Vale fixture asset in content asset list.");
+}
+if (lyraAsset.relative_path !== "npcs/captain-lyra-vale.png") {
+  throw new Error(`Unexpected Captain Lyra asset relative_path: ${lyraAsset.relative_path}`);
+}
+if (lyraAsset.size_bytes !== 69) {
+  throw new Error(`Expected Captain Lyra asset size 69, got ${lyraAsset.size_bytes}`);
+}
+if (lyraAsset.media_type !== "image/png") {
+  throw new Error(`Expected Captain Lyra asset media_type image/png, got ${lyraAsset.media_type}`);
+}
+if (lyraAsset.url !== "/campaigns/linden-pass/assets/npcs/captain-lyra-vale.png") {
+  throw new Error(`Unexpected Captain Lyra asset URL: ${lyraAsset.url}`);
+}
+if (Object.hasOwn(lyraAsset, "data_base64")) {
+  throw new Error("Expected content asset list payload to omit data_base64.");
+}
+
+const contentAsset = await requestJson("/api/v1/campaigns/linden-pass/content/assets/npcs/captain-lyra-vale.png");
+if (contentAsset.status !== 200) {
+  throw new Error(`Expected content asset detail endpoint 200, got ${contentAsset.status}`);
+}
+if (contentAsset.payload?.asset_file?.asset_ref !== "npcs/captain-lyra-vale.png") {
+  throw new Error(`Expected Captain Lyra asset detail, got ${contentAsset.payload?.asset_file?.asset_ref}`);
+}
+if (contentAsset.payload?.asset_file?.media_type !== "image/png") {
+  throw new Error(`Expected Captain Lyra asset detail PNG media type, got ${contentAsset.payload?.asset_file?.media_type}`);
+}
+const assetBytes = Buffer.from(contentAsset.payload?.asset_file?.data_base64 || "", "base64");
+if (assetBytes.length !== 69) {
+  throw new Error(`Expected Captain Lyra asset detail to include 69 bytes, got ${assetBytes.length}`);
+}
+
+const missingContentAsset = await requestJson("/api/v1/campaigns/linden-pass/content/assets/definitely-not-an-asset.png");
+if (missingContentAsset.status !== 404 || missingContentAsset.payload?.error?.code !== "content_asset_not_found") {
+  throw new Error(
+    `Expected missing content asset JSON 404, got ${missingContentAsset.status} ${missingContentAsset.payload?.error?.code}`,
+  );
+}
+
 const contentPages = await requestJson("/api/v1/campaigns/linden-pass/content/pages");
 if (contentPages.status !== 200) {
   throw new Error(`Expected content pages list endpoint 200, got ${contentPages.status}`);
