@@ -1311,9 +1311,34 @@ export interface CustomSystemsEntry {
   provenance: string;
   search_metadata: string;
   body_markdown: string;
+  linked_published_page_ref?: string;
+  source_page_ref?: string;
+  item_mechanics?: CampaignItemMechanicsReview | null;
   rendered_html: string;
   href: string;
   override: SystemsEntryOverride | null;
+}
+
+export interface CampaignItemMechanicsReview {
+  version: string;
+  review_status: string;
+  support_state: string;
+  modeled_fields: string[];
+  flags: Array<Record<string, string>>;
+  field_provenance: Record<string, unknown>;
+  source_page_ref?: string;
+  intake_mode?: string;
+}
+
+export interface CampaignItemPageRow {
+  page_ref: string;
+  title: string;
+  source_ref: string;
+  route_slug: string;
+  has_structured_item: boolean;
+  entry_slug: string;
+  entry_title: string;
+  item_mechanics?: CampaignItemMechanicsReview | null;
 }
 
 export interface CustomSystemsSourceRow {
@@ -1362,6 +1387,7 @@ export interface DmContentSystemsResponse extends ApiResponseBase {
   has_proprietary_sources: boolean;
   entry_override_rows: SystemsEntryOverrideRow[];
   entry_override_count: number;
+  campaign_item_page_rows: CampaignItemPageRow[];
   custom_entry_source_rows: CustomSystemsSourceRow[];
   custom_entry_count: number;
   custom_entry_default_visibility: string;
@@ -1420,6 +1446,16 @@ export interface CustomSystemsEntryPayload {
   provenance: string;
   search_metadata: string;
   body_markdown: string;
+  source_page_ref?: string;
+  item_mechanics_review_status?: string;
+  item_mechanics?: Record<string, unknown>;
+}
+
+export interface CampaignItemMechanicsImportPayload {
+  page_ref: string;
+  visibility?: string;
+  item_mechanics_review_status?: string;
+  item_mechanics?: Record<string, unknown>;
 }
 
 export interface CustomSystemsEntryResponse extends ApiResponseBase {

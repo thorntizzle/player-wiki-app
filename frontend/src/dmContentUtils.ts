@@ -60,6 +60,19 @@ export interface DmContentSystemsCustomDraftState {
   provenance: string;
   searchMetadata: string;
   bodyMarkdown: string;
+  sourcePageRef: string;
+  itemMechanicsReviewStatus: string;
+  itemBaseItem: string;
+  itemBonusWeapon: string;
+  itemBonusAc: string;
+  itemArmorType: string;
+  itemArmorAc: string;
+  itemDamage: string;
+  itemVersatileDamage: string;
+  itemRange: string;
+  itemProperties: string;
+  itemRarity: string;
+  itemAttunement: string;
 }
 
 export function buildInitialStagedArticleDraft(article: SessionArticle): StagedArticleDraftState {
@@ -135,10 +148,24 @@ export function buildInitialSystemsCustomDraft(payload?: DmContentSystemsRespons
     provenance: "",
     searchMetadata: "",
     bodyMarkdown: "",
+    sourcePageRef: "",
+    itemMechanicsReviewStatus: "draft",
+    itemBaseItem: "",
+    itemBonusWeapon: "",
+    itemBonusAc: "",
+    itemArmorType: "",
+    itemArmorAc: "",
+    itemDamage: "",
+    itemVersatileDamage: "",
+    itemRange: "",
+    itemProperties: "",
+    itemRarity: "",
+    itemAttunement: "",
   };
 }
 
 export function buildSystemsCustomDraftFromEntry(entry: CustomSystemsEntry): DmContentSystemsCustomDraftState {
+  const review = entry.item_mechanics;
   return {
     title: entry.title,
     slugLeaf: entry.slug,
@@ -147,11 +174,24 @@ export function buildSystemsCustomDraftFromEntry(entry: CustomSystemsEntry): DmC
     provenance: entry.provenance || "",
     searchMetadata: entry.search_metadata || "",
     bodyMarkdown: entry.body_markdown || "",
+    sourcePageRef: entry.source_page_ref || entry.linked_published_page_ref || review?.source_page_ref || "",
+    itemMechanicsReviewStatus: review?.review_status || "draft",
+    itemBaseItem: "",
+    itemBonusWeapon: "",
+    itemBonusAc: "",
+    itemArmorType: "",
+    itemArmorAc: "",
+    itemDamage: "",
+    itemVersatileDamage: "",
+    itemRange: "",
+    itemProperties: "",
+    itemRarity: "",
+    itemAttunement: "",
   };
 }
 
 export function buildCustomSystemsPayload(draft: DmContentSystemsCustomDraftState): CustomSystemsEntryPayload {
-  return {
+  const payload: CustomSystemsEntryPayload = {
     title: draft.title.trim(),
     slug_leaf: draft.slugLeaf.trim(),
     entry_type: draft.entryType,
@@ -160,6 +200,47 @@ export function buildCustomSystemsPayload(draft: DmContentSystemsCustomDraftStat
     search_metadata: draft.searchMetadata,
     body_markdown: draft.bodyMarkdown,
   };
+  if (draft.entryType === "item") {
+    payload.source_page_ref = draft.sourcePageRef.trim();
+    payload.item_mechanics_review_status = draft.itemMechanicsReviewStatus || "draft";
+    const itemMechanics = buildManualItemMechanicsPayload(draft);
+    if (Object.keys(itemMechanics).length) {
+      payload.item_mechanics = itemMechanics;
+    }
+  }
+  return payload;
+}
+
+function buildManualItemMechanicsPayload(draft: DmContentSystemsCustomDraftState): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  addStringField(payload, "base_item", draft.itemBaseItem);
+  addNumberField(payload, "bonus_weapon", draft.itemBonusWeapon);
+  addNumberField(payload, "bonus_ac", draft.itemBonusAc);
+  addStringField(payload, "type", draft.itemArmorType);
+  addNumberField(payload, "ac", draft.itemArmorAc);
+  addStringField(payload, "damage", draft.itemDamage);
+  addStringField(payload, "versatile_damage", draft.itemVersatileDamage);
+  addStringField(payload, "range", draft.itemRange);
+  addStringField(payload, "properties", draft.itemProperties);
+  addStringField(payload, "rarity", draft.itemRarity);
+  addStringField(payload, "attunement", draft.itemAttunement);
+  return payload;
+}
+
+function addStringField(payload: Record<string, unknown>, key: string, value: string): void {
+  const trimmed = value.trim();
+  if (trimmed) {
+    payload[key] = trimmed;
+  }
+}
+
+function addNumberField(payload: Record<string, unknown>, key: string, value: string): void {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return;
+  }
+  const parsed = Number(trimmed);
+  payload[key] = Number.isFinite(parsed) ? parsed : trimmed;
 }
 
 function metadataString(metadata: ContentPageMetadata, key: string): string {

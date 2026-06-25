@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import player_wiki.app as app_module
 import pytest
 import yaml
+from player_wiki.campaign_item_mechanics import build_campaign_item_mechanics_metadata
 from player_wiki.character_campaign_options import normalize_campaign_character_option
 from player_wiki.character_campaign_progression import build_campaign_page_progression_entries
 from player_wiki.character_builder import (
@@ -9368,6 +9369,91 @@ def test_recalculate_definition_attacks_uses_campaign_item_page_weapon_bonus_met
     assert attack["damage_type"] == "bludgeoning"
     assert attack["page_ref"] == "items/censer-of-last-light"
     assert attack["equipment_refs"] == ["censer-of-last-light-1"]
+
+
+def test_recalculate_definition_attacks_uses_approved_campaign_systems_item_mechanics():
+    definition = _minimal_character_definition("huran-bearer", "Huran Bearer")
+    definition.proficiencies["weapons"] = ["Martial Weapons"]
+    item_entry = _systems_entry(
+        "item",
+        "custom-linden-pass-consecrated-huran-blade",
+        "Consecrated Huran Blade",
+        source_id="CUSTOM-LINDEN-PASS",
+        metadata=build_campaign_item_mechanics_metadata(
+            title="Consecrated Huran Blade",
+            body_markdown=(
+                "*Weapon (longsword), uncommon (requires attunement)*\n\n"
+                "You gain a +1 bonus to attack and damage rolls made with this magic weapon.\n"
+            ),
+            source_page_ref="items/consecrated-huran-blade",
+            review_status="approved",
+        ),
+    )
+    definition.equipment_catalog = [
+        {
+            "id": "consecrated-huran-blade-1",
+            "name": "Consecrated Huran Blade",
+            "default_quantity": 1,
+            "weight": "3 lb.",
+            "notes": "",
+            "systems_ref": _systems_ref(item_entry),
+            "is_equipped": True,
+            "is_attuned": True,
+        }
+    ]
+
+    recalculated = _recalculate_definition_attacks(
+        definition,
+        item_catalog=_build_item_catalog([item_entry]),
+    )
+
+    assert len(recalculated) == 2
+    attack = next(item for item in recalculated if item["damage"] == "1d8+4 slashing")
+    assert attack["name"] == "Consecrated Huran Blade"
+    assert attack["category"] == "melee weapon"
+    assert attack["attack_bonus"] == 6
+    assert attack["damage"] == "1d8+4 slashing"
+    assert attack["systems_ref"]["slug"] == item_entry.slug
+    assert attack["equipment_refs"] == ["consecrated-huran-blade-1"]
+
+
+def test_recalculate_definition_attacks_ignores_unapproved_campaign_systems_item_mechanics():
+    definition = _minimal_character_definition("draft-bearer", "Draft Bearer")
+    definition.proficiencies["weapons"] = ["Martial Weapons"]
+    item_entry = _systems_entry(
+        "item",
+        "custom-linden-pass-consecrated-huran-blade",
+        "Consecrated Huran Blade",
+        source_id="CUSTOM-LINDEN-PASS",
+        metadata=build_campaign_item_mechanics_metadata(
+            title="Consecrated Huran Blade",
+            body_markdown=(
+                "*Weapon (longsword), uncommon (requires attunement)*\n\n"
+                "You gain a +1 bonus to attack and damage rolls made with this magic weapon.\n"
+            ),
+            source_page_ref="items/consecrated-huran-blade",
+            review_status="draft",
+        ),
+    )
+    definition.equipment_catalog = [
+        {
+            "id": "consecrated-huran-blade-1",
+            "name": "Consecrated Huran Blade",
+            "default_quantity": 1,
+            "weight": "3 lb.",
+            "notes": "",
+            "systems_ref": _systems_ref(item_entry),
+            "is_equipped": True,
+            "is_attuned": True,
+        }
+    ]
+
+    recalculated = _recalculate_definition_attacks(
+        definition,
+        item_catalog=_build_item_catalog([item_entry]),
+    )
+
+    assert recalculated == []
 
 
 def test_recalculate_definition_attacks_preserves_existing_systems_link_for_matching_weapon_row():

@@ -10,6 +10,10 @@ from flask import g, has_request_context
 import markdown
 
 from .auth_store import isoformat, utcnow
+from .campaign_item_mechanics import (
+    build_campaign_item_mechanics_metadata,
+    campaign_item_review_for_metadata,
+)
 from .character_campaign_options import (
     build_campaign_page_character_option,
     normalize_campaign_base_rule_refs,
@@ -978,6 +982,110 @@ class SystemsService:
             return None
         return entry
 
+    def list_campaign_item_page_rows(self, campaign_slug: str) -> list[dict[str, object]]:
+        entries_by_page = self._custom_campaign_item_entries_by_linked_page(campaign_slug)
+        rows: list[dict[str, object]] = []
+        for record in self._list_campaign_item_page_records(campaign_slug):
+            page = getattr(record, "page", None)
+            page_ref = str(getattr(record, "page_ref", "") or "").strip()
+            if not page_ref or page is None:
+                continue
+            entry = entries_by_page.get(page_ref)
+            item_mechanics_review = campaign_item_review_for_metadata(dict(getattr(entry, "metadata", {}) or {})) if entry else None
+            rows.append(
+                {
+                    "page_ref": page_ref,
+                    "title": str(getattr(page, "title", "") or "").strip() or page_ref,
+                    "source_ref": str(getattr(page, "source_ref", "") or "").strip(),
+                    "route_slug": str(getattr(page, "route_slug", "") or "").strip(),
+                    "has_structured_item": entry is not None,
+                    "entry_slug": str(getattr(entry, "slug", "") or "").strip() if entry else "",
+                    "entry_title": str(getattr(entry, "title", "") or "").strip() if entry else "",
+                    "item_mechanics": item_mechanics_review,
+                }
+            )
+        return rows
+
+    def upsert_campaign_item_mechanics_entry_from_page(
+        self,
+        campaign_slug: str,
+        page_ref: str,
+        *,
+        visibility: str = "",
+        item_mechanics_review_status: object = "",
+        item_mechanics: dict[str, object] | None = None,
+        actor_user_id: int,
+        can_set_private: bool,
+    ) -> SystemsEntryRecord:
+        page_record = self._get_campaign_item_page_record(campaign_slug, page_ref)
+        if page_record is None:
+            raise SystemsPolicyValidationError("Choose a valid published item page before importing item mechanics.")
+        page = getattr(page_record, "page", None)
+        title = str(getattr(page, "title", "") or "").strip() or str(getattr(page_record, "page_ref", "") or "").strip()
+        if not title:
+            raise SystemsPolicyValidationError("Published item pages need a title before they can be imported.")
+        body_markdown = str(getattr(page_record, "body_markdown", "") or "").strip()
+        if not body_markdown:
+            raise SystemsPolicyValidationError("Published item pages need a body before they can be imported.")
+
+        source = self.ensure_campaign_custom_source(
+            campaign_slug,
+            actor_user_id=actor_user_id,
+        )
+        library = self.get_campaign_library(campaign_slug)
+        if library is None:
+            raise SystemsPolicyValidationError("That campaign does not have a systems library configured.")
+        normalized_page_ref = str(getattr(page_record, "page_ref", "") or page_ref or "").strip()
+        slug_leaf = slugify(title).replace("/", "-").strip("-")
+        if not slug_leaf:
+            raise SystemsPolicyValidationError("Published item pages need a usable title before they can be imported.")
+        slug = f"{source.source_id.lower()}-{slug_leaf}"
+        existing = self._custom_campaign_item_entries_by_linked_page(campaign_slug).get(normalized_page_ref)
+        existing_slug_entry = self.store.get_entry_by_slug(library.library_slug, slug)
+        if existing is None and existing_slug_entry is not None:
+            if not self.is_campaign_custom_entry(campaign_slug, existing_slug_entry):
+                raise SystemsPolicyValidationError("That imported item Systems slug is already in use.")
+            existing = existing_slug_entry
+        entry_key = (
+            existing.entry_key
+            if existing is not None
+            else f"{library.library_slug.lower()}|custom|{campaign_slug}|{slug_leaf}"
+        )
+        override = (
+            self.store.get_campaign_entry_override(campaign_slug, existing.entry_key)
+            if existing is not None
+            else None
+        )
+        normalized_visibility = (
+            str(visibility or "").strip()
+            or (
+                override.visibility_override
+                if override is not None and override.visibility_override
+                else self.get_custom_campaign_entry_default_visibility(campaign_slug)
+            )
+        )
+        provenance = str(getattr(page, "source_ref", "") or "").strip()
+        if not provenance:
+            provenance = f"Published item page: {title}"
+        return self._save_custom_campaign_entry(
+            campaign_slug,
+            source=source,
+            entry_key=entry_key,
+            slug=existing.slug if existing is not None else slug,
+            title=title,
+            entry_type="item",
+            provenance=provenance,
+            visibility=normalized_visibility,
+            search_metadata=normalized_page_ref,
+            body_markdown=body_markdown,
+            source_page_ref=normalized_page_ref,
+            item_mechanics_review_status=item_mechanics_review_status,
+            item_mechanics=item_mechanics,
+            actor_user_id=actor_user_id,
+            can_set_private=can_set_private,
+            is_enabled_override=override.is_enabled_override if override is not None else None,
+        )
+
     def create_custom_campaign_entry(
         self,
         campaign_slug: str,
@@ -989,6 +1097,9 @@ class SystemsService:
         visibility: str = VISIBILITY_PLAYERS,
         search_metadata: str = "",
         body_markdown: str = "",
+        source_page_ref: str = "",
+        item_mechanics_review_status: object = "",
+        item_mechanics: dict[str, object] | None = None,
         actor_user_id: int,
         can_set_private: bool,
     ) -> SystemsEntryRecord:
@@ -1018,6 +1129,9 @@ class SystemsService:
             visibility=visibility,
             search_metadata=search_metadata,
             body_markdown=body_markdown,
+            source_page_ref=source_page_ref,
+            item_mechanics_review_status=item_mechanics_review_status,
+            item_mechanics=item_mechanics,
             actor_user_id=actor_user_id,
             can_set_private=can_set_private,
             is_enabled_override=None,
@@ -1034,6 +1148,9 @@ class SystemsService:
         visibility: str = VISIBILITY_PLAYERS,
         search_metadata: str = "",
         body_markdown: str = "",
+        source_page_ref: str = "",
+        item_mechanics_review_status: object = "",
+        item_mechanics: dict[str, object] | None = None,
         actor_user_id: int,
         can_set_private: bool,
     ) -> SystemsEntryRecord:
@@ -1055,6 +1172,9 @@ class SystemsService:
             visibility=visibility,
             search_metadata=search_metadata,
             body_markdown=body_markdown,
+            source_page_ref=source_page_ref,
+            item_mechanics_review_status=item_mechanics_review_status,
+            item_mechanics=item_mechanics,
             actor_user_id=actor_user_id,
             can_set_private=can_set_private,
             is_enabled_override=override.is_enabled_override if override is not None else None,
@@ -1311,6 +1431,9 @@ class SystemsService:
         visibility: str,
         search_metadata: str,
         body_markdown: str,
+        source_page_ref: str = "",
+        item_mechanics_review_status: object = "",
+        item_mechanics: dict[str, object] | None = None,
         actor_user_id: int,
         can_set_private: bool,
         is_enabled_override: bool | None,
@@ -1343,6 +1466,23 @@ class SystemsService:
         if len(normalized_search_metadata) > 4000:
             raise SystemsPolicyValidationError("Custom Systems searchable metadata must stay under 4000 characters.")
         normalized_body_markdown = str(body_markdown or "").strip()
+        linked_item_page = None
+        normalized_source_page_ref = str(source_page_ref or "").strip()
+        if normalized_source_page_ref:
+            if len(normalized_source_page_ref) > 500:
+                raise SystemsPolicyValidationError("Linked item page references must stay under 500 characters.")
+            if normalized_entry_type != "item":
+                raise SystemsPolicyValidationError("Only item custom Systems entries can link item mechanics pages.")
+            linked_item_page = self._get_campaign_item_page_record(campaign_slug, normalized_source_page_ref)
+            if linked_item_page is None:
+                raise SystemsPolicyValidationError("Choose a valid published item page before saving item mechanics.")
+            normalized_source_page_ref = str(getattr(linked_item_page, "page_ref", "") or "").strip()
+            if not normalized_body_markdown:
+                normalized_body_markdown = str(getattr(linked_item_page, "body_markdown", "") or "").strip()
+            if not normalized_provenance:
+                linked_page = getattr(linked_item_page, "page", None)
+                linked_title = str(getattr(linked_page, "title", "") or "").strip()
+                normalized_provenance = f"Published item page: {linked_title or normalized_source_page_ref}"
         if not normalized_body_markdown:
             raise SystemsPolicyValidationError("Custom Systems entries need a rendered body.")
         if len(normalized_body_markdown) > 100_000:
@@ -1370,6 +1510,23 @@ class SystemsService:
         body = {
             "markdown": normalized_body_markdown,
         }
+        if normalized_entry_type == "item":
+            source_page_metadata = (
+                dict(getattr(linked_item_page, "metadata", {}) or {})
+                if linked_item_page is not None
+                else {}
+            )
+            item_mechanics_metadata = build_campaign_item_mechanics_metadata(
+                title=normalized_title,
+                body_markdown=normalized_body_markdown,
+                explicit_mechanics=item_mechanics,
+                source_page_ref=normalized_source_page_ref,
+                source_page_metadata=source_page_metadata,
+                review_status=item_mechanics_review_status,
+                intake_mode="published_page" if normalized_source_page_ref else "direct",
+            )
+            metadata.update(item_mechanics_metadata)
+            body["item_mechanics"] = dict(item_mechanics_metadata.get("campaign_item_mechanics") or {})
         if library.library_slug.lower() == XIANXIA_SYSTEM_CODE.lower():
             self._stamp_xianxia_custom_entry_metadata(
                 metadata=metadata,
@@ -3701,6 +3858,67 @@ class SystemsService:
 
     def _get_campaign(self, campaign_slug: str):
         return self.repository_store.get().get_campaign(campaign_slug)
+
+    def _get_campaign_item_page_record(self, campaign_slug: str, page_ref: str):
+        campaign = self._get_campaign(campaign_slug)
+        page_store = getattr(self.repository_store, "page_store", None)
+        if campaign is None or page_store is None:
+            return None
+        record = page_store.get_page_record(
+            campaign_slug,
+            page_ref,
+            content_dir=Path(campaign.player_content_dir),
+            include_body=True,
+        )
+        if record is None:
+            return None
+        page = getattr(record, "page", None)
+        if str(getattr(page, "section", "") or "").strip() != "Items":
+            return None
+        return record
+
+    def _list_campaign_item_page_records(self, campaign_slug: str) -> list[object]:
+        campaign = self._get_campaign(campaign_slug)
+        page_store = getattr(self.repository_store, "page_store", None)
+        if campaign is None or page_store is None:
+            return []
+        records = page_store.list_page_records(
+            campaign_slug,
+            content_dir=Path(campaign.player_content_dir),
+            include_body=True,
+        )
+        return [
+            record
+            for record in records
+            if (page := getattr(record, "page", None)) is not None
+            and str(getattr(page, "section", "") or "").strip() == "Items"
+        ]
+
+    def _custom_campaign_item_entries_by_linked_page(self, campaign_slug: str) -> dict[str, SystemsEntryRecord]:
+        library = self.get_campaign_library(campaign_slug)
+        if library is None:
+            return {}
+        entries_by_page: dict[str, SystemsEntryRecord] = {}
+        for state in self.list_campaign_source_states(campaign_slug):
+            if state.source.license_class != "custom_campaign":
+                continue
+            for entry in self.store.list_entries_for_source(
+                state.source.library_slug,
+                state.source.source_id,
+                entry_type="item",
+                limit=None,
+            ):
+                if not self.is_campaign_custom_entry(campaign_slug, entry):
+                    continue
+                metadata = dict(entry.metadata or {})
+                page_ref = str(
+                    metadata.get("linked_published_page_ref")
+                    or metadata.get("page_ref")
+                    or ""
+                ).strip()
+                if page_ref and page_ref not in entries_by_page:
+                    entries_by_page[page_ref] = entry
+        return entries_by_page
 
     def _campaign_source_seed_map(self, campaign_slug: str) -> dict[str, dict[str, object]]:
         campaign = self._get_campaign(campaign_slug)

@@ -89,6 +89,7 @@ from .campaign_content_service import (
     write_campaign_character_file,
     write_campaign_page_file,
 )
+from .campaign_item_mechanics import campaign_item_review_for_metadata
 from .campaign_dm_content_service import (
     CampaignDMContentValidationError,
     build_statblock_parser_feedback,
@@ -1925,6 +1926,12 @@ def register_api(app) -> None:
         )
         metadata = dict(entry.metadata or {})
         body = dict(entry.body or {})
+        item_mechanics_review = campaign_item_review_for_metadata(metadata)
+        linked_published_page_ref = str(
+            metadata.get("linked_published_page_ref")
+            or metadata.get("page_ref")
+            or ""
+        ).strip()
         return {
             **serialize_systems_entry_summary(entry),
             "visibility": visibility,
@@ -1934,6 +1941,9 @@ def register_api(app) -> None:
             "provenance": str(metadata.get("provenance") or entry.source_path or ""),
             "search_metadata": str(metadata.get("search_metadata") or ""),
             "body_markdown": str(body.get("markdown") or metadata.get("body_markdown") or ""),
+            "linked_published_page_ref": linked_published_page_ref,
+            "source_page_ref": linked_published_page_ref,
+            "item_mechanics": item_mechanics_review,
             "rendered_html": entry.rendered_html,
             "href": (
                 url_for(
@@ -2092,6 +2102,7 @@ def register_api(app) -> None:
             "has_proprietary_sources": any(row["license_class"] == "proprietary_private" for row in source_rows),
             "entry_override_rows": entry_override_rows,
             "entry_override_count": len(entry_override_rows),
+            "campaign_item_page_rows": systems_service.list_campaign_item_page_rows(campaign_slug),
             "custom_entry_source_rows": custom_entry_source_rows,
             "custom_entry_count": custom_entry_count,
             "custom_entry_default_visibility": systems_service.get_custom_campaign_entry_default_visibility(campaign_slug),
@@ -7832,6 +7843,7 @@ def register_api(app) -> None:
 
         try:
             payload = load_json_object()
+            item_mechanics = payload.get("item_mechanics")
             entry = current_app.extensions["systems_service"].create_custom_campaign_entry(
                 campaign_slug,
                 title=str(payload.get("title") or ""),
@@ -7841,6 +7853,13 @@ def register_api(app) -> None:
                 visibility=str(payload.get("visibility") or ""),
                 search_metadata=str(payload.get("search_metadata") or ""),
                 body_markdown=str(payload.get("body_markdown") or ""),
+                source_page_ref=str(payload.get("source_page_ref") or ""),
+                item_mechanics_review_status=(
+                    payload.get("item_mechanics_review_status")
+                    or payload.get("mechanics_review_status")
+                    or ""
+                ),
+                item_mechanics=item_mechanics if isinstance(item_mechanics, dict) else None,
                 actor_user_id=user.id,
                 can_set_private=bool(user.is_admin),
             )
@@ -7868,6 +7887,55 @@ def register_api(app) -> None:
             }
         )
 
+    @api.post("/campaigns/<campaign_slug>/systems/item-mechanics/import")
+    @api_campaign_systems_management_required
+    @api_login_required
+    def systems_item_mechanics_import(campaign_slug: str):
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        try:
+            payload = load_json_object()
+            item_mechanics = payload.get("item_mechanics")
+            entry = current_app.extensions["systems_service"].upsert_campaign_item_mechanics_entry_from_page(
+                campaign_slug,
+                str(payload.get("page_ref") or ""),
+                visibility=str(payload.get("visibility") or ""),
+                item_mechanics_review_status=(
+                    payload.get("item_mechanics_review_status")
+                    or payload.get("mechanics_review_status")
+                    or ""
+                ),
+                item_mechanics=item_mechanics if isinstance(item_mechanics, dict) else None,
+                actor_user_id=user.id,
+                can_set_private=bool(user.is_admin),
+            )
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="invalid_json")
+        except SystemsPolicyValidationError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        get_auth_store().write_audit_event(
+            event_type="campaign_systems_item_mechanics_imported",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "entry_key": entry.entry_key,
+                "entry_slug": entry.slug,
+                "entry_type": entry.entry_type,
+                "page_ref": str(payload.get("page_ref") or ""),
+                "source": "api",
+            },
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "entry": serialize_custom_systems_entry(campaign_slug, entry),
+                "systems": build_dm_content_systems_payload(campaign_slug),
+            }
+        )
+
     @api.put("/campaigns/<campaign_slug>/systems/custom-entries/<entry_slug>")
     @api_campaign_systems_management_required
     @api_login_required
@@ -7878,6 +7946,7 @@ def register_api(app) -> None:
 
         try:
             payload = load_json_object()
+            item_mechanics = payload.get("item_mechanics")
             entry = current_app.extensions["systems_service"].update_custom_campaign_entry(
                 campaign_slug,
                 entry_slug,
@@ -7887,6 +7956,13 @@ def register_api(app) -> None:
                 visibility=str(payload.get("visibility") or ""),
                 search_metadata=str(payload.get("search_metadata") or ""),
                 body_markdown=str(payload.get("body_markdown") or ""),
+                source_page_ref=str(payload.get("source_page_ref") or ""),
+                item_mechanics_review_status=(
+                    payload.get("item_mechanics_review_status")
+                    or payload.get("mechanics_review_status")
+                    or ""
+                ),
+                item_mechanics=item_mechanics if isinstance(item_mechanics, dict) else None,
                 actor_user_id=user.id,
                 can_set_private=bool(user.is_admin),
             )

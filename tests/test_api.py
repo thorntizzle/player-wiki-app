@@ -5397,6 +5397,75 @@ def test_api_dm_content_systems_custom_entry_lifecycle_returns_refreshed_system_
     assert restored_row_entry["is_archived"] is False
 
 
+def test_api_systems_imports_campaign_item_page_as_reviewed_mechanics_entry(
+    client,
+    app,
+    users,
+):
+    item_path = Path(app.config["TEST_CAMPAIGNS_DIR"]) / "linden-pass" / "content" / "items" / "api-consecrated-huran-blade.md"
+    item_path.write_text(
+        "\n".join(
+            [
+                "---",
+                "title: API Consecrated Huran Blade",
+                "section: Items",
+                "page_type: item",
+                "source_ref: API test item page",
+                "published: true",
+                "---",
+                "",
+                "*Weapon (longsword), uncommon (requires attunement)*",
+                "",
+                "You gain a +1 bonus to attack and damage rolls made with this magic weapon.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-systems-item-mechanics-api")
+
+    systems_response = client.get(
+        "/api/v1/campaigns/linden-pass/dm-content/systems",
+        headers=api_headers(dm_token),
+    )
+    assert systems_response.status_code == 200
+    systems_payload = systems_response.get_json()
+    item_page_row = next(
+        row
+        for row in systems_payload["campaign_item_page_rows"]
+        if row["page_ref"] == "items/api-consecrated-huran-blade"
+    )
+    assert item_page_row["has_structured_item"] is False
+
+    import_response = client.post(
+        "/api/v1/campaigns/linden-pass/systems/item-mechanics/import",
+        headers=api_headers(dm_token),
+        json={
+            "page_ref": "items/api-consecrated-huran-blade",
+            "visibility": "players",
+            "item_mechanics_review_status": "approved",
+        },
+    )
+    assert import_response.status_code == 200
+    payload = import_response.get_json()
+    entry = payload["entry"]
+    assert entry["entry_type"] == "item"
+    assert entry["linked_published_page_ref"] == "items/api-consecrated-huran-blade"
+    assert entry["item_mechanics"]["review_status"] == "approved"
+    assert entry["item_mechanics"]["support_state"] == "modeled"
+    assert "base_item" in entry["item_mechanics"]["modeled_fields"]
+    assert "bonus_weapon" in entry["item_mechanics"]["modeled_fields"]
+
+    refreshed_row = next(
+        row
+        for row in payload["systems"]["campaign_item_page_rows"]
+        if row["page_ref"] == "items/api-consecrated-huran-blade"
+    )
+    assert refreshed_row["has_structured_item"] is True
+    assert refreshed_row["entry_slug"] == entry["slug"]
+    assert refreshed_row["item_mechanics"]["review_status"] == "approved"
+
+
 def test_api_systems_import_endpoints_require_admin_and_record_runs(client, app, users, tmp_path):
     admin_token = issue_api_token(app, users["admin"]["email"], label="admin-systems-import-api")
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-systems-import-api")

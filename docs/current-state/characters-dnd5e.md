@@ -60,6 +60,9 @@ Last updated: 2026-06-25
 - Armorer Arcane Armor is mutable character state at `feature_states.arcane_armor.enabled`; it gates Guardian Thunder Gauntlets and Defensive Field availability.
 - Eligible Artificers get an Equipment-page Infusions lane. Active selections target eligible nonmagical inventory/equipment items; `Enhanced Defense` is automated as a +1 AC defensive rule while the infused armor or shield is equipped, and unsupported active infusion effects remain visible as active note-only rows instead of silent partial automation.
 - Supported magic weapon/item effects require equipped state, and attunement-gated effects require attunement.
+- Approved campaign-owned Systems `item` mechanics now use the same item metadata paths as shared DND item rows for supported weapons, armor, attunement, spell grants, resource modifiers, defensive rules, and attack reminders.
+- Campaign item rows with `draft`, `manual_review`, or `reference_only` mechanics review status are visible as Systems entries but do not drive attacks, Armor Class, spell grants, or resource math. Published item page fallback remains available only where no structured item record is linked or the mechanic is still intentionally manual.
+- The first structured Linden Pass item records cover Consecrated Huran Blade, Censer of Last Light, Hourglass Pendant, Staff of the Crescent Moon, Psionic Circlet, and Innovator's Bolt. Supported fields can automate after approval; bespoke effects such as extra damage riders, incense healing, initiative shifting, custom Sleep riders, and enchanted bullet effects remain flagged for implementation/manual handling.
 
 ## Source Locking And Reimport
 

@@ -13,6 +13,12 @@ import {
 
 type StatusReporter = (message: string | null) => void;
 
+interface CampaignItemMechanicsImportDraft {
+  pageRef: string;
+  reviewStatus: string;
+  visibility?: string;
+}
+
 export interface DmContentSystemsSourceDraftState {
   isEnabled: boolean;
   defaultVisibility: string;
@@ -132,6 +138,20 @@ export function useDmContentSystemsMutations({
     onError: handleMutationError,
   });
 
+  const importItemMechanicsMutation = useMutation({
+    mutationFn: (draft: CampaignItemMechanicsImportDraft) => apiClient.importSystemsItemMechanics(campaignSlug, {
+      page_ref: draft.pageRef,
+      visibility: draft.visibility || payload?.custom_entry_default_visibility || "players",
+      item_mechanics_review_status: draft.reviewStatus || "draft",
+    }),
+    onSuccess: (response) => {
+      setSystemsMessage(`Campaign item mechanics saved: ${response.entry.title}.`);
+      setSystemsError(null);
+      refetchSystems();
+    },
+    onError: handleMutationError,
+  });
+
   const updateCustomMutation = useMutation({
     mutationFn: (entry: CustomSystemsEntry) => {
       const draft = customEditDrafts[entry.slug] ?? buildSystemsCustomDraftFromEntry(entry);
@@ -168,6 +188,7 @@ export function useDmContentSystemsMutations({
   return {
     archiveCustomMutation,
     createCustomMutation,
+    importItemMechanicsMutation,
     restoreCustomMutation,
     updateCustomMutation,
     updateOverrideMutation,

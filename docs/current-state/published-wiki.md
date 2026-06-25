@@ -25,12 +25,14 @@ Last updated: 2026-06-25
 - Pages with `display_order < 10000` render as pinned featured cards at the top of their section or subsection.
 - Gods use subsection-aware display labels in cards and search results.
 - Item, spell, and mechanic detail pages suppress the summary lede even when summaries appear in cards/search.
+- Published item pages are player-facing prose and can be linked as provenance for campaign-owned Systems `item` mechanics records. The Systems item record, not the article body alone, is the mechanics intake/source of truth for character-facing behavior.
 - Current publication conventions for guilds, gods, civic NPCs, NPC buckets, notes, session handouts, Bestiary articles, and images are documented in the app repo map until fully atomized here.
 
 ## Management And Safety Contract
 
 - Browser Player Wiki management can create, edit, search, attach inline page images, promote staged/session articles, unpublish/archive, and hard-delete published pages.
 - Published page writes keep the SQLite read model plus mirrored Markdown in sync through `campaign_content_service`.
+- DM Content -> `Systems` can import/refresh a structured campaign item record from an existing published item page. DM Content -> `Player Wiki` remains the place to edit the public item article.
 - Hard delete is blocked when backlinks, character hooks or sheet references, session article source refs, or session-article conversion provenance make removal risky unless an explicit force path is used where supported.
 - Session-only articles stay out of wiki/search until converted or saved through the Player Wiki editor promotion path.
 

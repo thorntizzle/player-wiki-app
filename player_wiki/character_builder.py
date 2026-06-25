@@ -12,6 +12,10 @@ from typing import Any, Callable
 from flask import g, has_request_context
 
 from .auth_store import isoformat, utcnow
+from .campaign_item_mechanics import (
+    campaign_item_character_metadata,
+    is_campaign_item_mechanics_metadata,
+)
 from .character_artificer_infusions import (
     ENHANCED_DEFENSE_INFUSION_KEY,
     active_infusion_armor_class_bonus,
@@ -10864,7 +10868,10 @@ def _resolve_item_support_metadata(
 ) -> dict[str, Any]:
     resolved_entry = entry if isinstance(entry, SystemsEntryRecord) else _resolve_item_entry(item, item_catalog)
     if isinstance(resolved_entry, SystemsEntryRecord):
-        return dict(resolved_entry.metadata or {})
+        entry_metadata = dict(resolved_entry.metadata or {})
+        if is_campaign_item_mechanics_metadata(entry_metadata):
+            return campaign_item_character_metadata(entry_metadata)
+        return entry_metadata
     resolved_campaign_item_support = (
         dict(campaign_item_support or {})
         if isinstance(campaign_item_support, dict)

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import type { SystemsSourceRow } from "../api/types";
+import type { CampaignItemMechanicsReview, CampaignItemPageRow, SystemsSourceRow } from "../api/types";
 import { getApiErrorMessage } from "../apiErrors";
 import { useApiClient } from "../apiClientContext";
 import { ApiErrorNotice, ToastNotice, useToastNotice } from "../components/feedback";
@@ -18,6 +18,13 @@ import {
 import { isAuthRequiredFromError as isAuthError } from "../sessionRouteState";
 import { formatTimestamp } from "../timeFormatting";
 
+const ITEM_MECHANICS_REVIEW_STATUS_CHOICES = [
+  { value: "draft", label: "Draft" },
+  { value: "approved", label: "Approved" },
+  { value: "reference_only", label: "Reference Only" },
+  { value: "manual_review", label: "Manual Review" },
+];
+
 export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string }) {
   const { apiClient, setAuthRequired } = useApiClient();
   const [sourceDrafts, setSourceDrafts] = useState<Record<string, DmContentSystemsSourceDraftState>>({});
@@ -30,6 +37,7 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
   const [customCreateDraft, setCustomCreateDraft] = useState<DmContentSystemsCustomDraftState>(() => buildInitialSystemsCustomDraft());
   const [customEditDrafts, setCustomEditDrafts] = useState<Record<string, DmContentSystemsCustomDraftState>>({});
   const [customArchiveConfirm, setCustomArchiveConfirm] = useState<Record<string, boolean>>({});
+  const [itemImportReviewStatus, setItemImportReviewStatus] = useState<Record<string, string>>({});
   const [customQuery, setCustomQuery] = useState("");
   const [systemsError, setSystemsError] = useState<string | null>(null);
   const { showToast, toastMessage, toastTone } = useToastNotice();
@@ -71,6 +79,13 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
       }
       return next;
     });
+    setItemImportReviewStatus((current) => {
+      const next: Record<string, string> = {};
+      for (const row of payload.campaign_item_page_rows) {
+        next[row.page_ref] = current[row.page_ref] ?? row.item_mechanics?.review_status ?? "draft";
+      }
+      return next;
+    });
     setCustomCreateDraft((current) => {
       if (current.title || current.bodyMarkdown || current.provenance || current.searchMetadata) {
         return current;
@@ -89,6 +104,7 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
   const {
     archiveCustomMutation,
     createCustomMutation,
+    importItemMechanicsMutation,
     restoreCustomMutation,
     updateCustomMutation,
     updateOverrideMutation,
@@ -131,6 +147,10 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
         entry.provenance,
         entry.search_metadata,
         entry.body_markdown,
+        entry.linked_published_page_ref,
+        entry.item_mechanics?.review_status,
+        entry.item_mechanics?.support_state,
+        entry.item_mechanics?.modeled_fields?.join(" "),
       ].join(" ").toLowerCase().includes(query)
     ));
   }, [customQuery, payload?.custom_entry_source_rows]);
@@ -149,6 +169,7 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
     disabled: boolean;
   }) => {
     const updateDraft = (updates: Partial<DmContentSystemsCustomDraftState>) => setDraft({ ...draft, ...updates });
+    const isItemEntry = draft.entryType === "item";
     return (
       <>
         <div className="builder-field-grid">
@@ -222,6 +243,156 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
             onChange={(event: ChangeEvent<HTMLTextAreaElement>) => updateDraft({ searchMetadata: event.currentTarget.value })}
           />
         </label>
+        {isItemEntry ? (
+          <>
+            <div className="builder-field-grid">
+              <label htmlFor={`${idPrefix}-item-source-page`} className="field">
+                <span>Published item page</span>
+                <select
+                  id={`${idPrefix}-item-source-page`}
+                  value={draft.sourcePageRef}
+                  disabled={disabled}
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) => updateDraft({ sourcePageRef: event.currentTarget.value })}
+                >
+                  <option value="">No linked page</option>
+                  {(payload?.campaign_item_page_rows ?? []).map((row: CampaignItemPageRow) => (
+                    <option key={row.page_ref} value={row.page_ref}>{row.title}</option>
+                  ))}
+                </select>
+              </label>
+              <label htmlFor={`${idPrefix}-item-review-status`} className="field">
+                <span>Mechanics review</span>
+                <select
+                  id={`${idPrefix}-item-review-status`}
+                  value={draft.itemMechanicsReviewStatus}
+                  disabled={disabled}
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) => updateDraft({ itemMechanicsReviewStatus: event.currentTarget.value })}
+                >
+                  {ITEM_MECHANICS_REVIEW_STATUS_CHOICES.map((choice) => (
+                    <option key={choice.value} value={choice.value}>{choice.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label htmlFor={`${idPrefix}-item-base`} className="field">
+                <span>Base weapon/armor</span>
+                <input
+                  id={`${idPrefix}-item-base`}
+                  value={draft.itemBaseItem}
+                  disabled={disabled}
+                  placeholder="longsword"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ itemBaseItem: event.currentTarget.value })}
+                />
+              </label>
+              <label htmlFor={`${idPrefix}-item-rarity`} className="field">
+                <span>Rarity</span>
+                <input
+                  id={`${idPrefix}-item-rarity`}
+                  value={draft.itemRarity}
+                  disabled={disabled}
+                  placeholder="rare"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ itemRarity: event.currentTarget.value })}
+                />
+              </label>
+            </div>
+            <div className="builder-field-grid">
+              <label htmlFor={`${idPrefix}-item-bonus-weapon`} className="field">
+                <span>Weapon +X</span>
+                <input
+                  id={`${idPrefix}-item-bonus-weapon`}
+                  value={draft.itemBonusWeapon}
+                  disabled={disabled}
+                  inputMode="numeric"
+                  placeholder="1"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ itemBonusWeapon: event.currentTarget.value })}
+                />
+              </label>
+              <label htmlFor={`${idPrefix}-item-bonus-ac`} className="field">
+                <span>AC +X</span>
+                <input
+                  id={`${idPrefix}-item-bonus-ac`}
+                  value={draft.itemBonusAc}
+                  disabled={disabled}
+                  inputMode="numeric"
+                  placeholder="1"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ itemBonusAc: event.currentTarget.value })}
+                />
+              </label>
+              <label htmlFor={`${idPrefix}-item-armor-type`} className="field">
+                <span>Armor type</span>
+                <input
+                  id={`${idPrefix}-item-armor-type`}
+                  value={draft.itemArmorType}
+                  disabled={disabled}
+                  placeholder="LA, MA, HA, S"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ itemArmorType: event.currentTarget.value })}
+                />
+              </label>
+              <label htmlFor={`${idPrefix}-item-armor-ac`} className="field">
+                <span>Armor AC</span>
+                <input
+                  id={`${idPrefix}-item-armor-ac`}
+                  value={draft.itemArmorAc}
+                  disabled={disabled}
+                  inputMode="numeric"
+                  placeholder="12"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ itemArmorAc: event.currentTarget.value })}
+                />
+              </label>
+            </div>
+            <div className="builder-field-grid">
+              <label htmlFor={`${idPrefix}-item-damage`} className="field">
+                <span>Damage</span>
+                <input
+                  id={`${idPrefix}-item-damage`}
+                  value={draft.itemDamage}
+                  disabled={disabled}
+                  placeholder="1d8"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ itemDamage: event.currentTarget.value })}
+                />
+              </label>
+              <label htmlFor={`${idPrefix}-item-versatile`} className="field">
+                <span>Versatile</span>
+                <input
+                  id={`${idPrefix}-item-versatile`}
+                  value={draft.itemVersatileDamage}
+                  disabled={disabled}
+                  placeholder="1d10"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ itemVersatileDamage: event.currentTarget.value })}
+                />
+              </label>
+              <label htmlFor={`${idPrefix}-item-range`} className="field">
+                <span>Range</span>
+                <input
+                  id={`${idPrefix}-item-range`}
+                  value={draft.itemRange}
+                  disabled={disabled}
+                  placeholder="20/60"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ itemRange: event.currentTarget.value })}
+                />
+              </label>
+              <label htmlFor={`${idPrefix}-item-properties`} className="field">
+                <span>Properties</span>
+                <input
+                  id={`${idPrefix}-item-properties`}
+                  value={draft.itemProperties}
+                  disabled={disabled}
+                  placeholder="V, Ammunition"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ itemProperties: event.currentTarget.value })}
+                />
+              </label>
+            </div>
+            <label htmlFor={`${idPrefix}-item-attunement`} className="field">
+              <span>Attunement</span>
+              <input
+                id={`${idPrefix}-item-attunement`}
+                value={draft.itemAttunement}
+                disabled={disabled}
+                placeholder="requires attunement"
+                onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft({ itemAttunement: event.currentTarget.value })}
+              />
+            </label>
+          </>
+        ) : null}
         <label htmlFor={`${idPrefix}-body`} className="field">
           <span>Rendered body</span>
           <textarea
@@ -233,6 +404,33 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
           />
         </label>
       </>
+    );
+  };
+
+  const renderItemMechanicsReview = (review?: CampaignItemMechanicsReview | null) => {
+    if (!review) {
+      return null;
+    }
+    return (
+      <div className="systems-item-review">
+        <div className="badge-list">
+          <span className="meta-badge">{review.review_status.replace(/_/g, " ")}</span>
+          {review.support_state ? <span className="meta-badge">{review.support_state.replace(/_/g, " ")}</span> : null}
+          {review.source_page_ref ? <span className="meta-badge">{review.source_page_ref}</span> : null}
+        </div>
+        {review.modeled_fields.length ? (
+          <p className="meta">Modeled fields: {review.modeled_fields.join(", ")}</p>
+        ) : null}
+        {review.flags.length ? (
+          <ul className="plain-list">
+            {review.flags.map((flag, index) => (
+              <li className="meta" key={`${flag.code || "flag"}-${index}`}>
+                {flag.message || flag.code || "Needs review"}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
     );
   };
 
@@ -457,6 +655,74 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
         )}
       </section>
 
+      <section className="card" id="systems-campaign-item-mechanics">
+        <div className="section-heading">
+          <h2>Campaign Item Mechanics</h2>
+          <p className="meta">{payload.campaign_item_page_rows.length} published item page{payload.campaign_item_page_rows.length === 1 ? "" : "s"}</p>
+        </div>
+        {payload.campaign_item_page_rows.length ? (
+          <div className="dm-content-list systems-campaign-item-list">
+            {payload.campaign_item_page_rows.map((row) => {
+              const reviewStatus = itemImportReviewStatus[row.page_ref] ?? row.item_mechanics?.review_status ?? "draft";
+              return (
+                <article className="dm-content-item" key={row.page_ref}>
+                  <div className="dm-content-item__header">
+                    <div>
+                      <h3>{row.title}</h3>
+                      <p className="meta">{row.page_ref}</p>
+                      {row.source_ref ? <p className="meta">{row.source_ref}</p> : null}
+                    </div>
+                    <div className="badge-list">
+                      <span className="meta-badge">{row.has_structured_item ? "Structured" : "Page only"}</span>
+                      {row.entry_slug ? <span className="meta-badge">{row.entry_slug}</span> : null}
+                    </div>
+                  </div>
+                  {renderItemMechanicsReview(row.item_mechanics)}
+                  <div className="builder-field-grid">
+                    <label htmlFor={`systems-item-import-${row.page_ref}`} className="field">
+                      <span>Review status</span>
+                      <select
+                        id={`systems-item-import-${row.page_ref}`}
+                        value={reviewStatus}
+                        disabled={!canManageSystems}
+                        onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                          const status = event.currentTarget.value;
+                          setItemImportReviewStatus((current) => ({ ...current, [row.page_ref]: status }));
+                        }}
+                      >
+                        {ITEM_MECHANICS_REVIEW_STATUS_CHOICES.map((choice) => (
+                          <option key={choice.value} value={choice.value}>{choice.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="field">
+                      <span>Systems row</span>
+                      <button
+                        type="button"
+                        disabled={!canManageSystems || importItemMechanicsMutation.isPending}
+                        onClick={() => importItemMechanicsMutation.mutate({
+                          pageRef: row.page_ref,
+                          reviewStatus,
+                          visibility: payload.custom_entry_default_visibility,
+                        })}
+                      >
+                        {importItemMechanicsMutation.isPending
+                          ? "Saving..."
+                          : row.has_structured_item
+                            ? "Refresh item mechanics"
+                            : "Import item mechanics"}
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="status status-neutral">No published item pages are available for structured item mechanics.</p>
+        )}
+      </section>
+
       <section className="card" id="systems-custom-entries">
         <div className="section-heading">
           <h2>Custom Entries</h2>
@@ -559,6 +825,8 @@ export function DmContentSystemsLane({ campaignSlug }: { campaignSlug: string })
                     <summary>Review or edit custom entry</summary>
                     {entry.provenance ? <p className="meta">Source/provenance: {entry.provenance}</p> : null}
                     {entry.search_metadata ? <p className="meta">Search metadata: {entry.search_metadata}</p> : null}
+                    {entry.linked_published_page_ref ? <p className="meta">Published item page: {entry.linked_published_page_ref}</p> : null}
+                    {renderItemMechanicsReview(entry.item_mechanics)}
                     {entry.body_markdown ? <pre className="dm-content-preview dm-content-preview--compact">{entry.body_markdown}</pre> : null}
                     <form
                       className="stack-form"

@@ -15,6 +15,7 @@ from player_wiki.systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_T
 from player_wiki.systems_metadata_repair import repair_dnd5e_item_metadata
 
 DEFAULT_DND5E_EXPORT_ROOT = Path.home() / "Documents" / "dnd5e-source-export"
+CAMPAIGN_ITEM_REVIEW_STATUS_CHOICES = ("draft", "approved", "reference_only", "manual_review")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -108,6 +109,25 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         help="Optional source IDs to limit the repair, such as PHB DMG.",
     )
+
+    import_campaign_items = subparsers.add_parser(
+        "import-campaign-item-mechanics",
+        help="Create or refresh campaign-owned Systems item records from published campaign item pages.",
+    )
+    import_campaign_items.add_argument("campaign_slug")
+    import_campaign_items.add_argument(
+        "page_refs",
+        nargs="*",
+        help="Optional item page refs. When omitted, all published item pages in the campaign are refreshed.",
+    )
+    import_campaign_items.add_argument(
+        "--review-status",
+        default="draft",
+        choices=CAMPAIGN_ITEM_REVIEW_STATUS_CHOICES,
+        help="Review status to stamp on imported item mechanics.",
+    )
+    import_campaign_items.add_argument("--visibility")
+    import_campaign_items.add_argument("--actor-email")
 
     return parser
 
@@ -447,6 +467,39 @@ def main() -> None:
             for change in result.changes:
                 fields = ", ".join(change.fields)
                 print(f"  {change.source_id} {change.slug}: {change.title} ({fields})")
+            return
+
+        if args.command == "import-campaign-item-mechanics":
+            ensure_campaign_exists(app, args.campaign_slug)
+            actor_user_id = resolve_actor_id(store, args.actor_email)
+            systems_service = app.extensions["systems_service"]
+            page_refs = list(args.page_refs or [])
+            if not page_refs:
+                page_refs = [str(row["page_ref"]) for row in systems_service.list_campaign_item_page_rows(args.campaign_slug)]
+            if not page_refs:
+                raise SystemExit(f"No published item pages found for {args.campaign_slug}.")
+            for page_ref in page_refs:
+                entry = systems_service.upsert_campaign_item_mechanics_entry_from_page(
+                    args.campaign_slug,
+                    page_ref,
+                    visibility=str(args.visibility or ""),
+                    item_mechanics_review_status=args.review_status,
+                    actor_user_id=actor_user_id,
+                    can_set_private=True,
+                )
+                store.write_audit_event(
+                    event_type="campaign_systems_item_mechanics_imported",
+                    actor_user_id=actor_user_id,
+                    campaign_slug=args.campaign_slug,
+                    metadata={
+                        "entry_key": entry.entry_key,
+                        "entry_slug": entry.slug,
+                        "entry_type": entry.entry_type,
+                        "page_ref": page_ref,
+                        "source": "manage.py",
+                    },
+                )
+                print(f"Imported {page_ref}: {entry.title} ({entry.slug})")
             return
 
     raise SystemExit(f"Unknown command: {args.command}")

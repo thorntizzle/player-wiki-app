@@ -106,6 +106,7 @@ import type {
   SessionWikiLookupSearchResponse,
   CampaignReferenceSearchResponse,
   CampaignReferencePreviewResponse,
+  CampaignItemMechanicsImportPayload,
   SystemsEntryResponse,
   CustomSystemsEntryPayload,
   CustomSystemsEntryResponse,
@@ -745,6 +746,19 @@ export class CampaignApiClient {
   ): Promise<CustomSystemsEntryResponse> {
     return this.requestJson<CustomSystemsEntryResponse>(
       `/api/v1/campaigns/${encodeURIComponent(slug)}/systems/custom-entries`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async importSystemsItemMechanics(
+    slug: string,
+    payload: CampaignItemMechanicsImportPayload,
+  ): Promise<CustomSystemsEntryResponse> {
+    return this.requestJson<CustomSystemsEntryResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/systems/item-mechanics/import`,
       {
         method: "POST",
         body: JSON.stringify(payload),
