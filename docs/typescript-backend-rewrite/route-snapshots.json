@@ -1,0 +1,1966 @@
+{
+  "api_v1_routes": [
+    {
+      "line_number": 3297,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/advanced-editor",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 3319,
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/advanced-editor",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 3691,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/retraining",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 3707,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/retraining",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 3971,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/level-up",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 3999,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/level-up",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 4241,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 4270,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 4679,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/cultivation",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 4688,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/cultivation",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5230,
+      "method": "GET",
+      "path": "/api/v1/me",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5252,
+      "method": "POST",
+      "path": "/api/v1/me/view-as",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5287,
+      "method": "DELETE",
+      "path": "/api/v1/me/view-as",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5298,
+      "method": "GET",
+      "path": "/api/v1/me/settings",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5320,
+      "method": "PATCH",
+      "path": "/api/v1/me/settings",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5384,
+      "method": "GET",
+      "path": "/api/v1/admin",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5390,
+      "method": "GET",
+      "path": "/api/v1/admin/users/<int:user_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5397,
+      "method": "POST",
+      "path": "/api/v1/admin/users/invite",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5486,
+      "method": "POST",
+      "path": "/api/v1/admin/users/<int:user_id>/membership",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5529,
+      "method": "DELETE",
+      "path": "/api/v1/admin/users/<int:user_id>/membership",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5570,
+      "method": "POST",
+      "path": "/api/v1/admin/users/<int:user_id>/assignment",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5626,
+      "method": "DELETE",
+      "path": "/api/v1/admin/users/<int:user_id>/assignment",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5667,
+      "method": "POST",
+      "path": "/api/v1/admin/users/<int:user_id>/invite",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5694,
+      "method": "POST",
+      "path": "/api/v1/admin/users/<int:user_id>/password-reset",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5721,
+      "method": "POST",
+      "path": "/api/v1/admin/users/<int:user_id>/disable",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5749,
+      "method": "POST",
+      "path": "/api/v1/admin/users/<int:user_id>/enable",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5783,
+      "method": "DELETE",
+      "path": "/api/v1/admin/users/<int:user_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5829,
+      "method": "GET",
+      "path": "/api/v1/app",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5833,
+      "method": "GET",
+      "path": "/api/v1/systems/import-runs",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5857,
+      "method": "GET",
+      "path": "/api/v1/systems/import-runs/<int:import_run_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5866,
+      "method": "POST",
+      "path": "/api/v1/systems/imports/dnd5e",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5935,
+      "method": "GET",
+      "path": "/api/v1/campaigns",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5945,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 5970,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/control",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6009,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/control/visibility",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6092,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/help",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6152,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/wiki",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6245,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/wiki/sections/<section_slug>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6296,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/wiki/pages/<path:page_slug>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6353,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/config",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6363,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/config",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6381,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/assets",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6398,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/assets/<path:asset_ref>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6414,
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/assets/<path:asset_ref>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6434,
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/assets/<path:asset_ref>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6458,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/pages",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6488,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/pages/<path:page_ref>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6527,
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/pages/<path:page_ref>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6575,
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/pages/<path:page_ref>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6645,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/characters",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6660,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/characters/<character_slug>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6672,
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/characters/<character_slug>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6690,
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/characters/<character_slug>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6719,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6720,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/search",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6736,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/sources",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6760,
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/sources",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6809,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/sources/<source_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 6931,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/sources/<source_id>/types/<entry_type>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7010,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/entries/<entry_slug>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7057,
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/overrides/<path:entry_key>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7110,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/session",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7134,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/article-sources/search",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7163,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/articles/<int:article_id>/image",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7187,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/start",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7208,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/close",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7229,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/logs/<int:session_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7259,
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/logs/<int:session_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7273,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/messages",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7308,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/articles",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7491,
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/articles/<int:article_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7560,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/articles/<int:article_id>/reveal",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7600,
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/articles/<int:article_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7614,
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/articles/revealed",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7641,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/dm-content",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7646,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/dm-content/systems",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7658,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/dm-content/statblocks",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7687,
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/dm-content/statblocks/<int:statblock_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7734,
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/dm-content/statblocks/<int:statblock_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7751,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/dm-content/conditions",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7779,
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/dm-content/conditions/<int:condition_definition_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7819,
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/dm-content/conditions/<int:condition_definition_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7836,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/custom-entries",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7890,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/item-mechanics/import",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7939,
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/custom-entries/<entry_slug>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 7993,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/custom-entries/<entry_slug>/archive",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8032,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/custom-entries/<entry_slug>/restore",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8071,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8089,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/live-state",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8107,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/systems-monsters/search",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8171,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/player-combatants",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8197,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/npc-combatants",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8229,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/statblock-combatants",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8281,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/systems-monsters",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8333,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/advance-turn",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8355,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/clear",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8377,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/set-current",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8400,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/turn",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8438,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/vitals",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8500,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/resources",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8549,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/npc-resources",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8594,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/conditions",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8620,
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8635,
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8650,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8689,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/create",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8696,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/create",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8780,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/import/xianxia-manual",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8802,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/import/xianxia-manual",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8872,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8918,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 8969,
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9011,
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9066,
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/portrait",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9119,
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/portrait",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9166,
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9382,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/sheet-edit",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9409,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9436,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9452,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<int:level>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9469,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9570,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-active-state",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9585,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-requests",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9615,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-records",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9649,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9663,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9678,
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9692,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/equipped",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9707,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/equipment/<item_id>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9723,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/artificer-infusions",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9741,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/feature-states/<feature_key>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9756,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/currency",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9782,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/notes",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9796,
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/personal",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    },
+    {
+      "line_number": 9812,
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>",
+      "route_family": "api_v1",
+      "source_file": "player_wiki/api.py"
+    }
+  ],
+  "flask_routes": [
+    {
+      "line_number": 1432,
+      "method": "GET",
+      "path": "/app-next",
+      "route_family": "app-next",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 1433,
+      "method": "GET",
+      "path": "/app-next/",
+      "route_family": "app-next",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 1439,
+      "method": "GET",
+      "path": "/app-next/<path:asset_path>",
+      "route_family": "app-next",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9209,
+      "method": "GET",
+      "path": "/healthz",
+      "route_family": "healthz",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9226,
+      "method": "GET",
+      "path": "/",
+      "route_family": "root",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9250,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9289,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/global-search",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9313,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/global-search/preview",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9343,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/help",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9349,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/assets/<path:asset_path>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9367,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/sections/<section_slug>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9405,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/pages/<path:page_slug>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9442,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/control-panel",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9452,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/control-panel/visibility",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9517,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/systems",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9529,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/systems/search",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9541,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/systems/sources/<source_id>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9552,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/systems/sources/<source_id>/types/<entry_type>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9564,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/systems/entries/<entry_slug>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9570,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/systems/control-panel",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9579,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/systems/control-panel/sources",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9660,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/systems/control-panel/shared-core-permission",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9720,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/systems/control-panel/overrides",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9867,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/systems/control-panel/shared-entries/<entry_slug>/edit",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9876,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/systems/control-panel/shared-entries/<entry_slug>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 9973,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/systems/control-panel/custom-entries",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10025,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/systems/control-panel/custom-entries/<entry_slug>/edit",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10041,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/systems/control-panel/custom-entries/<entry_slug>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10099,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/systems/control-panel/custom-entries/<entry_slug>/archive",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10141,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/systems/control-panel/custom-entries/<entry_slug>/restore",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10183,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/systems/control-panel/imports/dnd5e",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10312,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/dm-content",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10318,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/dm-content/<dm_content_subpage>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10332,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/dm-content/player-wiki/pages/<path:page_ref>/edit",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10357,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/dm-content/player-wiki/session-articles/<int:article_id>/new",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10393,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/dm-content/player-wiki/pages",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10482,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/dm-content/player-wiki/pages/<path:page_ref>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10554,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/dm-content/player-wiki/pages/<path:page_ref>/unpublish",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10603,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/dm-content/player-wiki/pages/<path:page_ref>/delete",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10686,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/dm-content/staged-articles",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10721,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/dm-content/staged-articles/<int:article_id>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10748,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/dm-content/staged-articles/<int:article_id>/delete",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10782,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/dm-content/statblocks",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10827,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/dm-content/statblocks/<int:statblock_id>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10884,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/dm-content/statblocks/<int:statblock_id>/delete",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10903,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/dm-content/conditions",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10931,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/dm-content/conditions/<int:condition_definition_id>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 10980,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/dm-content/conditions/<int:condition_definition_id>/delete",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11002,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/combat",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11016,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/combat/live-state",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11060,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/combat/dm",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11079,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/combat/dm/live-state",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11147,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/combat/status",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11153,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/combat/status/live-state",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11214,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/combat/character",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11226,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/combat/character/live-state",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11268,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/character/combatants/<int:combatant_id>/resources/<resource_id>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11290,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/character/combatants/<int:combatant_id>/spell-slots/<int:level>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11318,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/character/combatants/<int:combatant_id>/equipment/<item_id>/state",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11340,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/character/combatants/<int:combatant_id>/feature-states/<feature_key>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11361,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/combat/systems-monsters/search",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11423,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/player-combatants",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11460,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/npc-combatants",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11502,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/statblock-combatants",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11575,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/systems-monsters",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11640,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/advance-turn",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11678,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/clear",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11712,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/set-current",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11747,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/turn",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11788,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/vitals",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11867,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/resources",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11919,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/player-detail-visibility",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11959,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/conditions",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 11996,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>/delete",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12025,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12064,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/delete",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12091,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/session",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12097,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/session/dm",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12106,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/session/character",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12119,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/session/live-state",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12161,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/session/article-sources/search",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12188,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/session/wiki-lookup/search",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12220,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/session/wiki-lookup/preview",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12258,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/session-article-images/<int:article_id>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12283,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/session/start",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12312,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/session/messages",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12346,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/session/articles",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12384,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/session/articles/<int:article_id>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12414,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/session/articles/<int:article_id>/convert",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12423,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/session/articles/<int:article_id>/convert",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12492,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/session/articles/<int:article_id>/reveal",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12523,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/session/articles/<int:article_id>/delete",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12565,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/session/articles/clear-revealed",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12602,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/session/close",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12630,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/session/logs/<int:session_id>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12668,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/session/logs/<int:session_id>/delete",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12691,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/characters",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12731,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/characters/new",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12731,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/new",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12858,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/characters/import/xianxia-manual",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12858,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/import/xianxia-manual",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12918,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/level-up",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 12918,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/level-up",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 13021,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/cultivation",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 13021,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/cultivation",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 13348,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 13348,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 13475,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/edit",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 13475,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/edit",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 13635,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/retraining",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 13635,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/retraining",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 13806,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 13811,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 13856,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment/remove",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 13891,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/controls/delete",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 13936,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/equipment/systems-items/search",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 13986,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/spells/search",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14019,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/add",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14057,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/update",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14095,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/remove",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14132,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/equipment/add-systems",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14173,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/equipment/add-manual",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14195,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/equipment/add-campaign-item",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14226,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/equipment/<item_id>/update",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14277,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/equipment/<item_id>/state",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14298,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/feature-states/<feature_key>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14407,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/equipment/<item_id>/remove",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14426,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/xianxia/dao-immolating-use-requests",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14462,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/xianxia/dao-immolating-use-records",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14500,
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/portrait",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14516,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/personal/portrait",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14583,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/personal/portrait/remove",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14633,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14662,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-active-state",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14716,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14738,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<int:level>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14770,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14804,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/add",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14820,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/update",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14837,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/remove",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14853,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/equipped",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14870,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/session/currency",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14899,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/session/notes",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 14965,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/session/personal",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    },
+    {
+      "line_number": 15049,
+      "method": "POST",
+      "path": "/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>",
+      "route_family": "campaigns",
+      "source_file": "player_wiki/app.py"
+    }
+  ]
+}

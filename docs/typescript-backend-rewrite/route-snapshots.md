@@ -2,41 +2,38 @@
 
 Last updated: 2026-06-25
 
-Status: documentation-only parity evidence
+Status: documentation review companion for executable source-of-truth fixtures
 
 This file records source-derived route snapshots and fixture-backed missing-resource
-response shapes for the TypeScript backend rewrite. It is intentionally tracked as
-Markdown for reviewability until the stack spike chooses the TypeScript test runner
-and fixture format.
+response shapes for the TypeScript backend rewrite.
+
+This file is the human-review companion to:
+
+- `docs/typescript-backend-rewrite/route-snapshots.json`
+- `scripts/route_snapshots.py`
+
+`route-snapshots.json` is the executable source-of-truth artifact for route declaration
+drift checks. Use the command below after route edits to regenerate it.
+
+```powershell
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\route_snapshots.py --write
+```
+
+Check parity as part of CI or local validation:
+
+```powershell
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\route_snapshots.py --check
+```
 
 ## Snapshot Decision
 
-These snapshots are documentation-only for now. They should become executable parity
-fixtures after the stack spike chooses the route/test harness. Until then, they are
-the source-backed inventory for deciding which TypeScript handlers, compatibility
-routes, and error shapes must be preserved.
+These fixtures are generated from source by AST parser so route inventory stays
+declarative and deterministic for parity checks.
 
-## Source Commands
+## Source Snapshot Command
 
-API route snapshot:
-
-```powershell
-$pattern = '@api\.(get|post|put|patch|delete)\("([^"]+)"'
-Select-String -Path 'player_wiki\api.py' -Pattern $pattern |
-  ForEach-Object {
-    if ($_.Line -match $pattern) {
-      '{0} /api/v1{1} # player_wiki/api.py:{2}' -f $matches[1].ToUpperInvariant(), $matches[2], $_.LineNumber
-    }
-  }
-```
-
-Flask/browser compatibility route snapshot:
-
-```powershell
-$directPattern = '@app\.(get|post|put|patch|delete)\("([^"]+)"'
-$routePattern = '@app\.route\("([^"]+)"(?:, methods=\[([^\]]+)\])?'
-Select-String -Path 'player_wiki\app.py' -Pattern $directPattern,$routePattern
-```
+The executable parser command above replaced regex-based extraction in this document.
+No manual grep snippets are expected to be maintained here.
 
 ## `/api/v1` Route Snapshot
 
@@ -182,7 +179,9 @@ POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/
 
 ## Flask Browser Compatibility Route Snapshot
 
-Count: 138 declarations: 49 `GET`, 82 `POST`, 7 `GET,POST` dual-method form routes.
+Human-readable count: 138 declarations: 49 `GET`, 82 `POST`, 7 `GET,POST` dual-method form routes.
+
+Executable JSON count: 145 expanded route entries: 56 `GET`, 89 `POST`.
 
 ```text
 GET /app-next # player_wiki/app.py:1432

@@ -1,0 +1,59 @@
+{
+  "seed_source": "docs/typescript-backend-rewrite/stack-spike.md",
+  "status": "seed",
+  "notes": [
+    "Seed routes are intentionally minimal and should be treated as provisional parity targets.",
+    "These entries are for future TypeScript handler parity work, not proof of a production rewrite backend."
+  ],
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/v1/healthz",
+      "route_family": "api_v1",
+      "status": "proven_in_scratch",
+      "notes": "Health route passed in both Hono and TanStack Start scratch probes."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/session/login",
+      "route_family": "api_v1",
+      "status": "proven_in_scratch",
+      "notes": "Session cookie write route passed in the Hono scratch probe."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/session/login",
+      "route_family": "api_v1",
+      "status": "proven_in_scratch",
+      "notes": "Session cookie write route passed in the TanStack Start scratch probe."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/session/me",
+      "route_family": "api_v1",
+      "status": "proven_in_scratch",
+      "notes": "Session cookie read route passed in both scratch probes."
+    },
+    {
+      "method": "GET",
+      "path": "/assets/protected/<name>",
+      "route_family": "assets",
+      "status": "proven_in_scratch",
+      "notes": "Protected WebP asset route passed in both scratch probes."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/upload",
+      "route_family": "api_v1",
+      "status": "proven_in_scratch",
+      "notes": "Multipart upload route passed in both scratch probes."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/notes/<id>",
+      "route_family": "api_v1",
+      "status": "proven_in_scratch",
+      "notes": "SQLite-backed note route passed in both scratch probes."
+    }
+  ]
+}
