@@ -97,5 +97,82 @@ if (missing.payload?.error?.code !== "campaign_not_found") {
   throw new Error(`Expected campaign_not_found error code, got ${missing.payload?.error?.code}`);
 }
 
+const wikiHome = await requestJson("/api/v1/campaigns/linden-pass/wiki");
+if (wikiHome.status !== 200) {
+  throw new Error(`Expected wiki home 200, got ${wikiHome.status}`);
+}
+if (wikiHome.payload?.result_count !== 25) {
+  throw new Error(`Expected 25 visible fixture wiki pages, got ${wikiHome.payload?.result_count}`);
+}
+if (wikiHome.payload?.overview_page !== null) {
+  throw new Error("Expected deprecated Overview page to stay hidden from wiki home.");
+}
+if (wikiHome.payload?.latest_session_summary?.route_slug !== "sessions/session-2-the-brass-vault") {
+  throw new Error(
+    `Expected latest session summary route slug, got ${wikiHome.payload?.latest_session_summary?.route_slug}`,
+  );
+}
+const wikiSections = wikiHome.payload?.section_navigation || [];
+if (wikiSections[0]?.section_name !== "Sessions" || wikiSections[2]?.section_name !== "Locations") {
+  throw new Error(`Expected Flask-compatible wiki section ordering, got ${JSON.stringify(wikiSections.slice(0, 3))}`);
+}
+
+const wikiSection = await requestJson("/api/v1/campaigns/linden-pass/wiki/sections/locations");
+if (wikiSection.status !== 200) {
+  throw new Error(`Expected wiki section 200, got ${wikiSection.status}`);
+}
+if (wikiSection.payload?.section_name !== "Locations" || wikiSection.payload?.page_count !== 5) {
+  throw new Error(`Expected Locations section with five pages, got ${JSON.stringify(wikiSection.payload)}`);
+}
+if (wikiSection.payload?.show_subsections !== true) {
+  throw new Error("Expected Locations section to expose subsection grouping.");
+}
+if (wikiSection.payload?.pages?.[0]?.route_slug !== "locations/harbor-row") {
+  throw new Error(`Expected Harbor Row first in Locations section, got ${wikiSection.payload?.pages?.[0]?.route_slug}`);
+}
+
+const wikiPage = await requestJson("/api/v1/campaigns/linden-pass/wiki/pages/locations/port-meridian");
+if (wikiPage.status !== 200) {
+  throw new Error(`Expected wiki page 200, got ${wikiPage.status}`);
+}
+if (wikiPage.payload?.page?.route_slug !== "locations/port-meridian") {
+  throw new Error(`Expected Port Meridian page, got ${wikiPage.payload?.page?.route_slug}`);
+}
+if (
+  wikiPage.payload?.page?.body_html !==
+  "<p>Port Meridian is a layered trade city of piers, markets, guild offices, and storm channels cut into the cliff.</p>"
+) {
+  throw new Error(`Unexpected Port Meridian body_html: ${wikiPage.payload?.page?.body_html}`);
+}
+if (wikiPage.payload?.page?.image !== null) {
+  throw new Error("Expected Port Meridian to have no image payload.");
+}
+
+const imagePage = await requestJson("/api/v1/campaigns/linden-pass/wiki/pages/npcs/captain-lyra-vale");
+if (imagePage.status !== 200) {
+  throw new Error(`Expected Captain Lyra Vale page 200, got ${imagePage.status}`);
+}
+if (imagePage.payload?.page?.image?.media_type !== "image/png") {
+  throw new Error(`Expected PNG image metadata, got ${JSON.stringify(imagePage.payload?.page?.image)}`);
+}
+if (imagePage.payload?.page?.image?.url !== "/campaigns/linden-pass/assets/npcs/captain-lyra-vale.png") {
+  throw new Error(`Expected Flask asset URL, got ${imagePage.payload?.page?.image?.url}`);
+}
+
+const missingWikiCampaign = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/wiki");
+if (missingWikiCampaign.status !== 404 || missingWikiCampaign.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(`Expected missing wiki campaign JSON 404, got ${missingWikiCampaign.status}`);
+}
+
+const missingWikiSection = await requestJson("/api/v1/campaigns/linden-pass/wiki/sections/definitely-not-a-section");
+if (missingWikiSection.status !== 404 || missingWikiSection.payload?.error?.code !== "wiki_section_not_found") {
+  throw new Error(`Expected missing wiki section JSON 404, got ${missingWikiSection.status}`);
+}
+
+const missingWikiPage = await requestJson("/api/v1/campaigns/linden-pass/wiki/pages/definitely-not-a-page");
+if (missingWikiPage.status !== 404 || missingWikiPage.payload?.error?.code !== "wiki_page_not_found") {
+  throw new Error(`Expected missing wiki page JSON 404, got ${missingWikiPage.status}`);
+}
+
 ensureStopped();
 process.exit(0);

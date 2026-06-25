@@ -27,6 +27,33 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/wiki",
+      "route_family": "api_v1_wiki",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/wiki",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono wiki-home route backed by sanitized fixture Markdown content reads."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/wiki/sections/<section_slug>",
+      "route_family": "api_v1_wiki",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/wiki/sections/:sectionSlug",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono wiki-section route backed by sanitized fixture Markdown content reads."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/wiki/pages/<path:page_slug>",
+      "route_family": "api_v1_wiki",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/wiki/pages/*",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono wiki-page detail route backed by sanitized fixture Markdown content reads."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/session/login",
       "route_family": "api_v1",
       "status": "deferred_scratch_proof",

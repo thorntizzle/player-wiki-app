@@ -9,10 +9,15 @@ This document records the first implemented TypeScript read-only compatibility s
 - Added a tracked TypeScript API app under `apps/api` using Hono.
 - Implemented `GET /healthz`.
 - Implemented `GET /api/v1/campaigns/:campaignSlug` using fixture-backed repository reads.
+- Implemented fixture-backed wiki read endpoints:
+  - `GET /api/v1/campaigns/:campaignSlug/wiki`
+  - `GET /api/v1/campaigns/:campaignSlug/wiki/sections/:sectionSlug`
+  - `GET /api/v1/campaigns/:campaignSlug/wiki/pages/*`
+- Added `apps/api/src/wiki/` as the read-only Markdown/frontmatter fixture reader and wiki payload serializer.
 - Default campaign fixture directory is `tests/fixtures/sample_campaigns`.
 - `CPW_CAMPAIGNS_DIR` overrides the fixture directory.
-- Both endpoints return JSON-only payloads for the read-only slice and include explicit fixture-mode auth/permissions metadata.
-- Missing campaigns return a JSON `404` response.
+- Implemented endpoints return JSON-only payloads for the read-only slice, with explicit fixture-mode auth/permissions metadata on campaign detail.
+- Missing campaigns, wiki sections, and wiki pages return JSON `404` responses.
 - Added `apps/api/src/routes.ts` as the implemented-route manifest for the tracked TypeScript slice.
 - Added a route-parity smoke check that verifies implemented TypeScript routes stay present in both the Python route snapshot and the active TypeScript route seed.
 
@@ -23,13 +28,27 @@ This document records the first implemented TypeScript read-only compatibility s
   - `campaign` with `slug`, `title`, `summary`, `system`, `current_session`, and `systems_library_slug`
   - `auth_source` and explicit read-only auth block
   - read-only `permissions` block
+- Wiki home response preserves the stable Flask fixture fields for:
+  - `frontend_mode`
+  - `can_view_wiki`
+  - `wiki_visibility_label`
+  - `query`
+  - `result_count`
+  - `grouped_sections`
+  - `section_navigation`
+  - `latest_session_summary`
+  - hidden deprecated `Overview` page behavior
+- Wiki section response preserves stable Flask fixture section grouping fields, including top-level pages, subsection groups, and section navigation.
+- Wiki page response preserves stable Flask fixture page fields, image metadata, `body_html`, backlinks, and section navigation.
 
 ## Added Tests and Checks
 
 - `tests/test_typescript_readonly_slice_contract.py`:
   - runs a focused Flask-vs-TypeScript contract check for stable `campaign` fields for `linden-pass` using sanitized fixture data.
+  - compares stable Flask-vs-TypeScript wiki home, section, and page payload fields.
+  - checks JSON missing-resource shapes for TypeScript wiki dynamic routes.
 - `apps/api/tests/smoke.mjs`:
-  - starts compiled API on a local port and verifies `/healthz`, campaign detail, and 404 behavior.
+  - starts compiled API on a local port and verifies `/healthz`, campaign detail, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
 - `apps/api/tests/route-parity.mjs`:
   - checks implemented route coverage against `route-snapshots.json` and `typescript-route-seed.json`.
 
@@ -47,7 +66,9 @@ npm --prefix apps/api test
 
 ## Open Items
 
-- Remaining read-only surfaces beyond campaign detail remain open.
+- Session read-only fixture surfaces remain open.
+- Content/config read-only fixture surfaces remain open.
+- Production auth, live SQLite, write paths, and deployment cutover are intentionally outside this fixture-only slice.
 
 ## Frontend Dev-Mode Pointer
 
