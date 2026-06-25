@@ -177,6 +177,7 @@
       {% set show_equipment_sections = character_subpage == 'equipment' %}
       {% set show_inventory_sections = character_subpage == 'inventory' %}
       {% set show_personal_sections = character_subpage == 'personal' %}
+      {% set show_portrait_sections = character_subpage == 'portrait' %}
       {% set show_note_sections = character_subpage == 'notes' %}
       {% set show_control_sections = character_subpage == 'controls' %}
       {% set character_inline_state_controls_enabled = can_use_session_mode and native_character_tools_supported and not is_session_mode and not is_xianxia_sheet %}
@@ -1075,16 +1076,6 @@
             <h2>Personal</h2>
           </div>
           <div class="reference-stack">
-            {% if character.portrait %}
-              <article class="detail-card" id="character-personal-portrait">
-                <figure>
-                  <img class="article-image" src="{{ character.portrait.url }}" alt="{{ character.portrait.alt }}">
-                  {% if character.portrait.caption %}
-                    <figcaption class="meta article-image__caption">{{ character.portrait.caption }}</figcaption>
-                  {% endif %}
-                </figure>
-              </article>
-            {% endif %}
             {% if character.physical_description_html %}
               <article class="detail-card">
                 <h3>Physical Description</h3>
@@ -1097,16 +1088,38 @@
                 <div class="article-body article-body--compact">{{ character.personal_background_html | safe }}</div>
               </article>
             {% endif %}
-            {% if not character.portrait and not character.physical_description_html and not character.personal_background_html and not is_session_mode %}
+            {% if not character.physical_description_html and not character.personal_background_html and not is_session_mode %}
               <article class="detail-card">
                 <p class="meta">No personal details yet.</p>
               </article>
             {% endif %}
           </div>
+        </section>
+      {% endif %}
+
+      {% if show_portrait_sections %}
+        <section class="read-section" id="character-portrait">
+          <div class="section-heading">
+            <h2>Portrait</h2>
+          </div>
+          <div class="reference-stack">
+            {% if character.portrait %}
+              <figure class="character-portrait-display" id="character-portrait-current">
+                <img class="character-portrait-display__image" src="{{ character.portrait.url }}" alt="{{ character.portrait.alt }}">
+                {% if character.portrait.caption %}
+                  <figcaption class="meta article-image__caption">{{ character.portrait.caption }}</figcaption>
+                {% endif %}
+              </figure>
+            {% else %}
+              <article class="detail-card">
+                <p class="meta">No portrait yet.</p>
+              </article>
+            {% endif %}
+          </div>
           {% if can_use_session_mode and not is_session_mode %}
-            <article class="detail-card session-card" id="character-personal-portrait-manager">
+            <article class="detail-card session-card" id="character-portrait-manager">
               <div class="section-heading">
-                <h3>Portrait</h3>
+                <h3>Manage portrait</h3>
               </div>
               <form
                 class="stack-form"
@@ -1116,7 +1129,7 @@
               >
                 <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                 <input type="hidden" name="mode" value="read">
-                <input type="hidden" name="page" value="{{ character_subpage }}">
+                <input type="hidden" name="page" value="portrait">
                 <label class="field">
                   <span>Portrait image</span>
                   <input type="file" name="portrait_file" accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp">
@@ -1140,7 +1153,7 @@
                 >
                   <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                   <input type="hidden" name="mode" value="read">
-                  <input type="hidden" name="page" value="{{ character_subpage }}">
+                  <input type="hidden" name="page" value="portrait">
                   <button type="submit" class="ghost-button">Remove portrait</button>
                 </form>
               {% endif %}

@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any
 
 from .character_builder import _normalize_weapon_wield_mode_value
+from .character_artificer_infusions import normalize_active_infusions
 from .character_hit_dice import (
     normalize_hit_dice_state,
     normalize_hit_dice_state_payload,
@@ -65,6 +66,9 @@ def build_inventory_state(item: dict[str, Any], *, quantity: int | None = None) 
     weapon_wield_mode = _normalize_weapon_wield_mode_value(item.get("weapon_wield_mode"))
     if weapon_wield_mode:
         payload["weapon_wield_mode"] = weapon_wield_mode
+    active_infusions = normalize_active_infusions(item.get("active_infusions"))
+    if active_infusions:
+        payload["active_infusions"] = active_infusions
     return payload
 
 
@@ -332,6 +336,12 @@ def merge_state_with_definition(
                     merged_item["is_equipped"] = True
                 else:
                     merged_item.pop("weapon_wield_mode", None)
+            if "active_infusions" in item_state_override:
+                active_infusions = normalize_active_infusions(item_state_override.get("active_infusions"))
+                if active_infusions:
+                    merged_item["active_infusions"] = active_infusions
+                else:
+                    merged_item.pop("active_infusions", None)
         merged_inventory.append(merged_item)
 
     for item in existing_inventory:
@@ -533,6 +543,9 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
         weapon_wield_mode = _normalize_weapon_wield_mode_value(item.get("weapon_wield_mode"))
         if weapon_wield_mode:
             normalized_inventory[-1]["weapon_wield_mode"] = weapon_wield_mode
+        active_infusions = normalize_active_infusions(item.get("active_infusions"))
+        if active_infusions:
+            normalized_inventory[-1]["active_infusions"] = active_infusions
     payload["inventory"] = normalized_inventory
 
     currency = dict(payload.get("currency") or {})

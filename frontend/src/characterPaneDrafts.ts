@@ -52,6 +52,8 @@ export interface CharacterEquipmentDraft {
   weaponWieldMode: string;
 }
 
+export type CharacterArtificerInfusionDrafts = Record<string, string>;
+
 export interface CharacterPortraitDraft {
   file: EmbeddedImageInput | null;
   fileName: string;
@@ -73,6 +75,7 @@ export interface CharacterPaneDraftSnapshot {
   spellSlotDrafts: Record<string, string>;
   inventoryDrafts: Record<string, string>;
   equipmentDrafts: Record<string, CharacterEquipmentDraft>;
+  artificerInfusionDrafts: CharacterArtificerInfusionDrafts;
   xianxiaInventoryDrafts: Record<string, CharacterXianxiaInventoryDraft>;
   xianxiaDaoUseNotesDrafts: Record<string, string>;
   arcaneArmorEnabled: boolean;
@@ -92,6 +95,7 @@ export interface CharacterPaneDraftState extends CharacterPaneDraftSnapshot {
   setSpellSlotDrafts: Dispatch<SetStateAction<Record<string, string>>>;
   setInventoryDrafts: Dispatch<SetStateAction<Record<string, string>>>;
   setEquipmentDrafts: Dispatch<SetStateAction<Record<string, CharacterEquipmentDraft>>>;
+  setArtificerInfusionDrafts: Dispatch<SetStateAction<CharacterArtificerInfusionDrafts>>;
   setXianxiaInventoryDrafts: Dispatch<SetStateAction<Record<string, CharacterXianxiaInventoryDraft>>>;
   setNewXianxiaInventoryDraft: Dispatch<SetStateAction<CharacterXianxiaInventoryDraft>>;
   setXianxiaDaoRequestDraft: Dispatch<SetStateAction<CharacterXianxiaDaoUseRequestDraft>>;
@@ -123,6 +127,7 @@ export function useCharacterPaneDraftState({
   const [spellSlotDrafts, setSpellSlotDrafts] = useState<Record<string, string>>({});
   const [inventoryDrafts, setInventoryDrafts] = useState<Record<string, string>>({});
   const [equipmentDrafts, setEquipmentDrafts] = useState<Record<string, CharacterEquipmentDraft>>({});
+  const [artificerInfusionDrafts, setArtificerInfusionDrafts] = useState<CharacterArtificerInfusionDrafts>({});
   const [xianxiaInventoryDrafts, setXianxiaInventoryDrafts] = useState<Record<string, CharacterXianxiaInventoryDraft>>(
     {},
   );
@@ -156,6 +161,7 @@ export function useCharacterPaneDraftState({
     setSpellSlotDrafts(draftSnapshot.spellSlotDrafts);
     setInventoryDrafts(draftSnapshot.inventoryDrafts);
     setCurrencyDraft(draftSnapshot.currencyDraft);
+    setArtificerInfusionDrafts(draftSnapshot.artificerInfusionDrafts);
     setPortraitDraft(draftSnapshot.portraitDraft);
     setControlsDraft(draftSnapshot.controlsDraft);
     if (portraitFileInputRef.current) {
@@ -172,6 +178,7 @@ export function useCharacterPaneDraftState({
     spellSlotDrafts,
     inventoryDrafts,
     equipmentDrafts,
+    artificerInfusionDrafts,
     xianxiaInventoryDrafts,
     xianxiaDaoUseNotesDrafts,
     arcaneArmorEnabled: arcaneArmorDraft,
@@ -188,6 +195,7 @@ export function useCharacterPaneDraftState({
     setSpellSlotDrafts,
     setInventoryDrafts,
     setEquipmentDrafts,
+    setArtificerInfusionDrafts,
     setXianxiaInventoryDrafts,
     setNewXianxiaInventoryDraft,
     setXianxiaDaoRequestDraft,
@@ -336,6 +344,12 @@ export function buildCharacterPaneDraftSnapshot(character: CharacterRecord): Cha
       };
     }
   }
+  const artificerInfusionDrafts: CharacterArtificerInfusionDrafts = {};
+  for (const infusion of equipmentState?.artificer_infusions_state?.known ?? []) {
+    if (infusion.infusion_key) {
+      artificerInfusionDrafts[infusion.infusion_key] = infusion.selected_target_item_ref || "";
+    }
+  }
 
   const currency = isXianxiaCharacter(character) ? asRecord(xianxiaState.currency) : asRecord(state.currency);
   const currencyDraft: Record<string, string> = {};
@@ -377,6 +391,7 @@ export function buildCharacterPaneDraftSnapshot(character: CharacterRecord): Cha
     spellSlotDrafts,
     inventoryDrafts,
     equipmentDrafts,
+    artificerInfusionDrafts,
     xianxiaInventoryDrafts,
     xianxiaDaoUseNotesDrafts,
     arcaneArmorEnabled: Boolean((character.arcane_armor_state ?? equipmentState?.arcane_armor_state)?.enabled),

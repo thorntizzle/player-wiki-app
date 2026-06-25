@@ -9,14 +9,16 @@ Last updated: 2026-06-25
 ## Current User-Facing Behavior
 
 - DND-5E character detail subpages: `Quick Reference` or Gen2 `Overview`, `Resources`, `Spellcasting` or Gen2 `Spells`, `Equipment`, `Inventory`, `Abilities and Skills`, `Personal`, `Portrait`, `Notes`, and `Controls`.
-- Quick Reference shows core overview rows, editable HP/temp HP/Hit Dice for authorized users, tracked resources, carrying capacity when derivable, and defensive rules when modeled.
+- Quick Reference or Gen2 Overview shows core overview rows, editable HP/temp HP/Hit Dice for authorized users, tracked resources, carrying capacity when derivable, and defensive rules when modeled. On the normal Gen2 sheet, the vitals/rest editor appears only on Overview rather than repeating across every subpage.
 - Combat reminders from `stats.attack_reminder_state` belong on combat-facing attack panels, not normal Character Quick Reference.
 - Spellcasting is the durable home for spell-list management. Prepared casters and wizards use local `Current spells` and `Preparation` subviews over the same durable rows.
-- Equipment is the durable home for equip/unequip, attunement, weapon wield mode, and supported feature-state toggles such as Armorer Arcane Armor.
+- Equipment is the durable home for equip/unequip, attunement, weapon wield mode, supported feature-state toggles such as Armorer Arcane Armor, and Artificer infusion activation.
 - Inventory is the durable home for carried item rows, supplemental item adds, supported removals, quantity controls, and DND currency.
+- Resources shows tracked current/max resource cards. Authorized editors can change each current value through the existing resource state path with both blur autosave and a visible per-card `Save` action.
 - Spell detail popups in Gen2 include resolved upcasting text (e.g., `At Higher Levels`) when source-backed spell payload includes it; non-upcastable spells do not show an empty upcast section.
 - Personal displays physical description/background reference text. Physical description/background authoring belongs in Advanced Editor.
-- Portrait displays the current portrait and supports one portrait slot with upload/remove for authorized users.
+- Notes displays player notes and imported/reference note sections. Editable users can save or confirmed-delete the mutable player note through the shared revision-checked notes path.
+- Portrait displays a large unframed current portrait and supports one portrait slot with upload/remove for authorized users. PNG/JPG uploads are stored as WebP; GIF/WebP uploads pass through validation.
 - Controls covers owner status, app-admin assignment/clear, and DM/admin checked deletion.
 
 ## Current Authoring And Support Matrix
@@ -33,8 +35,9 @@ Last updated: 2026-06-25
 - Save-time derivation is the authority for computed DND-5E sheet math on supported write paths.
 - Shared derivation covers proficiency, saves, skills, passive checks, initiative, speed, carrying capacity, max HP when provenance exists, spell DC/attack, slot progression, Armor Class, attacks, and resource templates.
 - DND mutable state includes HP/temp HP, per-die-size Hit Dice pools, resources, spell-slot usage by slot lane, equipment state, inventory quantity, currency, notes, and feature states such as Arcane Armor.
-- Hit Dice max pools derive from class-row levels and hit-die metadata; current counts stay in SQLite. Long rests restore expended Hit Dice equal to half total character level, capped by pool maximum, and do not auto-heal HP.
+- Hit Dice max pools derive from class-row levels and hit-die metadata; current counts stay in SQLite. Long rests restore expended Hit Dice equal to half total character level, capped by pool maximum, and do not auto-heal HP. Gen2 rest confirmation fields let the user set final Current HP and current Hit Dice after the modeled rest recovery before applying the rest.
 - State reconciliation treats unlabeled legacy spell-slot rows as migration-only once tracked slot lanes exist.
+- Artificer active infusion state lives on targeted equipment rows as normalized `active_infusions`. Known infusions derive from modeled Artificer Infusions feature rows and known-infusion summaries, while active capacity derives from Artificer level.
 
 ## Current Spellcasting Contract
 
@@ -44,6 +47,7 @@ Last updated: 2026-06-25
 - Spell add/update/remove actions route through an explicit target class row.
 - Combat and Session Character consume only the Current spell set; unprepared candidates do not appear as castable spells there.
 - Always-prepared grants stay out of manual prepared counts and should not render as separate source-package cards when each spell card already carries the badge.
+- Always-prepared grants come from Systems metadata, explicit spell-support grants, supported class/subclass progression, or the bounded table-backed feature interpreter. The old subclass-title-only fallback is retired; legacy imported source labels such as `Cleric (Always Prepared)` still backfill durable always-prepared flags for older rows.
 - Spell detail popups show `At Higher Levels` upcasting mechanics from presenter spell payloads when available and suppress the section when not present.
 
 ## Current Equipment, AC, And Attack Contract
@@ -54,6 +58,7 @@ Last updated: 2026-06-25
 - Generated weapon attacks carry stable equipment refs, mode keys, and variant labels.
 - Quick Reference hides linked weapon attacks when source items are not equipped and respects explicit wield modes.
 - Armorer Arcane Armor is mutable character state at `feature_states.arcane_armor.enabled`; it gates Guardian Thunder Gauntlets and Defensive Field availability.
+- Eligible Artificers get an Equipment-page Infusions lane. Active selections target eligible nonmagical inventory/equipment items; `Enhanced Defense` is automated as a +1 AC defensive rule while the infused armor or shield is equipped, and unsupported active infusion effects remain visible as active note-only rows instead of silent partial automation.
 - Supported magic weapon/item effects require equipped state, and attunement-gated effects require attunement.
 
 ## Source Locking And Reimport
@@ -67,8 +72,6 @@ Last updated: 2026-06-25
 
 - Unsupported base classes and unsupported spell-bearing subclass-only lanes stay blocked until progression and spell rules are modeled end to end.
 - Additional senses, optional encumbrance thresholds, contextual passive-detection clauses, advanced attack/damage edge cases, broad boons/curses/training rewards, generic respec, and history rewrite remain deferred.
-- Artificer infusion active/preparation mechanics remain open backlog.
-- Some title-specific always-prepared fallback constants remain until the bounded interpreter covers all shipped cases with equivalent durability.
 
 ## Related Backlog
 
@@ -78,6 +81,7 @@ Last updated: 2026-06-25
 
 - `player_wiki/character_builder.py`
 - `player_wiki/character_editor.py`
+- `player_wiki/character_artificer_infusions.py`
 - `player_wiki/character_presenter.py`
 - `player_wiki/character_state_service.py`
 - `player_wiki/managed_resource_registry.py`

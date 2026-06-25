@@ -4,6 +4,7 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 import { apiErrorMessage } from "./api/client";
 import type {
   CharacterCurrencyPatchPayload,
+  CharacterArtificerInfusionsPatchPayload,
   CharacterDetailResponse,
   CharacterEquipmentStatePatchPayload,
   CharacterFeatureStatePatchPayload,
@@ -123,6 +124,13 @@ export function useCharacterPaneMutations({
     mutationFn: ({ featureKey, payload }: { featureKey: string; payload: CharacterFeatureStatePatchPayload }) =>
       apiClient.patchCharacterFeatureState(campaignSlug, selectedSlug || "", featureKey, payload),
     onSuccess: (response) => handleMutationSuccess(response, "Feature state saved."),
+    onError: handleMutationError,
+  });
+
+  const patchArtificerInfusions = useMutation({
+    mutationFn: (payload: CharacterArtificerInfusionsPatchPayload) =>
+      apiClient.patchCharacterArtificerInfusions(campaignSlug, selectedSlug || "", payload),
+    onSuccess: (response) => handleMutationSuccess(response, "Artificer infusions saved."),
     onError: handleMutationError,
   });
 
@@ -285,6 +293,7 @@ export function useCharacterPaneMutations({
     patchCurrency,
     patchEquipmentState,
     patchFeatureState,
+    patchArtificerInfusions,
     patchInventory,
     patchNotes,
     patchResource,

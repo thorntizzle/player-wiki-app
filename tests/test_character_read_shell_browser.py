@@ -1,9 +1,18 @@
 import re
 import threading
+import time
 from copy import deepcopy
 
+import player_wiki.app as app_module
 import pytest
 import yaml
+from tests.test_character_builder import (
+    _builder_context_fixture,
+    _level_up_context_fixture,
+    _minimal_character_definition,
+    _minimal_import_metadata,
+)
+from tests.test_character_read_routes import _seed_systems_item_entry
 
 
 @pytest.fixture
@@ -139,6 +148,161 @@ def _wait_for_app_loading_cover(page) -> None:
         }""",
         timeout=5000,
     )
+
+
+def _sign_in_browser(page, base_url: str, user) -> None:
+    page.goto(f"{base_url}/sign-in")
+    page.locator("input[name='email']").fill(user["email"])
+    page.locator("input[name='password']").fill(user["password"])
+    page.locator("button[type='submit']").click()
+    page.wait_for_url(re.compile(rf"^{re.escape(base_url)}/.*"), timeout=5000)
+
+
+def _write_leveler_fixture(app) -> None:
+    character_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters" / "leveler"
+    character_dir.mkdir(parents=True, exist_ok=True)
+    definition = _minimal_character_definition("leveler", "Leveler")
+    import_metadata = _minimal_import_metadata("leveler")
+    (character_dir / "definition.yaml").write_text(yaml.safe_dump(definition.to_dict(), sort_keys=False), encoding="utf-8")
+    (character_dir / "import.yaml").write_text(yaml.safe_dump(import_metadata.to_dict(), sort_keys=False), encoding="utf-8")
+
+
+def _scroll_y(page) -> float:
+    return float(page.evaluate("window.scrollY"))
+
+
+def test_character_native_live_previews_preserve_focus_and_viewport(
+    app,
+    users,
+    character_read_shell_live_server,
+    monkeypatch,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    monkeypatch.setattr(app_module, "build_level_one_builder_context", lambda *args, **kwargs: _builder_context_fixture())
+    monkeypatch.setattr(
+        app_module,
+        "native_level_up_readiness",
+        lambda *args, **kwargs: {"status": "ready", "message": "", "reasons": []},
+    )
+    monkeypatch.setattr(
+        app_module,
+        "build_native_level_up_context",
+        lambda *args, **kwargs: _level_up_context_fixture(),
+    )
+    _write_leveler_fixture(app)
+
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 960, "height": 420})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in_browser(page, base_url, users["dm"])
+
+            page.goto(f"{base_url}/campaigns/linden-pass/characters/new")
+            _wait_for_app_loading_cover(page)
+            strength_field = page.locator("input[name='str']")
+            expect(strength_field).to_be_visible(timeout=5000)
+            strength_field.scroll_into_view_if_needed()
+            page.wait_for_timeout(50)
+            create_scroll_before = _scroll_y(page)
+            with page.expect_response(
+                lambda response: "/campaigns/linden-pass/characters/new" in response.url
+                and "_live_preview=1" in response.url,
+                timeout=5000,
+            ):
+                strength_field.fill("17")
+            expect(strength_field).to_be_focused(timeout=5000)
+            expect(strength_field).to_have_value("17", timeout=5000)
+            assert abs(_scroll_y(page) - create_scroll_before) <= 40
+
+            page.goto(f"{base_url}/campaigns/linden-pass/characters/leveler/level-up")
+            _wait_for_app_loading_cover(page)
+            hp_gain_field = page.locator("input[name='hp_gain']")
+            expect(hp_gain_field).to_be_visible(timeout=5000)
+            hp_gain_field.scroll_into_view_if_needed()
+            page.wait_for_timeout(50)
+            level_scroll_before = _scroll_y(page)
+            with page.expect_response(
+                lambda response: "/campaigns/linden-pass/characters/leveler/level-up" in response.url
+                and "_live_preview=1" in response.url,
+                timeout=5000,
+            ):
+                hp_gain_field.fill("9")
+            expect(hp_gain_field).to_be_focused(timeout=5000)
+            expect(hp_gain_field).to_have_value("9", timeout=5000)
+            assert abs(_scroll_y(page) - level_scroll_before) <= 40
+        finally:
+            page.close()
+            browser.close()
+
+
+def test_character_systems_item_lookup_keeps_results_visible_while_refreshing(
+    app,
+    users,
+    character_read_shell_live_server,
+    monkeypatch,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    entry = _seed_systems_item_entry(app)
+    with app.app_context():
+        systems_service = app.extensions["systems_service"]
+        original_search = systems_service.search_entries_for_campaign
+
+    def _slow_search(*args, **kwargs):
+        if str(kwargs.get("query") or "").strip().lower() == "lantern":
+            time.sleep(1.0)
+        return original_search(*args, **kwargs)
+
+    monkeypatch.setattr(systems_service, "search_entries_for_campaign", _slow_search)
+
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in_browser(page, base_url, users["dm"])
+
+            page.goto(f"{base_url}/campaigns/linden-pass/characters/selene-brook?page=inventory")
+            _wait_for_app_loading_cover(page)
+            search_input = page.locator("[data-character-systems-item-query]")
+            results_select = page.locator("[data-character-systems-item-results]")
+            status = page.locator("[data-character-systems-item-status]")
+            expect(search_input).to_be_visible(timeout=5000)
+
+            with page.expect_response(
+                lambda response: "/equipment/systems-items/search" in response.url and "q=rope" in response.url,
+                timeout=5000,
+            ):
+                search_input.fill("rope")
+            expect(results_select).not_to_be_disabled(timeout=5000)
+            expect(results_select.locator("option").first).to_have_text(re.compile(r"Rope"))
+            assert results_select.input_value() == entry.slug
+
+            search_input.fill("lantern")
+            expect(status).to_have_text("Searching Systems items...", timeout=1500)
+            expect(results_select).not_to_be_disabled(timeout=5000)
+            expect(results_select.locator("option").first).to_have_text(re.compile(r"Rope"))
+            assert results_select.input_value() == entry.slug
+            expect(status).to_have_text("No enabled Systems items matched that search.", timeout=5000)
+        finally:
+            page.close()
+            browser.close()
 
 
 def test_spellcasting_subview_buttons_hide_and_show_panels(
@@ -560,6 +724,9 @@ def test_character_read_shell_browser_state_and_save_flow(
     personal_url_pattern = re.compile(
         r"^.*/campaigns/linden-pass/characters/arden-march\?.*page=personal.*$"
     )
+    portrait_url_pattern = re.compile(
+        r"^.*/campaigns/linden-pass/characters/arden-march\?.*page=portrait.*$"
+    )
 
     with sync_playwright() as playwright:
         try:
@@ -605,7 +772,7 @@ def test_character_read_shell_browser_state_and_save_flow(
             quick_row_columns = page.locator(".glance-grid--quick-row-1").evaluate(
                 "(element) => getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length"
             )
-            assert quick_row_columns == 2
+            assert quick_row_columns == 3
             passive_row_columns = page.locator(".glance-grid--quick-row-3").evaluate(
                 "(element) => getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length"
             )
@@ -693,14 +860,14 @@ def test_character_read_shell_browser_state_and_save_flow(
             expect(page.locator("textarea[name='player_notes_markdown']")).to_be_visible(timeout=5000)
 
             notes_draft = "Browser draft to preserve."
-            personal_draft = "Portrait caption draft from browser flow."
+            portrait_draft = "Portrait caption draft from browser flow."
             page.locator("textarea[name='player_notes_markdown']").fill(notes_draft)
-            page.locator("[data-character-read-target-subpage='personal']").click()
-            page.wait_for_function("window.location.search.includes('page=personal')")
-            expect(page).to_have_url(personal_url_pattern, timeout=5000)
+            page.locator("[data-character-read-target-subpage='portrait']").click()
+            page.wait_for_function("window.location.search.includes('page=portrait')")
+            expect(page).to_have_url(portrait_url_pattern, timeout=5000)
             expect(page.locator("textarea[name='background_markdown']")).to_have_count(0)
             expect(page.locator("button:has-text('Save personal details')")).to_have_count(0)
-            page.locator("input[name='portrait_caption']").fill(personal_draft)
+            page.locator("input[name='portrait_caption']").fill(portrait_draft)
 
             page.go_back()
             expect(page.locator("textarea[name='player_notes_markdown']")).to_have_value(
@@ -711,10 +878,10 @@ def test_character_read_shell_browser_state_and_save_flow(
 
             page.go_forward()
             expect(page.locator("input[name='portrait_caption']")).to_have_value(
-                personal_draft,
+                portrait_draft,
                 timeout=5000,
             )
-            expect(page).to_have_url(personal_url_pattern, timeout=5000)
+            expect(page).to_have_url(portrait_url_pattern, timeout=5000)
 
             page.locator("[data-character-read-target-subpage='notes']").click()
             expect(page).to_have_url(notes_url_pattern, timeout=5000)

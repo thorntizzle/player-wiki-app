@@ -14,6 +14,7 @@ from player_wiki.character_builder import (
     CHARACTER_BUILDER_VERSION,
     NATIVE_PROGRESSION_FEATURE_SOURCE_KIND,
     _attach_campaign_item_page_support,
+    _automatic_prepared_spell_lookup_keys,
     _build_item_catalog,
     _build_spell_catalog,
     _clear_builder_static_bundle_cache,
@@ -15207,6 +15208,33 @@ def test_level_one_builder_adds_structured_subclass_prepared_spells():
     assert spells_by_name["Detect Magic"]["mark"] == "Prepared"
     assert spells_by_name["Bless"]["is_always_prepared"] is True
     assert spells_by_name["Cure Wounds"]["is_always_prepared"] is True
+
+
+def test_automatic_prepared_spells_do_not_fall_back_to_subclass_title_only():
+    cleric = _systems_entry(
+        "class",
+        "phb-class-cleric",
+        "Cleric",
+        metadata={"subclass_title": "Divine Domain"},
+    )
+    life_domain_without_spell_metadata = _systems_entry(
+        "subclass",
+        "phb-subclass-cleric-life-domain",
+        "Life Domain",
+        metadata={"class_name": "Cleric", "class_source": "PHB"},
+    )
+    bless = _systems_entry("spell", "phb-spell-bless", "Bless", metadata={"level": 1})
+    cure_wounds = _systems_entry("spell", "phb-spell-cure-wounds", "Cure Wounds", metadata={"level": 1})
+
+    automatic_keys = _automatic_prepared_spell_lookup_keys(
+        selected_class=cleric,
+        selected_subclass=life_domain_without_spell_metadata,
+        spell_catalog=_build_spell_catalog([bless, cure_wounds]),
+        target_level=1,
+        feature_entries=[],
+    )
+
+    assert automatic_keys == set()
 
 
 def test_level_one_builder_adds_body_only_grave_domain_prepared_spells():

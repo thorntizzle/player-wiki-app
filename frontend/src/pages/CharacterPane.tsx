@@ -25,7 +25,7 @@ import { CharacterNavigationCard } from "../components/CharacterNavigationCard";
 import { CharacterPortraitSection } from "../components/CharacterPortraitSection";
 import { CharacterSummaryCard } from "../components/CharacterSummaryCard";
 import { CharacterSystemSummarySection } from "../components/CharacterSystemSummarySection";
-import { CharacterVitalsBar } from "../components/CharacterVitalsBar";
+import { CharacterVitalsBar, type CharacterRestAdjustmentDraft } from "../components/CharacterVitalsBar";
 import { CharacterDndSections } from "../components/CharacterDndSections";
 import { CharacterNotesSection } from "../components/CharacterNotesSection";
 import { CharacterXianxiaSections } from "../components/CharacterXianxiaSections";
@@ -49,6 +49,33 @@ import { buildCharacterPaneModel } from "../characterPaneModel";
 import { buildCharacterPaneXianxiaModel } from "../characterPaneXianxiaModel";
 import { useCharacterPaneSubmitHandlers } from "../characterPaneSubmitHandlers";
 
+function emptyRestAdjustmentDraft(): CharacterRestAdjustmentDraft {
+  return {
+    currentHp: "",
+    hitDice: {},
+  };
+}
+
+function restAdjustmentDraftFromPreview(
+  preview: CharacterRestPreviewResponse["preview"] | null,
+): CharacterRestAdjustmentDraft {
+  if (!preview?.adjustments) {
+    return emptyRestAdjustmentDraft();
+  }
+  const hitDice: Record<string, string> = {};
+  for (const pool of preview.adjustments.hit_dice?.pools ?? []) {
+    const faces = String(pool.faces ?? "");
+    if (!faces) {
+      continue;
+    }
+    hitDice[faces] = String(readNumber(pool.current, 0));
+  }
+  return {
+    currentHp: String(readNumber(preview.adjustments.current_hp, 0)),
+    hitDice,
+  };
+}
+
 export function CharacterPane({
   campaignSlug,
   initialCharacterSlug = null,
@@ -66,6 +93,7 @@ export function CharacterPane({
   const [selectedSlug, setSelectedSlug] = useState<string | null>(initialCharacterSlug);
   const [activeCharacterSection, setActiveCharacterSection] = useState<CharacterSection>(initialSection ?? "overview");
   const [restPreview, setRestPreview] = useState<CharacterRestPreviewResponse["preview"] | null>(null);
+  const [restAdjustmentDraft, setRestAdjustmentDraft] = useState<CharacterRestAdjustmentDraft>(emptyRestAdjustmentDraft);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [detailDialog, setDetailDialog] = useState<CharacterDetailDialogState | null>(null);
   const detailDialogReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -134,6 +162,7 @@ export function CharacterPane({
 
   const {
     arcaneArmorEnabled: arcaneArmorDraft,
+    artificerInfusionDrafts,
     controlsDraft,
     currencyDraft,
     equipmentDrafts,
@@ -143,6 +172,7 @@ export function CharacterPane({
     portraitDraft,
     resourceDrafts,
     setArcaneArmorDraft,
+    setArtificerInfusionDrafts,
     setControlsDraft,
     setCurrencyDraft,
     setEquipmentDrafts,
@@ -184,6 +214,10 @@ export function CharacterPane({
   }, [detailQuery.error, setAuthRequired]);
 
   useEffect(() => {
+    setRestAdjustmentDraft(restAdjustmentDraftFromPreview(restPreview));
+  }, [restPreview]);
+
+  useEffect(() => {
     if (!detailDialog) {
       return;
     }
@@ -222,6 +256,7 @@ export function CharacterPane({
   const isXianxia = isXianxiaCharacter(detailRecord);
   const {
     arcaneArmorState,
+    artificerInfusionsState,
     currency,
     dndAbilities,
     dndProficiencyGroups,
@@ -311,6 +346,7 @@ export function CharacterPane({
     patchCurrency,
     patchEquipmentState,
     patchFeatureState,
+    patchArtificerInfusions,
     patchInventory,
     patchNotes,
     patchResource,
@@ -341,10 +377,13 @@ export function CharacterPane({
 
   const {
     clearCharacterAssignment,
+    clearNotes,
     handlePortraitFileChange,
     removePortrait,
     removeXianxiaInventory,
     submitArcaneArmorState,
+    submitArtificerInfusions,
+    submitArtificerInfusionsPatch,
     submitCharacterAssignment,
     submitCharacterDelete,
     submitCurrency,
@@ -370,6 +409,7 @@ export function CharacterPane({
   } = useCharacterPaneSubmitHandlers({
     arcaneArmorDraft,
     arcaneArmorState,
+    artificerInfusionDrafts,
     canEdit,
     canRecordXianxiaDaoUse,
     controls,
@@ -419,6 +459,35 @@ export function CharacterPane({
     window.history.replaceState(null, "", nextUrl);
   };
 
+  const shouldShowReadHeaderSummary = Boolean(selected && isReadSurface);
+  const shouldShowInlineSummary = Boolean(selected && !isReadSurface);
+  const shouldShowVitalsBar = !isReadSurface || !isDnd || activeCharacterSection === "overview";
+  const buildRestApplyAdjustmentPayload = ():
+    | { current_hp?: number; hit_dice_current?: Record<string, number> }
+    | null => {
+    if (!restPreview?.adjustments || isXianxia) {
+      return {};
+    }
+    const currentHp = Number(restAdjustmentDraft.currentHp);
+    if (!Number.isInteger(currentHp) || currentHp < 0) {
+      setErrorMessage("Current HP after rest must be 0 or greater.");
+      return null;
+    }
+    const hitDiceCurrent: Record<string, number> = {};
+    for (const [faces, rawValue] of Object.entries(restAdjustmentDraft.hitDice)) {
+      const value = Number(rawValue);
+      if (!Number.isInteger(value) || value < 0) {
+        setErrorMessage(`d${faces} Hit Dice after rest must be 0 or greater.`);
+        return null;
+      }
+      hitDiceCurrent[faces] = value;
+    }
+    return {
+      current_hp: currentHp,
+      ...(Object.keys(hitDiceCurrent).length ? { hit_dice_current: hitDiceCurrent } : {}),
+    };
+  };
+
   return (
     <div className={isReadSurface ? "page-layout character-layout character-read-content" : "session-pane-content"}>
       {isSessionSurface ? (
@@ -460,6 +529,13 @@ export function CharacterPane({
               surfaceMetaLabel={surfaceMetaLabel}
             />
 
+            {shouldShowReadHeaderSummary && selected ? (
+              <CharacterSummaryCard
+                selected={selected}
+                selectedPortrait={selectedPortrait}
+              />
+            ) : null}
+
             <CharacterNavigationCard
               activeCharacterSection={activeCharacterSection}
               characterList={characterList}
@@ -476,7 +552,7 @@ export function CharacterPane({
         {listQuery.isLoading ? <p className="status status-neutral">Loading characters...</p> : null}
         {detailQuery.isLoading ? <p className="status status-neutral">Loading character...</p> : null}
 
-        {selected ? (
+        {shouldShowInlineSummary && selected ? (
           <CharacterSummaryCard
             selected={selected}
             selectedPortrait={selectedPortrait}
@@ -485,30 +561,39 @@ export function CharacterPane({
 
         {selected && detailRecord ? (
           <>
-            <CharacterVitalsBar
-              canEdit={canEdit}
-              isRestApplying={applyRest.isPending}
-              isRestPreviewLoading={previewRest.isPending}
-              isVitalsSaving={patchVitals.isPending}
-              isXianxia={isXianxia}
-              maxHp={readNumber(stats.max_hp, selected?.max_hp)}
-              onApplyRest={(restType) =>
-                applyRest.mutate({
-                  restType,
-                  payload: { expected_revision: revision },
-                })
-              }
-              onClearRestPreview={() => setRestPreview(null)}
-              onPreviewRest={(restType) => previewRest.mutate(restType)}
-              restPreview={restPreview}
-              setVitalsDraft={setVitalsDraft}
-              setXianxiaVitalsDraft={setXianxiaVitalsDraft}
-              submitVitals={submitVitals}
-              submitXianxiaVitals={submitXianxiaVitals}
-              surfaceMetaLabel={surfaceMetaLabel}
-              vitalsDraft={vitalsDraft}
-              xianxiaVitalsDraft={xianxiaVitalsDraft}
-            />
+            {shouldShowVitalsBar ? (
+              <CharacterVitalsBar
+                canEdit={canEdit}
+                isRestApplying={applyRest.isPending}
+                isRestPreviewLoading={previewRest.isPending}
+                isVitalsSaving={patchVitals.isPending}
+                isXianxia={isXianxia}
+                maxHp={readNumber(stats.max_hp, selected?.max_hp)}
+                onApplyRest={(restType) => {
+                  const adjustmentPayload = buildRestApplyAdjustmentPayload();
+                  if (adjustmentPayload === null) {
+                    return;
+                  }
+                  setErrorMessage(null);
+                  applyRest.mutate({
+                    restType,
+                    payload: { expected_revision: revision, ...adjustmentPayload },
+                  });
+                }}
+                onClearRestPreview={() => setRestPreview(null)}
+                onPreviewRest={(restType) => previewRest.mutate(restType)}
+                restAdjustmentDraft={restAdjustmentDraft}
+                restPreview={restPreview}
+                setRestAdjustmentDraft={setRestAdjustmentDraft}
+                setVitalsDraft={setVitalsDraft}
+                setXianxiaVitalsDraft={setXianxiaVitalsDraft}
+                submitVitals={submitVitals}
+                submitXianxiaVitals={submitXianxiaVitals}
+                surfaceMetaLabel={surfaceMetaLabel}
+                vitalsDraft={vitalsDraft}
+                xianxiaVitalsDraft={xianxiaVitalsDraft}
+              />
+            ) : null}
 
             {isDnd && !isReadSurface ? (
               <CharacterEmbeddedSectionNav
@@ -633,16 +718,22 @@ export function CharacterPane({
                 equipment={{
                   arcaneArmorDraft,
                   arcaneArmorState,
+                  artificerInfusionDrafts,
+                  artificerInfusionsState,
                   canEdit,
                   equipmentDrafts,
                   equipmentRows,
                   equipmentState,
                   isCombatSurface,
+                  isArtificerInfusionSaving: patchArtificerInfusions.isPending,
                   isEquipmentStateSaving: patchEquipmentState.isPending,
                   isFeatureStateSaving: patchFeatureState.isPending,
                   openItemDetail,
                   setArcaneArmorDraft,
+                  setArtificerInfusionDrafts,
                   setEquipmentDrafts,
+                  submitArtificerInfusions,
+                  submitArtificerInfusionsPatch,
                   submitArcaneArmorState,
                   submitEquipmentState,
                   submitEquipmentStatePatch,
@@ -735,6 +826,7 @@ export function CharacterPane({
             {((isDnd || isXianxia) ? activeCharacterSection === "notes" : !isDnd) ? (
               <CharacterNotesSection
                 canEdit={canEdit}
+                clearNotes={clearNotes}
                 isSaving={patchNotes.isPending}
                 notesDraft={notesDraft}
                 playerNotesHtml={playerNotesHtml}

@@ -61,8 +61,13 @@ export function CharacterDndResourcesSection({
                         onBlur={submitResourceOnBlur}
                       />
                     </label>
-                    <button type="submit" className="visually-hidden" disabled={isSaving || !canEdit}>
-                      Update {resourceLabel}
+                    <button
+                      type="submit"
+                      className="ghost-button resource-card__save"
+                      aria-label={`Save ${resourceLabel}`}
+                      disabled={isSaving || !canEdit}
+                    >
+                      Save
                     </button>
                   </form>
                 ) : null}

@@ -8,6 +8,11 @@ import {
 
 type RestType = "short" | "long";
 
+export interface CharacterRestAdjustmentDraft {
+  currentHp: string;
+  hitDice: Record<string, string>;
+}
+
 export function CharacterVitalsBar({
   canEdit,
   isRestApplying,
@@ -18,8 +23,10 @@ export function CharacterVitalsBar({
   onApplyRest,
   onClearRestPreview,
   onPreviewRest,
+  restAdjustmentDraft,
   restPreview,
   setVitalsDraft,
+  setRestAdjustmentDraft,
   setXianxiaVitalsDraft,
   submitVitals,
   submitXianxiaVitals,
@@ -36,7 +43,9 @@ export function CharacterVitalsBar({
   onApplyRest: (restType: RestType) => void;
   onClearRestPreview: () => void;
   onPreviewRest: (restType: RestType) => void;
+  restAdjustmentDraft: CharacterRestAdjustmentDraft;
   restPreview: CharacterRestPreviewResponse["preview"] | null;
+  setRestAdjustmentDraft: Dispatch<SetStateAction<CharacterRestAdjustmentDraft>>;
   setVitalsDraft: Dispatch<SetStateAction<CharacterVitalsDraft>>;
   setXianxiaVitalsDraft: Dispatch<SetStateAction<CharacterXianxiaVitalsDraft>>;
   submitVitals: (event: FormEvent<HTMLFormElement>) => void;
@@ -45,6 +54,9 @@ export function CharacterVitalsBar({
   vitalsDraft: CharacterVitalsDraft;
   xianxiaVitalsDraft: CharacterXianxiaVitalsDraft;
 }) {
+  const restHitDicePools = restPreview?.adjustments?.hit_dice?.pools ?? [];
+  const showRestAdjustments = Boolean(restPreview?.adjustments && !isXianxia);
+
   return (
     <section className="session-bar session-bar--compact" id="session-vitals">
       <div className="session-bar__summary">
@@ -137,11 +149,70 @@ export function CharacterVitalsBar({
           <div className="section-heading">
             <h2>{restPreview.label} confirmation</h2>
           </div>
+          {showRestAdjustments ? (
+            <div className="rest-adjustment-grid">
+              <label className="session-field rest-adjustment-field" htmlFor="rest-current-hp">
+                <span>Current HP after rest</span>
+                <input
+                  id="rest-current-hp"
+                  type="number"
+                  min="0"
+                  value={restAdjustmentDraft.currentHp}
+                  disabled={!canEdit || isRestApplying}
+                  onChange={(event) =>
+                    setRestAdjustmentDraft({
+                      ...restAdjustmentDraft,
+                      currentHp: event.currentTarget.value,
+                    })
+                  }
+                />
+              </label>
+              {restHitDicePools.length ? (
+                <div className="session-field rest-adjustment-field rest-adjustment-field--hit-dice">
+                  <span>Current Hit Dice after rest</span>
+                  <div className="hit-dice-pool-list" aria-label="Current Hit Dice after rest">
+                    {restHitDicePools.map((pool) => {
+                      const faces = String(pool.faces ?? "");
+                      const label = pool.label || (faces ? `d${faces}` : "Hit Die");
+                      return (
+                        <label className="hit-dice-pool" key={faces || label}>
+                          <span>{label}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max={pool.max}
+                            aria-label={`${label} Hit Dice after rest`}
+                            value={restAdjustmentDraft.hitDice[faces] ?? ""}
+                            disabled={!canEdit || isRestApplying}
+                            onChange={(event) =>
+                              setRestAdjustmentDraft({
+                                ...restAdjustmentDraft,
+                                hitDice: {
+                                  ...restAdjustmentDraft.hitDice,
+                                  [faces]: event.currentTarget.value,
+                                },
+                              })
+                            }
+                          />
+                          <span>/ {pool.max ?? 0}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <ul className="plain-list rest-preview-list">
             {restPreview.changes.length ? (
               restPreview.changes.map((change) => (
                 <li key={`${change.label}-${change.from_value}-${change.to_value}`}>
-                  <strong>{change.label}</strong>: <span>{change.from_value} {"->"} {change.to_value}</span>
+                  <strong>{change.label}</strong>
+                  <span className="rest-preview-change__values">
+                    <span>{change.from_value}</span>
+                    <span aria-hidden="true">{"->"}</span>
+                    <span>{change.to_value}</span>
+                  </span>
                 </li>
               ))
             ) : (

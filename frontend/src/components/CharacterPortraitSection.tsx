@@ -33,14 +33,16 @@ export function CharacterPortraitSection({
       </div>
       <div className="reference-stack">
         {selectedPortrait ? (
-          <article className="detail-card" id="character-portrait-current">
-            <figure>
-              <img className="article-image" src={selectedPortrait.url} alt={selectedPortrait.alt_text || selectedName} />
-              {selectedPortrait.caption ? (
-                <figcaption className="meta article-image__caption">{selectedPortrait.caption}</figcaption>
-              ) : null}
-            </figure>
-          </article>
+          <figure className="character-portrait-display" id="character-portrait-current">
+            <img
+              className="character-portrait-display__image"
+              src={selectedPortrait.url}
+              alt={selectedPortrait.alt_text || selectedName}
+            />
+            {selectedPortrait.caption ? (
+              <figcaption className="meta article-image__caption">{selectedPortrait.caption}</figcaption>
+            ) : null}
+          </figure>
         ) : (
           <article className="detail-card character-empty-state">
             <p className="meta">No portrait yet.</p>

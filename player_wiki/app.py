@@ -281,6 +281,7 @@ CHARACTER_READ_SUBPAGE_LABELS = {
     "equipment": "Equipment",
     "inventory": "Inventory",
     "personal": "Personal",
+    "portrait": "Portrait",
     "notes": "Notes",
 }
 CHARACTER_CONTROLS_SUBPAGE_LABELS = {
@@ -1049,6 +1050,7 @@ def get_character_read_subpage_labels(
             "equipment": CHARACTER_READ_SUBPAGE_LABELS["equipment"],
             "inventory": CHARACTER_READ_SUBPAGE_LABELS["inventory"],
             "personal": CHARACTER_READ_SUBPAGE_LABELS["personal"],
+            "portrait": CHARACTER_READ_SUBPAGE_LABELS["portrait"],
             "notes": CHARACTER_READ_SUBPAGE_LABELS["notes"],
         }
     )
@@ -2708,6 +2710,13 @@ def create_app() -> Flask:
             raise ValueError("Uploaded portrait files cannot be empty.")
         if len(data_blob) > CHARACTER_PORTRAIT_MAX_BYTES:
             raise ValueError("Character portraits must stay under 8 MB.")
+        try:
+            filename, data_blob = prepare_published_article_image(filename, data_blob)
+        except ValueError as exc:
+            message = str(exc)
+            message = message.replace("Wiki page images", "Character portraits")
+            message = message.replace("Uploaded wiki page images", "Uploaded portrait files")
+            raise ValueError(message) from exc
         return filename, data_blob
 
     def build_character_portrait_context(campaign, definition) -> dict[str, str] | None:
@@ -14551,7 +14560,7 @@ def create_app() -> Flask:
         else:
             flash("Portrait saved.", "success")
 
-        return redirect_to_character_mode(campaign_slug, character_slug, anchor="character-personal-portrait")
+        return redirect_to_character_mode(campaign_slug, character_slug, anchor="character-portrait-manager")
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/personal/portrait/remove")
     @campaign_scope_access_required("characters")
@@ -14567,7 +14576,7 @@ def create_app() -> Flask:
         existing_asset_ref = str((record.definition.profile or {}).get("portrait_asset_ref") or "").strip()
         if not existing_asset_ref:
             flash("That character does not currently have a portrait.", "error")
-            return redirect_to_character_mode(campaign_slug, character_slug, anchor="character-personal-portrait")
+            return redirect_to_character_mode(campaign_slug, character_slug, anchor="character-portrait-manager")
 
         try:
             expected_revision = parse_expected_revision()
@@ -14601,7 +14610,7 @@ def create_app() -> Flask:
         else:
             flash("Portrait removed.", "success")
 
-        return redirect_to_character_mode(campaign_slug, character_slug, anchor="character-personal-portrait")
+        return redirect_to_character_mode(campaign_slug, character_slug, anchor="character-portrait-manager")
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals")
     @campaign_scope_access_required("characters")

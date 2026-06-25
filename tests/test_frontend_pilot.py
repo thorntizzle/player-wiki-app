@@ -550,7 +550,13 @@ def test_character_vitals_bar_uses_flask_style_chrome_in_source() -> None:
     assert 'id="character-current-hp"' in source
     assert 'id="character-temp-hp"' in source
     assert "<span> / {maxHp}</span>" in source
+    assert "export interface CharacterRestAdjustmentDraft" in source
+    assert 'className="rest-adjustment-grid"' in source
+    assert "Current HP after rest" in source
+    assert "Current Hit Dice after rest" in source
+    assert 'className="hit-dice-pool"' in source
     assert 'className="plain-list rest-preview-list"' in source
+    assert 'className="rest-preview-change__values"' in source
     assert '{"->"}' in source
     assert 'onClick={() => onApplyRest(restPreview.rest_type === "short" ? "short" : "long")}' in source
     assert "onClick={onClearRestPreview}" in source
@@ -2576,6 +2582,14 @@ def test_character_portrait_is_dedicated_subpage_in_source() -> None:
     assert "<CharacterPortraitSection" in pane_source
     assert 'id="character-portrait"' in section_source
     assert "<h2>Portrait</h2>" in section_source
+    assert 'className="character-portrait-display"' in section_source
+    assert 'className="character-portrait-display__image"' in section_source
+    current_portrait_markup = section_source[
+        section_source.index('className="character-portrait-display"'):
+        section_source.index(') : (', section_source.index('className="character-portrait-display"'))
+    ]
+    assert "detail-card" not in current_portrait_markup
+    assert 'className="article-image"' not in current_portrait_markup
     assert 'id="character-portrait-manager"' in section_source
     assert "<CharacterPortraitManager" in section_source
     assert "CharacterPortraitManager" not in personal_source
@@ -3613,9 +3627,36 @@ def test_session_character_picker_lives_above_sheet_card_in_source() -> None:
     article_markup = source[article_start:source.index("{listQuery.isLoading", article_start)]
     assert "{!isSessionSurface ? (" in article_markup
     assert "<CharacterHeader" in article_markup
+    assert "shouldShowReadHeaderSummary" in article_markup
+    assert "<CharacterSummaryCard" in article_markup
     assert "<CharacterNavigationCard" in article_markup
+    assert article_markup.index("<CharacterHeader") < article_markup.index("<CharacterSummaryCard")
+    assert article_markup.index("<CharacterSummaryCard") < article_markup.index("<CharacterNavigationCard")
     assert ".session-pane-content > .character-selector-card {" in styles
     assert ".character-selector-row {" in styles
+
+
+def test_character_read_sheet_keeps_vitals_on_overview_only_in_source() -> None:
+    source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
+
+    assert 'const shouldShowReadHeaderSummary = Boolean(selected && isReadSurface);' in source
+    assert 'const shouldShowInlineSummary = Boolean(selected && !isReadSurface);' in source
+    assert 'const shouldShowVitalsBar = !isReadSurface || !isDnd || activeCharacterSection === "overview";' in source
+    assert "{shouldShowInlineSummary && selected ? (" in source
+    assert "{shouldShowVitalsBar ? (" in source
+
+
+def test_character_rest_adjustments_flow_into_apply_payload_in_source() -> None:
+    source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
+
+    assert "function restAdjustmentDraftFromPreview" in source
+    assert "preview.adjustments.hit_dice?.pools" in source
+    assert "const buildRestApplyAdjustmentPayload = ()" in source
+    assert "current_hp: currentHp" in source
+    assert "hit_dice_current: hitDiceCurrent" in source
+    assert "payload: { expected_revision: revision, ...adjustmentPayload }" in source
+    assert "restAdjustmentDraft={restAdjustmentDraft}" in source
+    assert "setRestAdjustmentDraft={setRestAdjustmentDraft}" in source
 
 
 def test_mutation_heavy_gen2_routes_use_shared_toast_notice() -> None:
@@ -3725,9 +3766,12 @@ def test_character_pane_submit_handlers_live_in_shared_hook() -> None:
     assert "mutations.patchEquipmentState.mutate" in handler_source
     assert "mutations.postXianxiaDaoUseRecord.mutate" in handler_source
     assert 'player_notes_markdown: notesDraft.notes' in handler_source
+    assert "const clearNotes = () =>" in handler_source
+    assert 'player_notes_markdown: ""' in handler_source
 
     assert 'import { useCharacterPaneSubmitHandlers } from "../characterPaneSubmitHandlers";' in route_source
     assert "useCharacterPaneSubmitHandlers({" in route_source
+    assert "clearNotes={clearNotes}" in route_source
     assert "mutations: characterPaneMutations" in route_source
     assert "const submitVitals = " not in route_source
     assert "const submitXianxiaDaoUseRequest = " not in route_source
@@ -3735,6 +3779,17 @@ def test_character_pane_submit_handlers_live_in_shared_hook() -> None:
     assert "parseCharacterNumberInput(value, label)" not in route_source
     assert "xianxiaInventoryPayloadFromDraft" not in route_source
     assert "readBinaryAsBase64(file" not in route_source
+
+
+def test_character_notes_section_exposes_confirmed_delete_note_action() -> None:
+    source = Path("frontend/src/components/CharacterNotesSection.tsx").read_text(encoding="utf-8")
+
+    assert "clearNotes: () => void;" in source
+    assert "const hasPlayerNote = Boolean(notesDraft.notes.trim() || playerNotesHtml.trim());" in source
+    assert 'className="ghost-button"' in source
+    assert 'window.confirm("Delete this character note?")' in source
+    assert "clearNotes();" in source
+    assert "Delete note" in source
 
 
 def test_character_dnd_overview_section_uses_flask_style_glance_rows() -> None:
@@ -3923,6 +3978,15 @@ def test_character_dnd_equipment_section_uses_flask_style_row_form_chrome() -> N
     assert 'name="enabled"' in section_markup
     assert "isFeatureStateSaving || !canEdit" in section_markup
     assert "isEquipmentStateSaving || !canEdit" in section_markup
+    assert 'id="character-artificer-infusions"' in section_markup
+    assert 'data-character-sheet-edit-form="artificer-infusions"' in section_markup
+    assert "artificerInfusionsState.active_count" in section_markup
+    assert "artificerInfusionsState.active_capacity" in section_markup
+    assert "artificerInfusionsState.known.map" in section_markup
+    assert 'option value="">Not active</option>' in section_markup
+    assert "submitArtificerInfusionsPatch(nextDrafts)" in section_markup
+    assert 'infusion.automation_status === "automated" ? "Automated effect" : "Active note only"' in section_markup
+    assert 'className="ghost-button resource-card__save"' in section_markup
     assert 'name="weapon_wield_mode"' in section_markup
     assert 'name="is_equipped"' in section_markup
     assert 'name="is_attuned"' in section_markup
@@ -3935,6 +3999,30 @@ def test_character_dnd_equipment_section_uses_flask_style_row_form_chrome() -> N
     assert 'Save feature state' not in section_markup
     assert '<p className="meta">Requires attunement</p>' not in section_markup
     assert 'item.attunement_hint !== "Requires attunement"' in section_markup
+
+
+def test_character_artificer_infusions_flow_through_gen2_client_and_handlers() -> None:
+    types_source = Path("frontend/src/api/types.ts").read_text(encoding="utf-8")
+    client_source = Path("frontend/src/api/client.ts").read_text(encoding="utf-8")
+    mutations_source = Path("frontend/src/characterPaneMutations.ts").read_text(encoding="utf-8")
+    drafts_source = Path("frontend/src/characterPaneDrafts.ts").read_text(encoding="utf-8")
+    handlers_source = Path("frontend/src/characterPaneSubmitHandlers.ts").read_text(encoding="utf-8")
+    pane_source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
+
+    assert "export interface CharacterArtificerInfusionsState" in types_source
+    assert "export interface CharacterArtificerInfusionsPatchPayload" in types_source
+    assert "artificer_infusions_state?: CharacterArtificerInfusionsState" in types_source
+    assert "patchCharacterArtificerInfusions" in client_source
+    assert "/session/artificer-infusions" in client_source
+    assert "const patchArtificerInfusions = useMutation" in mutations_source
+    assert "apiClient.patchCharacterArtificerInfusions" in mutations_source
+    assert "artificerInfusionDrafts[infusion.infusion_key]" in drafts_source
+    assert "setArtificerInfusionDrafts(draftSnapshot.artificerInfusionDrafts)" in drafts_source
+    assert "const submitArtificerInfusionsPatch =" in handlers_source
+    assert "mutations.patchArtificerInfusions.mutate" in handlers_source
+    assert "target_item_ref: readString(targetItemRef)" in handlers_source
+    assert "artificerInfusionsState" in pane_source
+    assert "isArtificerInfusionSaving: patchArtificerInfusions.isPending" in pane_source
 
 
 def test_character_dnd_resources_section_uses_flask_style_row_form_chrome() -> None:
@@ -3957,14 +4045,16 @@ def test_character_dnd_resources_section_uses_flask_style_row_form_chrome() -> N
         is not None
     )
     assert 'className="resource-card__value"' in resources_markup
-    assert 'className="visually-hidden"' in resources_markup
-    assert 'Update {resourceLabel}' in resources_markup
+    assert 'className="ghost-button resource-card__save"' in resources_markup
+    assert 'aria-label={`Save ${resourceLabel}`}' in resources_markup
+    assert re.search(r'>\s*Save\s*</button>', resources_markup) is not None
     assert ".visually-hidden" in styles
     assert ".resource-grid {" in styles
     assert ".character-sheet .resource-grid--compact," in styles
     assert ".character-sheet .resource-grid--editable" in styles
     assert "grid-template-columns: repeat(3, minmax(0, min(24rem, 100%)));" in styles
     assert ".resource-card {" in styles
+    assert ".resource-card__save" in styles
     assert ".session-resource-card--compact" in styles
     assert ".session-inline-form--compact-resource" in styles
 
@@ -3972,7 +4062,8 @@ def test_character_dnd_resources_section_uses_flask_style_row_form_chrome() -> N
     assert 'className="character-state-card"' not in resources_markup
     assert 'className="compact-state-form"' not in resources_markup
     assert 'className="chat-label"' not in resources_markup
-    assert 'Save' not in resources_markup
+    assert 'className="visually-hidden"' not in resources_markup
+    assert 'Update {resourceLabel}' not in resources_markup
 
 
 def test_character_dnd_spell_slots_section_uses_flask_style_row_form_chrome() -> None:

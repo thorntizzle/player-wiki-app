@@ -28,6 +28,12 @@ Last updated: 2026-06-25
 - Shared shell components live under `frontend/src/AppShell.tsx` and `frontend/src/components/**`.
 - Shared mutation/query helpers should stay in domain-specific hooks rather than being rebuilt in page files.
 - Critical destructive forms, including the Character Controls delete confirmation card, should reuse theme tokens (`--error-*` / `--danger`) for readable warning text, field input, and action styling.
+- Character Notes deletion is a confirmed local action that reuses the same revision-checked notes mutation as saving, rather than introducing a separate route or unguarded clear.
+- Editable DND resource cards keep the shared autosubmit metadata and JSON resource mutation while also exposing a compact `ghost-button` per-card Save control; do not hide the only save affordance on those resource inputs.
+- Normal Gen2 Character read sheets keep the character identity header and summary above the subpage navigation; subpage buttons change only the content below that stable header area. The DND vitals/rest editor belongs to Overview on that normal read sheet.
+- Gen2 rest confirmation diff rows use compact content-width rows rather than stretching labels and values across the card. DND rest confirmations include final Current HP and current Hit Dice fields.
+- Gen2 Character Portrait displays the current portrait as a large unframed image on the dedicated Portrait subpage. Character portrait uploads reuse the article-image WebP conversion rule.
+- Gen2 Character Equipment consumes the shared DND equipment-state payload, including Artificer active infusion state. Enhanced Defense shows as an automated active effect, while unsupported active infusions stay visible as note-only active rows.
 
 ## UX And Feedback Conventions
 

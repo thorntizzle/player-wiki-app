@@ -1537,6 +1537,44 @@ export interface CharacterArcaneArmorState {
   defensive_field_available?: boolean;
 }
 
+export interface CharacterArtificerInfusionTargetOption {
+  value: string;
+  label: string;
+}
+
+export interface CharacterArtificerKnownInfusion {
+  infusion_key: string;
+  name: string;
+  source_feature_id?: string;
+  effect_key?: string;
+  supported_effect: boolean;
+  automation_status: string;
+  effect_summary: string;
+  selected_target_item_ref: string;
+  target_options: CharacterArtificerInfusionTargetOption[];
+}
+
+export interface CharacterArtificerActiveInfusion {
+  infusion_key: string;
+  name: string;
+  target_item_ref: string;
+  target_item_name: string;
+  supported_effect: boolean;
+  automation_status: string;
+  effect_summary: string;
+}
+
+export interface CharacterArtificerInfusionsState {
+  available: boolean;
+  artificer_level: number;
+  known_capacity: number;
+  known_count: number;
+  active_capacity: number;
+  active_count: number;
+  known: CharacterArtificerKnownInfusion[];
+  active: CharacterArtificerActiveInfusion[];
+}
+
 export interface CharacterEquipmentState {
   rows: CharacterEquipmentRow[];
   attuned_count: number;
@@ -1547,6 +1585,7 @@ export interface CharacterEquipmentState {
   at_attunement_limit: boolean;
   over_attunement_limit: boolean;
   arcane_armor_state: CharacterArcaneArmorState;
+  artificer_infusions_state?: CharacterArtificerInfusionsState;
 }
 
 export interface CharacterPresentedSpell {
@@ -2357,6 +2396,14 @@ export interface CharacterFeatureStatePatchPayload {
   enabled: boolean;
 }
 
+export interface CharacterArtificerInfusionsPatchPayload {
+  expected_revision: number;
+  active: Array<{
+    infusion_key: string;
+    target_item_ref: string;
+  }>;
+}
+
 export interface CharacterCurrencyPatchPayload {
   expected_revision: number;
   cp?: number | null;
@@ -2487,11 +2534,26 @@ export interface CharacterRestPreviewResponse extends ApiResponseBase {
     rest_type: "short" | "long" | string;
     label: string;
     changes: CharacterRestPreviewChange[];
+    adjustments?: {
+      current_hp?: number;
+      hit_dice?: {
+        value?: string;
+        pools?: Array<{
+          faces?: number;
+          label?: string;
+          current?: number;
+          max?: number;
+          input_name?: string;
+        }>;
+      };
+    };
   };
 }
 
 export interface CharacterRestApplyPayload {
   expected_revision: number;
+  current_hp?: number;
+  hit_dice_current?: Record<string, number>;
 }
 
 export interface CharacterRestApplyResponse extends ApiResponseBase {

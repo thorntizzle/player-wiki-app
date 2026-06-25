@@ -37,20 +37,23 @@ def prepare_published_article_image(
     except UnidentifiedImageError as exc:
         raise ValueError("Uploaded wiki page images must be valid image files.") from exc
 
-    with image:
-        if extension in PASSTHROUGH_ARTICLE_IMAGE_EXTENSIONS:
-            image.verify()
-            return Path(str(filename or "image")).name, raw_bytes
+    try:
+        with image:
+            if extension in PASSTHROUGH_ARTICLE_IMAGE_EXTENSIONS:
+                image.verify()
+                return Path(str(filename or "image")).name, raw_bytes
 
-        mode = image.mode
-        if mode in {"RGBA", "RGB", "P", "LA", "L"}:
-            source_image = image.convert("RGBA" if mode in {"RGBA", "LA"} else "RGB")
-        else:
-            source_image = image.convert("RGBA")
+            mode = image.mode
+            if mode in {"RGBA", "RGB", "P", "LA", "L"}:
+                source_image = image.convert("RGBA" if mode in {"RGBA", "LA"} else "RGB")
+            else:
+                source_image = image.convert("RGBA")
 
-        output = BytesIO()
-        source_image.save(output, format="WEBP", quality=quality)
-        output_bytes = output.getvalue()
+            output = BytesIO()
+            source_image.save(output, format="WEBP", quality=quality)
+            output_bytes = output.getvalue()
+    except (OSError, SyntaxError) as exc:
+        raise ValueError("Uploaded wiki page images must be valid image files.") from exc
 
     converted_filename = Path(str(filename or "image")).with_suffix(".webp").name
     return converted_filename, output_bytes

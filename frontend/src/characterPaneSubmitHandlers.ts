@@ -11,6 +11,7 @@ import type {
 } from "./api/types";
 import type {
   CharacterControlsDraft,
+  CharacterArtificerInfusionDrafts,
   CharacterEquipmentDraft,
   CharacterNotesDraft,
   CharacterPortraitDraft,
@@ -36,6 +37,7 @@ type CharacterPaneMutationBundle = ReturnType<typeof useCharacterPaneMutations>;
 export function useCharacterPaneSubmitHandlers({
   arcaneArmorDraft,
   arcaneArmorState,
+  artificerInfusionDrafts,
   canEdit,
   canRecordXianxiaDaoUse,
   controls,
@@ -65,6 +67,7 @@ export function useCharacterPaneSubmitHandlers({
 }: {
   arcaneArmorDraft: boolean;
   arcaneArmorState?: CharacterArcaneArmorState | null;
+  artificerInfusionDrafts: CharacterArtificerInfusionDrafts;
   canEdit: boolean;
   canRecordXianxiaDaoUse: boolean;
   controls?: CharacterControls | null;
@@ -450,6 +453,27 @@ export function useCharacterPaneSubmitHandlers({
     });
   };
 
+  const submitArtificerInfusionsPatch = (drafts: CharacterArtificerInfusionDrafts = artificerInfusionDrafts) => {
+    if (!requireEditableCharacter()) {
+      return;
+    }
+    setStatusMessage("Saving...");
+    mutations.patchArtificerInfusions.mutate({
+      expected_revision: revision,
+      active: Object.entries(drafts)
+        .filter(([, targetItemRef]) => readString(targetItemRef))
+        .map(([infusionKey, targetItemRef]) => ({
+          infusion_key: infusionKey,
+          target_item_ref: readString(targetItemRef),
+        })),
+    });
+  };
+
+  const submitArtificerInfusions = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    submitArtificerInfusionsPatch();
+  };
+
   const submitEquipmentStatePatch = (item: CharacterEquipmentRow, draft: CharacterEquipmentDraft) => {
     if (!requireEditableCharacter()) {
       return;
@@ -515,12 +539,29 @@ export function useCharacterPaneSubmitHandlers({
     });
   };
 
+  const clearNotes = () => {
+    if (!requireEditableCharacter()) {
+      return;
+    }
+    if (!notesDraft.notes.trim()) {
+      return;
+    }
+    setStatusMessage("Deleting note...");
+    mutations.patchNotes.mutate({
+      expected_revision: revision,
+      player_notes_markdown: "",
+    });
+  };
+
   return {
+    clearNotes,
     clearCharacterAssignment,
     handlePortraitFileChange,
     removePortrait,
     removeXianxiaInventory,
     submitArcaneArmorState,
+    submitArtificerInfusions,
+    submitArtificerInfusionsPatch,
     submitCharacterAssignment,
     submitCharacterDelete,
     submitCurrency,

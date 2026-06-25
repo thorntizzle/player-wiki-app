@@ -34,6 +34,7 @@ export function buildCharacterPaneModel(
   const equipmentState = character?.equipment_state;
   const equipmentRows = equipmentState?.rows ?? [];
   const arcaneArmorState = character?.arcane_armor_state ?? equipmentState?.arcane_armor_state;
+  const artificerInfusionsState = equipmentState?.artificer_infusions_state;
   const presentedXianxia = character?.presented_xianxia ?? {};
   const presentedSpells = collectPresentedSpells(character);
   const presentedSpellGroups = groupSpellsByLevel(presentedSpells, (spell) => spell.level_label);
@@ -43,6 +44,7 @@ export function buildCharacterPaneModel(
 
   return {
     arcaneArmorState,
+    artificerInfusionsState,
     currency,
     dndAbilities,
     dndProficiencyGroups,

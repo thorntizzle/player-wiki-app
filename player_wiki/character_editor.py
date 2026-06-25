@@ -5,6 +5,14 @@ import re
 from typing import Any
 
 from .auth_store import isoformat, utcnow
+from .character_artificer_infusions import (
+    ENHANCED_DEFENSE_INFUSION_KEY,
+    active_infusion_payload,
+    artificer_infusion_active_capacity,
+    artificer_level_from_definition,
+    has_artificer_infusion_feature,
+    known_artificer_infusions,
+)
 from .character_adjustments import (
     apply_manual_stat_adjustments,
     apply_recoverable_stat_penalties,
@@ -137,6 +145,11 @@ IMPORTED_CHARACTER_LINKED_FEATURE_AUTHORING_REPAIR_MESSAGE = (
 IMPORTED_CHARACTER_LINKED_FEATURE_AUTHORING_UNSUPPORTED_MESSAGE = (
     "This imported character's current baseline is outside the shipped linked-feature authoring and retraining parity lane."
 )
+
+
+def _inventory_item_ref(item: dict[str, Any]) -> str:
+    payload = dict(item or {})
+    return str(payload.get("catalog_ref") or payload.get("id") or "").strip()
 
 
 class CharacterEditValidationError(ValueError):
@@ -1663,6 +1676,129 @@ def apply_equipment_state_edit(
         current_import_metadata,
     )
     return definition, import_metadata
+
+
+def apply_artificer_infusion_state_edit(
+    campaign_slug: str,
+    current_definition: CharacterDefinition,
+    current_import_metadata: CharacterImportMetadata,
+    *,
+    current_state: dict[str, Any],
+    item_catalog: dict[str, Any] | None = None,
+    systems_service: Any | None = None,
+    active_entries: list[dict[str, Any]] | None = None,
+) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int], dict[str, dict[str, Any]]]:
+    artificer_level = artificer_level_from_definition(current_definition)
+    active_capacity = artificer_infusion_active_capacity(artificer_level)
+    known_infusions = known_artificer_infusions(current_definition)
+    known_by_key = {str(entry.get("infusion_key") or "").strip(): dict(entry) for entry in known_infusions}
+    if not active_capacity and not has_artificer_infusion_feature(current_definition):
+        raise CharacterEditValidationError("Artificer infusions are only available for Artificer sheets with Infuse Item.")
+    if not known_by_key:
+        raise CharacterEditValidationError("This Artificer sheet does not have modeled known infusions yet.")
+
+    inventory_by_ref = {
+        _inventory_item_ref(item): dict(item)
+        for item in list((current_state or {}).get("inventory") or [])
+        if _inventory_item_ref(item)
+    }
+    definition_items_by_ref = {
+        str(item.get("id") or "").strip(): dict(item)
+        for item in list(current_definition.equipment_catalog or [])
+        if str(item.get("id") or "").strip()
+    }
+
+    next_active_rows: list[dict[str, Any]] = []
+    seen_infusion_keys: set[str] = set()
+    seen_target_refs: set[str] = set()
+    for raw_entry in list(active_entries or []):
+        if not isinstance(raw_entry, dict):
+            continue
+        infusion_key = str(raw_entry.get("infusion_key") or raw_entry.get("key") or "").strip()
+        target_item_ref = str(raw_entry.get("target_item_ref") or raw_entry.get("item_ref") or "").strip()
+        if not infusion_key or not target_item_ref:
+            continue
+        known_entry = known_by_key.get(infusion_key)
+        if known_entry is None:
+            raise CharacterEditValidationError("Choose a known Artificer infusion.")
+        if infusion_key in seen_infusion_keys:
+            raise CharacterEditValidationError("Each known infusion can only be active once.")
+        if target_item_ref in seen_target_refs:
+            raise CharacterEditValidationError("Each item can only hold one active infusion.")
+        inventory_item = inventory_by_ref.get(target_item_ref)
+        definition_item = definition_items_by_ref.get(target_item_ref)
+        if inventory_item is None or definition_item is None:
+            raise CharacterEditValidationError("Choose a valid inventory target for that infusion.")
+        support_item = {**definition_item, **inventory_item}
+        support = describe_equipment_state_support(support_item, item_catalog=item_catalog)
+        if bool(support.get("is_magic_item")):
+            raise CharacterEditValidationError("Artificer infusions can only target nonmagical items.")
+        if infusion_key == ENHANCED_DEFENSE_INFUSION_KEY and not bool(support.get("is_armor")):
+            raise CharacterEditValidationError("Enhanced Defense can only target nonmagical armor or a shield.")
+        seen_infusion_keys.add(infusion_key)
+        seen_target_refs.add(target_item_ref)
+        next_active_rows.append(
+            {
+                "infusion_key": infusion_key,
+                "target_item_ref": target_item_ref,
+                "payload": active_infusion_payload(
+                    known_entry.get("name"),
+                    feature_id=known_entry.get("source_feature_id"),
+                ),
+            }
+        )
+
+    if len(next_active_rows) > active_capacity:
+        raise CharacterEditValidationError(
+            f"This Artificer can keep {active_capacity} infusion"
+            f"{'' if active_capacity == 1 else 's'} active."
+        )
+
+    active_by_target: dict[str, list[dict[str, Any]]] = {}
+    for row in next_active_rows:
+        active_by_target.setdefault(str(row["target_item_ref"]), []).append(dict(row["payload"]))
+
+    next_equipment_catalog: list[dict[str, Any]] = []
+    inventory_state_overrides: dict[str, dict[str, Any]] = {}
+    for item in list(current_definition.equipment_catalog or []):
+        item_payload = dict(item or {})
+        item_ref = str(item_payload.get("id") or "").strip()
+        active_infusions = active_by_target.get(item_ref, [])
+        if active_infusions:
+            item_payload["active_infusions"] = active_infusions
+            inventory_state_overrides[item_ref] = {"active_infusions": active_infusions}
+        else:
+            item_payload.pop("active_infusions", None)
+            if item_ref in inventory_by_ref:
+                inventory_state_overrides[item_ref] = {"active_infusions": []}
+        next_equipment_catalog.append(item_payload)
+
+    payload = deepcopy(current_definition.to_dict())
+    payload["campaign_slug"] = campaign_slug
+    payload["character_slug"] = current_definition.character_slug
+    payload["equipment_catalog"] = next_equipment_catalog
+
+    definition = CharacterDefinition.from_dict(payload)
+    source_type = str((current_definition.source or {}).get("source_type") or "").strip()
+    if source_type and source_type != "native_character_builder":
+        definition = converge_imported_definition(
+            definition,
+            existing_definition=current_definition,
+            item_catalog=item_catalog,
+            systems_service=systems_service,
+        )
+    else:
+        definition = normalize_definition_to_native_model(
+            definition,
+            item_catalog=item_catalog,
+            systems_service=systems_service,
+        )
+    import_metadata = build_managed_character_import_metadata(
+        campaign_slug,
+        current_definition.character_slug,
+        current_import_metadata,
+    )
+    return definition, import_metadata, {}, inventory_state_overrides
 
 
 def build_native_character_edit_context(

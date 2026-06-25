@@ -4,6 +4,7 @@ import { asRecord, readString } from "../characterValueUtils";
 
 export function CharacterNotesSection({
   canEdit,
+  clearNotes,
   isSaving,
   notesDraft,
   playerNotesHtml,
@@ -12,6 +13,7 @@ export function CharacterNotesSection({
   submitNotes,
 }: {
   canEdit: boolean;
+  clearNotes: () => void;
   isSaving: boolean;
   notesDraft: CharacterNotesDraft;
   playerNotesHtml: string;
@@ -19,6 +21,8 @@ export function CharacterNotesSection({
   setNotesDraft: Dispatch<SetStateAction<CharacterNotesDraft>>;
   submitNotes: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const hasPlayerNote = Boolean(notesDraft.notes.trim() || playerNotesHtml.trim());
+
   return (
     <section className="read-section" id="session-notes">
       <div className="section-heading">
@@ -72,6 +76,20 @@ export function CharacterNotesSection({
             <button type="submit" disabled={isSaving || !canEdit}>
               {isSaving ? "Saving..." : "Save note"}
             </button>
+            {hasPlayerNote ? (
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={isSaving || !canEdit}
+                onClick={() => {
+                  if (window.confirm("Delete this character note?")) {
+                    clearNotes();
+                  }
+                }}
+              >
+                Delete note
+              </button>
+            ) : null}
           </form>
         </article>
       ) : null}

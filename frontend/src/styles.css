@@ -3600,6 +3600,23 @@ textarea {
   aspect-ratio: 1;
 }
 
+.character-portrait-display {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  max-width: min(100%, 58rem);
+}
+
+.character-portrait-display__image {
+  display: block;
+  width: min(100%, 58rem);
+  max-height: min(72vh, 58rem);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  object-fit: contain;
+}
+
 .character-card__portrait {
   width: 4.5rem;
   height: 4.5rem;
@@ -3760,16 +3777,61 @@ textarea {
   max-width: 12ch;
 }
 
-.rest-preview-list li {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.45rem 0;
-  border-bottom: 1px solid var(--border-soft);
+.rest-adjustment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), max-content));
+  gap: 0.65rem;
+  align-items: end;
+  margin: 0.35rem 0 0.65rem;
 }
 
-.rest-preview-list li:last-child {
-  border-bottom: 0;
+.rest-adjustment-field {
+  max-width: 18rem;
+}
+
+.hit-dice-pool-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.hit-dice-pool {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.hit-dice-pool input {
+  width: 5.5rem;
+}
+
+.rest-preview-list {
+  display: grid;
+  gap: 0.35rem;
+  max-width: min(100%, 42rem);
+}
+
+.rest-preview-list li {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: baseline;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.rest-preview-change__values {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  color: var(--muted);
 }
 
 .compact-header {
@@ -3891,6 +3953,11 @@ textarea {
 .session-inline-form--compact-resource {
   margin-top: auto;
   padding-top: 0.15rem;
+}
+
+.resource-card__save {
+  justify-self: start;
+  align-self: start;
 }
 
 .session-resource-card--compact .session-field {

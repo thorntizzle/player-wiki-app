@@ -8767,9 +8767,9 @@ def test_character_personal_portrait_can_be_uploaded_replaced_rendered_and_remov
         data={
             "expected_revision": revision,
             "mode": "read",
-            "page": "personal",
+            "page": "portrait",
             "portrait_alt": "Arden leaning over the harbor rail.",
-            "portrait_caption": "Used on the personal page.",
+            "portrait_caption": "Used on the portrait page.",
             "portrait_file": (BytesIO(TEST_PNG_BYTES), "arden-portrait.png"),
         },
         content_type="multipart/form-data",
@@ -8777,27 +8777,34 @@ def test_character_personal_portrait_can_be_uploaded_replaced_rendered_and_remov
     )
 
     assert upload_response.status_code == 302
+    assert upload_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/arden-march?page=portrait#character-portrait-manager"
+    )
 
-    portrait_png = (
+    portrait_webp = (
         app.config["TEST_CAMPAIGNS_DIR"]
         / "linden-pass"
         / "assets"
         / "characters"
         / "arden-march"
-        / "portrait.png"
+        / "portrait.webp"
     )
-    assert portrait_png.exists()
+    assert portrait_webp.exists()
+    portrait_bytes = portrait_webp.read_bytes()
+    assert portrait_bytes[:4] == b"RIFF"
+    assert portrait_bytes[8:12] == b"WEBP"
 
-    read_personal = client.get("/campaigns/linden-pass/characters/arden-march?page=personal")
-    read_html = read_personal.get_data(as_text=True)
-    assert read_personal.status_code == 200
+    read_portrait = client.get("/campaigns/linden-pass/characters/arden-march?page=portrait")
+    read_html = read_portrait.get_data(as_text=True)
+    assert read_portrait.status_code == 200
     assert "/campaigns/linden-pass/characters/arden-march/portrait" in read_html
     assert "Arden leaning over the harbor rail." in read_html
+    assert "Used on the portrait page." in read_html
     assert "Remove portrait" in read_html
 
-    session_personal = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=personal")
-    session_html = session_personal.get_data(as_text=True)
-    assert session_personal.status_code == 200
+    session_portrait = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=portrait")
+    session_html = session_portrait.get_data(as_text=True)
+    assert session_portrait.status_code == 200
     assert "/campaigns/linden-pass/characters/arden-march/portrait" in session_html
     assert 'data-character-read-shell-mode="read"' in session_html
     assert "Remove portrait" in session_html
@@ -8805,14 +8812,14 @@ def test_character_personal_portrait_can_be_uploaded_replaced_rendered_and_remov
 
     portrait_response = client.get("/campaigns/linden-pass/characters/arden-march/portrait")
     assert portrait_response.status_code == 200
-    assert portrait_response.mimetype == "image/png"
-    assert portrait_response.data == TEST_PNG_BYTES
+    assert portrait_response.mimetype == "image/webp"
+    assert portrait_response.data == portrait_bytes
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
-    read_only_personal = client.get("/campaigns/linden-pass/characters/arden-march?page=personal")
-    read_only_html = read_only_personal.get_data(as_text=True)
-    assert read_only_personal.status_code == 200
+    read_only_portrait = client.get("/campaigns/linden-pass/characters/arden-march?page=portrait")
+    read_only_html = read_only_portrait.get_data(as_text=True)
+    assert read_only_portrait.status_code == 200
     assert "/campaigns/linden-pass/characters/arden-march/portrait" in read_only_html
     assert "Save portrait" not in read_only_html
     assert "Remove portrait" not in read_only_html
@@ -8830,7 +8837,7 @@ def test_character_personal_portrait_can_be_uploaded_replaced_rendered_and_remov
         data={
             "expected_revision": revision,
             "mode": "read",
-            "page": "personal",
+            "page": "portrait",
             "portrait_alt": "Arden in a second portrait.",
             "portrait_caption": "Updated portrait caption.",
             "portrait_file": (BytesIO(TEST_JPG_BYTES), "arden-portrait.jpg"),
@@ -8840,9 +8847,10 @@ def test_character_personal_portrait_can_be_uploaded_replaced_rendered_and_remov
     )
 
     assert replace_response.status_code == 302
-    portrait_jpg = portrait_png.with_suffix(".jpg")
-    assert portrait_jpg.exists()
-    assert not portrait_png.exists()
+    assert portrait_webp.exists()
+    replacement_portrait_bytes = portrait_webp.read_bytes()
+    assert replacement_portrait_bytes[:4] == b"RIFF"
+    assert replacement_portrait_bytes[8:12] == b"WEBP"
 
     with app.app_context():
         record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
@@ -8854,13 +8862,16 @@ def test_character_personal_portrait_can_be_uploaded_replaced_rendered_and_remov
         data={
             "expected_revision": revision,
             "mode": "read",
-            "page": "personal",
+            "page": "portrait",
         },
         follow_redirects=False,
     )
 
     assert remove_response.status_code == 302
-    assert not portrait_jpg.exists()
+    assert remove_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/arden-march?page=portrait#character-portrait-manager"
+    )
+    assert not portrait_webp.exists()
 
     with app.app_context():
         record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
@@ -8904,9 +8915,9 @@ def test_non_equipment_character_save_persists_recovered_equipment_links(
         data={
             "expected_revision": revision,
             "mode": "read",
-            "page": "personal",
+            "page": "portrait",
             "portrait_alt": "Arden leaning over the harbor rail.",
-            "portrait_caption": "Used on the personal page.",
+            "portrait_caption": "Used on the portrait page.",
             "portrait_file": (BytesIO(TEST_PNG_BYTES), "arden-portrait.png"),
         },
         content_type="multipart/form-data",
@@ -9117,6 +9128,7 @@ def test_dnd_character_normal_page_shows_inline_state_controls_for_assigned_play
     spell_response = client.get("/campaigns/linden-pass/characters/arden-march?page=spellcasting")
     inventory_response = client.get("/campaigns/linden-pass/characters/arden-march?page=inventory")
     personal_response = client.get("/campaigns/linden-pass/characters/arden-march?page=personal")
+    portrait_response = client.get("/campaigns/linden-pass/characters/arden-march?page=portrait")
     notes_response = client.get("/campaigns/linden-pass/characters/arden-march?page=notes")
     controls_response = client.get("/campaigns/linden-pass/characters/arden-march?page=controls")
 
@@ -9178,12 +9190,18 @@ def test_dnd_character_normal_page_shows_inline_state_controls_for_assigned_play
     assert personal_response.status_code == 200
     personal_html = personal_response.get_data(as_text=True)
     assert "Personal" in personal_html
-    assert "Save portrait" in personal_html
+    assert "Save portrait" not in personal_html
     assert "Save personal details" not in personal_html
     assert 'name="physical_description_markdown"' not in personal_html
     assert 'name="background_markdown"' not in personal_html
     assert "Open sheet edit view" not in personal_html
     assert "Sheet edit view" not in personal_html
+
+    assert portrait_response.status_code == 200
+    portrait_html = portrait_response.get_data(as_text=True)
+    assert "Portrait" in portrait_html
+    assert "Save portrait" in portrait_html
+    assert 'name="page" value="portrait"' in portrait_html
 
     assert notes_response.status_code == 200
     notes_html = notes_response.get_data(as_text=True)
@@ -9209,6 +9227,7 @@ def test_dnd_character_normal_page_hides_inline_state_controls_for_read_only_use
     spell_response = client.get("/campaigns/linden-pass/characters/arden-march?page=spellcasting")
     inventory_response = client.get("/campaigns/linden-pass/characters/arden-march?page=inventory")
     personal_response = client.get("/campaigns/linden-pass/characters/arden-march?page=personal")
+    portrait_response = client.get("/campaigns/linden-pass/characters/arden-march?page=portrait")
     notes_response = client.get("/campaigns/linden-pass/characters/arden-march?page=notes")
     controls_response = client.get("/campaigns/linden-pass/characters/arden-march?page=controls")
 
@@ -9240,6 +9259,11 @@ def test_dnd_character_normal_page_hides_inline_state_controls_for_read_only_use
     assert "Save personal details" not in personal_html
     assert 'name="physical_description_markdown"' not in personal_html
     assert 'name="background_markdown"' not in personal_html
+
+    assert portrait_response.status_code == 200
+    portrait_html = portrait_response.get_data(as_text=True)
+    assert "Portrait" in portrait_html
+    assert "Save portrait" not in portrait_html
 
     assert notes_response.status_code == 200
     notes_html = notes_response.get_data(as_text=True)
@@ -9275,6 +9299,7 @@ def test_dnd_character_normal_page_preserves_advanced_and_management_controls_fo
     quick_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
     controls_response = client.get("/campaigns/linden-pass/characters/arden-march?page=controls")
     personal_response = client.get("/campaigns/linden-pass/characters/arden-march?page=personal")
+    portrait_response = client.get("/campaigns/linden-pass/characters/arden-march?page=portrait")
     edit_response = client.get("/campaigns/linden-pass/characters/arden-march/edit")
 
     assert quick_response.status_code == 200
@@ -9299,10 +9324,15 @@ def test_dnd_character_normal_page_preserves_advanced_and_management_controls_fo
 
     assert personal_response.status_code == 200
     personal_html = personal_response.get_data(as_text=True)
-    assert "Save portrait" in personal_html
+    assert "Save portrait" not in personal_html
     assert "Save personal details" not in personal_html
     assert 'name="physical_description_markdown"' not in personal_html
     assert 'name="background_markdown"' not in personal_html
+
+    assert portrait_response.status_code == 200
+    portrait_html = portrait_response.get_data(as_text=True)
+    assert "Save portrait" in portrait_html
+    assert 'name="page" value="portrait"' in portrait_html
 
     assert edit_response.status_code == 200
     edit_html = edit_response.get_data(as_text=True)

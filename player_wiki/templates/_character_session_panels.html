@@ -16,7 +16,7 @@
           {% for change in rest_preview.changes %}
             <li>
               <strong>{{ change.label }}</strong>
-              <span>{{ change.from_value }} -> {{ change.to_value }}</span>
+              <span class="rest-preview-change__values">{{ change.from_value }} -> {{ change.to_value }}</span>
             </li>
           {% endfor %}
         </ul>

@@ -1945,11 +1945,25 @@ def test_api_character_endpoints_allow_assigned_owner_updates(client, app, users
         == "Remember to bring the ash-yard contract to the council."
     )
 
+    clear_notes_response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/session/notes",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": updated_character["state_record"]["revision"],
+            "player_notes_markdown": "",
+        },
+    )
+
+    assert clear_notes_response.status_code == 200
+    cleared_character = clear_notes_response.get_json()["character"]
+    assert cleared_character["state_record"]["revision"] == updated_character["state_record"]["revision"] + 1
+    assert cleared_character["state_record"]["state"]["notes"]["player_notes_markdown"] == ""
+
     personal_response = client.patch(
         "/api/v1/campaigns/linden-pass/characters/arden-march/session/personal",
         headers=api_headers(owner_token),
         json={
-            "expected_revision": updated_character["state_record"]["revision"],
+            "expected_revision": cleared_character["state_record"]["revision"],
             "physical_description_markdown": "Broad-shouldered and steady-eyed.",
             "background_markdown": "Spent years running messages along the harbor roads.",
         },
@@ -2245,18 +2259,30 @@ def test_api_character_session_endpoints_cover_dnd_state_controls(client, app, u
     assert preview_payload["rest_type"] == "long"
     assert preview_payload["label"] == "Long Rest"
     assert preview_payload["changes"]
+    assert isinstance(preview_payload["adjustments"]["current_hp"], int)
+    hit_dice_pools = preview_payload["adjustments"]["hit_dice"]["pools"]
+    assert hit_dice_pools
+    adjusted_hit_die_faces = str(hit_dice_pools[0]["faces"])
 
     rest_response = client.post(
         "/api/v1/campaigns/linden-pass/characters/arden-march/session/rest/long",
         headers=api_headers(owner_token),
         json={
             "expected_revision": currency_character["state_record"]["revision"],
+            "current_hp": 7,
+            "hit_dice_current": {adjusted_hit_die_faces: 0},
         },
     )
 
     assert rest_response.status_code == 200
     rested_character = rest_response.get_json()["character"]
     rested_state = rested_character["state_record"]["state"]
+    assert rested_state["vitals"]["current_hp"] == 7
+    assert next(
+        pool
+        for pool in rested_state["hit_dice"]["pools"]
+        if str(pool["faces"]) == adjusted_hit_die_faces
+    )["current"] == 0
     rested_sorcery = {item["id"]: item for item in rested_state["resources"]}["sorcery-points"]
     assert rested_sorcery["current"] == rested_sorcery["max"]
     assert next(
@@ -2661,6 +2687,179 @@ def test_api_character_session_equipment_state_endpoint_updates_wield_mode_and_r
     assert "does not support equipment state" in invalid_response.get_json()["error"]["message"]
 
 
+def test_api_character_artificer_infusions_apply_enhanced_defense_and_note_only_effects(
+    client,
+    app,
+    users,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    def _mutate_definition(payload: dict) -> None:
+        payload["source"] = {
+            "source_type": "native_character_builder",
+            "source_path": "builder://arden-march",
+            "imported_from": "In-app Native Level 6 Builder",
+        }
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Artificer 6"
+        profile["classes"] = [
+            {
+                "row_id": "class-row-1",
+                "class_name": "Artificer",
+                "subclass_name": "Armorer",
+                "level": 6,
+            }
+        ]
+        payload["profile"] = profile
+        stats = dict(payload.get("stats") or {})
+        ability_scores = dict(stats.get("ability_scores") or {})
+        ability_scores["dex"] = {"score": 16, "modifier": 3, "save_bonus": 3}
+        stats["ability_scores"] = ability_scores
+        stats["armor_class"] = 16
+        payload["stats"] = stats
+        payload["features"] = [
+            {
+                "id": "artificer-infusions-1",
+                "name": "Artificer Infusions",
+                "category": "class_feature",
+                "source": "TCoE 12",
+                "description_markdown": "You have invented numerous magical infusions.",
+                "activation_type": "passive",
+            },
+            {
+                "id": "enhanced-defense-1",
+                "name": "Enhanced Defense",
+                "category": "class_feature",
+                "source": "TCoE 12",
+                "description_markdown": "A creature gains a +1 bonus to Armor Class while wearing the infused item.",
+                "activation_type": "passive",
+                "native_edit_parent_feature_id": "artificer-infusions-1",
+            },
+            {
+                "id": "homunculus-servant-1",
+                "name": "Homunculus Servant",
+                "category": "class_feature",
+                "source": "TCoE 13",
+                "description_markdown": "You learn intricate methods for creating a special homunculus.",
+                "activation_type": "passive",
+                "native_edit_parent_feature_id": "artificer-infusions-1",
+            },
+        ]
+        payload["equipment_catalog"] = [
+            {
+                "id": "scale-mail-1",
+                "name": "Scale Mail",
+                "default_quantity": 1,
+                "weight": "45 lb.",
+                "notes": "",
+                "systems_ref": {
+                    "entry_type": "item",
+                    "slug": "phb-item-scale-mail",
+                    "title": "Scale Mail",
+                    "source_id": "PHB",
+                },
+                "is_equipped": True,
+                "is_attuned": False,
+            },
+            {
+                "id": "backpack-1",
+                "name": "Backpack",
+                "default_quantity": 1,
+                "weight": "5 lb.",
+                "notes": "",
+                "tags": [],
+                "is_equipped": False,
+                "is_attuned": False,
+            },
+        ]
+
+    def _mutate_state(payload: dict) -> None:
+        payload["inventory"] = [
+            {
+                "id": "scale-mail-1",
+                "catalog_ref": "scale-mail-1",
+                "name": "Scale Mail",
+                "quantity": 1,
+                "weight": "45 lb.",
+                "notes": "",
+                "is_equipped": True,
+                "is_attuned": False,
+                "tags": [],
+            },
+            {
+                "id": "backpack-1",
+                "catalog_ref": "backpack-1",
+                "name": "Backpack",
+                "quantity": 1,
+                "weight": "5 lb.",
+                "notes": "",
+                "is_equipped": False,
+                "is_attuned": False,
+                "tags": [],
+            },
+        ]
+        payload["attunement"] = {"max_attuned_items": 3, "attuned_item_refs": []}
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+    _write_character_state(app, "arden-march", _mutate_state)
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-artificer-infusions-api")
+
+    character_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(owner_token),
+    )
+
+    assert character_response.status_code == 200
+    character = character_response.get_json()["character"]
+    infusions_state = character["equipment_state"]["artificer_infusions_state"]
+    known_by_key = {entry["infusion_key"]: entry for entry in infusions_state["known"]}
+    assert infusions_state["available"] is True
+    assert infusions_state["artificer_level"] == 6
+    assert infusions_state["known_capacity"] == 6
+    assert infusions_state["active_capacity"] == 3
+    assert "enhanced-defense" in known_by_key
+    assert "homunculus-servant" in known_by_key
+    assert known_by_key["enhanced-defense"]["target_options"] == [
+        {"value": "scale-mail-1", "label": "Scale Mail"}
+    ]
+    assert any(option["value"] == "backpack-1" for option in known_by_key["homunculus-servant"]["target_options"])
+
+    patch_response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/session/artificer-infusions",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": character["state_record"]["revision"],
+            "active": [
+                {"infusion_key": "enhanced-defense", "target_item_ref": "scale-mail-1"},
+                {"infusion_key": "homunculus-servant", "target_item_ref": "backpack-1"},
+            ],
+        },
+    )
+
+    assert patch_response.status_code == 200
+    updated_character = patch_response.get_json()["character"]
+    updated_inventory = {
+        item["catalog_ref"] if item.get("catalog_ref") else item["id"]: item
+        for item in updated_character["state_record"]["state"]["inventory"]
+    }
+    assert updated_inventory["scale-mail-1"]["active_infusions"][0]["infusion_key"] == "enhanced-defense"
+    assert updated_inventory["backpack-1"]["active_infusions"][0]["infusion_key"] == "homunculus-servant"
+    assert updated_character["definition"]["stats"]["armor_class"] == 17
+    overview_by_label = {stat["label"]: stat["value"] for stat in updated_character["overview_stats"]}
+    assert overview_by_label["Armor Class"] == "17"
+    defensive_rules = updated_character["definition"]["stats"]["defensive_state"]["rules"]
+    assert any(rule["title"] == "Enhanced Defense" and rule["active"] is True for rule in defensive_rules)
+
+    updated_infusions = updated_character["equipment_state"]["artificer_infusions_state"]
+    active_by_key = {entry["infusion_key"]: entry for entry in updated_infusions["active"]}
+    assert active_by_key["enhanced-defense"]["automation_status"] == "automated"
+    assert active_by_key["homunculus-servant"]["automation_status"] == "note_only"
+    assert active_by_key["homunculus-servant"]["effect_summary"] == (
+        "Active note only; this infusion does not have automated effects yet."
+    )
+
+
 def test_api_character_detail_exposes_linked_item_and_spell_details(
     client,
     app,
@@ -3013,7 +3212,7 @@ def test_api_character_roster_exposes_gen2_links_search_and_portraits(client, ap
         / "assets"
         / "characters"
         / "arden-march"
-        / "portrait.png"
+        / "portrait.webp"
     )
     portrait_path.parent.mkdir(parents=True, exist_ok=True)
     portrait_path.write_bytes(tiny_png)
@@ -4116,7 +4315,7 @@ def test_api_character_portrait_upload_remove_uses_revisioned_gen2_contract(
         / "assets"
         / "characters"
         / "arden-march"
-        / "portrait.png"
+        / "portrait.webp"
     )
     definition_path = (
         app.config["TEST_CAMPAIGNS_DIR"]
@@ -4154,18 +4353,20 @@ def test_api_character_portrait_upload_remove_uses_revisioned_gen2_contract(
     assert upload_response.status_code == 200
     uploaded_character = upload_response.get_json()["character"]
     assert uploaded_character["state_record"]["revision"] == starting_revision + 1
-    assert uploaded_character["portrait"]["asset_ref"] == "characters/arden-march/portrait.png"
+    assert uploaded_character["portrait"]["asset_ref"] == "characters/arden-march/portrait.webp"
     assert uploaded_character["portrait"]["alt_text"] == "Arden updated portrait"
     assert uploaded_character["portrait"]["caption"] == "Uploaded through Gen2."
-    assert portrait_path.read_bytes() == tiny_png
+    portrait_bytes = portrait_path.read_bytes()
+    assert portrait_bytes[:4] == b"RIFF"
+    assert portrait_bytes[8:12] == b"WEBP"
     profile = yaml.safe_load(definition_path.read_text(encoding="utf-8"))["profile"]
-    assert profile["portrait_asset_ref"] == "characters/arden-march/portrait.png"
+    assert profile["portrait_asset_ref"] == "characters/arden-march/portrait.webp"
     assert profile["portrait_alt"] == "Arden updated portrait"
     assert profile["portrait_caption"] == "Uploaded through Gen2."
 
     portrait_response = client.get(uploaded_character["portrait"]["url"], headers=api_headers(dm_token))
     assert portrait_response.status_code == 200
-    assert portrait_response.mimetype == "image/png"
+    assert portrait_response.mimetype == "image/webp"
 
     stale_upload_response = client.put(
         "/api/v1/campaigns/linden-pass/characters/arden-march/portrait",
@@ -4173,9 +4374,9 @@ def test_api_character_portrait_upload_remove_uses_revisioned_gen2_contract(
         json={
             "expected_revision": starting_revision,
             "portrait_file": {
-                "filename": "stale-portrait.webp",
+                "filename": "stale-portrait.png",
                 "data_base64": encoded_png,
-                "media_type": "image/webp",
+                "media_type": "image/png",
             },
         },
     )

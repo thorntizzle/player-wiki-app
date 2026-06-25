@@ -12,6 +12,11 @@ from typing import Any, Callable
 from flask import g, has_request_context
 
 from .auth_store import isoformat, utcnow
+from .character_artificer_infusions import (
+    ENHANCED_DEFENSE_INFUSION_KEY,
+    active_infusion_armor_class_bonus,
+    item_has_active_infusion,
+)
 from .character_adjustments import (
     apply_manual_stat_adjustments,
     apply_recoverable_ability_score_penalties,
@@ -632,15 +637,6 @@ NATIVE_LEVEL_UP_LIMITATIONS = [
     "Multiclass support in this slice covers shared-slot base casters, supported structured subclass-only spellcasting rows, Pact Magic base casters, and martial rows. Spell-bearing subclasses that still lack a structured supported spellcasting profile continue to need manual follow-up.",
     "Some advanced feat side effects and non-structured campaign spell access still need manual follow-up.",
 ]
-LEVEL_ONE_ALWAYS_PREPARED_SPELLS_BY_SUBCLASS = {
-    normalize_lookup("Knowledge Domain"): ["Command", "Identify"],
-    normalize_lookup("Life Domain"): ["Bless", "Cure Wounds"],
-    normalize_lookup("Light Domain"): ["Burning Hands", "Faerie Fire"],
-    normalize_lookup("Nature Domain"): ["Animal Friendship", "Speak with Animals"],
-    normalize_lookup("Tempest Domain"): ["Fog Cloud", "Thunderwave"],
-    normalize_lookup("Trickery Domain"): ["Charm Person", "Disguise Self"],
-    normalize_lookup("War Domain"): ["Divine Favor", "Shield of Faith"],
-}
 ITEM_TITLES_BY_EQUIPMENT_TYPE = {
     "weaponSimple": [
         "Club",
@@ -11251,10 +11247,13 @@ def _resolve_armor_profile(
     item: dict[str, Any],
     item_catalog: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
+    infusion_bonus_ac = active_infusion_armor_class_bonus(item)
     entry = _resolve_item_entry(item, item_catalog)
     entry_profile = _armor_profile_from_entry(entry)
     if entry_profile is not None:
-        return entry_profile
+        resolved_entry_profile = dict(entry_profile)
+        resolved_entry_profile["bonus_ac"] = int(resolved_entry_profile.get("bonus_ac") or 0) + infusion_bonus_ac
+        return resolved_entry_profile
 
     armor_profiles = dict((item_catalog or {}).get("phb_armor_profiles") or _load_phb_armor_profiles())
     metadata = _resolve_item_support_metadata(item, item_catalog, entry=entry)
@@ -11282,7 +11281,11 @@ def _resolve_armor_profile(
             if profile is None:
                 continue
             resolved_profile = dict(profile)
-            resolved_profile["bonus_ac"] = int(resolved_profile.get("bonus_ac") or 0) + int(effective_bonus or 0)
+            resolved_profile["bonus_ac"] = (
+                int(resolved_profile.get("bonus_ac") or 0)
+                + int(effective_bonus or 0)
+                + infusion_bonus_ac
+            )
             return resolved_profile
     return None
 
@@ -11603,6 +11606,27 @@ def _derive_defensive_state_from_character_inputs(
                         "label": "Reaction",
                         "summary": "If an effect lets you make a Dexterity save for half damage, you can use your reaction to take no damage on a success.",
                     },
+                ],
+            }
+        )
+    for item, profile in _resolved_armor_profiles(equipment_catalog, item_catalog=item_catalog):
+        if not item_has_active_infusion(item, ENHANCED_DEFENSE_INFUSION_KEY):
+            continue
+        item_name = str(item.get("name") or profile.get("title") or "Infused item").strip()
+        is_equipped = bool(item.get("is_equipped"))
+        rules.append(
+            {
+                "id": f"artificer-infusion:enhanced-defense:{slugify(item_name)}",
+                "title": "Enhanced Defense",
+                "active": is_equipped,
+                "condition": "Applies while the infused armor or shield is equipped.",
+                "inactive_reason": "" if is_equipped else "Equip the infused armor or shield to apply this Armor Class bonus.",
+                "effects": [
+                    {
+                        "kind": "armor_class",
+                        "label": item_name,
+                        "summary": f"{item_name} grants a +1 bonus to Armor Class while infused by Enhanced Defense.",
+                    }
                 ],
             }
         )
@@ -19695,9 +19719,6 @@ def _automatic_prepared_spell_values(
         grant_value = str(grant.get("value") or "").strip()
         if grant_value:
             values.append(grant_value)
-    if not values and exact_level in {None, 1} and target_level >= 1 and selected_subclass is not None:
-        subclass_key = normalize_lookup(selected_subclass.title)
-        values.extend(LEVEL_ONE_ALWAYS_PREPARED_SPELLS_BY_SUBCLASS.get(subclass_key, []))
     return _dedupe_preserve_order(values)
 
 

@@ -131,6 +131,7 @@ from .character_page_records import (
 )
 from .character_editor import (
     CharacterEditValidationError,
+    apply_artificer_infusion_state_edit,
     apply_native_character_retraining,
     apply_native_character_edits,
     apply_equipment_state_edit,
@@ -138,6 +139,15 @@ from .character_editor import (
     build_managed_character_import_metadata,
     build_native_character_edit_context,
     build_native_character_retraining_context,
+)
+from .character_artificer_infusions import (
+    ENHANCED_DEFENSE_INFUSION_KEY,
+    artificer_infusion_active_capacity,
+    artificer_infusion_known_capacity,
+    artificer_level_from_definition,
+    has_artificer_infusion_feature,
+    item_active_infusions,
+    known_artificer_infusions,
 )
 from .character_importer import write_yaml
 from .character_models import CharacterRecord, CharacterStateRecord
@@ -170,6 +180,7 @@ from .session_presenter import present_session_dm_passive_score_rows
 from .session_source_presenter import (
     build_session_article_source_search_results as build_shared_session_article_source_search_results,
 )
+from .image_publish import prepare_published_article_image
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
 from .systems_ingest import SystemsIngestError, extracted_systems_archive
 from .systems_labels import (
@@ -2628,6 +2639,13 @@ def register_api(app) -> None:
             raise ValueError("Uploaded portrait files cannot be empty.")
         if len(data_blob) > CHARACTER_PORTRAIT_MAX_BYTES:
             raise ValueError("Character portraits must stay under 8 MB.")
+        try:
+            filename, data_blob = prepare_published_article_image(filename, data_blob)
+        except ValueError as exc:
+            message = str(exc)
+            message = message.replace("Wiki page images", "Character portraits")
+            message = message.replace("Uploaded wiki page images", "Uploaded portrait files")
+            raise ValueError(message) from exc
         alt_text = str(payload.get("alt_text") or "").strip()
         caption = str(payload.get("caption") or "").strip()
         if len(alt_text) > CHARACTER_PORTRAIT_ALT_MAX_LENGTH:
@@ -4806,6 +4824,101 @@ def register_api(app) -> None:
             )
         return definition_item_lookup, support_lookup
 
+    def build_artificer_infusions_state_payload(
+        record: CharacterRecord,
+        *,
+        inventory_lookup: dict[str, dict[str, Any]],
+        support_lookup: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        artificer_level = artificer_level_from_definition(record.definition)
+        known_capacity = artificer_infusion_known_capacity(artificer_level)
+        active_capacity = artificer_infusion_active_capacity(artificer_level)
+        known_infusions = known_artificer_infusions(record.definition)
+        known_by_key = {str(entry.get("infusion_key") or "").strip(): dict(entry) for entry in known_infusions}
+        has_feature = has_artificer_infusion_feature(record.definition)
+        active_rows: list[dict[str, Any]] = []
+        active_target_by_key: dict[str, str] = {}
+
+        for item_ref, inventory_item in inventory_lookup.items():
+            for active_infusion in item_active_infusions(inventory_item):
+                infusion_key = str(active_infusion.get("infusion_key") or "").strip()
+                if not infusion_key:
+                    continue
+                known_entry = dict(known_by_key.get(infusion_key) or {})
+                name = str(active_infusion.get("name") or known_entry.get("name") or "Infusion").strip()
+                active_target_by_key[infusion_key] = item_ref
+                active_rows.append(
+                    {
+                        "infusion_key": infusion_key,
+                        "name": name,
+                        "target_item_ref": item_ref,
+                        "target_item_name": str(inventory_item.get("name") or item_ref).strip(),
+                        "supported_effect": infusion_key == ENHANCED_DEFENSE_INFUSION_KEY,
+                        "automation_status": (
+                            "automated" if infusion_key == ENHANCED_DEFENSE_INFUSION_KEY else "note_only"
+                        ),
+                        "effect_summary": (
+                            "Adds +1 Armor Class while the infused armor or shield is equipped."
+                            if infusion_key == ENHANCED_DEFENSE_INFUSION_KEY
+                            else "Active note only; this infusion does not have automated effects yet."
+                        ),
+                    }
+                )
+
+        known_payloads: list[dict[str, Any]] = []
+        for known_entry in known_infusions:
+            infusion_key = str(known_entry.get("infusion_key") or "").strip()
+            if not infusion_key:
+                continue
+            target_options = [
+                {
+                    "value": item_ref,
+                    "label": str(inventory_item.get("name") or item_ref).strip(),
+                }
+                for item_ref, inventory_item in inventory_lookup.items()
+                if _artificer_infusion_target_eligible(
+                    infusion_key,
+                    support_lookup.get(item_ref, {}),
+                )
+            ]
+            known_payloads.append(
+                {
+                    **known_entry,
+                    "supported_effect": infusion_key == ENHANCED_DEFENSE_INFUSION_KEY,
+                    "automation_status": (
+                        "automated" if infusion_key == ENHANCED_DEFENSE_INFUSION_KEY else "note_only"
+                    ),
+                    "effect_summary": (
+                        "Adds +1 Armor Class to the targeted armor or shield while equipped."
+                        if infusion_key == ENHANCED_DEFENSE_INFUSION_KEY
+                        else "Can be tracked as active; no automated effect is applied yet."
+                    ),
+                    "selected_target_item_ref": active_target_by_key.get(infusion_key, ""),
+                    "target_options": target_options,
+                }
+            )
+
+        return {
+            "available": bool((known_payloads or has_feature) and active_capacity),
+            "artificer_level": artificer_level,
+            "known_capacity": known_capacity,
+            "known_count": len(known_payloads),
+            "active_capacity": active_capacity,
+            "active_count": len(active_rows),
+            "known": known_payloads,
+            "active": active_rows,
+        }
+
+    def _artificer_infusion_target_eligible(
+        infusion_key: str,
+        support: dict[str, Any],
+    ) -> bool:
+        if bool(dict(support or {}).get("is_magic_item")):
+            return False
+        if str(infusion_key or "").strip() == ENHANCED_DEFENSE_INFUSION_KEY:
+            return bool(dict(support or {}).get("is_armor"))
+        return True
+
     def build_character_equipment_state_payload(
         campaign_slug: str,
         record: CharacterRecord,
@@ -4928,6 +5041,11 @@ def register_api(app) -> None:
             inventory_lookup=inventory_lookup,
             equipment_catalog_lookup=definition_item_lookup,
         )
+        artificer_infusions_state = build_artificer_infusions_state_payload(
+            record,
+            inventory_lookup=inventory_lookup,
+            support_lookup=support_lookup,
+        )
         return {
             "rows": equipment_items,
             "attuned_count": attuned_count,
@@ -4946,6 +5064,7 @@ def register_api(app) -> None:
             "at_attunement_limit": attuned_count >= max_attuned_items if max_attuned_items > 0 else True,
             "over_attunement_limit": attuned_count > max_attuned_items,
             "arcane_armor_state": arcane_armor_state,
+            "artificer_infusions_state": artificer_infusions_state,
         }
 
     def serialize_character_record(campaign_slug: str, record: CharacterRecord) -> dict[str, Any]:
@@ -8854,6 +8973,7 @@ def register_api(app) -> None:
                         }
                         for change in preview.changes
                     ],
+                    "adjustments": preview.adjustments,
                 },
             }
         )
@@ -9089,6 +9209,7 @@ def register_api(app) -> None:
                 current_yin=payload.get("current_yin"),
                 current_yang=payload.get("current_yang"),
                 current_dao=payload.get("current_dao"),
+                hit_dice_current=optional_json_hit_dice_current(payload),
                 hp_delta=payload.get("hp_delta"),
                 temp_hp_delta=payload.get("temp_hp_delta"),
                 clear_temp_hp=bool(payload.get("clear_temp_hp")),
@@ -9195,6 +9316,23 @@ def register_api(app) -> None:
         if value < 0:
             raise ValueError(f"{field_label} must be 0 or greater.")
         return value
+
+    def optional_json_hit_dice_current(payload: dict[str, Any]) -> dict[int, Any] | None:
+        raw_value = json_payload_value(payload, "hit_dice_current", "hit_dice")
+        if raw_value in (None, ""):
+            return None
+        if not isinstance(raw_value, dict):
+            raise ValueError("Hit Dice must be submitted as an object keyed by die size.")
+        values: dict[int, Any] = {}
+        for raw_faces, current in raw_value.items():
+            if current is None or str(current).strip() == "":
+                continue
+            try:
+                faces = int(str(raw_faces).removeprefix("d"))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Hit Dice keys must be die sizes such as 6, 8, or d10.") from exc
+            values[faces] = current
+        return values or None
 
     def required_json_int(payload: dict[str, Any], *keys: str, field_label: str) -> int:
         value = optional_json_int(payload, *keys, field_label=field_label)
@@ -9366,6 +9504,24 @@ def register_api(app) -> None:
             ),
         )
 
+    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/artificer-infusions")
+    @api_login_required
+    def character_artificer_infusions_update(campaign_slug: str, character_slug: str):
+        item_catalog = build_character_item_catalog(campaign_slug)
+        return run_character_definition_mutation(
+            campaign_slug,
+            character_slug,
+            lambda record, payload, user_id: apply_artificer_infusion_state_edit(
+                campaign_slug,
+                record.definition,
+                record.import_metadata,
+                current_state=record.state_record.state,
+                item_catalog=item_catalog,
+                systems_service=current_app.extensions["systems_service"],
+                active_entries=list(payload.get("active") or []),
+            ),
+        )
+
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/feature-states/<feature_key>")
     @api_login_required
     def character_feature_state_update(campaign_slug: str, character_slug: str, feature_key: str):
@@ -9447,6 +9603,8 @@ def register_api(app) -> None:
                 record,
                 rest_type,
                 expected_revision=int(payload.get("expected_revision")),
+                current_hp=payload.get("current_hp"),
+                hit_dice_current=optional_json_hit_dice_current(payload),
                 updated_by_user_id=user_id,
             ),
         )

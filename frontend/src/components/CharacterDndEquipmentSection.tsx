@@ -1,41 +1,54 @@
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import type {
   CharacterArcaneArmorState,
+  CharacterArtificerInfusionsState,
   CharacterEquipmentRow,
   CharacterEquipmentState,
 } from "../api/types";
-import type { CharacterEquipmentDraft } from "../characterPaneDrafts";
+import type { CharacterArtificerInfusionDrafts, CharacterEquipmentDraft } from "../characterPaneDrafts";
 import { readString } from "../characterValueUtils";
 
 export function CharacterDndEquipmentSection({
   arcaneArmorDraft,
   arcaneArmorState,
+  artificerInfusionDrafts,
+  artificerInfusionsState,
   canEdit,
   equipmentDrafts,
   equipmentRows,
   equipmentState,
   isCombatSurface,
+  isArtificerInfusionSaving,
   isEquipmentStateSaving,
   isFeatureStateSaving,
   openItemDetail,
   setArcaneArmorDraft,
+  setArtificerInfusionDrafts,
   setEquipmentDrafts,
+  submitArtificerInfusions,
+  submitArtificerInfusionsPatch,
   submitArcaneArmorState,
   submitEquipmentState,
   submitEquipmentStatePatch,
 }: {
   arcaneArmorDraft: boolean;
   arcaneArmorState: CharacterArcaneArmorState | undefined;
+  artificerInfusionDrafts: CharacterArtificerInfusionDrafts;
+  artificerInfusionsState: CharacterArtificerInfusionsState | undefined;
   canEdit: boolean;
   equipmentDrafts: Record<string, CharacterEquipmentDraft>;
   equipmentRows: CharacterEquipmentRow[];
   equipmentState: CharacterEquipmentState | undefined;
   isCombatSurface: boolean;
+  isArtificerInfusionSaving: boolean;
   isEquipmentStateSaving: boolean;
   isFeatureStateSaving: boolean;
   openItemDetail: (item: CharacterEquipmentRow) => void;
   setArcaneArmorDraft: Dispatch<SetStateAction<boolean>>;
+  setArtificerInfusionDrafts: Dispatch<SetStateAction<CharacterArtificerInfusionDrafts>>;
   setEquipmentDrafts: Dispatch<SetStateAction<Record<string, CharacterEquipmentDraft>>>;
+  submitArtificerInfusions: (event: FormEvent<HTMLFormElement>) => void;
+  submitArtificerInfusionsPatch: (drafts: CharacterArtificerInfusionDrafts) => void;
   submitArcaneArmorState: (event?: FormEvent<HTMLFormElement>, enabled?: boolean) => void;
   submitEquipmentState: (event: FormEvent<HTMLFormElement>, item: CharacterEquipmentRow) => void;
   submitEquipmentStatePatch: (item: CharacterEquipmentRow, draft: CharacterEquipmentDraft) => void;
@@ -102,6 +115,80 @@ export function CharacterDndEquipmentSection({
                 />
                 Arcane Armor enabled
               </label>
+            </form>
+          ) : null}
+        </article>
+      ) : null}
+      {artificerInfusionsState?.available ? (
+        <article className="detail-card character-edit-row" id="character-artificer-infusions">
+          <div className="section-heading">
+            <h3>Artificer Infusions</h3>
+            <span className="meta">
+              Level {artificerInfusionsState.artificer_level} | Active {artificerInfusionsState.active_count} /{" "}
+              {artificerInfusionsState.active_capacity} | Known {artificerInfusionsState.known_count} /{" "}
+              {artificerInfusionsState.known_capacity}
+            </span>
+          </div>
+          {artificerInfusionsState.active.length ? (
+            <ul className="feature-note-list">
+              {artificerInfusionsState.active.map((infusion) => (
+                <li key={`${infusion.infusion_key}-${infusion.target_item_ref}`}>
+                  <strong>{readString(infusion.name, "Infusion")}</strong>: {readString(infusion.target_item_name, "Item")}
+                  <span className="meta"> - {readString(infusion.effect_summary)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="meta">No active infusions selected.</p>
+          )}
+          {canEdit ? (
+            <form
+              onSubmit={submitArtificerInfusions}
+              className="stack-form"
+              data-character-autosubmit
+              data-character-sheet-edit-form="artificer-infusions"
+            >
+              <div className="detail-grid">
+                {artificerInfusionsState.known.map((infusion) => {
+                  const currentTarget = artificerInfusionDrafts[infusion.infusion_key] ?? "";
+                  return (
+                    <label key={infusion.infusion_key}>
+                      {readString(infusion.name, "Infusion")}
+                      <select
+                        name={`infusion_${infusion.infusion_key}`}
+                        value={currentTarget}
+                        disabled={isArtificerInfusionSaving || !canEdit}
+                        onChange={(event) => {
+                          const nextDrafts = {
+                            ...artificerInfusionDrafts,
+                            [infusion.infusion_key]: event.currentTarget.value,
+                          };
+                          setArtificerInfusionDrafts(nextDrafts);
+                          submitArtificerInfusionsPatch(nextDrafts);
+                        }}
+                      >
+                        <option value="">Not active</option>
+                        {infusion.target_options.map((option) => (
+                          <option value={option.value} key={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="meta">
+                        {infusion.automation_status === "automated" ? "Automated effect" : "Active note only"} -{" "}
+                        {readString(infusion.effect_summary)}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              <button
+                type="submit"
+                className="ghost-button resource-card__save"
+                disabled={isArtificerInfusionSaving || !canEdit}
+              >
+                Save
+              </button>
             </form>
           ) : null}
         </article>

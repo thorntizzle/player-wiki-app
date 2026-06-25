@@ -31,6 +31,7 @@ import type {
   CharacterCreateSubmitPayload,
   CharacterCreateSubmitResponse,
   CharacterEquipmentStatePatchPayload,
+  CharacterArtificerInfusionsPatchPayload,
   CharacterFeatureStatePatchPayload,
   CharacterListResponse,
   CharacterInventoryPatchPayload,
@@ -1324,6 +1325,22 @@ export class CampaignApiClient {
       `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
         characterSlug,
       )}/session/feature-states/${encodeURIComponent(featureKey)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async patchCharacterArtificerInfusions(
+    slug: string,
+    characterSlug: string,
+    payload: CharacterArtificerInfusionsPatchPayload,
+  ): Promise<CharacterVitalsPatchResponse> {
+    return this.requestJson<CharacterVitalsPatchResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(
+        characterSlug,
+      )}/session/artificer-infusions`,
       {
         method: "PATCH",
         body: JSON.stringify(payload),

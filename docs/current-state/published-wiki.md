@@ -12,7 +12,7 @@ Last updated: 2026-06-25
 - Campaign Home is the player-facing landing view for a campaign. Unfiltered Flask and Gen2 Campaign Home show the latest visible published session summary as a news-style card above the section list; Gen2 uses section-card browsing below it, while section and article pages use section navigation and backlinks.
 - The shared global search row is the ordinary ad hoc lookup path for visible wiki pages and accessible Systems entries. Flask Campaign Home no longer owns a visible page-local search form, though old `?q=` URLs remain compatible.
 - Page detail views lead with article title and optional summary. They can render an optional image between summary and body.
-- Article images are campaign-owned protected assets, not public static files.
+- Article images are campaign-owned protected assets, not public static files. PNG/JPG image uploads are converted to WebP by the shared image-publishing helper, while GIF/WebP uploads pass through validation; character portrait uploads reuse that same conversion rule.
 - `Overview` pages and `type: overview` pages are legacy artifacts and are not visible through public wiki discovery, section navigation, search, section routes, or direct page routes.
 
 ## Current Content Conventions

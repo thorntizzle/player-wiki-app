@@ -2109,13 +2109,22 @@ def test_xianxia_read_pages_show_xianxia_inline_controls_for_authorized_users(
     personal_response = client.get(
         "/campaigns/linden-pass/characters/read-inline-crane?page=personal"
     )
+    portrait_response = client.get(
+        "/campaigns/linden-pass/characters/read-inline-crane?page=portrait"
+    )
     assert personal_response.status_code == 200
     personal_html = unescape(personal_response.get_data(as_text=True))
     assert "Personal" in personal_html
-    assert "Save portrait" in personal_html
+    assert "Save portrait" not in personal_html
     assert "Save personal details" not in personal_html
     assert 'name="physical_description_markdown"' not in personal_html
     assert 'name="background_markdown"' not in personal_html
+
+    assert portrait_response.status_code == 200
+    portrait_html = unescape(portrait_response.get_data(as_text=True))
+    assert "Portrait" in portrait_html
+    assert "Save portrait" in portrait_html
+    assert 'name="page" value="portrait"' in portrait_html
 
     controls_response = client.get(
         "/campaigns/linden-pass/characters/read-inline-crane?page=controls"
@@ -2592,6 +2601,9 @@ def test_xianxia_read_pages_keep_read_only_roles_from_writing(
     personal_response = client.get(
         f"/campaigns/linden-pass/characters/{character_slug}?page=personal"
     )
+    portrait_response = client.get(
+        f"/campaigns/linden-pass/characters/{character_slug}?page=portrait"
+    )
     assert personal_response.status_code == 200
     personal_html = unescape(personal_response.get_data(as_text=True))
     assert "Personal" in personal_html
@@ -2599,6 +2611,11 @@ def test_xianxia_read_pages_keep_read_only_roles_from_writing(
     assert "Save personal details" not in personal_html
     assert 'name="physical_description_markdown"' not in personal_html
     assert 'name="background_markdown"' not in personal_html
+
+    assert portrait_response.status_code == 200
+    portrait_html = unescape(portrait_response.get_data(as_text=True))
+    assert "Portrait" in portrait_html
+    assert "Save portrait" not in portrait_html
 
     controls_response = client.get(
         f"/campaigns/linden-pass/characters/{character_slug}?page=controls"

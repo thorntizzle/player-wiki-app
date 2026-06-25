@@ -164,6 +164,7 @@ XIANXIA_READ_SUBPAGE_LABELS = (
     ("skills", "Skills"),
     ("equipment", "Equipment"),
     ("inventory", "Inventory"),
+    ("portrait", "Portrait"),
     ("personal", "Personal"),
     ("notes", "Notes"),
     ("controls", "Controls"),

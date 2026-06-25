@@ -7,6 +7,7 @@ from typing import Any
 from .character_hit_dice import (
     apply_long_rest_hit_dice_recovery,
     hit_dice_rest_changes,
+    hit_dice_summary_from_state,
     normalize_hit_dice_state_payload,
     set_hit_dice_current_values,
 )
@@ -46,6 +47,7 @@ class CharacterRestPreview:
     rest_type: str
     label: str
     changes: list[CharacterRestChange]
+    adjustments: dict[str, Any]
 
 
 class CharacterStateService:
@@ -1179,6 +1181,14 @@ class CharacterStateService:
             rest_type=normalized_rest,
             label=self._rest_label(normalized_rest),
             changes=changes,
+            adjustments=self._rest_adjustments_from_state(
+                self._modeled_rest_state(
+                    state,
+                    normalized_rest,
+                    definition=record.definition,
+                ),
+                record.definition,
+            ),
         )
 
     def apply_rest(
@@ -1187,25 +1197,22 @@ class CharacterStateService:
         rest_type: str,
         *,
         expected_revision: int,
+        current_hp: Any | None = None,
+        hit_dice_current: dict[int, Any] | None = None,
         updated_by_user_id: int | None = None,
     ) -> CharacterStateRecord:
         normalized_rest = self._normalize_rest_type(rest_type)
         state = deepcopy(record.state_record.state)
+        state = self._modeled_rest_state(
+            state,
+            normalized_rest,
+            definition=record.definition,
+        )
 
-        for resource in list(state.get("resources") or []):
-            if not self._should_reset_resource(resource, normalized_rest):
-                continue
-            resource["current"] = self._reset_resource_value(resource)
-
-        if normalized_rest == "long":
-            for slot in list(state.get("spell_slots") or []):
-                slot["used"] = 0
-            if is_xianxia_system(record.definition.system):
-                self._apply_xianxia_one_day_rest(state, record.definition)
-            else:
-                state = apply_long_rest_hit_dice_recovery(record.definition, state)
-        elif not is_xianxia_system(record.definition.system):
-            state = normalize_hit_dice_state_payload(record.definition, state)
+        if current_hp is not None and str(current_hp).strip() != "":
+            self._apply_vitals_update(state, current_hp=current_hp)
+        if hit_dice_current is not None and not is_xianxia_system(record.definition.system):
+            state = set_hit_dice_current_values(record.definition, state, hit_dice_current)
 
         return self._replace_state(
             record,
@@ -1213,6 +1220,44 @@ class CharacterStateService:
             expected_revision=expected_revision,
             updated_by_user_id=updated_by_user_id,
         )
+
+    def _modeled_rest_state(
+        self,
+        state: dict[str, Any],
+        rest_type: str,
+        *,
+        definition: Any,
+    ) -> dict[str, Any]:
+        modeled_state = deepcopy(state)
+        for resource in list(modeled_state.get("resources") or []):
+            if not self._should_reset_resource(resource, rest_type):
+                continue
+            resource["current"] = self._reset_resource_value(resource)
+
+        if rest_type == "long":
+            for slot in list(modeled_state.get("spell_slots") or []):
+                slot["used"] = 0
+            if is_xianxia_system(getattr(definition, "system", None)):
+                self._apply_xianxia_one_day_rest(modeled_state, definition)
+            else:
+                modeled_state = apply_long_rest_hit_dice_recovery(definition, modeled_state)
+        elif not is_xianxia_system(getattr(definition, "system", None)):
+            modeled_state = normalize_hit_dice_state_payload(definition, modeled_state)
+        return modeled_state
+
+    def _rest_adjustments_from_state(
+        self,
+        state: dict[str, Any],
+        definition: Any,
+    ) -> dict[str, Any]:
+        vitals = dict(state.get("vitals") or {})
+        adjustments: dict[str, Any] = {
+            "current_hp": int(vitals.get("current_hp") or 0),
+        }
+        hit_dice = hit_dice_summary_from_state(definition, state)
+        if list(hit_dice.get("pools") or []):
+            adjustments["hit_dice"] = hit_dice
+        return adjustments
 
     def _replace_state(
         self,
