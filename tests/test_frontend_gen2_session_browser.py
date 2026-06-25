@@ -2081,8 +2081,15 @@ def test_gen2_combat_browser_exposes_dm_status_and_controls(
             expect(carousel.get_by_label("Jump to combatant")).to_be_visible()
             carousel.get_by_role("button", name=re.compile(r"Clockwork Hound", re.I)).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/combat\?view=status&combatant=\d+"))
-            expect(page.locator(".combat-selected-snapshot h2")).to_have_text("Clockwork Hound", timeout=5000)
-            expect(page.locator(".combat-dm-grid .combat-control-card").first.locator(".section-heading h2")).to_have_text(
+            expect(page.locator(".combat-selected-snapshot > .section-heading > div > h2")).to_have_text(
+                "Clockwork Hound",
+                timeout=5000,
+            )
+            expect(
+                page.locator(".combat-dm-snapshot-controls .combat-snapshot-control-block")
+                .first
+                .locator(".section-heading h2")
+            ).to_have_text(
                 "Turn Focus",
             )
             expect(page.get_by_text("Turn value orders initiative. Priority breaks ties after turn value.")).to_be_visible()
@@ -2092,6 +2099,26 @@ def test_gen2_combat_browser_exposes_dm_status_and_controls(
             expect(page.locator(".combat-inline-resource-form .meta", has_text="Move left")).to_be_visible()
             assert page.evaluate("window.__cpwLoadingBeginCount") == 0
             assert not page.evaluate("document.documentElement.classList.contains('app-loading')")
+
+            page.set_viewport_size({"width": 768, "height": 900})
+            tablet_shell_metrics = page.evaluate(
+                """() => {
+                    const title = document.querySelector(".topbar-campaign");
+                    const titleSpan = document.querySelector(".topbar-campaign span");
+                    const titleRect = title?.getBoundingClientRect();
+                    const spanRect = titleSpan?.getBoundingClientRect();
+                    return {
+                        innerWidth: window.innerWidth,
+                        scrollWidth: document.documentElement.scrollWidth,
+                        titleWidth: titleRect ? titleRect.width : 0,
+                        titleRight: titleRect ? titleRect.right : 0,
+                        spanRight: spanRect ? spanRect.right : 0,
+                    };
+                }"""
+            )
+            assert tablet_shell_metrics["scrollWidth"] <= tablet_shell_metrics["innerWidth"] + 1
+            assert tablet_shell_metrics["titleWidth"] <= tablet_shell_metrics["innerWidth"]
+            assert tablet_shell_metrics["spanRight"] <= tablet_shell_metrics["titleRight"] + 1
 
             dm_current_hp = page.get_by_label("DM Current HP", exact=True)
             expect(dm_current_hp).to_be_visible()
@@ -2105,6 +2132,36 @@ def test_gen2_combat_browser_exposes_dm_status_and_controls(
             if not condition_editor.evaluate("(element) => element.open"):
                 condition_editor.locator("> summary").focus()
                 page.keyboard.press("Enter")
+            condition_editor_metrics = page.evaluate(
+                """() => {
+                    const snapshot = document.querySelector(".combat-selected-snapshot");
+                    const editor = document.querySelector(".combat-status-conditions .combat-condition-editor--add");
+                    const form = document.querySelector(
+                        ".combat-status-conditions .combat-condition-editor--add[open] .combat-condition-editor__form"
+                    );
+                    const snapshotRect = snapshot?.getBoundingClientRect();
+                    const editorRect = editor?.getBoundingClientRect();
+                    const formRect = form?.getBoundingClientRect();
+                    const formColumns = form
+                        ? window.getComputedStyle(form).gridTemplateColumns.split(" ").filter(Boolean).length
+                        : 0;
+                    return {
+                        innerWidth: window.innerWidth,
+                        scrollWidth: document.documentElement.scrollWidth,
+                        formColumns,
+                        editorLeft: editorRect ? editorRect.left : 0,
+                        editorRight: editorRect ? editorRect.right : 0,
+                        formRight: formRect ? formRect.right : 0,
+                        snapshotLeft: snapshotRect ? snapshotRect.left : 0,
+                        snapshotRight: snapshotRect ? snapshotRect.right : 0,
+                    };
+                }"""
+            )
+            assert condition_editor_metrics["scrollWidth"] <= condition_editor_metrics["innerWidth"] + 1
+            assert condition_editor_metrics["formColumns"] == 1
+            assert condition_editor_metrics["editorLeft"] >= condition_editor_metrics["snapshotLeft"] - 1
+            assert condition_editor_metrics["editorRight"] <= condition_editor_metrics["snapshotRight"] + 1
+            assert condition_editor_metrics["formRight"] <= condition_editor_metrics["snapshotRight"] + 1
             condition_form = condition_editor.locator("form.combat-condition-editor__form")
             condition_form.get_by_label("Condition", exact=True).fill("Restrained")
             condition_form.get_by_label("Duration", exact=True).fill("Until round 3")
@@ -2164,17 +2221,19 @@ def test_gen2_combat_visual_parity_smoke(
         try:
             browser = playwright.chromium.launch(headless=True)
             desktop_context = browser.new_context(viewport={"width": 1280, "height": 900})
+            dm_context = browser.new_context(viewport={"width": 1280, "height": 900})
             mobile_context = browser.new_context(viewport={"width": 390, "height": 800})
         except Exception as exc:
             pytest.skip(f"Playwright browser unavailable: {exc}")
 
         desktop_page = desktop_context.new_page()
+        dm_page = dm_context.new_page()
         mobile_page = mobile_context.new_page()
 
         try:
-            _sign_in(desktop_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            _sign_in(desktop_page, base_url, email=users["owner"]["email"], password=users["owner"]["password"])
             desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=player")
-            expect(desktop_page.get_by_role("heading", name="Combat")).to_be_visible(timeout=10000)
+            expect(desktop_page.get_by_role("heading", name="Combat", exact=True)).to_be_visible(timeout=10000)
             expect(desktop_page.locator(".combat-summary-band")).to_be_visible()
             expect(desktop_page.locator(".combat-carousel")).to_be_visible()
             expect(desktop_page.locator(".combat-selected-snapshot")).to_be_visible()
@@ -2183,7 +2242,7 @@ def test_gen2_combat_visual_parity_smoke(
             expect(desktop_page.locator(".combat-carousel > .section-heading > div > h2")).to_have_text("Turn Order")
             expect(desktop_page.locator(".combat-carousel > .section-heading .meta")).to_contain_text("Initiative is pinned here")
             expect(desktop_page.locator(".combat-carousel").get_by_label("Jump to combatant")).to_be_visible()
-            expect(desktop_page.locator(".combat-pc-workspace > .section-heading > div > h2")).to_be_visible()
+            expect(desktop_page.locator(".combat-pc-workspace > .section-heading h2")).to_be_visible()
             player_metrics = desktop_page.evaluate(
                 """() => {
                     const main = document.querySelector("main.main-shell") || document.querySelector("main");
@@ -2258,11 +2317,12 @@ def test_gen2_combat_visual_parity_smoke(
             assert player_metrics["snapshotBareHeadingCount"] == 0
             expect(desktop_page.locator(".combat-view-switch")).to_have_count(0)
 
-            desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=status")
-            expect(desktop_page.get_by_role("heading", name="DM status")).to_be_visible(timeout=10000)
-            expect(desktop_page.get_by_role("navigation", name="DM encounter subview")).to_be_visible()
-            expect(desktop_page.locator(".combat-dm-grid .combat-control-card").first).to_be_visible()
-            status_metrics = desktop_page.evaluate(
+            _sign_in(dm_page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            dm_page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=status")
+            expect(dm_page.get_by_role("heading", name="DM status")).to_be_visible(timeout=10000)
+            expect(dm_page.get_by_role("navigation", name="DM encounter subview")).to_be_visible()
+            expect(dm_page.locator(".combat-dm-snapshot-controls .combat-snapshot-control-block").first).to_be_visible()
+            status_metrics = dm_page.evaluate(
                 """() => {
                     const switcher = document.querySelector('nav[aria-label="DM encounter subview"]');
                     const dmStatus = Array.from(switcher?.querySelectorAll("button") || []).find(
@@ -2271,9 +2331,9 @@ def test_gen2_combat_visual_parity_smoke(
                     const controls = Array.from(switcher?.querySelectorAll("button") || []).find(
                       (button) => button.textContent?.trim() === "Controls"
                     );
-                    const controlCard = document.querySelector(".combat-dm-grid .combat-control-card");
+                    const controlCard = document.querySelector(".combat-dm-snapshot-controls .combat-snapshot-control-block");
                     const condition = document.querySelector(".combat-condition-chip");
-                    const grid = document.querySelector(".combat-dm-grid");
+                    const grid = document.querySelector(".combat-dm-snapshot-controls");
                     return {
                         dmStatusClass: dmStatus ? dmStatus.className : "",
                         controlsClass: controls ? controls.className : "",
@@ -2289,10 +2349,10 @@ def test_gen2_combat_visual_parity_smoke(
             assert status_metrics["conditionRadius"] >= 16
             assert status_metrics["dmGridColumns"] >= 2
 
-            desktop_page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=controls")
-            expect(desktop_page.get_by_role("heading", name="Add combatant")).to_be_visible(timeout=10000)
-            expect(desktop_page.get_by_role("radiogroup", name="Add combatant type")).to_be_visible()
-            controls_metrics = desktop_page.evaluate(
+            dm_page.goto(f"{base_url}/app-next/campaigns/linden-pass/combat?view=controls")
+            expect(dm_page.get_by_role("heading", name="Add combatant")).to_be_visible(timeout=10000)
+            expect(dm_page.get_by_role("radiogroup", name="Add combatant type")).to_be_visible()
+            controls_metrics = dm_page.evaluate(
                 """() => {
                     const layout = document.querySelector(".combat-controls-layout");
                     const controlCard = document.querySelector(".combat-controls-layout .combat-control-card");
@@ -2350,8 +2410,10 @@ def test_gen2_combat_visual_parity_smoke(
                 assert mobile_metrics["trackClientWidth"] <= mobile_metrics["innerWidth"]
         finally:
             desktop_page.close()
+            dm_page.close()
             mobile_page.close()
             desktop_context.close()
+            dm_context.close()
             mobile_context.close()
             browser.close()
 
@@ -3211,6 +3273,29 @@ def test_gen2_character_visual_parity_smoke(
                                 expect(spell_detail_trigger).to_be_focused()
                         if desktop_grid_metrics["spellColumns"]:
                             assert desktop_grid_metrics["spellColumns"] == 3
+                    if section_name in {"Equipment", "Inventory"}:
+                        desktop_item_metrics = desktop_page.evaluate(
+                            """(sectionName) => {
+                                const grid = document.querySelector(
+                                    sectionName === "Equipment" ? ".equipment-state-grid" : ".inventory-list"
+                                );
+                                const rows = grid ? Array.from(grid.children) : [];
+                                return {
+                                    columns: grid
+                                        ? window.getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length
+                                        : 0,
+                                    rowCount: rows.length,
+                                    rowsFit: rows.every((row) => row.scrollWidth <= row.clientWidth + 1),
+                                    scrollWidth: document.documentElement.scrollWidth,
+                                    innerWidth: window.innerWidth,
+                                };
+                            }""",
+                            section_name,
+                        )
+                        assert desktop_item_metrics["scrollWidth"] <= desktop_item_metrics["innerWidth"] + 1
+                        assert desktop_item_metrics["rowCount"] > 0
+                        assert desktop_item_metrics["columns"] == 3
+                        assert desktop_item_metrics["rowsFit"]
                     _assert_character_detail_trigger_classes(character_read_shell)
 
             _sign_in(mobile_page, base_url, email=users["party"]["email"], password=users["party"]["password"])

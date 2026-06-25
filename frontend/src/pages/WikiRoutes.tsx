@@ -56,7 +56,6 @@ export function WikiHomePage() {
   return (
     <>
       <section className="hero compact wiki-home">
-        <p className="meta">Campaign</p>
         <h1>Campaign Home</h1>
         <p className="lede">{data?.campaign.summary}</p>
       </section>
@@ -154,9 +153,7 @@ export function WikiSectionPage() {
   return (
     <>
       <section className="hero compact wiki-section-page">
-        <p className="meta">Section</p>
         <h1>{data?.section_name ?? resolvedSectionSlug}</h1>
-        <p className="lede">Published player-facing pages in this section.</p>
       </section>
       <ApiErrorNotice isLoading={sectionQuery.isLoading} message={error} onAuth={() => setAuthRequired(true)} />
       {data ? (

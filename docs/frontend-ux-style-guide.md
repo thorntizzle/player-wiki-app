@@ -26,6 +26,8 @@ Use these external standards as the baseline:
 
 - Every full page has one `h1` in the hero or primary article header.
 - Use compact heroes for work surfaces. Hero text should orient, not market.
+- Omit hero eyebrows when they only repeat the page identity already stated by the `h1`.
+- Omit helper text when it only explains the obvious route purpose; keep it when it carries state, permissions, workflow constraints, or recovery guidance.
 - Put page-wide navigation in the hero action area or a stable subheader, not in repeated cards.
 - Use direct `main` children for primary page sections. Avoid wrapper panels around the whole route.
 - Use `page-layout` when a page has a main column and sidebar.
@@ -74,6 +76,7 @@ Use these external standards as the baseline:
 - Do not use a card just to restate page context.
 - Repeated cards should have a stable layout and comparable heights where users scan across rows.
 - Prefer three-column grids for dense play modules on desktop when the content supports it: resources, spell slots, spell cards, compact stat modules.
+- Use compact multi-column grids for Inventory and Equipment item lists where space allows; keep controls and detail actions readable, and fall back to one-column mobile layouts without horizontal scrolling.
 - Use one-column mobile layouts with clear rhythm and no horizontal scrolling.
 - Sidebar cards should contain secondary support: navigation, metadata, management actions, or rules notes. They should not hold primary workflow controls unless the page is explicitly a sidebar/main workflow.
 

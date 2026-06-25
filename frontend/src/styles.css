@@ -249,11 +249,16 @@ a:hover {
 }
 
 .topbar-campaign span {
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
   padding: 0.2rem 0.85rem 0.28rem;
   border: 1px solid var(--border-accent);
   border-radius: 999px;
   background: linear-gradient(180deg, var(--surface-soft-strong), var(--surface-soft));
   box-shadow: inset 0 0 0 1px var(--surface-soft-muted), var(--shadow-soft);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .topbar-controls {
@@ -3959,6 +3964,30 @@ textarea {
   gap: 0.85rem;
 }
 
+.inventory-list,
+.equipment-state-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, min(24rem, 100%)));
+  justify-content: center;
+  align-items: stretch;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.inventory-row,
+.equipment-state-grid > .detail-card {
+  min-width: 0;
+}
+
+.inventory-row__header {
+  min-width: 0;
+}
+
+.inventory-row__header h3,
+.equipment-state-grid .section-heading h3 {
+  overflow-wrap: anywhere;
+}
+
 .character-sheet .resource-grid--compact,
 .character-sheet .resource-grid--editable {
   grid-template-columns: repeat(3, minmax(0, min(24rem, 100%)));
@@ -4899,16 +4928,23 @@ button.spell-card__main:focus-visible .spell-card__name {
 
 .combat-condition-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
   gap: 0.55rem;
   justify-content: flex-end;
   align-items: flex-start;
+}
+
+.combat-condition-actions .ghost-button {
+  white-space: nowrap;
 }
 
 .combat-condition-editor {
   position: relative;
   display: inline-grid;
   justify-items: end;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .combat-condition-editor summary {
@@ -4944,7 +4980,7 @@ button.spell-card__main:focus-visible .spell-card__name {
 
 .combat-condition-editor__form {
   display: grid;
-  grid-template-columns: minmax(12rem, 1fr) minmax(12rem, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   gap: 0.65rem;
   align-items: end;
   width: min(100%, 46rem);
@@ -4972,6 +5008,36 @@ button.spell-card__main:focus-visible .spell-card__name {
   width: 100%;
 }
 
+.combat-status-conditions > .section-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  margin-bottom: 0;
+}
+
+.combat-status-conditions > .section-heading h3 {
+  min-width: 0;
+}
+
+.combat-status-conditions .combat-condition-editor--add {
+  justify-self: end;
+}
+
+.combat-status-conditions .combat-condition-editor--add[open] {
+  grid-column: 1 / -1;
+  justify-self: stretch;
+  justify-items: stretch;
+}
+
+.combat-status-conditions .combat-condition-editor--add[open] summary {
+  justify-self: end;
+}
+
+.combat-status-conditions .combat-condition-editor--add .combat-condition-editor__form {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 100%;
+}
+
 .combat-conditions {
   display: grid;
   gap: 1rem;
@@ -4979,6 +5045,14 @@ button.spell-card__main:focus-visible .spell-card__name {
 
 .combat-conditions--compact {
   gap: 0.75rem;
+}
+
+.combat-status-conditions .combat-condition-item > div:first-child {
+  min-width: 0;
+}
+
+.combat-status-conditions .combat-condition-item strong {
+  overflow-wrap: anywhere;
 }
 
 .combat-systems-results {
@@ -5045,6 +5119,32 @@ button.spell-card__main:focus-visible .spell-card__name {
 @media (max-width: 900px) {
   .wiki-home-section-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) and (min-width: 741px) {
+  .topbar--campaign {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+
+  .topbar--campaign .brand-block {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .topbar--campaign .topbar-controls {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .topbar-campaign {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: stretch;
+    justify-content: flex-start;
+    max-width: none;
+    text-align: left;
   }
 }
 
@@ -5122,6 +5222,8 @@ button.spell-card__main:focus-visible .spell-card__name {
 
   .character-sheet .resource-grid--compact,
   .character-sheet .resource-grid--editable,
+  .inventory-list,
+  .equipment-state-grid,
   .character-sheet .spell-slot-editor-list--compact,
   .character-sheet .spell-card-grid--level {
     grid-template-columns: repeat(2, minmax(0, min(24rem, 100%)));
@@ -5291,6 +5393,8 @@ button.spell-card__main:focus-visible .spell-card__name {
 
   .character-sheet .resource-grid--compact,
   .character-sheet .resource-grid--editable,
+  .inventory-list,
+  .equipment-state-grid,
   .character-sheet .spell-slot-editor-list--compact,
   .character-sheet .spell-card-grid--level {
     grid-template-columns: minmax(0, min(24rem, 100%));

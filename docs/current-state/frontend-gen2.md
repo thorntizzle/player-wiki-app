@@ -12,9 +12,11 @@ Last updated: 2026-06-25
 - Direct Flask routes remain compatibility fallbacks and no-JS or unsupported-slice exits.
 - `/app-next` serves the built `frontend/dist` bundle when present and uses SPA fallback for Gen2 document routes. Missing builds and missing assets still return 404.
 - The app shell exposes a two-row campaign header with global brand/account/admin controls, campaign navigation, and a shared campaign global search row.
+- At tablet widths the campaign title chip spans its own readable header row instead of shrinking into a narrow vertical column; desktop keeps the compact three-column header and mobile keeps the stacked one-column header.
 - App admins have a compact `View as` control in the header account area. It can select an active user context for campaign pages, shows the active viewed user in the header, and provides an `Exit` action without adding controls for non-admin users.
 - Global search covers visible published wiki pages plus accessible Systems entries and opens previews in an in-page dialog with a dedicated-page link.
 - Gen2 Campaign Home renders a latest-session-summary news card above the section-card grid when a visible published `Sessions`/`session` page exists.
+- Gen2 page heroes avoid duplicate identity copy: eyebrow labels are omitted when they only restate the `h1`, and helper text is kept only when it adds campaign state, permission, workflow, or recovery context.
 - Gen2 top-nav left-clicks use TanStack Router navigation while preserving real hrefs for fallback and new-tab behavior.
 - Gen2 wiki section/article links use the same principle: real `href`s remain available, while ordinary internal section/page clicks inside wiki chrome or rendered article bodies route in place through TanStack.
 - Gen2 Session uses mounted Session/Character/DM panes under the compact hero tab strip. The player Session pane shows a compact inactive-state card until a live session exists, then shows chat plus composer. The DM pane uses URL-backed `dm_view` subviews and preserves scroll on subview query changes.
@@ -36,6 +38,7 @@ Last updated: 2026-06-25
 - Gen2 rest confirmation diff rows use compact content-width rows rather than stretching labels and values across the card. DND rest confirmations include final Current HP and current Hit Dice fields.
 - Gen2 Character Portrait displays the current portrait as a large unframed image on the dedicated Portrait subpage. Character portrait uploads reuse the article-image WebP conversion rule.
 - Gen2 Character Equipment consumes the shared DND equipment-state payload, including Artificer active infusion state. Enhanced Defense shows as an automated active effect, while unsupported active infusions stay visible as note-only active rows.
+- Gen2 Character, Session Character, and Combat selected-PC item lists use compact Inventory and Equipment grids with up to three columns where space allows, then step down to two columns on tablet/narrow layouts and one column on mobile.
 
 ## UX And Feedback Conventions
 

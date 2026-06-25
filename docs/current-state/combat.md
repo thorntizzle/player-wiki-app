@@ -15,6 +15,7 @@ Last updated: 2026-06-25
 - DM-only `DM page` / controls owns setup, seeding, and cleanup.
 - `/combat/dm` defaults to the full-width `DM status` selected-combatant workspace, while `?view=controls` is a controls-only setup/seeding/cleanup view.
 - The Gen2 selected-combatant snapshot card groups HP, movement, action economy, and active conditions. DM Status folds editable turn focus, vitals, action economy, conditions, and selected-combatant removal into that selected snapshot instead of rendering separate tactical cards.
+- The DM Status Conditions editor stays inside the selected-snapshot control card at desktop, tablet, and mobile widths. The `Add condition` disclosure stacks its fields inside the card, condition rows keep readable names/durations, and row actions such as `Remove` stay on one line.
 - In Gen2 Encounter Controls, the encounter summary/status band owns Round, current turn, combatant count, and `Advance turn`; setup and cleanup controls do not duplicate a separate tracker/status card.
 - Selected-PC combat workspaces expose combat-specific character sections from the presented character data, including Actions, Bonus Actions, Reactions, Attacks, and Features when present, followed by the shared CharacterPane for durable sheet sections and mutable-state edits.
 
@@ -42,7 +43,7 @@ Last updated: 2026-06-25
 
 ## Known Limits
 
-- Source-backed NPC resources and richer NPC spell/resource edit controls remain deferred.
+- Source-backed NPC resources and richer NPC spell/resource edit controls remain deferred. The current durable combatant model persists source identity, HP, movement/action economy, conditions, and revisions, but it does not yet persist arbitrary per-combatant counters derived from Systems monsters or DM Content statblocks without mutating those source rows.
 - Xianxia combat automation is not implemented.
 - Encounter presets or saved rosters are future backlog work.
 

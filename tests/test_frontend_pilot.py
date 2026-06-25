@@ -71,16 +71,35 @@ def test_normal_gen2_user_surfaces_do_not_render_revision_copy() -> None:
 
 def test_gen2_topbar_account_controls_use_flask_chrome_classes_in_source() -> None:
     source = Path("frontend/src/AppShell.tsx").read_text(encoding="utf-8")
-    account_row = re.search(r'<div className="account-row">([\s\S]*?)</div>', source)
-    assert account_row is not None
-
-    account_controls_markup = account_row.group(1)
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+    account_controls_markup = _extract_component_source(source, '<div className="account-row">', "</header>")
     assert 'className="header-link" href="/app-next/admin"' in account_controls_markup
     assert 'className="header-link" href="/app-next/account"' in account_controls_markup
     assert '<span className="meta">Admin</span>' in account_controls_markup
     assert re.search(r'<button type="submit" className="ghost-button">\s*Sign out\s*</button>', account_controls_markup) is not None
     assert re.search(r'<a className="ghost-button" href=\{signInHref\}>\s*Sign in\s*</a>', account_controls_markup) is not None
     assert "button button-secondary" not in account_controls_markup
+    assert "@media (max-width: 900px) and (min-width: 741px)" in styles
+    assert ".topbar--campaign .brand-block" in styles
+    assert ".topbar-campaign {" in styles
+    assert "grid-column: 1 / -1;" in styles
+    assert ".topbar-campaign span {" in styles
+    assert "overflow-wrap: anywhere;" in styles
+
+
+def test_gen2_wiki_home_and_section_headers_avoid_duplicate_identity_copy() -> None:
+    source = Path("frontend/src/pages/WikiRoutes.tsx").read_text(encoding="utf-8")
+    home_markup = _extract_component_source(source, "export function WikiHomePage()", "export function WikiSectionPage()")
+    section_markup = _extract_component_source(source, "export function WikiSectionPage()", "export function WikiArticlePage()")
+
+    assert '<section className="hero compact wiki-home">' in home_markup
+    assert "<h1>Campaign Home</h1>" in home_markup
+    assert '<p className="meta">Campaign</p>' not in home_markup
+
+    assert '<section className="hero compact wiki-section-page">' in section_markup
+    assert "<h1>{data?.section_name ?? resolvedSectionSlug}</h1>" in section_markup
+    assert '<p className="meta">Section</p>' not in section_markup
+    assert "Published player-facing pages in this section." not in section_markup
 
 
 def test_campaign_picker_grid_and_empty_state_are_mutually_exclusive_in_source() -> None:
@@ -1757,7 +1776,7 @@ def test_systems_source_category_nav_has_active_state_and_wrap_css() -> None:
     assert "gap: 0.45rem;" in source_nav_block
     assert ".systems-source-nav .button-link[aria-current=\"page\"]" in source_css
     assert "box-shadow: 0 0 0 2px var(--border-accent);" in source_css
-    assert "color-mix" not in source_css
+    assert "color-mix" not in source_nav_block
 
 
 def test_combat_empty_tracker_prompt_uses_current_surface_wording() -> None:
@@ -1962,6 +1981,7 @@ def test_combat_player_workspace_target_chrome_in_source() -> None:
 
 def test_combat_conditions_chrome_in_source() -> None:
     combat_page_source = Path("frontend/src/components/CombatDmStatusPanel.tsx").read_text(encoding="utf-8")
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
 
     condition_section_match = re.search(
         r'<section className="combat-conditions combat-conditions--compact combat-status-conditions">([\s\S]*?)</section>',
@@ -1985,6 +2005,12 @@ def test_combat_conditions_chrome_in_source() -> None:
         condition_section_markup,
     ) is not None
     assert "className=\"button button-secondary\"" not in condition_section_markup
+    assert ".combat-status-conditions > .section-heading" in styles
+    assert ".combat-status-conditions .combat-condition-editor--add[open]" in styles
+    assert ".combat-status-conditions .combat-condition-editor--add .combat-condition-editor__form" in styles
+    assert ".combat-status-conditions .combat-condition-item > div:first-child" in styles
+    assert ".combat-condition-actions .ghost-button" in styles
+    assert "white-space: nowrap;" in styles
 
 
 def test_character_maintenance_unsupported_card_chrome_in_source() -> None:
@@ -3837,6 +3863,7 @@ def test_character_dnd_inventory_currency_section_uses_flask_style_row_form_chro
 
 def test_character_dnd_inventory_section_uses_flask_style_row_form_chrome() -> None:
     source = Path("frontend/src/components/CharacterDndInventorySection.tsx").read_text(encoding="utf-8")
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     section_markup = source
 
     controls_end = section_markup.index('<div className="detail-grid">')
@@ -3875,6 +3902,9 @@ def test_character_dnd_inventory_section_uses_flask_style_row_form_chrome() -> N
     assert 'className="compact-state-form"' not in inventory_controls_markup
     assert 'className="chat-label"' not in inventory_controls_markup
     assert '>Save<' not in inventory_controls_markup
+    assert ".inventory-list," in styles
+    assert "grid-template-columns: repeat(3, minmax(0, min(24rem, 100%)));" in styles
+    assert ".inventory-row__header h3" in styles
 
 
 def test_character_dnd_abilities_and_skills_section_uses_compact_skill_proficiency_cues() -> None:
@@ -3944,6 +3974,7 @@ def test_character_controls_section_keeps_flask_card_form_chrome() -> None:
 
 def test_character_dnd_equipment_section_uses_flask_style_row_form_chrome() -> None:
     source = Path("frontend/src/components/CharacterDndEquipmentSection.tsx").read_text(encoding="utf-8")
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
     section_markup = source
 
     summary_end = section_markup.index('className="detail-card character-edit-row"')
@@ -3999,6 +4030,9 @@ def test_character_dnd_equipment_section_uses_flask_style_row_form_chrome() -> N
     assert 'Save feature state' not in section_markup
     assert '<p className="meta">Requires attunement</p>' not in section_markup
     assert 'item.attunement_hint !== "Requires attunement"' in section_markup
+    assert ".equipment-state-grid {" in styles
+    assert "grid-template-columns: repeat(3, minmax(0, min(24rem, 100%)));" in styles
+    assert ".equipment-state-grid .section-heading h3" in styles
 
 
 def test_character_artificer_infusions_flow_through_gen2_client_and_handlers() -> None:
