@@ -18,6 +18,7 @@ This folder tracks the deliberate TypeScript backend rewrite path for Campaign P
 ### Stack Evidence
 
 - `stack-spike.md`: architecture decision record for the TypeScript backend stack evaluation and proof checklist.
+- `sqlite-migration-spike.md`: migration-layer proof for Drizzle `generate`/`migrate`, runtime probes, and driver comparison.
 
 ## Working Rules
 

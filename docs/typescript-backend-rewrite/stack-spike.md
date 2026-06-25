@@ -9,6 +9,8 @@ Status: complete evidence capture for framework runtime viability; migration lay
 
 For the TypeScript rewrite spike, Hono is the preferred initial stack because it gives a clear API boundary and the same checked request behaviors with lower runtime coupling to route surfaces. TanStack Start is viable and proved runnable for the same API requirements, but it should be chosen only if the team wants tighter full-stack route coupling.
 
+For migration-layer follow-up and driver fit, see `sqlite-migration-spike.md`.
+
 ## Verified package/tooling assumptions
 
 - `hono` and `@hono/node-server` were installed from npm in a scratch project.
