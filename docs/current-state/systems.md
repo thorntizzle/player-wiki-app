@@ -41,6 +41,7 @@ Last updated: 2026-06-25
 ## Current Tests Or Verification
 
 - Systems changes usually need focused source policy tests, importer tests, route/API tests, or seed validation depending on the touched lane.
+- The 2026-06-25 local DND-5E duplicate audit is recorded in `.local/systems-duplicate-audit/summary.md`; it found no confirmed true importer or normalization duplicate requiring cleanup.
 - If local Systems DB changes matter on Fly, a code deploy is not enough; sync the volume-backed SQLite data separately.
 
 ## Known Limits
