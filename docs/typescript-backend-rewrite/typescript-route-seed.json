@@ -1,59 +1,71 @@
 {
-  "seed_source": "docs/typescript-backend-rewrite/stack-spike.md",
-  "status": "seed",
+  "seed_source": "apps/api/src/routes.ts",
+  "status": "active_seed",
   "notes": [
-    "Seed routes are intentionally minimal and should be treated as provisional parity targets.",
-    "These entries are for future TypeScript handler parity work, not proof of a production rewrite backend."
+    "Seed routes are intentionally minimal and should be narrowed or expanded in lockstep with implemented TypeScript handlers.",
+    "Routes with an implemented_* status must have a matching entry in apps/api/src/routes.ts and a matching current Python route snapshot.",
+    "Deferred scratch-proof routes are retained as future candidates only; they are not implemented by the tracked TypeScript API slice yet."
   ],
   "routes": [
     {
       "method": "GET",
-      "path": "/api/v1/healthz",
-      "route_family": "api_v1",
-      "status": "proven_in_scratch",
-      "notes": "Health route passed in both Hono and TanStack Start scratch probes."
+      "path": "/healthz",
+      "route_family": "ops",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/healthz",
+      "snapshot_family": "flask",
+      "notes": "Tracked Hono read-only slice health route."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>",
+      "route_family": "api_v1_campaigns",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono campaign-detail route backed by sanitized fixture campaign.yaml reads."
     },
     {
       "method": "GET",
       "path": "/api/v1/session/login",
       "route_family": "api_v1",
-      "status": "proven_in_scratch",
-      "notes": "Session cookie write route passed in the Hono scratch probe."
+      "status": "deferred_scratch_proof",
+      "notes": "Session cookie read route passed in earlier scratch probes but is not implemented in apps/api."
     },
     {
       "method": "POST",
       "path": "/api/v1/session/login",
       "route_family": "api_v1",
-      "status": "proven_in_scratch",
-      "notes": "Session cookie write route passed in the TanStack Start scratch probe."
+      "status": "deferred_scratch_proof",
+      "notes": "Session cookie write route passed in earlier scratch probes but is not implemented in apps/api."
     },
     {
       "method": "GET",
       "path": "/api/v1/session/me",
       "route_family": "api_v1",
-      "status": "proven_in_scratch",
-      "notes": "Session cookie read route passed in both scratch probes."
+      "status": "deferred_scratch_proof",
+      "notes": "Session cookie read route passed in earlier scratch probes but is not implemented in apps/api."
     },
     {
       "method": "GET",
       "path": "/assets/protected/<name>",
       "route_family": "assets",
-      "status": "proven_in_scratch",
-      "notes": "Protected WebP asset route passed in both scratch probes."
+      "status": "deferred_scratch_proof",
+      "notes": "Protected WebP asset route passed in earlier scratch probes but is not implemented in apps/api."
     },
     {
       "method": "POST",
       "path": "/api/v1/upload",
       "route_family": "api_v1",
-      "status": "proven_in_scratch",
-      "notes": "Multipart upload route passed in both scratch probes."
+      "status": "deferred_scratch_proof",
+      "notes": "Multipart upload route passed in earlier scratch probes but is not implemented in apps/api."
     },
     {
       "method": "GET",
       "path": "/api/v1/notes/<id>",
       "route_family": "api_v1",
-      "status": "proven_in_scratch",
-      "notes": "SQLite-backed note route passed in both scratch probes."
+      "status": "deferred_scratch_proof",
+      "notes": "SQLite-backed note route passed in earlier scratch probes but is not implemented in apps/api."
     }
   ]
 }

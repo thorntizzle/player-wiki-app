@@ -51,6 +51,8 @@ tmp*
 frontend/.vite
 frontend/dist
 frontend/node_modules
+apps/**/dist
+apps/**/node_modules
 campaigns
 docs
 tests

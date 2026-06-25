@@ -29,6 +29,8 @@ __pycache__/
 campaigns/*
 !campaigns/.gitkeep
 !campaigns/README.md
+apps/**/node_modules/
+apps/**/dist/
 docs/*
 !docs/api-v1.md
 !docs/current-state/

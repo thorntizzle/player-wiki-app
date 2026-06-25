@@ -28,6 +28,7 @@ Route parity check command:
 
 - `stack-spike.md`: architecture decision record for the TypeScript backend stack evaluation and proof checklist.
 - `sqlite-migration-spike.md`: migration-layer proof for Drizzle `generate`/`migrate`, runtime probes, and driver comparison.
+- `read-only-compatibility-slice.md`: evidence for the first read-only API compatibility slice (campaign detail + healthz).
 
 ## Working Rules
 
@@ -45,5 +46,16 @@ Route parity check command:
 4. Framework-free domain and policy packages.
 5. Compatibility persistence and migration reads.
 6. Auth, API contracts, read-only Gen2 slices, then controlled write paths.
+
+## Slice Progress
+
+- `apps/api` exists and now serves:
+  - `GET /healthz`
+  - `GET /api/v1/campaigns/:campaignSlug`
+- Campaign detail uses fixture-backed reads from `tests/fixtures/sample_campaigns` by default and supports
+  `CPW_CAMPAIGNS_DIR` override.
+- Read-only auth/permission metadata for the fixture mode is explicit in the response.
+- `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
+- `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.
 
 Production cutover is not part of the early phases. It requires backup, migration dry-run, browser rehearsal, production smoke checks, and an approved rollback window.
