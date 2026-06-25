@@ -127,6 +127,57 @@ if (typeof campaignConfig.payload?.config_file?.updated_at !== "string" || !camp
   throw new Error(`Expected non-empty updated_at string, got ${campaignConfig.payload?.config_file?.updated_at}`);
 }
 
+const contentCharacters = await requestJson("/api/v1/campaigns/linden-pass/content/characters");
+if (contentCharacters.status !== 200) {
+  throw new Error(`Expected content characters list endpoint 200, got ${contentCharacters.status}`);
+}
+if (!Array.isArray(contentCharacters.payload?.characters) || contentCharacters.payload.characters.length !== 3) {
+  throw new Error(`Expected 3 fixture content characters, got ${contentCharacters.payload?.characters?.length}`);
+}
+if (contentCharacters.payload.characters.map((item) => item.character_slug).join("|") !== "arden-march|selene-brook|tobin-slate") {
+  throw new Error(
+    `Expected fixture content characters to be sorted by slug, got ${JSON.stringify(contentCharacters.payload.characters)}`,
+  );
+}
+const ardenSummary = contentCharacters.payload.characters[0];
+if (ardenSummary.name !== "Arden March" || ardenSummary.status !== "active" || ardenSummary.import_status !== "clean") {
+  throw new Error(`Unexpected Arden content character summary: ${JSON.stringify(ardenSummary)}`);
+}
+if (typeof ardenSummary.updated_at !== "string" || !ardenSummary.updated_at) {
+  throw new Error(`Expected Arden content character summary updated_at, got ${ardenSummary.updated_at}`);
+}
+
+const contentCharacter = await requestJson("/api/v1/campaigns/linden-pass/content/characters/arden-march");
+if (contentCharacter.status !== 200) {
+  throw new Error(`Expected content character detail endpoint 200, got ${contentCharacter.status}`);
+}
+if (contentCharacter.payload?.character_file?.character_slug !== "arden-march") {
+  throw new Error(`Expected Arden character detail, got ${contentCharacter.payload?.character_file?.character_slug}`);
+}
+if (contentCharacter.payload?.character_file?.state_created !== false) {
+  throw new Error(`Expected read-only fixture character state_created false, got ${contentCharacter.payload?.character_file?.state_created}`);
+}
+if (contentCharacter.payload?.character_file?.definition?.system !== "DND-5E") {
+  throw new Error(`Expected Arden definition system DND-5E, got ${contentCharacter.payload?.character_file?.definition?.system}`);
+}
+if (contentCharacter.payload?.character_file?.definition?.proficiencies?.tool_expertise?.length !== 0) {
+  throw new Error(
+    `Expected Arden definition normalized tool_expertise array, got ${JSON.stringify(contentCharacter.payload?.character_file?.definition?.proficiencies)}`,
+  );
+}
+if (contentCharacter.payload?.character_file?.import_metadata?.parser_version !== "fixture") {
+  throw new Error(
+    `Expected Arden import metadata parser_version fixture, got ${contentCharacter.payload?.character_file?.import_metadata?.parser_version}`,
+  );
+}
+
+const missingContentCharacter = await requestJson("/api/v1/campaigns/linden-pass/content/characters/missing-character");
+if (missingContentCharacter.status !== 404 || missingContentCharacter.payload?.error?.code !== "content_character_not_found") {
+  throw new Error(
+    `Expected missing content character JSON 404, got ${missingContentCharacter.status} ${missingContentCharacter.payload?.error?.code}`,
+  );
+}
+
 const contentAssets = await requestJson("/api/v1/campaigns/linden-pass/content/assets");
 if (contentAssets.status !== 200) {
   throw new Error(`Expected content assets list endpoint 200, got ${contentAssets.status}`);
@@ -391,6 +442,10 @@ if (missingCampaignConfig.status !== 404 || missingCampaignConfig.payload?.error
 const missingContentPages = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/content/pages");
 if (missingContentPages.status !== 404 || missingContentPages.payload?.error?.code !== "campaign_not_found") {
   throw new Error(`Expected missing content pages campaign JSON 404, got ${missingContentPages.status}`);
+}
+const missingContentCharacters = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/content/characters");
+if (missingContentCharacters.status !== 404 || missingContentCharacters.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(`Expected missing content characters campaign JSON 404, got ${missingContentCharacters.status}`);
 }
 
 ensureStopped();

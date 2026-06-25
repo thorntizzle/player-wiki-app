@@ -175,6 +175,36 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "content_page_not_found",
     },
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/campaigns/:campaignSlug/content/characters",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/content/characters",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/content/characters",
+    routeFamily: "api_v1_content",
+    missingResource: {
+      method: "GET",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/content/characters",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
+  {
+    method: "GET",
+    honoPath: "/api/v1/campaigns/:campaignSlug/content/characters/:characterSlug",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/content/characters/<character_slug>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/content/characters/<character_slug>",
+    routeFamily: "api_v1_content",
+    missingResource: {
+      method: "GET",
+      path: "/api/v1/campaigns/linden-pass/content/characters/missing-character",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -189,4 +219,6 @@ export const ROUTES = {
   contentAssets: IMPLEMENTED_ROUTES[8].honoPath,
   contentAsset: IMPLEMENTED_ROUTES[9].honoPath,
   contentPage: IMPLEMENTED_ROUTES[10].honoPath,
+  contentCharacters: IMPLEMENTED_ROUTES[11].honoPath,
+  contentCharacter: IMPLEMENTED_ROUTES[12].honoPath,
 } as const;

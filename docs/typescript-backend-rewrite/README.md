@@ -61,6 +61,8 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/content/pages/*`
   - `GET /api/v1/campaigns/:campaignSlug/content/assets`
   - `GET /api/v1/campaigns/:campaignSlug/content/assets/*`
+  - `GET /api/v1/campaigns/:campaignSlug/content/characters`
+  - `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
 - Campaign detail uses fixture-backed reads from `tests/fixtures/sample_campaigns` by default and supports
   `CPW_CAMPAIGNS_DIR` override.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.

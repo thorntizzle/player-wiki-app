@@ -42,6 +42,15 @@ export interface CampaignAssetFileRecord {
   data_base64?: string;
 }
 
+export interface CampaignCharacterFileRecord {
+  character_slug: string;
+  character_dir: string;
+  definition: Record<string, unknown>;
+  import_metadata: Record<string, unknown>;
+  updated_at: string;
+  state_created: boolean;
+}
+
 export interface ContentPageRemovalSafety {
   blockers_by_type: Record<string, string[]>;
   samples: Record<string, string>;

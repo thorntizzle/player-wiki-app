@@ -1,5 +1,6 @@
 import type {
   CampaignAssetFileRecord,
+  CampaignCharacterFileRecord,
   CampaignConfigRecord,
   CampaignPageFileRecord,
   ContentPagePayload,
@@ -82,6 +83,11 @@ function withVisibilityDefaults(record: CampaignPageFileRecord): ContentPagePayl
   };
 }
 
+function recordString(record: Record<string, unknown>, key: string): string {
+  const value = record[key];
+  return typeof value === "string" ? value : "";
+}
+
 export function buildCampaignConfigPayload(record: CampaignConfigRecord): CampaignConfigPayload {
   return {
     ok: true,
@@ -90,6 +96,49 @@ export function buildCampaignConfigPayload(record: CampaignConfigRecord): Campai
       updated_at: record.updated_at,
       config: record.config,
       editable_fields: [...EDITABLE_FIELDS].sort(),
+    },
+  };
+}
+
+function buildContentCharacterSummaryPayload(record: CampaignCharacterFileRecord) {
+  return {
+    character_slug: record.character_slug,
+    updated_at: record.updated_at,
+    name: recordString(record.definition, "name"),
+    status: recordString(record.definition, "status"),
+    import_status: recordString(record.import_metadata, "import_status"),
+  };
+}
+
+export function buildContentCharacterListPayload(
+  records: CampaignCharacterFileRecord[],
+): { ok: true; characters: ReturnType<typeof buildContentCharacterSummaryPayload>[] } {
+  return {
+    ok: true,
+    characters: records.map(buildContentCharacterSummaryPayload),
+  };
+}
+
+export function buildContentCharacterDetailPayload(
+  record: CampaignCharacterFileRecord,
+): {
+  ok: true;
+  character_file: {
+    character_slug: string;
+    updated_at: string;
+    definition: Record<string, unknown>;
+    import_metadata: Record<string, unknown>;
+    state_created: boolean;
+  };
+} {
+  return {
+    ok: true,
+    character_file: {
+      character_slug: record.character_slug,
+      updated_at: record.updated_at,
+      definition: record.definition,
+      import_metadata: record.import_metadata,
+      state_created: record.state_created,
     },
   };
 }

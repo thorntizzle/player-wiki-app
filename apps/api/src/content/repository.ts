@@ -7,6 +7,7 @@ import type { ApiConfig } from "../config.js";
 import { getCampaignBySlug } from "../campaigns/repository.js";
 import type {
   CampaignAssetFileRecord,
+  CampaignCharacterFileRecord,
   CampaignPageFileRecord,
   CampaignConfigRecord,
   ContentPage,
@@ -68,11 +69,15 @@ const SUBSECTION_ORDER: Record<string, Record<string, number>> = {
 const DEPRECATED_SECTIONS = new Set(["overview"]);
 const DEPRECATED_PAGE_TYPES = new Set(["overview"]);
 const DEFAULT_DISPLAY_ORDER = 10_000;
+const DND_5E_SYSTEM_CODE = "DND-5E";
+const XIANXIA_SYSTEM_CODE = "Xianxia";
 
 interface CampaignContentContext {
   currentSession: number;
   contentDir: string;
   assetsDir: string;
+  charactersDir: string;
+  system: string;
 }
 
 interface CampaignContentContextOptions {
@@ -137,6 +142,14 @@ function asStringArray(value: unknown): string[] {
       .filter((item) => item.length > 0);
   }
   return [];
+}
+
+function parseYamlRecord(rawText: string): Record<string, unknown> {
+  try {
+    return asRecord(parse(rawText) || {});
+  } catch {
+    return {};
+  }
 }
 
 function toIsoTimestamp(value: Date): string {
@@ -273,6 +286,14 @@ function normalizeAssetRef(value: string): string | null {
   return segments.join("/");
 }
 
+function normalizeCharacterSlug(value: string): string | null {
+  const normalized = value.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
 function resolveSafeAssetPath(assetsDir: string, assetRef: string): string | null {
   const safeAssetRef = normalizeAssetRef(assetRef);
   if (!safeAssetRef) {
@@ -282,6 +303,20 @@ function resolveSafeAssetPath(assetsDir: string, assetRef: string): string | nul
   const assetsRoot = path.resolve(assetsDir);
   const resolvedPath = path.resolve(assetsRoot, ...safeAssetRef.split("/"));
   if (resolvedPath !== assetsRoot && !resolvedPath.startsWith(`${assetsRoot}${path.sep}`)) {
+    return null;
+  }
+  return resolvedPath;
+}
+
+function resolveSafeCharacterDir(charactersDir: string, characterSlug: string): string | null {
+  const safeCharacterSlug = normalizeCharacterSlug(characterSlug);
+  if (!safeCharacterSlug) {
+    return null;
+  }
+
+  const charactersRoot = path.resolve(charactersDir);
+  const resolvedPath = path.resolve(charactersRoot, safeCharacterSlug);
+  if (resolvedPath !== charactersRoot && !resolvedPath.startsWith(`${charactersRoot}${path.sep}`)) {
     return null;
   }
   return resolvedPath;
@@ -301,6 +336,107 @@ const ASSET_MEDIA_TYPE_BY_EXTENSION: Record<string, string> = {
 
 function guessAssetMediaType(filePath: string): string {
   return ASSET_MEDIA_TYPE_BY_EXTENSION[path.extname(filePath).toLowerCase()] || "application/octet-stream";
+}
+
+function normalizeSystemCode(value: unknown): string {
+  const rawValue = asString(value);
+  const normalizedKey = rawValue.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (normalizedKey === "dnd5e") {
+    return DND_5E_SYSTEM_CODE;
+  }
+  if (normalizedKey === "xianxia") {
+    return XIANXIA_SYSTEM_CODE;
+  }
+  return rawValue;
+}
+
+function dedupeProficiencyValues(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const item of value) {
+    const cleaned = asString(item);
+    const normalized = cleaned.toLowerCase();
+    if (!cleaned || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    deduped.push(cleaned);
+  }
+  return deduped;
+}
+
+function normalizeCharacterProficiencies(value: unknown): Record<string, string[]> {
+  const source = asRecord(value);
+  const toolExpertise = dedupeProficiencyValues(source.tool_expertise);
+  const rawTools = Array.isArray(source.tools) ? source.tools : [];
+  return {
+    armor: dedupeProficiencyValues(source.armor),
+    weapons: dedupeProficiencyValues(source.weapons),
+    tools: dedupeProficiencyValues([...rawTools, ...toolExpertise]),
+    languages: dedupeProficiencyValues(source.languages),
+    tool_expertise: toolExpertise,
+  };
+}
+
+function normalizePythonYamlTimestampString(value: unknown): string {
+  if (value instanceof Date) {
+    return toIsoTimestamp(value).replace("T", " ");
+  }
+  const rawValue = asString(value);
+  const match = rawValue.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.\d+)?Z$/);
+  return match ? `${match[1]} ${match[2]}+00:00` : rawValue;
+}
+
+function normalizeCharacterDefinition(
+  source: Record<string, unknown>,
+  campaignSlug: string,
+  characterSlug: string,
+  campaignSystem: string,
+): Record<string, unknown> {
+  const normalizedSystem =
+    normalizeSystemCode(source.system ?? source.system_code ?? campaignSystem) || DND_5E_SYSTEM_CODE;
+  const payload: Record<string, unknown> = {
+    campaign_slug: asString(source.campaign_slug) || campaignSlug,
+    character_slug: asString(source.character_slug) || characterSlug,
+    name: asString(source.name) || titleFromSlug(characterSlug),
+    status: asString(source.status) || "active",
+    system: normalizedSystem,
+    profile: asRecord(source.profile),
+    stats: asRecord(source.stats),
+    skills: Array.isArray(source.skills) ? source.skills : [],
+    proficiencies: normalizeCharacterProficiencies(source.proficiencies),
+    attacks: Array.isArray(source.attacks) ? source.attacks : [],
+    features: Array.isArray(source.features) ? source.features : [],
+    spellcasting: asRecord(source.spellcasting),
+    equipment_catalog: Array.isArray(source.equipment_catalog) ? source.equipment_catalog : [],
+    reference_notes: asRecord(source.reference_notes),
+    resource_templates: Array.isArray(source.resource_templates) ? source.resource_templates : [],
+    source: asRecord(source.source),
+  };
+
+  if (normalizedSystem === XIANXIA_SYSTEM_CODE) {
+    payload.xianxia = asRecord(source.xianxia);
+  }
+  return payload;
+}
+
+function normalizeCharacterImportMetadata(
+  source: Record<string, unknown>,
+  campaignSlug: string,
+  characterSlug: string,
+): Record<string, unknown> {
+  return {
+    campaign_slug: asString(source.campaign_slug) || campaignSlug,
+    character_slug: asString(source.character_slug) || characterSlug,
+    source_path: asString(source.source_path),
+    imported_at_utc: normalizePythonYamlTimestampString(source.imported_at_utc),
+    parser_version: asString(source.parser_version),
+    import_status: asString(source.import_status),
+    warnings: Array.isArray(source.warnings) ? source.warnings : [],
+  };
 }
 
 async function loadCampaignContentContext(
@@ -342,6 +478,12 @@ async function loadCampaignContentContext(
     campaignDir,
     asStringOrDefault((source as Record<string, unknown>).asset_dir, "assets"),
   );
+  const charactersDir = path.resolve(
+    campaignDir,
+    asStringOrDefault((source as Record<string, unknown>).character_dir, "characters"),
+  );
+  const system =
+    normalizeSystemCode((source as Record<string, unknown>).system ?? safeCampaign.system) || DND_5E_SYSTEM_CODE;
 
   if (options.requireContentDir ?? true) {
     try {
@@ -354,7 +496,7 @@ async function loadCampaignContentContext(
     }
   }
 
-  return { currentSession, contentDir, assetsDir };
+  return { currentSession, contentDir, assetsDir, charactersDir, system };
 }
 
 async function listCampaignMarkdownFiles(contentDir: string): Promise<string[]> {
@@ -430,6 +572,29 @@ async function listCampaignAssetFiles(assetsDir: string): Promise<string[]> {
 
   found.sort();
   return found;
+}
+
+async function listCampaignCharacterDirectories(charactersDir: string): Promise<string[]> {
+  try {
+    const charactersStats = await fs.stat(charactersDir);
+    if (!charactersStats.isDirectory()) {
+      return [];
+    }
+  } catch {
+    return [];
+  }
+
+  let entries: { isDirectory: () => boolean; name: string }[] = [];
+  try {
+    entries = await fs.readdir(charactersDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(charactersDir, entry.name))
+    .sort();
 }
 
 function toPageFromFile(
@@ -517,6 +682,55 @@ function toAssetFileRecord(
     size_bytes: stats.size,
     media_type: guessAssetMediaType(filePath),
     updated_at: toIsoTimestamp(stats.mtime),
+  };
+}
+
+async function toCharacterFileRecord(
+  campaign: CampaignContentContext,
+  campaignSlug: string,
+  characterSlug: string,
+): Promise<CampaignCharacterFileRecord | null> {
+  const characterDir = resolveSafeCharacterDir(campaign.charactersDir, characterSlug);
+  if (!characterDir) {
+    return null;
+  }
+
+  const definitionPath = path.join(characterDir, "definition.yaml");
+  const importPath = path.join(characterDir, "import.yaml");
+  let definitionRaw: string;
+  let importRaw: string;
+  let definitionStats;
+  let importStats;
+  try {
+    [definitionRaw, importRaw, definitionStats, importStats] = await Promise.all([
+      fs.readFile(definitionPath, "utf-8"),
+      fs.readFile(importPath, "utf-8"),
+      fs.stat(definitionPath),
+      fs.stat(importPath),
+    ]);
+  } catch {
+    return null;
+  }
+
+  const updatedAt = definitionStats.mtime.getTime() >= importStats.mtime.getTime()
+    ? definitionStats.mtime
+    : importStats.mtime;
+  return {
+    character_slug: characterSlug,
+    character_dir: characterDir,
+    definition: normalizeCharacterDefinition(
+      parseYamlRecord(definitionRaw),
+      campaignSlug,
+      characterSlug,
+      campaign.system,
+    ),
+    import_metadata: normalizeCharacterImportMetadata(
+      parseYamlRecord(importRaw),
+      campaignSlug,
+      characterSlug,
+    ),
+    updated_at: toIsoTimestamp(updatedAt),
+    state_created: false,
   };
 }
 
@@ -657,6 +871,26 @@ export async function listCampaignContentAssets(
   return records;
 }
 
+export async function listCampaignContentCharacters(
+  config: ApiConfig,
+  campaignSlug: string,
+): Promise<CampaignCharacterFileRecord[] | null> {
+  const campaign = await loadCampaignContentContext(config, campaignSlug, { requireContentDir: false });
+  if (!campaign) {
+    return null;
+  }
+
+  const characterDirs = await listCampaignCharacterDirectories(campaign.charactersDir);
+  const records: CampaignCharacterFileRecord[] = [];
+  for (const characterDir of characterDirs) {
+    const record = await toCharacterFileRecord(campaign, campaignSlug, path.basename(characterDir));
+    if (record) {
+      records.push(record);
+    }
+  }
+  return records;
+}
+
 export async function getCampaignContentPage(
   config: ApiConfig,
   campaignSlug: string,
@@ -716,6 +950,31 @@ export async function getCampaignContentAsset(
   return record;
 }
 
+export async function getCampaignContentCharacter(
+  config: ApiConfig,
+  campaignSlug: string,
+  rawCharacterSlug: string,
+): Promise<CampaignCharacterFileRecord | null> {
+  let characterSlug = rawCharacterSlug;
+  try {
+    characterSlug = decodeURIComponent(rawCharacterSlug);
+  } catch {
+    // keep raw value to preserve failure semantics.
+  }
+
+  const safeCharacterSlug = normalizeCharacterSlug(characterSlug);
+  if (!safeCharacterSlug) {
+    return null;
+  }
+
+  const campaign = await loadCampaignContentContext(config, campaignSlug, { requireContentDir: false });
+  if (!campaign) {
+    return null;
+  }
+
+  return toCharacterFileRecord(campaign, campaignSlug, safeCharacterSlug);
+}
+
 export function sanitizeContentPageRef(rawPageRef: string): string | null {
   try {
     return normalizeContentRef(decodeURIComponent(rawPageRef));
@@ -729,5 +988,13 @@ export function sanitizeContentAssetRef(rawAssetRef: string): string | null {
     return normalizeAssetRef(decodeURIComponent(rawAssetRef));
   } catch {
     return normalizeAssetRef(rawAssetRef);
+  }
+}
+
+export function sanitizeContentCharacterSlug(rawCharacterSlug: string): string | null {
+  try {
+    return normalizeCharacterSlug(decodeURIComponent(rawCharacterSlug));
+  } catch {
+    return normalizeCharacterSlug(rawCharacterSlug);
   }
 }

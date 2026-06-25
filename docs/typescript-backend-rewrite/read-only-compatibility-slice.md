@@ -24,6 +24,9 @@ This document records the first implemented TypeScript read-only compatibility s
 - Added fixture-backed content asset management read endpoints:
   - `GET /api/v1/campaigns/:campaignSlug/content/assets`
   - `GET /api/v1/campaigns/:campaignSlug/content/assets/*`
+- Added fixture-backed content character management read endpoints:
+  - `GET /api/v1/campaigns/:campaignSlug/content/characters`
+  - `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
 - Default campaign fixture directory is `tests/fixtures/sample_campaigns`.
 - `CPW_CAMPAIGNS_DIR` overrides the fixture directory.
 - Implemented endpoints return JSON-only payloads for the read-only slice, with explicit fixture-mode auth/permissions metadata on campaign detail.
@@ -72,6 +75,10 @@ This document records the first implemented TypeScript read-only compatibility s
   - list endpoint `assets` shape with `2` fixture records and omitted `data_base64`.
   - detail endpoint `asset_file` shape with exact Flask-compatible `data_base64`.
   - stable asset fields (`asset_ref`, `relative_path`, `size_bytes`, `media_type`, and protected asset `url`).
+- Content/character-management payload checks cover:
+  - list endpoint `characters` shape with `3` fixture records and stable slug ordering.
+  - summary fields (`character_slug`, `name`, `status`, and `import_status`).
+  - detail endpoint `character_file` shape with Flask-compatible definition/import metadata normalization and `state_created: false`.
 
 ## Added Tests and Checks
 
@@ -80,6 +87,7 @@ This document records the first implemented TypeScript read-only compatibility s
   - compares Flask-vs-TypeScript payload parity for `GET /api/v1/campaigns/linden-pass/content/config`.
   - compares Flask-vs-TypeScript payload parity for `GET /api/v1/campaigns/linden-pass/content/pages` and one `.../content/pages/locations/port-meridian` detail endpoint, including removal fields and omission/inclusion of `body_markdown`.
   - compares Flask-vs-TypeScript payload parity for `GET /api/v1/campaigns/linden-pass/content/assets` and one `.../content/assets/npcs/captain-lyra-vale.png` detail endpoint, including detail-only `data_base64`.
+  - compares Flask-vs-TypeScript payload parity for `GET /api/v1/campaigns/linden-pass/content/characters` and one `.../content/characters/arden-march` detail endpoint, including Flask-style definition/import metadata normalization.
   - compares stable Flask-vs-TypeScript wiki home, section, and page payload fields.
   - checks JSON missing-resource shapes for TypeScript wiki dynamic routes.
   - adds fixture session parity checks (active session state, messages, passive score flag, revision/token shape, short-circuit response, missing session campaign 404).
@@ -88,6 +96,7 @@ This document records the first implemented TypeScript read-only compatibility s
   - validates fixture-backed content config endpoint payload for `linden-pass` (`campaign_slug`, `current_session`, `title`, `systems_sources`, `editable_fields`, `updated_at`) and missing-campaign 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/pages` list sorting/count/body omission and sampled `Port Meridian` metadata/removal fields, plus `GET /api/v1/campaigns/:campaignSlug/content/pages/*` detail payload body inclusion and missing-content-page 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/assets` list sorting/count/data omission and sampled PNG metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/assets/*` detail payload byte data and missing-content-asset 404.
+  - validates `GET /api/v1/campaigns/:campaignSlug/content/characters` list sorting/count and sampled character summary metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` detail payload definition/import metadata and missing-content-character 404.
   - verifies `GET /api/v1/campaigns/:campaignSlug/session` read-only payload shape, token/revision headers behavior, unchanged-response short-circuit, and session missing-campaign 404.
 - `apps/api/tests/route-parity.mjs`:
   - checks implemented route coverage against `route-snapshots.json` and `typescript-route-seed.json`.

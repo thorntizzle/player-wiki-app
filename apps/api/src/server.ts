@@ -12,16 +12,21 @@ import { buildSessionStatePayload } from "./session/view.js";
 import { getCampaignConfigFile } from "./content/repository.js";
 import {
   getCampaignContentAsset,
+  getCampaignContentCharacter,
   getCampaignContentPage,
   listCampaignContentAssets,
+  listCampaignContentCharacters,
   listCampaignContentPages,
   sanitizeContentAssetRef,
+  sanitizeContentCharacterSlug,
   sanitizeContentPageRef,
 } from "./content/repository.js";
 import {
   buildCampaignConfigPayload,
   buildContentAssetDetailPayload,
   buildContentAssetListPayload,
+  buildContentCharacterDetailPayload,
+  buildContentCharacterListPayload,
   buildContentPageDetailPayload,
   buildContentPageListPayload,
 } from "./content/view.js";
@@ -220,6 +225,15 @@ function contentAssetNotFound(campaignSlug: string, assetRef: string) {
     `Could not find content asset '${assetRef}' in campaign '${campaignSlug}'.`,
     404,
     { campaign_slug: campaignSlug, asset_ref: assetRef },
+  );
+}
+
+function contentCharacterNotFound(campaignSlug: string, characterSlug: string) {
+  return jsonError(
+    "content_character_not_found",
+    `Could not find content character '${characterSlug}' in campaign '${campaignSlug}'.`,
+    404,
+    { campaign_slug: campaignSlug, character_slug: characterSlug },
   );
 }
 
@@ -547,6 +561,46 @@ app.get(ROUTES.contentPage, async (ctx) => {
   }
 
   return ctx.json(buildContentPageDetailPayload(page));
+});
+
+app.get(ROUTES.contentCharacters, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characters = await listCampaignContentCharacters(config, campaignSlug);
+  if (!characters) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildContentCharacterListPayload(characters));
+});
+
+app.get(ROUTES.contentCharacter, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaignSlug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaignSlug, characterSlug);
+  if (!character) {
+    const error = contentCharacterNotFound(campaignSlug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildContentCharacterDetailPayload(character));
 });
 
 app.notFound((ctx) =>

@@ -196,6 +196,18 @@ def _content_asset_record_summary(asset):
     }
 
 
+def _content_character_summary(character):
+    return {
+        key: character[key]
+        for key in (
+            "character_slug",
+            "name",
+            "status",
+            "import_status",
+        )
+    }
+
+
 def _content_page_removal_summary(page):
     return {
         "can_hard_delete": page["can_hard_delete"],
@@ -321,6 +333,53 @@ def test_typescript_content_asset_detail_matches_flask_contract(typescript_api_s
     assert len(base64.b64decode(ts_asset_file["data_base64"])) == ts_asset_file["size_bytes"]
     assert isinstance(ts_asset_file["updated_at"], str) and ts_asset_file["updated_at"]
     _normalize_timestamp(ts_asset_file["updated_at"])
+
+
+def test_typescript_content_characters_list_matches_flask_contract(typescript_api_server, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    flask_response = client.get("/api/v1/campaigns/linden-pass/content/characters")
+    assert flask_response.status_code == 200
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/characters")
+    assert status == 200
+
+    assert payload["ok"] is True
+    assert isinstance(payload["characters"], list)
+    assert isinstance(flask_payload["characters"], list)
+    assert len(payload["characters"]) == len(flask_payload["characters"]) == 3
+    assert [character["character_slug"] for character in payload["characters"]] == [
+        character["character_slug"] for character in flask_payload["characters"]
+    ]
+
+    for flask_character, ts_character in zip(flask_payload["characters"], payload["characters"]):
+        assert _content_character_summary(ts_character) == _content_character_summary(flask_character)
+        assert isinstance(ts_character["updated_at"], str) and ts_character["updated_at"]
+        _normalize_timestamp(ts_character["updated_at"])
+
+
+def test_typescript_content_character_detail_matches_flask_contract(typescript_api_server, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    target_character_slug = "arden-march"
+    flask_response = client.get(f"/api/v1/campaigns/linden-pass/content/characters/{target_character_slug}")
+    assert flask_response.status_code == 200
+    flask_payload = flask_response.get_json()
+    assert flask_payload["ok"] is True
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/characters/{target_character_slug}"
+    )
+    assert status == 200
+
+    assert payload["ok"] is True
+    flask_character_file = flask_payload["character_file"]
+    ts_character_file = payload["character_file"]
+    assert ts_character_file["character_slug"] == flask_character_file["character_slug"]
+    assert ts_character_file["definition"] == flask_character_file["definition"]
+    assert ts_character_file["import_metadata"] == flask_character_file["import_metadata"]
+    assert ts_character_file["state_created"] == flask_character_file["state_created"] is False
+    assert isinstance(ts_character_file["updated_at"], str) and ts_character_file["updated_at"]
+    _normalize_timestamp(ts_character_file["updated_at"])
 
 
 def test_typescript_session_matches_flask_contract_readonly_fixture(typescript_api_server, client, users, sign_in):
@@ -509,3 +568,17 @@ def test_typescript_wiki_missing_resources_return_json(typescript_api_server):
     assert status == 404
     assert payload["ok"] is False
     assert payload["error"]["code"] == "content_asset_not_found"
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/definitely-not-a-campaign/content/characters"
+    )
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "campaign_not_found"
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/characters/missing-character"
+    )
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "content_character_not_found"

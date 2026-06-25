@@ -108,6 +108,24 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/characters",
+      "route_family": "api_v1_content",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/content/characters",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono content character management list endpoint for fixture-only read-only mode."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/characters/<character_slug>",
+      "route_family": "api_v1_content",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/content/characters/:characterSlug",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono content character management detail endpoint for fixture-only read-only mode."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/session/login",
       "route_family": "api_v1",
       "status": "deferred_scratch_proof",
