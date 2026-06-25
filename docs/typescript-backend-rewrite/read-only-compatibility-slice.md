@@ -47,5 +47,24 @@ npm --prefix apps/api test
 
 ## Open Items
 
-- Frontend dev-mode pointer to TypeScript API remains open and is tracked separately.
 - Remaining read-only surfaces beyond campaign detail remain open.
+
+## Frontend Dev-Mode Pointer
+
+To load campaign detail from the TypeScript API while keeping other surfaces on Flask:
+
+1. Start the fixture API slice on `127.0.0.1:3000`:
+
+```powershell
+npm --prefix apps/api run build
+npm --prefix apps/api run start
+```
+
+2. In a separate terminal for Vite, set `VITE_CPW_TYPESCRIPT_CAMPAIGN_API_BASE_URL` to the Vite-only proxy path and start the dev server:
+
+```powershell
+$env:VITE_CPW_TYPESCRIPT_CAMPAIGN_API_BASE_URL="/typescript-api"
+npm --prefix frontend run dev
+```
+
+3. Leave the variable unset for normal Flask behavior (including production). The Vite proxy forwards `/typescript-api/*` to `http://127.0.0.1:3000/*`, so browser dev-mode reads stay same-origin with Vite while only campaign detail uses the TypeScript API.

@@ -14,7 +14,7 @@ The current default-frontend contract and historical migration notes live in:
 ## Install
 
 ```powershell
-cd C:\Users\thorn\Documents\my_scripts\campaign_player_wiki\frontend
+cd <workspace>\campaign_player_wiki\frontend
 npm install
 ```
 
@@ -32,6 +32,25 @@ npm run dev
   - Set `PLAYER_WIKI_ENABLE_APP_NEXT_PREVIEW=0` as a temporary kill switch.
   - Set `PLAYER_WIKI_APP_NEXT_DIST_DIR` when the built bundle is not at `<repo>/frontend/dist`.
 - The Vite dev server proxies `/api/*` requests to `http://127.0.0.1:5000`.
+
+- For dev-mode TypeScript campaign detail reads, start the API slice separately on port 3000:
+
+```powershell
+npm --prefix ../apps/api run build
+npm --prefix ../apps/api run start
+```
+
+- Then launch Vite with a campaign detail override through the local Vite proxy:
+
+```powershell
+$env:VITE_CPW_TYPESCRIPT_CAMPAIGN_API_BASE_URL="/typescript-api"
+npm run dev
+```
+
+- This switch is scoped to `GET /api/v1/campaigns/<slug>` only. All other frontend API methods remain on the Flask same-origin/proxy paths.
+- In production and by default, keep `VITE_CPW_TYPESCRIPT_CAMPAIGN_API_BASE_URL` unset so behavior stays on Flask.
+- The Vite-only `/typescript-api` proxy strips that prefix and forwards requests to `http://127.0.0.1:3000`, avoiding cross-origin browser requests during local testing.
+- Run `npm run test:api-switch` for the lightweight source harness that checks only campaign detail uses the override.
 
 ## Router Layout
 

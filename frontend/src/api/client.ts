@@ -134,6 +134,7 @@ function encodePathSegments(value: string): string {
 
 export interface CampaignApiClientOptions {
   baseUrl?: string;
+  campaignDetailBaseUrl?: string;
   bearerToken?: string;
 }
 
@@ -185,10 +186,16 @@ function getJsonError(payload: unknown, fallbackMessage: string, status: number)
 
 export class CampaignApiClient {
   private readonly baseUrl: string;
+  private readonly campaignDetailBaseUrl: string;
   private bearerToken: string | null;
 
-  constructor({ baseUrl = DEFAULT_BASE_PATH, bearerToken = "" }: CampaignApiClientOptions = {}) {
+  constructor({
+    baseUrl = DEFAULT_BASE_PATH,
+    campaignDetailBaseUrl = "",
+    bearerToken = "",
+  }: CampaignApiClientOptions = {}) {
     this.baseUrl = baseUrl;
+    this.campaignDetailBaseUrl = campaignDetailBaseUrl.trim();
     this.bearerToken = bearerToken.trim() || null;
   }
 
@@ -213,8 +220,8 @@ export class CampaignApiClient {
     return headers;
   }
 
-  private async requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
+  private async requestJson<T>(path: string, init: RequestInit = {}, baseUrl = this.baseUrl): Promise<T> {
+    const response = await fetch(`${baseUrl}${path}`, {
       credentials: "same-origin",
       ...init,
       headers: {
@@ -383,7 +390,8 @@ export class CampaignApiClient {
   }
 
   async getCampaign(slug: string): Promise<CampaignDetailResponse> {
-    return this.requestJson<CampaignDetailResponse>(`/api/v1/campaigns/${encodeURIComponent(slug)}`);
+    const baseUrl = this.campaignDetailBaseUrl || this.baseUrl;
+    return this.requestJson<CampaignDetailResponse>(`/api/v1/campaigns/${encodeURIComponent(slug)}`, {}, baseUrl);
   }
 
   async getCampaignHelp(slug: string): Promise<CampaignHelpResponse> {

@@ -45,12 +45,14 @@ export function AppShell() {
   const [viewAsDraftUserId, setViewAsDraftUserId] = useState("");
   const [viewAsStatus, setViewAsStatus] = useState<string | null>(null);
   const hasMounted = useRef(false);
+  const campaignDetailBaseUrl = import.meta.env.VITE_CPW_TYPESCRIPT_CAMPAIGN_API_BASE_URL?.trim() || undefined;
 
   const apiClient = useMemo(() => {
     return new CampaignApiClient({
       bearerToken: apiToken,
+      campaignDetailBaseUrl,
     });
-  }, [apiToken]);
+  }, [apiToken, campaignDetailBaseUrl]);
 
   useEffect(() => {
     if (!hasMounted.current) {
