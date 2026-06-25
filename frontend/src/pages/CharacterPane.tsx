@@ -253,6 +253,7 @@ export function CharacterPane({
 
   const isReadSurface = surface === "read";
   const isCombatSurface = surface === "combat";
+  const isSessionSurface = surface === "session";
   const canUseControls = isReadSurface && Boolean(permissions?.can_use_controls && controls?.available);
   const canManagePortrait = isReadSurface && canEdit;
   const surfaceMetaLabel = isReadSurface ? "Character sheet" : isCombatSurface ? "Combat Character" : "Session Character";
@@ -420,6 +421,20 @@ export function CharacterPane({
 
   return (
     <div className={isReadSurface ? "page-layout character-layout character-read-content" : "session-pane-content"}>
+      {isSessionSurface ? (
+        <CharacterNavigationCard
+          activeCharacterSection={activeCharacterSection}
+          characterList={characterList}
+          handleReadSurfaceSectionNavClick={handleReadSurfaceSectionNavClick}
+          isReadSurface={isReadSurface}
+          readSurfaceSectionUrl={readSurfaceSectionUrl}
+          selectCharacter={selectCharacter}
+          selectedCharacterSheetUrl={selectedCharacterSheetUrl}
+          selectedSlug={selectedSlug}
+          showCharacterSheetLink
+          visibleCharacterSections={visibleCharacterSections}
+        />
+      ) : null}
       <article
         className={
           isReadSurface
@@ -430,29 +445,33 @@ export function CharacterPane({
         data-character-read-shell-page={isReadSurface ? activeCharacterSection || "overview" : undefined}
         data-character-read-shell-mode={isReadSurface ? "read" : undefined}
       >
-        <CharacterHeader
-          detailLinks={detailLinks}
-          detailProgressionRepairUrl={detailProgressionRepairUrl}
-          embeddedHeaderDetails={embeddedHeaderDetails}
-          hasReadHeaderManagementActions={hasReadHeaderManagementActions}
-          isCombatSurface={isCombatSurface}
-          isReadSurface={isReadSurface}
-          selectedCharacterSheetUrl={selectedCharacterSheetUrl}
-          selectedName={selected?.name}
-          surfaceHeading={surfaceHeading}
-          surfaceMetaLabel={surfaceMetaLabel}
-        />
+        {!isSessionSurface ? (
+          <>
+            <CharacterHeader
+              detailLinks={detailLinks}
+              detailProgressionRepairUrl={detailProgressionRepairUrl}
+              embeddedHeaderDetails={embeddedHeaderDetails}
+              hasReadHeaderManagementActions={hasReadHeaderManagementActions}
+              isCombatSurface={isCombatSurface}
+              isReadSurface={isReadSurface}
+              selectedCharacterSheetUrl={selectedCharacterSheetUrl}
+              selectedName={selected?.name}
+              surfaceHeading={surfaceHeading}
+              surfaceMetaLabel={surfaceMetaLabel}
+            />
 
-        <CharacterNavigationCard
-          activeCharacterSection={activeCharacterSection}
-          characterList={characterList}
-          handleReadSurfaceSectionNavClick={handleReadSurfaceSectionNavClick}
-          isReadSurface={isReadSurface}
-          readSurfaceSectionUrl={readSurfaceSectionUrl}
-          selectCharacter={selectCharacter}
-          selectedSlug={selectedSlug}
-          visibleCharacterSections={visibleCharacterSections}
-        />
+            <CharacterNavigationCard
+              activeCharacterSection={activeCharacterSection}
+              characterList={characterList}
+              handleReadSurfaceSectionNavClick={handleReadSurfaceSectionNavClick}
+              isReadSurface={isReadSurface}
+              readSurfaceSectionUrl={readSurfaceSectionUrl}
+              selectCharacter={selectCharacter}
+              selectedSlug={selectedSlug}
+              visibleCharacterSections={visibleCharacterSections}
+            />
+          </>
+        ) : null}
 
         {listQuery.isLoading ? <p className="status status-neutral">Loading characters...</p> : null}
         {detailQuery.isLoading ? <p className="status status-neutral">Loading character...</p> : null}

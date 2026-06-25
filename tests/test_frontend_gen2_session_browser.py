@@ -419,7 +419,7 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             assert page.locator("text=Back to list").count() == 0
             assert page.locator("text=/Session:/").count() == 0
 
-            session_tabs = page.locator(".session-tab-strip")
+            session_tabs = page.locator(".session-hero > .hero-actions.session-tab-strip")
             expect(session_tabs.get_by_role("button", name="Session", exact=True)).to_be_visible()
             expect(session_tabs.get_by_role("button", name="Character", exact=True)).to_be_visible()
             expect(session_tabs.get_by_role("button", name="DM", exact=True)).to_be_visible()
@@ -438,14 +438,24 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
 
             session_tabs.get_by_role("button", name="DM", exact=True).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))
-            assert page.locator(".pane-visible .page-layout.session-layout > .session-column").count() == 1
-            assert page.locator(".pane-visible .page-layout.session-layout > .session-sidebar").count() == 1
+            dm_pane = page.locator(".pane-visible")
+            dm_view_tabs = dm_pane.locator(".hero-actions.session-tab-strip")
+            assert dm_pane.locator(".page-layout.session-layout.session-layout--single > .session-column").count() == 1
+            assert dm_pane.locator(".page-layout.session-layout > .session-sidebar").count() == 0
             assert page.locator(".pane-visible .session-workspace-grid").count() == 0
             assert page.locator(".pane-visible .session-workspace-main").count() == 0
             assert page.locator(".pane-visible .session-workspace-sidebar").count() == 0
-            expect(page.get_by_role("heading", name="Session controls")).to_be_visible(timeout=5000)
-            expect(page.get_by_role("heading", name="Stage session articles")).to_be_visible(timeout=5000)
+            expect(dm_view_tabs.get_by_role("button", name="DM Tools")).to_have_attribute("aria-pressed", "true")
+            expect(dm_view_tabs.get_by_role("button", name="Staged Articles")).to_be_visible()
+            expect(dm_view_tabs.get_by_role("button", name="Revealed Articles")).to_be_visible()
+            expect(dm_view_tabs.get_by_role("button", name="Stage Session Articles")).to_be_visible()
+            expect(dm_view_tabs.get_by_role("button", name="Chat Logs")).to_be_visible()
+            expect(page.get_by_role("heading", name="DM references")).to_be_visible(timeout=5000)
             expect(page.get_by_role("heading", name="Live session")).to_be_visible(timeout=5000)
+            expect(page.get_by_role("heading", name="Session controls")).to_be_visible(timeout=5000)
+            expect(page.get_by_role("heading", name="Stage session articles")).to_have_count(0)
+            expect(page.get_by_role("heading", name="Staged articles")).to_have_count(0)
+            expect(page.get_by_role("heading", name="Chat logs")).to_have_count(0)
 
             session_start_response = page.request.post(f"{base_url}/campaigns/linden-pass/session/start")
             assert session_start_response.status in {200, 302}
@@ -463,6 +473,11 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
                 form={"title": revealed_title, "body_markdown": "To be revealed."},
             )
             assert revealed_source_response.status in {200, 302}
+            dm_view_tabs.get_by_role("button", name="Staged Articles").click()
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session\?dm_view=staged$"))
+            expect(dm_view_tabs.get_by_role("button", name="Staged Articles")).to_have_attribute("aria-pressed", "true")
+            expect(page.get_by_role("heading", name="Staged articles")).to_be_visible(timeout=5000)
+            expect(page.get_by_role("heading", name="Live session")).to_have_count(0)
             reveal_ready_card = page.locator("article#session-staged-articles").locator(
                 "details.feature-detail.session-article-detail",
                 has_text=revealed_title,
@@ -474,9 +489,6 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(reveal_ready_card).to_have_count(0, timeout=10000)
 
             staged_parity_section = page.locator("article#session-staged-articles")
-            revealed_parity_section = page.locator("article#session-revealed-articles")
-            revealed_card = revealed_parity_section.locator("details.feature-detail.session-article-detail", has_text=revealed_title)
-            expect(revealed_card).to_be_visible(timeout=10000)
             staged_card = staged_parity_section.locator("details.feature-detail.session-article-detail", has_text=staged_title)
             expect(staged_card).to_be_visible(timeout=10000)
 
@@ -484,23 +496,16 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
                 staged_card.locator("> summary").click()
             assert staged_card.evaluate("(element) => element.open") is True
 
-            if not revealed_card.evaluate("(element) => element.open"):
-                revealed_card.locator("> summary").click()
-            assert revealed_card.evaluate("(element) => element.open") is True
-
             staged_edit_detail = staged_card.locator("details.session-article-edit-detail")
             if not staged_edit_detail.evaluate("(element) => element.open"):
                 staged_edit_detail.locator("summary").click()
             assert staged_edit_detail.evaluate("(element) => element.open") is True
 
             expect(staged_parity_section.locator("div.session-article-stack")).to_have_count(1)
-            expect(revealed_parity_section.locator("div.session-article-stack")).to_have_count(1)
             expect(staged_parity_section.locator("details.feature-detail.session-article-detail")).to_have_count(1)
-            expect(revealed_parity_section.locator("details.feature-detail.session-article-detail")).to_have_count(1)
             expect(staged_card.locator("details.session-article-edit-detail")).to_have_count(1)
             expect(staged_card.locator("form.stack-form.session-article-edit-form")).to_have_count(1)
             expect(staged_card.locator("div.session-article-detail__actions")).to_have_count(1)
-            expect(revealed_card.locator("div.session-article-detail__actions")).to_have_count(1)
             expect(staged_card.get_by_role("button", name="Update prep draft")).to_have_count(1)
             expect(staged_card.locator("div.session-article-detail__actions").get_by_role("button", name="Reveal in chat")).to_have_class(
                 re.compile(r"\bghost-button\b")
@@ -508,73 +513,57 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(staged_card.locator("div.session-article-detail__actions").get_by_role("button", name="Delete article")).to_have_class(
                 re.compile(r"\bghost-button\b")
             )
-            expect(revealed_card.locator("div.session-article-detail__actions").get_by_role("button", name="Delete article")).to_have_class(
-                re.compile(r"\bghost-button\b")
-            )
-            expect(revealed_parity_section.get_by_role("button", name="Clear all")).to_have_class(re.compile(r"\bghost-button\b"))
 
-            for section in (staged_parity_section, revealed_parity_section):
+            for section in (staged_parity_section,):
                 expect(section.locator(".article-stack")).to_have_count(0)
                 expect(section.locator("details.article-card")).to_have_count(0)
                 expect(section.locator(".article-actions")).to_have_count(0)
                 expect(section.locator(".article-kind")).to_have_count(0)
                 expect(section.locator(".button-danger")).to_have_count(0)
 
-            dm_card_texts = page.evaluate(
-                """() => {
-                    const section = document.querySelector(".pane-visible .page-layout.session-layout > .session-column");
-                return Array.from(
-                        section
-                            ? section.querySelectorAll(
-                                ":scope > .session-passive-scores-bar .section-title,"
-                                + ":scope > .card.session-sidebar-card .section-heading h2"
-                            )
-                            : [],
-                    ).map((node) => (node.textContent || "").trim());
-                }"""
+            dm_view_tabs.get_by_role("button", name="Revealed Articles").click()
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session\?dm_view=revealed$"))
+            expect(dm_view_tabs.get_by_role("button", name="Revealed Articles")).to_have_attribute("aria-pressed", "true")
+            revealed_parity_section = page.locator("article#session-revealed-articles")
+            expect(page.get_by_role("heading", name="Revealed articles")).to_be_visible(timeout=5000)
+            revealed_card = revealed_parity_section.locator("details.feature-detail.session-article-detail", has_text=revealed_title)
+            expect(revealed_card).to_be_visible(timeout=10000)
+            if not revealed_card.evaluate("(element) => element.open"):
+                revealed_card.locator("> summary").click()
+            assert revealed_card.evaluate("(element) => element.open") is True
+            expect(revealed_parity_section.locator("div.session-article-stack")).to_have_count(1)
+            expect(revealed_parity_section.locator("details.feature-detail.session-article-detail")).to_have_count(1)
+            expect(revealed_card.locator("div.session-article-detail__actions")).to_have_count(1)
+            expect(revealed_card.locator("div.session-article-detail__actions").get_by_role("button", name="Delete article")).to_have_class(
+                re.compile(r"\bghost-button\b")
             )
-            sidebar_ids = page.evaluate(
-                """() => {
-                    const sidebar = document.querySelector(".pane-visible .page-layout.session-layout > .session-sidebar");
-                    const ids = sidebar
-                        ? {
-                            status: !!sidebar.querySelector("#session-controls"),
-                            articleStore: !!sidebar.querySelector("#session-article-store"),
-                          }
-                        : null;
-                    return ids;
-                }"""
-            )
-            main_ids = page.evaluate(
-                """() => {
-                    const main = document.querySelector(".pane-visible .page-layout.session-layout > .session-column");
-                    const ids = main
-                        ? {
-                            passive: !!main.querySelector("#session-passive-scores"),
-                            staged: !!main.querySelector("#session-staged-articles"),
-                            revealed: !!main.querySelector("#session-revealed-articles"),
-                            logs: !!main.querySelector("#session-chat-logs"),
-                          }
-                        : null;
-                    return ids;
-                }"""
-            )
+            expect(revealed_parity_section.get_by_role("button", name="Clear all")).to_have_class(re.compile(r"\bghost-button\b"))
+            expect(revealed_parity_section.locator(".article-stack")).to_have_count(0)
+            expect(revealed_parity_section.locator("details.article-card")).to_have_count(0)
+            expect(revealed_parity_section.locator(".article-actions")).to_have_count(0)
+            expect(revealed_parity_section.locator(".article-kind")).to_have_count(0)
+            expect(revealed_parity_section.locator(".button-danger")).to_have_count(0)
+
+            dm_view_tabs.get_by_role("button", name="Stage Session Articles").click()
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session\?dm_view=stage$"))
+            expect(dm_view_tabs.get_by_role("button", name="Stage Session Articles")).to_have_attribute("aria-pressed", "true")
+            expect(page.get_by_role("heading", name="Stage session articles")).to_be_visible(timeout=5000)
+            expect(page.locator("article#session-article-store")).to_be_visible()
+
+            dm_view_tabs.get_by_role("button", name="Chat Logs").click()
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session\?dm_view=logs$"))
+            expect(dm_view_tabs.get_by_role("button", name="Chat Logs")).to_have_attribute("aria-pressed", "true")
+            expect(page.get_by_role("heading", name="Chat logs")).to_be_visible(timeout=5000)
+
+            dm_view_tabs.get_by_role("button", name="DM Tools").click()
+            expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))
+            expect(dm_view_tabs.get_by_role("button", name="DM Tools")).to_have_attribute("aria-pressed", "true")
+            expect(page.get_by_role("heading", name="Live session")).to_be_visible(timeout=5000)
+            expect(page.get_by_role("heading", name="Session controls")).to_be_visible(timeout=5000)
+            expect(page.get_by_role("button", name=re.compile(r"Begin session|Close session|Starting|Closing", re.I))).to_be_visible()
             assert page.locator(".pane-visible .page-layout.session-layout > .session-column .panel-nested").count() == 0
-            assert page.locator(".pane-visible .page-layout.session-layout > .session-sidebar .panel-nested").count() == 0
+            assert page.locator(".pane-visible .page-layout.session-layout > .session-sidebar").count() == 0
             assert page.locator(".pane-visible .page-layout.session-layout > .session-column .card.session-sidebar-card").count() >= 2
-            assert page.locator(".pane-visible .page-layout.session-layout > .session-sidebar .card.session-sidebar-card").count() >= 2
-            assert "Live session" not in dm_card_texts
-            assert dm_card_texts.index("Staged articles") != -1
-            assert dm_card_texts.index("Chat logs") != -1
-            assert sidebar_ids is not None
-            assert sidebar_ids["status"] is True
-            assert sidebar_ids["articleStore"] is True
-            assert main_ids is not None
-            assert main_ids["staged"] is True
-            assert main_ids["logs"] is True
-            assert main_ids["passive"] is True
-            if main_ids["revealed"]:
-                assert dm_card_texts.index("Revealed articles") != -1
             for viewport in (
                 {"width": 1280, "height": 900},
                 {"width": 390, "height": 900},
@@ -589,9 +578,7 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
                             : 0;
                         const selectors = [
                             ".pane-visible .page-layout.session-layout > .session-column",
-                            ".pane-visible .page-layout.session-layout > .session-sidebar",
                             ".pane-visible .page-layout.session-layout > .session-column .card.session-sidebar-card",
-                            ".pane-visible .page-layout.session-layout > .session-sidebar .card.session-sidebar-card",
                         ];
                         return {
                             fits: selectors.every((selector) => {
@@ -604,29 +591,7 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
                     viewport["width"],
                 )
                 assert layout_metrics["fits"] is True
-                if viewport["width"] <= 480:
-                    assert layout_metrics["layoutColumnsCount"] == 1
-                else:
-                    assert layout_metrics["layoutColumnsCount"] >= 2
-            passive_index = dm_card_texts.index("Passive scores") if "Passive scores" in dm_card_texts else None
-            staged_index = dm_card_texts.index("Staged articles")
-            logs_index = dm_card_texts.index("Chat logs")
-            if passive_index is not None:
-                assert passive_index == 0
-                assert passive_index < staged_index
-            else:
-                assert dm_card_texts[0] == "Staged articles"
-            assert dm_card_texts.index("Staged articles") < dm_card_texts.index("Chat logs")
-            assert staged_index < logs_index
-            revealed_index = dm_card_texts.index("Revealed articles") if "Revealed articles" in dm_card_texts else None
-            if revealed_index is not None:
-                assert staged_index < revealed_index
-                assert revealed_index < logs_index
-            expect(page.locator(".session-sidebar").get_by_role("heading", name="Live session")).to_be_visible()
-            expect(page.locator(".session-sidebar").get_by_role("heading", name="Session controls")).to_be_visible()
-            expect(page.get_by_role("button", name=re.compile(r"Begin session|Close session|Starting|Closing", re.I))).to_be_visible()
-            expect(page.get_by_role("heading", name="Staged articles")).to_be_visible()
-            expect(page.get_by_role("heading", name="Chat logs")).to_be_visible()
+                assert layout_metrics["layoutColumnsCount"] == 1
 
             session_tabs.get_by_role("button", name="Session", exact=True).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))
@@ -638,9 +603,15 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             expect(page.get_by_role("heading", name="Send message")).to_be_visible()
             chat_composer = page.locator("article.card.session-composer-card#session-chat-compose")
             expect(chat_composer.locator("label.field > span", has_text="Audience")).to_be_visible()
-            expect(chat_composer.locator("label.field > span", has_text="Player")).to_be_visible()
             expect(chat_composer.locator("label.field > span", has_text="Message")).to_be_visible()
+            expect(chat_composer.locator("select")).to_have_count(1)
+            chat_composer.locator("select#session-message-audience").select_option("player")
+            expect(chat_composer.locator("label.field > span", has_text="Player")).to_be_visible()
             expect(chat_composer.locator("select")).to_have_count(2)
+            player_option_texts = chat_composer.locator("select#session-message-player option").all_inner_texts()
+            assert "Arden March (Owner Player)" in player_option_texts
+            assert "Party Player" in player_option_texts
+            assert all("@" not in label for label in player_option_texts)
             expect(chat_composer.locator("textarea")).to_be_visible()
             player_card_texts = page.evaluate(
                 """() => {
@@ -668,12 +639,14 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
 
             session_tabs.get_by_role("button", name="Character", exact=True).click()
             expect(page).to_have_url(re.compile(r"/app-next/campaigns/linden-pass/session$"))
+            character_selector_card = page.locator(".session-pane-content > .character-selector-card")
+            expect(character_selector_card).to_be_visible()
+            character_selector = character_selector_card.locator("select#character-selector")
+            expect(character_selector).to_be_visible()
+            expect(character_selector_card.get_by_role("link", name="Open full character page")).to_be_visible()
             embedded_character_shell = page.locator(".session-pane-content > article.card.character-sheet.session-character-sheet")
             expect(embedded_character_shell).to_be_visible()
-            expect(embedded_character_shell.locator("> header.character-header .eyebrow")).to_have_text("Session Character")
-            expect(embedded_character_shell.locator("> header.character-header h2")).to_be_visible()
-            character_selector = embedded_character_shell.locator("select#character-selector")
-            expect(character_selector).to_be_visible()
+            expect(embedded_character_shell.locator("> header.character-header")).to_have_count(0)
             selected_character_slug = character_selector.input_value()
             assert selected_character_slug
             selected_character_option_text = character_selector.locator("option:checked").inner_text()
@@ -682,11 +655,8 @@ def test_gen2_session_browser_exposes_flask_session_capabilities(
             assert selected_character_slug not in character_summary_text
             assert "Status:" not in character_summary_text
             expect(embedded_character_shell.locator("> header.character-header h1")).to_have_count(0)
-            embedded_character_header = embedded_character_shell.locator("> header.character-header")
-            expect(embedded_character_header.locator(".hero-actions")).to_be_visible()
-            expect(embedded_character_header.get_by_role("link", name="Open full character page")).to_be_visible()
-            expect(embedded_character_header.locator(".article-actions")).to_have_count(0)
-            expect(embedded_character_header.locator(".button.button-secondary")).to_have_count(0)
+            expect(character_selector_card.locator(".article-actions")).to_have_count(0)
+            expect(character_selector_card.locator(".button.button-secondary")).to_have_count(0)
             _assert_character_detail_trigger_classes(embedded_character_shell)
             vitals_bar = embedded_character_shell.locator("section#session-vitals.session-bar")
             expect(vitals_bar).to_be_visible()
@@ -3706,10 +3676,38 @@ def test_gen2_session_preserves_local_state_across_live_polling(
                 },
             )
             assert article_response.status in {200, 302}
+            for index in range(18):
+                message_response = page.request.post(
+                    f"{base_url}/campaigns/linden-pass/session/messages",
+                    form={"body": f"Scroll history message {index:02d}"},
+                )
+                assert message_response.status in {200, 302}
 
             page.goto(f"{base_url}/app-next/campaigns/linden-pass/session")
-            session_tabs = page.locator(".session-tab-strip")
+            session_tabs = page.locator(".session-hero > .hero-actions.session-tab-strip")
             expect(session_tabs.get_by_role("button", name="Session", exact=True)).to_be_visible(timeout=10000)
+
+            expect(page.get_by_text("Scroll history message 00")).to_be_visible(timeout=5000)
+            page.evaluate(
+                """() => {
+                    const target = document.querySelector("#session-chat .chat-item:nth-child(8)");
+                    if (target) {
+                        target.scrollIntoView();
+                    }
+                }"""
+            )
+            player_scroll_before = page.evaluate("window.scrollY")
+            assert player_scroll_before > 0
+            live_poll_message = "Live polling should not move the reader."
+            live_poll_response = page.request.post(
+                f"{base_url}/campaigns/linden-pass/session/messages",
+                form={"body": live_poll_message},
+            )
+            assert live_poll_response.status in {200, 302}
+            page.wait_for_timeout(3600)
+            expect(page.get_by_text(live_poll_message)).to_have_count(1)
+            player_scroll_after = page.evaluate("window.scrollY")
+            assert abs(player_scroll_after - player_scroll_before) <= 5
 
             chat_draft = "This chat draft should survive pane switches and live polling."
             page.locator(".pane-visible").get_by_label("Message").fill(chat_draft)
@@ -3739,6 +3737,9 @@ def test_gen2_session_preserves_local_state_across_live_polling(
 
             session_tabs.get_by_role("button", name="DM", exact=True).click()
             dm_pane = page.locator(".pane-visible")
+            dm_view_tabs = dm_pane.locator(".hero-actions.session-tab-strip")
+            dm_view_tabs.get_by_role("button", name="Staged Articles").click()
+            expect(dm_view_tabs.get_by_role("button", name="Staged Articles")).to_have_attribute("aria-pressed", "true")
             article_card = dm_pane.locator("details.feature-detail.session-article-detail", has_text="Gen2 Preservation Article")
             expect(article_card).to_be_visible(timeout=5000)
             if not article_card.evaluate("(element) => element.open"):

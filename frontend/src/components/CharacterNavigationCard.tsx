@@ -14,7 +14,9 @@ export function CharacterNavigationCard({
   isReadSurface,
   readSurfaceSectionUrl,
   selectCharacter,
+  selectedCharacterSheetUrl = "",
   selectedSlug,
+  showCharacterSheetLink = false,
   visibleCharacterSections,
 }: {
   activeCharacterSection: CharacterSection;
@@ -23,7 +25,9 @@ export function CharacterNavigationCard({
   isReadSurface: boolean;
   readSurfaceSectionUrl: (section: CharacterSection) => string;
   selectCharacter: (nextSlug: string | null) => void;
+  selectedCharacterSheetUrl?: string;
   selectedSlug: string | null;
+  showCharacterSheetLink?: boolean;
   visibleCharacterSections: CharacterNavigationSection[];
 }) {
   return (
@@ -51,22 +55,29 @@ export function CharacterNavigationCard({
           })}
         </nav>
       ) : (
-        <label className="field" htmlFor="character-selector">
-          <span>Character</span>
-          <select
-            id="character-selector"
-            value={selectedSlug || ""}
-            onChange={(event) => {
-              selectCharacter(event.currentTarget.value || null);
-            }}
-          >
-            {characterList.map((item) => (
-              <option key={item.slug} value={item.slug}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="character-selector-row">
+          <label className="field" htmlFor="character-selector">
+            <span>Character</span>
+            <select
+              id="character-selector"
+              value={selectedSlug || ""}
+              onChange={(event) => {
+                selectCharacter(event.currentTarget.value || null);
+              }}
+            >
+              {characterList.map((item) => (
+                <option key={item.slug} value={item.slug}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {showCharacterSheetLink && selectedCharacterSheetUrl ? (
+            <a href={selectedCharacterSheetUrl} className="ghost-button">
+              Open full character page
+            </a>
+          ) : null}
+        </div>
       )}
     </div>
   );

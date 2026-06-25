@@ -1400,6 +1400,10 @@ def test_api_session_messages_support_private_audience_scope(client, app, users)
     assert users["owner"]["id"] in recipient_ids
     assert users["party"]["id"] in recipient_ids
     assert all("label" in choice for choice in recipient_choices)
+    recipient_labels = {int(choice["user_id"]): choice["label"] for choice in recipient_choices}
+    assert recipient_labels[users["owner"]["id"]] == "Arden March (Owner Player)"
+    assert recipient_labels[users["party"]["id"]] == "Party Player"
+    assert all("@" not in choice["label"] for choice in recipient_choices)
 
     owner_messages = {entry["body_text"]: entry for entry in owner_payload["messages"]}
     assert owner_messages[global_body]["recipient_scope"] == "global"

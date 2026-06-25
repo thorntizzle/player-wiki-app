@@ -1878,8 +1878,10 @@ def test_session_message_composer_includes_audience_controls(client, sign_in, us
     assert '<option value="global">Global</option>' in session_html
     assert '<option value="dm_only">DM only</option>' in session_html
     assert '<option value="player">Specific player</option>' in session_html
-    assert "Owner Player (owner@example.com)" in session_html
-    assert "Party Player (party@example.com)" in session_html
+    assert "Arden March (Owner Player)" in session_html
+    assert "Party Player" in session_html
+    assert "owner@example.com" not in session_html
+    assert "party@example.com" not in session_html
 
 
 def test_session_message_audience_filtering_respects_private_scope(client, sign_in, users):

@@ -486,10 +486,13 @@ def test_character_navigation_card_uses_flask_style_chrome_in_source() -> None:
     assert "data-character-read-subpage-link" in source
     assert "data-character-read-target-subpage={section.id}" in source
     assert "onClick={handleReadSurfaceSectionNavClick(section.id)}" in source
+    assert 'className="character-selector-row"' in source
     assert '<label className="field" htmlFor="character-selector">' in source
     assert "<span>Character</span>" in source
     assert 'id="character-selector"' in source
     assert "selectCharacter(event.currentTarget.value || null)" in source
+    assert "showCharacterSheetLink && selectedCharacterSheetUrl" in source
+    assert "Open full character page" in source
     assert "className=\"chat-label\"" not in source
 
 
@@ -1168,7 +1171,7 @@ def test_admin_user_account_actions_are_flat_stack_in_source() -> None:
 def test_session_chat_logs_card_uses_flask_style_row_hooks_in_source() -> None:
     source = Path("frontend/src/pages/SessionDmPane.tsx").read_text(encoding="utf-8")
     chat_logs_start = source.index('<article className="card session-sidebar-card" id="session-chat-logs">')
-    chat_logs_end = source.index('<aside className="session-sidebar">', chat_logs_start)
+    chat_logs_end = source.index("</article>", chat_logs_start) + len("</article>")
     chat_logs_source = source[chat_logs_start:chat_logs_end]
 
     assert 'className="plain-list session-log-list"' in chat_logs_source
@@ -1211,6 +1214,35 @@ def test_session_dm_mutations_live_in_shared_hook() -> None:
     assert "const deleteLogMutation = useMutation({" in hook_source
     assert 'showToastMessage("Revealed articles cleared.");' in hook_source
     assert "setManualDraft(buildEmptyManualArticleDraft());" in hook_source
+
+
+def test_session_dm_has_focused_subview_model() -> None:
+    source = Path("frontend/src/pages/SessionDmPane.tsx").read_text(encoding="utf-8")
+
+    assert 'type DmPaneView = "tools" | "staged" | "revealed" | "stage" | "logs";' in source
+    assert 'const readDmPaneView = (search: string): DmPaneView => {' in source
+    assert 'new URLSearchParams(search).get("dm_view")' in source
+    assert 'const activeDmView = readDmPaneView(location.searchStr);' in source
+    assert 'const setDmPaneView = (next: DmPaneView) => {' in source
+
+    assert 'className="hero-actions session-tab-strip" aria-label="Session DM views"' in source
+    assert 'className="page-layout session-layout session-layout--single"' in source
+    compact_source = source.replace("\n", "")
+    compact_source = compact_source.replace(" ", "")
+    assert ">DMTools<" in compact_source
+    assert ">StagedArticles<" in compact_source
+    assert ">RevealedArticles<" in compact_source
+    assert ">StageSessionArticles<" in compact_source
+    assert ">ChatLogs<" in compact_source
+
+    assert 'const subviewClass = (view: DmPaneView) => (' in source
+    assert 'className={subviewClass("tools")}' in source
+    assert 'className={subviewClass("staged")}' in source
+    assert 'className={subviewClass("revealed")}' in source
+    assert 'className={subviewClass("stage")}' in source
+    assert 'className={subviewClass("logs")}' in source
+    assert '<aside className="session-sidebar">' not in source
+    assert ".session-dm-subview {" in Path("frontend/src/styles.css").read_text(encoding="utf-8")
 
 
 def test_combat_action_chrome_in_source() -> None:
@@ -3550,6 +3582,42 @@ def test_session_player_composer_uses_compact_target_row_and_labels() -> None:
     assert ".session-message-form textarea {" in styles
 
 
+def test_gen2_session_hides_chat_interface_when_inactive() -> None:
+    source = Path("frontend/src/pages/SessionRoutes.tsx").read_text(encoding="utf-8")
+
+    assert "function SessionPaneInactiveCard()" in source
+    assert 'id="session-inactive-state"' in source
+    assert "No active session is running right now." in source
+    assert "{payload && !payload.active_session ? (" in source
+    assert "{payload?.active_session ? (" in source
+    inactive_branch = source[
+        source.index("{payload && !payload.active_session ? ("):
+        source.index("{payload?.active_session ? (")
+    ]
+    assert "<SessionPaneChat" not in inactive_branch
+    assert "<SessionPaneMessageComposer" not in inactive_branch
+
+
+def test_session_character_picker_lives_above_sheet_card_in_source() -> None:
+    source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
+    styles = Path("frontend/src/styles.css").read_text(encoding="utf-8")
+
+    assert 'const isSessionSurface = surface === "session";' in source
+    external_nav_start = source.index("{isSessionSurface ? (")
+    article_start = source.index("<article", external_nav_start)
+    external_nav_markup = source[external_nav_start:article_start]
+    assert "<CharacterNavigationCard" in external_nav_markup
+    assert "selectedCharacterSheetUrl={selectedCharacterSheetUrl}" in external_nav_markup
+    assert "showCharacterSheetLink" in external_nav_markup
+
+    article_markup = source[article_start:source.index("{listQuery.isLoading", article_start)]
+    assert "{!isSessionSurface ? (" in article_markup
+    assert "<CharacterHeader" in article_markup
+    assert "<CharacterNavigationCard" in article_markup
+    assert ".session-pane-content > .character-selector-card {" in styles
+    assert ".character-selector-row {" in styles
+
+
 def test_mutation_heavy_gen2_routes_use_shared_toast_notice() -> None:
     toast_route_paths = [
         "frontend/src/pages/AccountSettingsPage.tsx",
@@ -4157,7 +4225,7 @@ def test_dm_session_revealed_articles_panel_uses_session_article_row_chrome_in_s
     source = Path("frontend/src/pages/SessionDmPane.tsx").read_text(encoding="utf-8")
     panel_id_start = source.index('id="session-revealed-articles"')
     panel_start = source.rfind("<article", 0, panel_id_start)
-    panel_end = source.index('<article className="card session-sidebar-card" id="session-chat-logs">', panel_start)
+    panel_end = source.index('<div className={subviewClass("stage")}>', panel_start)
     panel_markup = source[panel_start:panel_end]
 
     assert 'className="session-article-stack"' in panel_markup

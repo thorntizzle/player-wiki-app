@@ -45,6 +45,16 @@ function SessionPaneChat({
   );
 }
 
+function SessionPaneInactiveCard() {
+  return (
+    <article className="card auth-card session-inactive-card" id="session-inactive-state">
+      <h2>No active session</h2>
+      <p>No active session is running right now.</p>
+      <p className="meta">The chat window opens after the DM begins the live session.</p>
+    </article>
+  );
+}
+
 function SessionPaneMessageComposer({
   payload,
   messageDraft,
@@ -238,22 +248,29 @@ export function SessionPane({
       <ToastNotice message={toastMessage} tone={toastTone} />
       <div className="page-layout session-layout session-layout--single">
         <section className="session-column">
-          <SessionPaneChat
-            payload={payload}
-          />
-          <SessionPaneMessageComposer
-            payload={payload}
-            messageDraft={messageDraft}
-            setMessageDraft={setMessageDraft}
-            recipientScope={recipientScope}
-            setRecipientScope={setRecipientScope}
-            recipientPlayerId={recipientPlayerId}
-            setRecipientPlayerId={setRecipientPlayerId}
-            recipientPlayerChoices={recipientPlayerChoices}
-            sendError={sendError}
-            onSend={sendMessage}
-            isSending={postMessage.isPending}
-          />
+          {payload && !payload.active_session ? (
+            <SessionPaneInactiveCard />
+          ) : null}
+          {payload?.active_session ? (
+            <>
+              <SessionPaneChat
+                payload={payload}
+              />
+              <SessionPaneMessageComposer
+                payload={payload}
+                messageDraft={messageDraft}
+                setMessageDraft={setMessageDraft}
+                recipientScope={recipientScope}
+                setRecipientScope={setRecipientScope}
+                recipientPlayerId={recipientPlayerId}
+                setRecipientPlayerId={setRecipientPlayerId}
+                recipientPlayerChoices={recipientPlayerChoices}
+                sendError={sendError}
+                onSend={sendMessage}
+                isSending={postMessage.isPending}
+              />
+            </>
+          ) : null}
         </section>
       </div>
     </>

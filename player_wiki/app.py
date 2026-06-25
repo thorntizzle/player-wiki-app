@@ -2100,7 +2100,33 @@ def create_app() -> Flask:
         }
 
     def build_session_message_recipient_player_choices(campaign_slug: str) -> list[dict[str, object]]:
-        return build_active_player_choices(get_auth_store(), campaign_slug)
+        store = get_auth_store()
+        character_names_by_user_id: dict[int, list[str]] = {}
+        character_names_by_slug = {
+            record.definition.character_slug: record.definition.name
+            for record in get_character_repository().list_visible_characters(campaign_slug)
+        }
+        for user, _membership in store.list_campaign_user_memberships(
+            campaign_slug,
+            statuses=("active",),
+            roles=("player",),
+            user_statuses=("active",),
+        ):
+            character_names = [
+                character_names_by_slug.get(assignment.character_slug, assignment.character_slug)
+                for assignment in store.list_character_assignments_for_user(
+                    int(user.id),
+                    campaign_slug=campaign_slug,
+                )
+            ]
+            if character_names:
+                character_names_by_user_id[int(user.id)] = character_names
+        return build_active_player_choices(
+            store,
+            campaign_slug,
+            label_mode="character_with_display_name",
+            character_names_by_user_id=character_names_by_user_id,
+        )
 
     def normalize_character_page_ref(value: object) -> str:
         if isinstance(value, dict):

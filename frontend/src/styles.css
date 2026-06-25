@@ -2663,6 +2663,12 @@ button:disabled,
   position: relative;
 }
 
+.session-dm-subview {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
 .pane-hidden {
   display: none;
 }
@@ -3517,6 +3523,27 @@ textarea {
 
 .character-selector-card {
   margin: 0;
+}
+
+.session-pane-content > .character-selector-card {
+  max-width: 100%;
+  width: 100%;
+}
+
+.character-selector-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.character-selector-row .field {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.character-selector-row .ghost-button {
+  flex: 0 1 auto;
 }
 
 .character-summary__main,

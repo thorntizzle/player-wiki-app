@@ -14,7 +14,7 @@ Last updated: 2026-06-25
 - Gen2 is the default frontend. Character roster, detail, native create/import lanes, DND-5E Advanced Editor, Progression Repair, Level Up, Retraining, Xianxia Cultivation, Portrait, Controls, and selected live-state edits have Gen2 parity.
 - Character detail pages default to the normal read shell. Legacy `?mode=session` URLs remain compatibility aliases that render the normal Character page for the requested subpage.
 - The Gen2 character read summary is identity-focused: it can display the portrait image/caption and character identity details, but HP, Temp HP, Hit Dice, System, and resource previews live on their owning sheet sections instead of the header summary.
-- `/session/character` remains the active-session sheet lane. The player-facing Session shell can lazy-load Session Character as a mounted pane; direct `/session/character` remains the full-page and no-JS fallback.
+- `/session/character` remains the active-session sheet lane. The player-facing Session shell can lazy-load Session Character as a mounted pane; direct `/session/character` remains the full-page and no-JS fallback. In Gen2, the Session Character selector is a row under the Session shell tabs with `Open full character page`; it is outside the sheet card, and the embedded sheet omits the duplicate `Session Character` header.
 - Combat and DM status selected-PC views reuse the shared character presentation and state-edit contracts where relevant.
 - Gen2 Combat adds a combat-only selected-PC section layer above the shared CharacterPane, populated from presented character data for Actions, Bonus Actions, Reactions, Attacks, and Features.
 
