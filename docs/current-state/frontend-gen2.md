@@ -13,6 +13,7 @@ Last updated: 2026-06-25
 - `/app-next` serves the built `frontend/dist` bundle when present and uses SPA fallback for Gen2 document routes. Missing builds and missing assets still return 404.
 - The app shell exposes a two-row campaign header with global brand/account/admin controls, campaign navigation, and a shared campaign global search row.
 - Global search covers visible published wiki pages plus accessible Systems entries and opens previews in an in-page dialog with a dedicated-page link.
+- Gen2 Campaign Home renders a latest-session-summary news card above the section-card grid when a visible published `Sessions`/`session` page exists.
 - Gen2 top-nav left-clicks use TanStack Router navigation while preserving real hrefs for fallback and new-tab behavior.
 - The loading cover is shared across Flask hard navigations and Gen2 client-side route changes. It should not reveal raw unstyled HTML, should not swap loading media during an active transition, and should wait for the React route/query readiness signal before dismissing.
 

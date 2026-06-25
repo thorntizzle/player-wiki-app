@@ -5770,6 +5770,7 @@ def register_api(app) -> None:
         query = request.args.get("q", "").strip() if can_view_wiki else ""
         grouped_sections: list[dict[str, Any]] = []
         navigation_pages: list[Any] = []
+        latest_session_summary = None
         result_count = 0
         overview_page = None
 
@@ -5801,6 +5802,18 @@ def register_api(app) -> None:
                             frontend_mode=frontend_mode,
                         )
 
+            if not query:
+                latest_session_summary_page = repository.get_latest_session_summary_page(campaign_slug)
+                latest_session_summary = (
+                    serialize_public_wiki_page(
+                        campaign,
+                        latest_session_summary_page,
+                        frontend_mode=frontend_mode,
+                    )
+                    if latest_session_summary_page is not None
+                    else None
+                )
+
         return jsonify(
             {
                 "ok": True,
@@ -5812,6 +5825,7 @@ def register_api(app) -> None:
                 "result_count": result_count,
                 "grouped_sections": grouped_sections,
                 "overview_page": overview_page,
+                "latest_session_summary": latest_session_summary,
                 "message": (
                     f"The player wiki for this campaign currently requires {wiki_visibility_label} access."
                     if not can_view_wiki

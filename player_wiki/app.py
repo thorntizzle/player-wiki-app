@@ -9218,6 +9218,7 @@ def create_app() -> Flask:
         query = request.args.get("q", "").strip() if can_view_wiki else ""
         grouped_pages: dict[str, list] = {}
         result_count = 0
+        latest_session_summary = None
         if can_view_wiki:
             pages = repository.search_pages(campaign_slug, query)
             grouped_pages_map: dict[str, list] = defaultdict(list)
@@ -9229,6 +9230,8 @@ def create_app() -> Flask:
                 overview_pages = grouped_pages.get("Overview", [])
                 if overview_pages:
                     repository.get_page_body_html(campaign_slug, overview_pages[0].route_slug)
+            if not query:
+                latest_session_summary = repository.get_latest_session_summary_page(campaign_slug)
 
         return render_template(
             "campaign.html",
@@ -9236,6 +9239,7 @@ def create_app() -> Flask:
             grouped_pages=grouped_pages,
             query=query,
             result_count=result_count,
+            latest_session_summary=latest_session_summary,
             can_view_wiki=can_view_wiki,
             wiki_visibility_label=VISIBILITY_LABELS[get_effective_campaign_visibility(campaign_slug, "wiki")],
             active_nav="wiki",

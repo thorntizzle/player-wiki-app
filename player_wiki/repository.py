@@ -9,7 +9,7 @@ from typing import Any
 import markdown
 import yaml
 
-from .models import Campaign, Page, page_sort_key
+from .models import Campaign, Page, is_session_summary_page, page_sort_key, session_summary_sort_key
 from .system_policy import default_systems_library_slug, normalize_system_code
 
 FRONTMATTER_PATTERN = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -122,6 +122,15 @@ class Repository:
             if page.route_slug in matching_slugs
         ]
         return sorted(results, key=page_sort_key)
+
+    def get_latest_session_summary_page(self, campaign_slug: str) -> Page | None:
+        campaign = self.get_campaign(campaign_slug)
+        if not campaign:
+            return None
+        candidates = [page for page in campaign.visible_pages() if is_session_summary_page(page)]
+        if not candidates:
+            return None
+        return max(candidates, key=session_summary_sort_key)
 
     def get_backlinks(self, campaign_slug: str, page_slug: str) -> list[Page]:
         campaign = self.get_campaign(campaign_slug)

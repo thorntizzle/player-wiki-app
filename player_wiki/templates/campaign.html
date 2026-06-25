@@ -37,6 +37,26 @@
         </div>
       </section>
     {% else %}
+      {% if latest_session_summary %}
+        <section class="wiki-latest-session" aria-label="Latest session summary">
+          <article class="card page-card page-card--featured wiki-latest-session-card">
+            <p class="card-kicker">Latest session summary</p>
+            <h2>
+              <a href="{{ url_for('page_view', campaign_slug=campaign.slug, page_slug=latest_session_summary.route_slug) }}">
+                {{ latest_session_summary.title }}
+              </a>
+            </h2>
+            {% if latest_session_summary.reveal_after_session > 0 %}
+              <p class="meta">Session {{ latest_session_summary.reveal_after_session }}</p>
+            {% else %}
+              <p class="meta">{{ latest_session_summary.display_type }}</p>
+            {% endif %}
+            {% if latest_session_summary.summary %}
+              <p class="page-card__summary">{{ latest_session_summary.summary }}</p>
+            {% endif %}
+          </article>
+        </section>
+      {% endif %}
       {% set overview_pages = grouped_pages.get('Overview', []) %}
       {% if overview_pages %}
         {% set overview_page = overview_pages|first %}

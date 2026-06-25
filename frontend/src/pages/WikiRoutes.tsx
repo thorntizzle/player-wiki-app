@@ -19,6 +19,7 @@ import { ApiErrorNotice } from "../components/feedback";
 import {
   splitPinnedPages,
   WikiHomeSectionGrid,
+  WikiLatestSessionCard,
   WikiPageGrid,
   WikiSectionBrowse,
   WikiSectionNav,
@@ -75,11 +76,18 @@ export function WikiHomePage() {
               </section>
             )
           ) : data.section_navigation.length ? (
-            <WikiHomeSectionGrid
-              sections={data.section_navigation}
-              campaignSlug={resolvedCampaignSlug}
-              frontendMode={wikiFrontendMode}
-            />
+            <>
+              <WikiLatestSessionCard
+                page={data.latest_session_summary}
+                campaignSlug={resolvedCampaignSlug}
+                frontendMode={wikiFrontendMode}
+              />
+              <WikiHomeSectionGrid
+                sections={data.section_navigation}
+                campaignSlug={resolvedCampaignSlug}
+                frontendMode={wikiFrontendMode}
+              />
+            </>
           ) : (
             <section className="card">
               <h2>No visible pages yet</h2>

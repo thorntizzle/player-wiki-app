@@ -1777,6 +1777,18 @@ a:hover {
   align-items: stretch;
 }
 
+.wiki-latest-session {
+  margin-bottom: 1rem;
+}
+
+.wiki-latest-session-card {
+  gap: 0.35rem;
+}
+
+.wiki-latest-session-card .meta {
+  margin: 0;
+}
+
 .wiki-home-section-card,
 .wiki-home-section-card:hover {
   text-decoration: none;

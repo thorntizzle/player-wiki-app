@@ -16,7 +16,7 @@ Last updated: 2026-06-25
 ## Lane Contracts
 
 - Statblocks accepts UTF-8 `.md` or `.markdown` uploads and can edit stored source Markdown body/subsection labels. The parser uses frontmatter `title`/`name`, then first non-generic heading, then `Name:`, then filename.
-- Player Wiki manages published Markdown pages through `campaign_content_service`, preserves unknown frontmatter, syncs the SQLite read model plus mirrored Markdown, and blocks unsafe hard delete through the shared removal-safety rules.
+- Player Wiki manages published Markdown pages through `campaign_content_service`, preserves unknown frontmatter, syncs the SQLite read model plus mirrored Markdown, and blocks unsafe hard delete through the shared removal-safety rules. The page editor section choices include `Bestiary` for encountered-enemy or monster articles.
 - Systems separates Source Enablement, Entry Overrides, Custom Entries, Shared Source Imports, and Import-Run History.
 - Staged Articles writes directly into the Session DM staged article queue. Reveal timing and revealed-article management remain on Session DM.
 - Conditions creates, edits, and deletes custom combat condition definitions, which augment the built-in DND-5E condition list.

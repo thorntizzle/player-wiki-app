@@ -764,6 +764,18 @@ button {
   gap: 1.25rem;
 }
 
+.wiki-latest-session {
+  margin-bottom: 1rem;
+}
+
+.wiki-latest-session-card {
+  gap: 0.35rem;
+}
+
+.wiki-latest-session-card .meta {
+  margin: 0;
+}
+
 .page-stack--featured + .section-list,
 .grid + .section-list {
   margin-top: 1.5rem;

@@ -119,6 +119,7 @@ type WikiSectionIconName =
   | "flag"
   | "sparkles"
   | "compass"
+  | "shield"
   | "package"
   | "wand"
   | "cog"
@@ -134,6 +135,7 @@ const WIKI_SECTION_ICON_BY_SLUG: Record<string, WikiSectionIconName> = {
   factions: "flag",
   gods: "sparkles",
   discoveries: "compass",
+  bestiary: "shield",
   items: "package",
   spells: "wand",
   mechanics: "cog",
@@ -230,6 +232,14 @@ function WikiSectionIcon({ icon }: { icon: WikiSectionIconName }) {
           <path d="m16 8-2 6-6 2 2-6Z" />
         </svg>
       );
+    case "shield":
+      return (
+        <svg {...sharedProps}>
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+          <path d="M12 8v6" />
+          <path d="M9.5 10.5h5" />
+        </svg>
+      );
     case "package":
       return (
         <svg {...sharedProps}>
@@ -286,6 +296,33 @@ function WikiSectionIcon({ icon }: { icon: WikiSectionIconName }) {
         </svg>
       );
   }
+}
+
+export function WikiLatestSessionCard({
+  page,
+  campaignSlug,
+  frontendMode,
+}: {
+  page: WikiPageSummary | null;
+  campaignSlug: string;
+  frontendMode: FrontendMode;
+}) {
+  if (!page) {
+    return null;
+  }
+  const sessionLabel = page.reveal_after_session > 0 ? `Session ${page.reveal_after_session}` : page.display_type;
+  return (
+    <section className="wiki-latest-session" aria-label="Latest session summary">
+      <article className="card page-card page-card--featured wiki-latest-session-card">
+        <p className="card-kicker">Latest session summary</p>
+        <h2>
+          <a href={preferredCampaignLink(page.href, campaignSlug, frontendMode)}>{page.title}</a>
+        </h2>
+        <p className="meta">{sessionLabel}</p>
+        {page.summary ? <p className="page-card__summary">{page.summary}</p> : null}
+      </article>
+    </section>
+  );
 }
 
 export function WikiHomeSectionGrid({

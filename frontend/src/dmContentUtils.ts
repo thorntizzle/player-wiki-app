@@ -78,6 +78,7 @@ export const PLAYER_WIKI_SECTION_CHOICES = [
   { label: "Factions", targetSubdir: "factions", defaultType: "faction" },
   { label: "Items", targetSubdir: "items", defaultType: "item" },
   { label: "Gods", targetSubdir: "gods", defaultType: "god" },
+  { label: "Bestiary", targetSubdir: "bestiary", defaultType: "monster" },
   { label: "Lore", targetSubdir: "lore", defaultType: "lore" },
   { label: "Mechanics", targetSubdir: "mechanics", defaultType: "rule" },
   { label: "Notes", targetSubdir: "notes", defaultType: "note" },

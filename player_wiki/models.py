@@ -11,6 +11,7 @@ SECTION_ORDER = {
     "Factions": 40,
     "Gods": 45,
     "Discoveries": 50,
+    "Bestiary": 55,
     "Items": 60,
     "Spells": 70,
     "Mechanics": 80,
@@ -97,6 +98,14 @@ def page_sort_key(page: "Page") -> tuple[int, str, int, str, int, int, str]:
         10_000,
         page.title.lower(),
     )
+
+
+def is_session_summary_page(page: "Page") -> bool:
+    return page.section == "Sessions" and page.page_type == "session"
+
+
+def session_summary_sort_key(page: "Page") -> tuple[int, str, str]:
+    return (page.reveal_after_session, page.title.lower(), page.route_slug.lower())
 
 
 @dataclass(slots=True)

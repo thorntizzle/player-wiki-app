@@ -2623,6 +2623,7 @@ def test_session_article_source_metadata_is_action_or_recovery_only() -> None:
 def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> None:
     source = Path("frontend/src/pages/WikiRoutes.tsx").read_text(encoding="utf-8")
     chrome_source = Path("frontend/src/components/WikiChrome.tsx").read_text(encoding="utf-8")
+    dm_content_utils_source = Path("frontend/src/dmContentUtils.ts").read_text(encoding="utf-8")
     nav_source = _extract_component_source(
         chrome_source,
         "export function WikiSectionNav({",
@@ -2661,10 +2662,18 @@ def test_wiki_home_uses_section_cards_while_detail_pages_keep_section_nav() -> N
     assert "overview: \"book\"" not in nav_source
     assert "spells: \"wand\"" in nav_source
     assert "mechanics: \"cog\"" in nav_source
+    assert "bestiary: \"shield\"" in nav_source
+    assert "export function WikiLatestSessionCard({" in nav_source
+    assert 'className="wiki-latest-session"' in nav_source
+    assert 'aria-label="Latest session summary"' in nav_source
+    assert "{page.title}" in nav_source
     assert 'targetSubdir: "overview"' not in source
     assert 'defaultType: "overview"' not in source
+    assert '{ label: "Bestiary", targetSubdir: "bestiary", defaultType: "monster" }' in dm_content_utils_source
 
     assert "<WikiHomeSectionGrid" in home_page_source
+    assert "<WikiLatestSessionCard" in home_page_source
+    assert "page={data.latest_session_summary}" in home_page_source
     assert "sections={data.section_navigation}" in home_page_source
     assert "<WikiSectionNav" not in home_page_source
     assert "wiki-overview-card" not in home_page_source

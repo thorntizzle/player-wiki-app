@@ -9,7 +9,7 @@ Last updated: 2026-06-25
 ## Current User-Facing Behavior
 
 - Published wiki pages are read-only for players and manageable by DMs/admins through DM Content -> `Player Wiki` or the content API.
-- Campaign Home is the player-facing landing view for a campaign. Gen2 uses section-card browsing; section and article pages use section navigation and backlinks.
+- Campaign Home is the player-facing landing view for a campaign. Unfiltered Flask and Gen2 Campaign Home show the latest visible published session summary as a news-style card above the section list; Gen2 uses section-card browsing below it, while section and article pages use section navigation and backlinks.
 - The shared global search row is the ordinary ad hoc lookup path for visible wiki pages and accessible Systems entries. Flask Campaign Home no longer owns a visible page-local search form, though old `?q=` URLs remain compatible.
 - Page detail views lead with article title and optional summary. They can render an optional image between summary and body.
 - Article images are campaign-owned protected assets, not public static files.
@@ -17,12 +17,14 @@ Last updated: 2026-06-25
 
 ## Current Content Conventions
 
-- Current sections include `Sessions`, `Notes`, `Locations`, `NPCs`, `Races`, `Factions`, `Gods`, `Discoveries`, `Items`, `Spells`, `Mechanics`, and `Lore`.
+- Current sections include `Sessions`, `Notes`, `Locations`, `NPCs`, `Races`, `Factions`, `Gods`, `Discoveries`, `Bestiary`, `Items`, `Spells`, `Mechanics`, and `Lore`.
+- `Bestiary` is the dedicated player-facing section for enemy or monster articles the party has encountered; do not place those articles in `Discoveries`.
+- The Campaign Home latest-session card is selected from visible published pages where `section: Sessions` and `type: session`, ordered by highest `reveal_after_session` with stable title/slug tie-breaks.
 - Grouped section pages can use subsections and top-level featured pages.
 - Pages with `display_order < 10000` render as pinned featured cards at the top of their section or subsection.
 - Gods use subsection-aware display labels in cards and search results.
 - Item, spell, and mechanic detail pages suppress the summary lede even when summaries appear in cards/search.
-- Current publication conventions for guilds, gods, civic NPCs, NPC buckets, notes, session handouts, and images are documented in the app repo map until fully atomized here.
+- Current publication conventions for guilds, gods, civic NPCs, NPC buckets, notes, session handouts, Bestiary articles, and images are documented in the app repo map until fully atomized here.
 
 ## Management And Safety Contract
 
@@ -38,8 +40,7 @@ Last updated: 2026-06-25
 
 ## Known Limits
 
-- The Bestiary split is not implemented. Enemy articles currently remain under existing published sections until the publishing backlog item ships.
-- The latest-session-summary Campaign Home news card is not implemented.
+- Some advanced publishing workflows still use Flask compatibility routes, especially session-article prefill/promotion and automatic WebP conversion.
 
 ## Related Backlog
 

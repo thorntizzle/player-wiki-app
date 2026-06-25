@@ -856,6 +856,25 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
         ),
         encoding="utf-8",
     )
+    bestiary_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "content" / "bestiary"
+    bestiary_dir.mkdir(parents=True, exist_ok=True)
+    (bestiary_dir / "clockwork-eel.md").write_text(
+        "\n".join(
+            [
+                "---",
+                "title: Clockwork Eel",
+                "section: Bestiary",
+                "type: monster",
+                "reveal_after_session: 2",
+                "summary: A hostile construct encountered by the party.",
+                "---",
+                "",
+                "The party documented this enemy after the harbor job.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     with app.app_context():
         app.extensions["repository_store"].refresh()
 
@@ -866,6 +885,10 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert home_payload["frontend_mode"] == "gen2"
     assert home_payload["can_view_wiki"] is True
     assert home_payload["overview_page"] is None
+    assert home_payload["latest_session_summary"] is not None
+    assert home_payload["latest_session_summary"]["title"] == "Session 2 - The Brass Vault"
+    assert home_payload["latest_session_summary"]["route_slug"] == "sessions/session-2-the-brass-vault"
+    assert home_payload["latest_session_summary"]["page_type"] == "session"
     assert all(section["section_name"] != "Overview" for section in home_payload["grouped_sections"])
     assert all(section["section_name"] != "Overview" for section in home_payload["section_navigation"])
     locations_group = next(section for section in home_payload["grouped_sections"] if section["section_name"] == "Locations")
@@ -877,6 +900,15 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
         "href": "/app-next/campaigns/linden-pass/sections/locations",
         "page_count": locations_group["page_count"],
     }
+    bestiary_group = next(section for section in home_payload["grouped_sections"] if section["section_name"] == "Bestiary")
+    assert bestiary_group["href"] == "/app-next/campaigns/linden-pass/sections/bestiary"
+    bestiary_nav_item = next(section for section in home_payload["section_navigation"] if section["section_name"] == "Bestiary")
+    assert bestiary_nav_item == {
+        "section_name": "Bestiary",
+        "section_slug": "bestiary",
+        "href": "/app-next/campaigns/linden-pass/sections/bestiary",
+        "page_count": 1,
+    }
 
     search_response = client.get(
         "/api/v1/campaigns/linden-pass/wiki?q=capt",
@@ -886,6 +918,7 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     search_payload = search_response.get_json()
     assert search_payload["query"] == "capt"
     assert search_payload["overview_page"] is None
+    assert search_payload["latest_session_summary"] is None
     assert search_payload["result_count"] >= 1
     search_pages = [
         page
@@ -913,6 +946,15 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert "Civic and Institutional Sites" in subsection_names
     assert "Venues and Residences" in subsection_names
     assert any(section["section_slug"] == "locations" for section in section_payload["section_navigation"])
+    bestiary_response = client.get(
+        "/api/v1/campaigns/linden-pass/wiki/sections/bestiary",
+        headers=api_headers(player_token),
+    )
+    assert bestiary_response.status_code == 200
+    bestiary_payload = bestiary_response.get_json()
+    assert bestiary_payload["section_name"] == "Bestiary"
+    assert bestiary_payload["pages"][0]["title"] == "Clockwork Eel"
+    assert bestiary_payload["pages"][0]["display_type"] == "monster"
 
     page_response = client.get(
         "/api/v1/campaigns/linden-pass/wiki/pages/npcs/captain-lyra-vale",
@@ -960,6 +1002,9 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     legacy_home_payload = legacy_home_response.get_json()
     assert legacy_home_payload["frontend_mode"] == "gen2"
     assert legacy_home_payload["overview_page"] is None
+    assert legacy_home_payload["latest_session_summary"] is not None
+    assert legacy_home_payload["latest_session_summary"]["title"] == "Session 2 - The Brass Vault"
+    assert legacy_home_payload["latest_session_summary"]["route_slug"] == "sessions/session-2-the-brass-vault"
     assert all(section["section_name"] != "Overview" for section in legacy_home_payload["grouped_sections"])
     assert all(section["section_name"] != "Overview" for section in legacy_home_payload["section_navigation"])
     legacy_locations_group = next(section for section in legacy_home_payload["grouped_sections"] if section["section_name"] == "Locations")
@@ -1016,6 +1061,62 @@ def test_api_player_wiki_home_reports_restricted_wiki_scope(
     )
     assert page_response.status_code == 403
     assert page_response.get_json()["error"]["code"] == "forbidden"
+
+
+def test_campaign_home_renders_latest_session_summary_card(client, sign_in, users):
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    response = client.get("/campaigns/linden-pass")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'aria-label="Latest session summary"' in html
+    assert "Latest session summary" in html
+    assert "Session 2 - The Brass Vault" in html
+    assert 'href="/campaigns/linden-pass/pages/sessions/session-2-the-brass-vault"' in html
+    assert "Session 3 - Stormglass Heist" not in html
+
+    search_response = client.get("/campaigns/linden-pass?q=capt")
+    assert search_response.status_code == 200
+    assert 'aria-label="Latest session summary"' not in search_response.get_data(as_text=True)
+
+
+def test_api_player_wiki_home_selects_latest_published_session_summary_deterministically(
+    client,
+    app,
+    users,
+):
+    sessions_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "content" / "sessions"
+    for stem, summary in (
+        ("session-2-alpha-incident", "Session 2 - Alpha Incident"),
+        ("session-2-zeta-chronicle", "Session 2 - Zeta Chronicle"),
+    ):
+        (sessions_dir / f"{stem}.md").write_text(
+            "\n".join(
+                [
+                    "---",
+                    "title: " + summary,
+                    "section: Sessions",
+                    "type: session",
+                    "reveal_after_session: 2",
+                    "summary: " + summary,
+                    "---",
+                    "",
+                    "Added as a deterministic test fixture for campaign-home session selection.",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+
+    dm_token = issue_api_token(app, users["dm"]["email"], label="session-summary-deterministic-api")
+    home_response = client.get("/api/v1/campaigns/linden-pass/wiki", headers=api_headers(dm_token))
+    assert home_response.status_code == 200
+    home_payload = home_response.get_json()
+    assert home_payload["latest_session_summary"] is not None
+    assert home_payload["latest_session_summary"]["title"] == "Session 2 - Zeta Chronicle"
 
 
 def test_api_session_endpoints_follow_permissions(client, app, users):

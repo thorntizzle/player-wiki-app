@@ -457,6 +457,7 @@ export interface WikiHomeResponse extends ApiResponseBase {
   grouped_sections: WikiSectionGroup[];
   section_navigation: WikiSectionNavItem[];
   overview_page: WikiPageDetail | null;
+  latest_session_summary: WikiPageSummary | null;
   message: string;
   links: WikiHomeLinks;
 }

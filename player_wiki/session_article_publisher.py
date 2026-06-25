@@ -17,6 +17,7 @@ SESSION_ARTICLE_SOURCE_REF_PREFIX = "session-article:"
 SESSION_ARTICLE_SECTION_TARGETS = {
     "Sessions": {"target_subdir": "sessions", "page_type": "session"},
     "Notes": {"target_subdir": "notes", "page_type": "note"},
+    "Bestiary": {"target_subdir": "bestiary", "page_type": "monster"},
     "Locations": {"target_subdir": "locations", "page_type": "location"},
     "NPCs": {"target_subdir": "npcs", "page_type": "npc"},
     "Races": {"target_subdir": "races", "page_type": "race"},
