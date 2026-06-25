@@ -8,13 +8,14 @@ Last updated: 2026-06-25
 
 ## Current User-Facing Behavior
 
-- DND-5E character detail subpages: `Quick Reference`, `Spellcasting`, `Features`, `Equipment`, `Inventory`, `Personal`, `Notes`, and `Controls`.
+- DND-5E character detail subpages: `Quick Reference` or Gen2 `Overview`, `Resources`, `Spellcasting` or Gen2 `Spells`, `Equipment`, `Inventory`, `Abilities and Skills`, `Personal`, `Portrait`, `Notes`, and `Controls`.
 - Quick Reference shows core overview rows, editable HP/temp HP/Hit Dice for authorized users, tracked resources, carrying capacity when derivable, and defensive rules when modeled.
 - Combat reminders from `stats.attack_reminder_state` belong on combat-facing attack panels, not normal Character Quick Reference.
 - Spellcasting is the durable home for spell-list management. Prepared casters and wizards use local `Current spells` and `Preparation` subviews over the same durable rows.
 - Equipment is the durable home for equip/unequip, attunement, weapon wield mode, and supported feature-state toggles such as Armorer Arcane Armor.
 - Inventory is the durable home for carried item rows, supplemental item adds, supported removals, quantity controls, and DND currency.
-- Personal displays physical description/background reference text and supports one portrait slot. Physical description/background authoring belongs in Advanced Editor.
+- Personal displays physical description/background reference text. Physical description/background authoring belongs in Advanced Editor.
+- Portrait displays the current portrait and supports one portrait slot with upload/remove for authorized users.
 - Controls covers owner status, app-admin assignment/clear, and DM/admin checked deletion.
 
 ## Current Authoring And Support Matrix

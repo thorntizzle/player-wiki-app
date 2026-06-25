@@ -31,6 +31,7 @@ export type CharacterSection =
   | "inventory"
   | "abilities"
   | "skills"
+  | "portrait"
   | "personal"
   | "notes"
   | "controls";
@@ -213,6 +214,8 @@ export const dndCharacterSections: Array<{ id: CharacterSection; label: string }
   { id: "equipment", label: "Equipment" },
   { id: "inventory", label: "Inventory" },
   { id: "abilities", label: "Abilities and Skills" },
+  { id: "personal", label: "Personal" },
+  { id: "portrait", label: "Portrait" },
   { id: "notes", label: "Notes" },
 ];
 
@@ -224,6 +227,7 @@ export const xianxiaCharacterSections: Array<{ id: CharacterSection; label: stri
   { id: "skills", label: "Skills" },
   { id: "equipment", label: "Equipment" },
   { id: "inventory", label: "Inventory" },
+  { id: "portrait", label: "Portrait" },
   { id: "personal", label: "Personal" },
   { id: "notes", label: "Notes" },
 ];
@@ -304,6 +308,8 @@ export function normalizeCharacterSection(value: string | null): CharacterSectio
       return "abilities";
     case "skills":
       return "skills";
+    case "portrait":
+      return "portrait";
     case "personal":
       return "personal";
     case "notes":

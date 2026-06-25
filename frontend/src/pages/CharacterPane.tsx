@@ -22,7 +22,7 @@ import { CharacterControlsSection } from "../components/CharacterControlsSection
 import { CharacterEmbeddedSectionNav } from "../components/CharacterEmbeddedSectionNav";
 import { CharacterHeader } from "../components/CharacterHeader";
 import { CharacterNavigationCard } from "../components/CharacterNavigationCard";
-import { CharacterPortraitManager } from "../components/CharacterPortraitManager";
+import { CharacterPortraitSection } from "../components/CharacterPortraitSection";
 import { CharacterSummaryCard } from "../components/CharacterSummaryCard";
 import { CharacterSystemSummarySection } from "../components/CharacterSystemSummarySection";
 import { CharacterVitalsBar } from "../components/CharacterVitalsBar";
@@ -459,26 +459,9 @@ export function CharacterPane({
 
         {selected ? (
           <CharacterSummaryCard
-            currentHp={readNumber(vitals.current_hp, selected.current_hp)}
-            maxHp={readNumber(stats.max_hp, selected.max_hp)}
             selected={selected}
             selectedPortrait={selectedPortrait}
-            systemLabel={characterSystem(detailRecord)}
-            tempHp={readNumber(vitals.temp_hp, selected.temp_hp)}
-          >
-            {canManagePortrait ? (
-              <CharacterPortraitManager
-                handlePortraitFileChange={handlePortraitFileChange}
-                portraitDraft={portraitDraft}
-                portraitFileInputRef={portraitFileInputRef}
-                portraitMutationPending={portraitMutationPending}
-                removePortrait={removePortrait}
-                selectedPortrait={selectedPortrait}
-                setPortraitDraft={setPortraitDraft}
-                submitPortrait={submitPortrait}
-              />
-            ) : null}
-          </CharacterSummaryCard>
+          />
         ) : null}
 
         {selected && detailRecord ? (
@@ -560,7 +543,7 @@ export function CharacterPane({
                 personal={{
                   personalBackgroundHtml,
                   physicalDescriptionHtml,
-                  portrait: detailRecord?.portrait,
+                  sectionId: "xianxia-personal",
                 }}
                 quickReference={{
                   hasSkillUseGuardrail: xianxiaModel.hasSkillUseGuardrail,
@@ -666,6 +649,11 @@ export function CharacterPane({
                   overviewStatRows,
                   overviewStats,
                 }}
+                personal={{
+                  personalBackgroundHtml,
+                  physicalDescriptionHtml,
+                  sectionId: "dnd-personal",
+                }}
                 resources={{
                   canEdit,
                   isSaving: patchResource.isPending,
@@ -707,6 +695,21 @@ export function CharacterPane({
                 setControlsDraft={setControlsDraft}
                 submitCharacterAssignment={submitCharacterAssignment}
                 submitCharacterDelete={submitCharacterDelete}
+              />
+            ) : null}
+
+            {activeCharacterSection === "portrait" && selected ? (
+              <CharacterPortraitSection
+                canManagePortrait={canManagePortrait}
+                handlePortraitFileChange={handlePortraitFileChange}
+                portraitDraft={portraitDraft}
+                portraitFileInputRef={portraitFileInputRef}
+                portraitMutationPending={portraitMutationPending}
+                removePortrait={removePortrait}
+                selectedName={selected.name}
+                selectedPortrait={selectedPortrait}
+                setPortraitDraft={setPortraitDraft}
+                submitPortrait={submitPortrait}
               />
             ) : null}
 

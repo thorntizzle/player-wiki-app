@@ -8,7 +8,7 @@ Last updated: 2026-06-25
 
 ## Current User-Facing Behavior
 
-- Xianxia character detail subpages: `Quick Reference`, `Martial Arts`, `Techniques`, `Resources`, `Skills`, `Equipment`, `Inventory`, `Personal`, `Notes`, and `Controls`.
+- Xianxia character detail subpages: `Quick Reference`, `Martial Arts`, `Techniques`, `Resources`, `Skills`, `Equipment`, `Inventory`, `Portrait`, `Personal`, `Notes`, and `Controls`.
 - Xianxia omits DND-5E Spellcasting and Features routes.
 - Session Character uses the same Xianxia read-sheet subpage slugs and labels except `Controls`, which remains on the full Character page.
 - Quick Reference shows Defense, Realm action count, Effort damage, check formula, EASY/Normal/HARD reminders, Honor reminders, Skills guardrails, Stance Break when relevant, active Stance/Aura reminder cards, and linked rule-text references.
@@ -17,6 +17,7 @@ Last updated: 2026-06-25
 - Resources shows current/max HP, Stance, Jing/Qi/Shen, Yin/Yang, Dao, Insight, and active Stance/Aura names.
 - Equipment shows necessary weapons/tools, equipped inventory, and Defense breakdown. Equipped Armor is presentation-only and does not drive Defense yet.
 - Inventory supports modeled Xianxia item rows plus Coin, Supply, and Spirit Stones.
+- Portrait displays the current portrait and supports upload/remove for authorized users. Personal remains for physical description/background reference text.
 
 ## Current Data Contract
 

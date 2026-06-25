@@ -6,6 +6,7 @@ import { CharacterDndInventorySection } from "./CharacterDndInventorySection";
 import { CharacterDndOverviewSection } from "./CharacterDndOverviewSection";
 import { CharacterDndResourcesSection } from "./CharacterDndResourcesSection";
 import { CharacterDndSpellsSection } from "./CharacterDndSpellsSection";
+import { CharacterPersonalSection } from "./CharacterPersonalSection";
 import type { CharacterSection } from "../characterPaneUtils";
 
 type CharacterDndOverviewProps = ComponentProps<typeof CharacterDndOverviewSection>;
@@ -14,6 +15,7 @@ type CharacterDndSpellsProps = ComponentProps<typeof CharacterDndSpellsSection>;
 type CharacterDndEquipmentProps = ComponentProps<typeof CharacterDndEquipmentSection>;
 type CharacterDndInventoryProps = ComponentProps<typeof CharacterDndInventorySection>;
 type CharacterDndAbilitySkillsProps = ComponentProps<typeof CharacterDndAbilitySkillsSection>;
+type CharacterDndPersonalProps = ComponentProps<typeof CharacterPersonalSection>;
 
 interface CharacterDndSectionsProps {
   activeCharacterSection: CharacterSection;
@@ -23,6 +25,7 @@ interface CharacterDndSectionsProps {
   equipment: CharacterDndEquipmentProps;
   inventory: CharacterDndInventoryProps;
   abilitySkills: CharacterDndAbilitySkillsProps;
+  personal: CharacterDndPersonalProps;
 }
 
 export function CharacterDndSections({
@@ -33,6 +36,7 @@ export function CharacterDndSections({
   equipment,
   inventory,
   abilitySkills,
+  personal,
 }: CharacterDndSectionsProps) {
   return (
     <>
@@ -42,6 +46,7 @@ export function CharacterDndSections({
       {activeCharacterSection === "equipment" ? <CharacterDndEquipmentSection {...equipment} /> : null}
       {activeCharacterSection === "inventory" ? <CharacterDndInventorySection {...inventory} /> : null}
       {activeCharacterSection === "abilities" ? <CharacterDndAbilitySkillsSection {...abilitySkills} /> : null}
+      {activeCharacterSection === "personal" ? <CharacterPersonalSection {...personal} /> : null}
     </>
   );
 }

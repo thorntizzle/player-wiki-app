@@ -377,17 +377,17 @@ CHARACTER_SHEET_EDIT_FIRST_PASS_SCOPE = (
 CHARACTER_SHEET_EDIT_OUTSIDE_FIRST_PASS_SCOPE = (
     "Rests and other relative quick actions",
     "Spell-list changes and other non-slot spell management",
-    "Profile text (physical description, background), portrait changes, and broader inventory/equipment maintenance",
+    "Profile text (physical description, background), Portrait page changes, and broader inventory/equipment maintenance",
     "Advanced character edit, level-up, retraining, and controls",
 )
 SESSION_CHARACTER_FULL_PAGE_ONLY_SCOPE = (
-    "Portrait management on Character Personal, and physical description/background in Advanced Editor",
+    "Portrait management on Character Portrait, and physical description/background in Advanced Editor",
     "Spell-list changes and other non-slot spell management",
     "Inventory add/remove work and other equipment maintenance beyond equipped, attuned, or wielding state",
     "Advanced character edit, level-up, retraining, and controls",
 )
 SESSION_CHARACTER_FULL_PAGE_ONLY_SUMMARY = (
-    "portrait management, Advanced Editor reference text, spell-list changes, inventory add/remove work, and advanced maintenance"
+    "Portrait page management, Advanced Editor reference text, spell-list changes, inventory add/remove work, and advanced maintenance"
 )
 CHARACTER_SHEET_EDIT_ACCESS_RULES = (
     "Assigned player owners can use inline Character-page state edits for their own characters.",

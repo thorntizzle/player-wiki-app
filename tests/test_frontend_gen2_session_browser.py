@@ -2544,10 +2544,32 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             expect(page.locator("header.character-header")).to_be_visible()
             expect(page.locator("section.panel.character-read-shell")).to_have_count(0)
             expect(page.get_by_text("Shown on the Gen2 sheet.")).to_be_visible()
+            character_summary_text = page.locator("article.character-summary").inner_text()
+            assert "HP:" not in character_summary_text
+            assert "Temp HP:" not in character_summary_text
+            assert "Hit Dice:" not in character_summary_text
+            assert "System:" not in character_summary_text
             expect(page.get_by_role("link", name="Advanced Editor")).to_be_visible()
             expect(page.locator(".character-action-row")).to_have_count(0)
             expect(page.get_by_role("link", name="Flask sheet")).to_have_count(0)
             expect(page.get_by_role("link", name="Flask editor")).to_have_count(0)
+            page.locator("nav.character-subpage-nav[aria-label='Character subpages']").get_by_role("link", name="Portrait").click()
+            expect(page).to_have_url(
+                re.compile(r"/app-next/campaigns/linden-pass/characters/arden-march\?page=portrait$"),
+                timeout=5000,
+            )
+            expect(page.get_by_role("heading", name="Portrait", exact=True)).to_be_visible(timeout=5000)
+            expect(page.locator("section#character-portrait img.article-image")).to_be_visible()
+            expect(page.get_by_label("Portrait image")).to_be_visible()
+            expect(page.get_by_label("Alt text")).to_have_value("Arden portrait")
+            expect(page.get_by_label("Caption")).to_have_value("Shown on the Gen2 sheet.")
+            expect(page.get_by_role("button", name="Save portrait")).to_be_disabled()
+            expect(page.get_by_role("button", name="Remove portrait")).to_be_visible()
+            page.locator("nav.character-subpage-nav[aria-label='Character subpages']").get_by_role("link", name="Overview").click()
+            expect(page).to_have_url(
+                re.compile(r"/app-next/campaigns/linden-pass/characters/arden-march$"),
+                timeout=5000,
+            )
 
             page.get_by_role("link", name="Advanced Editor").click()
             expect(page).to_have_url(

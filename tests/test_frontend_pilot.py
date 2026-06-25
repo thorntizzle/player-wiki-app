@@ -2514,15 +2514,37 @@ def test_character_summary_card_chrome_in_source() -> None:
     assert 'className="character-summary__main"' in source
     assert 'className="character-portrait"' in source
     assert 'alt={selectedPortrait.alt_text || selected.name}' in source
-    assert 'className="plain-list resource-preview-list"' in source
-    assert "HP: {currentHp} / {maxHp}" in source
-    assert "Temp HP: {tempHp}" in source
-    assert "Hit Dice: {selected.hit_dice.value}" in source
-    assert 'Class: {selected.class_level_text || "Unknown"}' in source
-    assert "System: {systemLabel}" in source
-    assert "{children}" in source
+    assert "identityDetails" in source
+    assert 'selected.class_level_text, selected.species, selected.background' in source
+    assert 'identityDetails.join(" | ")' in source
+    assert 'className="plain-list resource-preview-list"' not in source
+    assert "HP: {currentHp} / {maxHp}" not in source
+    assert "Temp HP: {tempHp}" not in source
+    assert "Hit Dice: {selected.hit_dice.value}" not in source
+    assert 'Class: {selected.class_level_text || "Unknown"}' not in source
+    assert "System: {systemLabel}" not in source
+    assert "{children}" not in source
     assert 'className="character-state-card"' not in source
     assert 'className="button-row character-portrait-manager__actions"' not in source
+
+
+def test_character_portrait_is_dedicated_subpage_in_source() -> None:
+    pane_source = Path("frontend/src/pages/CharacterPane.tsx").read_text(encoding="utf-8")
+    utils_source = Path("frontend/src/characterPaneUtils.ts").read_text(encoding="utf-8")
+    section_source = Path("frontend/src/components/CharacterPortraitSection.tsx").read_text(encoding="utf-8")
+    personal_source = Path("frontend/src/components/CharacterPersonalSection.tsx").read_text(encoding="utf-8")
+
+    assert '| "portrait"' in utils_source
+    assert '{ id: "portrait", label: "Portrait" }' in utils_source
+    assert 'case "portrait":' in utils_source
+    assert 'activeCharacterSection === "portrait"' in pane_source
+    assert "<CharacterPortraitSection" in pane_source
+    assert 'id="character-portrait"' in section_source
+    assert "<h2>Portrait</h2>" in section_source
+    assert 'id="character-portrait-manager"' in section_source
+    assert "<CharacterPortraitManager" in section_source
+    assert "CharacterPortraitManager" not in personal_source
+    assert "character-personal-portrait" not in personal_source
 
 
 def test_dm_article_creator_uses_flask_style_mode_panels_and_fields() -> None:
@@ -3415,10 +3437,11 @@ def test_character_xianxia_personal_section_uses_flask_style_reference_stack_and
     source = Path("frontend/src/components/CharacterPersonalSection.tsx").read_text(encoding="utf-8")
     personal_section_markup = source
 
-    assert 'className="read-section" id="xianxia-personal"' in personal_section_markup
+    assert 'className="read-section" id={sectionId}' in personal_section_markup
+    assert 'sectionId = "character-personal"' in personal_section_markup
     assert "<h2>Personal</h2>" in personal_section_markup
     assert 'className="reference-stack"' in personal_section_markup
-    assert 'id="character-personal-portrait"' in personal_section_markup
+    assert 'id="character-personal-portrait"' not in personal_section_markup
     assert "Physical Description" in personal_section_markup
     assert "Background" in personal_section_markup
     assert 'className="detail-card"' in personal_section_markup
@@ -4034,6 +4057,7 @@ def test_character_pane_delegates_dnd_section_composition() -> None:
     assert "CharacterDndEquipmentSection" not in route_source
     assert "CharacterDndInventorySection" not in route_source
     assert "CharacterDndAbilitySkillsSection" not in route_source
+    assert "CharacterPersonalSection" not in route_source
 
     for section_name in [
         "CharacterDndOverviewSection",
@@ -4042,6 +4066,7 @@ def test_character_pane_delegates_dnd_section_composition() -> None:
         "CharacterDndEquipmentSection",
         "CharacterDndInventorySection",
         "CharacterDndAbilitySkillsSection",
+        "CharacterPersonalSection",
     ]:
         assert section_name in dnd_sections_source
 
@@ -4051,6 +4076,7 @@ def test_character_pane_delegates_dnd_section_composition() -> None:
     assert 'activeCharacterSection === "equipment"' in dnd_sections_source
     assert 'activeCharacterSection === "inventory"' in dnd_sections_source
     assert 'activeCharacterSection === "abilities"' in dnd_sections_source
+    assert 'activeCharacterSection === "personal"' in dnd_sections_source
 
 
 def test_character_pane_delegates_xianxia_section_composition() -> None:

@@ -11,8 +11,9 @@ Last updated: 2026-06-25
 ## Current User-Facing Behavior
 
 - Campaign character roster and detail pages are available in Flask compatibility routes and Gen2 `/app-next` routes.
-- Gen2 is the default frontend. Character roster, detail, native create/import lanes, DND-5E Advanced Editor, Progression Repair, Level Up, Retraining, Xianxia Cultivation, portrait upload/remove, Controls, and selected live-state edits have Gen2 parity.
+- Gen2 is the default frontend. Character roster, detail, native create/import lanes, DND-5E Advanced Editor, Progression Repair, Level Up, Retraining, Xianxia Cultivation, Portrait, Controls, and selected live-state edits have Gen2 parity.
 - Character detail pages default to the normal read shell. Legacy `?mode=session` URLs remain compatibility aliases that render the normal Character page for the requested subpage.
+- The Gen2 character read summary is identity-focused: it can display the portrait image/caption and character identity details, but HP, Temp HP, Hit Dice, System, and resource previews live on their owning sheet sections instead of the header summary.
 - `/session/character` remains the active-session sheet lane. The player-facing Session shell can lazy-load Session Character as a mounted pane; direct `/session/character` remains the full-page and no-JS fallback.
 - Combat and DM status selected-PC views reuse the shared character presentation and state-edit contracts where relevant.
 
@@ -31,6 +32,7 @@ Last updated: 2026-06-25
 - Xianxia create/import/model/cultivation behavior belongs in the Xianxia-specific helpers.
 - Gen2 file routes should stay thin under `frontend/src/routes/**`; page implementations live under `frontend/src/pages/**`.
 - CharacterPane shared presentation, mutation, model, draft, and submit-handler modules own reusable Gen2 detail behavior.
+- Portrait upload/remove uses the existing portrait mutation contract but is mounted on the dedicated Gen2 `Portrait` subpage.
 
 ## Permissions
 
@@ -73,4 +75,5 @@ Last updated: 2026-06-25
 - `frontend/src/pages/CharacterPane.tsx`
 - `frontend/src/components/CharacterDndSections.tsx`
 - `frontend/src/components/CharacterXianxiaSections.tsx`
+- `frontend/src/components/CharacterPortraitSection.tsx`
 - `docs/api-v1.md`

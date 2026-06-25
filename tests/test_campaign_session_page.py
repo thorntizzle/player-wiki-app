@@ -722,7 +722,7 @@ def test_session_character_page_omits_active_session_edit_scope_note(
     assert "Full character page:" not in html
     assert "Vitals, rests, tracked resources, spell slots, equipment state, inventory quantities, " not in html
     assert (
-        "portrait management, Advanced Editor reference text, spell-list changes, inventory add/remove work, "
+        "Portrait page management, Advanced Editor reference text, spell-list changes, inventory add/remove work, "
         "and advanced maintenance."
     ) not in html
     assert "Character sections" not in html

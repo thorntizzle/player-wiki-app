@@ -1,23 +1,14 @@
-import type { ReactNode } from "react";
 import type { CharacterPortrait, CharacterSummary } from "../api/types";
 
 export function CharacterSummaryCard({
-  children,
-  currentHp,
-  maxHp,
   selected,
   selectedPortrait,
-  systemLabel,
-  tempHp,
 }: {
-  children?: ReactNode;
-  currentHp: number;
-  maxHp: number;
   selected: CharacterSummary;
   selectedPortrait: CharacterPortrait | null;
-  systemLabel: string;
-  tempHp: number;
 }) {
+  const identityDetails = [selected.class_level_text, selected.species, selected.background].filter(Boolean);
+
   return (
     <article className="character-summary">
       <div className="character-summary__main">
@@ -29,26 +20,9 @@ export function CharacterSummaryCard({
         ) : null}
         <div>
           <h3>{selected.name}</h3>
-          <p>
-            HP: {currentHp} / {maxHp}
-          </p>
-          <p>Temp HP: {tempHp}</p>
-          {selected.hit_dice?.value ? <p>Hit Dice: {selected.hit_dice.value}</p> : null}
-          <p>Class: {selected.class_level_text || "Unknown"}</p>
-          <p>System: {systemLabel}</p>
+          {identityDetails.length ? <p>{identityDetails.join(" | ")}</p> : null}
         </div>
       </div>
-      {selected.resource_preview?.length ? (
-        <ul className="plain-list resource-preview-list">
-          {selected.resource_preview.map((resource) => (
-            <li key={`${resource.label}-${resource.value}`}>
-              <span>{resource.label}</span>
-              <strong>{resource.value}</strong>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {children}
     </article>
   );
 }
