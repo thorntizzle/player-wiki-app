@@ -63,6 +63,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/config",
+      "route_family": "api_v1_content",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/content/config",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono content/config fixture read-only route returning parsed campaign.yaml metadata."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/session/login",
       "route_family": "api_v1",
       "status": "deferred_scratch_proof",

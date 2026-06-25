@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import os
 import re
 import shutil
@@ -265,6 +266,30 @@ def test_typescript_wiki_page_matches_flask_contract(typescript_api_server, clie
     assert _section_summary(payload) == _section_summary(flask_payload)
 
 
+def test_typescript_content_config_matches_flask_contract(typescript_api_server, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    flask_response = client.get("/api/v1/campaigns/linden-pass/content/config")
+    assert flask_response.status_code == 200
+    flask_payload = flask_response.get_json()
+    assert flask_payload["ok"] is True
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/config")
+    assert status == 200
+
+    assert payload["ok"] is True
+    assert payload["config_file"]["campaign_slug"] == flask_payload["config_file"]["campaign_slug"]
+    assert payload["config_file"]["config"] == flask_payload["config_file"]["config"]
+    assert payload["config_file"]["editable_fields"] == flask_payload["config_file"]["editable_fields"]
+
+    updated_at = payload["config_file"]["updated_at"]
+    assert isinstance(updated_at, str)
+    assert updated_at
+    try:
+        datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise AssertionError(f"Expected ISO timestamp from TypeScript content config, got {updated_at}") from exc
+
+
 def test_typescript_wiki_missing_resources_return_json(typescript_api_server):
     status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/definitely-not-a-campaign/wiki")
     assert status == 404
@@ -286,6 +311,13 @@ def test_typescript_wiki_missing_resources_return_json(typescript_api_server):
     assert payload["error"]["code"] == "wiki_page_not_found"
 
     status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/definitely-not-a-campaign/session")
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "campaign_not_found"
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/definitely-not-a-campaign/content/config"
+    )
     assert status == 404
     assert payload["ok"] is False
     assert payload["error"]["code"] == "campaign_not_found"

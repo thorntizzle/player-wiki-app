@@ -91,6 +91,42 @@ if (campaign.payload?.permissions?.can_manage_dm_content !== false) {
   throw new Error("Expected read-only permissions in campaign response.");
 }
 
+const campaignConfig = await requestJson("/api/v1/campaigns/linden-pass/content/config");
+if (campaignConfig.status !== 200) {
+  throw new Error(`Expected content config endpoint 200, got ${campaignConfig.status}`);
+}
+if (campaignConfig.payload?.config_file?.campaign_slug !== "linden-pass") {
+  throw new Error(`Expected content config campaign_slug linden-pass, got ${campaignConfig.payload?.config_file?.campaign_slug}`);
+}
+if (campaignConfig.payload?.config_file?.config?.current_session !== 2) {
+  throw new Error(
+    `Expected content config current_session 2, got ${campaignConfig.payload?.config_file?.config?.current_session}`,
+  );
+}
+if (campaignConfig.payload?.config_file?.config?.title !== "Echoes of the Alloy Coast") {
+  throw new Error(`Expected content config title, got ${campaignConfig.payload?.config_file?.config?.title}`);
+}
+if (!Array.isArray(campaignConfig.payload?.config_file?.config?.systems_sources)) {
+  throw new Error(
+    `Expected content config to include systems_sources array, got ${JSON.stringify(campaignConfig.payload?.config_file?.config?.systems_sources)}`,
+  );
+}
+const editableFields = campaignConfig.payload?.config_file?.editable_fields;
+const expectedEditableFields = [
+  "current_session",
+  "source_wiki_root",
+  "summary",
+  "system",
+  "systems_library",
+  "title",
+];
+if (!Array.isArray(editableFields) || editableFields.join("|") !== expectedEditableFields.join("|")) {
+  throw new Error(`Expected exact editable fields ${JSON.stringify(expectedEditableFields)}, got ${JSON.stringify(editableFields)}`);
+}
+if (typeof campaignConfig.payload?.config_file?.updated_at !== "string" || !campaignConfig.payload?.config_file?.updated_at) {
+  throw new Error(`Expected non-empty updated_at string, got ${campaignConfig.payload?.config_file?.updated_at}`);
+}
+
 const missing = await requestJson("/api/v1/campaigns/definitely-not-a-campaign");
 if (missing.status !== 404) {
   throw new Error(`Expected missing campaign to return 404, got ${missing.status}`);
@@ -240,6 +276,11 @@ if (
 const missingSession = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/session");
 if (missingSession.status !== 404 || missingSession.payload?.error?.code !== "campaign_not_found") {
   throw new Error(`Expected missing session campaign JSON 404, got ${missingSession.status}`);
+}
+
+const missingCampaignConfig = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/content/config");
+if (missingCampaignConfig.status !== 404 || missingCampaignConfig.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(`Expected missing content config campaign JSON 404, got ${missingCampaignConfig.status}`);
 }
 
 ensureStopped();

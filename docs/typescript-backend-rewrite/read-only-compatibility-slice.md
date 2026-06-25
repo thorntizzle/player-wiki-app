@@ -16,6 +16,8 @@ This document records the first implemented TypeScript read-only compatibility s
 - Implemented fixture-backed session read endpoint:
   - `GET /api/v1/campaigns/:campaignSlug/session`
 - Added `apps/api/src/wiki/` as the read-only Markdown/frontmatter fixture reader and wiki payload serializer.
+- Added fixture-backed content config endpoint:
+  - `GET /api/v1/campaigns/:campaignSlug/content/config`
 - Default campaign fixture directory is `tests/fixtures/sample_campaigns`.
 - `CPW_CAMPAIGNS_DIR` overrides the fixture directory.
 - Implemented endpoints return JSON-only payloads for the read-only slice, with explicit fixture-mode auth/permissions metadata on campaign detail.
@@ -51,16 +53,23 @@ This document records the first implemented TypeScript read-only compatibility s
   - `session_revision` and deterministic 12-character `session_view_token`
   - unchanged-response short-circuit response using matching `X-Live-Revision` + `X-Live-View-Token` headers
 - Session response omits DM-only arrays (`staged_articles`, `revealed_articles`, `session_logs`, `session_dm_passive_scores`) in read-only fixture mode.
+- Content/config payload compatibility checks cover:
+  - `config_file.campaign_slug`
+  - stable `config_file.config` fields, including `title`, `current_session`, and `source_wiki_root`
+  - `config_file.editable_fields` list
+  - parseable `config_file.updated_at` string
 
 ## Added Tests and Checks
 
 - `tests/test_typescript_readonly_slice_contract.py`:
   - runs a focused Flask-vs-TypeScript contract check for stable `campaign` fields for `linden-pass` using sanitized fixture data.
+  - compares Flask-vs-TypeScript payload parity for `GET /api/v1/campaigns/linden-pass/content/config`.
   - compares stable Flask-vs-TypeScript wiki home, section, and page payload fields.
   - checks JSON missing-resource shapes for TypeScript wiki dynamic routes.
   - adds fixture session parity checks (active session state, messages, passive score flag, revision/token shape, short-circuit response, missing session campaign 404).
 - `apps/api/tests/smoke.mjs`:
   - starts compiled API on a local port and verifies `/healthz`, campaign detail, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
+  - validates fixture-backed content config endpoint payload for `linden-pass` (`campaign_slug`, `current_session`, `title`, `systems_sources`, `editable_fields`, `updated_at`) and missing-campaign 404.
   - verifies `GET /api/v1/campaigns/:campaignSlug/session` read-only payload shape, token/revision headers behavior, unchanged-response short-circuit, and session missing-campaign 404.
 - `apps/api/tests/route-parity.mjs`:
   - checks implemented route coverage against `route-snapshots.json` and `typescript-route-seed.json`.
@@ -77,9 +86,8 @@ npm --prefix apps/api test
 & '<workspace>/.venv/Scripts/python.exe' .\scripts\route_snapshots.py --check
 ```
 
-## Open Items
+## Outside This Slice
 
-- Content/config read-only fixture surfaces remain open.
 - Production auth, live SQLite, write paths, and deployment cutover are intentionally outside this fixture-only slice.
 
 ## Frontend Dev-Mode Pointer

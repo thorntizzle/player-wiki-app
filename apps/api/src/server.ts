@@ -9,6 +9,8 @@ import { getApiConfig } from "./config.js";
 import { getCampaignBySlug, listCampaignSlugs } from "./campaigns/repository.js";
 import { ROUTES } from "./routes.js";
 import { buildSessionStatePayload } from "./session/view.js";
+import { getCampaignConfigFile } from "./content/repository.js";
+import { buildCampaignConfigPayload } from "./content/view.js";
 import { campaignWikiRepository, sectionSortKey, setWikiConfig, slugify } from "./wiki/repository.js";
 import {
   serializeCampaign,
@@ -390,6 +392,17 @@ app.get(ROUTES.sessionState, async (ctx) => {
   }
 
   return ctx.json(payload);
+});
+
+app.get(ROUTES.campaignConfig, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaignConfig = await getCampaignConfigFile(config, campaignSlug);
+  if (!campaignConfig) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildCampaignConfigPayload(campaignConfig));
 });
 
 app.notFound((ctx) =>
