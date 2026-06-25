@@ -14,6 +14,14 @@ This directory is the fast reference layer for the current Campaign Player Wiki 
 
 ## Current-State Docs
 
+- [Admin, Auth, And Visibility](admin-auth.md): sign-in, account settings, roles, membership, assignment, audit, and campaign visibility behavior.
+- [Combat](combat.md): player combat, DM status, encounter controls, combatant source identity, live updates, and current automation boundaries.
+- [DM Content](dm-content.md): Statblocks, Player Wiki management, Systems management lane, Staged Articles, Conditions, and cross-surface handoffs.
+- [Frontend And Gen2 Shell](frontend-gen2.md): `/app-next` hosting, route ownership, app shell, global search, loading behavior, and shared UX conventions.
+- [Live Session](live-session.md): player Session, DM Session, Session Character, staged/revealed articles, logs, and polling behavior.
+- [Ops And Fly Deployment](ops-deploy.md): local wrapper usage, Fly deployment shape, SQLite volume boundaries, and verification expectations.
+- [Published Wiki And Publishing](published-wiki.md): player-facing wiki pages, section/grouping conventions, images, Campaign Home, and publication/removal guardrails.
+- [Systems Wiki](systems.md): source policy, shared libraries, imports, RULES/book slices, custom entries, overrides, and search behavior.
 - [Characters Overview](characters-overview.md): shared character storage, route lanes, permissions, mutable state, save/revision rules, and cross-system conventions.
 - [Characters: DND-5E](characters-dnd5e.md): DND-5E native/imported support matrix, authoring lanes, read/session/combat behavior, spellcasting, equipment, and known limits.
 - [Characters: Xianxia](characters-xianxia.md): Xianxia definition/state model, create/import, read/session pages, Cultivation, Realm Ascension, approval records, and deferred automation.
@@ -31,7 +39,15 @@ Local roadmaps are intentionally not tracked:
 
 - `.local/roadmaps/INDEX.md`
 - `.local/roadmaps/feedback-inbox.md`
+- `.local/roadmaps/gen2-frontend-backlog.md`
+- `.local/roadmaps/ux-backlog.md`
+- `.local/roadmaps/publishing-backlog.md`
+- `.local/roadmaps/dm-content-backlog.md`
+- `.local/roadmaps/systems-backlog.md`
+- `.local/roadmaps/live-combat-backlog.md`
 - `.local/roadmaps/character-backlog.md`
+- `.local/roadmaps/xianxia-backlog.md`
+- `.local/roadmaps/ops-backlog.md`
 
 ## Migration Notes
 

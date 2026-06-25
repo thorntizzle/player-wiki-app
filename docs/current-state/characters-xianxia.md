@@ -70,7 +70,8 @@ Last updated: 2026-06-25
 ## Related Backlog
 
 - `.local/roadmaps/character-backlog.md`
-- `.local/xianxia-implementation-roadmap.md` remains historical/domain-specific until migrated.
+- `.local/roadmaps/xianxia-backlog.md`
+- Historical source: `.local/xianxia-implementation-roadmap.md`
 
 ## Source Pointers
 
