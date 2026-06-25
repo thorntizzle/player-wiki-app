@@ -13,6 +13,8 @@ This document records the first implemented TypeScript read-only compatibility s
   - `GET /api/v1/campaigns/:campaignSlug/wiki`
   - `GET /api/v1/campaigns/:campaignSlug/wiki/sections/:sectionSlug`
   - `GET /api/v1/campaigns/:campaignSlug/wiki/pages/*`
+- Implemented fixture-backed session read endpoint:
+  - `GET /api/v1/campaigns/:campaignSlug/session`
 - Added `apps/api/src/wiki/` as the read-only Markdown/frontmatter fixture reader and wiki payload serializer.
 - Default campaign fixture directory is `tests/fixtures/sample_campaigns`.
 - `CPW_CAMPAIGNS_DIR` overrides the fixture directory.
@@ -40,6 +42,15 @@ This document records the first implemented TypeScript read-only compatibility s
   - hidden deprecated `Overview` page behavior
 - Wiki section response preserves stable Flask fixture section grouping fields, including top-level pages, subsection groups, and section navigation.
 - Wiki page response preserves stable Flask fixture page fields, image metadata, `body_html`, backlinks, and section navigation.
+- Session endpoint preserves fixture read-only inactive session fields:
+  - `campaign` and read-only `permissions` (`can_manage_session: false`, `can_post_messages: false`)
+  - `active_session: null`
+  - `messages: []`
+  - `session_message_recipient_player_choices: []`
+  - `show_session_dm_passive_scores: false`
+  - `session_revision` and deterministic 12-character `session_view_token`
+  - unchanged-response short-circuit response using matching `X-Live-Revision` + `X-Live-View-Token` headers
+- Session response omits DM-only arrays (`staged_articles`, `revealed_articles`, `session_logs`, `session_dm_passive_scores`) in read-only fixture mode.
 
 ## Added Tests and Checks
 
@@ -47,8 +58,10 @@ This document records the first implemented TypeScript read-only compatibility s
   - runs a focused Flask-vs-TypeScript contract check for stable `campaign` fields for `linden-pass` using sanitized fixture data.
   - compares stable Flask-vs-TypeScript wiki home, section, and page payload fields.
   - checks JSON missing-resource shapes for TypeScript wiki dynamic routes.
+  - adds fixture session parity checks (active session state, messages, passive score flag, revision/token shape, short-circuit response, missing session campaign 404).
 - `apps/api/tests/smoke.mjs`:
   - starts compiled API on a local port and verifies `/healthz`, campaign detail, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
+  - verifies `GET /api/v1/campaigns/:campaignSlug/session` read-only payload shape, token/revision headers behavior, unchanged-response short-circuit, and session missing-campaign 404.
 - `apps/api/tests/route-parity.mjs`:
   - checks implemented route coverage against `route-snapshots.json` and `typescript-route-seed.json`.
 
@@ -66,7 +79,6 @@ npm --prefix apps/api test
 
 ## Open Items
 
-- Session read-only fixture surfaces remain open.
 - Content/config read-only fixture surfaces remain open.
 - Production auth, live SQLite, write paths, and deployment cutover are intentionally outside this fixture-only slice.
 

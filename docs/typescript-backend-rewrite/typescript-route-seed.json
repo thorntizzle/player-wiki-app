@@ -54,6 +54,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/session",
+      "route_family": "api_v1_session",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/session",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono session fixture read-only route with inactive-state payload, read-only permissions, and live revision short-circuit behavior."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/session/login",
       "route_family": "api_v1",
       "status": "deferred_scratch_proof",

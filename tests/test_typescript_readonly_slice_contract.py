@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import socket
 import subprocess
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 import pytest
 
@@ -20,9 +21,10 @@ NODE_CANDIDATES = [
 ]
 
 
-def _to_json(url: str):
+def _to_json(url: str, headers: dict[str, str] | None = None):
     try:
-        with urlopen(url) as response:
+        request = Request(url, headers=headers or {})
+        with urlopen(request) as response:
             return response.getcode(), __import__("json").loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         return exc.code, __import__("json").loads(exc.read().decode("utf-8"))
@@ -153,6 +155,48 @@ def _page_summary(page):
     }
 
 
+def test_typescript_session_matches_flask_contract_readonly_fixture(typescript_api_server, client, users, sign_in):
+    sign_in(users["party"]["email"], users["party"]["password"])
+    flask_response = client.get("/api/v1/campaigns/linden-pass/session")
+    assert flask_response.status_code == 200
+    flask_payload = flask_response.get_json()
+    assert flask_payload["ok"] is True
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/session")
+    assert status == 200
+
+    assert payload["ok"] is True
+    assert payload["campaign"] == flask_payload["campaign"]
+    assert payload["active_session"] == flask_payload["active_session"]
+    assert payload["messages"] == flask_payload["messages"]
+    assert payload["show_session_dm_passive_scores"] == flask_payload["show_session_dm_passive_scores"]
+    assert isinstance(payload["session_revision"], int)
+    assert payload["session_revision"] >= 0
+    assert isinstance(payload["session_view_token"], str)
+    assert len(payload["session_view_token"]) == 12
+    assert re.fullmatch(r"[0-9a-f]{12}", payload["session_view_token"], flags=re.IGNORECASE) is not None
+
+    assert "staged_articles" not in payload
+    assert "revealed_articles" not in payload
+    assert "session_logs" not in payload
+    assert "session_dm_passive_scores" not in payload
+
+    short_status, short_payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/session",
+        headers={
+            "X-Live-Revision": str(payload["session_revision"]),
+            "X-Live-View-Token": payload["session_view_token"],
+        },
+    )
+    assert short_status == 200
+    assert short_payload == {
+        "ok": True,
+        "changed": False,
+        "session_revision": payload["session_revision"],
+        "session_view_token": payload["session_view_token"],
+    }
+
+
 def test_typescript_wiki_home_matches_flask_contract(typescript_api_server, client, sign_in, users):
     sign_in(users["party"]["email"], users["party"]["password"])
     flask_response = client.get("/api/v1/campaigns/linden-pass/wiki")
@@ -240,3 +284,8 @@ def test_typescript_wiki_missing_resources_return_json(typescript_api_server):
     assert status == 404
     assert payload["ok"] is False
     assert payload["error"]["code"] == "wiki_page_not_found"
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/definitely-not-a-campaign/session")
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "campaign_not_found"

@@ -36,8 +36,10 @@ const logLine = (chunk) => {
 child.stdout.on("data", logLine);
 child.stderr.on("data", logLine);
 
-const requestJson = async (path) => {
-  const response = await fetch(`http://127.0.0.1:${port}${path}`);
+const requestJson = async (path, headers = {}) => {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    headers,
+  });
   const payload = await response.json();
   return { status: response.status, payload };
 };
@@ -172,6 +174,72 @@ if (missingWikiSection.status !== 404 || missingWikiSection.payload?.error?.code
 const missingWikiPage = await requestJson("/api/v1/campaigns/linden-pass/wiki/pages/definitely-not-a-page");
 if (missingWikiPage.status !== 404 || missingWikiPage.payload?.error?.code !== "wiki_page_not_found") {
   throw new Error(`Expected missing wiki page JSON 404, got ${missingWikiPage.status}`);
+}
+
+const session = await requestJson("/api/v1/campaigns/linden-pass/session");
+if (session.status !== 200 || session.payload?.ok !== true) {
+  throw new Error(`Expected session endpoint 200 ok, got ${session.status}`);
+}
+if (session.payload?.campaign?.slug !== "linden-pass") {
+  throw new Error(`Expected session campaign slug linden-pass, got ${session.payload?.campaign?.slug}`);
+}
+if (session.payload?.permissions?.can_manage_session !== false) {
+  throw new Error(`Expected read-only session permissions, got ${session.payload?.permissions?.can_manage_session}`);
+}
+if (session.payload?.permissions?.can_post_messages !== false) {
+  throw new Error(`Expected can_post_messages false, got ${session.payload?.permissions?.can_post_messages}`);
+}
+if (session.payload?.active_session !== null) {
+  throw new Error(`Expected active_session null in fixture session response, got ${JSON.stringify(session.payload?.active_session)}`);
+}
+if (!Array.isArray(session.payload?.messages) || session.payload.messages.length !== 0) {
+  throw new Error(`Expected empty messages array in fixture session response, got ${JSON.stringify(session.payload?.messages)}`);
+}
+if (session.payload?.session_message_recipient_player_choices?.length !== 0) {
+  throw new Error("Expected no recipient choices in fixture session read mode.");
+}
+if (session.payload?.show_session_dm_passive_scores !== false) {
+  throw new Error("Expected show_session_dm_passive_scores false in fixture session response.");
+}
+if (typeof session.payload?.session_revision !== "number" || session.payload.session_revision < 0) {
+  throw new Error(`Expected non-negative numeric session_revision, got ${session.payload?.session_revision}`);
+}
+if (typeof session.payload?.session_view_token !== "string" || !/^[0-9a-f]{12}$/i.test(session.payload.session_view_token)) {
+  throw new Error(`Expected 12-char hex session_view_token, got ${session.payload?.session_view_token}`);
+}
+if (session.payload?.staged_articles !== undefined) {
+  throw new Error("Expected fixture read-only session response to omit staged_articles.");
+}
+if (session.payload?.revealed_articles !== undefined) {
+  throw new Error("Expected fixture read-only session response to omit revealed_articles.");
+}
+if (session.payload?.session_logs !== undefined) {
+  throw new Error("Expected fixture read-only session response to omit session_logs.");
+}
+if (session.payload?.session_dm_passive_scores !== undefined) {
+  throw new Error("Expected fixture read-only session response to omit session_dm_passive_scores.");
+}
+
+const unchangedSession = await requestJson("/api/v1/campaigns/linden-pass/session", {
+  "X-Live-Revision": String(session.payload?.session_revision),
+  "X-Live-View-Token": String(session.payload?.session_view_token),
+});
+if (unchangedSession.status !== 200) {
+  throw new Error(`Expected unchanged session short-circuit request 200, got ${unchangedSession.status}`);
+}
+if (
+  unchangedSession.payload?.ok !== true ||
+  unchangedSession.payload?.changed !== false ||
+  unchangedSession.payload?.session_revision !== session.payload?.session_revision ||
+  unchangedSession.payload?.session_view_token !== session.payload?.session_view_token ||
+  Object.keys(unchangedSession.payload || {}).length !== 4
+) {
+  throw new Error(`Expected Flask-style unchanged payload, got ${JSON.stringify(unchangedSession.payload)}`);
+}
+
+const missingSession = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/session");
+if (missingSession.status !== 404 || missingSession.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(`Expected missing session campaign JSON 404, got ${missingSession.status}`);
 }
 
 ensureStopped();

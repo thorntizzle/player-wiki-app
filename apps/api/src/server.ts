@@ -8,6 +8,7 @@ import { serve } from "@hono/node-server";
 import { getApiConfig } from "./config.js";
 import { getCampaignBySlug, listCampaignSlugs } from "./campaigns/repository.js";
 import { ROUTES } from "./routes.js";
+import { buildSessionStatePayload } from "./session/view.js";
 import { campaignWikiRepository, sectionSortKey, setWikiConfig, slugify } from "./wiki/repository.js";
 import {
   serializeCampaign,
@@ -154,6 +155,19 @@ function pageSlugFromWildcard(pathname: string, campaignSlug: string): string {
   } catch {
     return pathname.slice(prefix.length);
   }
+}
+
+function parseLiveRevisionHeader(ctx: { req: { header: (name: string) => string | undefined } }): number | null {
+  const rawValue = ctx.req.header("X-Live-Revision")?.trim() || "";
+  if (!rawValue) {
+    return null;
+  }
+  const parsed = Number(rawValue);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function parseLiveViewTokenHeader(ctx: { req: { header: (name: string) => string | undefined } }): string {
+  return ctx.req.header("X-Live-View-Token")?.trim() || "";
 }
 
 app.get(ROUTES.healthz, async (ctx) => {
@@ -349,6 +363,33 @@ app.get(ROUTES.wikiPage, async (ctx) => {
       gen2_section_url: campaignHref(campaign.slug, `sections/${slugify(page.section)}`),
     },
   });
+});
+
+app.get(ROUTES.sessionState, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const payload = buildSessionStatePayload(campaign);
+  const requestedRevision = parseLiveRevisionHeader(ctx);
+  const requestedViewToken = parseLiveViewTokenHeader(ctx);
+  if (
+    requestedRevision === payload.session_revision &&
+    requestedViewToken.length > 0 &&
+    requestedViewToken === payload.session_view_token
+  ) {
+    return ctx.json({
+      ok: true,
+      changed: false,
+      session_revision: payload.session_revision,
+      session_view_token: payload.session_view_token,
+    });
+  }
+
+  return ctx.json(payload);
 });
 
 app.notFound((ctx) =>

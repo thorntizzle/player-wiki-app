@@ -85,6 +85,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "wiki_page_not_found",
     },
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/campaigns/:campaignSlug/session",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/session",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/session",
+    routeFamily: "api_v1_session",
+    missingResource: {
+      method: "GET",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/session",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -93,4 +108,5 @@ export const ROUTES = {
   wikiHome: IMPLEMENTED_ROUTES[2].honoPath,
   wikiSection: IMPLEMENTED_ROUTES[3].honoPath,
   wikiPage: IMPLEMENTED_ROUTES[4].honoPath,
+  sessionState: IMPLEMENTED_ROUTES[5].honoPath,
 } as const;
