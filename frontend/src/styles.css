@@ -4249,12 +4249,26 @@ button.spell-card__main:focus-visible .spell-card__name {
 }
 
 .character-controls-card--danger {
-  border-color: #f1b4aa;
-  background: #fff7f5;
+  border-color: var(--error-border);
+  background: var(--error-bg);
+  color: var(--ink);
 }
 
 .character-controls-card--danger h3 {
-  color: #7f1d1d;
+  color: var(--danger);
+}
+
+.character-controls-card--danger > p,
+.character-controls-card--danger .field span {
+  color: var(--ink);
+}
+
+.character-controls-card--danger input {
+  border-color: var(--error-border);
+}
+
+.character-controls-card--danger .character-delete-form {
+  margin-top: 0.5rem;
 }
 
 .compact-state-form {

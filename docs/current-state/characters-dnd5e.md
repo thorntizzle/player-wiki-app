@@ -14,6 +14,7 @@ Last updated: 2026-06-25
 - Spellcasting is the durable home for spell-list management. Prepared casters and wizards use local `Current spells` and `Preparation` subviews over the same durable rows.
 - Equipment is the durable home for equip/unequip, attunement, weapon wield mode, and supported feature-state toggles such as Armorer Arcane Armor.
 - Inventory is the durable home for carried item rows, supplemental item adds, supported removals, quantity controls, and DND currency.
+- Spell detail popups in Gen2 include resolved upcasting text (e.g., `At Higher Levels`) when source-backed spell payload includes it; non-upcastable spells do not show an empty upcast section.
 - Personal displays physical description/background reference text. Physical description/background authoring belongs in Advanced Editor.
 - Portrait displays the current portrait and supports one portrait slot with upload/remove for authorized users.
 - Controls covers owner status, app-admin assignment/clear, and DM/admin checked deletion.
@@ -43,6 +44,7 @@ Last updated: 2026-06-25
 - Spell add/update/remove actions route through an explicit target class row.
 - Combat and Session Character consume only the Current spell set; unprepared candidates do not appear as castable spells there.
 - Always-prepared grants stay out of manual prepared counts and should not render as separate source-package cards when each spell card already carries the badge.
+- Spell detail popups show `At Higher Levels` upcasting mechanics from presenter spell payloads when available and suppress the section when not present.
 
 ## Current Equipment, AC, And Attack Contract
 

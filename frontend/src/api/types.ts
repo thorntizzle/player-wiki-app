@@ -1562,6 +1562,7 @@ export interface CharacterPresentedSpell {
   save_or_hit: string;
   source: string;
   reference: string;
+  at_higher_levels?: string;
   badges: string[];
   class_row_id: string;
   management_note: string;

@@ -777,6 +777,11 @@ def present_character_detail(
                 )
                 else ""
             )
+            at_higher_levels = spell_payload_higher_level_text(
+                dict(spell or {}),
+                linked_systems_entry=linked_systems_entry,
+                linked_systems_metadata=linked_systems_metadata,
+            )
             always_prepared = _spell_payload_is_always_prepared(dict(spell or {}))
             badges = []
             if bool(spell.get("is_bonus_known")):
@@ -838,6 +843,8 @@ def present_character_detail(
                     ),
                 }
             )
+            if at_higher_levels:
+                presented_spell["at_higher_levels"] = at_higher_levels
             target_row_id = str(presented_spell.get("class_row_id") or "").strip()
             row_payload = dict(spell_rows_by_id.get(target_row_id) or {})
             row_mode = str(row_payload.get("spell_mode") or "").strip()
@@ -4144,6 +4151,99 @@ def spell_payload_can_upcast(
         return True
     detail_text = normalize_lookup(description_html)
     return "at higher levels" in detail_text or "using a spell slot of" in detail_text
+
+
+def _coerce_spell_detail_lines(
+    payload_value: Any,
+    *,
+    max_depth: int = 5,
+) -> list[str]:
+    if max_depth <= 0:
+        return []
+
+    if payload_value in (None, "", 0, False, [], {}):
+        return []
+
+    if isinstance(payload_value, str):
+        rendered = payload_value.strip()
+        return [rendered] if rendered else []
+
+    if isinstance(payload_value, dict):
+        lines: list[str] = []
+        preferred_keys = ("text", "entry", "entries", "name", "header", "title", "description")
+        for key in preferred_keys:
+            if key not in payload_value:
+                continue
+            lines.extend(
+                _coerce_spell_detail_lines(
+                    payload_value.get(key),
+                    max_depth=max_depth - 1,
+                )
+            )
+        if lines:
+            return lines
+        for nested in payload_value.values():
+            lines.extend(
+                _coerce_spell_detail_lines(
+                    nested,
+                    max_depth=max_depth - 1,
+                )
+            )
+        return lines
+
+    if isinstance(payload_value, (list, tuple)):
+        lines: list[str] = []
+        for item in payload_value:
+            lines.extend(_coerce_spell_detail_lines(item, max_depth=max_depth - 1))
+        return lines
+
+    rendered = str(payload_value).strip()
+    return [rendered] if rendered else []
+
+
+def _coalesce_spell_detail_text(payload_value: Any) -> str:
+    return " ".join(line for line in _coerce_spell_detail_lines(payload_value) if line.strip()).strip()
+
+
+def spell_payload_higher_level_text(
+    spell_payload: dict[str, Any],
+    *,
+    linked_systems_entry: Any | None = None,
+    linked_systems_metadata: dict[str, Any] | None = None,
+) -> str:
+    payload_sources = (
+        spell_payload,
+        dict(spell_payload.get("metadata") or {}),
+        dict(linked_systems_metadata or {}),
+    )
+
+    spell_payload_keys = (
+        "at_higher_levels",
+        "higher_level",
+        "higher_levels",
+        "entries_higher_level",
+        "entriesHigherLevel",
+    )
+
+    for payload in payload_sources:
+        for key in spell_payload_keys:
+            text = _coalesce_spell_detail_text(payload.get(key))
+            if text:
+                return text
+
+    entry_body = dict(getattr(linked_systems_entry, "body", None) or {})
+    for key in ("entries_higher_level", "entriesHigherLevel"):
+        text = _coalesce_spell_detail_text(entry_body.get(key))
+        if text:
+            return text
+
+    entry_metadata = dict(getattr(linked_systems_entry, "metadata", None) or {})
+    for key in ("entries_higher_level", "entriesHigherLevel"):
+        text = _coalesce_spell_detail_text(entry_metadata.get(key))
+        if text:
+            return text
+
+    return ""
 
 
 def spellcasting_stat_line(

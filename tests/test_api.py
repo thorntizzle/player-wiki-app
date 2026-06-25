@@ -2713,6 +2713,7 @@ def test_api_character_detail_exposes_linked_item_and_spell_details(
             "save_or_hit": "Dex save",
         }
         spellcasting["spells"] = spells
+        spellcasting["spells"][0]["at_higher_levels"] = "At higher levels, the spell deals +1d8 healing per spell slot above 1st."
         payload["spellcasting"] = spellcasting
 
     _write_character_definition(app, "arden-march", _mutate_definition)
@@ -2753,6 +2754,91 @@ def test_api_character_detail_exposes_linked_item_and_spell_details(
     assert detail_spell["href"].endswith("/systems/entries/phb-spell-api-linked-detail")
     assert "API linked spell detail" in detail_spell["description_html"]
     assert detail_spell["school"] == "Evocation"
+    assert detail_spell["at_higher_levels"] == "At higher levels, the spell deals +1d8 healing per spell slot above 1st."
+    assert detail_spell["is_upcastable"] is True
+
+
+def test_api_character_detail_exposes_optional_higher_level_text_only_when_present(
+    client,
+    app,
+    users,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    upcast_spell_entry = _seed_systems_spell_entry(
+        app,
+        slug="phb-spell-api-upcast-detail",
+        title="API Upcast Detail",
+        metadata={
+            "level": 1,
+            "school": "evocation",
+            "entries_higher_level": "At higher levels, the spell deals more damage.",
+        },
+        rendered_html="<p>API upcast detail spell.</p>",
+    )
+    base_spell_entry = _seed_systems_spell_entry(
+        app,
+        slug="phb-spell-api-base-detail",
+        title="API Base Detail",
+        metadata={"level": 1, "school": "evocation"},
+        rendered_html="<p>API base spell detail.</p>",
+    )
+
+    def _mutate_definition(payload: dict) -> None:
+        spellcasting = dict(payload.get("spellcasting") or {})
+        spellcasting["spells"] = [
+            {
+                "name": "API Upcast Detail",
+                "systems_ref": _systems_ref(upcast_spell_entry),
+                "casting_time": "1 action",
+                "range": "Touch",
+                "duration": "Instantaneous",
+                "components": "V, S",
+                "save_or_hit": "",
+            },
+            {
+                "name": "API Base Detail",
+                "systems_ref": _systems_ref(base_spell_entry),
+                "casting_time": "1 action",
+                "range": "Touch",
+                "duration": "Instantaneous",
+                "components": "V, S",
+                "save_or_hit": "",
+            },
+        ]
+        payload["spellcasting"] = spellcasting
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-session-upcast-detail-api")
+
+    response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(owner_token),
+    )
+
+    assert response.status_code == 200
+    character = response.get_json()["character"]
+
+    def _find_presented_spell(payload: dict, spell_name: str) -> dict:
+        spellcasting_payload = dict(payload.get("presented_spellcasting") or {})
+        for section_key in ("current_row_sections", "row_sections", "preparation_row_sections"):
+            for section in list(spellcasting_payload.get(section_key) or []):
+                for spell in list(dict(section or {}).get("spells") or []):
+                    if str(dict(spell).get("name") or "").strip() == spell_name:
+                        return dict(spell)
+                for level_section in list(dict(section or {}).get("spell_level_sections") or []):
+                    for group in list(dict(level_section or {}).get("groups") or []):
+                        for spell in list(dict(group or {}).get("spells") or []):
+                            if str(dict(spell).get("name") or "").strip() == spell_name:
+                                return dict(spell)
+        raise AssertionError(f"Presented spell {spell_name!r} was not found.")
+
+    upcast_spell = _find_presented_spell(character, "API Upcast Detail")
+    non_upcast_spell = _find_presented_spell(character, "API Base Detail")
+    assert upcast_spell["at_higher_levels"] == "At higher levels, the spell deals more damage."
+    assert upcast_spell["is_upcastable"] is True
+    assert "at_higher_levels" not in non_upcast_spell
+    assert non_upcast_spell["is_upcastable"] is False
 
 
 def test_api_character_session_equipment_state_endpoint_preserves_attunement_limit(

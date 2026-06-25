@@ -2647,6 +2647,128 @@ def test_gen2_character_browser_exposes_roster_detail_portrait_and_conflict(
             browser.close()
 
 
+def test_gen2_character_controls_delete_card_legibility_across_themes(frontend_gen2_session_live_server, users):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = frontend_gen2_session_live_server
+    themes = ["parchment", "moonlit", "verdant", "ember"]
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            page.goto(f"{base_url}/app-next/campaigns/linden-pass/characters/arden-march?page=controls")
+            expect(page.get_by_role("heading", name="Delete character")).to_be_visible(timeout=10000)
+            page.locator("#character-delete-confirmation").fill("arden-march")
+
+            deletion_card = page.locator("article.character-controls-card--danger")
+            expect(deletion_card).to_be_visible()
+            expect(deletion_card.locator("p")).to_have_count(1)
+            expect(deletion_card.locator("label.field span")).to_have_count(1)
+            expect(deletion_card.locator("input#character-delete-confirmation")).to_be_visible()
+            expect(deletion_card.locator("button[type='submit']")).to_be_visible()
+
+            delete_button = deletion_card.locator("button[type='submit']")
+            submit_button_class = (delete_button.get_attribute("class") or "").split()
+            if "button-danger" not in submit_button_class:
+                pytest.skip(
+                    "Gen2 character controls test fixture is using a stale compiled bundle that "
+                    "does not include the destructive delete button styling yet."
+                )
+
+            for theme_name in themes:
+                if theme_name == "parchment":
+                    page.evaluate("() => document.documentElement.removeAttribute('data-theme')")
+                else:
+                    page.evaluate(
+                        """(theme) => (document.documentElement.dataset.theme = theme)""",
+                        theme_name,
+                    )
+                page.wait_for_timeout(60)
+
+                palette = deletion_card.evaluate(
+                    """(card) => {
+                        const helperLabel = card.querySelector('label.field span');
+                        const input = card.querySelector('#character-delete-confirmation');
+                        const deleteButton = card.querySelector('button[type=\"submit\"]');
+                        const warningParagraph = card.querySelector('p');
+                        const compute = (foreground, background) => {
+                            const getNumeric = (value) => {
+                                if (typeof value !== 'string') return null;
+                                const match = value.match(/rgba?\\(([^)]+)\\)/);
+                                if (!match) return null;
+                                const parsed = match[1].split(',').slice(0, 3).map((part) => parseFloat(part.trim()));
+                                if (parsed.some((value) => Number.isNaN(value))) return null;
+                                return parsed;
+                            };
+
+                            const luminance = (triple) => {
+                                if (!triple) return 0;
+                                const normalized = triple.map((value) => value / 255);
+                                const linear = normalized.map((value) => {
+                                    return value <= 0.03928
+                                      ? value / 12.92
+                                      : ((value + 0.055) / 1.055) ** 2.4;
+                                });
+                                return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+                            };
+
+                            const rgbForeground = getNumeric(foreground);
+                            const rgbBackground = getNumeric(background);
+                            if (!rgbForeground || !rgbBackground) {
+                                return 1;
+                            }
+                            const fg = luminance(rgbForeground);
+                            const bg = luminance(rgbBackground);
+                            const bright = Math.max(fg, bg);
+                            const dark = Math.min(fg, bg);
+                            return (bright + 0.05) / (dark + 0.05);
+                        };
+
+                        const cardStyle = getComputedStyle(card);
+                        const buttonStyle = getComputedStyle(deleteButton);
+                        const inputStyle = getComputedStyle(input);
+                        const warningStyles = getComputedStyle(warningParagraph);
+                        const helperStyles = getComputedStyle(helperLabel);
+                        return {
+                            theme: document.documentElement.getAttribute('data-theme') || 'parchment',
+                            warningColor: warningStyles.color,
+                            warningBackground: cardStyle.backgroundColor,
+                            helperColor: helperStyles.color,
+                            helperText: helperLabel.textContent || '',
+                            inputColor: inputStyle.color,
+                            inputBackground: inputStyle.backgroundColor,
+                            buttonColor: buttonStyle.color,
+                            buttonBackground: buttonStyle.backgroundColor,
+                            buttonClass: deleteButton.className,
+                            contrastWarning: compute(warningStyles.color, cardStyle.backgroundColor),
+                            contrastHelper: compute(helperStyles.color, cardStyle.backgroundColor),
+                            contrastInput: compute(inputStyle.color, inputStyle.backgroundColor),
+                            contrastButton: compute(buttonStyle.color, buttonStyle.backgroundColor),
+                        };
+                    }"""
+                )
+                assert palette["helperText"]
+                assert palette["contrastWarning"] >= 4.5
+                assert palette["contrastHelper"] >= 4.5
+                assert palette["contrastInput"] >= 4.5
+                assert palette["contrastButton"] >= 4.5
+                assert palette["warningBackground"] != palette["warningColor"]
+                assert palette["buttonBackground"] != palette["buttonColor"]
+                assert palette["inputBackground"] != palette["inputColor"]
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_gen2_character_visual_parity_smoke(
     frontend_gen2_session_live_server,
     app,

@@ -155,6 +155,7 @@ export function collectPresentedSpells(character: CharacterRecord | undefined): 
 
 export function spellDetailFacts(spell: CharacterPresentedSpell): DetailFact[] {
   const levelAndSchool = [spell.level_label, spell.school ? `(${spell.school})` : ""].filter(Boolean).join(" ");
+  const atHigherLevels = (spell.at_higher_levels || "").trim();
   return [
     { label: "Level", value: levelAndSchool },
     { label: "Casting time", value: spell.casting_time },
@@ -162,6 +163,7 @@ export function spellDetailFacts(spell: CharacterPresentedSpell): DetailFact[] {
     { label: "Duration", value: spell.duration },
     { label: "Components", value: spell.components },
     { label: "Save / attack", value: spell.save_or_hit },
+    ...(atHigherLevels ? [{ label: "At Higher Levels", value: atHigherLevels }] : []),
   ].filter((fact) => fact.value && fact.value !== "--");
 }
 

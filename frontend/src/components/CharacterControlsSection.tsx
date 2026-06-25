@@ -138,7 +138,7 @@ export function CharacterControlsSection({
               Deleting a character removes the file-backed definition/import metadata, the live character state, and any
               current player assignment.
             </p>
-            <form onSubmit={submitCharacterDelete} className="stack-form">
+            <form onSubmit={submitCharacterDelete} className="stack-form character-delete-form">
               <label className="field">
                 <span>
                   Type this character's URL name to confirm: <code>{characterSlug}</code>
@@ -157,6 +157,7 @@ export function CharacterControlsSection({
               </label>
               <button
                 type="submit"
+                className="button-danger"
                 disabled={controlsMutationPending || controlsDraft.deleteConfirmation.trim() !== characterSlug}
               >
                 {isDeletingCharacter ? "Deleting..." : "Delete character"}

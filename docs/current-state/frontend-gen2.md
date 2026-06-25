@@ -27,6 +27,7 @@ Last updated: 2026-06-25
 - `frontend/src/main.tsx` owns generated route-tree bootstrap only.
 - Shared shell components live under `frontend/src/AppShell.tsx` and `frontend/src/components/**`.
 - Shared mutation/query helpers should stay in domain-specific hooks rather than being rebuilt in page files.
+- Critical destructive forms, including the Character Controls delete confirmation card, should reuse theme tokens (`--error-*` / `--danger`) for readable warning text, field input, and action styling.
 
 ## UX And Feedback Conventions
 
