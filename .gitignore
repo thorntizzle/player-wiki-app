@@ -37,6 +37,8 @@ docs/*
 !docs/frontend-ux-style-guide.md
 !docs/gen2-migration-readiness.md
 !docs/roadmap-automation-reference.md
+!docs/typescript-backend-rewrite/
+!docs/typescript-backend-rewrite/*.md
 tests/fixtures/campaign_characters/
 frontend/.venv/
 frontend/dist/
