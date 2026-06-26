@@ -838,6 +838,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "validation_error",
     },
   },
+  {
+    method: "POST",
+    honoPath: "/api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/set-current",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/set-current",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/set-current",
+    routeFamily: "api_v1_combat",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/campaigns/linden-pass/combat/combatants/999999/set-current",
+      status: 400,
+      contentType: "application/json",
+      errorCode: "validation_error",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -899,4 +914,5 @@ export const ROUTES = {
   dmContentConditionCreate: IMPLEMENTED_ROUTES[55].honoPath,
   dmContentConditionUpdate: IMPLEMENTED_ROUTES[56].honoPath,
   dmContentConditionDelete: IMPLEMENTED_ROUTES[57].honoPath,
+  combatSetCurrent: IMPLEMENTED_ROUTES[58].honoPath,
 } as const;

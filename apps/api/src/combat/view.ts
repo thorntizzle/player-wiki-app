@@ -141,6 +141,10 @@ interface CombatRuntimeState {
   existingCharacterSlugs: Set<string>;
 }
 
+type CombatMutationResult = { status: "ok" } | { status: "validation_error"; message: string };
+
+class CombatMutationConflictError extends Error {}
+
 export interface CombatReadOnlyPayload {
   ok: true;
   campaign: CampaignViewModel;
@@ -216,7 +220,11 @@ function asBoolean(value: unknown): boolean {
   return false;
 }
 
-function supportsCombatTracker(system: string): boolean {
+function utcIsoTimestamp(): string {
+  return new Date().toISOString().replace("Z", "+00:00");
+}
+
+export function supportsCombatTracker(system: string): boolean {
   return normalizeSystemKey(system) === "dnd5e";
 }
 
@@ -520,6 +528,37 @@ function readCombatTrackerRow(database: SqliteDatabase, campaignSlug: string): C
   );
 }
 
+function ensureCombatTrackerRow(
+  database: SqliteDatabase,
+  campaignSlug: string,
+  actorUserId: number,
+): CombatTrackerRow {
+  const existing = readCombatTrackerRow(database, campaignSlug);
+  if (existing) {
+    return existing;
+  }
+  database
+    .prepare(
+      `
+        INSERT INTO campaign_combat_trackers (
+          campaign_slug,
+          round_number,
+          current_combatant_id,
+          revision,
+          updated_at,
+          updated_by_user_id
+        )
+        VALUES (?, 1, NULL, 1, ?, ?)
+      `,
+    )
+    .run(campaignSlug, utcIsoTimestamp(), actorUserId);
+  const created = readCombatTrackerRow(database, campaignSlug);
+  if (!created) {
+    throw new Error("Failed to persist campaign combat tracker.");
+  }
+  return created;
+}
+
 function readCombatantRows(database: SqliteDatabase, campaignSlug: string): CombatantRow[] {
   return database
     .prepare(
@@ -556,6 +595,40 @@ function readCombatantRows(database: SqliteDatabase, campaignSlug: string): Comb
       `,
     )
     .all(campaignSlug) as CombatantRow[];
+}
+
+function readCombatantRow(database: SqliteDatabase, campaignSlug: string, combatantId: number): CombatantRow | null {
+  return (
+    (database
+      .prepare(
+        `
+          SELECT
+            id,
+            combatant_type,
+            character_slug,
+            player_detail_visible,
+            source_kind,
+            source_ref,
+            display_name,
+            turn_value,
+            initiative_bonus,
+            dexterity_modifier,
+            initiative_priority,
+            current_hp,
+            max_hp,
+            temp_hp,
+            movement_total,
+            movement_remaining,
+            has_action,
+            has_bonus_action,
+            has_reaction,
+            revision
+          FROM campaign_combatants
+          WHERE campaign_slug = ? AND id = ?
+        `,
+      )
+      .get(campaignSlug, combatantId) as CombatantRow | undefined) || null
+  );
 }
 
 function readCombatConditionRows(database: SqliteDatabase, campaignSlug: string): CombatConditionRow[] {
@@ -660,6 +733,79 @@ function loadCombatRuntimeState(
   } catch (error) {
     if (isNoSuchTableOrColumnError(error)) {
       return emptyCombatRuntimeState();
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function setCurrentCombatant(
+  dbPath: string,
+  campaignSlug: string,
+  combatantId: number,
+  actorUserId: number,
+): CombatMutationResult {
+  if (!existsSync(dbPath)) {
+    return { status: "validation_error", message: "Combat storage is not initialized." };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const writeSetCurrent = database.transaction((): CombatMutationResult => {
+      const combatant = readCombatantRow(database, campaignSlug, combatantId);
+      if (!combatant) {
+        return { status: "validation_error", message: "That combatant could not be found." };
+      }
+
+      const tracker = ensureCombatTrackerRow(database, campaignSlug, actorUserId);
+      const now = utcIsoTimestamp();
+      const combatantUpdate = database
+        .prepare(
+          `
+            UPDATE campaign_combatants
+            SET has_action = 1,
+                has_bonus_action = 1,
+                has_reaction = 1,
+                movement_remaining = movement_total,
+                revision = revision + 1,
+                updated_at = ?,
+                updated_by_user_id = ?
+            WHERE campaign_slug = ? AND id = ?
+          `,
+        )
+        .run(now, actorUserId, campaignSlug, combatantId);
+      if (combatantUpdate.changes !== 1) {
+        throw new CombatMutationConflictError("That combatant could not be found.");
+      }
+
+      const trackerUpdate = database
+        .prepare(
+          `
+            UPDATE campaign_combat_trackers
+            SET round_number = ?,
+                current_combatant_id = ?,
+                revision = revision + 1,
+                updated_at = ?,
+                updated_by_user_id = ?
+            WHERE campaign_slug = ?
+          `,
+        )
+        .run(Math.max(1, Number(tracker.round_number || 1)), combatantId, now, actorUserId, campaignSlug);
+      if (trackerUpdate.changes !== 1) {
+        throw new CombatMutationConflictError("The current turn could not be updated.");
+      }
+
+      return { status: "ok" };
+    });
+
+    return writeSetCurrent();
+  } catch (error) {
+    if (error instanceof CombatMutationConflictError) {
+      return { status: "validation_error", message: error.message };
+    }
+    if (isNoSuchTableOrColumnError(error)) {
+      return { status: "validation_error", message: "Combat storage is not initialized." };
     }
     throw error;
   } finally {

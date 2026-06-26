@@ -25,6 +25,7 @@ fixture database.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/systems/entries/:entrySlug` with Flask-compatible unauthenticated auth failure, fixture-role entry access checks, parsed entry metadata/body JSON, source state, campaign entry override serialization, Flask compatibility links, and explicit missing-entry JSON.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/combat` and `GET /api/v1/campaigns/:campaignSlug/combat/live-state` with Flask-compatible unauthenticated auth failure, fixture player/DM permission splits, read-only SQLite tracker/combatant state with empty fallback, live polling metadata, unchanged-response short-circuit behavior, DM/admin player-character and DM Content statblock setup choices, and custom condition names merged into condition options.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/combat/systems-monsters/search` with Flask-compatible unauthenticated auth failure, fixture manager-only access, short-query guidance, and Systems monster metadata result formatting.
+- Implemented `POST /api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/set-current` with bearer API-token DM/admin access, fixture-role write denial, supported-combat validation, SQLite combatant existence validation, start-of-turn movement/action reset, tracker current-combatant update, revision bumps, refreshed Combat payloads, and validation-error missing-combatant JSON.
 - Implemented `GET /api/v1/campaigns` using fixture-backed repository reads.
 - Implemented `GET /api/v1/campaigns/:campaignSlug` using fixture-backed repository reads.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/help` using public fixture-read-only Campaign Help assumptions.
@@ -190,6 +191,12 @@ fixture database.
   - `live_revision`, 12-character `live_view_token`, and `poll_settings` fields are present
   - matching `X-Live-Revision` and `X-Live-View-Token` headers return an unchanged response without the tracker payload
   - missing campaign combat reads return `campaign_not_found` JSON
+- Combat set-current writes preserve the first manager mutation shell:
+  - fixture-role write attempts return `forbidden` because durable writes require bearer API authentication
+  - bearer-token player roles return `forbidden`
+  - bearer-token DM/admin roles can set the current combatant when the campaign supports the DND-5E tracker
+  - missing combatants return `validation_error`
+  - successful writes reset the selected combatant's movement/action economy, bump the combatant revision, bump the tracker revision, update `current_combatant_id`, and return the refreshed Combat payload
 - Campaign Help response preserves the stable public Flask fixture fields for:
   - public viewer role and account note
   - available surface labels, cross-cutting limits, visibility rows, and surface guidance

@@ -131,6 +131,10 @@ Route parity check command:
   choices, custom condition names merged into combat condition options, and SQLite tracker/combatant
   reads with current-turn labels, ordered combatants, visible conditions, and NPC resource summaries
   when the fixture database carries Combat rows.
+- The first Combat write route now serves `POST .../combat/combatants/:combatantId/set-current`
+  for bearer-token DM/admin users against fixture SQLite, denying fixture-role writes, validating
+  supported Combat campaigns and combatant existence, resetting the selected combatant's movement
+  and action economy, bumping tracker/combatant revisions, and returning the refreshed Combat payload.
 - The first Session manager lookup slice now serves `GET .../session/article-sources/search`, preserving
   Flask-compatible unauthenticated `auth_required`, fixture or bearer-token membership-derived
   manager-only access, short-query guidance, visible wiki page results, accessible Systems entry

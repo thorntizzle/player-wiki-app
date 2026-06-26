@@ -2041,6 +2041,83 @@ if (
   );
 }
 
+const fixtureSetCurrentCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/combatants/502/set-current",
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "POST" },
+);
+if (
+  fixtureSetCurrentCombatState.status !== 403 ||
+  fixtureSetCurrentCombatState.payload?.error?.code !== "forbidden"
+) {
+  throw new Error(
+    `Expected fixture combat set-current forbidden 403, got ${fixtureSetCurrentCombatState.status} ${fixtureSetCurrentCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerSetCurrentCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/combatants/502/set-current",
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "POST" },
+);
+if (
+  playerSetCurrentCombatState.status !== 403 ||
+  playerSetCurrentCombatState.payload?.error?.code !== "forbidden"
+) {
+  throw new Error(
+    `Expected player combat set-current forbidden 403, got ${playerSetCurrentCombatState.status} ${playerSetCurrentCombatState.payload?.error?.code}`,
+  );
+}
+
+const missingSetCurrentCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/combatants/999999/set-current",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST" },
+);
+if (
+  missingSetCurrentCombatState.status !== 400 ||
+  missingSetCurrentCombatState.payload?.error?.code !== "validation_error"
+) {
+  throw new Error(
+    `Expected missing combat set-current validation_error 400, got ${missingSetCurrentCombatState.status} ${missingSetCurrentCombatState.payload?.error?.code}`,
+  );
+}
+
+const setCurrentCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/combatants/502/set-current",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST" },
+);
+if (
+  setCurrentCombatState.status !== 200 ||
+  setCurrentCombatState.payload?.ok !== true ||
+  setCurrentCombatState.payload?.changed !== true ||
+  setCurrentCombatState.payload?.live_revision !== 13 ||
+  setCurrentCombatState.payload?.tracker?.round_number !== 3 ||
+  setCurrentCombatState.payload?.tracker?.current_turn_label !== "Arden March" ||
+  setCurrentCombatState.payload?.selected_combatant_id !== 502 ||
+  setCurrentCombatState.payload?.selected_combatant?.name !== "Arden March" ||
+  setCurrentCombatState.payload?.selected_combatant?.combatant_revision !== 5 ||
+  setCurrentCombatState.payload?.selected_combatant?.has_action !== true ||
+  setCurrentCombatState.payload?.selected_combatant?.has_bonus_action !== true ||
+  setCurrentCombatState.payload?.selected_combatant?.has_reaction !== true ||
+  setCurrentCombatState.payload?.selected_combatant?.movement_remaining !== 30 ||
+  setCurrentCombatState.payload?.selected_player_character?.name !== "Arden March" ||
+  setCurrentCombatState.payload?.player_character_targets?.[0]?.is_selected !== true ||
+  setCurrentCombatState.payload?.available_character_choices?.map((item) => item.slug).join("|") !==
+    "selene-brook|tobin-slate"
+) {
+  throw new Error(`Unexpected combat set-current payload: ${JSON.stringify(setCurrentCombatState.payload)}`);
+}
+
 const missingCombatState = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/combat", {
   "X-CPW-Fixture-Role": "dm",
 });

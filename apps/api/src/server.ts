@@ -25,7 +25,7 @@ import {
 } from "./campaigns/control.js";
 import { getCampaignBySlug, listCampaigns, listCampaignSlugs } from "./campaigns/repository.js";
 import type { CampaignViewModel } from "./campaigns/view.js";
-import { buildCombatReadOnlyPayload } from "./combat/view.js";
+import { buildCombatReadOnlyPayload, setCurrentCombatant, supportsCombatTracker } from "./combat/view.js";
 import {
   buildDmContentPayload,
   createDmContentCondition,
@@ -417,6 +417,28 @@ function resolveDmContentBearerWrite(
 
   if (fixtureRole(ctx)) {
     return { kind: "forbidden", message: "DM Content writes require bearer API authentication." };
+  }
+  return { kind: "missing" };
+}
+
+function resolveCombatManagerBearerWrite(
+  ctx: { req: { header: (name: string) => string | undefined } },
+  campaignSlug: string,
+): RoleResolution {
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "authenticated") {
+    const role = apiTokenRoleForCampaign(apiAuth.context, campaignSlug);
+    if (role === "admin" || role === "dm") {
+      return { kind: "authenticated", role: toFixtureSystemsRole(role), actorUserId: apiAuth.context.user.id };
+    }
+    return { kind: "forbidden", message: "You do not have permission to manage combat." };
+  }
+  if (apiAuth.kind === "invalid") {
+    return { kind: "invalid" };
+  }
+
+  if (fixtureRole(ctx)) {
+    return { kind: "forbidden", message: "Combat writes require bearer API authentication." };
   }
   return { kind: "missing" };
 }
@@ -1109,6 +1131,48 @@ app.get(ROUTES.combatLiveState, async (ctx) => {
   }
 
   return ctx.json(payload);
+});
+
+app.post(ROUTES.combatSetCurrent, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCombatManagerBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!supportsCombatTracker(campaign.system)) {
+    const error = validationError(
+      `Combat tracker support for ${campaign.system || "this system"} is not available yet.`,
+    );
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const combatantId = parsePositiveInteger(ctx.req.param("combatantId") || "");
+  if (combatantId === null) {
+    const error = validationError("Choose a valid combatant.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const actorUserId = auth.actorUserId;
+  if (typeof actorUserId !== "number") {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = setCurrentCombatant(config.dbPath, campaign.slug, combatantId, actorUserId);
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(await buildCombatReadOnlyPayload(config, campaign, auth.role));
 });
 
 app.get(ROUTES.campaignList, async (ctx) => {

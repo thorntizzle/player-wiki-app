@@ -224,6 +224,15 @@
       "notes": "Tracked Hono Combat live-state route sharing the fixture/SQLite combat state payload, including read-only tracker/combatant/condition/resource reads with empty fallback, fixture-role and bearer-token membership-derived role gates, manager setup choices, and unchanged-response short-circuit contract."
     },
     {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/set-current",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/set-current",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat set-current mutation with bearer API-token DM/admin access, fixture-role write denial, supported-combat validation, SQLite combatant existence validation, start-of-turn movement/action reset, tracker current-combatant update with revision bump, refreshed combat payloads, and validation_error missing-combatant JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/wiki",
       "route_family": "api_v1_wiki",
