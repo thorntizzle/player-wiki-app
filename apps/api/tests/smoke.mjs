@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,10 +10,12 @@ import Database from "better-sqlite3";
 const DEFAULT_PORT = 39873;
 const port = Number(process.env.CPW_SMOKE_PORT || DEFAULT_PORT);
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
-const campaignsDir =
+const sourceCampaignsDir =
   process.env.CPW_CAMPAIGNS_DIR ||
   fileURLToPath(new URL("../../../tests/fixtures/sample_campaigns", import.meta.url));
 const smokeTempDir = mkdtempSync(path.join(tmpdir(), "cpw-api-smoke-"));
+const campaignsDir = path.join(smokeTempDir, "campaigns");
+cpSync(sourceCampaignsDir, campaignsDir, { recursive: true });
 const dbPath = path.join(smokeTempDir, "player_wiki.sqlite3");
 const liveApiToken = "fixture-live-api-token";
 const dmApiToken = "fixture-dm-api-token";
@@ -2019,6 +2021,160 @@ if (typeof campaignConfig.payload?.config_file?.updated_at !== "string" || !camp
   throw new Error(`Expected non-empty updated_at string, got ${campaignConfig.payload?.config_file?.updated_at}`);
 }
 
+const blockedContentConfigPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/config",
+  {},
+  { method: "PATCH", body: { config: { summary: "Blocked" } } },
+);
+if (blockedContentConfigPatch.status !== 401 || blockedContentConfigPatch.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated content config PATCH 401, got ${blockedContentConfigPatch.status} ${blockedContentConfigPatch.payload?.error?.code}`,
+  );
+}
+
+const fixtureContentConfigPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/config",
+  contentManagerHeaders,
+  { method: "PATCH", body: { config: { summary: "Blocked" } } },
+);
+if (
+  fixtureContentConfigPatch.status !== 403 ||
+  fixtureContentConfigPatch.payload?.error?.message !== "Content config writes require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture content config PATCH bearer requirement, got ${fixtureContentConfigPatch.status} ${fixtureContentConfigPatch.payload?.error?.message}`,
+  );
+}
+
+const bearerPlayerContentConfigPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/config",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "PATCH", body: { config: { summary: "Blocked" } } },
+);
+if (
+  bearerPlayerContentConfigPatch.status !== 403 ||
+  bearerPlayerContentConfigPatch.payload?.error?.message !== "You do not have permission to manage campaign content."
+) {
+  throw new Error(
+    `Expected bearer player content config PATCH forbidden, got ${bearerPlayerContentConfigPatch.status} ${bearerPlayerContentConfigPatch.payload?.error?.message}`,
+  );
+}
+
+const invalidJsonContentConfigPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/config",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PATCH", body: "[]" },
+);
+if (
+  invalidJsonContentConfigPatch.status !== 400 ||
+  invalidJsonContentConfigPatch.payload?.error?.message !== "Request body must be a JSON object."
+) {
+  throw new Error(
+    `Expected content config PATCH JSON-object validation, got ${invalidJsonContentConfigPatch.status} ${invalidJsonContentConfigPatch.payload?.error?.message}`,
+  );
+}
+
+const unsupportedContentConfigPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/config",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PATCH", body: { config: { hidden_lair: "yes" } } },
+);
+if (
+  unsupportedContentConfigPatch.status !== 400 ||
+  unsupportedContentConfigPatch.payload?.error?.message !== "Unsupported campaign config fields: hidden_lair"
+) {
+  throw new Error(
+    `Expected unsupported content config field validation, got ${unsupportedContentConfigPatch.status} ${unsupportedContentConfigPatch.payload?.error?.message}`,
+  );
+}
+
+const negativeSessionConfigPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/config",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PATCH", body: { config: { current_session: -1 } } },
+);
+if (
+  negativeSessionConfigPatch.status !== 400 ||
+  negativeSessionConfigPatch.payload?.error?.message !== "current_session must be zero or greater."
+) {
+  throw new Error(
+    `Expected negative current_session validation, got ${negativeSessionConfigPatch.status} ${negativeSessionConfigPatch.payload?.error?.message}`,
+  );
+}
+
+const updatedContentConfigPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/config",
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "PATCH",
+    body: {
+      config: {
+        current_session: "3",
+        summary: "Updated through the TypeScript API smoke test.",
+        system: "xianxia",
+        systems_library: "xianxia",
+      },
+    },
+  },
+);
+if (
+  updatedContentConfigPatch.status !== 200 ||
+  updatedContentConfigPatch.payload?.config_file?.config?.current_session !== 3 ||
+  updatedContentConfigPatch.payload?.config_file?.config?.summary !== "Updated through the TypeScript API smoke test." ||
+  updatedContentConfigPatch.payload?.config_file?.config?.system !== "Xianxia" ||
+  updatedContentConfigPatch.payload?.config_file?.config?.systems_library !== "Xianxia"
+) {
+  throw new Error(`Unexpected content config PATCH payload: ${JSON.stringify(updatedContentConfigPatch.payload)}`);
+}
+
+const campaignAfterContentConfigPatch = await requestJson("/api/v1/campaigns/linden-pass");
+if (
+  campaignAfterContentConfigPatch.status !== 200 ||
+  campaignAfterContentConfigPatch.payload?.campaign?.current_session !== 3 ||
+  campaignAfterContentConfigPatch.payload?.campaign?.system !== "Xianxia" ||
+  campaignAfterContentConfigPatch.payload?.campaign?.systems_library_slug !== "Xianxia"
+) {
+  throw new Error(
+    `Expected campaign detail to reflect content config PATCH, got ${JSON.stringify(campaignAfterContentConfigPatch.payload?.campaign)}`,
+  );
+}
+
+const emptyContentConfigPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/config",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PATCH" },
+);
+if (
+  emptyContentConfigPatch.status !== 200 ||
+  emptyContentConfigPatch.payload?.config_file?.config?.current_session !== 3
+) {
+  throw new Error(`Expected empty content config PATCH to preserve config, got ${JSON.stringify(emptyContentConfigPatch.payload)}`);
+}
+
+const restoredContentConfigPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/config",
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "PATCH",
+    body: {
+      config: {
+        current_session: 2,
+        summary: "A public-safe sample campaign fixture used to verify wiki, session, combat, and character flows.",
+        system: "DND 5E",
+        systems_library: "DND5E",
+      },
+    },
+  },
+);
+if (
+  restoredContentConfigPatch.status !== 200 ||
+  restoredContentConfigPatch.payload?.config_file?.config?.current_session !== 2 ||
+  restoredContentConfigPatch.payload?.config_file?.config?.system !== "DND-5E" ||
+  restoredContentConfigPatch.payload?.config_file?.config?.systems_library !== "DND-5E"
+) {
+  throw new Error(`Expected restored content config payload, got ${JSON.stringify(restoredContentConfigPatch.payload)}`);
+}
+
 const contentCharacters = await requestJson("/api/v1/campaigns/linden-pass/content/characters", contentManagerHeaders);
 if (contentCharacters.status !== 200) {
   throw new Error(`Expected content characters list endpoint 200, got ${contentCharacters.status}`);
@@ -3750,6 +3906,16 @@ if (
 const missingCampaignConfig = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/content/config");
 if (missingCampaignConfig.status !== 404 || missingCampaignConfig.payload?.error?.code !== "campaign_not_found") {
   throw new Error(`Expected missing content config campaign JSON 404, got ${missingCampaignConfig.status}`);
+}
+const missingCampaignConfigPatch = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/content/config",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PATCH", body: { config: { summary: "Missing" } } },
+);
+if (missingCampaignConfigPatch.status !== 404 || missingCampaignConfigPatch.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(
+    `Expected missing content config PATCH campaign JSON 404, got ${missingCampaignConfigPatch.status} ${missingCampaignConfigPatch.payload?.error?.code}`,
+  );
 }
 const missingContentPages = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/content/pages");
 if (missingContentPages.status !== 404 || missingContentPages.payload?.error?.code !== "campaign_not_found") {

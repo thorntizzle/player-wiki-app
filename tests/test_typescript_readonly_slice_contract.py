@@ -718,6 +718,21 @@ def test_typescript_content_management_auth_matches_flask_contract(typescript_ap
     assert payload == flask_payload
 
 
+def test_typescript_content_config_mutation_requires_auth_like_flask(typescript_api_server, client):
+    body = {"config": {"summary": "Blocked without auth."}}
+    flask_response = client.patch("/api/v1/campaigns/linden-pass/content/config", json=body)
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/config",
+        method="PATCH",
+        body=body,
+    )
+    assert status == 401
+    assert payload == flask_payload
+
+
 def test_typescript_content_pages_list_matches_flask_contract(typescript_api_server, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     flask_response = client.get("/api/v1/campaigns/linden-pass/content/pages")

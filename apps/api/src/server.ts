@@ -64,6 +64,7 @@ import {
   sanitizeContentAssetRef,
   sanitizeContentCharacterSlug,
   sanitizeContentPageRef,
+  updateCampaignConfigFile,
 } from "./content/repository.js";
 import {
   buildCampaignConfigPayload,
@@ -184,6 +185,24 @@ async function readJsonObject(ctx: Context): Promise<{ status: "ok"; payload: Re
     return { status: "ok", payload: payload as Record<string, unknown> };
   } catch (error) {
     return { status: "error", message: error instanceof Error ? error.message : "Invalid JSON payload." };
+  }
+}
+
+async function readOptionalJsonObject(
+  ctx: Context,
+): Promise<{ status: "ok"; payload: Record<string, unknown> } | { status: "error"; message: string }> {
+  const rawPayload = await ctx.req.text();
+  if (!rawPayload.trim()) {
+    return { status: "ok", payload: {} };
+  }
+  try {
+    const payload = JSON.parse(rawPayload);
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return { status: "error", message: "Request body must be a JSON object." };
+    }
+    return { status: "ok", payload: payload as Record<string, unknown> };
+  } catch {
+    return { status: "error", message: "Request body must be a JSON object." };
   }
 }
 
@@ -332,6 +351,30 @@ function resolveContentManagerRole(
   }
   if (role === "player") {
     return { kind: "forbidden", message: forbiddenMessage };
+  }
+  return { kind: "missing" };
+}
+
+function resolveContentManagerBearerWrite(
+  ctx: { req: { header: (name: string) => string | undefined } },
+  campaignSlug: string,
+  fixtureForbiddenMessage: string,
+): RoleResolution {
+  const forbiddenMessage = "You do not have permission to manage campaign content.";
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "authenticated") {
+    const role = apiTokenRoleForCampaign(apiAuth.context, campaignSlug);
+    if (role === "admin" || role === "dm") {
+      return { kind: "authenticated", role: toFixtureSystemsRole(role), actorUserId: apiAuth.context.user.id };
+    }
+    return { kind: "forbidden", message: forbiddenMessage };
+  }
+  if (apiAuth.kind === "invalid") {
+    return { kind: "invalid" };
+  }
+
+  if (fixtureRole(ctx)) {
+    return { kind: "forbidden", message: fixtureForbiddenMessage };
   }
   return { kind: "missing" };
 }
@@ -1809,6 +1852,49 @@ app.get(ROUTES.campaignConfig, async (ctx) => {
   }
 
   return ctx.json(buildCampaignConfigPayload(campaignConfig));
+});
+
+app.patch(ROUTES.campaignConfigUpdate, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaignConfig = await getCampaignConfigFile(config, campaignSlug);
+  if (!campaignConfig) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveContentManagerBearerWrite(
+    ctx,
+    campaignConfig.campaign_slug,
+    "Content config writes require bearer API authentication.",
+  );
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readOptionalJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const updates =
+    typeof jsonPayload.payload.config === "object" &&
+    jsonPayload.payload.config !== null &&
+    !Array.isArray(jsonPayload.payload.config)
+      ? jsonPayload.payload.config
+      : jsonPayload.payload;
+  const result = await updateCampaignConfigFile(config, campaignConfig.campaign_slug, updates);
+  if (result.status === "not_found") {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildCampaignConfigPayload(result.record));
 });
 
 app.get(ROUTES.contentAssets, async (ctx) => {

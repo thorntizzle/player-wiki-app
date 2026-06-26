@@ -60,6 +60,8 @@ fixture database.
   - `PATCH /api/v1/campaigns/:campaignSlug/control/visibility`
 - Added fixture-backed, content-management-gated content config endpoint:
   - `GET /api/v1/campaigns/:campaignSlug/content/config`
+- Added fixture-backed content config write endpoint with bearer-token DM/admin access:
+  - `PATCH /api/v1/campaigns/:campaignSlug/content/config`
 - Added fixture-backed, content-management-gated content page management read endpoints:
   - `GET /api/v1/campaigns/:campaignSlug/content/pages`
   - `GET /api/v1/campaigns/:campaignSlug/content/pages/*`
@@ -281,6 +283,14 @@ fixture database.
   - stable `config_file.config` fields, including `title`, `current_session`, and `source_wiki_root`
   - `config_file.editable_fields` list
   - parseable `config_file.updated_at` string
+- Content/config writes preserve the `/api/v1/campaigns/:campaignSlug/content/config` mutation shell for a copied fixture campaign tree:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture-role write attempts are rejected because the mutation needs a durable bearer-token actor
+  - bearer-token players and users without active manager access receive `forbidden`
+  - request bodies may be empty, top-level update objects, or `{ "config": { ... } }`
+  - unsupported fields, invalid `current_session`, and blank titles return Flask-compatible `validation_error` messages
+  - `system` and `systems_library` aliases normalize to canonical known codes such as `DND-5E` and `Xianxia`
+  - writes update `campaign.yaml`, and subsequent Hono campaign/config reads reflect the changed fixture file
 - Content/page-management payload checks cover:
   - list endpoint `pages` shape with `29` fixture records, omitted `body_markdown`, and stable page/order sorting.
   - detail endpoint `page_file` shape with `body_markdown` included.
@@ -319,11 +329,11 @@ fixture database.
   - checks JSON missing-resource shapes for TypeScript wiki dynamic routes.
   - adds fixture session parity checks (active session state, messages, passive score flag, revision/token shape, short-circuit response, missing session campaign 404).
   - compares Flask-vs-TypeScript unauthenticated Session article-source search, Session article image, Session log detail, and Session log delete auth envelopes, and asserts the fixture lookup shell for short, wiki-result, player-forbidden, and missing-campaign cases.
-  - compares Flask-vs-TypeScript content-management unauthenticated and player-forbidden auth envelopes.
+  - compares Flask-vs-TypeScript content-management unauthenticated and player-forbidden auth envelopes, plus the unauthenticated content/config mutation envelope.
 - `apps/api/tests/smoke.mjs`:
   - starts compiled API on a local port and verifies `/healthz`, app state, fixture `/api/v1/me` identity reads, fixture `/api/v1/me/settings` account-settings reads, SQLite bearer-token `/api/v1/me` and `/api/v1/me/settings` reads/writes, SQLite-backed systems import-run list/detail reads with bearer admin/non-admin gates, campaign Systems landing/search/source list/detail/category/entry reads with fixture and bearer-token role gates, Combat state/live-state shell reads with fixture and bearer-token role gates, Combat Systems monster search reads with fixture and bearer-token role gates, Session state/article-source/image/log reads with fixture and bearer-token role gates, campaign list/detail, public Campaign Help, Campaign Control auth/payload reads and visibility writes, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
   - validates content-management auth gates for anonymous, fixture player, bearer player, bearer outsider, and bearer app-admin content config reads.
-  - validates fixture-backed content config endpoint payload for `linden-pass` (`campaign_slug`, `current_session`, `title`, `systems_sources`, `editable_fields`, `updated_at`) and missing-campaign 404.
+  - validates fixture-backed content config endpoint payload for `linden-pass` (`campaign_slug`, `current_session`, `title`, `systems_sources`, `editable_fields`, `updated_at`), content/config PATCH auth and validation behavior, `campaign.yaml` writes against a copied fixture tree, reflected campaign-detail reads, empty-body no-op behavior, canonical system/library normalization, and missing-campaign 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/pages` list sorting/count/body omission and sampled `Port Meridian` metadata/removal fields, plus `GET /api/v1/campaigns/:campaignSlug/content/pages/*` detail payload body inclusion and missing-content-page 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/assets` list sorting/count/data omission and sampled PNG metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/assets/*` detail payload byte data and missing-content-asset 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/characters` list sorting/count and sampled character summary metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` detail payload definition/import metadata and missing-content-character 404.

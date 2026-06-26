@@ -84,10 +84,12 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/session/article-sources/search`
   - `GET /api/v1/campaigns/:campaignSlug/session/articles/:articleId/image`
   - `GET /api/v1/campaigns/:campaignSlug/session/logs/:sessionId`
+  - `DELETE /api/v1/campaigns/:campaignSlug/session/logs/:sessionId`
   - `GET /api/v1/me`
   - `GET /api/v1/me/settings`
   - `PATCH /api/v1/me/settings`
   - `GET /api/v1/campaigns/:campaignSlug/content/config`
+  - `PATCH /api/v1/campaigns/:campaignSlug/content/config`
   - `GET /api/v1/campaigns/:campaignSlug/content/pages`
   - `GET /api/v1/campaigns/:campaignSlug/content/pages/*`
   - `GET /api/v1/campaigns/:campaignSlug/content/assets`
@@ -180,6 +182,12 @@ Route parity check command:
   preserve Flask-compatible content-management auth: no identity returns `auth_required`, fixture or
   bearer-token player/outsider identities return `forbidden`, and fixture or bearer-token DM/admin
   identities can read the fixture-backed payloads.
+- The content/config write route now serves `PATCH .../content/config` for bearer API-token DM/admin
+  users against the fixture campaign tree, preserving Flask-compatible editable-field validation,
+  `current_session` coercion, `system` and `systems_library` alias normalization, `campaign.yaml`
+  writes, refreshed campaign-detail reads, empty-body no-op behavior, and missing-campaign JSON.
+  Current validation covers a disposable copied fixture campaign only; production/staging write
+  readiness remains gated by migration, backup, and rollback rehearsal.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

@@ -323,6 +323,15 @@
       "notes": "Tracked Hono content/config fixture read-only route returning parsed campaign.yaml metadata behind Flask-compatible content-management auth for fixture or bearer-token DM/admin roles."
     },
     {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/config",
+      "route_family": "api_v1_content",
+      "status": "implemented_fixture_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/content/config",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono content/config write route with bearer API-token DM/admin access, Flask-compatible editable-field validation, current_session coercion, system and systems_library alias normalization, campaign.yaml writes, and explicit missing-campaign JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/content/pages",
       "route_family": "api_v1_content",

@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { parse } from "yaml";
+import { parse, stringify } from "yaml";
 
 import type { ApiConfig } from "../config.js";
 import { getCampaignBySlug } from "../campaigns/repository.js";
@@ -71,6 +71,14 @@ const DEPRECATED_PAGE_TYPES = new Set(["overview"]);
 const DEFAULT_DISPLAY_ORDER = 10_000;
 const DND_5E_SYSTEM_CODE = "DND-5E";
 const XIANXIA_SYSTEM_CODE = "Xianxia";
+const CAMPAIGN_CONFIG_EDITABLE_KEYS = new Set([
+  "current_session",
+  "source_wiki_root",
+  "summary",
+  "system",
+  "systems_library",
+  "title",
+]);
 
 interface CampaignContentContext {
   currentSession: number;
@@ -150,6 +158,10 @@ function parseYamlRecord(rawText: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function dumpYamlRecord(payload: Record<string, unknown>): string {
+  return `${stringify(payload, { sortMapEntries: false }).trimEnd()}\n`;
 }
 
 function toIsoTimestamp(value: Date): string {
@@ -348,6 +360,76 @@ function normalizeSystemCode(value: unknown): string {
     return XIANXIA_SYSTEM_CODE;
   }
   return rawValue;
+}
+
+function defaultSystemsLibrarySlug(value: unknown): string {
+  return normalizeSystemCode(value);
+}
+
+function stringFromPythonTruthy(value: unknown): string {
+  if (value === null || value === undefined || value === false || value === 0 || value === "") {
+    return "";
+  }
+  return String(value).trim();
+}
+
+function normalizeCurrentSession(value: unknown): { status: "ok"; value: number } | { status: "error"; message: string } {
+  let normalizedValue: number;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    normalizedValue = Math.trunc(value);
+  } else if (typeof value === "boolean") {
+    normalizedValue = value ? 1 : 0;
+  } else if (typeof value === "string" && /^[-+]?\d+$/.test(value.trim())) {
+    normalizedValue = Number.parseInt(value.trim(), 10);
+  } else {
+    return { status: "error", message: "current_session must be an integer." };
+  }
+
+  if (normalizedValue < 0) {
+    return { status: "error", message: "current_session must be zero or greater." };
+  }
+  return { status: "ok", value: normalizedValue };
+}
+
+function normalizeCampaignConfigUpdates(
+  updates: unknown,
+): { status: "ok"; updates: Record<string, unknown> } | { status: "error"; message: string } {
+  if (typeof updates !== "object" || updates === null || Array.isArray(updates)) {
+    return { status: "error", message: "Campaign config updates must be an object." };
+  }
+
+  const source = updates as Record<string, unknown>;
+  const unsupportedKeys = Object.keys(source)
+    .filter((key) => !CAMPAIGN_CONFIG_EDITABLE_KEYS.has(key))
+    .sort();
+  if (unsupportedKeys.length > 0) {
+    return { status: "error", message: `Unsupported campaign config fields: ${unsupportedKeys.join(", ")}` };
+  }
+
+  const normalized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (key === "current_session") {
+      const currentSession = normalizeCurrentSession(value);
+      if (currentSession.status === "error") {
+        return currentSession;
+      }
+      normalized[key] = currentSession.value;
+      continue;
+    }
+
+    let normalizedValue = stringFromPythonTruthy(value);
+    if (key === "title" && !normalizedValue) {
+      return { status: "error", message: "Campaign title is required." };
+    }
+    if (key === "system") {
+      normalizedValue = normalizeSystemCode(normalizedValue);
+    } else if (key === "systems_library") {
+      normalizedValue = defaultSystemsLibrarySlug(normalizedValue);
+    }
+    normalized[key] = normalizedValue;
+  }
+
+  return { status: "ok", updates: normalized };
 }
 
 function dedupeProficiencyValues(value: unknown): string[] {
@@ -834,6 +916,63 @@ export async function getCampaignConfigFile(
     configRecord,
     toIsoTimestamp(fileStats.mtime),
   );
+}
+
+export async function updateCampaignConfigFile(
+  config: ApiConfig,
+  campaignSlug: string,
+  updates: unknown,
+): Promise<
+  | {
+      status: "ok";
+      record: CampaignConfigRecord;
+    }
+  | {
+      status: "not_found";
+    }
+  | {
+      status: "validation_error";
+      message: string;
+    }
+> {
+  const safeCampaign = await getCampaignBySlug(config, campaignSlug);
+  if (!safeCampaign) {
+    return { status: "not_found" };
+  }
+
+  const campaignConfigPath = path.resolve(config.campaignsDir, safeCampaign.slug, "campaign.yaml");
+  let rawPayload: string;
+  try {
+    rawPayload = await fs.readFile(campaignConfigPath, "utf-8");
+  } catch {
+    return { status: "not_found" };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = parse(rawPayload);
+  } catch {
+    return { status: "validation_error", message: "Campaign config could not be parsed." };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { status: "validation_error", message: "Campaign config updates must be an object." };
+  }
+
+  const normalizedUpdates = normalizeCampaignConfigUpdates(updates);
+  if (normalizedUpdates.status === "error") {
+    return { status: "validation_error", message: normalizedUpdates.message };
+  }
+
+  const updatedConfig = {
+    ...(parsed as Record<string, unknown>),
+    ...normalizedUpdates.updates,
+  };
+  await fs.writeFile(campaignConfigPath, dumpYamlRecord(updatedConfig), "utf-8");
+  const refreshedRecord = await getCampaignConfigFile(config, safeCampaign.slug);
+  if (!refreshedRecord) {
+    return { status: "not_found" };
+  }
+  return { status: "ok", record: refreshedRecord };
 }
 
 export async function listCampaignContentPages(

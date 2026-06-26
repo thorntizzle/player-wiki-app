@@ -628,6 +628,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "validation_error",
     },
   },
+  {
+    method: "PATCH",
+    honoPath: "/api/v1/campaigns/:campaignSlug/content/config",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/content/config",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/content/config",
+    routeFamily: "api_v1_content",
+    missingResource: {
+      method: "PATCH",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/content/config",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -675,4 +690,5 @@ export const ROUTES = {
   sessionArticleDelete: IMPLEMENTED_ROUTES[41].honoPath,
   sessionArticlesRevealedClear: IMPLEMENTED_ROUTES[42].honoPath,
   sessionLogDelete: IMPLEMENTED_ROUTES[43].honoPath,
+  campaignConfigUpdate: IMPLEMENTED_ROUTES[44].honoPath,
 } as const;
