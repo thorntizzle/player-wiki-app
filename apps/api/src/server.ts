@@ -26,7 +26,15 @@ import {
 import { getCampaignBySlug, listCampaigns, listCampaignSlugs } from "./campaigns/repository.js";
 import type { CampaignViewModel } from "./campaigns/view.js";
 import { buildCombatReadOnlyPayload } from "./combat/view.js";
-import { buildDmContentPayload } from "./dmContent/view.js";
+import {
+  buildDmContentPayload,
+  createDmContentCondition,
+  createDmContentStatblock,
+  deleteDmContentCondition,
+  deleteDmContentStatblock,
+  updateDmContentCondition,
+  updateDmContentStatblock,
+} from "./dmContent/view.js";
 import { buildCampaignHelpPayload } from "./help/view.js";
 import { ROUTES } from "./routes.js";
 import { buildSessionArticleSourceSearchPayload } from "./session/sourceSearch.js";
@@ -387,6 +395,28 @@ function resolveContentManagerBearerWrite(
 
   if (fixtureRole(ctx)) {
     return { kind: "forbidden", message: fixtureForbiddenMessage };
+  }
+  return { kind: "missing" };
+}
+
+function resolveDmContentBearerWrite(
+  ctx: { req: { header: (name: string) => string | undefined } },
+  campaignSlug: string,
+): RoleResolution {
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "authenticated") {
+    const role = apiTokenRoleForCampaign(apiAuth.context, campaignSlug);
+    if (role === "admin" || role === "dm") {
+      return { kind: "authenticated", role: toFixtureSystemsRole(role), actorUserId: apiAuth.context.user.id };
+    }
+    return { kind: "forbidden", message: "You do not have permission to manage DM Content." };
+  }
+  if (apiAuth.kind === "invalid") {
+    return { kind: "invalid" };
+  }
+
+  if (fixtureRole(ctx)) {
+    return { kind: "forbidden", message: "DM Content writes require bearer API authentication." };
   }
   return { kind: "missing" };
 }
@@ -1411,6 +1441,192 @@ app.get(ROUTES.dmContentState, async (ctx) => {
 
   const playerWikiPages = await campaignWikiRepository.listVisiblePages(campaign.slug);
   return ctx.json(buildDmContentPayload(config.dbPath, campaign, auth.role, playerWikiPages.length));
+});
+
+app.post(ROUTES.dmContentStatblockCreate, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveDmContentBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = invalidJson(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = createDmContentStatblock(config.dbPath, campaign.slug, jsonPayload.payload, auth.actorUserId || 0);
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({ ok: true, ...result.payload });
+});
+
+app.put(ROUTES.dmContentStatblockUpdate, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveDmContentBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const statblockId = parsePositiveInteger(ctx.req.param("statblockId") || "");
+  if (!statblockId) {
+    const error = validationError("That statblock could not be found.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = invalidJson(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = updateDmContentStatblock(config.dbPath, campaign.slug, statblockId, jsonPayload.payload, auth.actorUserId || 0);
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({ ok: true, ...result.payload });
+});
+
+app.delete(ROUTES.dmContentStatblockDelete, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveDmContentBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const statblockId = parsePositiveInteger(ctx.req.param("statblockId") || "");
+  if (!statblockId) {
+    const error = validationError("That statblock could not be found.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = deleteDmContentStatblock(config.dbPath, campaign.slug, statblockId);
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({ ok: true, ...result.payload });
+});
+
+app.post(ROUTES.dmContentConditionCreate, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveDmContentBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = invalidJson(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = createDmContentCondition(config.dbPath, campaign.slug, jsonPayload.payload, auth.actorUserId || 0);
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({ ok: true, ...result.payload });
+});
+
+app.put(ROUTES.dmContentConditionUpdate, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveDmContentBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const conditionDefinitionId = parsePositiveInteger(ctx.req.param("conditionDefinitionId") || "");
+  if (!conditionDefinitionId) {
+    const error = validationError("That custom condition could not be found.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = invalidJson(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = updateDmContentCondition(
+    config.dbPath,
+    campaign.slug,
+    conditionDefinitionId,
+    jsonPayload.payload,
+    auth.actorUserId || 0,
+  );
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({ ok: true, ...result.payload });
+});
+
+app.delete(ROUTES.dmContentConditionDelete, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveDmContentBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const conditionDefinitionId = parsePositiveInteger(ctx.req.param("conditionDefinitionId") || "");
+  if (!conditionDefinitionId) {
+    const error = validationError("That custom condition could not be found.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = deleteDmContentCondition(config.dbPath, campaign.slug, conditionDefinitionId);
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({ ok: true, ...result.payload });
 });
 
 app.post(ROUTES.sessionStart, async (ctx) => {

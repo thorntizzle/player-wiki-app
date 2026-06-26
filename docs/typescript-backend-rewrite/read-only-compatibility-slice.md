@@ -60,6 +60,13 @@ fixture database.
   - `PATCH /api/v1/campaigns/:campaignSlug/control/visibility`
 - Added DM Content read endpoint with fixture or bearer-token DM/admin access:
   - `GET /api/v1/campaigns/:campaignSlug/dm-content`
+- Added DM Content statblock and custom condition write endpoints with bearer-token DM/admin access:
+  - `POST /api/v1/campaigns/:campaignSlug/dm-content/statblocks`
+  - `PUT /api/v1/campaigns/:campaignSlug/dm-content/statblocks/:statblockId`
+  - `DELETE /api/v1/campaigns/:campaignSlug/dm-content/statblocks/:statblockId`
+  - `POST /api/v1/campaigns/:campaignSlug/dm-content/conditions`
+  - `PUT /api/v1/campaigns/:campaignSlug/dm-content/conditions/:conditionDefinitionId`
+  - `DELETE /api/v1/campaigns/:campaignSlug/dm-content/conditions/:conditionDefinitionId`
 - Added fixture-backed, content-management-gated content config endpoint:
   - `GET /api/v1/campaigns/:campaignSlug/content/config`
 - Added fixture-backed content config write endpoint with bearer-token DM/admin access:
@@ -208,6 +215,21 @@ fixture database.
   - statblocks include source filename, subsection, parsed combat fields, timestamps, actor ids, and the Flask-compatible parser feedback summary
   - subpage counts cover statblocks, conditions, visible Player Wiki pages, staged Session articles, and campaign Systems source-state rows
   - missing campaign DM Content reads return `campaign_not_found` JSON
+- DM Content statblock writes preserve the `/api/v1/campaigns/:campaignSlug/dm-content/statblocks...` mutation shells for a disposable fixture SQLite database:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture-role write attempts are rejected because the mutation needs a durable bearer-token actor
+  - bearer-token players and users without active manager access receive `forbidden`
+  - creates validate `.md` / `.markdown` filenames, non-empty markdown, YAML frontmatter object shape, title, Hit Points, Speed, and subsection length
+  - updates require `markdown_text`, `body_markdown`, or `subsection`, then reparse the stored or submitted markdown with the existing title as fallback
+  - writes store parsed title/body/subsection/AC/HP/Speed/movement/initiative fields and actor ids in `campaign_dm_statblocks`
+  - deletes return the deleted statblock payload, and missing statblocks return Flask-compatible `validation_error`
+- DM Content custom condition writes preserve the `/api/v1/campaigns/:campaignSlug/dm-content/conditions...` mutation shells for a disposable fixture SQLite database:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture-role write attempts are rejected because the mutation needs a durable bearer-token actor
+  - bearer-token players and users without active manager access receive `forbidden`
+  - creates and updates validate name presence, 80-character names, 4,000-character descriptions, and normalized duplicate names
+  - writes store condition names/descriptions and actor ids in `campaign_dm_condition_definitions`
+  - deletes return the deleted condition payload, and missing conditions return Flask-compatible `validation_error`
 - Wiki home response preserves the stable Flask fixture fields for:
   - `frontend_mode`
   - `can_view_wiki`

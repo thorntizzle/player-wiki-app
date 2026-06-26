@@ -3529,6 +3529,262 @@ if (
   throw new Error(`Unexpected bearer DM Content payload: ${JSON.stringify(bearerDmContent.payload)}`);
 }
 
+const fixtureStatblockCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/dm-content/statblocks",
+  { "X-CPW-Fixture-Role": "dm" },
+  {
+    method: "POST",
+    body: {
+      filename: "fixture-blocked.md",
+      markdown_text: "# Fixture Blocked\n\nHit Points 5\nSpeed 30 ft.",
+    },
+  },
+);
+if (
+  fixtureStatblockCreate.status !== 403 ||
+  fixtureStatblockCreate.payload?.error?.message !== "DM Content writes require bearer API authentication."
+) {
+  throw new Error(`Expected fixture statblock create bearer requirement, got ${JSON.stringify(fixtureStatblockCreate.payload)}`);
+}
+
+const playerStatblockCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/dm-content/statblocks",
+  { Authorization: `Bearer ${playerApiToken}` },
+  {
+    method: "POST",
+    body: {
+      filename: "player-blocked.md",
+      markdown_text: "# Player Blocked\n\nHit Points 5\nSpeed 30 ft.",
+    },
+  },
+);
+if (
+  playerStatblockCreate.status !== 403 ||
+  playerStatblockCreate.payload?.error?.message !== "You do not have permission to manage DM Content."
+) {
+  throw new Error(`Expected player statblock create forbidden, got ${JSON.stringify(playerStatblockCreate.payload)}`);
+}
+
+const invalidStatblockCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/dm-content/statblocks",
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: {
+      filename: "bad-statblock.txt",
+      markdown_text: "# Bad\n\nHit Points 5\nSpeed 30 ft.",
+    },
+  },
+);
+if (
+  invalidStatblockCreate.status !== 400 ||
+  invalidStatblockCreate.payload?.error?.message !== "DM Content statblock uploads must use .md or .markdown files."
+) {
+  throw new Error(`Expected invalid statblock create validation, got ${JSON.stringify(invalidStatblockCreate.payload)}`);
+}
+
+const statblockCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/dm-content/statblocks",
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: {
+      filename: "dock-runner.md",
+      subsection: "Malverine Minions",
+      markdown_text: "# Dock Runner\n\nArmor Class 13\nHit Points 22\nSpeed 30 ft.\n\nDEX 14 (+2)\n",
+    },
+  },
+);
+const createdStatblock = statblockCreate.payload?.statblock;
+if (
+  statblockCreate.status !== 200 ||
+  statblockCreate.payload?.ok !== true ||
+  createdStatblock?.title !== "Dock Runner" ||
+  createdStatblock?.subsection !== "Malverine Minions" ||
+  createdStatblock?.parser_feedback?.summary !==
+    "Parsed combat fields: AC 13, HP 22, Speed 30 ft. (30 ft. movement), Init +2." ||
+  createdStatblock?.created_by_user_id !== 81 ||
+  createdStatblock?.updated_by_user_id !== 81
+) {
+  throw new Error(`Unexpected statblock create payload: ${JSON.stringify(statblockCreate.payload)}`);
+}
+
+const emptyStatblockUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/dm-content/statblocks/${createdStatblock.id}`,
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: {} },
+);
+if (
+  emptyStatblockUpdate.status !== 400 ||
+  emptyStatblockUpdate.payload?.error?.message !== "Provide markdown_text, body_markdown, or subsection to update a statblock."
+) {
+  throw new Error(`Expected empty statblock update validation, got ${JSON.stringify(emptyStatblockUpdate.payload)}`);
+}
+
+const statblockUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/dm-content/statblocks/${createdStatblock.id}`,
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "PUT",
+    body: {
+      subsection: "Dock Crew",
+      markdown_text: "# Dock Runner Captain\n\nArmor Class 15\nHit Points 36\nSpeed 35 ft.\n\nDEX 16 (+3)\n",
+    },
+  },
+);
+if (
+  statblockUpdate.status !== 200 ||
+  statblockUpdate.payload?.statblock?.title !== "Dock Runner Captain" ||
+  statblockUpdate.payload?.statblock?.subsection !== "Dock Crew" ||
+  statblockUpdate.payload?.statblock?.max_hp !== 36 ||
+  statblockUpdate.payload?.statblock?.movement_total !== 35 ||
+  statblockUpdate.payload?.statblock?.initiative_bonus !== 3 ||
+  statblockUpdate.payload?.statblock?.parser_feedback?.summary !==
+    "Parsed combat fields: AC 15, HP 36, Speed 35 ft. (35 ft. movement), Init +3."
+) {
+  throw new Error(`Unexpected statblock update payload: ${JSON.stringify(statblockUpdate.payload)}`);
+}
+
+const missingStatblockDelete = await requestJson(
+  "/api/v1/campaigns/linden-pass/dm-content/statblocks/999999",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "DELETE" },
+);
+if (
+  missingStatblockDelete.status !== 400 ||
+  missingStatblockDelete.payload?.error?.message !== "That statblock could not be found."
+) {
+  throw new Error(`Expected missing statblock delete validation, got ${JSON.stringify(missingStatblockDelete.payload)}`);
+}
+
+const statblockDelete = await requestJson(
+  `/api/v1/campaigns/linden-pass/dm-content/statblocks/${createdStatblock.id}`,
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "DELETE" },
+);
+if (
+  statblockDelete.status !== 200 ||
+  statblockDelete.payload?.statblock?.id !== createdStatblock.id ||
+  statblockDelete.payload?.statblock?.title !== "Dock Runner Captain"
+) {
+  throw new Error(`Unexpected statblock delete payload: ${JSON.stringify(statblockDelete.payload)}`);
+}
+
+const duplicateConditionCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/dm-content/conditions",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { name: "Salt Burned", description_markdown: "Duplicate normalized name." } },
+);
+if (
+  duplicateConditionCreate.status !== 400 ||
+  duplicateConditionCreate.payload?.error?.message !== "A custom condition with that name already exists."
+) {
+  throw new Error(`Expected duplicate condition validation, got ${JSON.stringify(duplicateConditionCreate.payload)}`);
+}
+
+const conditionCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/dm-content/conditions",
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: {
+      name: "Off Balance",
+      description_markdown: "The target has disadvantage on its next attack roll.",
+    },
+  },
+);
+const createdCondition = conditionCreate.payload?.condition;
+if (
+  conditionCreate.status !== 200 ||
+  conditionCreate.payload?.ok !== true ||
+  createdCondition?.name !== "Off Balance" ||
+  createdCondition?.created_by_user_id !== 81 ||
+  createdCondition?.updated_by_user_id !== 81
+) {
+  throw new Error(`Unexpected condition create payload: ${JSON.stringify(conditionCreate.payload)}`);
+}
+
+const emptyConditionUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/dm-content/conditions/${createdCondition.id}`,
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: {} },
+);
+if (
+  emptyConditionUpdate.status !== 400 ||
+  emptyConditionUpdate.payload?.error?.message !== "Provide name or description_markdown to update a custom condition."
+) {
+  throw new Error(`Expected empty condition update validation, got ${JSON.stringify(emptyConditionUpdate.payload)}`);
+}
+
+const conditionUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/dm-content/conditions/${createdCondition.id}`,
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "PUT",
+    body: {
+      name: "Off Balance Revised",
+      description_markdown: "The target has disadvantage on its next Dexterity check.",
+    },
+  },
+);
+if (
+  conditionUpdate.status !== 200 ||
+  conditionUpdate.payload?.condition?.name !== "Off Balance Revised" ||
+  conditionUpdate.payload?.condition?.description_markdown !==
+    "The target has disadvantage on its next Dexterity check."
+) {
+  throw new Error(`Unexpected condition update payload: ${JSON.stringify(conditionUpdate.payload)}`);
+}
+
+const playerConditionUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/dm-content/conditions/${createdCondition.id}`,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "PUT", body: { name: "Blocked" } },
+);
+if (playerConditionUpdate.status !== 403 || playerConditionUpdate.payload?.error?.code !== "forbidden") {
+  throw new Error(`Expected player condition update forbidden, got ${JSON.stringify(playerConditionUpdate.payload)}`);
+}
+
+const missingConditionDelete = await requestJson(
+  "/api/v1/campaigns/linden-pass/dm-content/conditions/999999",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "DELETE" },
+);
+if (
+  missingConditionDelete.status !== 400 ||
+  missingConditionDelete.payload?.error?.message !== "That custom condition could not be found."
+) {
+  throw new Error(`Expected missing condition delete validation, got ${JSON.stringify(missingConditionDelete.payload)}`);
+}
+
+const conditionDelete = await requestJson(
+  `/api/v1/campaigns/linden-pass/dm-content/conditions/${createdCondition.id}`,
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "DELETE" },
+);
+if (
+  conditionDelete.status !== 200 ||
+  conditionDelete.payload?.condition?.id !== createdCondition.id ||
+  conditionDelete.payload?.condition?.name !== "Off Balance Revised"
+) {
+  throw new Error(`Unexpected condition delete payload: ${JSON.stringify(conditionDelete.payload)}`);
+}
+
+const dmContentAfterMutations = await requestJson("/api/v1/campaigns/linden-pass/dm-content", {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  dmContentAfterMutations.status !== 200 ||
+  dmContentAfterMutations.payload?.statblocks?.length !== 1 ||
+  dmContentAfterMutations.payload?.conditions?.length !== 1 ||
+  dmContentAfterMutations.payload?.subpage_counts?.statblocks !== 1 ||
+  dmContentAfterMutations.payload?.subpage_counts?.conditions !== 1 ||
+  dmContentAfterMutations.payload?.statblocks?.some((statblock) => statblock.title === "Dock Runner Captain") ||
+  dmContentAfterMutations.payload?.conditions?.some((condition) => condition.name === "Off Balance Revised")
+) {
+  throw new Error(`Unexpected DM Content payload after mutations: ${JSON.stringify(dmContentAfterMutations.payload)}`);
+}
+
 const missingDmContentCampaign = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/dm-content", {
   "X-CPW-Fixture-Role": "dm",
 });

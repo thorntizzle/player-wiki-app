@@ -70,6 +70,12 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/control`
   - `PATCH /api/v1/campaigns/:campaignSlug/control/visibility`
   - `GET /api/v1/campaigns/:campaignSlug/dm-content`
+  - `POST /api/v1/campaigns/:campaignSlug/dm-content/statblocks`
+  - `PUT /api/v1/campaigns/:campaignSlug/dm-content/statblocks/:statblockId`
+  - `DELETE /api/v1/campaigns/:campaignSlug/dm-content/statblocks/:statblockId`
+  - `POST /api/v1/campaigns/:campaignSlug/dm-content/conditions`
+  - `PUT /api/v1/campaigns/:campaignSlug/dm-content/conditions/:conditionDefinitionId`
+  - `DELETE /api/v1/campaigns/:campaignSlug/dm-content/conditions/:conditionDefinitionId`
   - `GET /api/v1/campaigns/:campaignSlug/help`
   - `GET /api/v1/campaigns/:campaignSlug/wiki`
   - `GET /api/v1/campaigns/:campaignSlug/wiki/sections/:sectionSlug`
@@ -191,8 +197,14 @@ Route parity check command:
   unauthenticated `auth_required`, DM/admin-only access for fixture roles and bearer API tokens,
   SQLite statblock and custom condition serialization, statblock parser feedback summaries, lane
   counts for Player Wiki pages, staged Session articles, and Systems sources, and missing-campaign
-  JSON. This is read-only route parity only; DM Content statblock/condition mutations and browser
-  page workflows remain Flask-owned until separate Hono route slices land.
+  JSON.
+- The DM Content statblock and custom condition API mutations now serve bearer-token DM/admin
+  create/update/delete routes against `CPW_DB_PATH`, preserving Flask-compatible durable-actor
+  requirements, markdown statblock upload validation and parser field extraction, condition
+  name/description/duplicate validation, deleted-record response payloads, and missing-resource
+  `validation_error` JSON. Current validation covers a disposable fixture database only; production
+  or staging write readiness remains gated by migration, backup, copied-data rehearsal, and rollback
+  approval.
 - The content/config, content page, content asset, and content character management read routes now
   preserve Flask-compatible content-management auth: no identity returns `auth_required`, fixture or
   bearer-token player/outsider identities return `forbidden`, and fixture or bearer-token DM/admin

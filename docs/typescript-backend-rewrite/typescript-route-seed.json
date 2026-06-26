@@ -53,6 +53,60 @@
       "notes": "Tracked Hono DM Content read route with Flask-compatible unauthenticated auth_required behavior, fixture-role and bearer-token DM/admin access, SQLite statblock and condition reads, parser feedback summaries, lane counts for player wiki, staged session articles, and Systems sources, and explicit missing-campaign JSON."
     },
     {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/dm-content/statblocks",
+      "route_family": "api_v1_dm_content",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/dm-content/statblocks",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono DM Content statblock create route with bearer API-token DM/admin access, Flask-compatible markdown upload validation, parser field extraction, SQLite row inserts with actor ids, and explicit missing-campaign JSON."
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/dm-content/statblocks/<int:statblock_id>",
+      "route_family": "api_v1_dm_content",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/dm-content/statblocks/:statblockId",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono DM Content statblock update route with bearer API-token DM/admin access, Flask-compatible required-field validation, markdown reparse, subsection updates, SQLite row updates with actor ids, and validation_error missing-statblock JSON."
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/dm-content/statblocks/<int:statblock_id>",
+      "route_family": "api_v1_dm_content",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/dm-content/statblocks/:statblockId",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono DM Content statblock delete route with bearer API-token DM/admin access, Flask-compatible deleted-statblock payloads, SQLite row deletes, and validation_error missing-statblock JSON."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/dm-content/conditions",
+      "route_family": "api_v1_dm_content",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/dm-content/conditions",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono DM Content custom condition create route with bearer API-token DM/admin access, Flask-compatible name/description/duplicate validation, SQLite row inserts with actor ids, and explicit missing-campaign JSON."
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/dm-content/conditions/<int:condition_definition_id>",
+      "route_family": "api_v1_dm_content",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/dm-content/conditions/:conditionDefinitionId",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono DM Content custom condition update route with bearer API-token DM/admin access, Flask-compatible required-field/name/description/duplicate validation, SQLite row updates with actor ids, and validation_error missing-condition JSON."
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/dm-content/conditions/<int:condition_definition_id>",
+      "route_family": "api_v1_dm_content",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/dm-content/conditions/:conditionDefinitionId",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono DM Content custom condition delete route with bearer API-token DM/admin access, Flask-compatible deleted-condition payloads, SQLite row deletes, and validation_error missing-condition JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/campaigns",
       "route_family": "api_v1_campaigns",
