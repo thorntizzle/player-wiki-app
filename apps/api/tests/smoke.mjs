@@ -182,6 +182,35 @@ if (mmImportRun.completed_at !== "2026-06-25T10:01:00+00:00" || mmImportRun.star
   throw new Error(`Unexpected MM import run completion metadata: ${JSON.stringify(mmImportRun)}`);
 }
 
+const blockedImportRunDetail = await requestJson(`/api/v1/systems/import-runs/${mmImportRun.id}`);
+if (blockedImportRunDetail.status !== 401 || blockedImportRunDetail.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated systems import run detail to return auth_required 401, got ${blockedImportRunDetail.status} ${blockedImportRunDetail.payload?.error?.code}`,
+  );
+}
+
+const importRunDetail = await requestJson(`/api/v1/systems/import-runs/${mmImportRun.id}`, {
+  "X-CPW-Fixture-Role": "admin",
+});
+if (importRunDetail.status !== 200 || importRunDetail.payload?.ok !== true) {
+  throw new Error(`Expected systems import run detail 200 ok, got ${importRunDetail.status}`);
+}
+if (importRunDetail.payload?.import_run?.id !== mmImportRun.id) {
+  throw new Error(`Expected systems import run detail id ${mmImportRun.id}, got ${importRunDetail.payload?.import_run?.id}`);
+}
+if (importRunDetail.payload?.import_run?.summary?.source_files?.[0] !== "data/bestiary/bestiary-mm.json") {
+  throw new Error(`Unexpected systems import run detail summary: ${JSON.stringify(importRunDetail.payload?.import_run)}`);
+}
+
+const missingImportRunDetail = await requestJson("/api/v1/systems/import-runs/999999", {
+  "X-CPW-Fixture-Role": "admin",
+});
+if (missingImportRunDetail.status !== 404 || missingImportRunDetail.payload?.error?.code !== "systems_import_run_not_found") {
+  throw new Error(
+    `Expected missing systems import run detail JSON 404, got ${missingImportRunDetail.status} ${missingImportRunDetail.payload?.error?.code}`,
+  );
+}
+
 const campaignList = await requestJson("/api/v1/campaigns");
 if (campaignList.status !== 200) {
   throw new Error(`Expected campaign list endpoint 200, got ${campaignList.status}`);

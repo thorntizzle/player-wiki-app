@@ -244,6 +244,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
     seedPath: "/api/v1/systems/import-runs",
     routeFamily: "api_v1_systems",
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/systems/import-runs/:importRunId",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/systems/import-runs/<int:import_run_id>",
+    seedPath: "/api/v1/systems/import-runs/<int:import_run_id>",
+    routeFamily: "api_v1_systems",
+    missingResource: {
+      method: "GET",
+      path: "/api/v1/systems/import-runs/999999",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "systems_import_run_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -264,4 +279,5 @@ export const ROUTES = {
   campaignList: IMPLEMENTED_ROUTES[14].honoPath,
   appState: IMPLEMENTED_ROUTES[15].honoPath,
   systemsImportRuns: IMPLEMENTED_ROUTES[16].honoPath,
+  systemsImportRun: IMPLEMENTED_ROUTES[17].honoPath,
 } as const;

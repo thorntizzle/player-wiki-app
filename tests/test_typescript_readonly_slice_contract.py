@@ -171,6 +171,16 @@ def test_typescript_systems_import_runs_requires_auth_like_flask(typescript_api_
     assert payload == flask_payload
 
 
+def test_typescript_systems_import_run_detail_requires_auth_like_flask(typescript_api_server, client):
+    flask_response = client.get("/api/v1/systems/import-runs/999999")
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/systems/import-runs/999999")
+    assert status == 401
+    assert payload == flask_payload
+
+
 def test_typescript_systems_import_runs_success_shape_matches_flask(typescript_api_server):
     status, payload = _to_json(
         f"{typescript_api_server}/api/v1/systems/import-runs",

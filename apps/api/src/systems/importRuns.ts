@@ -64,6 +64,19 @@ function serializeImportRun(row: SystemsImportRunRow): SystemsImportRun {
   };
 }
 
+const importRunSelectColumns = `
+  id,
+  library_slug,
+  source_id,
+  status,
+  import_version,
+  source_path,
+  summary_json,
+  started_at,
+  completed_at,
+  started_by_user_id
+`;
+
 export function listSystemsImportRuns(dbPath: string, filters: SystemsImportRunFilters): SystemsImportRun[] {
   if (!existsSync(dbPath)) {
     return [];
@@ -81,17 +94,7 @@ export function listSystemsImportRuns(dbPath: string, filters: SystemsImportRunF
   }
 
   let query = `
-    SELECT
-      id,
-      library_slug,
-      source_id,
-      status,
-      import_version,
-      source_path,
-      summary_json,
-      started_at,
-      completed_at,
-      started_by_user_id
+    SELECT ${importRunSelectColumns}
     FROM systems_import_runs
   `;
   if (clauses.length > 0) {
@@ -107,6 +110,33 @@ export function listSystemsImportRuns(dbPath: string, filters: SystemsImportRunF
   } catch (error) {
     if (error instanceof Error && error.message.includes("no such table")) {
       return [];
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function getSystemsImportRun(dbPath: string, importRunId: number): SystemsImportRun | null {
+  if (!existsSync(dbPath)) {
+    return null;
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const row = database
+      .prepare(
+        `
+          SELECT ${importRunSelectColumns}
+          FROM systems_import_runs
+          WHERE id = ?
+        `,
+      )
+      .get(importRunId) as SystemsImportRunRow | undefined;
+    return row ? serializeImportRun(row) : null;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("no such table")) {
+      return null;
     }
     throw error;
   } finally {

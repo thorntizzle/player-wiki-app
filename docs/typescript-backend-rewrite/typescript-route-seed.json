@@ -54,6 +54,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/systems/import-runs/<int:import_run_id>",
+      "route_family": "api_v1_systems",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/systems/import-runs/:importRunId",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono systems import-run detail route with Flask-compatible unauthenticated auth_required behavior, fixture-admin SQLite reads through CPW_DB_PATH, and explicit missing-resource JSON."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/wiki",
       "route_family": "api_v1_wiki",
       "status": "implemented_fixture_readonly",

@@ -10,7 +10,7 @@ import { getCampaignBySlug, listCampaigns, listCampaignSlugs } from "./campaigns
 import { buildCampaignHelpPayload } from "./help/view.js";
 import { ROUTES } from "./routes.js";
 import { buildSessionStatePayload } from "./session/view.js";
-import { listSystemsImportRuns } from "./systems/importRuns.js";
+import { getSystemsImportRun, listSystemsImportRuns } from "./systems/importRuns.js";
 import { getCampaignConfigFile } from "./content/repository.js";
 import {
   getCampaignContentAsset,
@@ -122,9 +122,25 @@ function validationError(message: string) {
   };
 }
 
+function notFound(code: string, message: string) {
+  return {
+    ok: false,
+    error: {
+      code,
+      message,
+    },
+    status: 404 as const,
+  };
+}
+
 function hasFixtureAdminAuth(ctx: { req: { header: (name: string) => string | undefined } }): boolean {
   const fixtureRole = (ctx.req.header("X-CPW-Fixture-Role") || "").trim().toLowerCase();
   return fixtureRole === "admin";
+}
+
+function parsePositiveInteger(rawValue: string): number | null {
+  const parsed = Number(rawValue.trim());
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function campaignHref(campaignSlug: string, suffix = ""): string {
@@ -325,6 +341,30 @@ app.get(ROUTES.systemsImportRuns, async (ctx) => {
   return ctx.json({
     ok: true,
     import_runs: importRuns,
+  });
+});
+
+app.get(ROUTES.systemsImportRun, async (ctx) => {
+  if (!hasFixtureAdminAuth(ctx)) {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const importRunId = parsePositiveInteger(ctx.req.param("importRunId") || "");
+  if (importRunId === null) {
+    const error = notFound("systems_import_run_not_found", "Could not find that Systems import run.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const importRun = getSystemsImportRun(config.dbPath, importRunId);
+  if (!importRun) {
+    const error = notFound("systems_import_run_not_found", "Could not find that Systems import run.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    import_run: importRun,
   });
 });
 
