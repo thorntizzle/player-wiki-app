@@ -35,6 +35,15 @@
       "notes": "Tracked Hono Campaign Control read route with Flask-compatible campaign-visibility manager auth, fixture or bearer-token DM/admin access, SQLite visibility overrides when present, default visibility rows, rules, notes, and control links."
     },
     {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/control/visibility",
+      "route_family": "api_v1_campaigns",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/control/visibility",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Campaign Control visibility write route with bearer API-token manager auth, Flask-compatible validation for visibility payloads and admin-only Private choices, SQLite setting upserts, audit rows, refreshed control payload, changed scope labels, and explicit missing-campaign JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/campaigns",
       "route_family": "api_v1_campaigns",

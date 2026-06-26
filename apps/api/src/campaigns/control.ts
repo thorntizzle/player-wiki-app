@@ -49,6 +49,16 @@ interface CampaignVisibilitySettingRow {
   visibility: string;
 }
 
+type VisibilityUpdateResult =
+  | {
+      status: "ok";
+      changedScopes: string[];
+    }
+  | {
+      status: "validation_error";
+      message: string;
+    };
+
 function normalizeSystemKey(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
@@ -82,12 +92,34 @@ function roleSatisfiesVisibility(role: AuthRouteRole, visibility: string): boole
   return false;
 }
 
+function utcIsoTimestamp(): string {
+  return new Date().toISOString().replace("Z", "+00:00");
+}
+
 function campaignDefaultVisibility(campaign: CampaignViewModel): Record<VisibilityScope, string> {
   const defaults = { ...DEFAULT_CAMPAIGN_VISIBILITY_BY_SCOPE };
   if (normalizeSystemKey(campaign.system) === "xianxia") {
     defaults.systems = "dm";
   }
   return defaults;
+}
+
+function readVisibilitySettingsFromDatabase(
+  database: SqliteDatabase,
+  campaignSlug: string,
+): Map<VisibilityScope, string> {
+  const settings = new Map<VisibilityScope, string>();
+  const rows = database
+    .prepare("SELECT scope, visibility FROM campaign_visibility_settings WHERE campaign_slug = ?")
+    .all(campaignSlug) as CampaignVisibilitySettingRow[];
+  for (const row of rows) {
+    const scope = String(row.scope || "").trim().toLowerCase();
+    const visibility = normalizeVisibility(row.visibility);
+    if (isVisibilityScope(scope) && visibility) {
+      settings.set(scope, visibility);
+    }
+  }
+  return settings;
 }
 
 function readVisibilitySettings(dbPath: string, campaignSlug: string): Map<VisibilityScope, string> {
@@ -98,16 +130,7 @@ function readVisibilitySettings(dbPath: string, campaignSlug: string): Map<Visib
 
   const database: SqliteDatabase = new Database(dbPath, { fileMustExist: true, readonly: true });
   try {
-    const rows = database
-      .prepare("SELECT scope, visibility FROM campaign_visibility_settings WHERE campaign_slug = ?")
-      .all(campaignSlug) as CampaignVisibilitySettingRow[];
-    for (const row of rows) {
-      const scope = String(row.scope || "").trim().toLowerCase();
-      const visibility = normalizeVisibility(row.visibility);
-      if (isVisibilityScope(scope) && visibility) {
-        settings.set(scope, visibility);
-      }
-    }
+    return readVisibilitySettingsFromDatabase(database, campaignSlug);
   } catch (error) {
     if (error instanceof Error && (error.message.includes("no such table") || error.message.includes("no such column"))) {
       return settings;
@@ -117,6 +140,126 @@ function readVisibilitySettings(dbPath: string, campaignSlug: string): Map<Visib
     database.close();
   }
   return settings;
+}
+
+function writeAuditEvent(
+  database: SqliteDatabase,
+  {
+    actorUserId,
+    campaignSlug,
+    scope,
+    visibility,
+    now,
+  }: {
+    actorUserId: number;
+    campaignSlug: string;
+    scope: VisibilityScope;
+    visibility: string;
+    now: string;
+  },
+) {
+  database
+    .prepare(
+      `INSERT INTO auth_audit_log (
+        actor_user_id,
+        target_user_id,
+        campaign_slug,
+        character_slug,
+        event_type,
+        metadata_json,
+        created_at
+      ) VALUES (?, NULL, ?, NULL, ?, ?, ?)`,
+    )
+    .run(
+      actorUserId,
+      campaignSlug,
+      "campaign_visibility_updated",
+      JSON.stringify({
+        scope,
+        source: "campaign_control_api",
+        visibility,
+      }),
+      now,
+    );
+}
+
+export function updateCampaignVisibilitySettings(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  role: AuthRouteRole,
+  actorUserId: number,
+  rawVisibility: Record<string, unknown>,
+): VisibilityUpdateResult {
+  const defaults = campaignDefaultVisibility(campaign);
+  const database: SqliteDatabase = new Database(dbPath, { fileMustExist: true });
+  try {
+    const settings = readVisibilitySettingsFromDatabase(database, campaign.slug);
+    const changedScopes: string[] = [];
+    const now = utcIsoTimestamp();
+    const upsertSetting = database.prepare(
+      `INSERT INTO campaign_visibility_settings (
+        campaign_slug,
+        scope,
+        visibility,
+        updated_at,
+        updated_by_user_id
+      ) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(campaign_slug, scope) DO UPDATE SET
+        visibility = excluded.visibility,
+        updated_at = excluded.updated_at,
+        updated_by_user_id = excluded.updated_by_user_id`,
+    );
+
+    const writeChanges = database.transaction(() => {
+      for (const scope of VISIBILITY_SCOPES) {
+        const currentVisibility = settings.get(scope) || "";
+        const defaultVisibility = defaults[scope];
+        const submittedVisibility = Object.hasOwn(rawVisibility, scope)
+          ? rawVisibility[scope]
+          : currentVisibility || defaultVisibility;
+        const selectedVisibility = normalizeVisibility(submittedVisibility);
+
+        if (!selectedVisibility) {
+          return {
+            status: "validation_error" as const,
+            message: `Choose a valid visibility for ${VISIBILITY_SCOPE_LABELS[scope]}.`,
+          };
+        }
+        if (selectedVisibility === "private" && role !== "admin") {
+          return {
+            status: "validation_error" as const,
+            message: "Private visibility is reserved for app admins.",
+          };
+        }
+
+        if (currentVisibility && currentVisibility === selectedVisibility) {
+          continue;
+        }
+        if (!currentVisibility && defaultVisibility === selectedVisibility) {
+          continue;
+        }
+
+        upsertSetting.run(campaign.slug, scope, selectedVisibility, now, actorUserId);
+        writeAuditEvent(database, {
+          actorUserId,
+          campaignSlug: campaign.slug,
+          scope,
+          visibility: selectedVisibility,
+          now,
+        });
+        changedScopes.push(VISIBILITY_SCOPE_LABELS[scope]);
+      }
+
+      return {
+        status: "ok" as const,
+        changedScopes,
+      };
+    });
+
+    return writeChanges();
+  } finally {
+    database.close();
+  }
 }
 
 function getScopeVisibility(

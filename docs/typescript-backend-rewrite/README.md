@@ -28,12 +28,13 @@ Route parity check command:
 
 - `stack-spike.md`: architecture decision record for the TypeScript backend stack evaluation and proof checklist.
 - `sqlite-migration-spike.md`: migration-layer proof for Drizzle `generate`/`migrate`, runtime probes, and driver comparison.
-- `read-only-compatibility-slice.md`: evidence for the fixture-backed read-only API compatibility slice.
+- `read-only-compatibility-slice.md`: evidence for the fixture-backed compatibility API slice, including the first controlled SQLite write route validated against a disposable fixture database.
 
 ## Working Rules
 
 - Python/Flask remains the production authority until TypeScript passes parity gates and a cutover rehearsal.
 - TypeScript work starts read-only and fixture-backed before any production write path is added.
+- Controlled write routes on this branch are not production-write readiness by themselves; production use still requires backup, dry-run, copied-data rehearsal, and rollback evidence for the affected data.
 - Domain, service, persistence, content, auth, Systems, character, session, and combat logic must not live in React route components.
 - Experimental spikes stay in `.task-temp` or an isolated approved workspace until a workspace layout decision is recorded.
 - Any Python behavior that ships during the rewrite must either be added to the parity inventory or recorded as an explicit deferred exception.
@@ -66,6 +67,7 @@ Route parity check command:
   - `GET /api/v1/campaigns`
   - `GET /api/v1/campaigns/:campaignSlug`
   - `GET /api/v1/campaigns/:campaignSlug/control`
+  - `PATCH /api/v1/campaigns/:campaignSlug/control/visibility`
   - `GET /api/v1/campaigns/:campaignSlug/help`
   - `GET /api/v1/campaigns/:campaignSlug/wiki`
   - `GET /api/v1/campaigns/:campaignSlug/wiki/sections/:sectionSlug`
@@ -129,6 +131,13 @@ Route parity check command:
   visibility-management auth for fixture or bearer-token DM/admin identities, default campaign
   visibility rows, optional SQLite visibility overrides, admin-only Private choices, rules, notes,
   and Flask/Gen2 control links.
+- The Campaign Control visibility write route now serves `PATCH .../control/visibility` for bearer
+  API-token managers against `CPW_DB_PATH`, preserving Flask-compatible visibility object validation,
+  admin-only Private restrictions, changed-scope labels, no-change messaging, SQLite
+  `campaign_visibility_settings` upserts, `auth_audit_log` events with `campaign_control_api`
+  metadata, refreshed control payloads, and missing-campaign JSON. Current validation covers a
+  disposable fixture database only; production/staging write readiness remains gated by migration,
+  backup, and rollback rehearsal.
 - The content/config, content page, content asset, and content character management read routes now
   preserve Flask-compatible content-management auth: no identity returns `auth_required`, fixture or
   bearer-token player/outsider identities return `forbidden`, and fixture or bearer-token DM/admin

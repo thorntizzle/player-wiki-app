@@ -2,7 +2,9 @@
 
 Last updated: 2026-06-26
 
-This document records the first implemented TypeScript read-only compatibility surface.
+This document records the first implemented TypeScript compatibility surface. It began as a read-only
+fixture slice and now includes the first controlled SQLite write route, validated only against a
+disposable fixture database.
 
 ## Scope Completed
 
@@ -40,6 +42,8 @@ This document records the first implemented TypeScript read-only compatibility s
 - Added `apps/api/src/wiki/` as the read-only Markdown/frontmatter fixture reader and wiki payload serializer.
 - Added Campaign Control read endpoint with fixture or bearer-token visibility-manager access:
   - `GET /api/v1/campaigns/:campaignSlug/control`
+- Added Campaign Control visibility write endpoint with bearer-token visibility-manager access:
+  - `PATCH /api/v1/campaigns/:campaignSlug/control/visibility`
 - Added fixture-backed, content-management-gated content config endpoint:
   - `GET /api/v1/campaigns/:campaignSlug/content/config`
 - Added fixture-backed, content-management-gated content page management read endpoints:
@@ -151,6 +155,18 @@ This document records the first implemented TypeScript read-only compatibility s
   - fixture or bearer-token admin reads include the Private visibility choice while DM reads omit it
   - rows include selected, configured, default, effective, label, choice, and campaign-floor override fields
   - missing campaign control reads return `campaign_not_found` JSON
+- Campaign Control visibility writes preserve the API mutation shell for a disposable fixture SQLite database:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture-role write attempts are rejected because the mutation needs a durable bearer-token actor for update and audit rows
+  - bearer-token players receive `forbidden`
+  - bearer-token DMs can update non-Private visibility choices when they can manage campaign visibility
+  - `private` choices are rejected for non-admins with the Flask-compatible validation message
+  - invalid `visibility` payloads return Flask-compatible `validation_error`
+  - unchanged defaults/current values are skipped and return the no-change success message
+  - changed scopes upsert `campaign_visibility_settings` rows with the actor user id
+  - changed scopes write `auth_audit_log` rows with `campaign_visibility_updated` and `campaign_control_api` metadata
+  - responses return a refreshed Campaign Control payload plus `changed_scopes` and `message`
+  - missing campaign control writes return `campaign_not_found` JSON
 - Wiki home response preserves the stable Flask fixture fields for:
   - `frontend_mode`
   - `can_view_wiki`
@@ -237,13 +253,14 @@ This document records the first implemented TypeScript read-only compatibility s
   - compares Flask-vs-TypeScript unauthenticated Session article-source search, Session article image, and Session log detail auth envelopes, and asserts the fixture lookup shell for short, wiki-result, player-forbidden, and missing-campaign cases.
   - compares Flask-vs-TypeScript content-management unauthenticated and player-forbidden auth envelopes.
 - `apps/api/tests/smoke.mjs`:
-  - starts compiled API on a local port and verifies `/healthz`, app state, fixture `/api/v1/me` identity reads, fixture `/api/v1/me/settings` account-settings reads, SQLite bearer-token `/api/v1/me` and `/api/v1/me/settings` reads, SQLite-backed systems import-run list/detail reads with bearer admin/non-admin gates, campaign Systems landing/search/source list/detail/category/entry reads with fixture and bearer-token role gates, Combat state/live-state shell reads with fixture and bearer-token role gates, Combat Systems monster search reads with fixture and bearer-token role gates, Session state/article-source/image/log reads with fixture and bearer-token role gates, campaign list/detail, public Campaign Help, Campaign Control auth/payload reads, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
+  - starts compiled API on a local port and verifies `/healthz`, app state, fixture `/api/v1/me` identity reads, fixture `/api/v1/me/settings` account-settings reads, SQLite bearer-token `/api/v1/me` and `/api/v1/me/settings` reads, SQLite-backed systems import-run list/detail reads with bearer admin/non-admin gates, campaign Systems landing/search/source list/detail/category/entry reads with fixture and bearer-token role gates, Combat state/live-state shell reads with fixture and bearer-token role gates, Combat Systems monster search reads with fixture and bearer-token role gates, Session state/article-source/image/log reads with fixture and bearer-token role gates, campaign list/detail, public Campaign Help, Campaign Control auth/payload reads and visibility writes, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
   - validates content-management auth gates for anonymous, fixture player, bearer player, bearer outsider, and bearer app-admin content config reads.
   - validates fixture-backed content config endpoint payload for `linden-pass` (`campaign_slug`, `current_session`, `title`, `systems_sources`, `editable_fields`, `updated_at`) and missing-campaign 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/pages` list sorting/count/body omission and sampled `Port Meridian` metadata/removal fields, plus `GET /api/v1/campaigns/:campaignSlug/content/pages/*` detail payload body inclusion and missing-content-page 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/assets` list sorting/count/data omission and sampled PNG metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/assets/*` detail payload byte data and missing-content-asset 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/characters` list sorting/count and sampled character summary metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` detail payload definition/import metadata and missing-content-character 404.
   - verifies `GET /api/v1/campaigns/:campaignSlug/session` no-header read-only payload shape, role-aware fixture and bearer-token SQLite Session state reads, auth/forbidden bearer envelopes, token/revision headers behavior, unchanged-response short-circuit, and session missing-campaign 404.
+  - verifies `PATCH /api/v1/campaigns/:campaignSlug/control/visibility` auth, validation, Private restrictions, changed-scope response shape, SQLite persistence, audit rows, idempotent no-change response, and missing-campaign 404 against the disposable smoke-test database.
 - `apps/api/tests/route-parity.mjs`:
   - checks implemented route coverage against `route-snapshots.json` and `typescript-route-seed.json`.
 
@@ -261,7 +278,7 @@ npm --prefix apps/api test
 
 ## Outside This Slice
 
-- Production auth, live SQLite, write paths, and deployment cutover are intentionally outside this fixture-only slice.
+- Production auth, live SQLite cutover, production write readiness, backup/restore rehearsal, and deployment cutover are intentionally outside this fixture-only slice.
 
 ## Frontend Dev-Mode Pointer
 

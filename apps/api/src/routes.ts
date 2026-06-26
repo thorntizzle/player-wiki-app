@@ -470,6 +470,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "campaign_not_found",
     },
   },
+  {
+    method: "PATCH",
+    honoPath: "/api/v1/campaigns/:campaignSlug/control/visibility",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/control/visibility",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/control/visibility",
+    routeFamily: "api_v1_campaigns",
+    missingResource: {
+      method: "PATCH",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/control/visibility",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -506,4 +521,5 @@ export const ROUTES = {
   me: IMPLEMENTED_ROUTES[30].honoPath,
   meSettings: IMPLEMENTED_ROUTES[31].honoPath,
   campaignControl: IMPLEMENTED_ROUTES[32].honoPath,
+  campaignControlVisibility: IMPLEMENTED_ROUTES[33].honoPath,
 } as const;

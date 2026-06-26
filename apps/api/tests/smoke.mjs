@@ -16,6 +16,7 @@ const campaignsDir =
 const smokeTempDir = mkdtempSync(path.join(tmpdir(), "cpw-api-smoke-"));
 const dbPath = path.join(smokeTempDir, "player_wiki.sqlite3");
 const liveApiToken = "fixture-live-api-token";
+const dmApiToken = "fixture-dm-api-token";
 const playerApiToken = "fixture-player-api-token";
 const outsiderApiToken = "fixture-outsider-api-token";
 const hashToken = (rawToken) => createHash("sha256").update(rawToken, "utf8").digest("hex");
@@ -62,6 +63,26 @@ smokeDb.exec(`
     expires_at TEXT,
     revoked_at TEXT,
     created_by_user_id INTEGER
+  );
+
+  CREATE TABLE campaign_visibility_settings (
+    campaign_slug TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    visibility TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_user_id INTEGER,
+    PRIMARY KEY (campaign_slug, scope)
+  );
+
+  CREATE TABLE auth_audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_user_id INTEGER,
+    target_user_id INTEGER,
+    campaign_slug TEXT,
+    character_slug TEXT,
+    event_type TEXT NOT NULL,
+    metadata_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
   );
 
   CREATE TABLE systems_import_runs (
@@ -139,6 +160,21 @@ smokeDb
   );
 smokeDb
   .prepare(
+    "INSERT INTO users (id, email, display_name, is_admin, status, password_hash, auth_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    81,
+    "fixture-token-dm@example.com",
+    "Fixture Token DM",
+    0,
+    "active",
+    null,
+    1,
+    "2026-06-25T08:25:00+00:00",
+    "2026-06-25T08:25:00+00:00",
+  );
+smokeDb
+  .prepare(
     "INSERT INTO user_preferences (user_id, theme_key, session_chat_order, frontend_mode, updated_at) VALUES (?, ?, ?, ?, ?)",
   )
   .run(77, "moonlit", "oldest_first", "flask", "2026-06-25T08:35:00+00:00");
@@ -152,6 +188,11 @@ smokeDb
     "INSERT INTO campaign_memberships (id, user_id, campaign_slug, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
   )
   .run(502, 79, "linden-pass", "player", "active", "2026-06-25T08:16:00+00:00", "2026-06-25T08:16:00+00:00");
+smokeDb
+  .prepare(
+    "INSERT INTO campaign_memberships (id, user_id, campaign_slug, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(503, 81, "linden-pass", "dm", "active", "2026-06-25T08:26:00+00:00", "2026-06-25T08:26:00+00:00");
 smokeDb
   .prepare(
     "INSERT INTO api_tokens (id, user_id, label, token_hash, created_at, last_used_at, expires_at, revoked_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -193,6 +234,21 @@ smokeDb
     hashToken(outsiderApiToken),
     "2026-06-25T08:50:00+00:00",
     "2026-06-25T08:50:00+00:00",
+    null,
+    null,
+    null,
+  );
+smokeDb
+  .prepare(
+    "INSERT INTO api_tokens (id, user_id, label, token_hash, created_at, last_used_at, expires_at, revoked_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    904,
+    81,
+    "DM Smoke Token",
+    hashToken(dmApiToken),
+    "2026-06-25T08:55:00+00:00",
+    "2026-06-25T08:55:00+00:00",
     null,
     null,
     null,
@@ -628,9 +684,19 @@ const logLine = (chunk) => {
 child.stdout.on("data", logLine);
 child.stderr.on("data", logLine);
 
-const requestJson = async (path, headers = {}) => {
+const requestJson = async (path, headers = {}, options = {}) => {
+  const requestHeaders = { ...headers };
+  let body;
+  if (Object.hasOwn(options, "body")) {
+    body = typeof options.body === "string" ? options.body : JSON.stringify(options.body);
+    if (!Object.keys(requestHeaders).some((key) => key.toLowerCase() === "content-type")) {
+      requestHeaders["Content-Type"] = "application/json";
+    }
+  }
   const response = await fetch(`http://127.0.0.1:${port}${path}`, {
-    headers,
+    method: options.method || "GET",
+    headers: requestHeaders,
+    body,
   });
   const payload = await response.json();
   return { status: response.status, payload };
@@ -1606,6 +1672,161 @@ if (!adminCampaignRow?.choices?.some((choice) => choice.value === "private")) {
   throw new Error(`Expected bearer app-admin campaign control choices to include private, got ${JSON.stringify(adminCampaignRow?.choices)}`);
 }
 
+const blockedCampaignControlPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/control/visibility",
+  {},
+  { method: "PATCH", body: { visibility: { campaign: "players" } } },
+);
+if (
+  blockedCampaignControlPatch.status !== 401 ||
+  blockedCampaignControlPatch.payload?.error?.code !== "auth_required"
+) {
+  throw new Error(
+    `Expected unauthenticated campaign-control PATCH to return auth_required 401, got ${blockedCampaignControlPatch.status} ${blockedCampaignControlPatch.payload?.error?.code}`,
+  );
+}
+const fixtureCampaignControlPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/control/visibility",
+  { "X-CPW-Fixture-Role": "dm" },
+  { method: "PATCH", body: { visibility: { campaign: "players" } } },
+);
+if (
+  fixtureCampaignControlPatch.status !== 403 ||
+  fixtureCampaignControlPatch.payload?.error?.message !== "Campaign visibility updates require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture campaign-control PATCH to require bearer auth, got ${fixtureCampaignControlPatch.status} ${fixtureCampaignControlPatch.payload?.error?.message}`,
+  );
+}
+const invalidCampaignControlPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/control/visibility",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PATCH", body: { visibility: [] } },
+);
+if (
+  invalidCampaignControlPatch.status !== 400 ||
+  invalidCampaignControlPatch.payload?.error?.message !== "Visibility settings must be provided as an object."
+) {
+  throw new Error(
+    `Expected campaign-control PATCH visibility-object validation, got ${invalidCampaignControlPatch.status} ${invalidCampaignControlPatch.payload?.error?.message}`,
+  );
+}
+const invalidCampaignVisibilityChoicePatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/control/visibility",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PATCH", body: { visibility: { campaign: null } } },
+);
+if (
+  invalidCampaignVisibilityChoicePatch.status !== 400 ||
+  invalidCampaignVisibilityChoicePatch.payload?.error?.message !== "Choose a valid visibility for Campaign."
+) {
+  throw new Error(
+    `Expected campaign-control PATCH invalid campaign visibility validation, got ${invalidCampaignVisibilityChoicePatch.status} ${invalidCampaignVisibilityChoicePatch.payload?.error?.message}`,
+  );
+}
+const playerCampaignControlPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/control/visibility",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "PATCH", body: { visibility: { campaign: "players" } } },
+);
+if (playerCampaignControlPatch.status !== 403 || playerCampaignControlPatch.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player campaign-control PATCH to return forbidden 403, got ${playerCampaignControlPatch.status} ${playerCampaignControlPatch.payload?.error?.code}`,
+  );
+}
+const dmPrivateCampaignControlPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/control/visibility",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PATCH", body: { visibility: { campaign: "private" } } },
+);
+if (
+  dmPrivateCampaignControlPatch.status !== 400 ||
+  dmPrivateCampaignControlPatch.payload?.error?.message !== "Private visibility is reserved for app admins."
+) {
+  throw new Error(
+    `Expected DM campaign-control PATCH private validation, got ${dmPrivateCampaignControlPatch.status} ${dmPrivateCampaignControlPatch.payload?.error?.message}`,
+  );
+}
+const updateCampaignControlPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/control/visibility",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PATCH", body: { visibility: { campaign: "players", wiki: "dm", session: "players" } } },
+);
+if (updateCampaignControlPatch.status !== 200 || updateCampaignControlPatch.payload?.ok !== true) {
+  throw new Error(
+    `Expected DM campaign-control PATCH update 200 ok, got ${updateCampaignControlPatch.status} ${JSON.stringify(updateCampaignControlPatch.payload)}`,
+  );
+}
+if ((updateCampaignControlPatch.payload?.changed_scopes || []).join("|") !== "Campaign|Player Wiki") {
+  throw new Error(`Expected campaign-control changed scopes Campaign/Player Wiki, got ${JSON.stringify(updateCampaignControlPatch.payload?.changed_scopes)}`);
+}
+if (updateCampaignControlPatch.payload?.message !== "Updated visibility for Campaign, Player Wiki.") {
+  throw new Error(`Expected campaign-control update message, got ${updateCampaignControlPatch.payload?.message}`);
+}
+const updatedControlRowsByScope = Object.fromEntries(
+  (updateCampaignControlPatch.payload?.visibility_rows || []).map((row) => [row.scope, row]),
+);
+if (updatedControlRowsByScope.campaign?.selected_visibility !== "players") {
+  throw new Error(`Expected campaign visibility players after PATCH, got ${updatedControlRowsByScope.campaign?.selected_visibility}`);
+}
+if (updatedControlRowsByScope.wiki?.selected_visibility !== "dm") {
+  throw new Error(`Expected wiki visibility dm after PATCH, got ${updatedControlRowsByScope.wiki?.selected_visibility}`);
+}
+if (updatedControlRowsByScope.session?.effective_visibility !== "players") {
+  throw new Error(`Expected session effective visibility players after PATCH, got ${updatedControlRowsByScope.session?.effective_visibility}`);
+}
+const visibilityAssertionDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const persistedVisibilityRows = visibilityAssertionDb
+  .prepare("SELECT scope, visibility, updated_by_user_id FROM campaign_visibility_settings ORDER BY scope ASC")
+  .all();
+if (
+  JSON.stringify(
+    persistedVisibilityRows.map((row) => ({
+      scope: row.scope,
+      visibility: row.visibility,
+      updated_by_user_id: row.updated_by_user_id,
+    })),
+  ) !==
+  JSON.stringify([
+    { scope: "campaign", visibility: "players", updated_by_user_id: 81 },
+    { scope: "wiki", visibility: "dm", updated_by_user_id: 81 },
+  ])
+) {
+  throw new Error(`Expected persisted campaign visibility rows for changed scopes, got ${JSON.stringify(persistedVisibilityRows)}`);
+}
+const visibilityAuditRows = visibilityAssertionDb
+  .prepare("SELECT actor_user_id, campaign_slug, event_type, metadata_json FROM auth_audit_log ORDER BY id ASC")
+  .all();
+visibilityAssertionDb.close();
+if (visibilityAuditRows.length !== 2) {
+  throw new Error(`Expected two campaign visibility audit rows, got ${JSON.stringify(visibilityAuditRows)}`);
+}
+for (const row of visibilityAuditRows) {
+  const metadata = JSON.parse(row.metadata_json);
+  if (
+    row.actor_user_id !== 81 ||
+    row.campaign_slug !== "linden-pass" ||
+    row.event_type !== "campaign_visibility_updated" ||
+    metadata.source !== "campaign_control_api"
+  ) {
+    throw new Error(`Unexpected campaign visibility audit row: ${JSON.stringify(row)}`);
+  }
+}
+const repeatedCampaignControlPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/control/visibility",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PATCH", body: { visibility: { campaign: "players", wiki: "dm", session: "players" } } },
+);
+if (
+  repeatedCampaignControlPatch.status !== 200 ||
+  repeatedCampaignControlPatch.payload?.changed_scopes?.length !== 0 ||
+  repeatedCampaignControlPatch.payload?.message !== "Visibility settings already matched those values."
+) {
+  throw new Error(
+    `Expected repeated campaign-control PATCH to report no changes, got ${repeatedCampaignControlPatch.status} ${JSON.stringify(repeatedCampaignControlPatch.payload)}`,
+  );
+}
+
 const contentManagerHeaders = { "X-CPW-Fixture-Role": "dm" };
 const bearerContentManagerHeaders = { Authorization: `Bearer ${liveApiToken}` };
 
@@ -2426,6 +2647,19 @@ const missingCampaignControl = await requestJson("/api/v1/campaigns/definitely-n
 });
 if (missingCampaignControl.status !== 404 || missingCampaignControl.payload?.error?.code !== "campaign_not_found") {
   throw new Error(`Expected missing campaign control JSON 404, got ${missingCampaignControl.status}`);
+}
+const missingCampaignControlPatch = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/control/visibility",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PATCH", body: { visibility: { campaign: "players" } } },
+);
+if (
+  missingCampaignControlPatch.status !== 404 ||
+  missingCampaignControlPatch.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing campaign control PATCH JSON 404, got ${missingCampaignControlPatch.status} ${missingCampaignControlPatch.payload?.error?.code}`,
+  );
 }
 
 const missingCampaignConfig = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/content/config");

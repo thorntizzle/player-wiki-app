@@ -13,7 +13,11 @@ import {
   buildFixtureMePayload,
 } from "./auth/view.js";
 import { getApiConfig } from "./config.js";
-import { buildCampaignControlPayload, campaignRoleCanManageVisibility } from "./campaigns/control.js";
+import {
+  buildCampaignControlPayload,
+  campaignRoleCanManageVisibility,
+  updateCampaignVisibilitySettings,
+} from "./campaigns/control.js";
 import { getCampaignBySlug, listCampaigns, listCampaignSlugs } from "./campaigns/repository.js";
 import type { CampaignViewModel } from "./campaigns/view.js";
 import { buildCombatReadOnlyPayload } from "./combat/view.js";
@@ -142,6 +146,18 @@ function validationError(message: string) {
   };
 }
 
+async function readJsonObject(ctx: Context): Promise<{ status: "ok"; payload: Record<string, unknown> } | { status: "error"; message: string }> {
+  try {
+    const payload = await ctx.req.json();
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return { status: "error", message: "Request body must be a JSON object." };
+    }
+    return { status: "ok", payload: payload as Record<string, unknown> };
+  } catch (error) {
+    return { status: "error", message: error instanceof Error ? error.message : "Invalid JSON payload." };
+  }
+}
+
 function notFound(code: string, message: string) {
   return {
     ok: false,
@@ -174,6 +190,12 @@ function fixtureRole(ctx: { req: { header: (name: string) => string | undefined 
 
 type RoleResolution =
   | { kind: "authenticated"; role: FixtureSystemsRole }
+  | { kind: "missing" }
+  | { kind: "invalid" }
+  | { kind: "forbidden"; message: string };
+
+type CampaignVisibilityWriteResolution =
+  | { kind: "authenticated"; role: FixtureSystemsRole; actorUserId: number }
   | { kind: "missing" }
   | { kind: "invalid" }
   | { kind: "forbidden"; message: string };
@@ -259,6 +281,33 @@ function resolveCampaignVisibilityManagerRole(
   }
   if (role) {
     return { kind: "forbidden", message: forbiddenMessage };
+  }
+  return { kind: "missing" };
+}
+
+function resolveCampaignVisibilityWriter(
+  ctx: { req: { header: (name: string) => string | undefined } },
+  campaign: CampaignViewModel,
+): CampaignVisibilityWriteResolution {
+  const forbiddenMessage = "You do not have permission to manage campaign visibility.";
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "authenticated") {
+    const role = apiTokenRoleForCampaign(apiAuth.context, campaign.slug);
+    if (role && campaignRoleCanManageVisibility(config.dbPath, campaign, role)) {
+      return { kind: "authenticated", role: toFixtureSystemsRole(role), actorUserId: apiAuth.context.user.id };
+    }
+    return { kind: "forbidden", message: forbiddenMessage };
+  }
+  if (apiAuth.kind === "invalid") {
+    return { kind: "invalid" };
+  }
+
+  const role = fixtureRole(ctx);
+  if (role) {
+    return {
+      kind: "forbidden",
+      message: "Campaign visibility updates require bearer API authentication.",
+    };
   }
   return { kind: "missing" };
 }
@@ -903,6 +952,53 @@ app.get(ROUTES.campaignControl, async (ctx) => {
   }
 
   return ctx.json(buildCampaignControlPayload(config.dbPath, campaign, auth.role));
+});
+
+app.patch(ROUTES.campaignControlVisibility, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignVisibilityWriter(ctx, campaign);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const rawVisibility = jsonPayload.payload.visibility;
+  if (!rawVisibility || typeof rawVisibility !== "object" || Array.isArray(rawVisibility)) {
+    const error = validationError("Visibility settings must be provided as an object.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = updateCampaignVisibilitySettings(
+    config.dbPath,
+    campaign,
+    auth.role,
+    auth.actorUserId,
+    rawVisibility as Record<string, unknown>,
+  );
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ...buildCampaignControlPayload(config.dbPath, campaign, auth.role),
+    changed_scopes: result.changedScopes,
+    message: result.changedScopes.length
+      ? `Updated visibility for ${result.changedScopes.join(", ")}.`
+      : "Visibility settings already matched those values.",
+  });
 });
 
 app.get(ROUTES.wikiHome, async (ctx) => {
