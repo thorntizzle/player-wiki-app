@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
 
-import { buildFixtureMePayload } from "./auth/view.js";
+import { buildFixtureAccountSettingsPayload, buildFixtureMePayload } from "./auth/view.js";
 import { getApiConfig } from "./config.js";
 import { getCampaignBySlug, listCampaigns, listCampaignSlugs } from "./campaigns/repository.js";
 import { buildCombatReadOnlyPayload } from "./combat/view.js";
@@ -363,6 +363,16 @@ app.get(ROUTES.me, async (ctx) => {
 
   const campaigns = await listCampaigns(config);
   return ctx.json(buildFixtureMePayload(config, campaigns, role));
+});
+
+app.get(ROUTES.meSettings, async (ctx) => {
+  const role = fixtureRole(ctx);
+  if (!role) {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildFixtureAccountSettingsPayload(role));
 });
 
 app.get(ROUTES.systemsImportRuns, async (ctx) => {

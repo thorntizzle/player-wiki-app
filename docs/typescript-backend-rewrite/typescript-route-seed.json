@@ -288,6 +288,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/me/settings",
+      "route_family": "api_v1",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/me/settings",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono account settings read route with Flask-compatible unauthenticated auth_required behavior and synthetic fixture-role user, preference, theme preset, and live-session chat-order metadata."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/session/login",
       "route_family": "api_v1",
       "status": "deferred_scratch_proof",

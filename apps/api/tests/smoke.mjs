@@ -567,6 +567,32 @@ if (
   throw new Error(`Unexpected fixture admin me payload: ${JSON.stringify(adminMe.payload)}`);
 }
 
+const blockedMeSettings = await requestJson("/api/v1/me/settings");
+if (blockedMeSettings.status !== 401 || blockedMeSettings.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated me settings request to return auth_required 401, got ${blockedMeSettings.status} ${blockedMeSettings.payload?.error?.code}`,
+  );
+}
+
+const playerMeSettings = await requestJson("/api/v1/me/settings", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (
+  playerMeSettings.status !== 200 ||
+  playerMeSettings.payload?.ok !== true ||
+  playerMeSettings.payload?.user?.email !== "fixture-player@example.com" ||
+  playerMeSettings.payload?.preferences?.theme_key !== "parchment" ||
+  playerMeSettings.payload?.preferences?.session_chat_order !== "newest_first" ||
+  playerMeSettings.payload?.preferences?.frontend_mode !== "gen2" ||
+  playerMeSettings.payload?.theme_presets?.length !== 4 ||
+  playerMeSettings.payload?.theme_presets?.[0]?.key !== "parchment" ||
+  playerMeSettings.payload?.session_chat_order_choices?.length !== 2 ||
+  playerMeSettings.payload?.session_chat_order_choices?.[1]?.value !== "oldest_first" ||
+  "frontend_mode_choices" in (playerMeSettings.payload || {})
+) {
+  throw new Error(`Unexpected fixture player settings payload: ${JSON.stringify(playerMeSettings.payload)}`);
+}
+
 const blockedImportRuns = await requestJson("/api/v1/systems/import-runs");
 if (blockedImportRuns.status !== 401 || blockedImportRuns.payload?.error?.code !== "auth_required") {
   throw new Error(

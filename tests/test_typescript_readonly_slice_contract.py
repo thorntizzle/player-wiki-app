@@ -196,6 +196,44 @@ def test_typescript_me_fixture_auth_shell(typescript_api_server):
     }
 
 
+def test_typescript_me_settings_requires_auth_like_flask(typescript_api_server, client):
+    flask_response = client.get("/api/v1/me/settings")
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/me/settings")
+    assert status == 401
+    assert payload == flask_payload
+
+
+def test_typescript_me_settings_fixture_shell_matches_static_flask_choices(
+    typescript_api_server,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["party"]["email"], users["party"]["password"])
+    flask_response = client.get("/api/v1/me/settings")
+    assert flask_response.status_code == 200
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/me/settings",
+        headers={"X-CPW-Fixture-Role": "player"},
+    )
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["user"]["email"] == "fixture-player@example.com"
+    assert payload["preferences"] == {
+        "theme_key": "parchment",
+        "session_chat_order": "newest_first",
+        "frontend_mode": "gen2",
+    }
+    assert payload["theme_presets"] == flask_payload["theme_presets"]
+    assert payload["session_chat_order_choices"] == flask_payload["session_chat_order_choices"]
+    assert "frontend_mode_choices" not in payload
+
+
 def test_typescript_systems_import_runs_requires_auth_like_flask(typescript_api_server, client):
     flask_response = client.get("/api/v1/systems/import-runs")
     assert flask_response.status_code == 401

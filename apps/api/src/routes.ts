@@ -447,6 +447,14 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
     seedPath: "/api/v1/me",
     routeFamily: "api_v1",
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/me/settings",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/me/settings",
+    seedPath: "/api/v1/me/settings",
+    routeFamily: "api_v1",
+  },
 ];
 
 export const ROUTES = {
@@ -481,4 +489,5 @@ export const ROUTES = {
   sessionArticleImage: IMPLEMENTED_ROUTES[28].honoPath,
   sessionLogDetail: IMPLEMENTED_ROUTES[29].honoPath,
   me: IMPLEMENTED_ROUTES[30].honoPath,
+  meSettings: IMPLEMENTED_ROUTES[31].honoPath,
 } as const;
