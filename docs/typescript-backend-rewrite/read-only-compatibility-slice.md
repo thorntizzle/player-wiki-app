@@ -335,6 +335,7 @@ fixture database.
   - bearer-token write/delete auth, fixture-role write denial, player-forbidden behavior, validation errors, copied-fixture `definition.yaml`/`import.yaml` writes, reflected list/detail reads, deleted-character payload flags, file removal, and missing-character delete responses.
   - DND-5E content-character creation initializes a real SQLite `character_state` row with HP, resources, spell slots, Hit Dice, inventory, and notes from the copied fixture definition; raw delete removes the state row plus a seeded assignment row and reports `deleted_state` / `deleted_assignment` from row counts.
   - Xianxia content-character creation initializes SQLite mutable state, and Xianxia definition update reconciles existing current HP/temp HP, Stance/temp Stance, Jing, Yin/Yang, Dao, active Stance, and notes against lowered definition maxima without writing mutable state back into `definition.yaml`.
+  - Flask-vs-TypeScript golden contract tests now compare DND-5E initialized state JSON and delete cleanup directly, and compare Xianxia mutable-state clamping/preservation plus definition-file separation directly.
 
 ## Added Tests and Checks
 
@@ -363,6 +364,8 @@ fixture database.
   - compares Flask-vs-TypeScript unauthenticated Session article-source search, Session article image, Session log detail, and Session log delete auth envelopes, and asserts the fixture lookup shell for short, wiki-result, player-forbidden, and missing-campaign cases.
   - compares Flask-vs-TypeScript content-management unauthenticated and player-forbidden auth envelopes, plus the unauthenticated content/config, content page, and content asset mutation envelopes.
   - compares Flask-vs-TypeScript unauthenticated content character mutation envelopes for `PUT` and `DELETE .../content/characters/:characterSlug`.
+  - compares Flask-vs-TypeScript DND-5E content-character create/delete golden behavior against copied campaign files and temp SQLite, including exact initialized state JSON, assignment cleanup, and delete flags.
+  - compares Flask-vs-TypeScript Xianxia content-character create/update/delete golden behavior against copied campaign files and temp SQLite, including clamped current pools, preserved active Stance/notes/Dao, no mutable fields in `definition.yaml`, and delete flags.
 - `apps/api/tests/smoke.mjs`:
   - starts compiled API on a local port and verifies `/healthz`, app state, fixture `/api/v1/me` identity reads, fixture `/api/v1/me/settings` account-settings reads, SQLite bearer-token `/api/v1/me` and `/api/v1/me/settings` reads/writes, SQLite-backed systems import-run list/detail reads with bearer admin/non-admin gates, campaign Systems landing/search/source list/detail/category/entry reads with fixture and bearer-token role gates, Combat state/live-state shell reads with fixture and bearer-token role gates, Combat Systems monster search reads with fixture and bearer-token role gates, Session state/article-source/image/log reads with fixture and bearer-token role gates, campaign list/detail, public Campaign Help, Campaign Control auth/payload reads and visibility writes, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
   - validates content-management auth gates for anonymous, fixture player, bearer player, bearer outsider, and bearer app-admin content config reads.

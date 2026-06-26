@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import base64
-from datetime import datetime
+from copy import deepcopy
+from datetime import datetime, timedelta
+import hashlib
 import json
 import os
 import re
 import shutil
 import socket
+import sqlite3
 import subprocess
 from pathlib import Path
 from urllib.error import HTTPError
@@ -14,6 +17,9 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 import pytest
+import yaml
+
+from player_wiki.auth_store import AuthStore
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +30,7 @@ NODE_CANDIDATES = [
 ]
 CONTENT_MANAGER_HEADERS = {"X-CPW-Fixture-Role": "dm"}
 CONTENT_PLAYER_HEADERS = {"X-CPW-Fixture-Role": "player"}
+TYPESCRIPT_DM_API_TOKEN = "typescript-golden-dm-token"
 
 
 def _to_json(
@@ -87,16 +94,19 @@ def _run_npm_command(node_bin: Path, command: list[str]) -> None:
 
 
 @pytest.fixture(scope="module")
-def typescript_api_server():
+def typescript_node_bin():
     node_bin = _find_local_node_bin()
     _run_npm_command(node_bin, ["run", "build"])
+    return node_bin
 
+
+def _launch_typescript_api(node_bin: Path, campaigns_dir: Path, db_path: Path):
     port = _find_free_port()
     env = os.environ.copy()
     env["NODE_ENV"] = "test"
     env["PORT"] = str(port)
-    env["CPW_CAMPAIGNS_DIR"] = str(PROJECT_ROOT / "tests" / "fixtures" / "sample_campaigns")
-    env["CPW_DB_PATH"] = str(PROJECT_ROOT / ".local" / "typescript-fixture.sqlite3")
+    env["CPW_CAMPAIGNS_DIR"] = str(campaigns_dir)
+    env["CPW_DB_PATH"] = str(db_path)
     env["PLAYER_WIKI_VERSION"] = "test-version"
     env["PLAYER_WIKI_BUILD_ID"] = "test-build"
     env["PLAYER_WIKI_GIT_SHA"] = "test-git-sha"
@@ -112,8 +122,8 @@ def typescript_api_server():
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    url = f"http://127.0.0.1:{port}"
     try:
-        url = f"http://127.0.0.1:{port}"
         for _ in range(120):
             try:
                 status, payload = _to_json(f"{url}/healthz")
@@ -121,17 +131,277 @@ def typescript_api_server():
                 pass
             else:
                 if status == 200 and payload.get("status") == "ok":
-                    yield url
-                    return
+                    return process, url
             if process.poll() is not None:
                 raise RuntimeError("TypeScript API process exited before becoming ready.")
             import time
 
             time.sleep(0.05)
         raise RuntimeError("TypeScript API did not become ready within timeout.")
+    except Exception:
+        process.terminate()
+        process.wait(timeout=5)
+        raise
+
+
+@pytest.fixture(scope="module")
+def typescript_api_server(typescript_node_bin):
+    process, url = _launch_typescript_api(
+        typescript_node_bin,
+        PROJECT_ROOT / "tests" / "fixtures" / "sample_campaigns",
+        PROJECT_ROOT / ".local" / "typescript-fixture.sqlite3",
+    )
+    try:
+        yield url
     finally:
         process.terminate()
         process.wait(timeout=5)
+
+
+def _hash_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def _seed_typescript_mutation_db(db_path: Path) -> None:
+    now = "2026-06-25T08:00:00+00:00"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE users (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              email TEXT NOT NULL UNIQUE,
+              display_name TEXT NOT NULL,
+              is_admin INTEGER NOT NULL DEFAULT 0,
+              status TEXT NOT NULL,
+              password_hash TEXT,
+              auth_version INTEGER NOT NULL DEFAULT 1,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE user_preferences (
+              user_id INTEGER PRIMARY KEY,
+              theme_key TEXT NOT NULL DEFAULT 'parchment',
+              session_chat_order TEXT NOT NULL DEFAULT 'newest_first',
+              frontend_mode TEXT NOT NULL DEFAULT 'gen2',
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE campaign_memberships (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER NOT NULL,
+              campaign_slug TEXT NOT NULL,
+              role TEXT NOT NULL,
+              status TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE api_tokens (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER NOT NULL,
+              label TEXT NOT NULL,
+              token_hash TEXT NOT NULL UNIQUE,
+              created_at TEXT NOT NULL,
+              last_used_at TEXT NOT NULL,
+              expires_at TEXT,
+              revoked_at TEXT,
+              created_by_user_id INTEGER
+            );
+
+            CREATE TABLE campaign_visibility_settings (
+              campaign_slug TEXT NOT NULL,
+              scope TEXT NOT NULL,
+              visibility TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              updated_by_user_id INTEGER,
+              PRIMARY KEY (campaign_slug, scope)
+            );
+
+            CREATE TABLE character_assignments (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER NOT NULL,
+              campaign_slug TEXT NOT NULL,
+              character_slug TEXT NOT NULL,
+              assignment_type TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              UNIQUE (campaign_slug, character_slug)
+            );
+
+            CREATE TABLE auth_audit_log (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              actor_user_id INTEGER,
+              target_user_id INTEGER,
+              campaign_slug TEXT,
+              character_slug TEXT,
+              event_type TEXT NOT NULL,
+              metadata_json TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE character_state (
+              campaign_slug TEXT NOT NULL,
+              character_slug TEXT NOT NULL,
+              revision INTEGER NOT NULL,
+              state_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              updated_by_user_id INTEGER,
+              PRIMARY KEY (campaign_slug, character_slug)
+            );
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO users (
+              id, email, display_name, is_admin, status, password_hash, auth_version, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (77, "typescript-golden-dm@example.com", "TypeScript Golden DM", 0, "active", None, 1, now, now),
+        )
+        connection.execute(
+            """
+            INSERT INTO users (
+              id, email, display_name, is_admin, status, password_hash, auth_version, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (79, "typescript-golden-player@example.com", "TypeScript Golden Player", 0, "active", None, 1, now, now),
+        )
+        connection.execute(
+            "INSERT INTO user_preferences (user_id, theme_key, session_chat_order, frontend_mode, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (77, "parchment", "newest_first", "gen2", now),
+        )
+        connection.execute(
+            "INSERT INTO campaign_memberships (id, user_id, campaign_slug, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (501, 77, "linden-pass", "dm", "active", now, now),
+        )
+        connection.execute(
+            "INSERT INTO campaign_memberships (id, user_id, campaign_slug, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (502, 79, "linden-pass", "player", "active", now, now),
+        )
+        connection.execute(
+            "INSERT INTO api_tokens (id, user_id, label, token_hash, created_at, last_used_at, expires_at, revoked_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (901, 77, "TypeScript Golden DM Token", _hash_token(TYPESCRIPT_DM_API_TOKEN), now, now, None, None, None),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+@pytest.fixture()
+def typescript_api_mutation_server(tmp_path, typescript_node_bin):
+    campaigns_dir = tmp_path / "typescript-campaigns"
+    shutil.copytree(PROJECT_ROOT / "tests" / "fixtures" / "sample_campaigns", campaigns_dir)
+    db_path = tmp_path / "typescript-player-wiki.sqlite3"
+    _seed_typescript_mutation_db(db_path)
+
+    process, url = _launch_typescript_api(typescript_node_bin, campaigns_dir, db_path)
+    try:
+        yield {
+            "url": url,
+            "campaigns_dir": campaigns_dir,
+            "db_path": db_path,
+            "dm_headers": {"Authorization": f"Bearer {TYPESCRIPT_DM_API_TOKEN}", "Accept": "application/json"},
+        }
+    finally:
+        process.terminate()
+        process.wait(timeout=5)
+
+
+def _api_headers(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+
+def _issue_api_token(app, user_email: str, *, label: str) -> str:
+    with app.app_context():
+        store = AuthStore()
+        user = store.get_user_by_email(user_email)
+        assert user is not None
+        raw_token, _ = store.create_api_token(user.id, label=label, expires_in=timedelta(days=365))
+        return raw_token
+
+
+def _read_sqlite_character_state(db_path: Path, character_slug: str) -> dict | None:
+    connection = sqlite3.connect(db_path)
+    connection.row_factory = sqlite3.Row
+    try:
+        row = connection.execute(
+            """
+            SELECT revision, state_json
+            FROM character_state
+            WHERE campaign_slug = ? AND character_slug = ?
+            """,
+            ("linden-pass", character_slug),
+        ).fetchone()
+    finally:
+        connection.close()
+    if row is None:
+        return None
+    return {"revision": int(row["revision"]), "state": json.loads(row["state_json"])}
+
+
+def _insert_sqlite_character_assignment(db_path: Path, character_slug: str) -> None:
+    now = "2026-06-25T12:30:00+00:00"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO character_assignments (
+              user_id, campaign_slug, character_slug, assignment_type, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (79, "linden-pass", character_slug, "owner", now, now),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _sqlite_character_assignment_count(db_path: Path, character_slug: str) -> int:
+    connection = sqlite3.connect(db_path)
+    try:
+        row = connection.execute(
+            "SELECT COUNT(*) FROM character_assignments WHERE campaign_slug = ? AND character_slug = ?",
+            ("linden-pass", character_slug),
+        ).fetchone()
+    finally:
+        connection.close()
+    return int(row[0])
+
+
+def _read_flask_character_state(app, character_slug: str) -> dict | None:
+    with app.app_context():
+        state_record = app.extensions["character_state_store"].get_state("linden-pass", character_slug)
+    if state_record is None:
+        return None
+    return {"revision": state_record.revision, "state": state_record.state}
+
+
+def _write_campaign_system(campaigns_dir: Path, *, system: str, systems_library: str) -> None:
+    config_path = campaigns_dir / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = system
+    payload["systems_library"] = systems_library
+    config_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
+def _xianxia_persistence_summary(state: dict) -> dict:
+    xianxia = dict(state.get("xianxia") or {})
+    return {
+        "status": state.get("status"),
+        "vitals": state.get("vitals"),
+        "resources": state.get("resources"),
+        "spell_slots": state.get("spell_slots"),
+        "notes": state.get("notes"),
+        "xianxia": {
+            "vitals": xianxia.get("vitals"),
+            "energies": xianxia.get("energies"),
+            "yin_yang": xianxia.get("yin_yang"),
+            "dao": xianxia.get("dao"),
+            "active_stance": xianxia.get("active_stance"),
+        },
+    }
 
 
 def test_typescript_campaign_detail_matches_flask_contract(typescript_api_server, client, sign_in, users):
@@ -836,6 +1106,270 @@ def test_typescript_content_character_mutations_require_auth_like_flask(typescri
     )
     assert status == 401
     assert payload == flask_payload
+
+
+def test_typescript_content_character_dnd_persistence_matches_flask_golden(
+    typescript_api_mutation_server,
+    client,
+    app,
+    users,
+):
+    character_slug = "api-scout-golden"
+    flask_dm_token = _issue_api_token(app, users["dm"]["email"], label="dm-content-character-dnd-golden")
+    flask_campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    source_character_dir = flask_campaigns_dir / "linden-pass" / "characters" / "arden-march"
+
+    definition_payload = yaml.safe_load((source_character_dir / "definition.yaml").read_text(encoding="utf-8"))
+    import_payload = yaml.safe_load((source_character_dir / "import.yaml").read_text(encoding="utf-8"))
+    definition_payload["name"] = "API Scout Golden"
+    definition_payload["profile"]["biography_markdown"] = "A golden parity scout prepared through the API."
+    import_payload["source_path"] = "api://campaigns/linden-pass/characters/api-scout-golden"
+    import_payload["parser_version"] = "api-golden"
+    import_payload["import_status"] = "managed"
+    if isinstance(import_payload.get("imported_at_utc"), datetime):
+        import_payload["imported_at_utc"] = import_payload["imported_at_utc"].isoformat().replace("+00:00", "Z")
+    body = {"definition": definition_payload, "import_metadata": import_payload}
+
+    flask_create = client.put(
+        f"/api/v1/campaigns/linden-pass/content/characters/{character_slug}",
+        headers=_api_headers(flask_dm_token),
+        json=body,
+    )
+    assert flask_create.status_code == 200
+    flask_character_file = flask_create.get_json()["character_file"]
+    assert flask_character_file["state_created"] is True
+
+    ts_status, ts_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/characters/{character_slug}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body=body,
+    )
+    assert ts_status == 200
+    assert ts_payload["character_file"]["state_created"] is True
+    assert ts_payload["character_file"]["definition"]["character_slug"] == flask_character_file["definition"]["character_slug"]
+    assert ts_payload["character_file"]["definition"]["system"] == flask_character_file["definition"]["system"] == "DND-5E"
+
+    flask_state = _read_flask_character_state(app, character_slug)
+    ts_state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
+    assert flask_state is not None
+    assert ts_state is not None
+    assert ts_state["revision"] == flask_state["revision"] == 1
+    assert ts_state["state"] == flask_state["state"]
+    assert ts_state["state"]["hit_dice"]["pools"] == [{"faces": 6, "current": 5, "max": 5}]
+    assert ts_state["state"]["spell_slots"][:2] == [
+        {"level": 1, "max": 4, "used": 0},
+        {"level": 2, "max": 3, "used": 0},
+    ]
+    assert ts_state["state"]["resources"][0]["current"] == 5
+    assert ts_state["state"]["inventory"][0]["is_equipped"] is True
+
+    with app.app_context():
+        AuthStore().upsert_character_assignment(users["party"]["id"], "linden-pass", character_slug)
+    _insert_sqlite_character_assignment(typescript_api_mutation_server["db_path"], character_slug)
+
+    flask_delete = client.delete(
+        f"/api/v1/campaigns/linden-pass/content/characters/{character_slug}",
+        headers=_api_headers(flask_dm_token),
+    )
+    assert flask_delete.status_code == 200
+
+    ts_delete_status, ts_delete_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/characters/{character_slug}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="DELETE",
+    )
+    assert ts_delete_status == 200
+    assert ts_delete_payload["deleted"] == flask_delete.get_json()["deleted"]
+    assert ts_delete_payload["deleted"]["deleted_state"] is True
+    assert ts_delete_payload["deleted"]["deleted_assignment"] is True
+
+    assert _read_flask_character_state(app, character_slug) is None
+    assert _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug) is None
+    with app.app_context():
+        assert AuthStore().get_character_assignment("linden-pass", character_slug) is None
+    assert _sqlite_character_assignment_count(typescript_api_mutation_server["db_path"], character_slug) == 0
+
+
+def test_typescript_content_character_xianxia_persistence_matches_flask_golden(
+    typescript_api_mutation_server,
+    client,
+    app,
+    users,
+):
+    character_slug = "api-cultivator-golden"
+    flask_dm_token = _issue_api_token(app, users["dm"]["email"], label="dm-content-character-xianxia-golden")
+    flask_campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    _write_campaign_system(flask_campaigns_dir, system="Xianxia", systems_library="Xianxia")
+    _write_campaign_system(typescript_api_mutation_server["campaigns_dir"], system="Xianxia", systems_library="Xianxia")
+
+    definition_payload = {
+        "name": "API Cultivator Golden",
+        "status": "active",
+        "system": "xianxia",
+        "xianxia": {
+            "realm": "Mortal",
+            "energy_maxima": {"jing": 3, "qi": 2, "shen": 1},
+            "yin_yang": {"yin_max": 2, "yang_max": 1},
+            "dao_max": 3,
+            "durability": {
+                "hp_max": 18,
+                "stance_max": 12,
+                "manual_armor_bonus": 1,
+                "defense": 11,
+            },
+            "trained_skills": ["Tea Ceremony"],
+            "necessary_weapons": ["Jian"],
+            "martial_arts": [{"name": "Heavenly Palm", "current_rank": "Initiate"}],
+        },
+    }
+    body = {"definition": definition_payload}
+
+    flask_create = client.put(
+        f"/api/v1/campaigns/linden-pass/content/characters/{character_slug}",
+        headers=_api_headers(flask_dm_token),
+        json=body,
+    )
+    assert flask_create.status_code == 200
+    assert flask_create.get_json()["character_file"]["state_created"] is True
+
+    ts_status, ts_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/characters/{character_slug}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body=body,
+    )
+    assert ts_status == 200
+    assert ts_payload["character_file"]["state_created"] is True
+    assert ts_payload["character_file"]["definition"]["system"] == "Xianxia"
+
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        state_store = app.extensions["character_state_store"]
+        record = repository.get_character("linden-pass", character_slug)
+        assert record is not None
+        flask_mutable_state = deepcopy(record.state_record.state)
+        flask_mutable_state["vitals"]["current_hp"] = 7
+        flask_mutable_state["xianxia"]["vitals"]["current_hp"] = 7
+        flask_mutable_state["xianxia"]["vitals"]["current_stance"] = 5
+        flask_mutable_state["xianxia"]["energies"]["jing"]["current"] = 2
+        flask_mutable_state["xianxia"]["yin_yang"]["yin_current"] = 1
+        flask_mutable_state["xianxia"]["dao"]["current"] = 2
+        flask_mutable_state["xianxia"]["active_stance"] = {"name": "Stone Root"}
+        flask_mutable_state["notes"]["player_notes_markdown"] = "Keep the manual pool edits in SQLite."
+        flask_edited_state = state_store.replace_state(
+            record.definition,
+            flask_mutable_state,
+            expected_revision=record.state_record.revision,
+        )
+
+    ts_initial_state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
+    assert ts_initial_state is not None
+    ts_mutable_state = deepcopy(ts_initial_state["state"])
+    ts_mutable_state["vitals"]["current_hp"] = 7
+    ts_mutable_state["xianxia"]["vitals"]["current_hp"] = 7
+    ts_mutable_state["xianxia"]["vitals"]["current_stance"] = 5
+    ts_mutable_state["xianxia"]["energies"]["jing"]["current"] = 2
+    ts_mutable_state["xianxia"]["yin_yang"]["yin_current"] = 1
+    ts_mutable_state["xianxia"]["dao"]["current"] = 2
+    ts_mutable_state["xianxia"]["active_stance"] = {"name": "Stone Root"}
+    ts_mutable_state["notes"]["player_notes_markdown"] = "Keep the manual pool edits in SQLite."
+    connection = sqlite3.connect(typescript_api_mutation_server["db_path"])
+    try:
+        connection.execute(
+            """
+            UPDATE character_state
+            SET revision = ?, state_json = ?, updated_at = ?, updated_by_user_id = ?
+            WHERE campaign_slug = ? AND character_slug = ?
+            """,
+            (
+                ts_initial_state["revision"] + 1,
+                json.dumps(ts_mutable_state),
+                "2026-06-25T12:45:00+00:00",
+                77,
+                "linden-pass",
+                character_slug,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    updated_definition_payload = deepcopy(definition_payload)
+    updated_definition_payload["xianxia"]["energy_maxima"] = {"jing": 1, "qi": 2, "shen": 1}
+    updated_definition_payload["xianxia"]["yin_yang"] = {"yin_max": 1, "yang_max": 1}
+    updated_definition_payload["xianxia"]["durability"] = {
+        "hp_max": 6,
+        "stance_max": 4,
+        "manual_armor_bonus": 1,
+        "defense": 11,
+    }
+    update_body = {"definition": updated_definition_payload}
+
+    flask_update = client.put(
+        f"/api/v1/campaigns/linden-pass/content/characters/{character_slug}",
+        headers=_api_headers(flask_dm_token),
+        json=update_body,
+    )
+    assert flask_update.status_code == 200
+    assert flask_update.get_json()["character_file"]["state_created"] is False
+
+    ts_update_status, ts_update_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/characters/{character_slug}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body=update_body,
+    )
+    assert ts_update_status == 200
+    assert ts_update_payload["character_file"]["state_created"] is False
+
+    flask_final_state = _read_flask_character_state(app, character_slug)
+    ts_final_state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
+    assert flask_final_state is not None
+    assert ts_final_state is not None
+    assert ts_final_state["revision"] == flask_final_state["revision"] == flask_edited_state.revision + 1
+    assert _xianxia_persistence_summary(ts_final_state["state"]) == _xianxia_persistence_summary(
+        flask_final_state["state"]
+    )
+    assert ts_final_state["state"]["vitals"] == {"current_hp": 6, "temp_hp": 0}
+    assert ts_final_state["state"]["xianxia"]["vitals"]["current_stance"] == 4
+    assert ts_final_state["state"]["xianxia"]["energies"]["jing"] == {"current": 1}
+    assert ts_final_state["state"]["xianxia"]["dao"] == {"current": 2}
+    assert ts_final_state["state"]["xianxia"]["active_stance"] == {"name": "Stone Root"}
+    assert ts_final_state["state"]["notes"]["player_notes_markdown"] == "Keep the manual pool edits in SQLite."
+
+    flask_definition_text = (
+        flask_campaigns_dir / "linden-pass" / "characters" / character_slug / "definition.yaml"
+    ).read_text(encoding="utf-8")
+    ts_definition_text = (
+        typescript_api_mutation_server["campaigns_dir"]
+        / "linden-pass"
+        / "characters"
+        / character_slug
+        / "definition.yaml"
+    ).read_text(encoding="utf-8")
+    for definition_text in (flask_definition_text, ts_definition_text):
+        assert "current_hp" not in definition_text
+        assert "active_stance" not in definition_text
+        assert "Keep the manual pool edits" not in definition_text
+
+    flask_delete = client.delete(
+        f"/api/v1/campaigns/linden-pass/content/characters/{character_slug}",
+        headers=_api_headers(flask_dm_token),
+    )
+    assert flask_delete.status_code == 200
+    assert flask_delete.get_json()["deleted"]["deleted_state"] is True
+    assert flask_delete.get_json()["deleted"]["deleted_assignment"] is False
+
+    ts_delete_status, ts_delete_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/characters/{character_slug}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="DELETE",
+    )
+    assert ts_delete_status == 200
+    assert ts_delete_payload["deleted"]["deleted_state"] is True
+    assert ts_delete_payload["deleted"]["deleted_assignment"] is False
+    assert _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug) is None
 
 
 def test_typescript_content_pages_list_matches_flask_contract(typescript_api_server, client, sign_in, users):

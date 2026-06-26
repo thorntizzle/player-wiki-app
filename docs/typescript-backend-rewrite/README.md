@@ -215,9 +215,10 @@ Route parity check command:
   `state_created` from real row insertion, reconciles existing Xianxia mutable state against updated
   definition maxima without writing live state into `definition.yaml`, and deletes SQLite
   character-state plus assignment rows while reporting `deleted_state` / `deleted_assignment` from
-  real deletes. Current validation covers disposable copied fixture files and fixture SQLite only;
-  production readiness still needs broader Flask-vs-TypeScript golden parity, migration, backup, and
-  rollback rehearsal.
+  real deletes. Current validation covers disposable copied fixture files, fixture SQLite, and
+  Flask-vs-TypeScript golden parity for DND-5E state initialization/deletion plus Xianxia mutable
+  state preservation/clamping. Staging or production write readiness still needs migration, backup,
+  and rollback rehearsal.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

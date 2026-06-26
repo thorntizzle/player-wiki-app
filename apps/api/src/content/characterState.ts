@@ -199,6 +199,60 @@ function normalizeDndCurrencyFromEquipment(definition: Record<string, unknown>):
   return currency;
 }
 
+function normalizeWeaponWieldModeValue(value: unknown): string {
+  const normalized = asString(value)
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/[^a-z0-9 ]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (normalized === "main hand") {
+    return "main-hand";
+  }
+  if (normalized === "off hand") {
+    return "off-hand";
+  }
+  if (normalized === "two handed") {
+    return "two-handed";
+  }
+  return "";
+}
+
+function slugifyValue(value: unknown): string {
+  return asString(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function normalizeActiveInfusions(value: unknown): Record<string, unknown>[] {
+  const normalized: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  for (const rawEntry of asArray(value)) {
+    const entry = asRecord(rawEntry);
+    const name = asString(entry.name);
+    const infusionKey = asString(entry.infusion_key || entry.key) || slugifyValue(name);
+    if (!infusionKey || seen.has(infusionKey)) {
+      continue;
+    }
+    seen.add(infusionKey);
+
+    const payload: Record<string, unknown> = {
+      infusion_key: infusionKey,
+      name: name || infusionKey.replace(/-/g, " ").replace(/\b\w/g, (match) => match.toUpperCase()),
+    };
+    const sourceFeatureId = asString(entry.source_feature_id);
+    if (sourceFeatureId) {
+      payload.source_feature_id = sourceFeatureId;
+    }
+    if (infusionKey === "enhanced-defense") {
+      payload.effect_key = "enhanced_defense";
+    }
+    normalized.push(payload);
+  }
+  return normalized;
+}
+
 function buildInventoryState(definition: Record<string, unknown>): unknown[] {
   const inventory: unknown[] = [];
   for (const rawItem of asArray(definition.equipment_catalog)) {
@@ -206,15 +260,53 @@ function buildInventoryState(definition: Record<string, unknown>): unknown[] {
     if (item.is_currency_only === true) {
       continue;
     }
-    inventory.push({
-      item_ref: asString(item.id),
-      name: asString(item.name || item.label),
-      quantity: nonNegativeInt(item.default_quantity, 1),
-      is_equipped: Boolean(item.default_equipped),
-      is_attuned: Boolean(item.default_attuned),
-    });
+    const payload: Record<string, unknown> = {
+      id: item.id ?? null,
+      catalog_ref: item.id ?? null,
+      name: item.name ?? null,
+      quantity: asInt(item.default_quantity, 0),
+      weight: item.weight ?? null,
+      is_equipped: Boolean(item.is_equipped),
+      is_attuned: Boolean(item.is_attuned),
+      charges_current: item.charges_current ?? null,
+      charges_max: item.charges_max ?? null,
+      notes: item.notes ?? "",
+      tags: asArray(item.tags),
+    };
+    const weaponWieldMode = normalizeWeaponWieldModeValue(item.weapon_wield_mode);
+    if (weaponWieldMode) {
+      payload.weapon_wield_mode = weaponWieldMode;
+    }
+    const activeInfusions = normalizeActiveInfusions(item.active_infusions);
+    if (activeInfusions.length > 0) {
+      payload.active_infusions = activeInfusions;
+    }
+    inventory.push(payload);
   }
   return inventory;
+}
+
+function inventoryItemRef(item: unknown): string {
+  const payload = asRecord(item);
+  return asString(payload.catalog_ref || payload.id);
+}
+
+function normalizeAttunementState(inventory: unknown[]): Record<string, unknown> {
+  const attunedItemRefs: string[] = [];
+  const seenRefs = new Set<string>();
+  for (const item of inventory) {
+    const payload = asRecord(item);
+    const itemRef = inventoryItemRef(payload);
+    if (!itemRef || payload.is_attuned !== true || seenRefs.has(itemRef)) {
+      continue;
+    }
+    seenRefs.add(itemRef);
+    attunedItemRefs.push(itemRef);
+  }
+  return {
+    max_attuned_items: 3,
+    attuned_item_refs: attunedItemRefs,
+  };
 }
 
 function buildResourceStates(definition: Record<string, unknown>): unknown[] {
@@ -452,7 +544,7 @@ function buildXianxiaInitialState(definition: Record<string, unknown>): Record<s
     inventory,
     currency: normalizeDndCurrencyFromEquipment(definition),
     spell_slots: [],
-    attunement: { max_attuned_items: 3, attuned_item_refs: [] },
+    attunement: normalizeAttunementState(inventory),
     notes: normalizeNotes({}),
     xianxia: xianxiaState,
   };
@@ -473,7 +565,7 @@ function buildDndInitialState(definition: Record<string, unknown>): Record<strin
     inventory,
     currency: normalizeDndCurrencyFromEquipment(definition),
     spell_slots: buildSpellSlotStates(definition),
-    attunement: { max_attuned_items: 3, attuned_item_refs: [] },
+    attunement: normalizeAttunementState(inventory),
     notes: normalizeNotes({}),
   };
 }
@@ -495,7 +587,10 @@ function mergeXianxiaStateWithDefinition(
   payload.spell_slots = [];
   payload.inventory = Array.isArray(payload.inventory) ? payload.inventory : initialState.inventory;
   payload.currency = Object.keys(asRecord(payload.currency)).length > 0 ? asRecord(payload.currency) : initialState.currency;
-  payload.attunement = { max_attuned_items: 3, attuned_item_refs: asArray(asRecord(payload.attunement).attuned_item_refs) };
+  payload.attunement = {
+    max_attuned_items: nonNegativeInt(asRecord(payload.attunement).max_attuned_items, 3),
+    attuned_item_refs: asArray(asRecord(payload.attunement).attuned_item_refs),
+  };
   payload.notes = normalizeNotes(payload.notes);
   payload.xianxia = normalizeXianxiaStateFromShared(definition, payload);
   const xianxiaVitals = asRecord(asRecord(payload.xianxia).vitals);
