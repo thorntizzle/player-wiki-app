@@ -205,6 +205,21 @@ smokeDb
   );
 smokeDb
   .prepare(
+    `
+      UPDATE systems_entries
+      SET
+        metadata_json = ?
+      WHERE library_slug = ?
+        AND entry_key = ?
+    `,
+  )
+  .run(
+    JSON.stringify({ abilities: { dex: 14 }, hp: { average: 7 }, speed: { walk: 30 } }),
+    "DND-5E",
+    "MM:monster:goblin",
+  );
+smokeDb
+  .prepare(
     "INSERT INTO campaign_entry_overrides (campaign_slug, library_slug, entry_key, visibility_override, is_enabled_override, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
   )
   .run("linden-pass", "DND-5E", "PHB:item:chain-mail", "players", null, "2026-06-25T09:35:00+00:00", 42);
@@ -690,6 +705,49 @@ if (missingSystemsEntryDetail.status !== 404 || missingSystemsEntryDetail.payloa
   throw new Error(
     `Expected missing systems entry detail JSON 404, got ${missingSystemsEntryDetail.status} ${missingSystemsEntryDetail.payload?.error?.code}`,
   );
+}
+
+const blockedCombatMonsterSearch = await requestJson("/api/v1/campaigns/linden-pass/combat/systems-monsters/search?q=gob");
+if (blockedCombatMonsterSearch.status !== 401 || blockedCombatMonsterSearch.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated combat Systems monster search to return auth_required 401, got ${blockedCombatMonsterSearch.status} ${blockedCombatMonsterSearch.payload?.error?.code}`,
+  );
+}
+
+const playerCombatMonsterSearch = await requestJson("/api/v1/campaigns/linden-pass/combat/systems-monsters/search?q=gob", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (playerCombatMonsterSearch.status !== 403 || playerCombatMonsterSearch.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player combat Systems monster search forbidden 403, got ${playerCombatMonsterSearch.status} ${playerCombatMonsterSearch.payload?.error?.code}`,
+  );
+}
+
+const shortCombatMonsterSearch = await requestJson("/api/v1/campaigns/linden-pass/combat/systems-monsters/search?q=g", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (
+  shortCombatMonsterSearch.status !== 200 ||
+  shortCombatMonsterSearch.payload?.message !== "Type at least 2 letters to search the Systems monster list." ||
+  shortCombatMonsterSearch.payload?.results?.length !== 0
+) {
+  throw new Error(`Unexpected short combat Systems monster search payload: ${JSON.stringify(shortCombatMonsterSearch.payload)}`);
+}
+
+const dmCombatMonsterSearch = await requestJson("/api/v1/campaigns/linden-pass/combat/systems-monsters/search?q=gob", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (
+  dmCombatMonsterSearch.status !== 200 ||
+  dmCombatMonsterSearch.payload?.message !== "Found 1 matching monster." ||
+  dmCombatMonsterSearch.payload?.results?.length !== 1 ||
+  dmCombatMonsterSearch.payload?.results?.[0]?.entry_key !== "MM:monster:goblin" ||
+  dmCombatMonsterSearch.payload?.results?.[0]?.title !== "Goblin" ||
+  dmCombatMonsterSearch.payload?.results?.[0]?.source_id !== "MM" ||
+  dmCombatMonsterSearch.payload?.results?.[0]?.subtitle !== "HP 7 - Speed Walk 30 ft." ||
+  dmCombatMonsterSearch.payload?.results?.[0]?.initiative_bonus !== "+2"
+) {
+  throw new Error(`Unexpected DM combat Systems monster search payload: ${JSON.stringify(dmCombatMonsterSearch.payload)}`);
 }
 
 const campaignList = await requestJson("/api/v1/campaigns");

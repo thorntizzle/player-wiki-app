@@ -60,6 +60,7 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources/:sourceId`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources/:sourceId/types/:entryType`
   - `GET /api/v1/campaigns/:campaignSlug/systems/entries/:entrySlug`
+  - `GET /api/v1/campaigns/:campaignSlug/combat/systems-monsters/search`
   - `GET /api/v1/campaigns`
   - `GET /api/v1/campaigns/:campaignSlug`
   - `GET /api/v1/campaigns/:campaignSlug/help`
@@ -83,6 +84,9 @@ Route parity check command:
   responses include source cards, entry search results, and rules-reference metadata search fields, entry
   detail responses include parsed metadata/body JSON, source state, override payloads, and Flask compatibility
   links, and missing detail rows return explicit JSON 404s.
+- The first combat-adjacent read path reuses the Systems SQLite fixture layer for Combat Systems monster
+  search, preserving Flask-compatible unauthenticated `auth_required`, manager-only access, short-query
+  guidance, and monster HP/speed/initiative result formatting.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

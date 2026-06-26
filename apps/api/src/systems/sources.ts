@@ -174,6 +174,23 @@ export type SystemsEntryDetailResult =
   | { status: "not_found" }
   | { status: "forbidden"; message: string };
 
+export interface CombatSystemsMonsterSearchResult {
+  entry_key: string;
+  title: string;
+  source_id: string;
+  subtitle: string;
+  initiative_bonus: string;
+}
+
+export interface CombatSystemsMonsterSearchPayload {
+  results: CombatSystemsMonsterSearchResult[];
+  message: string;
+}
+
+export type CombatSystemsMonsterSearchResultPayload =
+  | { status: "ok"; payload: CombatSystemsMonsterSearchPayload }
+  | { status: "forbidden"; message: string };
+
 interface SystemsLibraryRow {
   library_slug: string;
   title: string;
@@ -439,6 +456,11 @@ function canManageSystems(role: FixtureSystemsRole): boolean {
   return role === "dm" || role === "admin";
 }
 
+function supportsCombatTracker(system: string): boolean {
+  const normalized = String(system || "").trim().toLowerCase().replace(/\s+/g, "-");
+  return normalized === "dnd-5e";
+}
+
 function canAccessSource(role: FixtureSystemsRole, isEnabled: boolean, visibility: string): boolean {
   if (canManageSystems(role)) {
     return true;
@@ -586,6 +608,65 @@ function serializeEntryRecord(
 function coerceSortableInt(value: unknown, fallback: number): number {
   const parsed = Number.parseInt(String(value || "").trim(), 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function coerceInt(value: unknown, fallback = 0): number {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function extractMonsterHpAverage(value: unknown): number {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return coerceInt((value as Record<string, unknown>).average, 0);
+  }
+  return coerceInt(value, 0);
+}
+
+function extractMaxDistance(value: unknown): number {
+  if (typeof value === "number") {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string") {
+    const distances = [...value.matchAll(/\d+/g)].map((match) => Number.parseInt(match[0] || "", 10));
+    return distances.length > 0 ? Math.max(...distances.filter(Number.isFinite)) : 0;
+  }
+  if (Array.isArray(value)) {
+    const distances = value.map(extractMaxDistance);
+    return distances.length > 0 ? Math.max(...distances) : 0;
+  }
+  if (typeof value === "object" && value !== null) {
+    const distances = Object.values(value).map(extractMaxDistance);
+    return distances.length > 0 ? Math.max(...distances) : 0;
+  }
+  return 0;
+}
+
+function formatSpeedLabel(value: unknown): string {
+  if (typeof value === "number") {
+    return `${Math.trunc(value)} ft.`;
+  }
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    const parts: string[] = [];
+    for (const movementType of ["walk", "burrow", "climb", "fly", "swim"]) {
+      if (!Object.hasOwn(record, movementType)) {
+        continue;
+      }
+      const movementValue = record[movementType];
+      const renderedValue =
+        movementValue === true
+          ? "equal to walking speed"
+          : extractMaxDistance(movementValue)
+            ? `${extractMaxDistance(movementValue)} ft.`
+            : String(movementValue || "").trim();
+      parts.push(`${titleCaseFallback(movementType)} ${renderedValue}`.trim());
+    }
+    return parts.join(", ");
+  }
+  return "";
 }
 
 function entrySourceBrowseSortKey(row: SystemsEntryRow): [number, number, number, number, string, number] {
@@ -898,6 +979,19 @@ function loadEntriesForSources(
     .all(librarySlug, ...cleanedSourceIds) as SystemsEntryRow[];
 }
 
+function loadSearchableEntriesForSources(
+  database: Database.Database,
+  librarySlug: string,
+  sourceIds: string[],
+  entryType: string,
+  query: string,
+): SystemsEntryRow[] {
+  const normalizedEntryType = String(entryType || "").trim().toLowerCase();
+  return loadEntriesForSources(database, librarySlug, sourceIds)
+    .filter((row) => String(row.entry_type || "").trim().toLowerCase() === normalizedEntryType)
+    .filter((row) => entryMatchesGlobalQuery(row, query));
+}
+
 function effectiveEntryVisibility(
   row: SystemsEntryRow,
   sourceState: SystemsSourceState,
@@ -1060,6 +1154,23 @@ function serializeRulesReferenceResult(row: SystemsEntryRow): SystemsRulesRefere
   };
 }
 
+function serializeCombatSystemsMonsterSearchResult(row: SystemsEntryRow): CombatSystemsMonsterSearchResult {
+  const metadata = parseMetadata(row);
+  const abilities = asRecord(metadata.abilities);
+  const dexScore = coerceInt(abilities.dex, 10);
+  const initiativeBonus = Math.floor((dexScore - 10) / 2);
+  const speed = metadata.speed;
+  const movementTotal = extractMaxDistance(speed);
+  const speedLabel = formatSpeedLabel(speed);
+  return {
+    entry_key: String(row.entry_key),
+    title: String(row.title),
+    source_id: String(row.source_id),
+    subtitle: `HP ${extractMonsterHpAverage(metadata.hp)} - Speed ${speedLabel || `${movementTotal} ft.`}`,
+    initiative_bonus: initiativeBonus > 0 ? `+${initiativeBonus}` : String(initiativeBonus),
+  };
+}
+
 function buildRulesReferenceSearchMeta(rows: SystemsEntryRow[]): string {
   const hasBook = rows.some((row) => row.entry_type === "book");
   const hasRule = rows.some((row) => row.entry_type === "rule");
@@ -1073,6 +1184,100 @@ function buildRulesReferenceSearchMeta(rows: SystemsEntryRow[]): string {
     return "Searches only this source's rules entries using curated metadata like aliases, formulas, and rule facets. It does not search full entry body text.";
   }
   return "";
+}
+
+export function buildCombatSystemsMonsterSearchPayload(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  query = "",
+): CombatSystemsMonsterSearchResultPayload {
+  if (!canManageSystems(role)) {
+    return { status: "forbidden", message: "You do not have permission to manage combat." };
+  }
+  if (!supportsCombatTracker(campaign.system)) {
+    return {
+      status: "ok",
+      payload: {
+        results: [],
+        message: "Combat tracker support for this campaign system is not available yet.",
+      },
+    };
+  }
+
+  const cleanedQuery = String(query || "").trim();
+  if (cleanedQuery.length < 2) {
+    return {
+      status: "ok",
+      payload: {
+        results: [],
+        message: "Type at least 2 letters to search the Systems monster list.",
+      },
+    };
+  }
+
+  const librarySlug = campaign.systems_library_slug || "";
+  if (!librarySlug || !existsSync(dbPath)) {
+    return {
+      status: "ok",
+      payload: {
+        results: [],
+        message: "No Systems monsters matched that search.",
+      },
+    };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const seeds = parseSourceSeeds(campaignConfig);
+    const enabledSourceStates = loadSourceRows(database, campaign.slug, librarySlug)
+      .map((row) => serializeSourceState(row, seeds.get(row.source_id), role))
+      .filter((state) => state.is_enabled);
+    const sourceStatesById = new Map(enabledSourceStates.map((state) => [state.source_id, state]));
+    const overridesByEntryKey = loadCampaignEntryOverrides(database, campaign.slug, librarySlug);
+    const results = filterRowsForEntryAccess(
+      loadSearchableEntriesForSources(
+        database,
+        librarySlug,
+        enabledSourceStates.map((state) => state.source_id),
+        "monster",
+        cleanedQuery,
+      ),
+      role,
+      sourceStatesById,
+      overridesByEntryKey,
+    )
+      .slice(0, 30)
+      .map(serializeCombatSystemsMonsterSearchResult);
+
+    const message =
+      results.length === 30
+        ? "Showing the first 30 matching monsters."
+        : results.length > 0
+          ? `Found ${results.length} matching monster${results.length === 1 ? "" : "s"}.`
+          : "No Systems monsters matched that search.";
+    return {
+      status: "ok",
+      payload: {
+        results,
+        message,
+      },
+    };
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return {
+        status: "ok",
+        payload: {
+          results: [],
+          message: "No Systems monsters matched that search.",
+        },
+      };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
 }
 
 export function buildCampaignSystemsSourceListPayload(

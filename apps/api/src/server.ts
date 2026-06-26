@@ -12,6 +12,7 @@ import { ROUTES } from "./routes.js";
 import { buildSessionStatePayload } from "./session/view.js";
 import { getSystemsImportRun, listSystemsImportRuns } from "./systems/importRuns.js";
 import {
+  buildCombatSystemsMonsterSearchPayload,
   buildCampaignSystemsEntryDetailPayload,
   buildCampaignSystemsIndexPayload,
   buildCampaignSystemsSourceCategoryPayload,
@@ -554,6 +555,38 @@ app.get(ROUTES.systemsEntryDetail, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
+  return ctx.json({
+    ok: true,
+    ...result.payload,
+  });
+});
+
+app.get(ROUTES.combatSystemsMonsterSearch, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const role = fixtureRole(ctx);
+  if (!role) {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  const result = buildCombatSystemsMonsterSearchPayload(
+    config.dbPath,
+    campaign,
+    campaignConfig?.config || {},
+    role,
+    ctx.req.query("q") || "",
+  );
+  if (result.status === "forbidden") {
+    const error = forbidden(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
   return ctx.json({
     ok: true,
     ...result.payload,

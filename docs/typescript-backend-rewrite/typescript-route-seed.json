@@ -117,6 +117,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/systems-monsters/search",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/systems-monsters/search",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat Systems monster search route with Flask-compatible unauthenticated auth_required behavior, fixture DM/admin manager access, short-query guidance, SQLite monster metadata result formatting, and explicit missing-campaign JSON."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/wiki",
       "route_family": "api_v1_wiki",
       "status": "implemented_fixture_readonly",
