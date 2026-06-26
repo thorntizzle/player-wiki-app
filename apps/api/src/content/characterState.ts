@@ -1,0 +1,605 @@
+import { existsSync } from "node:fs";
+
+import Database from "better-sqlite3";
+
+import type { ApiConfig } from "../config.js";
+
+type SqliteDatabase = InstanceType<typeof Database>;
+
+interface CharacterStateRow {
+  revision: number;
+  state_json: string;
+}
+
+export interface CharacterStatePersistenceResult {
+  stateCreated: boolean;
+}
+
+export interface DeletedCharacterPersistenceResult {
+  deletedState: boolean;
+  deletedAssignment: boolean;
+}
+
+const XIANXIA_SYSTEM_CODE = "xianxia";
+const XIANXIA_ENERGY_KEYS = ["jing", "qi", "shen"] as const;
+const XIANXIA_CURRENCY_KEYS = ["coin", "supply", "spirit_stones"] as const;
+const VALID_HIT_DIE_FACES = new Set([4, 6, 8, 10, 12]);
+const STANDARD_DND_CLASS_HIT_DICE: Record<string, number> = {
+  artificer: 8,
+  barbarian: 12,
+  bard: 8,
+  cleric: 8,
+  druid: 8,
+  fighter: 10,
+  monk: 8,
+  paladin: 10,
+  ranger: 10,
+  rogue: 8,
+  sorcerer: 6,
+  warlock: 8,
+  wizard: 6,
+};
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeSystemKey(value: unknown): string {
+  return asString(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function asInt(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed)) {
+      return Math.trunc(parsed);
+    }
+  }
+  return fallback;
+}
+
+function nonNegativeInt(value: unknown, fallback = 0): number {
+  return Math.max(0, asInt(value, fallback));
+}
+
+function clampInt(value: unknown, fallback = 0, maximum?: number): number {
+  const normalized = nonNegativeInt(value, fallback);
+  return maximum === undefined ? normalized : Math.min(normalized, Math.max(0, maximum));
+}
+
+function utcIsoTimestamp(): string {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
+}
+
+function openDatabase(config: ApiConfig): SqliteDatabase | null {
+  if (!config.dbPath || !existsSync(config.dbPath)) {
+    return null;
+  }
+  return new Database(config.dbPath);
+}
+
+function tableExists(database: SqliteDatabase, tableName: string): boolean {
+  const row = database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(tableName) as { name?: string } | undefined;
+  return Boolean(row?.name);
+}
+
+function parseStateJson(rawJson: string): Record<string, unknown> {
+  try {
+    return asRecord(JSON.parse(rawJson));
+  } catch {
+    return {};
+  }
+}
+
+function readCharacterState(
+  database: SqliteDatabase,
+  campaignSlug: string,
+  characterSlug: string,
+): { revision: number; state: Record<string, unknown> } | null {
+  const row = database
+    .prepare(
+      `
+        SELECT revision, state_json
+        FROM character_state
+        WHERE campaign_slug = ?
+          AND character_slug = ?
+      `,
+    )
+    .get(campaignSlug, characterSlug) as CharacterStateRow | undefined;
+  if (!row) {
+    return null;
+  }
+  return {
+    revision: Number(row.revision) || 0,
+    state: parseStateJson(row.state_json),
+  };
+}
+
+function characterIdentity(definition: Record<string, unknown>): { campaignSlug: string; characterSlug: string } | null {
+  const campaignSlug = asString(definition.campaign_slug);
+  const characterSlug = asString(definition.character_slug);
+  return campaignSlug && characterSlug ? { campaignSlug, characterSlug } : null;
+}
+
+function definitionXianxia(definition: Record<string, unknown>): Record<string, unknown> {
+  return asRecord(definition.xianxia);
+}
+
+function definitionStats(definition: Record<string, unknown>): Record<string, unknown> {
+  return asRecord(definition.stats);
+}
+
+function definitionDurability(definition: Record<string, unknown>): Record<string, unknown> {
+  const xianxia = definitionXianxia(definition);
+  return asRecord(xianxia.durability);
+}
+
+function definitionYinYang(definition: Record<string, unknown>): Record<string, unknown> {
+  return asRecord(definitionXianxia(definition).yin_yang);
+}
+
+function definitionEnergies(definition: Record<string, unknown>): Record<string, unknown> {
+  return asRecord(definitionXianxia(definition).energies);
+}
+
+function definitionEnergyMaxima(definition: Record<string, unknown>): Record<string, unknown> {
+  return asRecord(definitionXianxia(definition).energy_maxima);
+}
+
+function xianxiaHpMax(definition: Record<string, unknown>): number {
+  const xianxia = definitionXianxia(definition);
+  return nonNegativeInt(definitionDurability(definition).hp_max ?? xianxia.hp_max ?? definitionStats(definition).max_hp, 10);
+}
+
+function xianxiaStanceMax(definition: Record<string, unknown>): number {
+  const xianxia = definitionXianxia(definition);
+  return nonNegativeInt(definitionDurability(definition).stance_max ?? xianxia.stance_max, 10);
+}
+
+function xianxiaEnergyMax(definition: Record<string, unknown>, energyKey: string): number {
+  const energy = asRecord(definitionEnergies(definition)[energyKey]);
+  return nonNegativeInt(energy.max ?? definitionEnergyMaxima(definition)[energyKey], 0);
+}
+
+function xianxiaYinMax(definition: Record<string, unknown>): number {
+  return nonNegativeInt(definitionYinYang(definition).yin_max ?? definitionXianxia(definition).yin_max, 1);
+}
+
+function xianxiaYangMax(definition: Record<string, unknown>): number {
+  return nonNegativeInt(definitionYinYang(definition).yang_max ?? definitionXianxia(definition).yang_max, 1);
+}
+
+function xianxiaDaoMax(definition: Record<string, unknown>): number {
+  return nonNegativeInt(asRecord(definitionXianxia(definition).dao).max ?? definitionXianxia(definition).dao_max, 3);
+}
+
+function normalizeDndCurrencyFromEquipment(definition: Record<string, unknown>): Record<string, unknown> {
+  const currency: Record<string, unknown> = { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0, other: [] };
+  for (const item of asArray(definition.equipment_catalog)) {
+    const itemCurrency = asRecord(asRecord(item).currency);
+    for (const denomination of ["cp", "sp", "ep", "gp", "pp"]) {
+      currency[denomination] = asInt(currency[denomination], 0) + asInt(itemCurrency[denomination], 0);
+    }
+  }
+  return currency;
+}
+
+function buildInventoryState(definition: Record<string, unknown>): unknown[] {
+  const inventory: unknown[] = [];
+  for (const rawItem of asArray(definition.equipment_catalog)) {
+    const item = asRecord(rawItem);
+    if (item.is_currency_only === true) {
+      continue;
+    }
+    inventory.push({
+      item_ref: asString(item.id),
+      name: asString(item.name || item.label),
+      quantity: nonNegativeInt(item.default_quantity, 1),
+      is_equipped: Boolean(item.default_equipped),
+      is_attuned: Boolean(item.default_attuned),
+    });
+  }
+  return inventory;
+}
+
+function buildResourceStates(definition: Record<string, unknown>): unknown[] {
+  return asArray(definition.resource_templates).map((rawTemplate) => {
+    const template = asRecord(rawTemplate);
+    const maxValue = template.max === null || template.max === undefined ? null : nonNegativeInt(template.max, 0);
+    return {
+      id: template.id ?? "",
+      label: template.label ?? "",
+      category: template.category ?? "",
+      current: clampInt(template.initial_current ?? template.current, maxValue ?? 0, maxValue ?? undefined),
+      max: maxValue,
+      reset_on: template.reset_on ?? "manual",
+      reset_to: template.reset_to ?? "unchanged",
+      rest_behavior: template.rest_behavior ?? "manual_only",
+      notes: template.notes ?? "",
+      display_order: asInt(template.display_order, 0),
+    };
+  });
+}
+
+function buildSpellSlotStates(definition: Record<string, unknown>): unknown[] {
+  const spellcasting = asRecord(definition.spellcasting);
+  const lanes = asArray(spellcasting.slot_lanes);
+  const slots: unknown[] = [];
+  for (const rawLane of lanes) {
+    const lane = asRecord(rawLane);
+    const laneId = asString(lane.id);
+    for (const rawSlot of asArray(lane.slot_progression)) {
+      const slot = asRecord(rawSlot);
+      const level = asInt(slot.level, 0);
+      const maxSlots = nonNegativeInt(slot.max_slots, 0);
+      if (level <= 0 || maxSlots <= 0) {
+        continue;
+      }
+      const stateSlot: Record<string, unknown> = { level, max: maxSlots, used: 0 };
+      if (laneId) {
+        stateSlot.slot_lane_id = laneId;
+      }
+      slots.push(stateSlot);
+    }
+  }
+  if (slots.length === 0) {
+    for (const rawSlot of asArray(spellcasting.slot_progression)) {
+      const slot = asRecord(rawSlot);
+      const level = asInt(slot.level, 0);
+      const maxSlots = nonNegativeInt(slot.max_slots, 0);
+      if (level > 0 && maxSlots > 0) {
+        slots.push({ level, max: maxSlots, used: 0 });
+      }
+    }
+  }
+  return slots;
+}
+
+function normalizeClassName(value: unknown): string {
+  return asString(value).toLowerCase().replace(/[^a-z]+/g, "");
+}
+
+function extractHitDieFaces(value: unknown): number {
+  if (value === null || value === undefined || value === "") {
+    return 0;
+  }
+  if (typeof value === "object" && !Array.isArray(value)) {
+    const record = asRecord(value);
+    return extractHitDieFaces(record.faces ?? record.face ?? record.die);
+  }
+  const parsed = Number.parseInt(String(value).trim().toLowerCase().replace(/^d/, ""), 10);
+  return VALID_HIT_DIE_FACES.has(parsed) ? parsed : 0;
+}
+
+function profileClassRows(definition: Record<string, unknown>): Record<string, unknown>[] {
+  const profile = asRecord(definition.profile);
+  const rows = asArray(profile.classes)
+    .map(asRecord)
+    .filter((row) => Object.keys(row).length > 0);
+  if (rows.length > 0) {
+    return rows;
+  }
+  const classLevelText = asString(profile.class_level_text);
+  const match = classLevelText.match(/^([A-Za-z][A-Za-z '\-]*)\s+(\d+)$/);
+  if (!match) {
+    return [];
+  }
+  return [{ class_name: match[1]?.trim() || "", level: Number.parseInt(match[2] || "0", 10) }];
+}
+
+function hitDieFacesForClassRow(classRow: Record<string, unknown>): number {
+  for (const key of ["hit_die_faces", "hit_die_face", "hit_die"]) {
+    const faces = extractHitDieFaces(classRow[key]);
+    if (faces) {
+      return faces;
+    }
+  }
+  const metadata = asRecord(classRow.metadata);
+  const metadataFaces = extractHitDieFaces(metadata.hit_die ?? metadata.hitDie);
+  if (metadataFaces) {
+    return metadataFaces;
+  }
+  const systemsRef = asRecord(classRow.systems_ref);
+  const systemsFaces = extractHitDieFaces(systemsRef.hit_die ?? systemsRef.hitDie);
+  if (systemsFaces) {
+    return systemsFaces;
+  }
+  const systemsMetadata = asRecord(systemsRef.metadata);
+  const systemsMetadataFaces = extractHitDieFaces(systemsMetadata.hit_die ?? systemsMetadata.hitDie);
+  if (systemsMetadataFaces) {
+    return systemsMetadataFaces;
+  }
+  const className = normalizeClassName(classRow.class_name || classRow.name);
+  return STANDARD_DND_CLASS_HIT_DICE[className] ?? (className ? 8 : 0);
+}
+
+function buildHitDiceState(definition: Record<string, unknown>): Record<string, unknown> {
+  const maxByFaces = new Map<number, number>();
+  for (const classRow of profileClassRows(definition)) {
+    const level = nonNegativeInt(classRow.level, 0);
+    const faces = hitDieFacesForClassRow(classRow);
+    if (level > 0 && faces > 0) {
+      maxByFaces.set(faces, (maxByFaces.get(faces) ?? 0) + level);
+    }
+  }
+  return {
+    pools: [...maxByFaces.entries()]
+      .sort(([leftFaces], [rightFaces]) => leftFaces - rightFaces)
+      .map(([faces, max]) => ({ faces, current: max, max })),
+  };
+}
+
+function normalizeNotes(value: unknown): Record<string, unknown> {
+  const notes = asRecord(value);
+  return {
+    player_notes_markdown: asString(notes.player_notes_markdown),
+    physical_description_markdown: asString(notes.physical_description_markdown),
+    background_markdown: asString(notes.background_markdown),
+    session_notes: asArray(notes.session_notes),
+  };
+}
+
+function normalizeActiveStateRecord(value: unknown): Record<string, unknown> {
+  if (typeof value === "string") {
+    const name = asString(value);
+    return name ? { name } : {};
+  }
+  const record = asRecord(value);
+  const name = asString(record.name || record.label);
+  return name ? { ...record, name } : {};
+}
+
+function normalizeXianxiaCurrency(value: unknown): Record<string, number> {
+  const currency = asRecord(value);
+  const normalized: Record<string, number> = {};
+  for (const key of XIANXIA_CURRENCY_KEYS) {
+    normalized[key] = nonNegativeInt(currency[key], 0);
+  }
+  return normalized;
+}
+
+function normalizeXianxiaInventory(rawXianxiaInventory: unknown, sharedInventory: unknown): unknown[] {
+  if (Array.isArray(rawXianxiaInventory)) {
+    return rawXianxiaInventory;
+  }
+  const rawInventoryRecord = asRecord(rawXianxiaInventory);
+  if (Array.isArray(rawInventoryRecord.quantities)) {
+    return rawInventoryRecord.quantities;
+  }
+  return asArray(sharedInventory);
+}
+
+function normalizeXianxiaStateFromShared(
+  definition: Record<string, unknown>,
+  state: Record<string, unknown>,
+): Record<string, unknown> {
+  const rawXianxia = asRecord(state.xianxia);
+  const rawXianxiaVitals = asRecord(rawXianxia.vitals);
+  const sharedVitals = asRecord(state.vitals);
+  const currentHpSource = Object.hasOwn(sharedVitals, "current_hp")
+    ? sharedVitals.current_hp
+    : rawXianxiaVitals.current_hp ?? rawXianxia.hp_current ?? rawXianxia.current_hp;
+  const tempHpSource = Object.hasOwn(sharedVitals, "temp_hp")
+    ? sharedVitals.temp_hp
+    : rawXianxiaVitals.temp_hp ?? rawXianxia.hp_temp ?? rawXianxia.temp_hp;
+  const rawEnergies = asRecord(rawXianxia.energies);
+  const rawYinYang = asRecord(rawXianxia.yin_yang);
+  const rawDao = asRecord(rawXianxia.dao);
+  const energies: Record<string, Record<string, number>> = {};
+  for (const key of XIANXIA_ENERGY_KEYS) {
+    const energyMax = xianxiaEnergyMax(definition, key);
+    energies[key] = {
+      current: clampInt(asRecord(rawEnergies[key]).current ?? asRecord(rawXianxia.energies_current)[key], energyMax, energyMax),
+    };
+  }
+
+  return {
+    schema_version: asInt(rawXianxia.schema_version, 1),
+    vitals: {
+      current_hp: clampInt(currentHpSource, xianxiaHpMax(definition), xianxiaHpMax(definition)),
+      temp_hp: clampInt(tempHpSource, 0),
+      current_stance: clampInt(
+        rawXianxiaVitals.current_stance ?? rawXianxiaVitals.stance_current ?? rawXianxia.stance_current,
+        xianxiaStanceMax(definition),
+        xianxiaStanceMax(definition),
+      ),
+      temp_stance: clampInt(rawXianxiaVitals.temp_stance ?? rawXianxiaVitals.stance_temp ?? rawXianxia.stance_temp, 0),
+    },
+    energies,
+    yin_yang: {
+      yin_current: clampInt(rawYinYang.yin_current ?? rawXianxia.yin_current, xianxiaYinMax(definition), xianxiaYinMax(definition)),
+      yang_current: clampInt(rawYinYang.yang_current ?? rawXianxia.yang_current, xianxiaYangMax(definition), xianxiaYangMax(definition)),
+    },
+    dao: {
+      current: clampInt(rawDao.current ?? rawXianxia.dao_current, 0, xianxiaDaoMax(definition)),
+    },
+    active_stance: normalizeActiveStateRecord(rawXianxia.active_stance),
+    active_aura: normalizeActiveStateRecord(rawXianxia.active_aura),
+    currency: normalizeXianxiaCurrency(asRecord(rawXianxia.currency)),
+    inventory: normalizeXianxiaInventory(rawXianxia.inventory, state.inventory),
+    notes: {
+      ...asRecord(rawXianxia.notes),
+      player_notes_markdown: asString(asRecord(state.notes).player_notes_markdown),
+    },
+  };
+}
+
+function buildXianxiaInitialState(definition: Record<string, unknown>): Record<string, unknown> {
+  const xianxiaState = normalizeXianxiaStateFromShared(definition, {});
+  const inventory = buildInventoryState(definition);
+  return {
+    status: asString(definition.status) || "active",
+    vitals: {
+      current_hp: asInt(asRecord(xianxiaState.vitals).current_hp, 0),
+      temp_hp: asInt(asRecord(xianxiaState.vitals).temp_hp, 0),
+    },
+    resources: [],
+    inventory,
+    currency: normalizeDndCurrencyFromEquipment(definition),
+    spell_slots: [],
+    attunement: { max_attuned_items: 3, attuned_item_refs: [] },
+    notes: normalizeNotes({}),
+    xianxia: xianxiaState,
+  };
+}
+
+function buildDndInitialState(definition: Record<string, unknown>): Record<string, unknown> {
+  const maxHp = nonNegativeInt(definitionStats(definition).max_hp, 0);
+  const inventory = buildInventoryState(definition);
+  return {
+    status: asString(definition.status) || "active",
+    vitals: {
+      current_hp: maxHp,
+      temp_hp: 0,
+      death_saves: { successes: 0, failures: 0 },
+    },
+    hit_dice: buildHitDiceState(definition),
+    resources: buildResourceStates(definition),
+    inventory,
+    currency: normalizeDndCurrencyFromEquipment(definition),
+    spell_slots: buildSpellSlotStates(definition),
+    attunement: { max_attuned_items: 3, attuned_item_refs: [] },
+    notes: normalizeNotes({}),
+  };
+}
+
+function buildInitialState(definition: Record<string, unknown>): Record<string, unknown> {
+  return normalizeSystemKey(definition.system) === XIANXIA_SYSTEM_CODE
+    ? buildXianxiaInitialState(definition)
+    : buildDndInitialState(definition);
+}
+
+function mergeXianxiaStateWithDefinition(
+  definition: Record<string, unknown>,
+  existingState: Record<string, unknown>,
+): Record<string, unknown> {
+  const initialState = buildXianxiaInitialState(definition);
+  const payload: Record<string, unknown> = { ...existingState };
+  payload.status = asString(payload.status) || asString(definition.status) || "active";
+  payload.resources = [];
+  payload.spell_slots = [];
+  payload.inventory = Array.isArray(payload.inventory) ? payload.inventory : initialState.inventory;
+  payload.currency = Object.keys(asRecord(payload.currency)).length > 0 ? asRecord(payload.currency) : initialState.currency;
+  payload.attunement = { max_attuned_items: 3, attuned_item_refs: asArray(asRecord(payload.attunement).attuned_item_refs) };
+  payload.notes = normalizeNotes(payload.notes);
+  payload.xianxia = normalizeXianxiaStateFromShared(definition, payload);
+  const xianxiaVitals = asRecord(asRecord(payload.xianxia).vitals);
+  payload.vitals = {
+    current_hp: asInt(xianxiaVitals.current_hp, 0),
+    temp_hp: asInt(xianxiaVitals.temp_hp, 0),
+  };
+  delete payload.hit_dice;
+  return payload;
+}
+
+export function persistCharacterStateForDefinition(
+  config: ApiConfig,
+  definition: Record<string, unknown>,
+): CharacterStatePersistenceResult {
+  const identity = characterIdentity(definition);
+  if (!identity) {
+    return { stateCreated: false };
+  }
+  const database = openDatabase(config);
+  if (!database) {
+    return { stateCreated: false };
+  }
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { stateCreated: false };
+    }
+
+    const existingState = readCharacterState(database, identity.campaignSlug, identity.characterSlug);
+    const now = utcIsoTimestamp();
+    if (!existingState) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(identity.campaignSlug, identity.characterSlug, 1, JSON.stringify(buildInitialState(definition)), now, null);
+      return { stateCreated: true };
+    }
+
+    if (normalizeSystemKey(definition.system) === XIANXIA_SYSTEM_CODE) {
+      const mergedState = mergeXianxiaStateWithDefinition(definition, existingState.state);
+      if (JSON.stringify(mergedState) !== JSON.stringify(existingState.state)) {
+        database
+          .prepare(
+            `
+              UPDATE character_state
+              SET revision = revision + 1,
+                  state_json = ?,
+                  updated_at = ?,
+                  updated_by_user_id = ?
+              WHERE campaign_slug = ?
+                AND character_slug = ?
+                AND revision = ?
+            `,
+          )
+          .run(
+            JSON.stringify(mergedState),
+            now,
+            null,
+            identity.campaignSlug,
+            identity.characterSlug,
+            existingState.revision,
+          );
+      }
+    }
+
+    return { stateCreated: false };
+  } finally {
+    database.close();
+  }
+}
+
+export function deleteCharacterPersistence(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+): DeletedCharacterPersistenceResult {
+  const database = openDatabase(config);
+  if (!database) {
+    return { deletedState: false, deletedAssignment: false };
+  }
+  try {
+    const deletedState = tableExists(database, "character_state")
+      ? database
+          .prepare("DELETE FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+          .run(campaignSlug, characterSlug).changes > 0
+      : false;
+    const deletedAssignment = tableExists(database, "character_assignments")
+      ? database
+          .prepare("DELETE FROM character_assignments WHERE campaign_slug = ? AND character_slug = ?")
+          .run(campaignSlug, characterSlug).changes > 0
+      : false;
+    return { deletedState, deletedAssignment };
+  } finally {
+    database.close();
+  }
+}

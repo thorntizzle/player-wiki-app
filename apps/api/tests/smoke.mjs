@@ -76,6 +76,17 @@ smokeDb.exec(`
     PRIMARY KEY (campaign_slug, scope)
   );
 
+  CREATE TABLE character_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    campaign_slug TEXT NOT NULL,
+    character_slug TEXT NOT NULL,
+    assignment_type TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (campaign_slug, character_slug)
+  );
+
   CREATE TABLE auth_audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     actor_user_id INTEGER,
@@ -98,6 +109,16 @@ smokeDb.exec(`
     started_at TEXT NOT NULL,
     completed_at TEXT,
     started_by_user_id INTEGER
+  );
+
+  CREATE TABLE character_state (
+    campaign_slug TEXT NOT NULL,
+    character_slug TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    state_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_user_id INTEGER,
+    PRIMARY KEY (campaign_slug, character_slug)
   );
 `);
 smokeDb
@@ -2355,6 +2376,34 @@ if (
 ) {
   throw new Error("Expected content character PUT to write definition/import YAML into the copied fixture tree.");
 }
+const dndStateAssertionDb = new Database(dbPath);
+const managedCharacterStateRow = dndStateAssertionDb
+  .prepare("SELECT revision, state_json FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", managedCharacterSlug);
+if (!managedCharacterStateRow || managedCharacterStateRow.revision !== 1) {
+  dndStateAssertionDb.close();
+  throw new Error(`Expected content character PUT to initialize SQLite state, got ${JSON.stringify(managedCharacterStateRow)}`);
+}
+const managedCharacterState = JSON.parse(managedCharacterStateRow.state_json);
+if (
+  managedCharacterState.status !== "active" ||
+  managedCharacterState.vitals?.temp_hp !== 0 ||
+  managedCharacterState.hit_dice?.pools?.[0]?.faces !== 6 ||
+  managedCharacterState.hit_dice?.pools?.[0]?.current !== 5 ||
+  managedCharacterState.spell_slots?.[0]?.level !== 1 ||
+  managedCharacterState.spell_slots?.[0]?.max !== 4 ||
+  managedCharacterState.resources?.[0]?.current !== 5
+) {
+  dndStateAssertionDb.close();
+  throw new Error(`Expected initialized character state payload, got ${JSON.stringify(managedCharacterState)}`);
+}
+const assignmentTimestamp = "2026-06-25T12:30:00+00:00";
+dndStateAssertionDb
+  .prepare(
+    "INSERT INTO character_assignments (user_id, campaign_slug, character_slug, assignment_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+  .run(79, "linden-pass", managedCharacterSlug, "owner", assignmentTimestamp, assignmentTimestamp);
+dndStateAssertionDb.close();
 
 const contentCharactersAfterPut = await requestJson("/api/v1/campaigns/linden-pass/content/characters", contentManagerHeaders);
 if (!contentCharactersAfterPut.payload?.characters?.some((item) => item.character_slug === managedCharacterSlug)) {
@@ -2395,8 +2444,8 @@ if (
   contentCharacterDelete.status !== 200 ||
   contentCharacterDelete.payload?.deleted?.character_slug !== managedCharacterSlug ||
   contentCharacterDelete.payload?.deleted?.deleted_files !== true ||
-  contentCharacterDelete.payload?.deleted?.deleted_state !== false ||
-  contentCharacterDelete.payload?.deleted?.deleted_assignment !== false
+  contentCharacterDelete.payload?.deleted?.deleted_state !== true ||
+  contentCharacterDelete.payload?.deleted?.deleted_assignment !== true
 ) {
   throw new Error(
     `Expected content character DELETE payload, got ${contentCharacterDelete.status} ${JSON.stringify(contentCharacterDelete.payload)}`,
@@ -2404,6 +2453,19 @@ if (
 }
 if (existsSync(managedCharacterDefinitionPath) || existsSync(managedCharacterImportPath)) {
   throw new Error("Expected content character DELETE to remove managed definition/import files from the copied fixture tree.");
+}
+const dndDeleteAssertionDb = new Database(dbPath);
+const remainingManagedState = dndDeleteAssertionDb
+  .prepare("SELECT COUNT(*) AS count FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", managedCharacterSlug);
+const remainingManagedAssignment = dndDeleteAssertionDb
+  .prepare("SELECT COUNT(*) AS count FROM character_assignments WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", managedCharacterSlug);
+dndDeleteAssertionDb.close();
+if (Number(remainingManagedState?.count) !== 0 || Number(remainingManagedAssignment?.count) !== 0) {
+  throw new Error(
+    `Expected content character DELETE to remove SQLite state and assignment, got state=${JSON.stringify(remainingManagedState)} assignment=${JSON.stringify(remainingManagedAssignment)}`,
+  );
 }
 
 const missingManagedCharacterDelete = await requestJson(
@@ -2418,6 +2480,184 @@ if (
   throw new Error(
     `Expected missing managed content character DELETE 404, got ${missingManagedCharacterDelete.status} ${missingManagedCharacterDelete.payload?.error?.code}`,
   );
+}
+
+const xianxiaContentConfigPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/config",
+  bearerContentManagerHeaders,
+  { method: "PATCH", body: { config: { system: "xianxia", systems_library: "xianxia" } } },
+);
+if (
+  xianxiaContentConfigPatch.status !== 200 ||
+  xianxiaContentConfigPatch.payload?.config_file?.config?.system !== "Xianxia" ||
+  xianxiaContentConfigPatch.payload?.config_file?.config?.systems_library !== "Xianxia"
+) {
+  throw new Error(`Expected Xianxia content config before character state smoke, got ${JSON.stringify(xianxiaContentConfigPatch.payload)}`);
+}
+
+const xianxiaCharacterSlug = "api-cultivator";
+const xianxiaCharacterPath = `/api/v1/campaigns/linden-pass/content/characters/${xianxiaCharacterSlug}`;
+const xianxiaDefinition = {
+  name: "API Cultivator",
+  status: "active",
+  system: "xianxia",
+  xianxia: {
+    realm: "Mortal",
+    energy_maxima: { jing: 3, qi: 2, shen: 1 },
+    yin_yang: { yin_max: 2, yang_max: 1 },
+    dao_max: 3,
+    durability: {
+      hp_max: 18,
+      stance_max: 12,
+      manual_armor_bonus: 1,
+      defense: 11,
+    },
+    trained_skills: ["Tea Ceremony"],
+    necessary_weapons: ["Jian"],
+    martial_arts: [{ name: "Heavenly Palm", current_rank: "Initiate" }],
+  },
+};
+const xianxiaCreateResponse = await requestJson(
+  xianxiaCharacterPath,
+  bearerContentManagerHeaders,
+  { method: "PUT", body: { definition: xianxiaDefinition } },
+);
+if (
+  xianxiaCreateResponse.status !== 200 ||
+  xianxiaCreateResponse.payload?.character_file?.state_created !== true ||
+  xianxiaCreateResponse.payload?.character_file?.definition?.system !== "Xianxia"
+) {
+  throw new Error(`Expected Xianxia content character create payload, got ${xianxiaCreateResponse.status} ${JSON.stringify(xianxiaCreateResponse.payload)}`);
+}
+
+const xianxiaStateSetupDb = new Database(dbPath);
+const xianxiaInitialRow = xianxiaStateSetupDb
+  .prepare("SELECT revision, state_json FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", xianxiaCharacterSlug);
+if (!xianxiaInitialRow || xianxiaInitialRow.revision !== 1) {
+  xianxiaStateSetupDb.close();
+  throw new Error(`Expected Xianxia character create to initialize state, got ${JSON.stringify(xianxiaInitialRow)}`);
+}
+const xianxiaMutableState = JSON.parse(xianxiaInitialRow.state_json);
+xianxiaMutableState.vitals.current_hp = 7;
+xianxiaMutableState.vitals.temp_hp = -2;
+xianxiaMutableState.xianxia.vitals.current_hp = 7;
+xianxiaMutableState.xianxia.vitals.temp_hp = -2;
+xianxiaMutableState.xianxia.vitals.current_stance = 5;
+xianxiaMutableState.xianxia.vitals.temp_stance = -3;
+xianxiaMutableState.xianxia.energies.jing.current = 2;
+xianxiaMutableState.xianxia.yin_yang.yin_current = 1;
+xianxiaMutableState.xianxia.dao.current = 2;
+xianxiaMutableState.xianxia.active_stance = { name: "Stone Root" };
+xianxiaMutableState.notes.player_notes_markdown = "Keep the manual pool edits in SQLite.";
+const editedXianxiaRevision = Number(xianxiaInitialRow.revision) + 1;
+xianxiaStateSetupDb
+  .prepare(
+    "UPDATE character_state SET revision = ?, state_json = ?, updated_at = ?, updated_by_user_id = ? WHERE campaign_slug = ? AND character_slug = ?",
+  )
+  .run(
+    editedXianxiaRevision,
+    JSON.stringify(xianxiaMutableState),
+    "2026-06-25T12:45:00+00:00",
+    77,
+    "linden-pass",
+    xianxiaCharacterSlug,
+  );
+xianxiaStateSetupDb.close();
+
+const updatedXianxiaDefinition = structuredClone(xianxiaDefinition);
+updatedXianxiaDefinition.xianxia.energy_maxima = { jing: 1, qi: 2, shen: 1 };
+updatedXianxiaDefinition.xianxia.yin_yang = { yin_max: 1, yang_max: 1 };
+updatedXianxiaDefinition.xianxia.durability = {
+  hp_max: 6,
+  stance_max: 4,
+  manual_armor_bonus: 1,
+  defense: 11,
+};
+const xianxiaUpdateResponse = await requestJson(
+  xianxiaCharacterPath,
+  bearerContentManagerHeaders,
+  { method: "PUT", body: { definition: updatedXianxiaDefinition } },
+);
+if (
+  xianxiaUpdateResponse.status !== 200 ||
+  xianxiaUpdateResponse.payload?.character_file?.state_created !== false
+) {
+  throw new Error(`Expected Xianxia content character update payload, got ${xianxiaUpdateResponse.status} ${JSON.stringify(xianxiaUpdateResponse.payload)}`);
+}
+const xianxiaDefinitionPath = path.join(
+  campaignsDir,
+  "linden-pass",
+  "characters",
+  xianxiaCharacterSlug,
+  "definition.yaml",
+);
+const savedXianxiaDefinitionText = readFileSync(xianxiaDefinitionPath, "utf8");
+if (
+  savedXianxiaDefinitionText.includes("current_hp") ||
+  savedXianxiaDefinitionText.includes("active_stance") ||
+  savedXianxiaDefinitionText.includes("Keep the manual pool edits")
+) {
+  throw new Error("Expected Xianxia mutable state to stay out of definition.yaml after content character update.");
+}
+const xianxiaUpdateAssertionDb = new Database(dbPath);
+const xianxiaUpdatedRow = xianxiaUpdateAssertionDb
+  .prepare("SELECT revision, state_json FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", xianxiaCharacterSlug);
+xianxiaUpdateAssertionDb.close();
+const xianxiaUpdatedState = JSON.parse(xianxiaUpdatedRow?.state_json || "{}");
+if (
+  Number(xianxiaUpdatedRow?.revision) !== editedXianxiaRevision + 1 ||
+  xianxiaUpdatedState.vitals?.current_hp !== 6 ||
+  xianxiaUpdatedState.vitals?.temp_hp !== 0 ||
+  xianxiaUpdatedState.xianxia?.vitals?.current_hp !== 6 ||
+  xianxiaUpdatedState.xianxia?.vitals?.current_stance !== 4 ||
+  xianxiaUpdatedState.xianxia?.vitals?.temp_stance !== 0 ||
+  xianxiaUpdatedState.xianxia?.energies?.jing?.current !== 1 ||
+  xianxiaUpdatedState.xianxia?.yin_yang?.yin_current !== 1 ||
+  xianxiaUpdatedState.xianxia?.yin_yang?.yang_current !== 1 ||
+  xianxiaUpdatedState.xianxia?.dao?.current !== 2 ||
+  xianxiaUpdatedState.xianxia?.active_stance?.name !== "Stone Root" ||
+  xianxiaUpdatedState.notes?.player_notes_markdown !== "Keep the manual pool edits in SQLite."
+) {
+  throw new Error(
+    `Expected Xianxia mutable state reconciliation, got revision=${xianxiaUpdatedRow?.revision} state=${JSON.stringify(xianxiaUpdatedState)}`,
+  );
+}
+
+const xianxiaDeleteResponse = await requestJson(
+  xianxiaCharacterPath,
+  bearerContentManagerHeaders,
+  { method: "DELETE" },
+);
+if (
+  xianxiaDeleteResponse.status !== 200 ||
+  xianxiaDeleteResponse.payload?.deleted?.deleted_files !== true ||
+  xianxiaDeleteResponse.payload?.deleted?.deleted_state !== true ||
+  xianxiaDeleteResponse.payload?.deleted?.deleted_assignment !== false
+) {
+  throw new Error(`Expected Xianxia content character delete payload, got ${xianxiaDeleteResponse.status} ${JSON.stringify(xianxiaDeleteResponse.payload)}`);
+}
+
+const restoredPostXianxiaContentConfigPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/config",
+  bearerContentManagerHeaders,
+  {
+    method: "PATCH",
+    body: {
+      config: {
+        system: "DND 5E",
+        systems_library: "DND5E",
+      },
+    },
+  },
+);
+if (
+  restoredPostXianxiaContentConfigPatch.status !== 200 ||
+  restoredPostXianxiaContentConfigPatch.payload?.config_file?.config?.system !== "DND-5E" ||
+  restoredPostXianxiaContentConfigPatch.payload?.config_file?.config?.systems_library !== "DND-5E"
+) {
+  throw new Error(`Expected DND config restore after Xianxia smoke, got ${JSON.stringify(restoredPostXianxiaContentConfigPatch.payload)}`);
 }
 
 const contentAssets = await requestJson("/api/v1/campaigns/linden-pass/content/assets", contentManagerHeaders);

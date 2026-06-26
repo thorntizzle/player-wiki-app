@@ -210,10 +210,14 @@ Route parity check command:
 - The content character write/delete routes now serve `PUT` and `DELETE .../content/characters/:characterSlug`
   for bearer API-token DM/admin users against copied fixture campaign trees, preserving
   definition/import YAML validation, route-slug normalization, Flask-style default API import
-  metadata, list/detail refresh, deleted-character payload flags, missing-campaign JSON, and
-  missing-character JSON. Current validation covers disposable copied fixture files only; full
-  SQLite mutable-state initialization/reconciliation and assignment cleanup remain later character
-  persistence parity work before this route is production-ready.
+  metadata, list/detail refresh, missing-campaign JSON, and missing-character JSON. The route now
+  initializes missing SQLite `character_state` rows for DND-5E and Xianxia definitions, reports
+  `state_created` from real row insertion, reconciles existing Xianxia mutable state against updated
+  definition maxima without writing live state into `definition.yaml`, and deletes SQLite
+  character-state plus assignment rows while reporting `deleted_state` / `deleted_assignment` from
+  real deletes. Current validation covers disposable copied fixture files and fixture SQLite only;
+  production readiness still needs broader Flask-vs-TypeScript golden parity, migration, backup, and
+  rollback rehearsal.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

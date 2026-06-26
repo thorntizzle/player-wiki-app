@@ -333,7 +333,8 @@ fixture database.
   - summary fields (`character_slug`, `name`, `status`, and `import_status`).
   - detail endpoint `character_file` shape with Flask-compatible definition/import metadata normalization and `state_created: false`.
   - bearer-token write/delete auth, fixture-role write denial, player-forbidden behavior, validation errors, copied-fixture `definition.yaml`/`import.yaml` writes, reflected list/detail reads, deleted-character payload flags, file removal, and missing-character delete responses.
-  - remaining parity gap: the TypeScript fixture route reports file creation/deletion but does not yet initialize/reconcile SQLite mutable character state or remove character assignments.
+  - DND-5E content-character creation initializes a real SQLite `character_state` row with HP, resources, spell slots, Hit Dice, inventory, and notes from the copied fixture definition; raw delete removes the state row plus a seeded assignment row and reports `deleted_state` / `deleted_assignment` from row counts.
+  - Xianxia content-character creation initializes SQLite mutable state, and Xianxia definition update reconciles existing current HP/temp HP, Stance/temp Stance, Jing, Yin/Yang, Dao, active Stance, and notes against lowered definition maxima without writing mutable state back into `definition.yaml`.
 
 ## Added Tests and Checks
 
@@ -371,6 +372,7 @@ fixture database.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/assets` list sorting/count/data omission and sampled PNG metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/assets/*` detail payload byte data and missing-content-asset 404.
   - validates `PUT` and `DELETE /api/v1/campaigns/:campaignSlug/content/assets/*` auth, fixture-write denial, player-forbidden behavior, base64 validation, missing-campaign behavior, copied-fixture file writes, list/detail refresh, deleted-reference payloads, file removal, and missing-asset delete 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/characters` list sorting/count and sampled character summary metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` detail payload definition/import metadata and missing-content-character 404.
+  - validates content-character SQLite persistence for DND-5E create/delete and Xianxia create/update/delete, including actual `state_created`, `deleted_state`, and `deleted_assignment` response flags and Xianxia mutable-state clamping/preservation.
   - validates `PUT` and `DELETE /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` auth, fixture-write denial, player-forbidden behavior, definition validation, missing-campaign behavior, copied-fixture definition/import YAML writes, list/detail refresh, deleted-character payload flags, file removal, and missing-character delete 404.
   - verifies `GET /api/v1/campaigns/:campaignSlug/session` no-header read-only payload shape, role-aware fixture and bearer-token SQLite Session state reads, auth/forbidden bearer envelopes, token/revision headers behavior, unchanged-response short-circuit, and session missing-campaign 404.
   - verifies `POST /api/v1/campaigns/:campaignSlug/session/messages` auth, fixture-write denial, malformed JSON handling, validation messages, SQLite persistence, private-message visibility, recipient labels, revision bumps, and missing-campaign 404 against the disposable smoke-test database.

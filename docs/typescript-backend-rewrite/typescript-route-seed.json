@@ -428,7 +428,7 @@
       "status": "implemented_fixture_write",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/content/characters/:characterSlug",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono content character upsert route with bearer API-token DM/admin access, safe definition/import YAML writes against copied fixture campaign trees, Flask-style default API import metadata, and explicit validation/missing-campaign JSON. Full SQLite mutable-state initialization/reconciliation remains a later character persistence parity item."
+      "notes": "Tracked Hono content character upsert route with bearer API-token DM/admin access, safe definition/import YAML writes against copied fixture campaign trees, Flask-style default API import metadata, explicit validation/missing-campaign JSON, SQLite character_state initialization for missing DND-5E/Xianxia state, and Xianxia mutable-state reconciliation against updated definition maxima without writing live state into definition.yaml."
     },
     {
       "method": "DELETE",
@@ -437,7 +437,7 @@
       "status": "implemented_fixture_write",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/content/characters/:characterSlug",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono content character delete route with bearer API-token DM/admin access, safe definition/import YAML removal plus portrait asset directory cleanup against copied fixture campaign trees, Flask-style delete payload flags, and explicit missing-character JSON. Full SQLite mutable-state and assignment cleanup remains a later character persistence parity item."
+      "notes": "Tracked Hono content character delete route with bearer API-token DM/admin access, safe definition/import YAML removal plus portrait asset directory cleanup against copied fixture campaign trees, SQLite character_state and character_assignments cleanup with Flask-style delete payload flags, and explicit missing-character JSON."
     },
     {
       "method": "GET",

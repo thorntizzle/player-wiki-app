@@ -5,6 +5,7 @@ import { parse, stringify } from "yaml";
 
 import type { ApiConfig } from "../config.js";
 import { getCampaignBySlug } from "../campaigns/repository.js";
+import { deleteCharacterPersistence, persistCharacterStateForDefinition } from "./characterState.js";
 import type {
   CampaignAssetFileRecord,
   CampaignCharacterFileRecord,
@@ -1457,8 +1458,9 @@ export async function writeCampaignContentCharacter(
     fs.writeFile(path.join(characterDir, "import.yaml"), dumpYamlRecord(normalizedImportMetadata), "utf-8"),
   ]);
 
+  const statePersistence = persistCharacterStateForDefinition(config, normalizedDefinition);
   const record = await toCharacterFileRecord(campaign, campaignSlug, characterSlug, {
-    stateCreated: existingRecord === null,
+    stateCreated: statePersistence.stateCreated,
   });
   if (!record) {
     return { status: "validation_error", message: "Character files were not readable after writing." };
@@ -1532,7 +1534,9 @@ export async function deleteCampaignContentCharacter(
     }
   }
 
-  if (!deletedFiles && !deletedAssets) {
+  const deletedPersistence = deleteCharacterPersistence(config, campaignSlug, characterSlug);
+
+  if (!deletedFiles && !deletedAssets && !deletedPersistence.deletedState && !deletedPersistence.deletedAssignment) {
     return { status: "not_found" };
   }
 
@@ -1541,8 +1545,8 @@ export async function deleteCampaignContentCharacter(
     deleted: {
       character_slug: characterSlug,
       deleted_files: deletedFiles,
-      deleted_state: false,
-      deleted_assignment: false,
+      deleted_state: deletedPersistence.deletedState,
+      deleted_assignment: deletedPersistence.deletedAssignment,
       deleted_assets: deletedAssets,
     },
   };
