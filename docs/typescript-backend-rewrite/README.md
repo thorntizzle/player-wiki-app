@@ -383,6 +383,11 @@ Route parity check command:
   IDs, non-equippable equipped-item validation, SQLite `state.xianxia.inventory.quantities`
   insertion, synchronized top-level `state.inventory` mirrors, and refreshed
   `character.state_record` payloads.
+- The Xianxia inventory remove write now serves
+  `DELETE .../characters/:characterSlug/session/xianxia-inventory/:itemId`. It preserves the
+  bearer-only session-state write gate, shared revision conflicts, Xianxia-only validation,
+  unknown-item validation, SQLite `state.xianxia.inventory.quantities` removal, synchronized
+  top-level `state.inventory` mirrors, and refreshed `character.state_record` payloads.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

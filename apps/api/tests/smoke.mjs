@@ -7904,6 +7904,84 @@ if (
   );
 }
 
+const xianxiaInventoryRemovePath =
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/xianxia-inventory/artifact-jade-charm`;
+const staleXianxiaInventoryRemove = await requestJson(
+  xianxiaInventoryRemovePath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "DELETE", body: { expected_revision: 999 } },
+);
+if (
+  staleXianxiaInventoryRemove.status !== 409 ||
+  staleXianxiaInventoryRemove.payload?.error?.code !== "state_conflict" ||
+  staleXianxiaInventoryRemove.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale Xianxia inventory remove conflict, got ${staleXianxiaInventoryRemove.status} ${JSON.stringify(staleXianxiaInventoryRemove.payload)}`,
+  );
+}
+
+const unknownXianxiaInventoryRemove = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/xianxia-inventory/missing-item`,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "DELETE", body: { expected_revision: editedXianxiaRevision + 8 } },
+);
+if (
+  unknownXianxiaInventoryRemove.status !== 400 ||
+  unknownXianxiaInventoryRemove.payload?.error?.code !== "validation_error" ||
+  unknownXianxiaInventoryRemove.payload?.error?.message !== "Unknown Xianxia inventory item: missing-item"
+) {
+  throw new Error(
+    `Expected unknown Xianxia inventory remove validation_error, got ${unknownXianxiaInventoryRemove.status} ${JSON.stringify(unknownXianxiaInventoryRemove.payload)}`,
+  );
+}
+
+const xianxiaInventoryRemove = await requestJson(
+  xianxiaInventoryRemovePath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "DELETE", body: { expected_revision: editedXianxiaRevision + 8 } },
+);
+const removePayloadQuantities =
+  xianxiaInventoryRemove.payload?.character?.state_record?.state?.xianxia?.inventory?.quantities || [];
+const removePayloadMirror = xianxiaInventoryRemove.payload?.character?.state_record?.state?.inventory || [];
+if (
+  xianxiaInventoryRemove.status !== 200 ||
+  xianxiaInventoryRemove.payload?.ok !== true ||
+  xianxiaInventoryRemove.payload?.character?.state_record?.revision !== editedXianxiaRevision + 9 ||
+  removePayloadQuantities.some((item) => item?.id === "artifact-jade-charm") ||
+  removePayloadMirror.some((item) => item?.id === "artifact-jade-charm")
+) {
+  throw new Error(`Unexpected Xianxia inventory remove DELETE payload: ${JSON.stringify(xianxiaInventoryRemove.payload)}`);
+}
+
+const xianxiaInventoryRemoveAssertionDb = new Database(dbPath, { readonly: true });
+const xianxiaInventoryRemoveRow = xianxiaInventoryRemoveAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", xianxiaCharacterSlug);
+xianxiaInventoryRemoveAssertionDb.close();
+const xianxiaInventoryRemoveState = JSON.parse(xianxiaInventoryRemoveRow?.state_json || "{}");
+const removedDbQuantities = xianxiaInventoryRemoveState.xianxia?.inventory?.quantities || [];
+const removedDbMirror = xianxiaInventoryRemoveState.inventory || [];
+if (
+  Number(xianxiaInventoryRemoveRow?.revision) !== editedXianxiaRevision + 9 ||
+  xianxiaInventoryRemoveRow?.updated_by_user_id !== 81 ||
+  removedDbQuantities.some((item) => item?.id === "artifact-jade-charm") ||
+  removedDbMirror.some((item) => item?.id === "artifact-jade-charm")
+) {
+  throw new Error(
+    `Unexpected Xianxia inventory remove database row: ${JSON.stringify({
+      xianxiaInventoryRemoveRow,
+      xianxiaInventoryRemoveState,
+    })}`,
+  );
+}
+
 const xianxiaDeleteResponse = await requestJson(
   xianxiaCharacterPath,
   bearerContentManagerHeaders,

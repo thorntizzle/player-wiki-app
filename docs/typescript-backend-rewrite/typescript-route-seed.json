@@ -764,6 +764,15 @@
       "notes": "Tracked Hono Xianxia inventory add route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflicts, Xianxia-only validation, Flask-style wrapped-or-flat item payload extraction, missing-name/catalog validation, duplicate explicit-id validation, generated item IDs, non-equippable equipped-item validation, SQLite state.xianxia.inventory.quantities insertion, synchronized top-level state.inventory mirror, refreshed character state payloads, and explicit missing-character JSON."
     },
     {
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/xianxia-inventory/:itemId",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Xianxia inventory remove route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflicts, Xianxia-only validation, unknown-item validation, SQLite state.xianxia.inventory.quantities removal, synchronized top-level state.inventory mirror, refreshed character state payloads, and explicit missing-character JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/me",
       "route_family": "api_v1",
