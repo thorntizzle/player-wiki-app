@@ -425,6 +425,32 @@ smokeDb.exec(`
     PRIMARY KEY (campaign_slug, entry_key)
   );
 
+  CREATE TABLE campaign_pages (
+    campaign_slug TEXT NOT NULL,
+    page_ref TEXT NOT NULL,
+    route_slug TEXT NOT NULL,
+    title TEXT NOT NULL,
+    section TEXT NOT NULL,
+    subsection TEXT NOT NULL DEFAULT '',
+    page_type TEXT NOT NULL,
+    display_order INTEGER NOT NULL DEFAULT 10000,
+    published INTEGER NOT NULL DEFAULT 1,
+    aliases_json TEXT NOT NULL DEFAULT '[]',
+    summary TEXT NOT NULL DEFAULT '',
+    image_path TEXT NOT NULL DEFAULT '',
+    image_alt TEXT NOT NULL DEFAULT '',
+    image_caption TEXT NOT NULL DEFAULT '',
+    reveal_after_session INTEGER NOT NULL DEFAULT 0,
+    source_ref TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    raw_link_targets_json TEXT NOT NULL DEFAULT '[]',
+    searchable_text TEXT NOT NULL DEFAULT '',
+    body_markdown TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (campaign_slug, page_ref)
+  );
+
   CREATE TABLE campaign_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     campaign_slug TEXT NOT NULL,
@@ -623,6 +649,7 @@ const insertEntry = smokeDb.prepare(`
 `);
 insertEntry.run("DND-5E", "PHB", "PHB:spell:mage-hand", "spell", "phb-spell-mage-hand", "Mage Hand", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("DND-5E", "PHB", "PHB:item:chain-mail", "item", "phb-item-chain-mail", "Chain Mail", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+insertEntry.run("DND-5E", "PHB", "PHB:item:profiled-blade", "item", "phb-item-profiled-blade", "Profiled Blade", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("DND-5E", "MM", "MM:monster:goblin", "monster", "mm-monster-goblin", "Goblin", 0, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 smokeDb
   .prepare(
@@ -646,6 +673,67 @@ smokeDb
     "<p>A sample armor entry.</p>",
     "DND-5E",
     "PHB:item:chain-mail",
+  );
+smokeDb
+  .prepare(
+    `
+      UPDATE systems_entries
+      SET metadata_json = ?
+      WHERE library_slug = ?
+        AND entry_key = ?
+    `,
+  )
+  .run(
+    JSON.stringify({
+      type: "M",
+      weapon_category: "martial",
+      properties: ["V"],
+      damage: "1d8",
+      versatile_damage: "1d10",
+      damage_type: "S",
+    }),
+    "DND-5E",
+    "PHB:item:profiled-blade",
+  );
+smokeDb
+  .prepare(
+    `
+      INSERT INTO campaign_pages (
+        campaign_slug,
+        page_ref,
+        route_slug,
+        title,
+        section,
+        page_type,
+        published,
+        metadata_json,
+        body_markdown,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  )
+  .run(
+    "linden-pass",
+    "items/pagebound-crescent",
+    "items/pagebound-crescent",
+    "Pagebound Crescent",
+    "Items",
+    "wiki",
+    1,
+    JSON.stringify({
+      base_item: "Longsword",
+      type: "M",
+      weapon_category: "martial",
+      properties: ["V"],
+      damage: "1d8",
+      versatile_damage: "1d10",
+      damage_type: "S",
+    }),
+    "*Weapon (longsword), rare (requires attunement)*\n\nThis item functions as a magic longsword.",
+    "2026-06-25T09:20:00+00:00",
+    "2026-06-25T09:20:00+00:00",
   );
 smokeDb
   .prepare(
@@ -1575,7 +1663,7 @@ if (
 }
 const phbIndexSource = playerSystemsIndex.payload.sources[0];
 if (
-  phbIndexSource.entry_count !== 2 ||
+  phbIndexSource.entry_count !== 3 ||
   phbIndexSource.default_visibility !== "players" ||
   phbIndexSource.has_rules_reference_entries !== false ||
   phbIndexSource.rules_reference_search_scope !== "global"
@@ -1649,7 +1737,7 @@ if (playerSourceIds.join("|") !== "PHB") {
   throw new Error(`Expected player-visible systems sources to include only PHB, got ${JSON.stringify(playerSourceIds)}`);
 }
 const phbSource = playerSystemsSources.payload.sources[0];
-if (phbSource.entry_count !== 2 || phbSource.default_visibility !== "players" || phbSource.permissions?.can_manage !== false) {
+if (phbSource.entry_count !== 3 || phbSource.default_visibility !== "players" || phbSource.permissions?.can_manage !== false) {
   throw new Error(`Unexpected PHB source state for player: ${JSON.stringify(phbSource)}`);
 }
 
@@ -1695,16 +1783,16 @@ const playerPhbDetail = await requestJson("/api/v1/campaigns/linden-pass/systems
 if (playerPhbDetail.status !== 200 || playerPhbDetail.payload?.ok !== true) {
   throw new Error(`Expected player PHB source detail 200 ok, got ${playerPhbDetail.status}`);
 }
-if (playerPhbDetail.payload?.source?.source_id !== "PHB" || playerPhbDetail.payload?.source?.entry_count !== 2) {
+if (playerPhbDetail.payload?.source?.source_id !== "PHB" || playerPhbDetail.payload?.source?.entry_count !== 3) {
   throw new Error(`Unexpected player PHB source detail source state: ${JSON.stringify(playerPhbDetail.payload?.source)}`);
 }
 const phbEntryGroups = (playerPhbDetail.payload?.entry_groups || []).map((group) => `${group.entry_type}:${group.count}`);
-if (phbEntryGroups.join("|") !== "spell:1|item:1") {
+if (phbEntryGroups.join("|") !== "spell:1|item:2") {
   throw new Error(`Expected PHB source detail groups spell/item, got ${JSON.stringify(playerPhbDetail.payload?.entry_groups)}`);
 }
 if (
-  playerPhbDetail.payload?.entry_count !== 2 ||
-  playerPhbDetail.payload?.browsable_entry_count !== 2 ||
+  playerPhbDetail.payload?.entry_count !== 3 ||
+  playerPhbDetail.payload?.browsable_entry_count !== 3 ||
   playerPhbDetail.payload?.permissions?.can_manage_systems !== false
 ) {
   throw new Error(`Unexpected PHB source detail counts/permissions: ${JSON.stringify(playerPhbDetail.payload)}`);
@@ -1772,7 +1860,7 @@ if (
 ) {
   throw new Error(`Unexpected player PHB spell category entries: ${JSON.stringify(playerPhbSpellCategory.payload)}`);
 }
-if ((playerPhbSpellCategory.payload?.entry_groups || []).map((group) => `${group.entry_type}:${group.count}`).join("|") !== "spell:1|item:1") {
+if ((playerPhbSpellCategory.payload?.entry_groups || []).map((group) => `${group.entry_type}:${group.count}`).join("|") !== "spell:1|item:2") {
   throw new Error(`Unexpected player PHB category groups: ${JSON.stringify(playerPhbSpellCategory.payload?.entry_groups)}`);
 }
 
@@ -6219,6 +6307,44 @@ managedCharacterDefinition.features = [
     description_markdown: "Smoke-test Armorer feature state support.",
   },
 ];
+managedCharacterDefinition.equipment_catalog = [
+  ...((Array.isArray(managedCharacterDefinition.equipment_catalog) ? managedCharacterDefinition.equipment_catalog : [])),
+  {
+    id: "catalog-profiled-weapon-7",
+    name: "Catalog Test Focus",
+    default_quantity: 1,
+    weight: "3 lb.",
+    systems_ref: {
+      entry_key: "PHB:item:profiled-blade",
+      entry_type: "item",
+      title: "Profiled Blade",
+      slug: "phb-item-profiled-blade",
+      source_id: "PHB",
+    },
+  },
+  {
+    id: "disabled-catalog-profiled-weapon-8",
+    name: "Disabled Catalog Focus",
+    default_quantity: 1,
+    systems_ref: {
+      entry_key: "PHB:item:disabled-profiled-spear",
+      entry_type: "item",
+      title: "Disabled Profiled Spear",
+      slug: "phb-item-disabled-profiled-spear",
+      source_id: "PHB",
+    },
+  },
+  {
+    id: "campaign-page-weapon-9",
+    name: "Pagebound Crescent",
+    default_quantity: 1,
+    weight: "3 lb.",
+    page_ref: {
+      slug: "items/pagebound-crescent",
+      title: "Pagebound Crescent",
+    },
+  },
+];
 const managedCharacterImportMetadata = structuredClone(contentCharacter.payload.character_file.import_metadata);
 managedCharacterImportMetadata.source_path = "api://campaigns/linden-pass/characters/api-scout";
 managedCharacterImportMetadata.parser_version = "api-test";
@@ -7037,12 +7163,260 @@ if (
   );
 }
 
+const equipmentStatePath =
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/equipment/quarterstaff-2`;
+const staleEquipmentStateUpdate = await requestJson(
+  equipmentStatePath,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 999, weapon_wield_mode: "two-handed" } },
+);
+if (
+  staleEquipmentStateUpdate.status !== 409 ||
+  staleEquipmentStateUpdate.payload?.error?.code !== "state_conflict" ||
+  staleEquipmentStateUpdate.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale equipment-state PATCH conflict, got ${staleEquipmentStateUpdate.status} ${JSON.stringify(staleEquipmentStateUpdate.payload)}`,
+  );
+}
+
+const inventoryOnlyEquipmentStateUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/equipment/backpack-5`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 11, is_equipped: true } },
+);
+if (
+  inventoryOnlyEquipmentStateUpdate.status !== 400 ||
+  inventoryOnlyEquipmentStateUpdate.payload?.error?.code !== "validation_error" ||
+  !inventoryOnlyEquipmentStateUpdate.payload?.error?.message?.includes("does not support equipment state")
+) {
+  throw new Error(
+    `Expected inventory-only equipment-state validation_error, got ${inventoryOnlyEquipmentStateUpdate.status} ${JSON.stringify(inventoryOnlyEquipmentStateUpdate.payload)}`,
+  );
+}
+
+const invalidEquipmentModeUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/equipment/light-crossbow-1`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 11, weapon_wield_mode: "main-hand" } },
+);
+if (
+  invalidEquipmentModeUpdate.status !== 400 ||
+  invalidEquipmentModeUpdate.payload?.error?.code !== "validation_error" ||
+  invalidEquipmentModeUpdate.payload?.error?.message !== "Choose a valid wielding mode for that weapon."
+) {
+  throw new Error(
+    `Expected invalid equipment mode validation_error, got ${invalidEquipmentModeUpdate.status} ${JSON.stringify(invalidEquipmentModeUpdate.payload)}`,
+  );
+}
+
+const equipmentStateUpdate = await requestJson(
+  equipmentStatePath,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 11, weapon_wield_mode: "two-handed" } },
+);
+const updatedEquipmentInventory = equipmentStateUpdate.payload?.character?.state_record?.state?.inventory || [];
+const updatedQuarterstaff = updatedEquipmentInventory.find((item) => item?.id === "quarterstaff-2");
+if (
+  equipmentStateUpdate.status !== 200 ||
+  equipmentStateUpdate.payload?.ok !== true ||
+  equipmentStateUpdate.payload?.character?.state_record?.revision !== 12 ||
+  updatedQuarterstaff?.is_equipped !== true ||
+  updatedQuarterstaff?.weapon_wield_mode !== "two-handed" ||
+  !readFileSync(managedCharacterDefinitionPath, "utf8").includes("weapon_wield_mode: two-handed")
+) {
+  throw new Error(`Unexpected equipment-state PATCH payload: ${JSON.stringify(equipmentStateUpdate.payload)}`);
+}
+
+const equipmentStateAssertionDb = new Database(dbPath, { readonly: true });
+const managedStateAfterEquipment = equipmentStateAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", managedCharacterSlug);
+equipmentStateAssertionDb.close();
+const managedEquipmentState = JSON.parse(managedStateAfterEquipment?.state_json || "{}");
+const dbQuarterstaff = (managedEquipmentState.inventory || []).find((item) => item?.id === "quarterstaff-2");
+if (
+  managedStateAfterEquipment?.revision !== 12 ||
+  managedStateAfterEquipment?.updated_by_user_id !== 79 ||
+  dbQuarterstaff?.is_equipped !== true ||
+  dbQuarterstaff?.weapon_wield_mode !== "two-handed"
+) {
+  throw new Error(
+    `Unexpected equipment-state database row: ${JSON.stringify({
+      managedStateAfterEquipment,
+      managedEquipmentState,
+    })}`,
+  );
+}
+
+const catalogProfiledEquipmentStateUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/equipment/catalog-profiled-weapon-7`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 12, weapon_wield_mode: "two-handed" } },
+);
+const catalogProfiledInventory =
+  catalogProfiledEquipmentStateUpdate.payload?.character?.state_record?.state?.inventory || [];
+const catalogProfiledWeapon = catalogProfiledInventory.find((item) => item?.id === "catalog-profiled-weapon-7");
+if (
+  catalogProfiledEquipmentStateUpdate.status !== 200 ||
+  catalogProfiledEquipmentStateUpdate.payload?.ok !== true ||
+  catalogProfiledEquipmentStateUpdate.payload?.character?.state_record?.revision !== 13 ||
+  catalogProfiledWeapon?.name !== "Catalog Test Focus" ||
+  catalogProfiledWeapon?.is_equipped !== true ||
+  catalogProfiledWeapon?.weapon_wield_mode !== "two-handed" ||
+  !readFileSync(managedCharacterDefinitionPath, "utf8").includes("catalog-profiled-weapon-7") ||
+  !readFileSync(managedCharacterDefinitionPath, "utf8").includes("weapon_wield_mode: two-handed")
+) {
+  throw new Error(`Unexpected catalog-profiled equipment-state PATCH payload: ${JSON.stringify(catalogProfiledEquipmentStateUpdate.payload)}`);
+}
+
+const catalogProfiledEquipmentAssertionDb = new Database(dbPath, { readonly: true });
+const managedStateAfterCatalogProfiledEquipment = catalogProfiledEquipmentAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", managedCharacterSlug);
+catalogProfiledEquipmentAssertionDb.close();
+const managedCatalogProfiledEquipmentState = JSON.parse(managedStateAfterCatalogProfiledEquipment?.state_json || "{}");
+const dbCatalogProfiledWeapon = (managedCatalogProfiledEquipmentState.inventory || []).find(
+  (item) => item?.id === "catalog-profiled-weapon-7",
+);
+if (
+  managedStateAfterCatalogProfiledEquipment?.revision !== 13 ||
+  managedStateAfterCatalogProfiledEquipment?.updated_by_user_id !== 79 ||
+  dbCatalogProfiledWeapon?.is_equipped !== true ||
+  dbCatalogProfiledWeapon?.weapon_wield_mode !== "two-handed"
+) {
+  throw new Error(
+    `Unexpected catalog-profiled equipment-state database row: ${JSON.stringify({
+      managedStateAfterCatalogProfiledEquipment,
+      managedCatalogProfiledEquipmentState,
+    })}`,
+  );
+}
+
+const campaignPageEquipmentStateUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/equipment/campaign-page-weapon-9`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 13, weapon_wield_mode: "two-handed" } },
+);
+const campaignPageEquipmentInventory =
+  campaignPageEquipmentStateUpdate.payload?.character?.state_record?.state?.inventory || [];
+const campaignPageWeapon = campaignPageEquipmentInventory.find((item) => item?.id === "campaign-page-weapon-9");
+if (
+  campaignPageEquipmentStateUpdate.status !== 200 ||
+  campaignPageEquipmentStateUpdate.payload?.ok !== true ||
+  campaignPageEquipmentStateUpdate.payload?.character?.state_record?.revision !== 14 ||
+  campaignPageWeapon?.name !== "Pagebound Crescent" ||
+  campaignPageWeapon?.is_equipped !== true ||
+  campaignPageWeapon?.weapon_wield_mode !== "two-handed" ||
+  !readFileSync(managedCharacterDefinitionPath, "utf8").includes("campaign-page-weapon-9") ||
+  !readFileSync(managedCharacterDefinitionPath, "utf8").includes("items/pagebound-crescent")
+) {
+  throw new Error(`Unexpected campaign-page equipment-state PATCH payload: ${JSON.stringify(campaignPageEquipmentStateUpdate.payload)}`);
+}
+
+const campaignPageEquipmentAssertionDb = new Database(dbPath, { readonly: true });
+const managedStateAfterCampaignPageEquipment = campaignPageEquipmentAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", managedCharacterSlug);
+campaignPageEquipmentAssertionDb.close();
+const managedCampaignPageEquipmentState = JSON.parse(managedStateAfterCampaignPageEquipment?.state_json || "{}");
+const dbCampaignPageWeapon = (managedCampaignPageEquipmentState.inventory || []).find(
+  (item) => item?.id === "campaign-page-weapon-9",
+);
+if (
+  managedStateAfterCampaignPageEquipment?.revision !== 14 ||
+  managedStateAfterCampaignPageEquipment?.updated_by_user_id !== 79 ||
+  dbCampaignPageWeapon?.is_equipped !== true ||
+  dbCampaignPageWeapon?.weapon_wield_mode !== "two-handed"
+) {
+  throw new Error(
+    `Unexpected campaign-page equipment-state database row: ${JSON.stringify({
+      managedStateAfterCampaignPageEquipment,
+      managedCampaignPageEquipmentState,
+    })}`,
+  );
+}
+
+const disabledCatalogEntryDb = new Database(dbPath);
+disabledCatalogEntryDb
+  .prepare(
+    `
+      INSERT INTO systems_entries (
+        library_slug,
+        source_id,
+        entry_key,
+        entry_type,
+        slug,
+        title,
+        player_safe_default,
+        metadata_json,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  )
+  .run(
+    "DND-5E",
+    "PHB",
+    "PHB:item:disabled-profiled-spear",
+    "item",
+    "phb-item-disabled-profiled-spear",
+    "Disabled Profiled Spear",
+    1,
+    JSON.stringify({
+      type: "M",
+      weapon_category: "martial",
+      properties: ["V"],
+      damage: "1d6",
+      versatile_damage: "1d8",
+      damage_type: "P",
+    }),
+    "2026-06-25T09:00:00+00:00",
+    "2026-06-25T09:00:00+00:00",
+  );
+disabledCatalogEntryDb
+  .prepare(
+    "INSERT INTO campaign_entry_overrides (campaign_slug, library_slug, entry_key, visibility_override, is_enabled_override, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run("linden-pass", "DND-5E", "PHB:item:disabled-profiled-spear", "players", 0, "2026-06-25T09:36:00+00:00", 42);
+disabledCatalogEntryDb.close();
+
+const disabledCatalogProfiledEquipmentUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/equipment/disabled-catalog-profiled-weapon-8`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 14, weapon_wield_mode: "two-handed" } },
+);
+if (
+  disabledCatalogProfiledEquipmentUpdate.status !== 400 ||
+  disabledCatalogProfiledEquipmentUpdate.payload?.error?.code !== "validation_error" ||
+  !disabledCatalogProfiledEquipmentUpdate.payload?.error?.message?.includes("does not support equipment state")
+) {
+  throw new Error(
+    `Expected disabled catalog equipment-state validation_error, got ${disabledCatalogProfiledEquipmentUpdate.status} ${JSON.stringify(disabledCatalogProfiledEquipmentUpdate.payload)}`,
+  );
+}
+
 const nonXianxiaInventoryEquippedUpdate = await requestJson(
   `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/xianxia-inventory/jade-sword/equipped`,
   {
     Authorization: `Bearer ${playerApiToken}`,
   },
-  { method: "PATCH", body: { expected_revision: 11, is_equipped: true } },
+  { method: "PATCH", body: { expected_revision: 14, is_equipped: true } },
 );
 if (
   nonXianxiaInventoryEquippedUpdate.status !== 400 ||

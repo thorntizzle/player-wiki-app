@@ -11,6 +11,22 @@ interface CharacterStateRow {
   state_json: string;
 }
 
+interface ItemCatalogEntry {
+  entryKey: string;
+  pageRef: string;
+  sourceId: string;
+  slug: string;
+  title: string;
+  metadata: Record<string, unknown>;
+}
+
+interface ItemCatalog {
+  byEntryKey: Map<string, ItemCatalogEntry>;
+  byPageRef: Map<string, ItemCatalogEntry>;
+  bySlug: Map<string, ItemCatalogEntry>;
+  byTitle: Map<string, ItemCatalogEntry>;
+}
+
 export interface CharacterStatePersistenceResult {
   stateCreated: boolean;
 }
@@ -39,6 +55,18 @@ export type CharacterSessionXianxiaInventoryItemUpdateResult = CharacterSessionV
 export type CharacterSessionXianxiaInventoryRemoveUpdateResult = CharacterSessionVitalsUpdateResult;
 
 export type CharacterSessionXianxiaInventoryEquippedUpdateResult = CharacterSessionVitalsUpdateResult;
+
+export type CharacterSessionEquipmentUpdateResult =
+  | {
+      status: "ok";
+      revision: number;
+      state: Record<string, unknown>;
+      updatedAt: string;
+      definition: Record<string, unknown>;
+    }
+  | { status: "not_found" }
+  | { status: "state_conflict"; message: string }
+  | { status: "validation_error"; message: string };
 
 export type CharacterSessionXianxiaActiveStateUpdateResult = CharacterSessionVitalsUpdateResult;
 
@@ -80,6 +108,34 @@ const XIANXIA_ENERGY_LABELS: Record<(typeof XIANXIA_ENERGY_KEYS)[number], string
 const XIANXIA_CURRENCY_KEYS = ["coin", "supply", "spirit_stones"] as const;
 const VALID_HIT_DIE_FACES = new Set([4, 6, 8, 10, 12]);
 const CHARACTER_STATE_CONFLICT_MESSAGE = "This sheet changed in another session. Refresh and try again.";
+const CAMPAIGN_ITEMS_SECTION = "Items";
+const CAMPAIGN_ITEM_PAGE_SUPPORT_METADATA_KEYS = new Set([
+  "ability_score_minimums",
+  "attack_reminder_rules",
+  "attunement",
+  "base_item",
+  "bonus_weapon",
+  "bonus_weapon_attack",
+  "bonus_weapon_damage",
+  "defensive_rules",
+  "rarity",
+  "resource_template_bonuses",
+  "spell_support",
+  "armor",
+  "armor_category",
+  "damage",
+  "damage_type",
+  "dmg1",
+  "is_magic_item",
+  "magic",
+  "properties",
+  "requires_attunement",
+  "type",
+  "versatile_damage",
+  "weapon",
+  "weapon_category",
+  "weapon_wield_modes",
+]);
 const STANDARD_DND_CLASS_HIT_DICE: Record<string, number> = {
   artificer: 8,
   barbarian: 12,
@@ -108,6 +164,14 @@ function asArray(value: unknown): unknown[] {
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function parseJsonRecord(rawValue: unknown): Record<string, unknown> {
+  try {
+    return asRecord(JSON.parse(String(rawValue || "{}")) ?? {});
+  } catch {
+    return {};
+  }
 }
 
 function normalizeSystemKey(value: unknown): string {
@@ -174,6 +238,221 @@ function openDatabase(config: ApiConfig): SqliteDatabase | null {
     return null;
   }
   return new Database(config.dbPath);
+}
+
+function emptyItemCatalog(): ItemCatalog {
+  return {
+    byEntryKey: new Map(),
+    byPageRef: new Map(),
+    bySlug: new Map(),
+    byTitle: new Map(),
+  };
+}
+
+function normalizeCatalogLookup(value: unknown): string {
+  return asString(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function addItemCatalogEntry(catalog: ItemCatalog, entry: ItemCatalogEntry): void {
+  if (entry.entryKey && !catalog.byEntryKey.has(entry.entryKey)) {
+    catalog.byEntryKey.set(entry.entryKey, entry);
+  }
+  if (entry.pageRef && !catalog.byPageRef.has(entry.pageRef)) {
+    catalog.byPageRef.set(entry.pageRef, entry);
+  }
+  if (entry.slug && !catalog.bySlug.has(entry.slug)) {
+    catalog.bySlug.set(entry.slug, entry);
+  }
+  const normalizedTitle = normalizeCatalogLookup(entry.title);
+  if (normalizedTitle && !catalog.byTitle.has(normalizedTitle)) {
+    catalog.byTitle.set(normalizedTitle, entry);
+  }
+}
+
+function hasCatalogSupportValue(value: unknown): boolean {
+  if (value === null || value === undefined || value === "") {
+    return false;
+  }
+  if (Array.isArray(value) && value.length === 0) {
+    return false;
+  }
+  if (typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === 0) {
+    return false;
+  }
+  return true;
+}
+
+function titleCaseEquipmentName(value: unknown): string {
+  return asString(value)
+    .toLowerCase()
+    .replace(/\b[a-z]/g, (match) => match.toUpperCase());
+}
+
+function buildCampaignItemPageSupportMetadata(
+  title: unknown,
+  bodyMarkdown: unknown,
+  metadataJson: unknown,
+): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {};
+  const lines = String(bodyMarkdown || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const classificationLine = lines.find((line) => line.startsWith("*") && line.endsWith("*"))?.replace(/^\*+|\*+$/g, "").trim()
+    || lines[0]
+    || "";
+  if (classificationLine) {
+    const rarityMatch = classificationLine.match(/\b(very rare|legendary|artifact|uncommon|common|rare)\b/i);
+    if (rarityMatch?.[1]) {
+      metadata.rarity = rarityMatch[1].toLowerCase();
+    }
+    if (classificationLine.toLowerCase().includes("requires attunement")) {
+      metadata.attunement = classificationLine;
+    }
+    const weaponMatch = classificationLine.match(/\bweapon(?:\s*\(([^)]+)\)|\s*,\s*([^,]+))/i);
+    const rawBaseItem = asString(weaponMatch?.[1] || weaponMatch?.[2]);
+    if (rawBaseItem) {
+      metadata.base_item = titleCaseEquipmentName(rawBaseItem);
+    }
+  }
+
+  const bodyText = lines.join(" ");
+  if (!metadata.attunement && bodyText.toLowerCase().includes("requires attunement")) {
+    metadata.attunement = "requires attunement";
+  }
+  if (!metadata.base_item) {
+    for (const pattern of [
+      /\bcan be wielded as (?:an? )?(?:\+\d+\s+)?magic ([a-z][a-z' -]+?)(?: that| which| with|[.,])/i,
+      /\bcan be used as (?:an? )?(?:\+\d+\s+)?magic ([a-z][a-z' -]+?)(?: that| which| with|[.,])/i,
+      /\bfunctions as (?:an? )?(?:\+\d+\s+)?magic ([a-z][a-z' -]+?)(?: that| which| with|[.,])/i,
+    ]) {
+      const match = bodyText.match(pattern);
+      if (match?.[1]) {
+        metadata.base_item = titleCaseEquipmentName(match[1]);
+        break;
+      }
+    }
+  }
+
+  const sharedBonusMatch = bodyText.match(/\+(\d+)\s+bonus to attack (?:and|rolls and) damage rolls/i);
+  if (sharedBonusMatch?.[1]) {
+    metadata.bonus_weapon = asInt(sharedBonusMatch[1], 0);
+  } else {
+    const attackBonusMatch = bodyText.match(/\+(\d+)\s+bonus to attack rolls/i);
+    if (attackBonusMatch?.[1]) {
+      metadata.bonus_weapon_attack = asInt(attackBonusMatch[1], 0);
+    }
+    const damageBonusMatch = bodyText.match(/\+(\d+)\s+bonus to damage rolls/i);
+    if (damageBonusMatch?.[1]) {
+      metadata.bonus_weapon_damage = asInt(damageBonusMatch[1], 0);
+    }
+  }
+
+  for (const [key, value] of Object.entries(parseJsonRecord(metadataJson))) {
+    if (CAMPAIGN_ITEM_PAGE_SUPPORT_METADATA_KEYS.has(key) && hasCatalogSupportValue(value)) {
+      metadata[key] = value;
+    }
+  }
+  if (!Object.keys(metadata).some((key) => hasCatalogSupportValue(metadata[key]))) {
+    return {};
+  }
+  metadata.title = asString(title);
+  return metadata;
+}
+
+function loadItemCatalog(database: SqliteDatabase, campaignSlug: string): ItemCatalog {
+  const catalog = emptyItemCatalog();
+  if (!tableExists(database, "systems_entries")) {
+    return catalog;
+  }
+  try {
+    const rows = database
+      .prepare(
+        `
+          SELECT
+            systems_entries.entry_key,
+            systems_entries.source_id,
+            systems_entries.slug,
+            systems_entries.title,
+            systems_entries.metadata_json
+          FROM systems_entries
+          LEFT JOIN systems_sources
+            ON systems_sources.library_slug = systems_entries.library_slug
+           AND systems_sources.source_id = systems_entries.source_id
+          LEFT JOIN campaign_enabled_sources
+            ON campaign_enabled_sources.campaign_slug = ?
+           AND campaign_enabled_sources.library_slug = systems_entries.library_slug
+           AND campaign_enabled_sources.source_id = systems_entries.source_id
+          LEFT JOIN campaign_entry_overrides
+            ON campaign_entry_overrides.campaign_slug = ?
+           AND campaign_entry_overrides.library_slug = systems_entries.library_slug
+           AND campaign_entry_overrides.entry_key = systems_entries.entry_key
+          WHERE systems_entries.entry_type = 'item'
+            AND (systems_sources.status IS NULL OR systems_sources.status = 'active')
+            AND COALESCE(campaign_enabled_sources.is_enabled, 1) != 0
+            AND COALESCE(campaign_entry_overrides.is_enabled_override, 1) != 0
+          ORDER BY systems_entries.title ASC, systems_entries.id ASC
+        `,
+      )
+      .all(campaignSlug, campaignSlug) as Array<{
+      entry_key: string;
+      source_id: string;
+      slug: string;
+      title: string;
+      metadata_json: string;
+    }>;
+    for (const row of rows) {
+      addItemCatalogEntry(catalog, {
+        entryKey: asString(row.entry_key),
+        pageRef: "",
+        sourceId: asString(row.source_id),
+        slug: asString(row.slug),
+        title: asString(row.title),
+        metadata: parseJsonRecord(row.metadata_json),
+      });
+    }
+  } catch {
+    return emptyItemCatalog();
+  }
+  if (tableExists(database, "campaign_pages")) {
+    try {
+      const pageRows = database
+        .prepare(
+          `
+            SELECT page_ref, route_slug, title, body_markdown, metadata_json
+            FROM campaign_pages
+            WHERE campaign_slug = ?
+              AND section = ?
+              AND published != 0
+            ORDER BY display_order ASC, title ASC, page_ref ASC
+          `,
+        )
+        .all(campaignSlug, CAMPAIGN_ITEMS_SECTION) as Array<{
+        page_ref: string;
+        route_slug: string;
+        title: string;
+        body_markdown: string;
+        metadata_json: string;
+      }>;
+      for (const row of pageRows) {
+        const metadata = buildCampaignItemPageSupportMetadata(row.title, row.body_markdown, row.metadata_json);
+        if (Object.keys(metadata).length === 0) {
+          continue;
+        }
+        addItemCatalogEntry(catalog, {
+          entryKey: "",
+          pageRef: asString(row.page_ref),
+          sourceId: "campaign-page",
+          slug: asString(row.route_slug || row.page_ref),
+          title: asString(row.title),
+          metadata,
+        });
+      }
+    } catch {
+      return catalog;
+    }
+  }
+  return catalog;
 }
 
 function tableExists(database: SqliteDatabase, tableName: string): boolean {
@@ -303,6 +582,342 @@ function normalizeWeaponWieldModeValue(value: unknown): string {
   return "";
 }
 
+function normalizeEquipmentToken(value: unknown): string {
+  return asString(value)
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/[^a-z0-9 ]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function titleLookupCandidates(value: unknown): string[] {
+  const cleaned = asString(value);
+  if (!cleaned) {
+    return [];
+  }
+  const values = [cleaned];
+  const baseItemName = splitMagicItemName(cleaned);
+  if (baseItemName && baseItemName !== cleaned) {
+    values.push(baseItemName);
+  }
+  if (cleaned.includes(",")) {
+    values.push(cleaned.split(",").reverse().map((part) => part.trim()).join(" "));
+  }
+  values.push(cleaned.replace(/'/g, ""));
+  values.push(cleaned.replace(/-/g, " "));
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+  for (const value of values) {
+    const normalized = normalizeCatalogLookup(value);
+    if (normalized && !seen.has(normalized)) {
+      seen.add(normalized);
+      candidates.push(normalized);
+    }
+  }
+  return candidates;
+}
+
+function splitMagicItemName(value: unknown): string {
+  const cleaned = asString(value);
+  const prefixMatch = cleaned.match(/^\+(\d+)\s+(.+)$/);
+  if (prefixMatch) {
+    return asString(prefixMatch[2]);
+  }
+  const suffixMatch = cleaned.match(/^(.+?),\s*\+(\d+)$/);
+  if (suffixMatch) {
+    return asString(suffixMatch[1]);
+  }
+  return cleaned;
+}
+
+function equipmentTokens(values: unknown[]): Set<string> {
+  const tokens = new Set<string>();
+  for (const value of values) {
+    const normalized = normalizeEquipmentToken(value);
+    if (normalized) {
+      tokens.add(normalized);
+    }
+  }
+  return tokens;
+}
+
+function itemStringFields(item: Record<string, unknown>): Set<string> {
+  return equipmentTokens([
+    item.item_type,
+    item.type,
+    item.category,
+    item.equipment_category,
+    item.weapon_category,
+    item.armor_category,
+    ...asArray(item.tags),
+    ...asArray(item.properties),
+    ...asArray(item.weapon_properties),
+  ]);
+}
+
+function extractPageRefSlug(value: unknown): string {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const payload = value as Record<string, unknown>;
+    return asString(payload.page_ref || payload.slug);
+  }
+  return asString(value);
+}
+
+function resolveCatalogEntry(item: Record<string, unknown>, catalog: ItemCatalog): ItemCatalogEntry | undefined {
+  const pageRef = extractPageRefSlug(item.page_ref);
+  if (pageRef && catalog.byPageRef.has(pageRef)) {
+    return catalog.byPageRef.get(pageRef);
+  }
+  const systemsRef = asRecord(item.systems_ref);
+  const entryKey = asString(systemsRef.entry_key);
+  if (entryKey && catalog.byEntryKey.has(entryKey)) {
+    return catalog.byEntryKey.get(entryKey);
+  }
+  const slug = asString(systemsRef.slug);
+  if (slug && catalog.bySlug.has(slug)) {
+    return catalog.bySlug.get(slug);
+  }
+  for (const candidate of [systemsRef.title, item.name]) {
+    for (const lookup of titleLookupCandidates(candidate)) {
+      const entry = catalog.byTitle.get(lookup);
+      if (entry) {
+        return entry;
+      }
+    }
+  }
+  return undefined;
+}
+
+function itemSupportMetadata(item: Record<string, unknown>, catalog: ItemCatalog): Record<string, unknown> {
+  const entry = resolveCatalogEntry(item, catalog);
+  const metadata = { ...(entry?.metadata || {}) };
+  for (const key of [
+    "armor",
+    "armor_category",
+    "attunement",
+    "base_item",
+    "bonus_ac",
+    "damage",
+    "damage_type",
+    "dmg1",
+    "is_magic_item",
+    "magic",
+    "properties",
+    "rarity",
+    "requires_attunement",
+    "type",
+    "versatile_damage",
+    "weapon",
+    "weapon_category",
+    "weapon_wield_modes",
+  ]) {
+    if (Object.hasOwn(item, key)) {
+      metadata[key] = item[key];
+    }
+  }
+  if (entry && !metadata.title) {
+    metadata.title = entry.title;
+  }
+  if (entry?.pageRef && !metadata.page_ref) {
+    metadata.page_ref = entry.pageRef;
+  }
+  return metadata;
+}
+
+function equipmentSupportItem(
+  inventoryItem: Record<string, unknown>,
+  definitionItem: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const supportItem = { ...inventoryItem, ...(definitionItem || {}) };
+  if (!asString(supportItem.name)) {
+    supportItem.name = asString(inventoryItem.name);
+  }
+  return supportItem;
+}
+
+function supportFields(item: Record<string, unknown>, metadata: Record<string, unknown>): Set<string> {
+  return equipmentTokens([
+    ...Array.from(itemStringFields(item)),
+    metadata.base_item,
+    metadata.type,
+    metadata.weapon_category,
+    metadata.armor_category,
+    ...asArray(metadata.properties),
+    ...asArray(asRecord(metadata.weapon).properties),
+    ...asArray(asRecord(metadata.armor).properties),
+  ]);
+}
+
+function isAmmunitionItem(fields: Set<string>, normalizedName: string): boolean {
+  return (
+    fields.has("ammunition") ||
+    fields.has("ammo") ||
+    /\b(ammunition|bolt|bolts|arrow|arrows|bullet|bullets)\b/.test(normalizedName)
+  );
+}
+
+function isWeaponItem(
+  item: Record<string, unknown>,
+  metadata: Record<string, unknown>,
+  fields: Set<string>,
+  normalizedName: string,
+): boolean {
+  if (isAmmunitionItem(fields, normalizedName)) {
+    return false;
+  }
+  const weapon = asRecord(metadata.weapon);
+  const typeCode = asString(metadata.type || weapon.type).toUpperCase();
+  if (
+    item.is_weapon === true ||
+    Object.keys(weapon).length > 0 ||
+    typeCode === "M" ||
+    typeCode === "R" ||
+    Boolean(asString(metadata.damage || metadata.dmg1 || weapon.damage || weapon.dmg1)) ||
+    fields.has("weapon") ||
+    fields.has("melee weapon") ||
+    fields.has("ranged weapon") ||
+    fields.has("simple weapon") ||
+    fields.has("martial weapon")
+  ) {
+    return true;
+  }
+  return /\b(crossbow|bow|sword|dagger|staff|quarterstaff|mace|axe|hammer|spear|javelin|club|rapier|scimitar|whip)\b/.test(
+    normalizedName,
+  );
+}
+
+function isArmorItem(
+  item: Record<string, unknown>,
+  metadata: Record<string, unknown>,
+  fields: Set<string>,
+  normalizedName: string,
+): boolean {
+  const armor = asRecord(metadata.armor);
+  const typeCode = asString(metadata.type || armor.type).toUpperCase();
+  if (
+    item.is_armor === true ||
+    item.is_shield === true ||
+    Object.keys(armor).length > 0 ||
+    Boolean(asString(metadata.ac || metadata.base_ac || armor.ac || armor.base_ac)) ||
+    ["LA", "MA", "HA", "S", "SHIELD"].includes(typeCode) ||
+    fields.has("armor") ||
+    fields.has("armour") ||
+    fields.has("shield") ||
+    fields.has("medium armor") ||
+    fields.has("heavy armor") ||
+    fields.has("light armor")
+  ) {
+    return true;
+  }
+  return /\b(armor|armour|mail|plate|shield)\b/.test(normalizedName);
+}
+
+function requiresAttunement(item: Record<string, unknown>, metadata: Record<string, unknown>, fields: Set<string>): boolean {
+  const value = metadata.attunement ?? item.attunement;
+  if (item.requires_attunement === true || metadata.requires_attunement === true) {
+    return true;
+  }
+  const attunement = normalizeEquipmentToken(value);
+  if (!attunement || ["false", "none", "no", "not required"].includes(attunement)) {
+    return false;
+  }
+  return attunement.includes("requires attunement") || fields.has("requires attunement");
+}
+
+function isMagicItem(item: Record<string, unknown>, metadata: Record<string, unknown>, fields: Set<string>): boolean {
+  const rarity = normalizeEquipmentToken(metadata.rarity ?? item.rarity);
+  return (
+    item.is_magic_item === true ||
+    metadata.is_magic_item === true ||
+    item.magic === true ||
+    metadata.magic === true ||
+    fields.has("magic") ||
+    fields.has("magic item") ||
+    requiresAttunement(item, metadata, fields) ||
+    Boolean(rarity && !["false", "none", "no", "not required", "unknown", "mundane", "common mundane"].includes(rarity))
+  );
+}
+
+function weaponWieldModesForItem(
+  item: Record<string, unknown>,
+  metadata: Record<string, unknown>,
+  fields: Set<string>,
+  normalizedName: string,
+): string[] {
+  const weapon = asRecord(metadata.weapon);
+  const explicitModes = asArray(item.weapon_wield_modes || metadata.weapon_wield_modes)
+    .map((mode) => normalizeWeaponWieldModeValue(mode))
+    .filter((mode) => mode);
+  if (explicitModes.length > 0) {
+    return Array.from(new Set(explicitModes));
+  }
+  const typeCode = asString(metadata.type || weapon.type).toUpperCase();
+  const versatileDamage = asString(metadata.versatile_damage || weapon.versatile_damage);
+  if (fields.has("two handed") || fields.has("2h") || normalizedName.includes("longbow") || normalizedName.includes("shortbow")) {
+    return ["two-handed"];
+  }
+  if (normalizedName.includes("crossbow") && !normalizedName.includes("hand crossbow")) {
+    return ["two-handed"];
+  }
+
+  const modes = ["main-hand"];
+  if (typeCode === "M" || fields.has("melee weapon") || fields.has("light") || /\b(sword|dagger|staff|quarterstaff|mace|axe|hammer|spear|club|rapier|scimitar|whip)\b/.test(normalizedName)) {
+    modes.push("off-hand");
+  }
+  if (
+    fields.has("versatile") ||
+    Boolean(versatileDamage) ||
+    /\b(quarterstaff|staff|spear|longsword|battleaxe|warhammer|trident)\b/.test(normalizedName)
+  ) {
+    modes.push("two-handed");
+  }
+  return Array.from(new Set(modes));
+}
+
+function describeEquipmentStateSupport(item: Record<string, unknown>, catalog: ItemCatalog): {
+  supportsEquippedState: boolean;
+  supportsAttunement: boolean;
+  supportsWeaponWieldMode: boolean;
+  weaponWieldModes: string[];
+} {
+  if (item.is_currency_only === true) {
+    return {
+      supportsEquippedState: false,
+      supportsAttunement: false,
+      supportsWeaponWieldMode: false,
+      weaponWieldModes: [],
+    };
+  }
+  const metadata = itemSupportMetadata(item, catalog);
+  const fields = supportFields(item, metadata);
+  const normalizedName = normalizeEquipmentToken(metadata.base_item || metadata.title || item.name);
+  const isWeapon = isWeaponItem(item, metadata, fields, normalizedName);
+  const isArmor = isArmorItem(item, metadata, fields, normalizedName);
+  const magicItem = isMagicItem(item, metadata, fields);
+  const supportsEquippedState = item.supports_equipped_state === true || isWeapon || isArmor || magicItem;
+  const weaponWieldModes = isWeapon ? weaponWieldModesForItem(item, metadata, fields, normalizedName) : [];
+  const supportsAttunement = supportsEquippedState && requiresAttunement(item, metadata, fields);
+  return {
+    supportsEquippedState,
+    supportsAttunement,
+    supportsWeaponWieldMode: weaponWieldModes.length > 0,
+    weaponWieldModes,
+  };
+}
+
+function buildDefinitionItemLookup(definition: Record<string, unknown>): Map<string, Record<string, unknown>> {
+  const lookup = new Map<string, Record<string, unknown>>();
+  for (const rawItem of asArray(definition.equipment_catalog)) {
+    const item = asRecord(rawItem);
+    const itemId = asString(item.id);
+    if (itemId) {
+      lookup.set(itemId, item);
+    }
+  }
+  return lookup;
+}
+
 function slugifyValue(value: unknown): string {
   return asString(value)
     .toLowerCase()
@@ -392,6 +1007,13 @@ function normalizeAttunementState(inventory: unknown[]): Record<string, unknown>
     max_attuned_items: 3,
     attuned_item_refs: attunedItemRefs,
   };
+}
+
+function attunementLimit(value: unknown): number {
+  if (value === 0 || value === "0" || !hasSubmittedValue(value)) {
+    return 3;
+  }
+  return asInt(value, 3);
 }
 
 function buildResourceStates(definition: Record<string, unknown>): unknown[] {
@@ -1515,6 +2137,126 @@ function applyFeatureStateUpdate(
   featureState.enabled = Boolean(payload.enabled);
   featureStates[normalizedKey] = featureState;
   state.feature_states = featureStates;
+}
+
+function applyEquipmentStateUpdate(
+  state: Record<string, unknown>,
+  definition: Record<string, unknown>,
+  catalog: ItemCatalog,
+  itemId: string,
+  payload: Record<string, unknown>,
+): { state: Record<string, unknown>; definition: Record<string, unknown> } {
+  const normalizedItemId = asString(itemId);
+  if (!normalizedItemId) {
+    throw new Error("Choose a valid equipment entry to update.");
+  }
+
+  const definitionItemsByRef = buildDefinitionItemLookup(definition);
+  const inventory = asArray(state.inventory).map((rawItem) => ({ ...asRecord(rawItem) }));
+  const targetInventoryIndex = inventory.findIndex((item) => inventoryItemRef(item) === normalizedItemId);
+  if (targetInventoryIndex < 0) {
+    throw new Error("Choose a valid equipment entry to update.");
+  }
+
+  const targetInventory = inventory[targetInventoryIndex];
+  const targetDefinitionItem = definitionItemsByRef.get(normalizedItemId);
+  const targetSupport = describeEquipmentStateSupport(equipmentSupportItem(targetInventory, targetDefinitionItem), catalog);
+  if (!targetSupport.supportsEquippedState) {
+    throw new Error("That inventory row stays on Inventory because it does not support equipment state.");
+  }
+
+  let weaponWieldMode = "";
+  let isEquipped: boolean;
+  if (targetSupport.supportsWeaponWieldMode) {
+    weaponWieldMode = normalizeWeaponWieldModeValue(payload.weapon_wield_mode);
+    if (weaponWieldMode && !targetSupport.weaponWieldModes.includes(weaponWieldMode)) {
+      throw new Error("Choose a valid wielding mode for that weapon.");
+    }
+    if (!weaponWieldMode && Boolean(payload.is_equipped) && targetSupport.weaponWieldModes.length > 0) {
+      weaponWieldMode = targetSupport.weaponWieldModes[0] || "";
+    }
+    isEquipped = Boolean(weaponWieldMode);
+  } else {
+    isEquipped = Boolean(payload.is_equipped);
+  }
+
+  const requestedAttunement = Boolean(payload.is_attuned);
+  if (requestedAttunement && !targetSupport.supportsAttunement) {
+    throw new Error("Only items whose durable metadata explicitly requires attunement can be attuned.");
+  }
+  const isAttuned = requestedAttunement && targetSupport.supportsAttunement;
+  const attunementPayload = asRecord(state.attunement);
+  const maxAttunedItems = attunementLimit(attunementPayload.max_attuned_items);
+  const currentlyAttunedRefs = new Set<string>();
+  for (const item of inventory) {
+    const itemRef = inventoryItemRef(item);
+    if (!itemRef || itemRef === normalizedItemId || item.is_attuned !== true) {
+      continue;
+    }
+    const support = describeEquipmentStateSupport(equipmentSupportItem(item, definitionItemsByRef.get(itemRef)), catalog);
+    if (support.supportsAttunement) {
+      currentlyAttunedRefs.add(itemRef);
+    }
+  }
+  const nextAttunedCount = currentlyAttunedRefs.size + (isAttuned ? 1 : 0);
+  if (maxAttunedItems >= 0 && nextAttunedCount > maxAttunedItems) {
+    throw new Error(`This character already has ${maxAttunedItems} attuned item${maxAttunedItems === 1 ? "" : "s"}. Clear one first.`);
+  }
+
+  const applyStateFields = (item: Record<string, unknown>): Record<string, unknown> => {
+    const updatedItem: Record<string, unknown> = { ...item, is_equipped: isEquipped, is_attuned: isAttuned };
+    if (targetSupport.supportsWeaponWieldMode && weaponWieldMode) {
+      updatedItem.weapon_wield_mode = weaponWieldMode;
+    } else {
+      delete updatedItem.weapon_wield_mode;
+    }
+    return updatedItem;
+  };
+
+  inventory[targetInventoryIndex] = applyStateFields(targetInventory);
+
+  let foundDefinitionItem = false;
+  const equipmentCatalog = asArray(definition.equipment_catalog).map((rawItem) => {
+    const item = { ...asRecord(rawItem) };
+    if (asString(item.id) !== normalizedItemId) {
+      return item;
+    }
+    foundDefinitionItem = true;
+    return applyStateFields(item);
+  });
+  if (!foundDefinitionItem) {
+    throw new Error("Choose a valid equipment entry to update.");
+  }
+
+  const nextAttunedRefs: string[] = [];
+  const seenAttunedRefs = new Set<string>();
+  for (const item of inventory) {
+    const itemRef = inventoryItemRef(item);
+    if (!itemRef || item.is_attuned !== true || seenAttunedRefs.has(itemRef)) {
+      continue;
+    }
+    const support = describeEquipmentStateSupport(equipmentSupportItem(item, definitionItemsByRef.get(itemRef)), catalog);
+    if (!support.supportsAttunement) {
+      continue;
+    }
+    seenAttunedRefs.add(itemRef);
+    nextAttunedRefs.push(itemRef);
+  }
+
+  return {
+    state: {
+      ...state,
+      inventory,
+      attunement: {
+        max_attuned_items: maxAttunedItems,
+        attuned_item_refs: nextAttunedRefs,
+      },
+    },
+    definition: {
+      ...definition,
+      equipment_catalog: equipmentCatalog,
+    },
+  };
 }
 
 function isXianxiaDefinition(definition: Record<string, unknown>): boolean {
@@ -3086,6 +3828,93 @@ export function applyCharacterSessionRest(
       return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
     }
     return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCharacterSessionEquipment(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+  itemId: string,
+  payload: Record<string, unknown>,
+  updatedByUserId: number,
+): CharacterSessionEquipmentUpdateResult {
+  let expectedRevision: number;
+  try {
+    expectedRevision = parseRequiredWholeNumber(payload.expected_revision, "Expected revision");
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character equipment payload." };
+  }
+
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+
+    let existingState = readCharacterState(database, campaignSlug, characterSlug);
+    const stateRowMissing = !existingState;
+    existingState ??= { revision: 1, state: buildInitialState(definition) };
+
+    if (existingState.revision !== expectedRevision) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+
+    let nextState: Record<string, unknown>;
+    let nextDefinition: Record<string, unknown>;
+    try {
+      const result = applyEquipmentStateUpdate(copyState(existingState.state), definition, loadItemCatalog(database, campaignSlug), itemId, payload);
+      nextState = result.state;
+      nextDefinition = result.definition;
+    } catch (error) {
+      return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character equipment payload." };
+    }
+
+    const now = utcIsoTimestamp();
+    if (stateRowMissing) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(campaignSlug, characterSlug, expectedRevision + 1, JSON.stringify(nextState), now, updatedByUserId);
+      return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now, definition: nextDefinition };
+    }
+
+    const updateResult = database
+      .prepare(
+        `
+          UPDATE character_state
+          SET revision = revision + 1,
+              state_json = ?,
+              updated_at = ?,
+              updated_by_user_id = ?
+          WHERE campaign_slug = ?
+            AND character_slug = ?
+            AND revision = ?
+        `,
+      )
+      .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
+    if (updateResult.changes <= 0) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+    return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now, definition: nextDefinition };
   } finally {
     database.close();
   }

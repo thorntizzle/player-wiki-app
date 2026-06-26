@@ -468,6 +468,11 @@ fixture database.
   - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/feature-states/<feature_key>` with bearer-only writes.
   - stale-revision conflict envelopes.
   - unsupported feature-state key validation, non-Arcane-Armor-sheet validation, and assigned-player Arcane Armor enablement through `state.feature_states.arcane_armor.enabled`.
+- Character DND equipment-state payload checks cover:
+  - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/equipment/<item_id>` with bearer-only writes.
+  - stale-revision conflict envelopes.
+  - inventory-only row rejection and invalid weapon wield-mode validation.
+  - assigned-player weapon wield-mode persistence through synchronized definition `equipment_catalog`, SQLite `state.inventory`, shared revision bumps, and `updated_by_user_id`.
 - Character Xianxia inventory equipped-state payload checks cover:
   - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/equipped` with bearer-only writes.
   - unauthenticated, fixture-role bearer requirement, and stale-revision envelopes.

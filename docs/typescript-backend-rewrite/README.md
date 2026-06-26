@@ -370,6 +370,12 @@ Route parity check command:
   session-state write gate, shared revision conflicts, unsupported-key validation, non-Armorer
   validation, SQLite-only `state.feature_states.arcane_armor.enabled` writes, and refreshed
   `character.state_record` payloads.
+- The DND equipment-state write now serves
+  `PATCH .../characters/:characterSlug/session/equipment/:itemId`. It preserves the bearer-only
+  session-state write gate, shared revision conflicts, valid definition-backed inventory row
+  validation, inventory-only row rejection, weapon wield-mode normalization and allowed-mode
+  validation, attunement support/limit validation, synchronized definition `equipment_catalog` and
+  SQLite `state.inventory` persistence, and refreshed `character.state_record` payloads.
 - The first Xianxia inventory equipment write now serves
   `PATCH .../characters/:characterSlug/session/xianxia-inventory/:itemId/equipped`. It preserves the
   bearer-only session-state write gate, shared revision conflicts, Xianxia-only validation, unknown
