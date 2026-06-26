@@ -16,6 +16,8 @@ const campaignsDir =
 const smokeTempDir = mkdtempSync(path.join(tmpdir(), "cpw-api-smoke-"));
 const dbPath = path.join(smokeTempDir, "player_wiki.sqlite3");
 const liveApiToken = "fixture-live-api-token";
+const playerApiToken = "fixture-player-api-token";
+const outsiderApiToken = "fixture-outsider-api-token";
 const hashToken = (rawToken) => createHash("sha256").update(rawToken, "utf8").digest("hex");
 
 const smokeDb = new Database(dbPath);
@@ -107,6 +109,36 @@ smokeDb
   );
 smokeDb
   .prepare(
+    "INSERT INTO users (id, email, display_name, is_admin, status, password_hash, auth_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    79,
+    "fixture-token-player@example.com",
+    "Fixture Token Player",
+    0,
+    "active",
+    null,
+    1,
+    "2026-06-25T08:15:00+00:00",
+    "2026-06-25T08:15:00+00:00",
+  );
+smokeDb
+  .prepare(
+    "INSERT INTO users (id, email, display_name, is_admin, status, password_hash, auth_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    80,
+    "fixture-token-outsider@example.com",
+    "Fixture Token Outsider",
+    0,
+    "active",
+    null,
+    1,
+    "2026-06-25T08:20:00+00:00",
+    "2026-06-25T08:20:00+00:00",
+  );
+smokeDb
+  .prepare(
     "INSERT INTO user_preferences (user_id, theme_key, session_chat_order, frontend_mode, updated_at) VALUES (?, ?, ?, ?, ?)",
   )
   .run(77, "moonlit", "oldest_first", "flask", "2026-06-25T08:35:00+00:00");
@@ -115,6 +147,11 @@ smokeDb
     "INSERT INTO campaign_memberships (id, user_id, campaign_slug, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
   )
   .run(501, 77, "linden-pass", "dm", "active", "2026-06-25T08:10:00+00:00", "2026-06-25T08:10:00+00:00");
+smokeDb
+  .prepare(
+    "INSERT INTO campaign_memberships (id, user_id, campaign_slug, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(502, 79, "linden-pass", "player", "active", "2026-06-25T08:16:00+00:00", "2026-06-25T08:16:00+00:00");
 smokeDb
   .prepare(
     "INSERT INTO api_tokens (id, user_id, label, token_hash, created_at, last_used_at, expires_at, revoked_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -126,6 +163,36 @@ smokeDb
     hashToken(liveApiToken),
     "2026-06-25T08:40:00+00:00",
     "2026-06-25T08:40:00+00:00",
+    null,
+    null,
+    null,
+  );
+smokeDb
+  .prepare(
+    "INSERT INTO api_tokens (id, user_id, label, token_hash, created_at, last_used_at, expires_at, revoked_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    902,
+    79,
+    "Player Smoke Token",
+    hashToken(playerApiToken),
+    "2026-06-25T08:45:00+00:00",
+    "2026-06-25T08:45:00+00:00",
+    null,
+    null,
+    null,
+  );
+smokeDb
+  .prepare(
+    "INSERT INTO api_tokens (id, user_id, label, token_hash, created_at, last_used_at, expires_at, revoked_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    903,
+    80,
+    "Outsider Smoke Token",
+    hashToken(outsiderApiToken),
+    "2026-06-25T08:50:00+00:00",
+    "2026-06-25T08:50:00+00:00",
     null,
     null,
     null,
@@ -658,7 +725,9 @@ if (
   bearerMe.payload?.preferences?.frontend_mode !== "gen2" ||
   bearerMe.payload?.view_as?.can_view_as !== true ||
   bearerMe.payload?.view_as?.active_user !== null ||
-  bearerMe.payload?.view_as?.user_choices?.[0]?.email !== "fixture-view-target@example.com"
+  !bearerMe.payload?.view_as?.user_choices
+    ?.map((user) => user.email)
+    .includes("fixture-view-target@example.com")
 ) {
   throw new Error(`Unexpected bearer me payload: ${JSON.stringify(bearerMe.payload)}`);
 }
@@ -747,6 +816,27 @@ if (blockedImportRuns.status !== 401 || blockedImportRuns.payload?.error?.code !
   );
 }
 
+const playerBearerImportRuns = await requestJson("/api/v1/systems/import-runs", {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (playerBearerImportRuns.status !== 403 || playerBearerImportRuns.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player bearer systems import runs request to return forbidden 403, got ${playerBearerImportRuns.status} ${playerBearerImportRuns.payload?.error?.code}`,
+  );
+}
+
+const bearerImportRuns = await requestJson("/api/v1/systems/import-runs?source_id=MM", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (
+  bearerImportRuns.status !== 200 ||
+  bearerImportRuns.payload?.ok !== true ||
+  bearerImportRuns.payload?.import_runs?.length !== 1 ||
+  bearerImportRuns.payload?.import_runs?.[0]?.source_id !== "MM"
+) {
+  throw new Error(`Unexpected bearer systems import runs payload: ${JSON.stringify(bearerImportRuns.payload)}`);
+}
+
 const importRuns = await requestJson("/api/v1/systems/import-runs?source_id=MM", {
   "X-CPW-Fixture-Role": "admin",
 });
@@ -787,6 +877,17 @@ if (importRunDetail.payload?.import_run?.summary?.source_files?.[0] !== "data/be
   throw new Error(`Unexpected systems import run detail summary: ${JSON.stringify(importRunDetail.payload?.import_run)}`);
 }
 
+const bearerImportRunDetail = await requestJson(`/api/v1/systems/import-runs/${mmImportRun.id}`, {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (
+  bearerImportRunDetail.status !== 200 ||
+  bearerImportRunDetail.payload?.ok !== true ||
+  bearerImportRunDetail.payload?.import_run?.id !== mmImportRun.id
+) {
+  throw new Error(`Unexpected bearer systems import run detail payload: ${JSON.stringify(bearerImportRunDetail.payload)}`);
+}
+
 const missingImportRunDetail = await requestJson("/api/v1/systems/import-runs/999999", {
   "X-CPW-Fixture-Role": "admin",
 });
@@ -800,6 +901,15 @@ const blockedSystemsIndex = await requestJson("/api/v1/campaigns/linden-pass/sys
 if (blockedSystemsIndex.status !== 401 || blockedSystemsIndex.payload?.error?.code !== "auth_required") {
   throw new Error(
     `Expected unauthenticated systems index to return auth_required 401, got ${blockedSystemsIndex.status} ${blockedSystemsIndex.payload?.error?.code}`,
+  );
+}
+
+const outsiderSystemsIndex = await requestJson("/api/v1/campaigns/linden-pass/systems", {
+  Authorization: `Bearer ${outsiderApiToken}`,
+});
+if (outsiderSystemsIndex.status !== 403 || outsiderSystemsIndex.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected bearer systems index without membership to return forbidden 403, got ${outsiderSystemsIndex.status} ${outsiderSystemsIndex.payload?.error?.code}`,
   );
 }
 
@@ -848,6 +958,17 @@ if (
   throw new Error(`Unexpected player systems search payload: ${JSON.stringify(playerSystemsSearch.payload)}`);
 }
 
+const bearerPlayerSystemsIndex = await requestJson("/api/v1/campaigns/linden-pass/systems", {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (
+  bearerPlayerSystemsIndex.status !== 200 ||
+  bearerPlayerSystemsIndex.payload?.permissions?.can_manage_systems !== false ||
+  (bearerPlayerSystemsIndex.payload?.sources || []).map((source) => source.source_id).join("|") !== "PHB"
+) {
+  throw new Error(`Unexpected bearer player systems index payload: ${JSON.stringify(bearerPlayerSystemsIndex.payload)}`);
+}
+
 const dmSystemsIndex = await requestJson("/api/v1/campaigns/linden-pass/systems", {
   "X-CPW-Fixture-Role": "dm",
 });
@@ -857,6 +978,17 @@ if (dmSystemsIndex.status !== 200 || dmSystemsIndex.payload?.permissions?.can_ma
 const dmIndexSourceIds = (dmSystemsIndex.payload?.sources || []).map((source) => source.source_id);
 if (dmIndexSourceIds.join("|") !== "MM|PHB") {
   throw new Error(`Expected DM systems index to include enabled source cards sorted by title, got ${JSON.stringify(dmIndexSourceIds)}`);
+}
+
+const bearerAdminSystemsIndex = await requestJson("/api/v1/campaigns/linden-pass/systems", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (
+  bearerAdminSystemsIndex.status !== 200 ||
+  bearerAdminSystemsIndex.payload?.permissions?.can_manage_systems !== true ||
+  (bearerAdminSystemsIndex.payload?.sources || []).map((source) => source.source_id).join("|") !== "MM|PHB"
+) {
+  throw new Error(`Unexpected bearer admin systems index payload: ${JSON.stringify(bearerAdminSystemsIndex.payload)}`);
 }
 
 const blockedSystemsSources = await requestJson("/api/v1/campaigns/linden-pass/systems/sources");
@@ -893,6 +1025,16 @@ if (dmSystemsSources.status !== 200 || dmSystemsSources.payload?.permissions?.ca
 const dmSourceIds = (dmSystemsSources.payload?.sources || []).map((source) => source.source_id);
 if (dmSourceIds.join("|") !== "MM|PHB|XGE") {
   throw new Error(`Expected DM systems source list to include all seeded sources sorted by title, got ${JSON.stringify(dmSourceIds)}`);
+}
+const bearerAdminSystemsSources = await requestJson("/api/v1/campaigns/linden-pass/systems/sources", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (
+  bearerAdminSystemsSources.status !== 200 ||
+  bearerAdminSystemsSources.payload?.permissions?.can_manage_systems !== true ||
+  (bearerAdminSystemsSources.payload?.sources || []).map((source) => source.source_id).join("|") !== "MM|PHB|XGE"
+) {
+  throw new Error(`Unexpected bearer admin systems source list payload: ${JSON.stringify(bearerAdminSystemsSources.payload)}`);
 }
 const mmSource = dmSystemsSources.payload.sources.find((source) => source.source_id === "MM");
 if (mmSource?.entry_count !== 1 || mmSource?.default_visibility !== "dm" || mmSource?.permissions?.can_access !== true) {
@@ -1226,6 +1368,21 @@ if (playerCombatMonsterSearch.status !== 403 || playerCombatMonsterSearch.payloa
   );
 }
 
+const bearerPlayerCombatMonsterSearch = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/systems-monsters/search?q=gob",
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+);
+if (
+  bearerPlayerCombatMonsterSearch.status !== 403 ||
+  bearerPlayerCombatMonsterSearch.payload?.error?.code !== "forbidden"
+) {
+  throw new Error(
+    `Expected player bearer combat Systems monster search forbidden 403, got ${bearerPlayerCombatMonsterSearch.status} ${bearerPlayerCombatMonsterSearch.payload?.error?.code}`,
+  );
+}
+
 const shortCombatMonsterSearch = await requestJson("/api/v1/campaigns/linden-pass/combat/systems-monsters/search?q=g", {
   "X-CPW-Fixture-Role": "dm",
 });
@@ -1251,6 +1408,22 @@ if (
   dmCombatMonsterSearch.payload?.results?.[0]?.initiative_bonus !== "+2"
 ) {
   throw new Error(`Unexpected DM combat Systems monster search payload: ${JSON.stringify(dmCombatMonsterSearch.payload)}`);
+}
+
+const bearerAdminCombatMonsterSearch = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/systems-monsters/search?q=gob",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+);
+if (
+  bearerAdminCombatMonsterSearch.status !== 200 ||
+  bearerAdminCombatMonsterSearch.payload?.message !== "Found 1 matching monster." ||
+  bearerAdminCombatMonsterSearch.payload?.results?.[0]?.entry_key !== "MM:monster:goblin"
+) {
+  throw new Error(
+    `Unexpected bearer admin combat Systems monster search payload: ${JSON.stringify(bearerAdminCombatMonsterSearch.payload)}`,
+  );
 }
 
 const campaignList = await requestJson("/api/v1/campaigns");

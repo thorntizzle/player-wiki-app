@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
 
-import { readApiTokenAuthContext } from "./auth/repository.js";
+import { apiTokenRoleForCampaign, readApiTokenAuthContext, type AuthRouteRole } from "./auth/repository.js";
 import {
   buildApiTokenAccountSettingsPayload,
   buildApiTokenMePayload,
@@ -162,16 +162,64 @@ function forbidden(message: string) {
   };
 }
 
-function hasFixtureAdminAuth(ctx: { req: { header: (name: string) => string | undefined } }): boolean {
-  return fixtureRole(ctx) === "admin";
-}
-
 function fixtureRole(ctx: { req: { header: (name: string) => string | undefined } }): FixtureSystemsRole | null {
   const role = (ctx.req.header("X-CPW-Fixture-Role") || "").trim().toLowerCase();
   if (role === "player" || role === "dm" || role === "admin") {
     return role;
   }
   return null;
+}
+
+type RoleResolution =
+  | { kind: "authenticated"; role: FixtureSystemsRole }
+  | { kind: "missing" }
+  | { kind: "invalid" }
+  | { kind: "forbidden"; message: string };
+
+function roleResolutionError(result: Exclude<RoleResolution, { kind: "authenticated" }>) {
+  if (result.kind === "forbidden") {
+    return forbidden(result.message);
+  }
+  return authRequired();
+}
+
+function toFixtureSystemsRole(role: AuthRouteRole): FixtureSystemsRole {
+  return role;
+}
+
+function resolveCampaignRole(
+  ctx: { req: { header: (name: string) => string | undefined } },
+  campaignSlug: string,
+): RoleResolution {
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "authenticated") {
+    const role = apiTokenRoleForCampaign(apiAuth.context, campaignSlug);
+    if (!role) {
+      return { kind: "forbidden", message: "You do not have access to this campaign scope." };
+    }
+    return { kind: "authenticated", role: toFixtureSystemsRole(role) };
+  }
+  if (apiAuth.kind === "invalid") {
+    return { kind: "invalid" };
+  }
+
+  const role = fixtureRole(ctx);
+  return role ? { kind: "authenticated", role } : { kind: "missing" };
+}
+
+function resolveAppAdminAuth(ctx: { req: { header: (name: string) => string | undefined } }): RoleResolution {
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "authenticated") {
+    if (apiAuth.context.user.is_admin) {
+      return { kind: "authenticated", role: "admin" };
+    }
+    return { kind: "forbidden", message: "You do not have permission to use the admin API." };
+  }
+  if (apiAuth.kind === "invalid") {
+    return { kind: "invalid" };
+  }
+
+  return fixtureRole(ctx) === "admin" ? { kind: "authenticated", role: "admin" } : { kind: "missing" };
 }
 
 function parsePositiveInteger(rawValue: string): number | null {
@@ -400,8 +448,9 @@ app.get(ROUTES.meSettings, async (ctx) => {
 });
 
 app.get(ROUTES.systemsImportRuns, async (ctx) => {
-  if (!hasFixtureAdminAuth(ctx)) {
-    const error = authRequired();
+  const auth = resolveAppAdminAuth(ctx);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
@@ -425,8 +474,9 @@ app.get(ROUTES.systemsImportRuns, async (ctx) => {
 });
 
 app.get(ROUTES.systemsImportRun, async (ctx) => {
-  if (!hasFixtureAdminAuth(ctx)) {
-    const error = authRequired();
+  const auth = resolveAppAdminAuth(ctx);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
@@ -456,11 +506,12 @@ async function systemsIndexResponse(ctx: Context) {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const role = fixtureRole(ctx);
-  if (!role) {
-    const error = authRequired();
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
+  const role = auth.role;
 
   const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
   return ctx.json({
@@ -487,11 +538,12 @@ app.get(ROUTES.systemsSources, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const role = fixtureRole(ctx);
-  if (!role) {
-    const error = authRequired();
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
+  const role = auth.role;
 
   const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
   return ctx.json({
@@ -508,11 +560,12 @@ app.get(ROUTES.systemsSourceDetail, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const role = fixtureRole(ctx);
-  if (!role) {
-    const error = authRequired();
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
+  const role = auth.role;
 
   const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
   const result = buildCampaignSystemsSourceDetailPayload(
@@ -546,11 +599,12 @@ app.get(ROUTES.systemsSourceCategory, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const role = fixtureRole(ctx);
-  if (!role) {
-    const error = authRequired();
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
+  const role = auth.role;
 
   const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
   const result = buildCampaignSystemsSourceCategoryPayload(
@@ -585,11 +639,12 @@ app.get(ROUTES.systemsEntryDetail, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const role = fixtureRole(ctx);
-  if (!role) {
-    const error = authRequired();
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
+  const role = auth.role;
 
   const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
   const result = buildCampaignSystemsEntryDetailPayload(
@@ -622,11 +677,12 @@ app.get(ROUTES.combatSystemsMonsterSearch, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const role = fixtureRole(ctx);
-  if (!role) {
-    const error = authRequired();
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
+  const role = auth.role;
 
   const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
   const result = buildCombatSystemsMonsterSearchPayload(

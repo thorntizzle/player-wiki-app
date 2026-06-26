@@ -46,6 +46,8 @@ export interface ApiTokenAuthContext {
   viewAsUserChoices: ViewAsChoice[];
 }
 
+export type AuthRouteRole = "player" | "dm" | "admin";
+
 export type ApiTokenAuthResult =
   | { kind: "missing" }
   | { kind: "invalid" }
@@ -264,4 +266,18 @@ export function readApiTokenAuthContext(
   } finally {
     database.close();
   }
+}
+
+export function apiTokenRoleForCampaign(authContext: ApiTokenAuthContext, campaignSlug: string): AuthRouteRole | null {
+  if (authContext.user.is_admin) {
+    return "admin";
+  }
+
+  const membership = authContext.memberships.find(
+    (item) => item.campaign_slug === campaignSlug && item.status === "active",
+  );
+  if (membership?.role === "dm" || membership?.role === "player") {
+    return membership.role;
+  }
+  return null;
 }

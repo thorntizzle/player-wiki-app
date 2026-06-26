@@ -87,13 +87,14 @@ Route parity check command:
 - The first tracked SQLite read path uses `better-sqlite3` against `CPW_DB_PATH` for
   the Systems import-run list/detail routes and the campaign Systems landing/search/source
   list/detail/category/entry-detail routes, while unauthenticated requests still preserve Flask's
-  `auth_required` envelope, fixture roles preserve source and entry visibility boundaries, landing search
-  responses include source cards, entry search results, and rules-reference metadata search fields, entry
-  detail responses include parsed metadata/body JSON, source state, override payloads, and Flask compatibility
-  links, and missing detail rows return explicit JSON 404s.
+  `auth_required` envelope, bearer API tokens now drive app-admin import-run access and campaign
+  role visibility from active memberships, fixture roles remain available for parity tests, landing
+  search responses include source cards, entry search results, and rules-reference metadata search
+  fields, entry detail responses include parsed metadata/body JSON, source state, override payloads,
+  and Flask compatibility links, and missing detail rows return explicit JSON 404s.
 - The first combat-adjacent read path reuses the Systems SQLite fixture layer for Combat Systems monster
-  search, preserving Flask-compatible unauthenticated `auth_required`, manager-only access, short-query
-  guidance, and monster HP/speed/initiative result formatting.
+  search, preserving Flask-compatible unauthenticated `auth_required`, bearer-token or fixture-role
+  manager-only access, short-query guidance, and monster HP/speed/initiative result formatting.
 - The first Combat state shell now serves read-only empty tracker payloads for `GET .../combat` and
   `GET .../combat/live-state`, preserving Flask-compatible unauthenticated `auth_required`, fixture
   player/DM permission splits, live polling metadata, and unchanged-response short-circuit behavior.

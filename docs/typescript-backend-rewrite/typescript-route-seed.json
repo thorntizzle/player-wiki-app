@@ -50,7 +50,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/systems/import-runs",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono systems import-run list route with Flask-compatible unauthenticated auth_required behavior and fixture-admin SQLite reads through CPW_DB_PATH."
+      "notes": "Tracked Hono systems import-run list route with Flask-compatible unauthenticated auth_required behavior, fixture-admin reads, and bearer API-token app-admin SQLite reads through CPW_DB_PATH."
     },
     {
       "method": "GET",
@@ -59,7 +59,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/systems/import-runs/:importRunId",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono systems import-run detail route with Flask-compatible unauthenticated auth_required behavior, fixture-admin SQLite reads through CPW_DB_PATH, and explicit missing-resource JSON."
+      "notes": "Tracked Hono systems import-run detail route with Flask-compatible unauthenticated auth_required behavior, fixture-admin reads, bearer API-token app-admin SQLite reads through CPW_DB_PATH, and explicit missing-resource JSON."
     },
     {
       "method": "GET",
@@ -68,7 +68,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/systems",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono campaign Systems landing route with Flask-compatible unauthenticated auth_required behavior, fixture-role source cards, optional entry search, global rules-reference metadata search, and explicit missing-campaign JSON."
+      "notes": "Tracked Hono campaign Systems landing route with Flask-compatible unauthenticated auth_required behavior, fixture-role and bearer API-token membership-derived source cards, optional entry search, global rules-reference metadata search, and explicit missing-campaign JSON."
     },
     {
       "method": "GET",
@@ -77,7 +77,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/systems/search",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono campaign Systems search alias route sharing the landing payload contract, q entry search, reference_q rules-reference search, and Flask-compatible unauthenticated auth_required behavior."
+      "notes": "Tracked Hono campaign Systems search alias route sharing the landing payload contract, fixture-role and bearer API-token membership-derived access, q entry search, reference_q rules-reference search, and Flask-compatible unauthenticated auth_required behavior."
     },
     {
       "method": "GET",
@@ -86,7 +86,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/systems/sources",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono campaign Systems source-list route with Flask-compatible unauthenticated auth_required behavior, fixture-role filtering, and SQLite library/source reads through CPW_DB_PATH."
+      "notes": "Tracked Hono campaign Systems source-list route with Flask-compatible unauthenticated auth_required behavior, fixture-role and bearer API-token membership-derived filtering, and SQLite library/source reads through CPW_DB_PATH."
     },
     {
       "method": "GET",
@@ -95,7 +95,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/systems/sources/:sourceId",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono campaign Systems source-detail route with Flask-compatible unauthenticated auth_required behavior, fixture-role source access checks, SQLite entry grouping, and explicit missing-source JSON."
+      "notes": "Tracked Hono campaign Systems source-detail route with Flask-compatible unauthenticated auth_required behavior, fixture-role and bearer API-token membership-derived source access checks, SQLite entry grouping, and explicit missing-source JSON."
     },
     {
       "method": "GET",
@@ -104,7 +104,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/systems/sources/:sourceId/types/:entryType",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono campaign Systems source-category route with Flask-compatible unauthenticated auth_required behavior, fixture-role source access checks, SQLite category entry reads, title/type query filtering, and explicit missing-category JSON."
+      "notes": "Tracked Hono campaign Systems source-category route with Flask-compatible unauthenticated auth_required behavior, fixture-role and bearer API-token membership-derived source access checks, SQLite category entry reads, title/type query filtering, and explicit missing-category JSON."
     },
     {
       "method": "GET",
@@ -113,7 +113,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/systems/entries/:entrySlug",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono campaign Systems entry-detail route with Flask-compatible unauthenticated auth_required behavior, fixture-role entry access checks, parsed metadata/body fields, source state, entry override payloads, Flask compatibility links, and explicit missing-entry JSON."
+      "notes": "Tracked Hono campaign Systems entry-detail route with Flask-compatible unauthenticated auth_required behavior, fixture-role and bearer API-token membership-derived entry access checks, parsed metadata/body fields, source state, entry override payloads, Flask compatibility links, and explicit missing-entry JSON."
     },
     {
       "method": "GET",
@@ -122,7 +122,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/systems-monsters/search",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Combat Systems monster search route with Flask-compatible unauthenticated auth_required behavior, fixture DM/admin manager access, short-query guidance, SQLite monster metadata result formatting, and explicit missing-campaign JSON."
+      "notes": "Tracked Hono Combat Systems monster search route with Flask-compatible unauthenticated auth_required behavior, fixture-role and bearer API-token membership-derived manager access, short-query guidance, SQLite monster metadata result formatting, and explicit missing-campaign JSON."
     },
     {
       "method": "GET",
