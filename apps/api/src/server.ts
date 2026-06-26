@@ -32,10 +32,15 @@ import { buildSessionArticleSourceSearchPayload } from "./session/sourceSearch.j
 import {
   buildSessionLogDetailPayload,
   buildSessionStatePayload,
+  clearRevealedSessionArticles,
   closeSession,
+  createSessionArticle,
+  deleteSessionArticle,
   postSessionMessage,
   readSessionArticleImage,
+  revealSessionArticle,
   startSession,
+  updateSessionArticle,
 } from "./session/view.js";
 import { getSystemsImportRun, listSystemsImportRuns } from "./systems/importRuns.js";
 import {
@@ -232,6 +237,50 @@ function roleResolutionError(result: Exclude<RoleResolution, { kind: "authentica
 
 function toFixtureSystemsRole(role: AuthRouteRole): FixtureSystemsRole {
   return role;
+}
+
+type SessionManagerWriteResolution =
+  | {
+      kind: "authenticated";
+      role: FixtureSystemsRole;
+      actor: { id: number; display_name: string };
+    }
+  | {
+      kind: "error";
+      error: ReturnType<typeof authRequired> | ReturnType<typeof forbidden>;
+    };
+
+function resolveSessionManagerBearerWrite(
+  ctx: { req: { header: (name: string) => string | undefined } },
+  campaignSlug: string,
+  fixtureForbiddenMessage: string,
+): SessionManagerWriteResolution {
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "invalid") {
+    return { kind: "error", error: authRequired() };
+  }
+  if (apiAuth.kind !== "authenticated") {
+    if (fixtureRole(ctx)) {
+      return { kind: "error", error: forbidden(fixtureForbiddenMessage) };
+    }
+    return { kind: "error", error: authRequired() };
+  }
+
+  const role = apiTokenRoleForCampaign(apiAuth.context, campaignSlug);
+  if (role !== "dm" && role !== "admin") {
+    return {
+      kind: "error",
+      error: forbidden("You do not have permission to manage this session."),
+    };
+  }
+  return {
+    kind: "authenticated",
+    role: toFixtureSystemsRole(role),
+    actor: {
+      id: apiAuth.context.user.id,
+      display_name: apiAuth.context.user.display_name,
+    },
+  };
 }
 
 function resolveCampaignRole(
@@ -1380,6 +1429,224 @@ app.post(ROUTES.sessionMessageCreate, async (ctx) => {
   return ctx.json({
     ok: true,
     message: result.message,
+  });
+});
+
+app.post(ROUTES.sessionArticleCreate, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveSessionManagerBearerWrite(
+    ctx,
+    campaign.slug,
+    "Session article writes require bearer API authentication.",
+  );
+  if (auth.kind === "error") {
+    return ctx.json({ ok: auth.error.ok, error: auth.error.error }, auth.error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = invalidJson(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  const result = await createSessionArticle(
+    config.dbPath,
+    config.campaignsDir,
+    campaign,
+    campaignConfig?.config || {},
+    auth.role,
+    { id: auth.actor.id },
+    jsonPayload.payload,
+  );
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    article: result.article,
+  });
+});
+
+app.put(ROUTES.sessionArticleUpdate, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveSessionManagerBearerWrite(
+    ctx,
+    campaign.slug,
+    "Session article writes require bearer API authentication.",
+  );
+  if (auth.kind === "error") {
+    return ctx.json({ ok: auth.error.ok, error: auth.error.error }, auth.error.status);
+  }
+
+  const articleId = parsePositiveInteger(ctx.req.param("articleId") || "");
+  if (articleId === null) {
+    const error = validationError("That session article could not be found.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = invalidJson(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  const result = await updateSessionArticle(
+    config.dbPath,
+    campaign,
+    campaignConfig?.config || {},
+    auth.role,
+    { id: auth.actor.id },
+    articleId,
+    jsonPayload.payload,
+  );
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    article: result.article,
+  });
+});
+
+app.post(ROUTES.sessionArticleReveal, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveSessionManagerBearerWrite(
+    ctx,
+    campaign.slug,
+    "Session article writes require bearer API authentication.",
+  );
+  if (auth.kind === "error") {
+    return ctx.json({ ok: auth.error.ok, error: auth.error.error }, auth.error.status);
+  }
+
+  const articleId = parsePositiveInteger(ctx.req.param("articleId") || "");
+  if (articleId === null) {
+    const error = validationError("That session article could not be found.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  const result = await revealSessionArticle(
+    config.dbPath,
+    campaign,
+    campaignConfig?.config || {},
+    auth.role,
+    auth.actor,
+    articleId,
+  );
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    article: result.article,
+    message: result.message,
+  });
+});
+
+app.delete(ROUTES.sessionArticlesRevealedClear, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveSessionManagerBearerWrite(
+    ctx,
+    campaign.slug,
+    "Session article writes require bearer API authentication.",
+  );
+  if (auth.kind === "error") {
+    return ctx.json({ ok: auth.error.ok, error: auth.error.error }, auth.error.status);
+  }
+
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  const result = await clearRevealedSessionArticles(
+    config.dbPath,
+    campaign,
+    campaignConfig?.config || {},
+    auth.role,
+    { id: auth.actor.id },
+  );
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    deleted_articles: result.deletedArticles,
+    deleted_article_ids: result.deletedArticleIds,
+  });
+});
+
+app.delete(ROUTES.sessionArticleDelete, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveSessionManagerBearerWrite(
+    ctx,
+    campaign.slug,
+    "Session article writes require bearer API authentication.",
+  );
+  if (auth.kind === "error") {
+    return ctx.json({ ok: auth.error.ok, error: auth.error.error }, auth.error.status);
+  }
+
+  const articleId = parsePositiveInteger(ctx.req.param("articleId") || "");
+  if (articleId === null) {
+    const error = validationError("That session article could not be found.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  const result = await deleteSessionArticle(
+    config.dbPath,
+    campaign,
+    campaignConfig?.config || {},
+    auth.role,
+    { id: auth.actor.id },
+    articleId,
+  );
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    article: result.article,
   });
 });
 

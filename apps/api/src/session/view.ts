@@ -1,13 +1,30 @@
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 import Database from "better-sqlite3";
+import { parse as parseYaml } from "yaml";
 
 import type { CampaignViewModel } from "../campaigns/view.js";
 import { buildCampaignSystemsEntryDetailPayload, type FixtureSystemsRole } from "../systems/sources.js";
 import { campaignWikiRepository } from "../wiki/repository.js";
 
 export const SESSION_READONLY_REVISION = 0;
+
+const ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS: Record<string, string> = {
+  ".gif": "image/gif",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+};
+const ALLOWED_SESSION_ARTICLE_MARKDOWN_EXTENSIONS = new Set([".markdown", ".md"]);
+const FRONTMATTER_PATTERN = /^---\s*\n([\s\S]*?)\n---\s*\n?/;
+const SESSION_ARTICLE_TITLE_HEADING_PATTERN = /^\s{0,3}#\s+(?<title>.*?)\s*#*\s*$/;
+const SESSION_ARTICLE_MARKDOWN_IMAGE_PATTERN =
+  /!\[(?<alt>[^\]]*)\]\((?<target><[^>]+>|[^)\s]+)(?:\s+"(?<title>[^"]*)")?\)/;
+const SESSION_ARTICLE_OBSIDIAN_IMAGE_PATTERN =
+  /!\[\[(?<target>[^\]|#]+)(?:#[^\]|]*)?(?:\|(?<label>[^\]]+))?\]\]/;
 
 type SessionSourceKind = "" | "page" | "systems";
 
@@ -77,6 +94,22 @@ interface ActivePlayerRow {
 interface SessionSummaryRow extends SessionRow {
   message_count: number;
   last_message_at: string | null;
+}
+
+interface SessionArticleImageUpload {
+  filename: string;
+  media_type: string;
+  data_blob: Buffer;
+  alt_text: string;
+  caption: string;
+}
+
+interface SessionArticleMarkdownUpload {
+  title: string;
+  body_markdown: string;
+  image_reference: string;
+  image_alt: string;
+  image_caption: string;
 }
 
 export interface SessionPermissionBlock {
@@ -224,6 +257,41 @@ export type SessionLifecycleWriteResult =
       message: string;
     };
 
+export type SessionArticleWriteResult =
+  | {
+      status: "ok";
+      article: SessionArticlePayload;
+      sessionRevision: number;
+    }
+  | {
+      status: "validation_error";
+      message: string;
+    };
+
+export type SessionArticleRevealResult =
+  | {
+      status: "ok";
+      article: SessionArticlePayload;
+      message: SessionMessagePayload;
+      sessionRevision: number;
+    }
+  | {
+      status: "validation_error";
+      message: string;
+    };
+
+export type SessionRevealedArticlesClearResult =
+  | {
+      status: "ok";
+      deletedArticles: SessionArticlePayload[];
+      deletedArticleIds: number[];
+      sessionRevision: number;
+    }
+  | {
+      status: "validation_error";
+      message: string;
+    };
+
 function stableHexDigest(value: string): string {
   return createHash("sha1").update(value).digest("hex");
 }
@@ -247,6 +315,319 @@ function isoString(value: unknown): string | null {
 
 function utcIsoTimestamp(): string {
   return new Date().toISOString().replace("Z", "+00:00");
+}
+
+function basename(value: string): string {
+  return String(value || "").replace(/\\/g, "/").split("/").filter(Boolean).at(-1) || "";
+}
+
+function titleFromSlug(value: string): string {
+  const tail = String(value || "").split(/[\\/]/).at(-1) || String(value || "");
+  const words = tail.replace(/\.[^.]*$/, "").replace(/[-_]+/g, " ").trim();
+  return words
+    ? words
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((word) => word[0]!.toUpperCase() + word.slice(1))
+        .join(" ")
+    : value;
+}
+
+function normalizeLookup(value: string): string {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function normalizeImageReference(value: unknown): string {
+  let normalized = String(value || "").trim();
+  if (normalized.startsWith("<") && normalized.endsWith(">")) {
+    normalized = normalized.slice(1, -1).trim();
+  }
+  return normalized.replace(/\\/g, "/");
+}
+
+function normalizeObsidianImageLabel(value: unknown): string {
+  const normalized = String(value || "").trim();
+  if (!normalized || /^\d+(?:x\d+)?$/.test(normalized)) {
+    return "";
+  }
+  return normalized;
+}
+
+function stripMarkdownImageToken(markdownText: string, start: number, end: number): string {
+  return (markdownText.slice(0, start) + markdownText.slice(end)).replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function extractSessionArticleTitleHeading(markdownText: string): { title: string; body: string } {
+  const lines = String(markdownText || "").replace(/\r\n/g, "\n").split("\n");
+  let lineIndex = 0;
+  while (lineIndex < lines.length && !String(lines[lineIndex] || "").trim()) {
+    lineIndex += 1;
+  }
+  if (lineIndex >= lines.length) {
+    return { title: "", body: String(markdownText || "").trim() };
+  }
+
+  const match = String(lines[lineIndex] || "").match(SESSION_ARTICLE_TITLE_HEADING_PATTERN);
+  const title = String(match?.groups?.title || "").trim();
+  if (!title) {
+    return { title: "", body: String(markdownText || "").trim() };
+  }
+
+  const bodyLines = lines.slice(lineIndex + 1);
+  while (bodyLines.length > 0 && !String(bodyLines[0] || "").trim()) {
+    bodyLines.shift();
+  }
+  return { title, body: bodyLines.join("\n").trim() };
+}
+
+function extractMarkdownImageReference(markdownText: string): SessionArticleMarkdownUpload {
+  const normalizedText = String(markdownText || "");
+  const obsidianMatch = SESSION_ARTICLE_OBSIDIAN_IMAGE_PATTERN.exec(normalizedText);
+  const markdownMatch = SESSION_ARTICLE_MARKDOWN_IMAGE_PATTERN.exec(normalizedText);
+
+  let chosenKind = "";
+  let chosenMatch: RegExpExecArray | null = null;
+  if (obsidianMatch && markdownMatch) {
+    chosenKind = obsidianMatch.index <= markdownMatch.index ? "obsidian" : "markdown";
+    chosenMatch = chosenKind === "obsidian" ? obsidianMatch : markdownMatch;
+  } else if (obsidianMatch) {
+    chosenKind = "obsidian";
+    chosenMatch = obsidianMatch;
+  } else if (markdownMatch) {
+    chosenKind = "markdown";
+    chosenMatch = markdownMatch;
+  }
+
+  if (!chosenMatch) {
+    return {
+      title: "",
+      body_markdown: normalizedText.trim(),
+      image_reference: "",
+      image_alt: "",
+      image_caption: "",
+    };
+  }
+
+  const imageReference = normalizeImageReference(chosenMatch.groups?.target || "");
+  if (!imageReference) {
+    return {
+      title: "",
+      body_markdown: normalizedText.trim(),
+      image_reference: "",
+      image_alt: "",
+      image_caption: "",
+    };
+  }
+
+  return {
+    title: "",
+    body_markdown: stripMarkdownImageToken(normalizedText, chosenMatch.index, chosenMatch.index + chosenMatch[0].length),
+    image_reference: imageReference,
+    image_alt:
+      chosenKind === "obsidian"
+        ? normalizeObsidianImageLabel(chosenMatch.groups?.label || "")
+        : String(chosenMatch.groups?.alt || "").trim(),
+    image_caption: chosenKind === "obsidian" ? "" : String(chosenMatch.groups?.title || "").trim(),
+  };
+}
+
+function stripMatchingBodyImageReference(markdownText: string, imageReference: string): string {
+  const normalizedReference = normalizeImageReference(imageReference);
+  if (!normalizedReference) {
+    return String(markdownText || "").trim();
+  }
+  const normalizedBasename = basename(normalizedReference).toLowerCase();
+  for (const pattern of [SESSION_ARTICLE_OBSIDIAN_IMAGE_PATTERN, SESSION_ARTICLE_MARKDOWN_IMAGE_PATTERN]) {
+    const match = pattern.exec(markdownText);
+    if (!match) {
+      continue;
+    }
+    const target = normalizeImageReference(match.groups?.target || "");
+    if (target === normalizedReference || basename(target).toLowerCase() === normalizedBasename) {
+      return stripMarkdownImageToken(markdownText, match.index, match.index + match[0].length);
+    }
+  }
+  return String(markdownText || "").trim();
+}
+
+function parseFrontmatter(rawText: string): { status: "ok"; metadata: Record<string, unknown>; body: string } | { status: "error"; message: string } {
+  const normalized = String(rawText || "").replace(/\r\n/g, "\n");
+  const match = normalized.match(FRONTMATTER_PATTERN);
+  if (!match) {
+    return { status: "ok", metadata: {}, body: normalized };
+  }
+  try {
+    const parsed = parseYaml(match[1] || "") || {};
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return { status: "error", message: "Uploaded markdown frontmatter must be a YAML object." };
+    }
+    return { status: "ok", metadata: parsed as Record<string, unknown>, body: normalized.slice(match[0].length) };
+  } catch {
+    return { status: "error", message: "Uploaded markdown frontmatter must be valid YAML." };
+  }
+}
+
+function parseArticleMarkdownUpload(
+  filename: unknown,
+  markdownText: unknown,
+): { status: "ok"; upload: SessionArticleMarkdownUpload } | { status: "validation_error"; message: string } {
+  const normalizedFilename = basename(String(filename || "").trim());
+  if (!normalizedFilename) {
+    return { status: "validation_error", message: "Choose a markdown file before saving the session article." };
+  }
+  const extension = path.extname(normalizedFilename).toLowerCase();
+  if (!ALLOWED_SESSION_ARTICLE_MARKDOWN_EXTENSIONS.has(extension)) {
+    return {
+      status: "validation_error",
+      message: "Session article uploads must be Markdown files with .md or .markdown extensions.",
+    };
+  }
+
+  const rawText = String(markdownText ?? "");
+  if (!rawText) {
+    return { status: "validation_error", message: "Uploaded markdown files cannot be empty." };
+  }
+
+  const parsed = parseFrontmatter(rawText.replace(/^\uFEFF/, ""));
+  if (parsed.status === "error") {
+    return { status: "validation_error", message: parsed.message };
+  }
+
+  const fallbackTitle = titleFromSlug(normalizedFilename);
+  let normalizedTitle = String(parsed.metadata.title || "").trim();
+  let normalizedBody = parsed.body.trim();
+  const heading = extractSessionArticleTitleHeading(normalizedBody);
+  let imageReference = normalizeImageReference(parsed.metadata.image || "");
+  let imageAlt = String(parsed.metadata.image_alt || "").trim();
+  let imageCaption = String(parsed.metadata.image_caption || "").trim();
+
+  if (normalizedTitle) {
+    if (heading.title && normalizeLookup(heading.title) === normalizeLookup(normalizedTitle)) {
+      normalizedBody = heading.body;
+    }
+  } else if (heading.title) {
+    normalizedTitle = heading.title;
+    normalizedBody = heading.body;
+  } else {
+    normalizedTitle = fallbackTitle;
+  }
+
+  if (imageReference) {
+    normalizedBody = stripMatchingBodyImageReference(normalizedBody, imageReference);
+  } else {
+    const extracted = extractMarkdownImageReference(normalizedBody);
+    imageReference = extracted.image_reference;
+    imageAlt = imageAlt || extracted.image_alt;
+    imageCaption = imageCaption || extracted.image_caption;
+    normalizedBody = extracted.body_markdown;
+  }
+
+  return {
+    status: "ok",
+    upload: {
+      title: normalizedTitle,
+      body_markdown: normalizedBody,
+      image_reference: imageReference,
+      image_alt: imageAlt,
+      image_caption: imageCaption,
+    },
+  };
+}
+
+function decodeEmbeddedFile(
+  payload: unknown,
+  label: string,
+): { status: "ok"; filename: string; media_type: string | null; data_blob: Buffer } | { status: "validation_error"; message: string } {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { status: "validation_error", message: `${label} must be an object.` };
+  }
+  const record = payload as Record<string, unknown>;
+  const filename = String(record.filename || "").trim();
+  const dataBase64 = String(record.data_base64 || "").trim();
+  const mediaType = String(record.media_type || "").trim() || null;
+  if (!filename) {
+    return { status: "validation_error", message: `${label} filename is required.` };
+  }
+  if (!dataBase64) {
+    return { status: "validation_error", message: `${label} data_base64 is required.` };
+  }
+  if (dataBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(dataBase64)) {
+    return { status: "validation_error", message: `${label} data_base64 must be valid base64.` };
+  }
+  const dataBlob = Buffer.from(dataBase64, "base64");
+  if (dataBlob.toString("base64").replace(/=+$/g, "") !== dataBase64.replace(/=+$/g, "")) {
+    return { status: "validation_error", message: `${label} data_base64 must be valid base64.` };
+  }
+  return { status: "ok", filename, media_type: mediaType, data_blob: dataBlob };
+}
+
+function prepareArticleImageUpload(input: {
+  filename: unknown;
+  media_type: unknown;
+  data_blob: Buffer | Uint8Array;
+  alt_text?: unknown;
+  caption?: unknown;
+}): { status: "ok"; image: SessionArticleImageUpload } | { status: "validation_error"; message: string } {
+  const normalizedFilename = basename(String(input.filename || "").trim());
+  if (!normalizedFilename) {
+    return { status: "validation_error", message: "Choose an image file before saving the session article." };
+  }
+  const extension = path.extname(normalizedFilename).toLowerCase();
+  const allowedMediaType = ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS[extension];
+  if (!allowedMediaType) {
+    return { status: "validation_error", message: "Session article images must be PNG, JPG, GIF, or WEBP files." };
+  }
+  const dataBlob = Buffer.from(input.data_blob);
+  if (dataBlob.byteLength <= 0) {
+    return { status: "validation_error", message: "Uploaded image files cannot be empty." };
+  }
+  if (dataBlob.byteLength > 8 * 1024 * 1024) {
+    return { status: "validation_error", message: "Session article images must stay under 8 MB." };
+  }
+
+  return {
+    status: "ok",
+    image: {
+      filename: normalizedFilename,
+      media_type: allowedMediaType,
+      data_blob: dataBlob,
+      alt_text: String(input.alt_text || "").trim(),
+      caption: String(input.caption || "").trim(),
+    },
+  };
+}
+
+function normalizeArticleFields(
+  title: unknown,
+  bodyMarkdown: unknown,
+  hasContentImage: boolean,
+): { status: "ok"; title: string; bodyMarkdown: string } | { status: "validation_error"; message: string } {
+  const normalizedTitle = String(title || "").trim();
+  const normalizedBody = String(bodyMarkdown || "").trim();
+  if (!normalizedTitle) {
+    return { status: "validation_error", message: "Session articles need a title." };
+  }
+  if (!normalizedBody && !hasContentImage) {
+    return {
+      status: "validation_error",
+      message: "Session articles need body text or an image before they can be saved.",
+    };
+  }
+  if (normalizedTitle.length > 200) {
+    return { status: "validation_error", message: "Session article titles must stay under 200 characters." };
+  }
+  if (normalizedBody.length > 40_000) {
+    return { status: "validation_error", message: "Session articles must stay under 40,000 characters." };
+  }
+  return { status: "ok", title: normalizedTitle, bodyMarkdown: normalizedBody };
+}
+
+function normalizeSessionArticleSourceRef(value: string): string {
+  const [sourceKind, sourceRef] = parseSessionArticleSourceRef(value);
+  if (!sourceRef) {
+    return "";
+  }
+  return sourceKind === "systems" ? `systems:${sourceRef}` : sourceRef;
 }
 
 function parseSessionArticleSourceRef(value: string): [SessionSourceKind, string] {
@@ -611,6 +992,47 @@ function loadSession(database: Database.Database, campaignSlug: string, sessionI
   );
 }
 
+function loadArticle(database: Database.Database, articleId: number): SessionArticleRow | null {
+  return (
+    (database
+      .prepare(
+        `
+          SELECT
+            id,
+            campaign_slug,
+            title,
+            body_markdown,
+            source_page_ref,
+            status,
+            created_at,
+            created_by_user_id,
+            revealed_at,
+            revealed_by_user_id,
+            revealed_in_session_id
+          FROM campaign_session_articles
+          WHERE id = ?
+          LIMIT 1
+        `,
+      )
+      .get(articleId) as SessionArticleRow | undefined) || null
+  );
+}
+
+function loadArticleImage(database: Database.Database, articleId: number): SessionArticleImageRow | null {
+  return (
+    (database
+      .prepare(
+        `
+          SELECT article_id, filename, media_type, alt_text, caption, updated_at
+          FROM campaign_session_article_images
+          WHERE article_id = ?
+          LIMIT 1
+        `,
+      )
+      .get(articleId) as SessionArticleImageRow | undefined) || null
+  );
+}
+
 async function buildSourceMetadata(
   dbPath: string,
   campaign: CampaignViewModel,
@@ -780,6 +1202,76 @@ function serializeSessionLogSummary(campaignSlug: string, row: SessionSummaryRow
     last_message_at: isoString(row.last_message_at),
     detail_url: `/api/v1/campaigns/${campaignSlug}/session/logs/${Number(row.id)}`,
   };
+}
+
+async function serializeSingleArticle(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  article: SessionArticleRow,
+  image: SessionArticleImageRow | null,
+): Promise<SessionArticlePayload> {
+  return serializeArticle(dbPath, campaign, campaignConfig, role, article, image || undefined);
+}
+
+async function serializeSingleMessage(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  message: SessionMessageRow,
+  article: SessionArticleRow,
+  image: SessionArticleImageRow | null,
+): Promise<SessionMessagePayload> {
+  const activePlayers = (() => {
+    if (!existsSync(dbPath)) {
+      return new Map<number, string>();
+    }
+    const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+    try {
+      return buildRecipientLabelMap(loadActivePlayerRows(database, campaign.slug));
+    } finally {
+      database.close();
+    }
+  })();
+  const messages = await serializeMessages(
+    dbPath,
+    campaign,
+    campaignConfig,
+    role,
+    [message],
+    new Map([[Number(article.id), article]]),
+    image ? new Map([[Number(article.id), image]]) : new Map(),
+    activePlayers,
+  );
+  return messages[0]!;
+}
+
+function campaignAssetImageUpload(
+  campaignsDir: string,
+  campaignSlug: string,
+  assetRef: string,
+  altText: string,
+  caption: string,
+): SessionArticleImageUpload | null {
+  const normalizedRef = String(assetRef || "").trim().replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!normalizedRef) {
+    return null;
+  }
+  const assetRoot = path.resolve(campaignsDir, campaignSlug, "assets");
+  const assetPath = path.resolve(assetRoot, normalizedRef);
+  if (!(assetPath === assetRoot || assetPath.startsWith(assetRoot + path.sep)) || !existsSync(assetPath)) {
+    return null;
+  }
+  const image = prepareArticleImageUpload({
+    filename: basename(normalizedRef),
+    media_type: ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS[path.extname(normalizedRef).toLowerCase()] || "",
+    data_blob: readFileSync(assetPath),
+    alt_text: altText,
+    caption,
+  });
+  return image.status === "ok" ? image.image : null;
 }
 
 export async function buildSessionStatePayload(
@@ -1091,6 +1583,620 @@ export function closeSession(
   } catch (error) {
     if (isNoSuchTableError(error)) {
       return { status: "validation_error", message: "There is no active session to close." };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+async function prepareSessionArticleCreateInput(
+  dbPath: string,
+  campaignsDir: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  payload: Record<string, unknown>,
+): Promise<
+  | {
+      status: "ok";
+      title: string;
+      bodyMarkdown: string;
+      sourcePageRef: string;
+      image: SessionArticleImageUpload | null;
+    }
+  | { status: "validation_error"; message: string }
+> {
+  const mode = String(payload.mode || "manual").trim().toLowerCase();
+  if (!["manual", "upload", "wiki"].includes(mode)) {
+    return { status: "validation_error", message: "Article mode must be 'manual', 'upload', or 'wiki'." };
+  }
+
+  let title: unknown = "";
+  let bodyMarkdown: unknown = "";
+  let sourcePageRef = "";
+  let image: SessionArticleImageUpload | null = null;
+
+  if (mode === "upload") {
+    const markdownUpload = parseArticleMarkdownUpload(payload.filename, payload.markdown_text);
+    if (markdownUpload.status !== "ok") {
+      return markdownUpload;
+    }
+    if (markdownUpload.upload.image_reference && payload.referenced_image === undefined) {
+      return {
+        status: "validation_error",
+        message: "This markdown file references an image. Include referenced_image too.",
+      };
+    }
+    if (payload.referenced_image !== undefined) {
+      const embeddedFile = decodeEmbeddedFile(payload.referenced_image, "referenced_image");
+      if (embeddedFile.status !== "ok") {
+        return embeddedFile;
+      }
+      const preparedImage = prepareArticleImageUpload({
+        filename: embeddedFile.filename,
+        media_type: embeddedFile.media_type,
+        data_blob: embeddedFile.data_blob,
+        alt_text: markdownUpload.upload.image_alt,
+        caption: markdownUpload.upload.image_caption,
+      });
+      if (preparedImage.status !== "ok") {
+        return preparedImage;
+      }
+      image = preparedImage.image;
+    }
+    title = markdownUpload.upload.title;
+    bodyMarkdown = markdownUpload.upload.body_markdown;
+  } else if (mode === "wiki") {
+    const [sourceKind, sourceRef] = parseSessionArticleSourceRef(
+      String(payload.source_ref || payload.page_ref || ""),
+    );
+    if (sourceKind === "systems") {
+      const result = buildCampaignSystemsEntryDetailPayload(dbPath, campaign, campaignConfig, sourceRef, role);
+      if (result.status !== "ok") {
+        return {
+          status: "validation_error",
+          message: "Choose a visible published wiki page or Systems entry before pulling it into the session store.",
+        };
+      }
+      const body = result.payload.entry.body;
+      const rendered = typeof body === "object" && body !== null ? (body as Record<string, unknown>).rendered : null;
+      const sourceBodyHtml =
+        String(result.payload.entry.rendered_html || "").trim() ||
+        (typeof rendered === "object" && rendered !== null
+          ? String((rendered as Record<string, unknown>).summary_html || "").trim()
+          : "");
+      if (!sourceBodyHtml) {
+        return {
+          status: "validation_error",
+          message: "The selected Systems entry does not have rendered article content to pull into the session store.",
+        };
+      }
+      title = result.payload.entry.title;
+      bodyMarkdown = sourceBodyHtml;
+      sourcePageRef = `systems:${result.payload.entry.slug}`;
+    } else {
+      const page = await campaignWikiRepository.getPage(campaign.slug, sourceRef);
+      if (!page) {
+        return {
+          status: "validation_error",
+          message: "Choose a visible published wiki page or Systems entry before pulling it into the session store.",
+        };
+      }
+      if (page.image_ref) {
+        image = campaignAssetImageUpload(
+          campaignsDir,
+          campaign.slug,
+          page.image_ref,
+          page.image_alt,
+          page.image_caption,
+        );
+      }
+      title = page.title;
+      bodyMarkdown = page.body_markdown.trim() || page.summary.trim();
+      sourcePageRef = page.page_ref;
+      if (!String(bodyMarkdown || "").trim() && image === null) {
+        return {
+          status: "validation_error",
+          message: "The selected wiki page does not have any body text, summary, or image to pull into the session store.",
+        };
+      }
+    }
+  } else {
+    if (payload.image !== undefined) {
+      const embeddedFile = decodeEmbeddedFile(payload.image, "image");
+      if (embeddedFile.status !== "ok") {
+        return embeddedFile;
+      }
+      const imagePayload = payload.image as Record<string, unknown>;
+      const preparedImage = prepareArticleImageUpload({
+        filename: embeddedFile.filename,
+        media_type: embeddedFile.media_type,
+        data_blob: embeddedFile.data_blob,
+        alt_text: imagePayload.alt_text,
+        caption: imagePayload.caption,
+      });
+      if (preparedImage.status !== "ok") {
+        return preparedImage;
+      }
+      image = preparedImage.image;
+    }
+    title = payload.title;
+    bodyMarkdown = payload.body_markdown;
+  }
+
+  sourcePageRef = normalizeSessionArticleSourceRef(sourcePageRef);
+  if (sourcePageRef.length > 400) {
+    return {
+      status: "validation_error",
+      message: "Session article source references must stay under 400 characters.",
+    };
+  }
+
+  const normalizedFields = normalizeArticleFields(title, bodyMarkdown, image !== null);
+  if (normalizedFields.status !== "ok") {
+    return normalizedFields;
+  }
+
+  return {
+    status: "ok",
+    title: normalizedFields.title,
+    bodyMarkdown: normalizedFields.bodyMarkdown,
+    sourcePageRef,
+    image,
+  };
+}
+
+function upsertArticleImage(
+  database: Database.Database,
+  articleId: number,
+  image: SessionArticleImageUpload,
+  now: string,
+): SessionArticleImageRow {
+  database
+    .prepare(
+      `
+        INSERT INTO campaign_session_article_images (
+          article_id,
+          filename,
+          media_type,
+          alt_text,
+          caption,
+          data_blob,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(article_id) DO UPDATE SET
+          filename = excluded.filename,
+          media_type = excluded.media_type,
+          alt_text = excluded.alt_text,
+          caption = excluded.caption,
+          data_blob = excluded.data_blob,
+          updated_at = excluded.updated_at
+      `,
+    )
+    .run(articleId, image.filename, image.media_type, image.alt_text, image.caption, image.data_blob, now);
+  const imageRow = loadArticleImage(database, articleId);
+  if (!imageRow) {
+    throw new Error("Failed to persist session article image.");
+  }
+  return imageRow;
+}
+
+export async function createSessionArticle(
+  dbPath: string,
+  campaignsDir: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  actor: { id: number },
+  payload: Record<string, unknown>,
+): Promise<SessionArticleWriteResult> {
+  const prepared = await prepareSessionArticleCreateInput(dbPath, campaignsDir, campaign, campaignConfig, role, payload);
+  if (prepared.status !== "ok") {
+    return prepared;
+  }
+  if (!existsSync(dbPath)) {
+    return { status: "validation_error", message: "Session storage is not initialized." };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const now = utcIsoTimestamp();
+    const writeArticle = database.transaction(() => {
+      const insertResult = database
+        .prepare(
+          `
+            INSERT INTO campaign_session_articles (
+              campaign_slug,
+              title,
+              body_markdown,
+              source_page_ref,
+              status,
+              created_at,
+              created_by_user_id,
+              revealed_at,
+              revealed_by_user_id,
+              revealed_in_session_id
+            ) VALUES (?, ?, ?, ?, 'staged', ?, ?, NULL, NULL, NULL)
+          `,
+        )
+        .run(campaign.slug, prepared.title, prepared.bodyMarkdown, prepared.sourcePageRef, now, actor.id);
+      const articleId = Number(insertResult.lastInsertRowid);
+      const imageRow = prepared.image ? upsertArticleImage(database, articleId, prepared.image, now) : null;
+      const sessionRevision = bumpSessionRevision(database, campaign.slug, actor.id, now);
+      const article = loadArticle(database, articleId);
+      if (!article) {
+        throw new Error("Failed to persist session article.");
+      }
+      return { article, imageRow, sessionRevision };
+    });
+
+    const result = writeArticle();
+    return {
+      status: "ok",
+      article: await serializeSingleArticle(dbPath, campaign, campaignConfig, role, result.article, result.imageRow),
+      sessionRevision: result.sessionRevision,
+    };
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return { status: "validation_error", message: "Session storage is not initialized." };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export async function updateSessionArticle(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  actor: { id: number },
+  articleId: number,
+  payload: Record<string, unknown>,
+): Promise<SessionArticleWriteResult> {
+  if (!existsSync(dbPath)) {
+    return { status: "validation_error", message: "That session article could not be found." };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const article = loadArticle(database, articleId);
+    if (!article || article.campaign_slug !== campaign.slug) {
+      return { status: "validation_error", message: "That session article could not be found." };
+    }
+    if (String(article.status) === "revealed") {
+      return { status: "validation_error", message: "Revealed session articles cannot be edited in the prep queue." };
+    }
+
+    let imageUpload: SessionArticleImageUpload | null = null;
+    if (payload.image !== undefined) {
+      const embeddedFile = decodeEmbeddedFile(payload.image, "image");
+      if (embeddedFile.status !== "ok") {
+        return embeddedFile;
+      }
+      const imagePayload = payload.image as Record<string, unknown>;
+      const preparedImage = prepareArticleImageUpload({
+        filename: embeddedFile.filename,
+        media_type: embeddedFile.media_type,
+        data_blob: embeddedFile.data_blob,
+        alt_text: imagePayload.alt_text,
+        caption: imagePayload.caption,
+      });
+      if (preparedImage.status !== "ok") {
+        return preparedImage;
+      }
+      imageUpload = preparedImage.image;
+    }
+
+    const existingImage = loadArticleImage(database, articleId);
+    const wantsMetadataUpdate = payload.image_alt_text !== undefined || payload.image_caption !== undefined;
+    if (wantsMetadataUpdate && imageUpload === null && existingImage === null) {
+      return { status: "validation_error", message: "That session article does not have an image to update." };
+    }
+
+    const normalizedFields = normalizeArticleFields(payload.title, payload.body_markdown, imageUpload !== null || existingImage !== null);
+    if (normalizedFields.status !== "ok") {
+      return normalizedFields;
+    }
+
+    const now = utcIsoTimestamp();
+    const writeArticle = database.transaction(() => {
+      const updateResult = database
+        .prepare(
+          `
+            UPDATE campaign_session_articles
+            SET title = ?,
+                body_markdown = ?
+            WHERE id = ?
+              AND campaign_slug = ?
+              AND status = 'staged'
+          `,
+        )
+        .run(normalizedFields.title, normalizedFields.bodyMarkdown, articleId, campaign.slug);
+      if (updateResult.changes !== 1) {
+        return { article: null, imageRow: null, sessionRevision: loadStateRevision(database, campaign.slug) };
+      }
+
+      let imageRow: SessionArticleImageRow | null = existingImage;
+      if (imageUpload) {
+        imageRow = upsertArticleImage(database, articleId, imageUpload, now);
+      } else if (wantsMetadataUpdate) {
+        const metadataResult = database
+          .prepare(
+            `
+              UPDATE campaign_session_article_images
+              SET alt_text = ?,
+                  caption = ?,
+                  updated_at = ?
+              WHERE article_id = ?
+            `,
+          )
+          .run(String(payload.image_alt_text || "").trim(), String(payload.image_caption || "").trim(), now, articleId);
+        if (metadataResult.changes !== 1) {
+          return { article: null, imageRow: null, sessionRevision: loadStateRevision(database, campaign.slug) };
+        }
+        imageRow = loadArticleImage(database, articleId);
+      }
+
+      const sessionRevision = bumpSessionRevision(database, campaign.slug, actor.id, now);
+      return {
+        article: loadArticle(database, articleId),
+        imageRow,
+        sessionRevision,
+      };
+    });
+
+    const result = writeArticle();
+    if (!result.article) {
+      return {
+        status: "validation_error",
+        message: "That session article could not be updated. Refresh the page and try again.",
+      };
+    }
+    return {
+      status: "ok",
+      article: await serializeSingleArticle(dbPath, campaign, campaignConfig, role, result.article, result.imageRow),
+      sessionRevision: result.sessionRevision,
+    };
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return { status: "validation_error", message: "That session article could not be found." };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export async function revealSessionArticle(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  actor: { id: number; display_name: string },
+  articleId: number,
+): Promise<SessionArticleRevealResult> {
+  if (!existsSync(dbPath)) {
+    return { status: "validation_error", message: "Begin a session before revealing articles in the chat." };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const activeSession = loadActiveSession(database, campaign.slug);
+    if (!activeSession) {
+      return { status: "validation_error", message: "Begin a session before revealing articles in the chat." };
+    }
+    const article = loadArticle(database, articleId);
+    if (!article || article.campaign_slug !== campaign.slug) {
+      return { status: "validation_error", message: "That session article could not be found." };
+    }
+    if (String(article.status) === "revealed") {
+      return { status: "validation_error", message: "That session article has already been revealed." };
+    }
+
+    const now = utcIsoTimestamp();
+    const writeReveal = database.transaction(() => {
+      const updateResult = database
+        .prepare(
+          `
+            UPDATE campaign_session_articles
+            SET status = 'revealed',
+                revealed_at = ?,
+                revealed_by_user_id = ?,
+                revealed_in_session_id = ?
+            WHERE id = ?
+              AND campaign_slug = ?
+              AND status = 'staged'
+          `,
+        )
+        .run(now, actor.id, Number(activeSession.id), articleId, campaign.slug);
+      if (updateResult.changes !== 1) {
+        return { article: null, imageRow: null, message: null, sessionRevision: loadStateRevision(database, campaign.slug) };
+      }
+      const messageResult = database
+        .prepare(
+          `
+            INSERT INTO campaign_session_messages (
+              session_id,
+              campaign_slug,
+              message_type,
+              body_text,
+              recipient_scope,
+              recipient_user_id,
+              author_user_id,
+              author_display_name,
+              article_id,
+              created_at
+            ) VALUES (?, ?, 'article_reveal', '', 'global', NULL, ?, ?, ?, ?)
+          `,
+        )
+        .run(
+          Number(activeSession.id),
+          campaign.slug,
+          actor.id,
+          String(actor.display_name || "").trim() || `User ${actor.id}`,
+          articleId,
+          now,
+        );
+      const sessionRevision = bumpSessionRevision(database, campaign.slug, actor.id, now);
+      const message = database
+        .prepare(
+          `
+            SELECT
+              id,
+              session_id,
+              campaign_slug,
+              message_type,
+              body_text,
+              recipient_scope,
+              recipient_user_id,
+              author_user_id,
+              author_display_name,
+              article_id,
+              created_at
+            FROM campaign_session_messages
+            WHERE id = ?
+          `,
+        )
+        .get(Number(messageResult.lastInsertRowid)) as SessionMessageRow | undefined;
+      return {
+        article: loadArticle(database, articleId),
+        imageRow: loadArticleImage(database, articleId),
+        message: message || null,
+        sessionRevision,
+      };
+    });
+
+    const result = writeReveal();
+    if (!result.article || !result.message) {
+      return {
+        status: "validation_error",
+        message: "That session article could not be revealed. Refresh the page and try again.",
+      };
+    }
+    return {
+      status: "ok",
+      article: await serializeSingleArticle(dbPath, campaign, campaignConfig, role, result.article, result.imageRow),
+      message: await serializeSingleMessage(
+        dbPath,
+        campaign,
+        campaignConfig,
+        role,
+        result.message,
+        result.article,
+        result.imageRow,
+      ),
+      sessionRevision: result.sessionRevision,
+    };
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return { status: "validation_error", message: "Begin a session before revealing articles in the chat." };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export async function deleteSessionArticle(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  actor: { id: number },
+  articleId: number,
+): Promise<SessionArticleWriteResult> {
+  if (!existsSync(dbPath)) {
+    return { status: "validation_error", message: "That session article could not be found." };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const article = loadArticle(database, articleId);
+    if (!article || article.campaign_slug !== campaign.slug) {
+      return { status: "validation_error", message: "That session article could not be found." };
+    }
+    const now = utcIsoTimestamp();
+    const writeDelete = database.transaction(() => {
+      database
+        .prepare("DELETE FROM campaign_session_messages WHERE campaign_slug = ? AND article_id = ?")
+        .run(campaign.slug, articleId);
+      const deleteResult = database
+        .prepare("DELETE FROM campaign_session_articles WHERE id = ? AND campaign_slug = ?")
+        .run(articleId, campaign.slug);
+      if (deleteResult.changes !== 1) {
+        return { sessionRevision: loadStateRevision(database, campaign.slug), deleted: false };
+      }
+      return { sessionRevision: bumpSessionRevision(database, campaign.slug, actor.id, now), deleted: true };
+    });
+
+    const result = writeDelete();
+    if (!result.deleted) {
+      return {
+        status: "validation_error",
+        message: "That session article could not be deleted. Refresh the page and try again.",
+      };
+    }
+    return {
+      status: "ok",
+      article: await serializeSingleArticle(dbPath, campaign, campaignConfig, role, article, null),
+      sessionRevision: result.sessionRevision,
+    };
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return { status: "validation_error", message: "That session article could not be found." };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export async function clearRevealedSessionArticles(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  actor: { id: number },
+): Promise<SessionRevealedArticlesClearResult> {
+  if (!existsSync(dbPath)) {
+    return { status: "ok", deletedArticles: [], deletedArticleIds: [], sessionRevision: SESSION_READONLY_REVISION };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const revealedArticles = loadArticles(database, campaign.slug, ["revealed"]);
+    const now = utcIsoTimestamp();
+    const writeClear = database.transaction(() => {
+      for (const article of revealedArticles) {
+        database
+          .prepare("DELETE FROM campaign_session_messages WHERE campaign_slug = ? AND article_id = ?")
+          .run(campaign.slug, Number(article.id));
+        database
+          .prepare("DELETE FROM campaign_session_articles WHERE id = ? AND campaign_slug = ?")
+          .run(Number(article.id), campaign.slug);
+      }
+      const sessionRevision =
+        revealedArticles.length > 0
+          ? bumpSessionRevision(database, campaign.slug, actor.id, now)
+          : loadStateRevision(database, campaign.slug);
+      return { sessionRevision };
+    });
+
+    const result = writeClear();
+    return {
+      status: "ok",
+      deletedArticles: await Promise.all(
+        revealedArticles.map((article) => serializeSingleArticle(dbPath, campaign, campaignConfig, role, article, null)),
+      ),
+      deletedArticleIds: revealedArticles.map((article) => Number(article.id)),
+      sessionRevision: result.sessionRevision,
+    };
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return { status: "ok", deletedArticles: [], deletedArticleIds: [], sessionRevision: SESSION_READONLY_REVISION };
     }
     throw error;
   } finally {

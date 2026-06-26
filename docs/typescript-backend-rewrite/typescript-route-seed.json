@@ -233,6 +233,51 @@
       "notes": "Tracked Hono session message write route with bearer API-token campaign access, Flask-compatible body/audience/target-player validation, active-session checks, SQLite message inserts, session revision bumps, recipient labels, refreshed read visibility, and explicit missing-campaign JSON."
     },
     {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/articles",
+      "route_family": "api_v1_session",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/session/articles",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono session article create route with bearer API-token DM/admin access, manual/upload/wiki modes, embedded image validation, wiki/Systems source pulls, SQLite staged article/image inserts, session revision bumps, and explicit missing-campaign JSON."
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/articles/<int:article_id>",
+      "route_family": "api_v1_session",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/session/articles/:articleId",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono session article update route with bearer API-token DM/admin access, unrevealed staged-article validation, title/body/image metadata updates, optional replacement image writes, session revision bumps, and validation_error missing-article JSON."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/articles/<int:article_id>/reveal",
+      "route_family": "api_v1_session",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/session/articles/:articleId/reveal",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono session article reveal route with bearer API-token DM/admin access, active-session validation, SQLite revealed article updates, article_reveal chat message creation, session revision bumps, and validation_error missing-article JSON."
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/articles/<int:article_id>",
+      "route_family": "api_v1_session",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/session/articles/:articleId",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono session article delete route with bearer API-token DM/admin access, related article chat-message cleanup, session revision bumps, and validation_error missing-article JSON."
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/articles/revealed",
+      "route_family": "api_v1_session",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/session/articles/revealed",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono clear revealed session articles route with bearer API-token DM/admin access, bulk revealed article deletion, related article chat-message cleanup, session revision bumps only when rows are removed, and explicit missing-campaign JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/session/article-sources/search",
       "route_family": "api_v1_session",

@@ -76,6 +76,11 @@ Route parity check command:
   - `POST /api/v1/campaigns/:campaignSlug/session/start`
   - `POST /api/v1/campaigns/:campaignSlug/session/close`
   - `POST /api/v1/campaigns/:campaignSlug/session/messages`
+  - `POST /api/v1/campaigns/:campaignSlug/session/articles`
+  - `PUT /api/v1/campaigns/:campaignSlug/session/articles/:articleId`
+  - `POST /api/v1/campaigns/:campaignSlug/session/articles/:articleId/reveal`
+  - `DELETE /api/v1/campaigns/:campaignSlug/session/articles/:articleId`
+  - `DELETE /api/v1/campaigns/:campaignSlug/session/articles/revealed`
   - `GET /api/v1/campaigns/:campaignSlug/session/article-sources/search`
   - `GET /api/v1/campaigns/:campaignSlug/session/articles/:articleId/image`
   - `GET /api/v1/campaigns/:campaignSlug/session/logs/:sessionId`
@@ -128,6 +133,14 @@ Route parity check command:
   permission checks, duplicate-start and empty-close validation messages, SQLite
   `campaign_sessions` inserts/updates, session revision bumps, serialized session responses, refreshed
   closed-log summaries, and missing-campaign JSON. Current validation covers a disposable fixture
+  database only; production/staging write readiness remains gated by migration, backup, and rollback
+  rehearsal.
+- The Session article-store write routes now serve create/update/reveal/delete/clear-revealed
+  mutations for bearer API-token DM/admin users against `CPW_DB_PATH`, preserving Flask-compatible
+  manager permission checks, manual/upload/wiki staging modes, embedded image validation, wiki page
+  and Systems source pulls, unrevealed staged-article update rules, reveal chat-message creation,
+  article-message cleanup on deletion, session revision bumps, serialized article/message responses,
+  and missing-campaign or missing-article JSON. Current validation covers a disposable fixture
   database only; production/staging write readiness remains gated by migration, backup, and rollback
   rehearsal.
 - The Session article image route now streams SQLite-backed fixture image bytes with stored media

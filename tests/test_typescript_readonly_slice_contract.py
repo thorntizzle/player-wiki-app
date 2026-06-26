@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime
+import json
 import os
 import re
 import shutil
@@ -25,13 +26,24 @@ CONTENT_MANAGER_HEADERS = {"X-CPW-Fixture-Role": "dm"}
 CONTENT_PLAYER_HEADERS = {"X-CPW-Fixture-Role": "player"}
 
 
-def _to_json(url: str, headers: dict[str, str] | None = None):
+def _to_json(
+    url: str,
+    headers: dict[str, str] | None = None,
+    *,
+    method: str | None = None,
+    body: dict | str | None = None,
+):
+    request_headers = dict(headers or {})
+    data = None
+    if body is not None:
+        data = body.encode("utf-8") if isinstance(body, str) else json.dumps(body).encode("utf-8")
+        request_headers.setdefault("Content-Type", "application/json")
     try:
-        request = Request(url, headers=headers or {})
+        request = Request(url, data=data, headers=request_headers, method=method)
         with urlopen(request) as response:
-            return response.getcode(), __import__("json").loads(response.read().decode("utf-8"))
+            return response.getcode(), json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        return exc.code, __import__("json").loads(exc.read().decode("utf-8"))
+        return exc.code, json.loads(exc.read().decode("utf-8"))
 
 
 def _find_free_port() -> int:
@@ -366,6 +378,36 @@ def test_typescript_session_log_detail_requires_auth_like_flask(typescript_api_s
     flask_payload = flask_response.get_json()
 
     status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/session/logs/999999")
+    assert status == 401
+    assert payload == flask_payload
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("POST", "/api/v1/campaigns/linden-pass/session/articles", {"mode": "manual"}),
+        ("PUT", "/api/v1/campaigns/linden-pass/session/articles/999999", {"title": "Missing"}),
+        ("POST", "/api/v1/campaigns/linden-pass/session/articles/999999/reveal", None),
+        ("DELETE", "/api/v1/campaigns/linden-pass/session/articles/999999", None),
+        ("DELETE", "/api/v1/campaigns/linden-pass/session/articles/revealed", None),
+    ],
+)
+def test_typescript_session_article_mutations_require_auth_like_flask(
+    typescript_api_server,
+    client,
+    method,
+    path,
+    body,
+):
+    flask_response = client.open(path, method=method, json=body)
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(
+        f"{typescript_api_server}{path}",
+        method=method,
+        body=body,
+    )
     assert status == 401
     assert payload == flask_payload
 

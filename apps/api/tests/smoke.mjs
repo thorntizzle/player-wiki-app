@@ -2674,6 +2674,392 @@ if (missingSessionMessageCampaign.status !== 404 || missingSessionMessageCampaig
   );
 }
 
+const blockedSessionArticleCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/articles",
+  {},
+  { method: "POST", body: { mode: "manual", title: "Blocked", body_markdown: "No auth." } },
+);
+if (blockedSessionArticleCreate.status !== 401 || blockedSessionArticleCreate.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated session article create 401, got ${blockedSessionArticleCreate.status} ${blockedSessionArticleCreate.payload?.error?.code}`,
+  );
+}
+
+const fixtureSessionArticleCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/articles",
+  { "X-CPW-Fixture-Role": "dm" },
+  { method: "POST", body: { mode: "manual", title: "Fixture blocked", body_markdown: "Fixture write." } },
+);
+if (fixtureSessionArticleCreate.status !== 403 || fixtureSessionArticleCreate.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected fixture session article create forbidden 403, got ${fixtureSessionArticleCreate.status} ${fixtureSessionArticleCreate.payload?.error?.code}`,
+  );
+}
+
+const playerSessionArticleCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/articles",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: { mode: "manual", title: "Player blocked", body_markdown: "Player write." } },
+);
+if (playerSessionArticleCreate.status !== 403 || playerSessionArticleCreate.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player session article create forbidden 403, got ${playerSessionArticleCreate.status} ${playerSessionArticleCreate.payload?.error?.code}`,
+  );
+}
+
+const malformedSessionArticleCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/articles",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: "not-json" },
+);
+if (malformedSessionArticleCreate.status !== 400 || malformedSessionArticleCreate.payload?.error?.code !== "invalid_json") {
+  throw new Error(
+    `Expected malformed session article create invalid_json 400, got ${malformedSessionArticleCreate.status} ${malformedSessionArticleCreate.payload?.error?.code}`,
+  );
+}
+
+const invalidModeSessionArticleCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/articles",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { mode: "lookup", title: "Bad mode", body_markdown: "Nope." } },
+);
+if (
+  invalidModeSessionArticleCreate.status !== 400 ||
+  invalidModeSessionArticleCreate.payload?.error?.message !== "Article mode must be 'manual', 'upload', or 'wiki'."
+) {
+  throw new Error(
+    `Expected invalid session article mode validation, got ${invalidModeSessionArticleCreate.status} ${invalidModeSessionArticleCreate.payload?.error?.message}`,
+  );
+}
+
+const manualArticleImageBytes = Buffer.from("manual-article-image");
+const manualSessionArticleCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/articles",
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: {
+      mode: "manual",
+      title: "Table Sketch",
+      image: {
+        filename: "table-sketch.webp",
+        media_type: "image/png",
+        data_base64: manualArticleImageBytes.toString("base64"),
+        alt_text: "Sketch alt",
+        caption: "Sketch caption",
+      },
+    },
+  },
+);
+if (
+  manualSessionArticleCreate.status !== 200 ||
+  manualSessionArticleCreate.payload?.article?.title !== "Table Sketch" ||
+  manualSessionArticleCreate.payload?.article?.body_markdown !== "" ||
+  manualSessionArticleCreate.payload?.article?.status !== "staged" ||
+  manualSessionArticleCreate.payload?.article?.created_by_user_id !== 81 ||
+  manualSessionArticleCreate.payload?.article?.image?.filename !== "table-sketch.webp" ||
+  manualSessionArticleCreate.payload?.article?.image?.media_type !== "image/webp" ||
+  manualSessionArticleCreate.payload?.article?.image?.alt_text !== "Sketch alt" ||
+  manualSessionArticleCreate.payload?.article?.image?.caption !== "Sketch caption"
+) {
+  throw new Error(`Unexpected manual session article create payload: ${JSON.stringify(manualSessionArticleCreate.payload)}`);
+}
+const manualArticleId = manualSessionArticleCreate.payload.article.id;
+
+const updatedManualSessionArticle = await requestJson(
+  `/api/v1/campaigns/linden-pass/session/articles/${manualArticleId}`,
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "PUT",
+    body: {
+      title: "Updated Table Sketch",
+      body_markdown: "A revised table clue.",
+      image_alt_text: "Updated sketch alt",
+      image_caption: "Updated sketch caption",
+    },
+  },
+);
+if (
+  updatedManualSessionArticle.status !== 200 ||
+  updatedManualSessionArticle.payload?.article?.title !== "Updated Table Sketch" ||
+  updatedManualSessionArticle.payload?.article?.body_markdown !== "A revised table clue." ||
+  updatedManualSessionArticle.payload?.article?.image?.alt_text !== "Updated sketch alt" ||
+  updatedManualSessionArticle.payload?.article?.image?.caption !== "Updated sketch caption"
+) {
+  throw new Error(`Unexpected manual session article update payload: ${JSON.stringify(updatedManualSessionArticle.payload)}`);
+}
+
+const uploadSessionArticleCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/articles",
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: {
+      mode: "upload",
+      filename: "uploaded-clue.md",
+      markdown_text:
+        "---\ntitle: Uploaded Clue\nimage: clue.png\nimage_alt: Upload alt\nimage_caption: Upload caption\n---\n![Upload alt](clue.png)\n\nBody after image.",
+      referenced_image: {
+        filename: "clue.png",
+        media_type: "image/png",
+        data_base64: Buffer.from("upload-image").toString("base64"),
+      },
+    },
+  },
+);
+if (
+  uploadSessionArticleCreate.status !== 200 ||
+  uploadSessionArticleCreate.payload?.article?.title !== "Uploaded Clue" ||
+  uploadSessionArticleCreate.payload?.article?.body_markdown !== "Body after image." ||
+  uploadSessionArticleCreate.payload?.article?.image?.filename !== "clue.png" ||
+  uploadSessionArticleCreate.payload?.article?.image?.alt_text !== "Upload alt" ||
+  uploadSessionArticleCreate.payload?.article?.image?.caption !== "Upload caption"
+) {
+  throw new Error(`Unexpected upload session article create payload: ${JSON.stringify(uploadSessionArticleCreate.payload)}`);
+}
+const uploadArticleId = uploadSessionArticleCreate.payload.article.id;
+
+const missingReferencedImageArticle = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/articles",
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: {
+      mode: "upload",
+      filename: "missing-image.md",
+      markdown_text: "---\ntitle: Missing Image\nimage: missing.png\n---\nBody.",
+    },
+  },
+);
+if (
+  missingReferencedImageArticle.status !== 400 ||
+  missingReferencedImageArticle.payload?.error?.message !==
+    "This markdown file references an image. Include referenced_image too."
+) {
+  throw new Error(
+    `Expected missing referenced-image validation, got ${missingReferencedImageArticle.status} ${missingReferencedImageArticle.payload?.error?.message}`,
+  );
+}
+
+const wikiPageSessionArticleCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/articles",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { mode: "wiki", source_ref: "npcs/captain-lyra-vale" } },
+);
+if (
+  wikiPageSessionArticleCreate.status !== 200 ||
+  wikiPageSessionArticleCreate.payload?.article?.title !== "Captain Lyra Vale" ||
+  wikiPageSessionArticleCreate.payload?.article?.source_kind !== "page" ||
+  wikiPageSessionArticleCreate.payload?.article?.source_ref !== "npcs/captain-lyra-vale" ||
+  !String(wikiPageSessionArticleCreate.payload?.article?.body_markdown || "").includes("Captain Lyra Vale coordinates") ||
+  wikiPageSessionArticleCreate.payload?.article?.image?.filename !== "captain-lyra-vale.png" ||
+  wikiPageSessionArticleCreate.payload?.article?.image?.media_type !== "image/png"
+) {
+  throw new Error(`Unexpected wiki page session article create payload: ${JSON.stringify(wikiPageSessionArticleCreate.payload)}`);
+}
+
+const systemsSessionArticleCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/articles",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { mode: "wiki", source_ref: "systems:phb-item-chain-mail" } },
+);
+if (
+  systemsSessionArticleCreate.status !== 200 ||
+  systemsSessionArticleCreate.payload?.article?.title !== "Chain Mail" ||
+  systemsSessionArticleCreate.payload?.article?.source_kind !== "systems" ||
+  systemsSessionArticleCreate.payload?.article?.source_ref !== "phb-item-chain-mail" ||
+  systemsSessionArticleCreate.payload?.article?.body_format !== "html" ||
+  systemsSessionArticleCreate.payload?.article?.body_markdown !== "<p>A sample armor entry.</p>"
+) {
+  throw new Error(`Unexpected Systems session article create payload: ${JSON.stringify(systemsSessionArticleCreate.payload)}`);
+}
+const systemsArticleId = systemsSessionArticleCreate.payload.article.id;
+
+const revealSystemsSessionArticle = await requestJson(
+  `/api/v1/campaigns/linden-pass/session/articles/${systemsArticleId}/reveal`,
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST" },
+);
+if (
+  revealSystemsSessionArticle.status !== 200 ||
+  revealSystemsSessionArticle.payload?.article?.id !== systemsArticleId ||
+  revealSystemsSessionArticle.payload?.article?.status !== "revealed" ||
+  revealSystemsSessionArticle.payload?.article?.revealed_by_user_id !== 81 ||
+  revealSystemsSessionArticle.payload?.article?.revealed_in_session_id !== 1 ||
+  revealSystemsSessionArticle.payload?.message?.message_type !== "article_reveal" ||
+  revealSystemsSessionArticle.payload?.message?.article_id !== systemsArticleId ||
+  revealSystemsSessionArticle.payload?.message?.article?.id !== systemsArticleId ||
+  revealSystemsSessionArticle.payload?.message?.author_display_name !== "Fixture Token DM"
+) {
+  throw new Error(`Unexpected session article reveal payload: ${JSON.stringify(revealSystemsSessionArticle.payload)}`);
+}
+
+const duplicateRevealSystemsSessionArticle = await requestJson(
+  `/api/v1/campaigns/linden-pass/session/articles/${systemsArticleId}/reveal`,
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST" },
+);
+if (
+  duplicateRevealSystemsSessionArticle.status !== 400 ||
+  duplicateRevealSystemsSessionArticle.payload?.error?.message !== "That session article has already been revealed."
+) {
+  throw new Error(
+    `Expected duplicate reveal validation, got ${duplicateRevealSystemsSessionArticle.status} ${duplicateRevealSystemsSessionArticle.payload?.error?.message}`,
+  );
+}
+
+const updateRevealedSystemsSessionArticle = await requestJson(
+  `/api/v1/campaigns/linden-pass/session/articles/${systemsArticleId}`,
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { title: "Should Fail", body_markdown: "No edit." } },
+);
+if (
+  updateRevealedSystemsSessionArticle.status !== 400 ||
+  updateRevealedSystemsSessionArticle.payload?.error?.message !==
+    "Revealed session articles cannot be edited in the prep queue."
+) {
+  throw new Error(
+    `Expected revealed article update validation, got ${updateRevealedSystemsSessionArticle.status} ${updateRevealedSystemsSessionArticle.payload?.error?.message}`,
+  );
+}
+
+const deleteUploadSessionArticle = await requestJson(
+  `/api/v1/campaigns/linden-pass/session/articles/${uploadArticleId}`,
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "DELETE" },
+);
+if (
+  deleteUploadSessionArticle.status !== 200 ||
+  deleteUploadSessionArticle.payload?.article?.id !== uploadArticleId ||
+  deleteUploadSessionArticle.payload?.article?.title !== "Uploaded Clue"
+) {
+  throw new Error(`Unexpected upload session article delete payload: ${JSON.stringify(deleteUploadSessionArticle.payload)}`);
+}
+
+const missingSessionArticleUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/articles/999999",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { title: "Missing", body_markdown: "Missing." } },
+);
+if (
+  missingSessionArticleUpdate.status !== 400 ||
+  missingSessionArticleUpdate.payload?.error?.message !== "That session article could not be found."
+) {
+  throw new Error(
+    `Expected missing session article update validation, got ${missingSessionArticleUpdate.status} ${missingSessionArticleUpdate.payload?.error?.message}`,
+  );
+}
+
+const missingSessionArticleReveal = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/articles/999999/reveal",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST" },
+);
+if (
+  missingSessionArticleReveal.status !== 400 ||
+  missingSessionArticleReveal.payload?.error?.message !== "That session article could not be found."
+) {
+  throw new Error(
+    `Expected missing session article reveal validation, got ${missingSessionArticleReveal.status} ${missingSessionArticleReveal.payload?.error?.message}`,
+  );
+}
+
+const missingSessionArticleDelete = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/articles/999999",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "DELETE" },
+);
+if (
+  missingSessionArticleDelete.status !== 400 ||
+  missingSessionArticleDelete.payload?.error?.message !== "That session article could not be found."
+) {
+  throw new Error(
+    `Expected missing session article delete validation, got ${missingSessionArticleDelete.status} ${missingSessionArticleDelete.payload?.error?.message}`,
+  );
+}
+
+const missingSessionArticleCampaign = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/session/articles",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { mode: "manual", title: "Missing campaign", body_markdown: "Missing campaign." } },
+);
+if (missingSessionArticleCampaign.status !== 404 || missingSessionArticleCampaign.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(
+    `Expected missing session article campaign JSON 404, got ${missingSessionArticleCampaign.status} ${missingSessionArticleCampaign.payload?.error?.code}`,
+  );
+}
+
+const playerSessionAfterArticleWrites = await requestJson("/api/v1/campaigns/linden-pass/session", {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (
+  playerSessionAfterArticleWrites.status !== 200 ||
+  !playerSessionAfterArticleWrites.payload?.messages?.some(
+    (message) => message.message_type === "article_reveal" && message.article?.id === systemsArticleId,
+  ) ||
+  playerSessionAfterArticleWrites.payload?.staged_articles !== undefined
+) {
+  throw new Error(`Unexpected player session after article writes: ${JSON.stringify(playerSessionAfterArticleWrites.payload)}`);
+}
+
+const articleAssertionDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const articleAssertionRows = articleAssertionDb
+  .prepare(
+    "SELECT id, title, status, source_page_ref, revealed_by_user_id, revealed_in_session_id FROM campaign_session_articles WHERE id IN (?, ?, ?, ?) ORDER BY id ASC",
+  )
+  .all(manualArticleId, uploadArticleId, wikiPageSessionArticleCreate.payload.article.id, systemsArticleId);
+const articleImageRows = articleAssertionDb
+  .prepare("SELECT article_id, filename, media_type, alt_text, caption FROM campaign_session_article_images WHERE article_id IN (?, ?, ?) ORDER BY article_id ASC")
+  .all(manualArticleId, wikiPageSessionArticleCreate.payload.article.id, systemsArticleId);
+const articleMessageRow = articleAssertionDb
+  .prepare("SELECT message_type, article_id, author_user_id FROM campaign_session_messages WHERE article_id = ?")
+  .get(systemsArticleId);
+const articleRevisionRow = articleAssertionDb
+  .prepare("SELECT revision, updated_by_user_id FROM campaign_session_states WHERE campaign_slug = ?")
+  .get("linden-pass");
+articleAssertionDb.close();
+if (
+  articleAssertionRows.length !== 3 ||
+  articleAssertionRows.some((row) => Number(row.id) === Number(uploadArticleId)) ||
+  !articleAssertionRows.some(
+    (row) => Number(row.id) === Number(manualArticleId) && row.title === "Updated Table Sketch" && row.status === "staged",
+  ) ||
+  !articleAssertionRows.some(
+    (row) =>
+      Number(row.id) === Number(wikiPageSessionArticleCreate.payload.article.id) &&
+      row.source_page_ref === "npcs/captain-lyra-vale",
+  ) ||
+  !articleAssertionRows.some(
+    (row) =>
+      Number(row.id) === Number(systemsArticleId) &&
+      row.status === "revealed" &&
+      row.source_page_ref === "systems:phb-item-chain-mail" &&
+      Number(row.revealed_by_user_id) === 81 &&
+      Number(row.revealed_in_session_id) === 1,
+  ) ||
+  !articleImageRows.some(
+    (row) =>
+      Number(row.article_id) === Number(manualArticleId) &&
+      row.filename === "table-sketch.webp" &&
+      row.alt_text === "Updated sketch alt" &&
+      row.caption === "Updated sketch caption",
+  ) ||
+  !articleImageRows.some(
+    (row) =>
+      Number(row.article_id) === Number(wikiPageSessionArticleCreate.payload.article.id) &&
+      row.filename === "captain-lyra-vale.png" &&
+      row.media_type === "image/png",
+  ) ||
+  articleMessageRow?.message_type !== "article_reveal" ||
+  Number(articleMessageRow?.author_user_id) !== 81 ||
+  Number(articleRevisionRow?.revision) !== Number(messageRevisionRow?.revision) + 7 ||
+  Number(articleRevisionRow?.updated_by_user_id) !== 81
+) {
+  throw new Error(
+    `Expected persisted session article writes, got articles=${JSON.stringify(articleAssertionRows)} images=${JSON.stringify(articleImageRows)} message=${JSON.stringify(articleMessageRow)} revision=${JSON.stringify(articleRevisionRow)}`,
+  );
+}
+
 const blockedSessionImage = await requestJson("/api/v1/campaigns/linden-pass/session/articles/102/image");
 if (blockedSessionImage.status !== 401 || blockedSessionImage.payload?.error?.code !== "auth_required") {
   throw new Error(
@@ -3084,7 +3470,7 @@ lifecycleAfterCloseDb.close();
 if (
   closedSessionRow?.status !== "closed" ||
   Number(closedSessionRow?.ended_by_user_id) !== 81 ||
-  Number(closeRevisionRow?.revision) !== Number(messageRevisionRow?.revision) + 1 ||
+  Number(closeRevisionRow?.revision) !== Number(articleRevisionRow?.revision) + 1 ||
   Number(closeRevisionRow?.updated_by_user_id) !== 81
 ) {
   throw new Error(
@@ -3120,6 +3506,65 @@ if (
   !dmSessionAfterLifecycle.payload?.session_logs?.some((entry) => entry.session?.id === 1 && entry.message_count >= 5)
 ) {
   throw new Error(`Unexpected DM session after lifecycle writes: ${JSON.stringify(dmSessionAfterLifecycle.payload)}`);
+}
+
+const blockedClearRevealedArticles = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/articles/revealed",
+  {},
+  { method: "DELETE" },
+);
+if (blockedClearRevealedArticles.status !== 401 || blockedClearRevealedArticles.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated clear revealed session articles 401, got ${blockedClearRevealedArticles.status} ${blockedClearRevealedArticles.payload?.error?.code}`,
+  );
+}
+
+const clearRevealedArticles = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/articles/revealed",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "DELETE" },
+);
+if (
+  clearRevealedArticles.status !== 200 ||
+  clearRevealedArticles.payload?.ok !== true ||
+  !clearRevealedArticles.payload?.deleted_article_ids?.includes(102) ||
+  !clearRevealedArticles.payload?.deleted_article_ids?.includes(systemsArticleId) ||
+  clearRevealedArticles.payload?.deleted_articles?.length !== clearRevealedArticles.payload?.deleted_article_ids?.length
+) {
+  throw new Error(`Unexpected clear revealed session articles payload: ${JSON.stringify(clearRevealedArticles.payload)}`);
+}
+
+const missingClearRevealedCampaign = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/session/articles/revealed",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "DELETE" },
+);
+if (missingClearRevealedCampaign.status !== 404 || missingClearRevealedCampaign.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(
+    `Expected missing clear revealed campaign JSON 404, got ${missingClearRevealedCampaign.status} ${missingClearRevealedCampaign.payload?.error?.code}`,
+  );
+}
+
+const clearAssertionDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const remainingRevealedArticleCount = clearAssertionDb
+  .prepare("SELECT COUNT(*) AS count FROM campaign_session_articles WHERE campaign_slug = ? AND status = 'revealed'")
+  .get("linden-pass");
+const remainingArticleRevealMessages = clearAssertionDb
+  .prepare("SELECT COUNT(*) AS count FROM campaign_session_messages WHERE campaign_slug = ? AND article_id IS NOT NULL")
+  .get("linden-pass");
+const clearRevisionRow = clearAssertionDb
+  .prepare("SELECT revision, updated_by_user_id FROM campaign_session_states WHERE campaign_slug = ?")
+  .get("linden-pass");
+clearAssertionDb.close();
+if (
+  Number(remainingRevealedArticleCount?.count) !== 0 ||
+  Number(remainingArticleRevealMessages?.count) !== 0 ||
+  Number(clearRevisionRow?.revision) !== Number(dmSessionAfterLifecycle.payload?.session_revision) + 1 ||
+  Number(clearRevisionRow?.updated_by_user_id) !== 81
+) {
+  throw new Error(
+    `Expected clear revealed persistence, got revealed=${JSON.stringify(remainingRevealedArticleCount)} messages=${JSON.stringify(remainingArticleRevealMessages)} revision=${JSON.stringify(clearRevisionRow)}`,
+  );
 }
 
 const missingHelp = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/help");
