@@ -90,6 +90,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/entries/<entry_slug>",
+      "route_family": "api_v1_systems",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/systems/entries/:entrySlug",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono campaign Systems entry-detail route with Flask-compatible unauthenticated auth_required behavior, fixture-role entry access checks, parsed metadata/body fields, source state, entry override payloads, Flask compatibility links, and explicit missing-entry JSON."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/wiki",
       "route_family": "api_v1_wiki",
       "status": "implemented_fixture_readonly",

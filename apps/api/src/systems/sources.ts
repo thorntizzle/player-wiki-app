@@ -60,6 +60,22 @@ export interface SystemsEntrySummary {
   updated_at: string;
 }
 
+export interface SystemsEntryOverride {
+  entry_key: string;
+  visibility_override: string | null;
+  is_enabled_override: boolean | null;
+  updated_at: string;
+  updated_by_user_id: number | null;
+}
+
+export interface SystemsEntryRecord extends SystemsEntrySummary {
+  metadata: Record<string, unknown>;
+  body: unknown;
+  rendered_html: string;
+  source_state: SystemsSourceState | null;
+  override: SystemsEntryOverride | null;
+}
+
 export interface SystemsEntryGroup {
   entry_type: string;
   entry_type_label: string;
@@ -119,6 +135,25 @@ export type SystemsSourceCategoryResult =
   | { status: "not_found" }
   | { status: "forbidden"; message: string };
 
+export interface SystemsEntryDetailPayload {
+  campaign: CampaignViewModel;
+  entry: SystemsEntryRecord;
+  permissions: {
+    can_manage_systems: boolean;
+  };
+  links: {
+    flask_entry_url: string;
+    flask_source_url: string;
+    flask_source_category_url: string;
+    dm_content_systems_url: string;
+  };
+}
+
+export type SystemsEntryDetailResult =
+  | { status: "ok"; payload: SystemsEntryDetailPayload }
+  | { status: "not_found" }
+  | { status: "forbidden"; message: string };
+
 interface SystemsLibraryRow {
   library_slug: string;
   title: string;
@@ -155,8 +190,18 @@ interface SystemsEntryRow {
   player_safe_default: number;
   dm_heavy: number;
   metadata_json: string;
+  body_json: string;
+  rendered_html: string;
   created_at: string;
   updated_at: string;
+}
+
+interface CampaignEntryOverrideRow {
+  entry_key: string;
+  visibility_override: string | null;
+  is_enabled_override: number | null;
+  updated_at: string;
+  updated_by_user_id: number | null;
 }
 
 interface CampaignSourceSeed {
@@ -431,12 +476,20 @@ function emptyPayload(campaign: CampaignViewModel, canManage: boolean): SystemsS
   };
 }
 
-function parseMetadata(row: SystemsEntryRow): Record<string, unknown> {
+function isNoSuchTableError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("no such table");
+}
+
+function parseJsonValue(rawValue: string, fallback: unknown = {}): unknown {
   try {
-    return asRecord(JSON.parse(row.metadata_json || "{}"));
+    return JSON.parse(rawValue || "null") ?? fallback;
   } catch {
-    return {};
+    return fallback;
   }
+}
+
+function parseMetadata(row: SystemsEntryRow): Record<string, unknown> {
+  return asRecord(parseJsonValue(row.metadata_json, {}));
 }
 
 function serializeEntrySummary(row: SystemsEntryRow): SystemsEntrySummary {
@@ -455,6 +508,35 @@ function serializeEntrySummary(row: SystemsEntryRow): SystemsEntrySummary {
     dm_heavy: Boolean(row.dm_heavy),
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
+  };
+}
+
+function serializeEntryOverride(row: CampaignEntryOverrideRow | undefined): SystemsEntryOverride | null {
+  if (!row) {
+    return null;
+  }
+  const visibilityOverride = row.visibility_override ? String(row.visibility_override) : null;
+  return {
+    entry_key: String(row.entry_key),
+    visibility_override: visibilityOverride,
+    is_enabled_override: row.is_enabled_override === null ? null : Boolean(row.is_enabled_override),
+    updated_at: String(row.updated_at),
+    updated_by_user_id: row.updated_by_user_id === null ? null : Number(row.updated_by_user_id),
+  };
+}
+
+function serializeEntryRecord(
+  row: SystemsEntryRow,
+  sourceState: SystemsSourceState | null,
+  override: SystemsEntryOverride | null,
+): SystemsEntryRecord {
+  return {
+    ...serializeEntrySummary(row),
+    metadata: parseMetadata(row),
+    body: parseJsonValue(row.body_json, {}),
+    rendered_html: String(row.rendered_html || ""),
+    source_state: sourceState,
+    override,
   };
 }
 
@@ -577,6 +659,8 @@ function loadAccessibleSourceEntries(
           player_safe_default,
           dm_heavy,
           metadata_json,
+          body_json,
+          rendered_html,
           created_at,
           updated_at
         FROM systems_entries
@@ -593,6 +677,111 @@ function loadAccessibleSourceEntries(
   return filterAccessibleEntryRows(filteredRows, role)
     .filter((row) => entryMatchesCategoryQuery(row, options.query || ""))
     .sort(compareEntryRowsForBrowse);
+}
+
+function loadCampaignEntryOverride(
+  database: Database.Database,
+  campaignSlug: string,
+  entryKey: string,
+): SystemsEntryOverride | null {
+  try {
+    return serializeEntryOverride(
+      database
+        .prepare(
+          `
+            SELECT
+              entry_key,
+              visibility_override,
+              is_enabled_override,
+              updated_at,
+              updated_by_user_id
+            FROM campaign_entry_overrides
+            WHERE campaign_slug = ?
+              AND entry_key = ?
+          `,
+        )
+        .get(campaignSlug, entryKey) as CampaignEntryOverrideRow | undefined,
+    );
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function loadSourceRow(
+  database: Database.Database,
+  campaignSlug: string,
+  librarySlug: string,
+  sourceId: string,
+): SystemsSourceRow | undefined {
+  return database
+    .prepare(
+      `
+        SELECT
+          systems_sources.source_id,
+          systems_sources.title,
+          systems_sources.library_slug,
+          systems_sources.license_class,
+          systems_sources.public_visibility_allowed,
+          systems_sources.requires_unofficial_notice,
+          systems_sources.status,
+          campaign_enabled_sources.is_enabled AS configured_enabled,
+          campaign_enabled_sources.default_visibility AS configured_visibility,
+          (
+            SELECT COUNT(*)
+            FROM systems_entries
+            WHERE systems_entries.library_slug = systems_sources.library_slug
+              AND systems_entries.source_id = systems_sources.source_id
+          ) AS entry_count
+        FROM systems_sources
+        LEFT JOIN campaign_enabled_sources
+          ON campaign_enabled_sources.campaign_slug = ?
+         AND campaign_enabled_sources.library_slug = systems_sources.library_slug
+         AND campaign_enabled_sources.source_id = systems_sources.source_id
+        WHERE systems_sources.library_slug = ?
+          AND systems_sources.source_id = ?
+      `,
+    )
+    .get(campaignSlug, librarySlug, sourceId) as SystemsSourceRow | undefined;
+}
+
+function effectiveEntryVisibility(
+  row: SystemsEntryRow,
+  sourceState: SystemsSourceState,
+  override: SystemsEntryOverride | null,
+): string {
+  const overrideVisibility = normalizeVisibility(override?.visibility_override || "", "");
+  if (overrideVisibility) {
+    if (overrideVisibility === "public" && !sourceState.public_visibility_allowed) {
+      return "players";
+    }
+    return overrideVisibility;
+  }
+  if (Boolean(row.player_safe_default) && !Boolean(row.dm_heavy)) {
+    return sourceState.default_visibility;
+  }
+  return "dm";
+}
+
+function canAccessEntry(
+  row: SystemsEntryRow,
+  role: FixtureSystemsRole,
+  sourceState: SystemsSourceState,
+  override: SystemsEntryOverride | null,
+): boolean {
+  if (role === "admin") {
+    return true;
+  }
+  if (!sourceState.permissions.can_access || !sourceState.is_enabled || override?.is_enabled_override === false) {
+    return false;
+  }
+  if (canManageSystems(role)) {
+    return true;
+  }
+  const visibility = effectiveEntryVisibility(row, sourceState, override);
+  return visibility === "public" || visibility === "players";
 }
 
 function referenceSearchValues(value: unknown): string[] {
@@ -800,35 +989,7 @@ export function buildCampaignSystemsSourceDetailPayload(
     }
 
     const seeds = parseSourceSeeds(campaignConfig);
-    const row = database
-      .prepare(
-        `
-          SELECT
-            systems_sources.source_id,
-            systems_sources.title,
-            systems_sources.library_slug,
-            systems_sources.license_class,
-            systems_sources.public_visibility_allowed,
-            systems_sources.requires_unofficial_notice,
-            systems_sources.status,
-            campaign_enabled_sources.is_enabled AS configured_enabled,
-            campaign_enabled_sources.default_visibility AS configured_visibility,
-            (
-              SELECT COUNT(*)
-              FROM systems_entries
-              WHERE systems_entries.library_slug = systems_sources.library_slug
-                AND systems_entries.source_id = systems_sources.source_id
-            ) AS entry_count
-          FROM systems_sources
-          LEFT JOIN campaign_enabled_sources
-            ON campaign_enabled_sources.campaign_slug = ?
-           AND campaign_enabled_sources.library_slug = systems_sources.library_slug
-           AND campaign_enabled_sources.source_id = systems_sources.source_id
-          WHERE systems_sources.library_slug = ?
-            AND systems_sources.source_id = ?
-        `,
-      )
-      .get(campaign.slug, librarySlug, normalizedSourceId) as SystemsSourceRow | undefined;
+    const row = loadSourceRow(database, campaign.slug, librarySlug, normalizedSourceId);
     if (!row) {
       return { status: "not_found" };
     }
@@ -886,7 +1047,7 @@ export function buildCampaignSystemsSourceDetailPayload(
       },
     };
   } catch (error) {
-    if (error instanceof Error && error.message.includes("no such table")) {
+    if (isNoSuchTableError(error)) {
       return { status: "not_found" };
     }
     throw error;
@@ -930,35 +1091,7 @@ export function buildCampaignSystemsSourceCategoryPayload(
     }
 
     const seeds = parseSourceSeeds(campaignConfig);
-    const row = database
-      .prepare(
-        `
-          SELECT
-            systems_sources.source_id,
-            systems_sources.title,
-            systems_sources.library_slug,
-            systems_sources.license_class,
-            systems_sources.public_visibility_allowed,
-            systems_sources.requires_unofficial_notice,
-            systems_sources.status,
-            campaign_enabled_sources.is_enabled AS configured_enabled,
-            campaign_enabled_sources.default_visibility AS configured_visibility,
-            (
-              SELECT COUNT(*)
-              FROM systems_entries
-              WHERE systems_entries.library_slug = systems_sources.library_slug
-                AND systems_entries.source_id = systems_sources.source_id
-            ) AS entry_count
-          FROM systems_sources
-          LEFT JOIN campaign_enabled_sources
-            ON campaign_enabled_sources.campaign_slug = ?
-           AND campaign_enabled_sources.library_slug = systems_sources.library_slug
-           AND campaign_enabled_sources.source_id = systems_sources.source_id
-          WHERE systems_sources.library_slug = ?
-            AND systems_sources.source_id = ?
-        `,
-      )
-      .get(campaign.slug, librarySlug, normalizedSourceId) as SystemsSourceRow | undefined;
+    const row = loadSourceRow(database, campaign.slug, librarySlug, normalizedSourceId);
     if (!row) {
       return { status: "not_found" };
     }
@@ -1006,7 +1139,109 @@ export function buildCampaignSystemsSourceCategoryPayload(
       },
     };
   } catch (error) {
-    if (error instanceof Error && error.message.includes("no such table")) {
+    if (isNoSuchTableError(error)) {
+      return { status: "not_found" };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function buildCampaignSystemsEntryDetailPayload(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  entrySlug: string,
+  role: FixtureSystemsRole,
+): SystemsEntryDetailResult {
+  const canManage = canManageSystems(role);
+  const librarySlug = campaign.systems_library_slug || "";
+  const normalizedEntrySlug = String(entrySlug || "").trim();
+  if (!librarySlug || !normalizedEntrySlug || !existsSync(dbPath)) {
+    return { status: "not_found" };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const library = serializeLibrary(
+      database
+        .prepare(
+          `
+            SELECT library_slug, title, system_code, status, created_at, updated_at
+            FROM systems_libraries
+            WHERE library_slug = ?
+          `,
+        )
+        .get(librarySlug) as SystemsLibraryRow | undefined,
+    );
+    if (!library) {
+      return { status: "not_found" };
+    }
+
+    const entry = database
+      .prepare(
+        `
+          SELECT
+            id,
+            library_slug,
+            source_id,
+            entry_key,
+            entry_type,
+            slug,
+            title,
+            source_page,
+            source_path,
+            search_text,
+            player_safe_default,
+            dm_heavy,
+            metadata_json,
+            body_json,
+            rendered_html,
+            created_at,
+            updated_at
+          FROM systems_entries
+          WHERE library_slug = ?
+            AND slug = ?
+        `,
+      )
+      .get(librarySlug, normalizedEntrySlug) as SystemsEntryRow | undefined;
+    if (!entry) {
+      return { status: "not_found" };
+    }
+
+    const sourceRow = loadSourceRow(database, campaign.slug, librarySlug, entry.source_id);
+    if (!sourceRow) {
+      return { status: "not_found" };
+    }
+
+    const seeds = parseSourceSeeds(campaignConfig);
+    const sourceState = serializeSourceState(sourceRow, seeds.get(sourceRow.source_id), role);
+    const override = loadCampaignEntryOverride(database, campaign.slug, entry.entry_key);
+    if (!canAccessEntry(entry, role, sourceState, override)) {
+      return { status: "forbidden", message: "You do not have access to this systems entry." };
+    }
+
+    return {
+      status: "ok",
+      payload: {
+        campaign,
+        entry: serializeEntryRecord(entry, sourceState, override),
+        permissions: {
+          can_manage_systems: canManage,
+        },
+        links: {
+          flask_entry_url: `/campaigns/${campaign.slug}/systems/entries/${entry.slug}`,
+          flask_source_url: `/campaigns/${campaign.slug}/systems/sources/${entry.source_id}`,
+          flask_source_category_url: `/campaigns/${campaign.slug}/systems/sources/${entry.source_id}/types/${entry.entry_type}`,
+          dm_content_systems_url: canManage
+            ? `/campaigns/${campaign.slug}/dm-content/systems?entry_key=${encodeURIComponent(entry.entry_key)}#systems-entry-overrides`
+            : "",
+        },
+      },
+    };
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
       return { status: "not_found" };
     }
     throw error;

@@ -124,6 +124,17 @@ smokeDb.exec(`
     UNIQUE (library_slug, entry_key),
     UNIQUE (library_slug, slug)
   );
+
+  CREATE TABLE campaign_entry_overrides (
+    campaign_slug TEXT NOT NULL,
+    library_slug TEXT NOT NULL,
+    entry_key TEXT NOT NULL,
+    visibility_override TEXT,
+    is_enabled_override INTEGER,
+    updated_at TEXT NOT NULL,
+    updated_by_user_id INTEGER,
+    PRIMARY KEY (campaign_slug, entry_key)
+  );
 `);
 smokeDb
   .prepare(
@@ -169,6 +180,34 @@ const insertEntry = smokeDb.prepare(`
 insertEntry.run("DND-5E", "PHB", "PHB:spell:mage-hand", "spell", "phb-spell-mage-hand", "Mage Hand", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("DND-5E", "PHB", "PHB:item:chain-mail", "item", "phb-item-chain-mail", "Chain Mail", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("DND-5E", "MM", "MM:monster:goblin", "monster", "mm-monster-goblin", "Goblin", 0, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+smokeDb
+  .prepare(
+    `
+      UPDATE systems_entries
+      SET
+        source_page = ?,
+        source_path = ?,
+        metadata_json = ?,
+        body_json = ?,
+        rendered_html = ?
+      WHERE library_slug = ?
+        AND entry_key = ?
+    `,
+  )
+  .run(
+    "145",
+    "items/chain-mail",
+    JSON.stringify({ armor: { ac: 16 }, reference_terms: ["armor"] }),
+    JSON.stringify({ entries: ["A sample armor entry."] }),
+    "<p>A sample armor entry.</p>",
+    "DND-5E",
+    "PHB:item:chain-mail",
+  );
+smokeDb
+  .prepare(
+    "INSERT INTO campaign_entry_overrides (campaign_slug, library_slug, entry_key, visibility_override, is_enabled_override, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run("linden-pass", "DND-5E", "PHB:item:chain-mail", "players", null, "2026-06-25T09:35:00+00:00", 42);
 smokeDb.close();
 
 const nodePath = fileURLToPath(new URL("../dist/server.js", import.meta.url));
@@ -498,6 +537,95 @@ if (
 ) {
   throw new Error(
     `Expected missing systems source category JSON 404, got ${missingSystemsSourceCategory.status} ${missingSystemsSourceCategory.payload?.error?.code}`,
+  );
+}
+
+const blockedSystemsEntryDetail = await requestJson("/api/v1/campaigns/linden-pass/systems/entries/phb-item-chain-mail");
+if (blockedSystemsEntryDetail.status !== 401 || blockedSystemsEntryDetail.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated systems entry detail to return auth_required 401, got ${blockedSystemsEntryDetail.status} ${blockedSystemsEntryDetail.payload?.error?.code}`,
+  );
+}
+
+const playerChainMailDetail = await requestJson("/api/v1/campaigns/linden-pass/systems/entries/phb-item-chain-mail", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (playerChainMailDetail.status !== 200 || playerChainMailDetail.payload?.ok !== true) {
+  throw new Error(`Expected player systems entry detail 200 ok, got ${playerChainMailDetail.status}`);
+}
+const chainMailEntry = playerChainMailDetail.payload?.entry;
+if (
+  chainMailEntry?.slug !== "phb-item-chain-mail" ||
+  chainMailEntry?.title !== "Chain Mail" ||
+  chainMailEntry?.entry_type_label !== "Items" ||
+  chainMailEntry?.source_page !== "145" ||
+  chainMailEntry?.source_path !== "items/chain-mail"
+) {
+  throw new Error(`Unexpected player systems entry detail identity: ${JSON.stringify(chainMailEntry)}`);
+}
+if (
+  chainMailEntry?.metadata?.armor?.ac !== 16 ||
+  chainMailEntry?.body?.entries?.[0] !== "A sample armor entry." ||
+  chainMailEntry?.rendered_html !== "<p>A sample armor entry.</p>"
+) {
+  throw new Error(`Unexpected player systems entry detail body fields: ${JSON.stringify(chainMailEntry)}`);
+}
+if (
+  chainMailEntry?.source_state?.source_id !== "PHB" ||
+  chainMailEntry?.source_state?.permissions?.can_access !== true ||
+  chainMailEntry?.source_state?.permissions?.can_manage !== false
+) {
+  throw new Error(`Unexpected player systems entry source state: ${JSON.stringify(chainMailEntry?.source_state)}`);
+}
+if (
+  chainMailEntry?.override?.entry_key !== "PHB:item:chain-mail" ||
+  chainMailEntry?.override?.visibility_override !== "players" ||
+  chainMailEntry?.override?.is_enabled_override !== null ||
+  chainMailEntry?.override?.updated_by_user_id !== 42
+) {
+  throw new Error(`Unexpected player systems entry override: ${JSON.stringify(chainMailEntry?.override)}`);
+}
+const chainMailLinks = playerChainMailDetail.payload?.links || {};
+if (
+  chainMailLinks.flask_entry_url !== "/campaigns/linden-pass/systems/entries/phb-item-chain-mail" ||
+  chainMailLinks.flask_source_url !== "/campaigns/linden-pass/systems/sources/PHB" ||
+  chainMailLinks.flask_source_category_url !== "/campaigns/linden-pass/systems/sources/PHB/types/item" ||
+  chainMailLinks.dm_content_systems_url !== ""
+) {
+  throw new Error(`Unexpected player systems entry links: ${JSON.stringify(chainMailLinks)}`);
+}
+
+const playerBlockedMmEntry = await requestJson("/api/v1/campaigns/linden-pass/systems/entries/mm-monster-goblin", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (playerBlockedMmEntry.status !== 403 || playerBlockedMmEntry.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player systems entry forbidden 403, got ${playerBlockedMmEntry.status} ${playerBlockedMmEntry.payload?.error?.code}`,
+  );
+}
+
+const dmMmEntry = await requestJson("/api/v1/campaigns/linden-pass/systems/entries/mm-monster-goblin", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (
+  dmMmEntry.status !== 200 ||
+  dmMmEntry.payload?.entry?.slug !== "mm-monster-goblin" ||
+  dmMmEntry.payload?.permissions?.can_manage_systems !== true ||
+  !String(dmMmEntry.payload?.links?.dm_content_systems_url || "").includes("/campaigns/linden-pass/dm-content/systems") ||
+  !String(dmMmEntry.payload?.links?.dm_content_systems_url || "").includes("systems-entry-overrides")
+) {
+  throw new Error(`Unexpected DM systems entry detail payload: ${JSON.stringify(dmMmEntry.payload)}`);
+}
+
+const missingSystemsEntryDetail = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/entries/definitely-not-an-entry",
+  {
+    "X-CPW-Fixture-Role": "admin",
+  },
+);
+if (missingSystemsEntryDetail.status !== 404 || missingSystemsEntryDetail.payload?.error?.code !== "systems_entry_not_found") {
+  throw new Error(
+    `Expected missing systems entry detail JSON 404, got ${missingSystemsEntryDetail.status} ${missingSystemsEntryDetail.payload?.error?.code}`,
   );
 }
 

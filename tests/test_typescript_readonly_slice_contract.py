@@ -211,6 +211,16 @@ def test_typescript_systems_source_category_requires_auth_like_flask(typescript_
     assert payload == flask_payload
 
 
+def test_typescript_systems_entry_detail_requires_auth_like_flask(typescript_api_server, client):
+    flask_response = client.get("/api/v1/campaigns/linden-pass/systems/entries/phb-item-chain-mail")
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/systems/entries/phb-item-chain-mail")
+    assert status == 401
+    assert payload == flask_payload
+
+
 def test_typescript_systems_import_runs_success_shape_matches_flask(typescript_api_server):
     status, payload = _to_json(
         f"{typescript_api_server}/api/v1/systems/import-runs",
@@ -742,3 +752,11 @@ def test_typescript_wiki_missing_resources_return_json(typescript_api_server):
     assert status == 404
     assert payload["ok"] is False
     assert payload["error"]["code"] == "systems_source_category_not_found"
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/systems/entries/definitely-not-an-entry",
+        headers={"X-CPW-Fixture-Role": "admin"},
+    )
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "systems_entry_not_found"
