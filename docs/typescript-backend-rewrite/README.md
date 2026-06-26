@@ -123,12 +123,14 @@ Route parity check command:
 - The first combat-adjacent read path reuses the Systems SQLite fixture layer for Combat Systems monster
   search, preserving Flask-compatible unauthenticated `auth_required`, bearer-token or fixture-role
   manager-only access, short-query guidance, and monster HP/speed/initiative result formatting.
-- The first Combat state shell now serves read-only empty tracker payloads for `GET .../combat` and
+- The Combat state shell now serves read-only tracker payloads for `GET .../combat` and
   `GET .../combat/live-state`, preserving Flask-compatible unauthenticated `auth_required`, fixture
   or bearer-token membership-derived player/DM permission splits, live polling metadata,
   invalid/no-membership bearer auth envelopes, unchanged-response short-circuit behavior, DM/admin
   player-character setup choices from fixture character definitions, DM Content statblock setup
-  choices, and custom condition names merged into the combat condition options.
+  choices, custom condition names merged into combat condition options, and SQLite tracker/combatant
+  reads with current-turn labels, ordered combatants, visible conditions, and NPC resource summaries
+  when the fixture database carries Combat rows.
 - The first Session manager lookup slice now serves `GET .../session/article-sources/search`, preserving
   Flask-compatible unauthenticated `auth_required`, fixture or bearer-token membership-derived
   manager-only access, short-query guidance, visible wiki page results, accessible Systems entry

@@ -23,7 +23,7 @@ fixture database.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/systems/sources/:sourceId` with Flask-compatible unauthenticated auth failure, fixture-role source access checks, entry grouping, book-entry summaries, rules-reference metadata fields, and explicit missing-source JSON.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/systems/sources/:sourceId/types/:entryType` with Flask-compatible unauthenticated auth failure, fixture-role source access checks, category entry grouping, title/type query filtering, entry summaries, and explicit missing-category JSON.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/systems/entries/:entrySlug` with Flask-compatible unauthenticated auth failure, fixture-role entry access checks, parsed entry metadata/body JSON, source state, campaign entry override serialization, Flask compatibility links, and explicit missing-entry JSON.
-- Implemented `GET /api/v1/campaigns/:campaignSlug/combat` and `GET /api/v1/campaigns/:campaignSlug/combat/live-state` with Flask-compatible unauthenticated auth failure, fixture player/DM permission splits, empty read-only tracker state, live polling metadata, unchanged-response short-circuit behavior, DM/admin player-character and DM Content statblock setup choices, and custom condition names merged into condition options.
+- Implemented `GET /api/v1/campaigns/:campaignSlug/combat` and `GET /api/v1/campaigns/:campaignSlug/combat/live-state` with Flask-compatible unauthenticated auth failure, fixture player/DM permission splits, read-only SQLite tracker/combatant state with empty fallback, live polling metadata, unchanged-response short-circuit behavior, DM/admin player-character and DM Content statblock setup choices, and custom condition names merged into condition options.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/combat/systems-monsters/search` with Flask-compatible unauthenticated auth failure, fixture manager-only access, short-query guidance, and Systems monster metadata result formatting.
 - Implemented `GET /api/v1/campaigns` using fixture-backed repository reads.
 - Implemented `GET /api/v1/campaigns/:campaignSlug` using fixture-backed repository reads.
@@ -179,9 +179,11 @@ fixture database.
   - result rows include `entry_key`, `title`, `source_id`, HP/speed subtitle, and signed initiative bonus
 - Combat state/live-state responses preserve the read API shell:
   - unauthenticated requests return Flask-compatible `auth_required`
-  - fixture or bearer-token player roles receive a read-only empty tracker with manager-only links omitted
+  - fixture or bearer-token player roles receive a read-only tracker with manager-only links omitted
   - fixture or bearer-token DM/admin roles receive manager permission flags, DM fallback links, player-character setup choices, DM Content statblock setup choices, and condition options
-  - player-character choices are read from fixture character definitions and include slug, name, class-level subtitle, and unsigned initiative bonus
+  - when SQLite Combat rows exist, tracker reads include tracker revision, round number, current turn label, ordered combatants, selected combatant id, visible combatant vitals, conditions, and simple NPC resource counters/notes
+  - missing Combat SQLite tables or rows preserve the previous empty-tracker fallback
+  - player-character choices are read from fixture character definitions, exclude characters already present in the tracker, and include slug, name, class-level subtitle, and unsigned initiative bonus
   - custom DM Content condition names are merged with the built-in DND-5E condition option list for combat payloads
   - DM Content statblock choices include string ids, title, HP/speed subtitle, and signed initiative bonus, and remain omitted for player roles
   - invalid bearer requests return `auth_required`, and bearer users without active campaign access return `forbidden`

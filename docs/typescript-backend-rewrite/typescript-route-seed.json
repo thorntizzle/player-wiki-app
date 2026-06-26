@@ -212,7 +212,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/combat",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Combat state route with Flask-compatible unauthenticated auth_required behavior, empty fixture tracker payload, fixture-role and bearer-token membership-derived player/DM permission flags, manager player-character setup choices from fixture character definitions, manager DM Content statblock choices from CPW_DB_PATH, custom condition options from CPW_DB_PATH, live polling metadata, auth/forbidden bearer envelopes, and explicit missing-campaign JSON."
+      "notes": "Tracked Hono Combat state route with Flask-compatible unauthenticated auth_required behavior, read-only SQLite tracker/combatant/condition/resource reads with empty fallback, fixture-role and bearer-token membership-derived player/DM permission flags, manager player-character setup choices from fixture character definitions excluding characters already in the tracker, manager DM Content statblock choices from CPW_DB_PATH, custom condition options from CPW_DB_PATH, live polling metadata, auth/forbidden bearer envelopes, and explicit missing-campaign JSON."
     },
     {
       "method": "GET",
@@ -221,7 +221,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/live-state",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Combat live-state route sharing the fixture/SQLite combat state payload, fixture-role and bearer-token membership-derived role gates, manager setup choices, and unchanged-response short-circuit contract."
+      "notes": "Tracked Hono Combat live-state route sharing the fixture/SQLite combat state payload, including read-only tracker/combatant/condition/resource reads with empty fallback, fixture-role and bearer-token membership-derived role gates, manager setup choices, and unchanged-response short-circuit contract."
     },
     {
       "method": "GET",

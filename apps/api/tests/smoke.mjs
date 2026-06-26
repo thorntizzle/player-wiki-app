@@ -465,6 +465,77 @@ smokeDb.exec(`
     created_by_user_id INTEGER,
     updated_by_user_id INTEGER
   );
+
+  CREATE TABLE campaign_combatants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_slug TEXT NOT NULL,
+    combatant_type TEXT NOT NULL,
+    character_slug TEXT,
+    player_detail_visible INTEGER NOT NULL DEFAULT 0,
+    source_kind TEXT NOT NULL DEFAULT 'manual_npc',
+    source_ref TEXT NOT NULL DEFAULT '',
+    display_name TEXT NOT NULL,
+    turn_value INTEGER NOT NULL DEFAULT 0,
+    initiative_bonus INTEGER NOT NULL DEFAULT 0,
+    dexterity_modifier INTEGER NOT NULL DEFAULT 0,
+    initiative_priority INTEGER NOT NULL DEFAULT 1,
+    current_hp INTEGER NOT NULL DEFAULT 0,
+    max_hp INTEGER NOT NULL DEFAULT 0,
+    temp_hp INTEGER NOT NULL DEFAULT 0,
+    movement_total INTEGER NOT NULL DEFAULT 0,
+    movement_remaining INTEGER NOT NULL DEFAULT 0,
+    has_action INTEGER NOT NULL DEFAULT 1,
+    has_bonus_action INTEGER NOT NULL DEFAULT 1,
+    has_reaction INTEGER NOT NULL DEFAULT 1,
+    revision INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by_user_id INTEGER,
+    updated_by_user_id INTEGER
+  );
+
+  CREATE TABLE campaign_combat_trackers (
+    campaign_slug TEXT PRIMARY KEY,
+    round_number INTEGER NOT NULL DEFAULT 1,
+    current_combatant_id INTEGER,
+    revision INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL,
+    updated_by_user_id INTEGER
+  );
+
+  CREATE TABLE campaign_combat_conditions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    combatant_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    duration_text TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    created_by_user_id INTEGER
+  );
+
+  CREATE TABLE campaign_combatant_resource_counters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    combatant_id INTEGER NOT NULL,
+    resource_key TEXT NOT NULL,
+    label TEXT NOT NULL,
+    current_value INTEGER NOT NULL DEFAULT 0,
+    max_value INTEGER NOT NULL DEFAULT 0,
+    reset_label TEXT NOT NULL DEFAULT '',
+    source_label TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by_user_id INTEGER,
+    updated_by_user_id INTEGER
+  );
+
+  CREATE TABLE campaign_combatant_resource_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    combatant_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    note TEXT NOT NULL,
+    source_label TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    created_by_user_id INTEGER
+  );
 `);
 smokeDb
   .prepare(
@@ -770,6 +841,206 @@ smokeDb
     77,
     77,
   );
+smokeDb
+  .prepare(
+    `
+      INSERT INTO campaign_combatants (
+        id,
+        campaign_slug,
+        combatant_type,
+        character_slug,
+        player_detail_visible,
+        source_kind,
+        source_ref,
+        display_name,
+        turn_value,
+        initiative_bonus,
+        dexterity_modifier,
+        initiative_priority,
+        current_hp,
+        max_hp,
+        temp_hp,
+        movement_total,
+        movement_remaining,
+        has_action,
+        has_bonus_action,
+        has_reaction,
+        revision,
+        created_at,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  )
+  .run(
+    501,
+    "linden-pass",
+    "npc",
+    null,
+    1,
+    "manual_npc",
+    "",
+    "Clockwork Hound",
+    18,
+    4,
+    2,
+    1,
+    22,
+    28,
+    3,
+    40,
+    25,
+    1,
+    0,
+    1,
+    6,
+    "2026-06-25T10:50:00+00:00",
+    "2026-06-25T10:55:00+00:00",
+    77,
+    77,
+  );
+smokeDb
+  .prepare(
+    `
+      INSERT INTO campaign_combatants (
+        id,
+        campaign_slug,
+        combatant_type,
+        character_slug,
+        player_detail_visible,
+        source_kind,
+        source_ref,
+        display_name,
+        turn_value,
+        initiative_bonus,
+        dexterity_modifier,
+        initiative_priority,
+        current_hp,
+        max_hp,
+        temp_hp,
+        movement_total,
+        movement_remaining,
+        has_action,
+        has_bonus_action,
+        has_reaction,
+        revision,
+        created_at,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  )
+  .run(
+    502,
+    "linden-pass",
+    "player_character",
+    "arden-march",
+    0,
+    "character",
+    "arden-march",
+    "Arden March",
+    15,
+    2,
+    2,
+    2,
+    38,
+    38,
+    0,
+    30,
+    30,
+    1,
+    1,
+    1,
+    4,
+    "2026-06-25T10:51:00+00:00",
+    "2026-06-25T10:56:00+00:00",
+    77,
+    77,
+  );
+smokeDb
+  .prepare(
+    `
+      INSERT INTO campaign_combat_trackers (
+        campaign_slug,
+        round_number,
+        current_combatant_id,
+        revision,
+        updated_at,
+        updated_by_user_id
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+    `,
+  )
+  .run("linden-pass", 3, 501, 12, "2026-06-25T10:57:00+00:00", 77);
+smokeDb
+  .prepare(
+    `
+      INSERT INTO campaign_combat_conditions (
+        id,
+        combatant_id,
+        name,
+        duration_text,
+        created_at,
+        created_by_user_id
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+    `,
+  )
+  .run(601, 501, "Restrained", "One minute", "2026-06-25T10:58:00+00:00", 77);
+smokeDb
+  .prepare(
+    `
+      INSERT INTO campaign_combatant_resource_counters (
+        id,
+        combatant_id,
+        resource_key,
+        label,
+        current_value,
+        max_value,
+        reset_label,
+        source_label,
+        created_at,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  )
+  .run(
+    701,
+    501,
+    "overdrive",
+    "Overdrive",
+    1,
+    2,
+    "Short rest",
+    "Manual NPC",
+    "2026-06-25T10:59:00+00:00",
+    "2026-06-25T10:59:00+00:00",
+    77,
+    77,
+  );
+smokeDb
+  .prepare(
+    `
+      INSERT INTO campaign_combatant_resource_notes (
+        id,
+        combatant_id,
+        label,
+        note,
+        source_label,
+        created_at,
+        created_by_user_id
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `,
+  )
+  .run(801, 501, "Tactics", "Tries to pin the nearest runner.", "Manual NPC", "2026-06-25T11:00:00+00:00", 77);
 smokeDb.close();
 
 const nodePath = fileURLToPath(new URL("../dist/server.js", import.meta.url));
@@ -1620,20 +1891,34 @@ if (outsiderCombatState.status !== 403 || outsiderCombatState.payload?.error?.co
 const playerCombatState = await requestJson("/api/v1/campaigns/linden-pass/combat", {
   "X-CPW-Fixture-Role": "player",
 });
+const playerCombatTracker = playerCombatState.payload?.tracker;
+const playerCurrentCombatant = playerCombatTracker?.combatants?.[0];
 if (
   playerCombatState.status !== 200 ||
   playerCombatState.payload?.ok !== true ||
   playerCombatState.payload?.changed !== true ||
   playerCombatState.payload?.campaign?.slug !== "linden-pass" ||
   playerCombatState.payload?.combat_system_supported !== true ||
-  playerCombatState.payload?.live_revision !== 0 ||
+  playerCombatState.payload?.live_revision !== 12 ||
   typeof playerCombatState.payload?.live_view_token !== "string" ||
   playerCombatState.payload.live_view_token.length !== 12 ||
-  playerCombatState.payload?.tracker?.round_number !== 1 ||
-  playerCombatState.payload?.tracker?.combatant_count !== 0 ||
-  playerCombatState.payload?.tracker?.combatants?.length !== 0 ||
-  playerCombatState.payload?.selected_combatant_id !== null ||
-  playerCombatState.payload?.selected_combatant !== null ||
+  playerCombatTracker?.round_number !== 3 ||
+  playerCombatTracker?.current_turn_label !== "Clockwork Hound" ||
+  playerCombatTracker?.has_current_turn !== true ||
+  playerCombatTracker?.combatant_count !== 2 ||
+  playerCombatTracker?.combatants?.length !== 2 ||
+  playerCurrentCombatant?.name !== "Clockwork Hound" ||
+  playerCurrentCombatant?.source_kind !== "manual_npc" ||
+  playerCurrentCombatant?.is_current_turn !== true ||
+  playerCurrentCombatant?.current_hp !== 22 ||
+  playerCurrentCombatant?.max_hp !== 28 ||
+  playerCurrentCombatant?.temp_hp !== 3 ||
+  playerCurrentCombatant?.movement_remaining !== 25 ||
+  playerCurrentCombatant?.conditions?.[0]?.name !== "Restrained" ||
+  playerCurrentCombatant?.npc_resource_counters?.[0]?.label !== "Overdrive" ||
+  playerCurrentCombatant?.npc_resource_notes?.[0]?.label !== "Tactics" ||
+  playerCombatState.payload?.selected_combatant_id !== 501 ||
+  playerCombatState.payload?.selected_combatant?.name !== "Clockwork Hound" ||
   playerCombatState.payload?.selected_player_character !== null ||
   playerCombatState.payload?.player_character_targets?.length !== 0 ||
   playerCombatState.payload?.available_character_choices?.length !== 0 ||
@@ -1653,6 +1938,8 @@ if (
   bearerPlayerCombatState.status !== 200 ||
   bearerPlayerCombatState.payload?.ok !== true ||
   bearerPlayerCombatState.payload?.campaign?.slug !== "linden-pass" ||
+  bearerPlayerCombatState.payload?.live_revision !== 12 ||
+  bearerPlayerCombatState.payload?.selected_combatant_id !== 501 ||
   bearerPlayerCombatState.payload?.permissions?.can_manage_combat !== false ||
   bearerPlayerCombatState.payload?.permissions?.can_access_systems !== true ||
   bearerPlayerCombatState.payload?.links?.flask_dm_status_url !== "" ||
@@ -1664,16 +1951,29 @@ if (
 const dmCombatState = await requestJson("/api/v1/campaigns/linden-pass/combat", {
   "X-CPW-Fixture-Role": "dm",
 });
+const dmSelectedCombatant = dmCombatState.payload?.selected_combatant;
 if (
   dmCombatState.status !== 200 ||
   dmCombatState.payload?.permissions?.can_manage_combat !== true ||
   dmCombatState.payload?.permissions?.can_access_dm_content !== true ||
-  dmCombatState.payload?.available_character_choices?.length !== 3 ||
+  dmCombatState.payload?.live_revision !== 12 ||
+  dmCombatState.payload?.tracker?.round_number !== 3 ||
+  dmCombatState.payload?.tracker?.combatant_count !== 2 ||
+  dmCombatState.payload?.selected_combatant_id !== 501 ||
+  dmSelectedCombatant?.name !== "Clockwork Hound" ||
+  dmSelectedCombatant?.dexterity_modifier !== 2 ||
+  dmSelectedCombatant?.initiative_priority !== 1 ||
+  dmSelectedCombatant?.can_edit_vitals !== true ||
+  dmSelectedCombatant?.can_toggle_player_detail_visibility !== true ||
+  dmSelectedCombatant?.npc_resource_counters?.[0]?.label !== "Overdrive" ||
+  dmCombatState.payload?.selected_player_character?.name !== "Arden March" ||
+  dmCombatState.payload?.player_character_targets?.length !== 1 ||
+  dmCombatState.payload?.player_character_targets?.[0]?.character_slug !== "arden-march" ||
+  dmCombatState.payload?.player_character_targets?.[0]?.is_selected !== true ||
+  dmCombatState.payload?.available_character_choices?.length !== 2 ||
   dmCombatState.payload?.available_character_choices?.map((item) => item.slug).join("|") !==
-    "arden-march|selene-brook|tobin-slate" ||
-  dmCombatState.payload?.available_character_choices?.[0]?.name !== "Arden March" ||
-  dmCombatState.payload?.available_character_choices?.[0]?.subtitle !== "Sorcerer 5" ||
-  dmCombatState.payload?.available_character_choices?.[0]?.initiative_bonus !== "2" ||
+    "selene-brook|tobin-slate" ||
+  dmCombatState.payload?.available_character_choices?.[0]?.name !== "Selene Brook" ||
   dmCombatState.payload?.available_statblock_choices?.length !== 1 ||
   dmCombatState.payload?.available_statblock_choices?.[0]?.id !== "301" ||
   dmCombatState.payload?.available_statblock_choices?.[0]?.title !== "Dock Tough" ||
@@ -1696,7 +1996,10 @@ if (
   bearerAdminCombatState.status !== 200 ||
   bearerAdminCombatState.payload?.permissions?.can_manage_combat !== true ||
   bearerAdminCombatState.payload?.permissions?.can_access_dm_content !== true ||
-  bearerAdminCombatState.payload?.available_character_choices?.[1]?.name !== "Selene Brook" ||
+  bearerAdminCombatState.payload?.live_revision !== 12 ||
+  bearerAdminCombatState.payload?.tracker?.combatant_count !== 2 ||
+  bearerAdminCombatState.payload?.selected_combatant_id !== 501 ||
+  bearerAdminCombatState.payload?.available_character_choices?.[0]?.name !== "Selene Brook" ||
   bearerAdminCombatState.payload?.available_statblock_choices?.[0]?.title !== "Dock Tough" ||
   bearerAdminCombatState.payload?.combat_condition_options?.includes("Salt-Burned") !== true ||
   bearerAdminCombatState.payload?.links?.flask_dm_status_url !== "/campaigns/linden-pass/combat/dm" ||
