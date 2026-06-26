@@ -34,6 +34,8 @@ export type CharacterSessionInventoryUpdateResult = CharacterSessionVitalsUpdate
 
 export type CharacterSessionXianxiaInventoryAddUpdateResult = CharacterSessionVitalsUpdateResult;
 
+export type CharacterSessionXianxiaInventoryItemUpdateResult = CharacterSessionVitalsUpdateResult;
+
 export type CharacterSessionXianxiaInventoryRemoveUpdateResult = CharacterSessionVitalsUpdateResult;
 
 export type CharacterSessionXianxiaInventoryEquippedUpdateResult = CharacterSessionVitalsUpdateResult;
@@ -1297,6 +1299,74 @@ function applyXianxiaInventoryRemoveStateUpdate(state: Record<string, unknown>, 
   syncTopLevelXianxiaInventory(state, normalizeSubmittedXianxiaInventoryRows(nextQuantities));
 }
 
+function mergeXianxiaInventoryRow(existing: Record<string, unknown>, update: Record<string, unknown>): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...existing };
+  const explicitEquippable = Object.hasOwn(update, "equippable");
+  const itemType = asString(update.item_type);
+  if (itemType) {
+    merged.item_type = itemType;
+  }
+  if (Object.hasOwn(update, "item_nature")) {
+    merged.item_nature = asString(update.item_nature);
+  }
+  if (Object.hasOwn(update, "name")) {
+    merged.name = asString(update.name);
+  }
+  if (Object.hasOwn(update, "quantity")) {
+    merged.quantity = asInt(update.quantity, 0);
+  }
+  if (Object.hasOwn(update, "notes")) {
+    merged.notes = asString(update.notes);
+  }
+  if (Object.hasOwn(update, "tags")) {
+    merged.tags = normalizeSubmittedXianxiaInventoryTags(update.tags);
+  }
+  if (Object.hasOwn(update, "catalog_ref")) {
+    merged.catalog_ref = asString(update.catalog_ref);
+  }
+  if (Object.hasOwn(update, "equippable")) {
+    merged.equippable = normalizeStateBoolean(update.equippable);
+  }
+  if (Object.hasOwn(update, "is_equipped")) {
+    merged.is_equipped = normalizeStateBoolean(update.is_equipped);
+  }
+  if (Object.hasOwn(update, "systems_ref")) {
+    const systemsRef = normalizeSubmittedXianxiaInventorySystemsRef(update.systems_ref);
+    if (systemsRef) {
+      merged.systems_ref = systemsRef;
+    } else {
+      delete merged.systems_ref;
+    }
+  }
+  if (!explicitEquippable) {
+    delete merged.equippable;
+  }
+
+  const normalized = normalizeSubmittedXianxiaInventoryRows([{ ...merged, id: asString(existing.id) }])[0] ?? {};
+  if (!Boolean(normalized.equippable)) {
+    normalized.is_equipped = false;
+  }
+  return normalized;
+}
+
+function applyXianxiaInventoryItemStateUpdate(
+  state: Record<string, unknown>,
+  itemId: string,
+  payload: Record<string, unknown>,
+): void {
+  normalizeXianxiaInventoryStatePayload(state);
+  const quantities = xianxiaInventoryRows(state);
+  const itemIndex = quantities.findIndex((row) => asString(row.id) === itemId);
+  if (itemIndex < 0) {
+    throw new Error(`Unknown Xianxia inventory item: ${itemId}`);
+  }
+  const itemPayload = submittedXianxiaInventoryItemPayload(payload);
+  const merged = mergeXianxiaInventoryRow(quantities[itemIndex] ?? {}, itemPayload);
+  merged.id = itemId;
+  quantities[itemIndex] = merged;
+  syncTopLevelXianxiaInventory(state, normalizeSubmittedXianxiaInventoryRows(quantities));
+}
+
 function applyInventoryQuantityUpdate(
   state: Record<string, unknown>,
   itemId: string,
@@ -2105,6 +2175,97 @@ export function updateCharacterSessionInventory(
       applyInventoryQuantityUpdate(nextState, itemId, payload, normalizeSystemKey(definition.system) === XIANXIA_SYSTEM_CODE);
     } catch (error) {
       return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character inventory payload." };
+    }
+
+    const now = utcIsoTimestamp();
+    if (stateRowMissing) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(campaignSlug, characterSlug, expectedRevision + 1, JSON.stringify(nextState), now, updatedByUserId);
+      return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+    }
+
+    const result = database
+      .prepare(
+        `
+          UPDATE character_state
+          SET revision = revision + 1,
+              state_json = ?,
+              updated_at = ?,
+              updated_by_user_id = ?
+          WHERE campaign_slug = ?
+            AND character_slug = ?
+            AND revision = ?
+        `,
+      )
+      .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
+    if (result.changes <= 0) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+    return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCharacterSessionXianxiaInventoryItem(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+  itemId: string,
+  payload: Record<string, unknown>,
+  updatedByUserId: number,
+): CharacterSessionXianxiaInventoryItemUpdateResult {
+  let expectedRevision: number;
+  try {
+    expectedRevision = parseRequiredWholeNumber(payload.expected_revision, "Expected revision");
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid Xianxia inventory item payload." };
+  }
+
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+
+    let existingState = readCharacterState(database, campaignSlug, characterSlug);
+    const stateRowMissing = !existingState;
+    existingState ??= { revision: 1, state: buildInitialState(definition) };
+
+    if (normalizeSystemKey(definition.system) !== XIANXIA_SYSTEM_CODE) {
+      return {
+        status: "validation_error",
+        message: "Xianxia inventory operations require a Xianxia character.",
+      };
+    }
+
+    if (existingState.revision !== expectedRevision) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+
+    const nextState = copyState(existingState.state);
+    try {
+      applyXianxiaInventoryItemStateUpdate(nextState, itemId, payload);
+    } catch (error) {
+      return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid Xianxia inventory item payload." };
     }
 
     const now = utcIsoTimestamp();

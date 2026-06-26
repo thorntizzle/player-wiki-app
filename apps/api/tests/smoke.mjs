@@ -7904,6 +7904,120 @@ if (
   );
 }
 
+const xianxiaInventoryItemPath =
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/xianxia-inventory/artifact-jade-charm`;
+const staleXianxiaInventoryItemUpdate = await requestJson(
+  xianxiaInventoryItemPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 999, item: { name: "Stale Jade Charm" } } },
+);
+if (
+  staleXianxiaInventoryItemUpdate.status !== 409 ||
+  staleXianxiaInventoryItemUpdate.payload?.error?.code !== "state_conflict" ||
+  staleXianxiaInventoryItemUpdate.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale Xianxia inventory item PATCH conflict, got ${staleXianxiaInventoryItemUpdate.status} ${JSON.stringify(staleXianxiaInventoryItemUpdate.payload)}`,
+  );
+}
+
+const unknownXianxiaInventoryItemUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/xianxia-inventory/missing-item`,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: editedXianxiaRevision + 8, item: { name: "Missing Item" } } },
+);
+if (
+  unknownXianxiaInventoryItemUpdate.status !== 400 ||
+  unknownXianxiaInventoryItemUpdate.payload?.error?.code !== "validation_error" ||
+  unknownXianxiaInventoryItemUpdate.payload?.error?.message !== "Unknown Xianxia inventory item: missing-item"
+) {
+  throw new Error(
+    `Expected unknown Xianxia inventory item PATCH validation_error, got ${unknownXianxiaInventoryItemUpdate.status} ${JSON.stringify(unknownXianxiaInventoryItemUpdate.payload)}`,
+  );
+}
+
+const xianxiaInventoryItemUpdate = await requestJson(
+  xianxiaInventoryItemPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_revision: editedXianxiaRevision + 8,
+      item: {
+        name: "Silk Charm",
+        quantity: 5,
+        item_type: "Consumable",
+        item_nature: "Mundane",
+        notes: "Folded into a sash.",
+        tags: ["ward", "silk"],
+        equippable: false,
+        is_equipped: true,
+      },
+    },
+  },
+);
+const itemUpdatePayloadQuantities =
+  xianxiaInventoryItemUpdate.payload?.character?.state_record?.state?.xianxia?.inventory?.quantities || [];
+const itemUpdatePayloadItem = itemUpdatePayloadQuantities.find((item) => item?.id === "artifact-jade-charm");
+const itemUpdatePayloadMirror = xianxiaInventoryItemUpdate.payload?.character?.state_record?.state?.inventory || [];
+const itemUpdateMirrorItem = itemUpdatePayloadMirror.find((item) => item?.id === "artifact-jade-charm");
+if (
+  xianxiaInventoryItemUpdate.status !== 200 ||
+  xianxiaInventoryItemUpdate.payload?.ok !== true ||
+  xianxiaInventoryItemUpdate.payload?.character?.state_record?.revision !== editedXianxiaRevision + 9 ||
+  itemUpdatePayloadItem?.name !== "Silk Charm" ||
+  itemUpdatePayloadItem?.quantity !== 5 ||
+  itemUpdatePayloadItem?.item_type !== "Consumable" ||
+  itemUpdatePayloadItem?.item_nature !== "Mundane" ||
+  itemUpdatePayloadItem?.equippable !== false ||
+  itemUpdatePayloadItem?.is_equipped !== false ||
+  itemUpdatePayloadItem?.notes !== "Folded into a sash." ||
+  itemUpdatePayloadItem?.tags?.join("|") !== "ward|silk" ||
+  itemUpdateMirrorItem?.name !== "Silk Charm" ||
+  itemUpdateMirrorItem?.quantity !== 5 ||
+  itemUpdateMirrorItem?.item_type !== "Consumable" ||
+  itemUpdateMirrorItem?.item_nature !== "Mundane" ||
+  itemUpdateMirrorItem?.is_equipped !== false
+) {
+  throw new Error(`Unexpected Xianxia inventory item PATCH payload: ${JSON.stringify(xianxiaInventoryItemUpdate.payload)}`);
+}
+
+const xianxiaInventoryItemAssertionDb = new Database(dbPath, { readonly: true });
+const xianxiaInventoryItemRow = xianxiaInventoryItemAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", xianxiaCharacterSlug);
+xianxiaInventoryItemAssertionDb.close();
+const xianxiaInventoryItemState = JSON.parse(xianxiaInventoryItemRow?.state_json || "{}");
+const itemUpdateDbQuantities = xianxiaInventoryItemState.xianxia?.inventory?.quantities || [];
+const itemUpdateDbItem = itemUpdateDbQuantities.find((item) => item?.id === "artifact-jade-charm");
+const itemUpdateDbMirror = xianxiaInventoryItemState.inventory || [];
+const itemUpdateDbMirrorItem = itemUpdateDbMirror.find((item) => item?.id === "artifact-jade-charm");
+if (
+  Number(xianxiaInventoryItemRow?.revision) !== editedXianxiaRevision + 9 ||
+  xianxiaInventoryItemRow?.updated_by_user_id !== 81 ||
+  itemUpdateDbItem?.name !== "Silk Charm" ||
+  itemUpdateDbItem?.quantity !== 5 ||
+  itemUpdateDbItem?.item_type !== "Consumable" ||
+  itemUpdateDbItem?.item_nature !== "Mundane" ||
+  itemUpdateDbItem?.equippable !== false ||
+  itemUpdateDbItem?.is_equipped !== false ||
+  itemUpdateDbMirrorItem?.name !== "Silk Charm" ||
+  itemUpdateDbMirrorItem?.is_equipped !== false
+) {
+  throw new Error(
+    `Unexpected Xianxia inventory item database row: ${JSON.stringify({
+      xianxiaInventoryItemRow,
+      xianxiaInventoryItemState,
+    })}`,
+  );
+}
+
 const xianxiaInventoryRemovePath =
   `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/xianxia-inventory/artifact-jade-charm`;
 const staleXianxiaInventoryRemove = await requestJson(
@@ -7928,7 +8042,7 @@ const unknownXianxiaInventoryRemove = await requestJson(
   {
     Authorization: `Bearer ${dmApiToken}`,
   },
-  { method: "DELETE", body: { expected_revision: editedXianxiaRevision + 8 } },
+  { method: "DELETE", body: { expected_revision: editedXianxiaRevision + 9 } },
 );
 if (
   unknownXianxiaInventoryRemove.status !== 400 ||
@@ -7945,7 +8059,7 @@ const xianxiaInventoryRemove = await requestJson(
   {
     Authorization: `Bearer ${dmApiToken}`,
   },
-  { method: "DELETE", body: { expected_revision: editedXianxiaRevision + 8 } },
+  { method: "DELETE", body: { expected_revision: editedXianxiaRevision + 9 } },
 );
 const removePayloadQuantities =
   xianxiaInventoryRemove.payload?.character?.state_record?.state?.xianxia?.inventory?.quantities || [];
@@ -7953,7 +8067,7 @@ const removePayloadMirror = xianxiaInventoryRemove.payload?.character?.state_rec
 if (
   xianxiaInventoryRemove.status !== 200 ||
   xianxiaInventoryRemove.payload?.ok !== true ||
-  xianxiaInventoryRemove.payload?.character?.state_record?.revision !== editedXianxiaRevision + 9 ||
+  xianxiaInventoryRemove.payload?.character?.state_record?.revision !== editedXianxiaRevision + 10 ||
   removePayloadQuantities.some((item) => item?.id === "artifact-jade-charm") ||
   removePayloadMirror.some((item) => item?.id === "artifact-jade-charm")
 ) {
@@ -7969,7 +8083,7 @@ const xianxiaInventoryRemoveState = JSON.parse(xianxiaInventoryRemoveRow?.state_
 const removedDbQuantities = xianxiaInventoryRemoveState.xianxia?.inventory?.quantities || [];
 const removedDbMirror = xianxiaInventoryRemoveState.inventory || [];
 if (
-  Number(xianxiaInventoryRemoveRow?.revision) !== editedXianxiaRevision + 9 ||
+  Number(xianxiaInventoryRemoveRow?.revision) !== editedXianxiaRevision + 10 ||
   xianxiaInventoryRemoveRow?.updated_by_user_id !== 81 ||
   removedDbQuantities.some((item) => item?.id === "artifact-jade-charm") ||
   removedDbMirror.some((item) => item?.id === "artifact-jade-charm")
