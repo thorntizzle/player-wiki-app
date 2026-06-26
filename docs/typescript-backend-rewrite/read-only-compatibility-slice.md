@@ -432,6 +432,10 @@ fixture database.
   - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>` with bearer-only writes.
   - fixture-role, stale-revision, and missing-resource validation envelopes.
   - assigned-player current/delta resource updates through `character_state`, including shared revision bumps and `updated_by_user_id`.
+- Character session spell-slot payload checks cover:
+  - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<int:level>` with bearer-only writes.
+  - stale-revision and missing-slot validation envelopes.
+  - assigned-player used/delta-used spell-slot updates through `character_state`, including shared revision bumps, `updated_by_user_id`, and legacy unlabeled slot-lane migration.
 
 ## Added Tests and Checks
 

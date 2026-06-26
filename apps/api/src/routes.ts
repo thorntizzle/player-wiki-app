@@ -1111,6 +1111,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "validation_error",
     },
   },
+  {
+    method: "PATCH",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/spell-slots/:level",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<int:level>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<int:level>",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "PATCH",
+      path: "/api/v1/campaigns/linden-pass/characters/arden-march/session/spell-slots/99",
+      status: 400,
+      contentType: "application/json",
+      errorCode: "validation_error",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1190,4 +1205,5 @@ export const ROUTES = {
   combatConditionUpdate: IMPLEMENTED_ROUTES[73].honoPath,
   characterSessionVitals: IMPLEMENTED_ROUTES[74].honoPath,
   characterSessionResource: IMPLEMENTED_ROUTES[75].honoPath,
+  characterSessionSpellSlots: IMPLEMENTED_ROUTES[76].honoPath,
 } as const;

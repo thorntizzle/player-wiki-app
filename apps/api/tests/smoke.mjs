@@ -6419,6 +6419,79 @@ if (
   );
 }
 
+const staleSessionSpellSlotsUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/spell-slots/1`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 999, used: "2" } },
+);
+if (
+  staleSessionSpellSlotsUpdate.status !== 409 ||
+  staleSessionSpellSlotsUpdate.payload?.error?.code !== "state_conflict" ||
+  staleSessionSpellSlotsUpdate.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale character session spell slots PATCH conflict, got ${staleSessionSpellSlotsUpdate.status} ${JSON.stringify(staleSessionSpellSlotsUpdate.payload)}`,
+  );
+}
+
+const missingSessionSpellSlotsUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/spell-slots/9`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 2, used: "2" } },
+);
+if (
+  missingSessionSpellSlotsUpdate.status !== 400 ||
+  missingSessionSpellSlotsUpdate.payload?.error?.code !== "validation_error" ||
+  missingSessionSpellSlotsUpdate.payload?.error?.message !== "Unknown spell slot level: 9"
+) {
+  throw new Error(
+    `Expected missing character session spell slots PATCH validation_error, got ${missingSessionSpellSlotsUpdate.status} ${JSON.stringify(missingSessionSpellSlotsUpdate.payload)}`,
+  );
+}
+
+const playerSessionSpellSlotsUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/spell-slots/1`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 2, slot_lane_id: "main-slots", used: "2", delta_used: "-1" } },
+);
+if (
+  playerSessionSpellSlotsUpdate.status !== 200 ||
+  playerSessionSpellSlotsUpdate.payload?.ok !== true ||
+  playerSessionSpellSlotsUpdate.payload?.character?.state_record?.revision !== 3 ||
+  playerSessionSpellSlotsUpdate.payload?.character?.state_record?.state?.spell_slots?.[0]?.level !== 1 ||
+  playerSessionSpellSlotsUpdate.payload?.character?.state_record?.state?.spell_slots?.[0]?.slot_lane_id !== "main-slots" ||
+  playerSessionSpellSlotsUpdate.payload?.character?.state_record?.state?.spell_slots?.[0]?.used !== 1
+) {
+  throw new Error(`Unexpected character session spell slots PATCH payload: ${JSON.stringify(playerSessionSpellSlotsUpdate.payload)}`);
+}
+
+const sessionSpellSlotsAssertionDb = new Database(dbPath, { readonly: true });
+const managedStateAfterSpellSlots = sessionSpellSlotsAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", managedCharacterSlug);
+sessionSpellSlotsAssertionDb.close();
+const managedSpellSlotsState = JSON.parse(managedStateAfterSpellSlots?.state_json || "{}");
+if (
+  managedStateAfterSpellSlots?.revision !== 3 ||
+  managedStateAfterSpellSlots?.updated_by_user_id !== 79 ||
+  managedSpellSlotsState.spell_slots?.[0]?.level !== 1 ||
+  managedSpellSlotsState.spell_slots?.[0]?.slot_lane_id !== "main-slots" ||
+  managedSpellSlotsState.spell_slots?.[0]?.used !== 1
+) {
+  throw new Error(
+    `Unexpected character session spell slots database row: ${JSON.stringify({
+      managedStateAfterSpellSlots,
+      managedSpellSlotsState,
+    })}`,
+  );
+}
+
 const contentCharactersAfterPut = await requestJson("/api/v1/campaigns/linden-pass/content/characters", contentManagerHeaders);
 if (!contentCharactersAfterPut.payload?.characters?.some((item) => item.character_slug === managedCharacterSlug)) {
   throw new Error(`Expected content characters list to include ${managedCharacterSlug} after PUT.`);

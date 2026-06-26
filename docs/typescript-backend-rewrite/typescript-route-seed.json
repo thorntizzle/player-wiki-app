@@ -665,6 +665,15 @@
       "notes": "Tracked Hono character session resource route with bearer API-token writes for app admin, campaign DM, or assigned player, fixture-role write denial, shared character_state revision conflict handling, current/delta resource updates by state resource id, refreshed character state payloads, and validation_error missing-resource JSON."
     },
     {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<int:level>",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/spell-slots/:level",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono character session spell-slot route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflict handling, used/delta_used updates by spell-slot level and optional slot_lane_id, legacy unlabeled slot lane migration, refreshed character state payloads, and validation_error missing-slot JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/me",
       "route_family": "api_v1",

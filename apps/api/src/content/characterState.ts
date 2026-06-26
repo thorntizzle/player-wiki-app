@@ -28,6 +28,8 @@ export type CharacterSessionVitalsUpdateResult =
 
 export type CharacterSessionResourceUpdateResult = CharacterSessionVitalsUpdateResult;
 
+export type CharacterSessionSpellSlotsUpdateResult = CharacterSessionVitalsUpdateResult;
+
 const XIANXIA_SYSTEM_CODE = "xianxia";
 const XIANXIA_ENERGY_KEYS = ["jing", "qi", "shen"] as const;
 const XIANXIA_CURRENCY_KEYS = ["coin", "supply", "spirit_stones"] as const;
@@ -797,6 +799,48 @@ function applyResourceUpdate(state: Record<string, unknown>, resourceId: string,
   state.resources = resources;
 }
 
+function normalizeSpellSlotLaneId(value: unknown): string {
+  return String(value || "").trim();
+}
+
+function applySpellSlotsUpdate(
+  state: Record<string, unknown>,
+  level: number,
+  payload: Record<string, unknown>,
+): void {
+  const slots = asArray(state.spell_slots);
+  const cleanLaneId = normalizeSpellSlotLaneId(payload.slot_lane_id);
+  let slot = slots.map(asRecord).find(
+    (item) =>
+      asInt(item.level, 0) === level &&
+      normalizeSpellSlotLaneId(item.slot_lane_id) === cleanLaneId,
+  );
+  if (!slot && cleanLaneId) {
+    slot = slots.map(asRecord).find(
+      (item) => asInt(item.level, 0) === level && !normalizeSpellSlotLaneId(item.slot_lane_id),
+    );
+    if (slot) {
+      slot.slot_lane_id = cleanLaneId;
+    }
+  }
+  if (!slot) {
+    const laneLabel = cleanLaneId ? ` in slot lane '${cleanLaneId}'` : "";
+    throw new Error(`Unknown spell slot level: ${level}${laneLabel}`);
+  }
+
+  let used = asInt(slot.used, 0);
+  const usedValue = parseOptionalWholeNumber(payload.used, "Used spell slots");
+  if (usedValue !== null) {
+    used = usedValue;
+  }
+  const deltaUsedValue = parseOptionalWholeNumber(payload.delta_used, "Spell slot delta");
+  if (deltaUsedValue !== null) {
+    used += deltaUsedValue;
+  }
+  slot.used = used;
+  state.spell_slots = slots;
+}
+
 export function canEditCharacterSessionState(
   config: ApiConfig,
   campaignSlug: string,
@@ -965,6 +1009,92 @@ export function updateCharacterSessionResource(
       applyResourceUpdate(nextState, resourceId, payload);
     } catch (error) {
       return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character resource payload." };
+    }
+
+    const now = utcIsoTimestamp();
+    if (stateRowMissing) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(campaignSlug, characterSlug, expectedRevision + 1, JSON.stringify(nextState), now, updatedByUserId);
+      return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+    }
+
+    const result = database
+      .prepare(
+        `
+          UPDATE character_state
+          SET revision = revision + 1,
+              state_json = ?,
+              updated_at = ?,
+              updated_by_user_id = ?
+          WHERE campaign_slug = ?
+            AND character_slug = ?
+            AND revision = ?
+        `,
+      )
+      .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
+    if (result.changes <= 0) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+    return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCharacterSessionSpellSlots(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+  levelValue: unknown,
+  payload: Record<string, unknown>,
+  updatedByUserId: number,
+): CharacterSessionSpellSlotsUpdateResult {
+  let expectedRevision: number;
+  let level: number;
+  try {
+    expectedRevision = parseRequiredWholeNumber(payload.expected_revision, "Expected revision");
+    level = parseRequiredWholeNumber(levelValue, "Spell slot level");
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character spell slot payload." };
+  }
+
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+
+    let existingState = readCharacterState(database, campaignSlug, characterSlug);
+    const stateRowMissing = !existingState;
+    existingState ??= { revision: 1, state: buildInitialState(definition) };
+
+    if (existingState.revision !== expectedRevision) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+
+    const nextState = copyState(existingState.state);
+    try {
+      applySpellSlotsUpdate(nextState, level, payload);
+    } catch (error) {
+      return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character spell slot payload." };
     }
 
     const now = utcIsoTimestamp();
