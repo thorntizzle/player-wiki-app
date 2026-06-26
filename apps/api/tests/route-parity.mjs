@@ -25,7 +25,7 @@ for (const route of IMPLEMENTED_ROUTES) {
     throw new Error(`Unknown snapshot family '${route.snapshotFamily}' for ${route.honoPath}.`);
   }
 
-  const expected = `${route.method} ${route.snapshotPath}`;
+  const expected = `${route.snapshotMethod || route.method} ${route.snapshotPath}`;
   const hasSnapshot = snapshotRoutes.some((snapshotRoute) => routeKey(snapshotRoute) === expected);
   if (!hasSnapshot) {
     throw new Error(`Implemented TypeScript route ${expected} is missing from ${repoRoot} route snapshot.`);

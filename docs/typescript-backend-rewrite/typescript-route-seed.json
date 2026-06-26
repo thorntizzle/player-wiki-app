@@ -3,7 +3,7 @@
   "status": "active_seed",
   "notes": [
     "Seed routes are intentionally minimal and should be narrowed or expanded in lockstep with implemented TypeScript handlers.",
-    "Routes with an implemented_* status must have a matching entry in apps/api/src/routes.ts and a matching current Python route snapshot.",
+    "Routes with an implemented_* status must have a matching entry in apps/api/src/routes.ts and a matching current Python route snapshot; API-only replacements for Flask form routes must name the Flask source route in notes and use the manifest snapshot_method override.",
     "Deferred scratch-proof routes are retained as future candidates only; they are not implemented by the tracked TypeScript API slice yet."
   ],
   "routes": [
@@ -222,6 +222,132 @@
       "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/live-state",
       "snapshot_family": "api_v1",
       "notes": "Tracked Hono Combat live-state route sharing the fixture/SQLite combat state payload, including read-only tracker/combatant/condition/resource reads with empty fallback, fixture-role and bearer-token membership-derived role gates, manager setup choices, and unchanged-response short-circuit contract."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/advance-turn",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/advance-turn",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat advance-turn mutation with bearer API-token DM/admin access, fixture-role write denial, supported-combat validation, empty-combatant validation, ordered combatant cycling, round increment when wrapping, start-of-turn movement/action reset for the new current combatant, tracker/combatant revision bumps, refreshed combat payloads, and missing-campaign JSON."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/clear",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/clear",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat clear mutation with bearer API-token DM/admin access, fixture-role write denial, supported-combat validation, campaign combatant/condition/resource cleanup, tracker round/current reset, tracker revision bump, refreshed empty combat payloads, and missing-campaign JSON."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/player-combatants",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/player-combatants",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat player-combatant add mutation with bearer API-token DM/admin access, fixture-role write denial, supported-combat validation, visible active character validation, character-state initialization fallback, turn-value defaulting from initiative, initiative-priority validation, duplicate player-character validation, tracker revision bump without changing current turn, refreshed combat payloads, and missing-campaign JSON."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/npc-combatants",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/npc-combatants",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat manual NPC add mutation with bearer API-token DM/admin access, fixture-role write denial, supported-combat validation, manual NPC field validation, integer/default normalization for initiative and HP/movement fields, current-HP ceiling validation, manual source identity, no resource counter/note seeds, tracker revision bump without changing current turn, refreshed combat payloads, and missing-campaign JSON."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/statblock-combatants",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/statblock-combatants",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat DM Content statblock add mutation with bearer API-token DM/admin access, fixture-role write denial, supported-combat validation, statblock-id validation, statblock default name/initiative/HP/movement fields, DEX tie-breaker extraction, source identity, source-backed limited-use counter and read-only mechanic note seeding, tracker revision bump without changing current turn, refreshed combat payloads, and missing-campaign JSON."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/systems-monsters",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/systems-monsters",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat Systems monster add mutation with bearer API-token DM/admin access, fixture-role write denial, supported-combat validation, enabled Systems monster validation, metadata-derived initiative/DEX/HP/movement fields, source identity, source-backed limited-use counter and read-only mechanic note seeding from structured Systems body JSON, tracker revision bump without changing current turn, refreshed combat payloads, and missing-campaign JSON."
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/turn",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/turn",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat turn-value mutation with bearer API-token DM/admin access, fixture-role write denial, supported-combat validation, SQLite combatant existence validation, turn-value and initiative-priority validation/defaulting, expected combatant revision stale-write conflict handling, combatant/tracker revision bumps, refreshed Combat payloads, and missing-campaign JSON."
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/vitals",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/vitals",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat vitals mutation with bearer API-token write access, fixture-role write denial, manager-only NPC vitals, assigned-player or manager player-character vitals, character-state revision conflict handling, combatant row revision conflict handling, HP/movement validation/defaulting, player-character combatant state_revision payloads, combatant/tracker revision bumps, refreshed Combat payloads, and missing-campaign JSON."
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/resources",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/resources",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat resources mutation with bearer API-token write access, fixture-role write denial, manager-only NPC movement/action-economy updates, assigned-player or manager player-character movement/action-economy updates, strict boolean validation, remaining-movement validation/defaulting, expected combatant revision stale-write conflict handling, combatant/tracker revision bumps, refreshed Combat payloads, and missing-campaign JSON."
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/npc-resources",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/npc-resources",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat NPC source-resource mutation with bearer API-token DM/admin access, fixture-role write denial, player bearer write denial, supported-combat validation, SQLite combatant existence validation, source-backed NPC-only counter edits, counter-list/object/key/value/max validation, expected combatant revision stale-write conflict handling, combatant/tracker revision bumps, refreshed Combat payloads, and missing-campaign JSON."
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/player-detail-visibility",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/player-detail-visibility",
+      "snapshot_family": "flask",
+      "notes": "API-only Hono Combat replacement for Flask form POST /campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/player-detail-visibility. Provides bearer API-token DM/admin access, fixture-role write denial, player bearer write denial, supported-combat validation, SQLite combatant existence validation, NPC-only player_detail_visible boolean validation, expected combatant revision stale-write conflict handling, combatant/tracker revision bumps, refreshed Combat payloads, and missing-campaign JSON."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/conditions",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/conditions",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat condition create mutation with bearer API-token DM/admin access, fixture-role write denial, player bearer write denial, supported-combat validation, SQLite combatant existence validation, condition name and duration validation, tracker revision bump, refreshed Combat payloads, and missing-campaign JSON."
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/conditions/:conditionId",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat condition delete mutation with bearer API-token DM/admin access, fixture-role write denial, player bearer write denial, supported-combat validation, SQLite condition existence validation, condition deletion, tracker revision bump, refreshed Combat payloads, and missing-campaign JSON."
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat combatant delete mutation with bearer API-token DM/admin access, fixture-role write denial, player bearer write denial, supported-combat validation, SQLite combatant existence validation, dependent condition/resource cleanup, current-turn cleanup, tracker revision bump, refreshed Combat payloads, and missing-campaign JSON."
     },
     {
       "method": "POST",

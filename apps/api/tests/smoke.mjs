@@ -276,6 +276,49 @@ smokeDb
     null,
     null,
   );
+const ardenInitialState = {
+  vitals: {
+    current_hp: 38,
+    temp_hp: 0,
+    death_saves: {
+      successes: 0,
+      failures: 0,
+    },
+  },
+  resources: [],
+  hit_dice: {
+    pools: [{ die_size: 8, total: 3, current: 2 }],
+  },
+  inventory: [],
+  currency: {},
+  spell_slots: [],
+  attunement: {},
+  notes: {},
+};
+smokeDb
+  .prepare(
+    "INSERT INTO character_state (campaign_slug, character_slug, revision, state_json, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    "linden-pass",
+    "arden-march",
+    8,
+    JSON.stringify(ardenInitialState),
+    "2026-06-25T09:05:00+00:00",
+    77,
+  );
+smokeDb
+  .prepare(
+    "INSERT INTO character_assignments (user_id, campaign_slug, character_slug, assignment_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    79,
+    "linden-pass",
+    "arden-march",
+    "owner",
+    "2026-06-25T09:06:00+00:00",
+    "2026-06-25T09:06:00+00:00",
+  );
 const insertImportRun = smokeDb.prepare(`
   INSERT INTO systems_import_runs (
     library_slug,
@@ -609,13 +652,21 @@ smokeDb
     `
       UPDATE systems_entries
       SET
-        metadata_json = ?
+        metadata_json = ?,
+        body_json = ?
       WHERE library_slug = ?
         AND entry_key = ?
     `,
   )
   .run(
     JSON.stringify({ abilities: { dex: 14 }, hp: { average: 7 }, speed: { walk: 30 } }),
+    JSON.stringify({
+      traits: [{ name: "Battle Cry", entries: ["Battle Cry (1/day)."] }],
+      actions: [
+        { name: "At-Will Tricks", entries: ["At will: minor illusion, dancing lights."] },
+        { name: "Snare Net", entries: ["Snare Net (Recharge 5-6)."] },
+      ],
+    }),
     "DND-5E",
     "MM:monster:goblin",
   );
@@ -802,7 +853,7 @@ smokeDb
     301,
     "linden-pass",
     "Dock Tough",
-    "## Dock Tough\nArmor Class: 12\nHit Points: 16\nSpeed: 30 ft.\nDEX 14 (+2)",
+    "## Dock Tough\nArmor Class: 12\nHit Points: 16\nSpeed: 30 ft.\nDEX 14 (+2)\nArcane Jolt (2/day)\nAt will: light, mage hand\nRust Breath (Recharge 5-6)",
     "dock-tough.md",
     "Dock Crew",
     12,
@@ -2057,6 +2108,58 @@ if (
   );
 }
 
+const fixtureAdvanceCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/advance-turn",
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "POST" },
+);
+if (fixtureAdvanceCombatState.status !== 403 || fixtureAdvanceCombatState.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected fixture combat advance-turn forbidden 403, got ${fixtureAdvanceCombatState.status} ${fixtureAdvanceCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerAdvanceCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/advance-turn",
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "POST" },
+);
+if (playerAdvanceCombatState.status !== 403 || playerAdvanceCombatState.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player combat advance-turn forbidden 403, got ${playerAdvanceCombatState.status} ${playerAdvanceCombatState.payload?.error?.code}`,
+  );
+}
+
+const fixtureClearCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/clear",
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "POST" },
+);
+if (fixtureClearCombatState.status !== 403 || fixtureClearCombatState.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected fixture combat clear forbidden 403, got ${fixtureClearCombatState.status} ${fixtureClearCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerClearCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/clear",
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "POST" },
+);
+if (playerClearCombatState.status !== 403 || playerClearCombatState.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player combat clear forbidden 403, got ${playerClearCombatState.status} ${playerClearCombatState.payload?.error?.code}`,
+  );
+}
+
 const playerSetCurrentCombatState = await requestJson(
   "/api/v1/campaigns/linden-pass/combat/combatants/502/set-current",
   {
@@ -2116,6 +2219,2997 @@ if (
     "selene-brook|tobin-slate"
 ) {
   throw new Error(`Unexpected combat set-current payload: ${JSON.stringify(setCurrentCombatState.payload)}`);
+}
+
+const advanceWrapCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/advance-turn",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST" },
+);
+if (
+  advanceWrapCombatState.status !== 200 ||
+  advanceWrapCombatState.payload?.ok !== true ||
+  advanceWrapCombatState.payload?.changed !== true ||
+  advanceWrapCombatState.payload?.live_revision !== 14 ||
+  advanceWrapCombatState.payload?.tracker?.round_number !== 4 ||
+  advanceWrapCombatState.payload?.tracker?.current_turn_label !== "Clockwork Hound" ||
+  advanceWrapCombatState.payload?.selected_combatant_id !== 501 ||
+  advanceWrapCombatState.payload?.selected_combatant?.name !== "Clockwork Hound" ||
+  advanceWrapCombatState.payload?.selected_combatant?.combatant_revision !== 7 ||
+  advanceWrapCombatState.payload?.selected_combatant?.has_action !== true ||
+  advanceWrapCombatState.payload?.selected_combatant?.has_bonus_action !== true ||
+  advanceWrapCombatState.payload?.selected_combatant?.has_reaction !== true ||
+  advanceWrapCombatState.payload?.selected_combatant?.movement_remaining !== 40 ||
+  advanceWrapCombatState.payload?.selected_player_character?.name !== "Arden March"
+) {
+  throw new Error(`Unexpected combat advance-turn wrap payload: ${JSON.stringify(advanceWrapCombatState.payload)}`);
+}
+
+const advanceNextCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/advance-turn",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST" },
+);
+if (
+  advanceNextCombatState.status !== 200 ||
+  advanceNextCombatState.payload?.ok !== true ||
+  advanceNextCombatState.payload?.changed !== true ||
+  advanceNextCombatState.payload?.live_revision !== 15 ||
+  advanceNextCombatState.payload?.tracker?.round_number !== 4 ||
+  advanceNextCombatState.payload?.tracker?.current_turn_label !== "Arden March" ||
+  advanceNextCombatState.payload?.selected_combatant_id !== 502 ||
+  advanceNextCombatState.payload?.selected_combatant?.name !== "Arden March" ||
+  advanceNextCombatState.payload?.selected_combatant?.combatant_revision !== 6 ||
+  advanceNextCombatState.payload?.selected_combatant?.has_action !== true ||
+  advanceNextCombatState.payload?.selected_combatant?.has_bonus_action !== true ||
+  advanceNextCombatState.payload?.selected_combatant?.has_reaction !== true ||
+  advanceNextCombatState.payload?.selected_combatant?.movement_remaining !== 30 ||
+  advanceNextCombatState.payload?.selected_player_character?.name !== "Arden March" ||
+  advanceNextCombatState.payload?.player_character_targets?.[0]?.is_selected !== true
+) {
+  throw new Error(`Unexpected combat advance-turn next payload: ${JSON.stringify(advanceNextCombatState.payload)}`);
+}
+
+const missingAdvanceCombatState = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/combat/advance-turn",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST" },
+);
+if (missingAdvanceCombatState.status !== 404 || missingAdvanceCombatState.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(
+    `Expected missing combat advance-turn JSON 404, got ${missingAdvanceCombatState.status} ${missingAdvanceCombatState.payload?.error?.code}`,
+  );
+}
+
+const missingClearCombatState = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/combat/clear",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST" },
+);
+if (missingClearCombatState.status !== 404 || missingClearCombatState.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(
+    `Expected missing combat clear JSON 404, got ${missingClearCombatState.status} ${missingClearCombatState.payload?.error?.code}`,
+  );
+}
+
+const clearCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/clear",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST" },
+);
+if (
+  clearCombatState.status !== 200 ||
+  clearCombatState.payload?.ok !== true ||
+  clearCombatState.payload?.changed !== true ||
+  clearCombatState.payload?.live_revision !== 16 ||
+  clearCombatState.payload?.tracker?.round_number !== 1 ||
+  clearCombatState.payload?.tracker?.current_turn_label !== "" ||
+  clearCombatState.payload?.tracker?.has_current_turn !== false ||
+  clearCombatState.payload?.tracker?.combatant_count !== 0 ||
+  clearCombatState.payload?.tracker?.combatants?.length !== 0 ||
+  clearCombatState.payload?.selected_combatant_id !== null ||
+  clearCombatState.payload?.selected_combatant !== null ||
+  clearCombatState.payload?.selected_player_character !== null ||
+  clearCombatState.payload?.player_character_targets?.length !== 0 ||
+  clearCombatState.payload?.available_character_choices?.map((item) => item.slug).join("|") !==
+    "arden-march|selene-brook|tobin-slate"
+) {
+  throw new Error(`Unexpected combat clear payload: ${JSON.stringify(clearCombatState.payload)}`);
+}
+
+const combatClearAssertionDb = new Database(dbPath, { readonly: true });
+const combatantRowsAfterClear = combatClearAssertionDb
+  .prepare("SELECT COUNT(*) AS count FROM campaign_combatants WHERE campaign_slug = ?")
+  .get("linden-pass");
+const conditionRowsAfterClear = combatClearAssertionDb
+  .prepare(
+    `
+      SELECT COUNT(*) AS count
+      FROM campaign_combat_conditions
+      WHERE combatant_id IN (501, 502)
+    `,
+  )
+  .get();
+const counterRowsAfterClear = combatClearAssertionDb
+  .prepare(
+    `
+      SELECT COUNT(*) AS count
+      FROM campaign_combatant_resource_counters
+      WHERE combatant_id IN (501, 502)
+    `,
+  )
+  .get();
+const noteRowsAfterClear = combatClearAssertionDb
+  .prepare(
+    `
+      SELECT COUNT(*) AS count
+      FROM campaign_combatant_resource_notes
+      WHERE combatant_id IN (501, 502)
+    `,
+  )
+  .get();
+combatClearAssertionDb.close();
+if (
+  combatantRowsAfterClear?.count !== 0 ||
+  conditionRowsAfterClear?.count !== 0 ||
+  counterRowsAfterClear?.count !== 0 ||
+  noteRowsAfterClear?.count !== 0
+) {
+  throw new Error(
+    `Expected combat clear to remove dependent rows, got ${JSON.stringify({
+      combatantRowsAfterClear,
+      conditionRowsAfterClear,
+      counterRowsAfterClear,
+      noteRowsAfterClear,
+    })}`,
+  );
+}
+
+const emptyAdvanceCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/advance-turn",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST" },
+);
+if (
+  emptyAdvanceCombatState.status !== 400 ||
+  emptyAdvanceCombatState.payload?.error?.code !== "validation_error" ||
+  emptyAdvanceCombatState.payload?.error?.message !== "Add combatants before advancing turn order."
+) {
+  throw new Error(
+    `Expected empty combat advance-turn validation_error 400, got ${emptyAdvanceCombatState.status} ${JSON.stringify(emptyAdvanceCombatState.payload)}`,
+  );
+}
+
+const fixtureAddPlayerCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/player-combatants",
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "POST", body: { character_slug: "arden-march" } },
+);
+if (fixtureAddPlayerCombatState.status !== 403 || fixtureAddPlayerCombatState.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected fixture combat player add forbidden 403, got ${fixtureAddPlayerCombatState.status} ${fixtureAddPlayerCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerAddPlayerCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/player-combatants",
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "POST", body: { character_slug: "arden-march" } },
+);
+if (playerAddPlayerCombatState.status !== 403 || playerAddPlayerCombatState.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player combat player add forbidden 403, got ${playerAddPlayerCombatState.status} ${playerAddPlayerCombatState.payload?.error?.code}`,
+  );
+}
+
+const missingAddPlayerCombatState = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/combat/player-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { character_slug: "arden-march" } },
+);
+if (missingAddPlayerCombatState.status !== 404 || missingAddPlayerCombatState.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(
+    `Expected missing combat player add JSON 404, got ${missingAddPlayerCombatState.status} ${missingAddPlayerCombatState.payload?.error?.code}`,
+  );
+}
+
+const malformedAddPlayerCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/player-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: "{" },
+);
+if (malformedAddPlayerCombatState.status !== 400 || malformedAddPlayerCombatState.payload?.error?.code !== "validation_error") {
+  throw new Error(
+    `Expected malformed combat player add validation_error 400, got ${malformedAddPlayerCombatState.status} ${malformedAddPlayerCombatState.payload?.error?.code}`,
+  );
+}
+
+const invalidCharacterAddCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/player-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { character_slug: "missing-character" } },
+);
+if (
+  invalidCharacterAddCombatState.status !== 400 ||
+  invalidCharacterAddCombatState.payload?.error?.code !== "validation_error" ||
+  invalidCharacterAddCombatState.payload?.error?.message !== "Choose a valid player character to add to the tracker."
+) {
+  throw new Error(
+    `Expected invalid combat player add character validation_error 400, got ${invalidCharacterAddCombatState.status} ${JSON.stringify(invalidCharacterAddCombatState.payload)}`,
+  );
+}
+
+const invalidTurnAddCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/player-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { character_slug: "arden-march", turn_value: "12.5" } },
+);
+if (
+  invalidTurnAddCombatState.status !== 400 ||
+  invalidTurnAddCombatState.payload?.error?.code !== "validation_error" ||
+  invalidTurnAddCombatState.payload?.error?.message !== "Turn value must be a whole number."
+) {
+  throw new Error(
+    `Expected invalid combat player add turn validation_error 400, got ${invalidTurnAddCombatState.status} ${JSON.stringify(invalidTurnAddCombatState.payload)}`,
+  );
+}
+
+const invalidPriorityAddCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/player-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { character_slug: "arden-march", initiative_priority: "none" } },
+);
+if (
+  invalidPriorityAddCombatState.status !== 400 ||
+  invalidPriorityAddCombatState.payload?.error?.code !== "validation_error" ||
+  invalidPriorityAddCombatState.payload?.error?.message !== "Priority must be a whole number."
+) {
+  throw new Error(
+    `Expected invalid combat player add priority validation_error 400, got ${invalidPriorityAddCombatState.status} ${JSON.stringify(invalidPriorityAddCombatState.payload)}`,
+  );
+}
+
+const lowPriorityAddCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/player-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { character_slug: "arden-march", initiative_priority: "0" } },
+);
+if (
+  lowPriorityAddCombatState.status !== 400 ||
+  lowPriorityAddCombatState.payload?.error?.code !== "validation_error" ||
+  lowPriorityAddCombatState.payload?.error?.message !== "Priority must be 1 or higher."
+) {
+  throw new Error(
+    `Expected low combat player add priority validation_error 400, got ${lowPriorityAddCombatState.status} ${JSON.stringify(lowPriorityAddCombatState.payload)}`,
+  );
+}
+
+const addPlayerCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/player-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { character_slug: "arden-march", turn_value: "19", initiative_priority: "3" } },
+);
+const addedPlayerCombatant = addPlayerCombatState.payload?.tracker?.combatants?.[0];
+if (
+  addPlayerCombatState.status !== 200 ||
+  addPlayerCombatState.payload?.ok !== true ||
+  addPlayerCombatState.payload?.changed !== true ||
+  addPlayerCombatState.payload?.live_revision !== 17 ||
+  addPlayerCombatState.payload?.tracker?.round_number !== 1 ||
+  addPlayerCombatState.payload?.tracker?.current_turn_label !== "" ||
+  addPlayerCombatState.payload?.tracker?.has_current_turn !== false ||
+  addPlayerCombatState.payload?.tracker?.combatant_count !== 1 ||
+  addedPlayerCombatant?.name !== "Arden March" ||
+  addedPlayerCombatant?.character_slug !== "arden-march" ||
+  addedPlayerCombatant?.source_kind !== "character" ||
+  addedPlayerCombatant?.source_ref !== "arden-march" ||
+  addedPlayerCombatant?.type_label !== "Player character" ||
+  addedPlayerCombatant?.turn_value !== 19 ||
+  addedPlayerCombatant?.initiative_bonus_label !== "+2" ||
+  addedPlayerCombatant?.dexterity_modifier !== 2 ||
+  addedPlayerCombatant?.initiative_priority !== 3 ||
+  addedPlayerCombatant?.current_hp !== 38 ||
+  addedPlayerCombatant?.max_hp !== 38 ||
+  addedPlayerCombatant?.temp_hp !== 0 ||
+  addedPlayerCombatant?.state_revision !== 8 ||
+  addedPlayerCombatant?.movement_total !== 30 ||
+  addedPlayerCombatant?.movement_remaining !== 30 ||
+  addedPlayerCombatant?.has_action !== true ||
+  addedPlayerCombatant?.has_bonus_action !== true ||
+  addedPlayerCombatant?.has_reaction !== true ||
+  addedPlayerCombatant?.is_current_turn !== false ||
+  addPlayerCombatState.payload?.selected_combatant_id !== addedPlayerCombatant?.id ||
+  addPlayerCombatState.payload?.selected_combatant?.name !== "Arden March" ||
+  addPlayerCombatState.payload?.selected_player_character?.name !== "Arden March" ||
+  addPlayerCombatState.payload?.player_character_targets?.[0]?.combatant_id !== addedPlayerCombatant?.id ||
+  addPlayerCombatState.payload?.player_character_targets?.[0]?.is_selected !== true ||
+  addPlayerCombatState.payload?.available_character_choices?.map((item) => item.slug).join("|") !==
+    "selene-brook|tobin-slate"
+) {
+  throw new Error(`Unexpected combat player add payload: ${JSON.stringify(addPlayerCombatState.payload)}`);
+}
+const addedPlayerCombatantId = Number(addedPlayerCombatant?.id || 0);
+
+const combatAddAssertionDb = new Database(dbPath, { readonly: true });
+const addedPlayerRow = combatAddAssertionDb
+  .prepare(
+    `
+      SELECT
+        combatant_type,
+        player_detail_visible,
+        source_kind,
+        source_ref,
+        display_name,
+        turn_value,
+        initiative_bonus,
+        dexterity_modifier,
+        initiative_priority,
+        current_hp,
+        max_hp,
+        temp_hp,
+        movement_total,
+        movement_remaining,
+        has_action,
+        has_bonus_action,
+        has_reaction,
+        revision,
+        created_by_user_id,
+        updated_by_user_id
+      FROM campaign_combatants
+      WHERE campaign_slug = ?
+        AND character_slug = ?
+    `,
+  )
+  .get("linden-pass", "arden-march");
+const trackerAfterPlayerAdd = combatAddAssertionDb
+  .prepare("SELECT round_number, current_combatant_id, revision FROM campaign_combat_trackers WHERE campaign_slug = ?")
+  .get("linden-pass");
+combatAddAssertionDb.close();
+if (
+  addedPlayerRow?.combatant_type !== "player_character" ||
+  addedPlayerRow?.player_detail_visible !== 1 ||
+  addedPlayerRow?.source_kind !== "character" ||
+  addedPlayerRow?.source_ref !== "arden-march" ||
+  addedPlayerRow?.display_name !== "Arden March" ||
+  addedPlayerRow?.turn_value !== 19 ||
+  addedPlayerRow?.initiative_bonus !== 2 ||
+  addedPlayerRow?.dexterity_modifier !== 2 ||
+  addedPlayerRow?.initiative_priority !== 3 ||
+  addedPlayerRow?.current_hp !== 38 ||
+  addedPlayerRow?.max_hp !== 38 ||
+  addedPlayerRow?.temp_hp !== 0 ||
+  addedPlayerRow?.movement_total !== 30 ||
+  addedPlayerRow?.movement_remaining !== 30 ||
+  addedPlayerRow?.has_action !== 1 ||
+  addedPlayerRow?.has_bonus_action !== 1 ||
+  addedPlayerRow?.has_reaction !== 1 ||
+  addedPlayerRow?.revision !== 1 ||
+  addedPlayerRow?.created_by_user_id !== 77 ||
+  addedPlayerRow?.updated_by_user_id !== 77 ||
+  trackerAfterPlayerAdd?.round_number !== 1 ||
+  trackerAfterPlayerAdd?.current_combatant_id !== null ||
+  trackerAfterPlayerAdd?.revision !== 17
+) {
+  throw new Error(
+    `Unexpected combat player add database rows: ${JSON.stringify({ addedPlayerRow, trackerAfterPlayerAdd })}`,
+  );
+}
+
+const duplicateAddPlayerCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/player-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { character_slug: "arden-march" } },
+);
+if (
+  duplicateAddPlayerCombatState.status !== 400 ||
+  duplicateAddPlayerCombatState.payload?.error?.code !== "validation_error" ||
+  duplicateAddPlayerCombatState.payload?.error?.message !== "That player character is already in the combat tracker."
+) {
+  throw new Error(
+    `Expected duplicate combat player add validation_error 400, got ${duplicateAddPlayerCombatState.status} ${JSON.stringify(duplicateAddPlayerCombatState.payload)}`,
+  );
+}
+
+const fixtureAddNpcCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/npc-combatants",
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "POST", body: { display_name: "Dock Bandit", max_hp: 9 } },
+);
+if (fixtureAddNpcCombatState.status !== 403 || fixtureAddNpcCombatState.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected fixture combat NPC add forbidden 403, got ${fixtureAddNpcCombatState.status} ${fixtureAddNpcCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerAddNpcCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/npc-combatants",
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "POST", body: { display_name: "Dock Bandit", max_hp: 9 } },
+);
+if (playerAddNpcCombatState.status !== 403 || playerAddNpcCombatState.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player combat NPC add forbidden 403, got ${playerAddNpcCombatState.status} ${playerAddNpcCombatState.payload?.error?.code}`,
+  );
+}
+
+const missingAddNpcCombatState = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/combat/npc-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { display_name: "Dock Bandit", max_hp: 9 } },
+);
+if (missingAddNpcCombatState.status !== 404 || missingAddNpcCombatState.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(
+    `Expected missing combat NPC add JSON 404, got ${missingAddNpcCombatState.status} ${missingAddNpcCombatState.payload?.error?.code}`,
+  );
+}
+
+const malformedAddNpcCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/npc-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: "{" },
+);
+if (malformedAddNpcCombatState.status !== 400 || malformedAddNpcCombatState.payload?.error?.code !== "validation_error") {
+  throw new Error(
+    `Expected malformed combat NPC add validation_error 400, got ${malformedAddNpcCombatState.status} ${malformedAddNpcCombatState.payload?.error?.code}`,
+  );
+}
+
+const namelessAddNpcCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/npc-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { display_name: "  ", max_hp: 9 } },
+);
+if (
+  namelessAddNpcCombatState.status !== 400 ||
+  namelessAddNpcCombatState.payload?.error?.code !== "validation_error" ||
+  namelessAddNpcCombatState.payload?.error?.message !== "NPC name is required."
+) {
+  throw new Error(
+    `Expected nameless combat NPC add validation_error 400, got ${namelessAddNpcCombatState.status} ${JSON.stringify(namelessAddNpcCombatState.payload)}`,
+  );
+}
+
+const missingMaxHpAddNpcCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/npc-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { display_name: "Dock Bandit" } },
+);
+if (
+  missingMaxHpAddNpcCombatState.status !== 400 ||
+  missingMaxHpAddNpcCombatState.payload?.error?.code !== "validation_error" ||
+  missingMaxHpAddNpcCombatState.payload?.error?.message !== "Max HP is required."
+) {
+  throw new Error(
+    `Expected missing max HP combat NPC add validation_error 400, got ${missingMaxHpAddNpcCombatState.status} ${JSON.stringify(missingMaxHpAddNpcCombatState.payload)}`,
+  );
+}
+
+const invalidInitiativeAddNpcCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/npc-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { display_name: "Dock Bandit", initiative_bonus: "fast", max_hp: 9 } },
+);
+if (
+  invalidInitiativeAddNpcCombatState.status !== 400 ||
+  invalidInitiativeAddNpcCombatState.payload?.error?.code !== "validation_error" ||
+  invalidInitiativeAddNpcCombatState.payload?.error?.message !== "Initiative bonus must be a whole number."
+) {
+  throw new Error(
+    `Expected invalid initiative combat NPC add validation_error 400, got ${invalidInitiativeAddNpcCombatState.status} ${JSON.stringify(invalidInitiativeAddNpcCombatState.payload)}`,
+  );
+}
+
+const negativeTempHpAddNpcCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/npc-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { display_name: "Dock Bandit", max_hp: 9, temp_hp: "-1" } },
+);
+if (
+  negativeTempHpAddNpcCombatState.status !== 400 ||
+  negativeTempHpAddNpcCombatState.payload?.error?.code !== "validation_error" ||
+  negativeTempHpAddNpcCombatState.payload?.error?.message !== "Temp HP cannot be less than 0."
+) {
+  throw new Error(
+    `Expected negative temp HP combat NPC add validation_error 400, got ${negativeTempHpAddNpcCombatState.status} ${JSON.stringify(negativeTempHpAddNpcCombatState.payload)}`,
+  );
+}
+
+const tooHighCurrentHpAddNpcCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/npc-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { display_name: "Dock Bandit", current_hp: 10, max_hp: 9 } },
+);
+if (
+  tooHighCurrentHpAddNpcCombatState.status !== 400 ||
+  tooHighCurrentHpAddNpcCombatState.payload?.error?.code !== "validation_error" ||
+  tooHighCurrentHpAddNpcCombatState.payload?.error?.message !== "Current HP cannot exceed max HP."
+) {
+  throw new Error(
+    `Expected too-high current HP combat NPC add validation_error 400, got ${tooHighCurrentHpAddNpcCombatState.status} ${JSON.stringify(tooHighCurrentHpAddNpcCombatState.payload)}`,
+  );
+}
+
+const addNpcCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/npc-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  {
+    method: "POST",
+    body: {
+      display_name: "Dock Bandit",
+      turn_value: "12",
+      initiative_bonus: "1",
+      dexterity_modifier: "",
+      initiative_priority: "2",
+      current_hp: "7",
+      max_hp: "9",
+      temp_hp: "2",
+      movement_total: "25",
+    },
+  },
+);
+const addedNpcCombatant = addNpcCombatState.payload?.tracker?.combatants?.find(
+  (combatant) => combatant.name === "Dock Bandit",
+);
+if (
+  addNpcCombatState.status !== 200 ||
+  addNpcCombatState.payload?.ok !== true ||
+  addNpcCombatState.payload?.changed !== true ||
+  addNpcCombatState.payload?.live_revision !== 18 ||
+  addNpcCombatState.payload?.tracker?.round_number !== 1 ||
+  addNpcCombatState.payload?.tracker?.current_turn_label !== "" ||
+  addNpcCombatState.payload?.tracker?.has_current_turn !== false ||
+  addNpcCombatState.payload?.tracker?.combatant_count !== 2 ||
+  addNpcCombatState.payload?.selected_combatant?.name !== "Arden March" ||
+  addNpcCombatState.payload?.selected_player_character?.name !== "Arden March" ||
+  addNpcCombatState.payload?.player_character_targets?.[0]?.name !== "Arden March" ||
+  addNpcCombatState.payload?.available_character_choices?.map((item) => item.slug).join("|") !==
+    "selene-brook|tobin-slate" ||
+  addedNpcCombatant?.character_slug !== "" ||
+  addedNpcCombatant?.source_kind !== "manual_npc" ||
+  addedNpcCombatant?.source_ref !== "" ||
+  addedNpcCombatant?.source_label !== "Manual NPC" ||
+  addedNpcCombatant?.type_label !== "NPC" ||
+  addedNpcCombatant?.turn_value !== 12 ||
+  addedNpcCombatant?.initiative_bonus_label !== "+1" ||
+  addedNpcCombatant?.dexterity_modifier !== 1 ||
+  addedNpcCombatant?.initiative_priority !== 2 ||
+  addedNpcCombatant?.current_hp !== 7 ||
+  addedNpcCombatant?.max_hp !== 9 ||
+  addedNpcCombatant?.temp_hp !== 2 ||
+  addedNpcCombatant?.movement_total !== 25 ||
+  addedNpcCombatant?.movement_remaining !== 25 ||
+  addedNpcCombatant?.has_action !== true ||
+  addedNpcCombatant?.has_bonus_action !== true ||
+  addedNpcCombatant?.has_reaction !== true ||
+  addedNpcCombatant?.is_current_turn !== false ||
+  addedNpcCombatant?.npc_resource_counters?.length !== 0 ||
+  addedNpcCombatant?.npc_resource_notes?.length !== 0
+) {
+  throw new Error(`Unexpected combat NPC add payload: ${JSON.stringify(addNpcCombatState.payload)}`);
+}
+
+const combatNpcAddAssertionDb = new Database(dbPath, { readonly: true });
+const addedNpcRow = combatNpcAddAssertionDb
+  .prepare(
+    `
+      SELECT
+        id,
+        combatant_type,
+        character_slug,
+        player_detail_visible,
+        source_kind,
+        source_ref,
+        display_name,
+        turn_value,
+        initiative_bonus,
+        dexterity_modifier,
+        initiative_priority,
+        current_hp,
+        max_hp,
+        temp_hp,
+        movement_total,
+        movement_remaining,
+        has_action,
+        has_bonus_action,
+        has_reaction,
+        revision,
+        created_by_user_id,
+        updated_by_user_id
+      FROM campaign_combatants
+      WHERE campaign_slug = ?
+        AND display_name = ?
+    `,
+  )
+  .get("linden-pass", "Dock Bandit");
+const addedNpcCounterRows = combatNpcAddAssertionDb
+  .prepare("SELECT COUNT(*) AS count FROM campaign_combatant_resource_counters WHERE combatant_id = ?")
+  .get(addedNpcRow?.id || -1);
+const addedNpcNoteRows = combatNpcAddAssertionDb
+  .prepare("SELECT COUNT(*) AS count FROM campaign_combatant_resource_notes WHERE combatant_id = ?")
+  .get(addedNpcRow?.id || -1);
+const trackerAfterNpcAdd = combatNpcAddAssertionDb
+  .prepare("SELECT round_number, current_combatant_id, revision FROM campaign_combat_trackers WHERE campaign_slug = ?")
+  .get("linden-pass");
+combatNpcAddAssertionDb.close();
+if (
+  addedNpcRow?.combatant_type !== "npc" ||
+  addedNpcRow?.character_slug !== null ||
+  addedNpcRow?.player_detail_visible !== 0 ||
+  addedNpcRow?.source_kind !== "manual_npc" ||
+  addedNpcRow?.source_ref !== "" ||
+  addedNpcRow?.display_name !== "Dock Bandit" ||
+  addedNpcRow?.turn_value !== 12 ||
+  addedNpcRow?.initiative_bonus !== 1 ||
+  addedNpcRow?.dexterity_modifier !== 1 ||
+  addedNpcRow?.initiative_priority !== 2 ||
+  addedNpcRow?.current_hp !== 7 ||
+  addedNpcRow?.max_hp !== 9 ||
+  addedNpcRow?.temp_hp !== 2 ||
+  addedNpcRow?.movement_total !== 25 ||
+  addedNpcRow?.movement_remaining !== 25 ||
+  addedNpcRow?.has_action !== 1 ||
+  addedNpcRow?.has_bonus_action !== 1 ||
+  addedNpcRow?.has_reaction !== 1 ||
+  addedNpcRow?.revision !== 1 ||
+  addedNpcRow?.created_by_user_id !== 77 ||
+  addedNpcRow?.updated_by_user_id !== 77 ||
+  addedNpcCounterRows?.count !== 0 ||
+  addedNpcNoteRows?.count !== 0 ||
+  trackerAfterNpcAdd?.round_number !== 1 ||
+  trackerAfterNpcAdd?.current_combatant_id !== null ||
+  trackerAfterNpcAdd?.revision !== 18
+) {
+  throw new Error(
+    `Unexpected combat NPC add database rows: ${JSON.stringify({
+      addedNpcRow,
+      addedNpcCounterRows,
+      addedNpcNoteRows,
+      trackerAfterNpcAdd,
+    })}`,
+  );
+}
+
+const fixtureAddStatblockCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/statblock-combatants",
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "POST", body: { statblock_id: 301 } },
+);
+if (fixtureAddStatblockCombatState.status !== 403 || fixtureAddStatblockCombatState.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected fixture combat statblock add forbidden 403, got ${fixtureAddStatblockCombatState.status} ${fixtureAddStatblockCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerAddStatblockCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/statblock-combatants",
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "POST", body: { statblock_id: 301 } },
+);
+if (playerAddStatblockCombatState.status !== 403 || playerAddStatblockCombatState.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player combat statblock add forbidden 403, got ${playerAddStatblockCombatState.status} ${playerAddStatblockCombatState.payload?.error?.code}`,
+  );
+}
+
+const missingAddStatblockCombatState = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/combat/statblock-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { statblock_id: 301 } },
+);
+if (
+  missingAddStatblockCombatState.status !== 404 ||
+  missingAddStatblockCombatState.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing combat statblock add JSON 404, got ${missingAddStatblockCombatState.status} ${missingAddStatblockCombatState.payload?.error?.code}`,
+  );
+}
+
+const malformedAddStatblockCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/statblock-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: "{" },
+);
+if (
+  malformedAddStatblockCombatState.status !== 400 ||
+  malformedAddStatblockCombatState.payload?.error?.code !== "validation_error"
+) {
+  throw new Error(
+    `Expected malformed combat statblock add validation_error 400, got ${malformedAddStatblockCombatState.status} ${JSON.stringify(malformedAddStatblockCombatState.payload)}`,
+  );
+}
+
+const invalidAddStatblockCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/statblock-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { statblock_id: 999999 } },
+);
+if (
+  invalidAddStatblockCombatState.status !== 400 ||
+  invalidAddStatblockCombatState.payload?.error?.code !== "validation_error" ||
+  invalidAddStatblockCombatState.payload?.error?.message !== "Choose a valid DM Content statblock to add."
+) {
+  throw new Error(
+    `Expected invalid combat statblock add validation_error 400, got ${invalidAddStatblockCombatState.status} ${JSON.stringify(invalidAddStatblockCombatState.payload)}`,
+  );
+}
+
+const invalidTurnAddStatblockCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/statblock-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { statblock_id: 301, turn_value: "soon" } },
+);
+if (
+  invalidTurnAddStatblockCombatState.status !== 400 ||
+  invalidTurnAddStatblockCombatState.payload?.error?.code !== "validation_error" ||
+  invalidTurnAddStatblockCombatState.payload?.error?.message !== "Turn value must be a whole number."
+) {
+  throw new Error(
+    `Expected invalid turn combat statblock add validation_error 400, got ${invalidTurnAddStatblockCombatState.status} ${JSON.stringify(invalidTurnAddStatblockCombatState.payload)}`,
+  );
+}
+
+const invalidPriorityAddStatblockCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/statblock-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { statblock_id: 301, initiative_priority: "0" } },
+);
+if (
+  invalidPriorityAddStatblockCombatState.status !== 400 ||
+  invalidPriorityAddStatblockCombatState.payload?.error?.code !== "validation_error" ||
+  invalidPriorityAddStatblockCombatState.payload?.error?.message !== "Priority must be 1 or higher."
+) {
+  throw new Error(
+    `Expected invalid priority combat statblock add validation_error 400, got ${invalidPriorityAddStatblockCombatState.status} ${JSON.stringify(invalidPriorityAddStatblockCombatState.payload)}`,
+  );
+}
+
+const addStatblockCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/statblock-combatants",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  {
+    method: "POST",
+    body: {
+      statblock_id: "301",
+      initiative_priority: "3",
+    },
+  },
+);
+const addedStatblockCombatant = addStatblockCombatState.payload?.tracker?.combatants?.find(
+  (combatant) => combatant.name === "Dock Tough",
+);
+if (
+  addStatblockCombatState.status !== 200 ||
+  addStatblockCombatState.payload?.ok !== true ||
+  addStatblockCombatState.payload?.changed !== true ||
+  addStatblockCombatState.payload?.live_revision !== 19 ||
+  addStatblockCombatState.payload?.tracker?.round_number !== 1 ||
+  addStatblockCombatState.payload?.tracker?.current_turn_label !== "" ||
+  addStatblockCombatState.payload?.tracker?.has_current_turn !== false ||
+  addStatblockCombatState.payload?.tracker?.combatant_count !== 3 ||
+  addStatblockCombatState.payload?.selected_combatant?.name !== "Arden March" ||
+  addStatblockCombatState.payload?.selected_player_character?.name !== "Arden March" ||
+  addStatblockCombatState.payload?.available_statblock_choices?.[0]?.id !== "301" ||
+  addedStatblockCombatant?.character_slug !== "" ||
+  addedStatblockCombatant?.source_kind !== "dm_statblock" ||
+  addedStatblockCombatant?.source_ref !== "301" ||
+  addedStatblockCombatant?.source_label !== "DM Content" ||
+  addedStatblockCombatant?.type_label !== "NPC" ||
+  addedStatblockCombatant?.turn_value !== 2 ||
+  addedStatblockCombatant?.initiative_bonus_label !== "+2" ||
+  addedStatblockCombatant?.dexterity_modifier !== 2 ||
+  addedStatblockCombatant?.initiative_priority !== 3 ||
+  addedStatblockCombatant?.current_hp !== 16 ||
+  addedStatblockCombatant?.max_hp !== 16 ||
+  addedStatblockCombatant?.temp_hp !== 0 ||
+  addedStatblockCombatant?.movement_total !== 30 ||
+  addedStatblockCombatant?.movement_remaining !== 30 ||
+  addedStatblockCombatant?.has_action !== true ||
+  addedStatblockCombatant?.has_bonus_action !== true ||
+  addedStatblockCombatant?.has_reaction !== true ||
+  addedStatblockCombatant?.is_current_turn !== false ||
+  addedStatblockCombatant?.npc_resource_counters?.[0]?.resource_key !== "arcane-jolt" ||
+  addedStatblockCombatant?.npc_resource_counters?.[0]?.label !== "Arcane Jolt" ||
+  addedStatblockCombatant?.npc_resource_counters?.[0]?.current_value !== 2 ||
+  addedStatblockCombatant?.npc_resource_counters?.[0]?.max_value !== 2 ||
+  addedStatblockCombatant?.npc_resource_counters?.[0]?.reset_label !== "Per day" ||
+  addedStatblockCombatant?.npc_resource_counters?.[0]?.source_label !== "DM Content" ||
+  addedStatblockCombatant?.npc_resource_notes?.[0]?.label !== "At-will spellcasting" ||
+  addedStatblockCombatant?.npc_resource_notes?.[0]?.note !== "light, mage hand" ||
+  addedStatblockCombatant?.npc_resource_notes?.[0]?.source_label !== "DM Content" ||
+  addedStatblockCombatant?.npc_resource_notes?.[1]?.label !== "Rust Breath" ||
+  addedStatblockCombatant?.npc_resource_notes?.[1]?.note !== "Recharge 5-6" ||
+  addedStatblockCombatant?.npc_resource_notes?.[1]?.source_label !== "DM Content"
+) {
+  throw new Error(`Unexpected combat statblock add payload: ${JSON.stringify(addStatblockCombatState.payload)}`);
+}
+
+const combatStatblockAddAssertionDb = new Database(dbPath, { readonly: true });
+const addedStatblockRow = combatStatblockAddAssertionDb
+  .prepare(
+    `
+      SELECT
+        id,
+        combatant_type,
+        character_slug,
+        player_detail_visible,
+        source_kind,
+        source_ref,
+        display_name,
+        turn_value,
+        initiative_bonus,
+        dexterity_modifier,
+        initiative_priority,
+        current_hp,
+        max_hp,
+        temp_hp,
+        movement_total,
+        movement_remaining,
+        has_action,
+        has_bonus_action,
+        has_reaction,
+        revision,
+        created_by_user_id,
+        updated_by_user_id
+      FROM campaign_combatants
+      WHERE campaign_slug = ?
+        AND display_name = ?
+        AND source_kind = ?
+    `,
+  )
+  .get("linden-pass", "Dock Tough", "dm_statblock");
+const addedStatblockCounterRows = combatStatblockAddAssertionDb
+  .prepare(
+    `
+      SELECT resource_key, label, current_value, max_value, reset_label, source_label, created_by_user_id, updated_by_user_id
+      FROM campaign_combatant_resource_counters
+      WHERE combatant_id = ?
+      ORDER BY id ASC
+    `,
+  )
+  .all(addedStatblockRow?.id || -1);
+const addedStatblockNoteRows = combatStatblockAddAssertionDb
+  .prepare(
+    `
+      SELECT label, note, source_label, created_by_user_id
+      FROM campaign_combatant_resource_notes
+      WHERE combatant_id = ?
+      ORDER BY id ASC
+    `,
+  )
+  .all(addedStatblockRow?.id || -1);
+const trackerAfterStatblockAdd = combatStatblockAddAssertionDb
+  .prepare("SELECT round_number, current_combatant_id, revision FROM campaign_combat_trackers WHERE campaign_slug = ?")
+  .get("linden-pass");
+combatStatblockAddAssertionDb.close();
+if (
+  addedStatblockRow?.combatant_type !== "npc" ||
+  addedStatblockRow?.character_slug !== null ||
+  addedStatblockRow?.player_detail_visible !== 0 ||
+  addedStatblockRow?.source_kind !== "dm_statblock" ||
+  addedStatblockRow?.source_ref !== "301" ||
+  addedStatblockRow?.display_name !== "Dock Tough" ||
+  addedStatblockRow?.turn_value !== 2 ||
+  addedStatblockRow?.initiative_bonus !== 2 ||
+  addedStatblockRow?.dexterity_modifier !== 2 ||
+  addedStatblockRow?.initiative_priority !== 3 ||
+  addedStatblockRow?.current_hp !== 16 ||
+  addedStatblockRow?.max_hp !== 16 ||
+  addedStatblockRow?.temp_hp !== 0 ||
+  addedStatblockRow?.movement_total !== 30 ||
+  addedStatblockRow?.movement_remaining !== 30 ||
+  addedStatblockRow?.has_action !== 1 ||
+  addedStatblockRow?.has_bonus_action !== 1 ||
+  addedStatblockRow?.has_reaction !== 1 ||
+  addedStatblockRow?.revision !== 1 ||
+  addedStatblockRow?.created_by_user_id !== 77 ||
+  addedStatblockRow?.updated_by_user_id !== 77 ||
+  addedStatblockCounterRows.length !== 1 ||
+  addedStatblockCounterRows[0]?.resource_key !== "arcane-jolt" ||
+  addedStatblockCounterRows[0]?.label !== "Arcane Jolt" ||
+  addedStatblockCounterRows[0]?.current_value !== 2 ||
+  addedStatblockCounterRows[0]?.max_value !== 2 ||
+  addedStatblockCounterRows[0]?.reset_label !== "Per day" ||
+  addedStatblockCounterRows[0]?.source_label !== "DM Content" ||
+  addedStatblockCounterRows[0]?.created_by_user_id !== 77 ||
+  addedStatblockCounterRows[0]?.updated_by_user_id !== 77 ||
+  addedStatblockNoteRows.length !== 2 ||
+  addedStatblockNoteRows[0]?.label !== "At-will spellcasting" ||
+  addedStatblockNoteRows[0]?.note !== "light, mage hand" ||
+  addedStatblockNoteRows[0]?.source_label !== "DM Content" ||
+  addedStatblockNoteRows[0]?.created_by_user_id !== 77 ||
+  addedStatblockNoteRows[1]?.label !== "Rust Breath" ||
+  addedStatblockNoteRows[1]?.note !== "Recharge 5-6" ||
+  addedStatblockNoteRows[1]?.source_label !== "DM Content" ||
+  addedStatblockNoteRows[1]?.created_by_user_id !== 77 ||
+  trackerAfterStatblockAdd?.round_number !== 1 ||
+  trackerAfterStatblockAdd?.current_combatant_id !== null ||
+  trackerAfterStatblockAdd?.revision !== 19
+) {
+  throw new Error(
+    `Unexpected combat statblock add database rows: ${JSON.stringify({
+      addedStatblockRow,
+      addedStatblockCounterRows,
+      addedStatblockNoteRows,
+      trackerAfterStatblockAdd,
+    })}`,
+  );
+}
+
+const fixtureAddSystemsMonsterCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/systems-monsters",
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "POST", body: { entry_key: "MM:monster:goblin" } },
+);
+if (
+  fixtureAddSystemsMonsterCombatState.status !== 403 ||
+  fixtureAddSystemsMonsterCombatState.payload?.error?.code !== "forbidden"
+) {
+  throw new Error(
+    `Expected fixture combat Systems monster add forbidden 403, got ${fixtureAddSystemsMonsterCombatState.status} ${fixtureAddSystemsMonsterCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerAddSystemsMonsterCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/systems-monsters",
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "POST", body: { entry_key: "MM:monster:goblin" } },
+);
+if (
+  playerAddSystemsMonsterCombatState.status !== 403 ||
+  playerAddSystemsMonsterCombatState.payload?.error?.code !== "forbidden"
+) {
+  throw new Error(
+    `Expected player combat Systems monster add forbidden 403, got ${playerAddSystemsMonsterCombatState.status} ${playerAddSystemsMonsterCombatState.payload?.error?.code}`,
+  );
+}
+
+const missingAddSystemsMonsterCombatState = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/combat/systems-monsters",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { entry_key: "MM:monster:goblin" } },
+);
+if (
+  missingAddSystemsMonsterCombatState.status !== 404 ||
+  missingAddSystemsMonsterCombatState.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing combat Systems monster add JSON 404, got ${missingAddSystemsMonsterCombatState.status} ${missingAddSystemsMonsterCombatState.payload?.error?.code}`,
+  );
+}
+
+const malformedAddSystemsMonsterCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/systems-monsters",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: "{" },
+);
+if (
+  malformedAddSystemsMonsterCombatState.status !== 400 ||
+  malformedAddSystemsMonsterCombatState.payload?.error?.code !== "validation_error"
+) {
+  throw new Error(
+    `Expected malformed combat Systems monster add validation_error 400, got ${malformedAddSystemsMonsterCombatState.status} ${JSON.stringify(malformedAddSystemsMonsterCombatState.payload)}`,
+  );
+}
+
+const invalidAddSystemsMonsterCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/systems-monsters",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { entry_key: "MM:monster:not-real" } },
+);
+if (
+  invalidAddSystemsMonsterCombatState.status !== 400 ||
+  invalidAddSystemsMonsterCombatState.payload?.error?.code !== "validation_error" ||
+  invalidAddSystemsMonsterCombatState.payload?.error?.message !== "Choose a valid Systems monster to add."
+) {
+  throw new Error(
+    `Expected invalid combat Systems monster add validation_error 400, got ${invalidAddSystemsMonsterCombatState.status} ${JSON.stringify(invalidAddSystemsMonsterCombatState.payload)}`,
+  );
+}
+
+const nonMonsterAddSystemsMonsterCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/systems-monsters",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { entry_key: "PHB:spell:mage-hand" } },
+);
+if (
+  nonMonsterAddSystemsMonsterCombatState.status !== 400 ||
+  nonMonsterAddSystemsMonsterCombatState.payload?.error?.code !== "validation_error" ||
+  nonMonsterAddSystemsMonsterCombatState.payload?.error?.message !== "Choose a valid Systems monster to add."
+) {
+  throw new Error(
+    `Expected non-monster combat Systems monster add validation_error 400, got ${nonMonsterAddSystemsMonsterCombatState.status} ${JSON.stringify(nonMonsterAddSystemsMonsterCombatState.payload)}`,
+  );
+}
+
+const invalidTurnAddSystemsMonsterCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/systems-monsters",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { entry_key: "MM:monster:goblin", turn_value: "soon" } },
+);
+if (
+  invalidTurnAddSystemsMonsterCombatState.status !== 400 ||
+  invalidTurnAddSystemsMonsterCombatState.payload?.error?.code !== "validation_error" ||
+  invalidTurnAddSystemsMonsterCombatState.payload?.error?.message !== "Turn value must be a whole number."
+) {
+  throw new Error(
+    `Expected invalid turn combat Systems monster add validation_error 400, got ${invalidTurnAddSystemsMonsterCombatState.status} ${JSON.stringify(invalidTurnAddSystemsMonsterCombatState.payload)}`,
+  );
+}
+
+const invalidPriorityAddSystemsMonsterCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/systems-monsters",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { entry_key: "MM:monster:goblin", initiative_priority: "0" } },
+);
+if (
+  invalidPriorityAddSystemsMonsterCombatState.status !== 400 ||
+  invalidPriorityAddSystemsMonsterCombatState.payload?.error?.code !== "validation_error" ||
+  invalidPriorityAddSystemsMonsterCombatState.payload?.error?.message !== "Priority must be 1 or higher."
+) {
+  throw new Error(
+    `Expected invalid priority combat Systems monster add validation_error 400, got ${invalidPriorityAddSystemsMonsterCombatState.status} ${JSON.stringify(invalidPriorityAddSystemsMonsterCombatState.payload)}`,
+  );
+}
+
+const addSystemsMonsterCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/systems-monsters",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  {
+    method: "POST",
+    body: {
+      entry_key: "MM:monster:goblin",
+      initiative_priority: "4",
+    },
+  },
+);
+const addedSystemsMonsterCombatant = addSystemsMonsterCombatState.payload?.tracker?.combatants?.find(
+  (combatant) => combatant.name === "Goblin",
+);
+if (
+  addSystemsMonsterCombatState.status !== 200 ||
+  addSystemsMonsterCombatState.payload?.ok !== true ||
+  addSystemsMonsterCombatState.payload?.changed !== true ||
+  addSystemsMonsterCombatState.payload?.live_revision !== 20 ||
+  addSystemsMonsterCombatState.payload?.tracker?.round_number !== 1 ||
+  addSystemsMonsterCombatState.payload?.tracker?.current_turn_label !== "" ||
+  addSystemsMonsterCombatState.payload?.tracker?.has_current_turn !== false ||
+  addSystemsMonsterCombatState.payload?.tracker?.combatant_count !== 4 ||
+  addSystemsMonsterCombatState.payload?.selected_combatant?.name !== "Arden March" ||
+  addSystemsMonsterCombatState.payload?.selected_player_character?.name !== "Arden March" ||
+  addedSystemsMonsterCombatant?.character_slug !== "" ||
+  addedSystemsMonsterCombatant?.source_kind !== "systems_monster" ||
+  addedSystemsMonsterCombatant?.source_ref !== "MM:monster:goblin" ||
+  addedSystemsMonsterCombatant?.source_label !== "Systems" ||
+  addedSystemsMonsterCombatant?.type_label !== "NPC" ||
+  addedSystemsMonsterCombatant?.turn_value !== 2 ||
+  addedSystemsMonsterCombatant?.initiative_bonus_label !== "+2" ||
+  addedSystemsMonsterCombatant?.dexterity_modifier !== 2 ||
+  addedSystemsMonsterCombatant?.initiative_priority !== 4 ||
+  addedSystemsMonsterCombatant?.current_hp !== 7 ||
+  addedSystemsMonsterCombatant?.max_hp !== 7 ||
+  addedSystemsMonsterCombatant?.temp_hp !== 0 ||
+  addedSystemsMonsterCombatant?.movement_total !== 30 ||
+  addedSystemsMonsterCombatant?.movement_remaining !== 30 ||
+  addedSystemsMonsterCombatant?.has_action !== true ||
+  addedSystemsMonsterCombatant?.has_bonus_action !== true ||
+  addedSystemsMonsterCombatant?.has_reaction !== true ||
+  addedSystemsMonsterCombatant?.is_current_turn !== false ||
+  addedSystemsMonsterCombatant?.npc_resource_counters?.[0]?.resource_key !== "battle-cry" ||
+  addedSystemsMonsterCombatant?.npc_resource_counters?.[0]?.label !== "Battle Cry" ||
+  addedSystemsMonsterCombatant?.npc_resource_counters?.[0]?.current_value !== 1 ||
+  addedSystemsMonsterCombatant?.npc_resource_counters?.[0]?.max_value !== 1 ||
+  addedSystemsMonsterCombatant?.npc_resource_counters?.[0]?.reset_label !== "Per day" ||
+  addedSystemsMonsterCombatant?.npc_resource_counters?.[0]?.source_label !== "Systems MM" ||
+  addedSystemsMonsterCombatant?.npc_resource_notes?.[0]?.label !== "At-will spellcasting" ||
+  addedSystemsMonsterCombatant?.npc_resource_notes?.[0]?.note !== "minor illusion, dancing lights" ||
+  addedSystemsMonsterCombatant?.npc_resource_notes?.[0]?.source_label !== "Systems MM" ||
+  addedSystemsMonsterCombatant?.npc_resource_notes?.[1]?.label !== "Snare Net" ||
+  addedSystemsMonsterCombatant?.npc_resource_notes?.[1]?.note !== "Recharge 5-6" ||
+  addedSystemsMonsterCombatant?.npc_resource_notes?.[1]?.source_label !== "Systems MM"
+) {
+  throw new Error(`Unexpected combat Systems monster add payload: ${JSON.stringify(addSystemsMonsterCombatState.payload)}`);
+}
+
+const combatSystemsMonsterAddAssertionDb = new Database(dbPath, { readonly: true });
+const addedSystemsMonsterRow = combatSystemsMonsterAddAssertionDb
+  .prepare(
+    `
+      SELECT
+        id,
+        combatant_type,
+        character_slug,
+        player_detail_visible,
+        source_kind,
+        source_ref,
+        display_name,
+        turn_value,
+        initiative_bonus,
+        dexterity_modifier,
+        initiative_priority,
+        current_hp,
+        max_hp,
+        temp_hp,
+        movement_total,
+        movement_remaining,
+        has_action,
+        has_bonus_action,
+        has_reaction,
+        revision,
+        created_by_user_id,
+        updated_by_user_id
+      FROM campaign_combatants
+      WHERE campaign_slug = ?
+        AND display_name = ?
+        AND source_kind = ?
+    `,
+  )
+  .get("linden-pass", "Goblin", "systems_monster");
+const addedSystemsMonsterCounterRows = combatSystemsMonsterAddAssertionDb
+  .prepare(
+    `
+      SELECT resource_key, label, current_value, max_value, reset_label, source_label, created_by_user_id, updated_by_user_id
+      FROM campaign_combatant_resource_counters
+      WHERE combatant_id = ?
+      ORDER BY id ASC
+    `,
+  )
+  .all(addedSystemsMonsterRow?.id || -1);
+const addedSystemsMonsterNoteRows = combatSystemsMonsterAddAssertionDb
+  .prepare(
+    `
+      SELECT label, note, source_label, created_by_user_id
+      FROM campaign_combatant_resource_notes
+      WHERE combatant_id = ?
+      ORDER BY id ASC
+    `,
+  )
+  .all(addedSystemsMonsterRow?.id || -1);
+const trackerAfterSystemsMonsterAdd = combatSystemsMonsterAddAssertionDb
+  .prepare("SELECT round_number, current_combatant_id, revision FROM campaign_combat_trackers WHERE campaign_slug = ?")
+  .get("linden-pass");
+combatSystemsMonsterAddAssertionDb.close();
+if (
+  addedSystemsMonsterRow?.combatant_type !== "npc" ||
+  addedSystemsMonsterRow?.character_slug !== null ||
+  addedSystemsMonsterRow?.player_detail_visible !== 0 ||
+  addedSystemsMonsterRow?.source_kind !== "systems_monster" ||
+  addedSystemsMonsterRow?.source_ref !== "MM:monster:goblin" ||
+  addedSystemsMonsterRow?.display_name !== "Goblin" ||
+  addedSystemsMonsterRow?.turn_value !== 2 ||
+  addedSystemsMonsterRow?.initiative_bonus !== 2 ||
+  addedSystemsMonsterRow?.dexterity_modifier !== 2 ||
+  addedSystemsMonsterRow?.initiative_priority !== 4 ||
+  addedSystemsMonsterRow?.current_hp !== 7 ||
+  addedSystemsMonsterRow?.max_hp !== 7 ||
+  addedSystemsMonsterRow?.temp_hp !== 0 ||
+  addedSystemsMonsterRow?.movement_total !== 30 ||
+  addedSystemsMonsterRow?.movement_remaining !== 30 ||
+  addedSystemsMonsterRow?.has_action !== 1 ||
+  addedSystemsMonsterRow?.has_bonus_action !== 1 ||
+  addedSystemsMonsterRow?.has_reaction !== 1 ||
+  addedSystemsMonsterRow?.revision !== 1 ||
+  addedSystemsMonsterRow?.created_by_user_id !== 77 ||
+  addedSystemsMonsterRow?.updated_by_user_id !== 77 ||
+  addedSystemsMonsterCounterRows.length !== 1 ||
+  addedSystemsMonsterCounterRows[0]?.resource_key !== "battle-cry" ||
+  addedSystemsMonsterCounterRows[0]?.label !== "Battle Cry" ||
+  addedSystemsMonsterCounterRows[0]?.current_value !== 1 ||
+  addedSystemsMonsterCounterRows[0]?.max_value !== 1 ||
+  addedSystemsMonsterCounterRows[0]?.reset_label !== "Per day" ||
+  addedSystemsMonsterCounterRows[0]?.source_label !== "Systems MM" ||
+  addedSystemsMonsterCounterRows[0]?.created_by_user_id !== 77 ||
+  addedSystemsMonsterCounterRows[0]?.updated_by_user_id !== 77 ||
+  addedSystemsMonsterNoteRows.length !== 2 ||
+  addedSystemsMonsterNoteRows[0]?.label !== "At-will spellcasting" ||
+  addedSystemsMonsterNoteRows[0]?.note !== "minor illusion, dancing lights" ||
+  addedSystemsMonsterNoteRows[0]?.source_label !== "Systems MM" ||
+  addedSystemsMonsterNoteRows[0]?.created_by_user_id !== 77 ||
+  addedSystemsMonsterNoteRows[1]?.label !== "Snare Net" ||
+  addedSystemsMonsterNoteRows[1]?.note !== "Recharge 5-6" ||
+  addedSystemsMonsterNoteRows[1]?.source_label !== "Systems MM" ||
+  addedSystemsMonsterNoteRows[1]?.created_by_user_id !== 77 ||
+  trackerAfterSystemsMonsterAdd?.round_number !== 1 ||
+  trackerAfterSystemsMonsterAdd?.current_combatant_id !== null ||
+  trackerAfterSystemsMonsterAdd?.revision !== 20
+) {
+  throw new Error(
+    `Unexpected combat Systems monster add database rows: ${JSON.stringify({
+      addedSystemsMonsterRow,
+      addedSystemsMonsterCounterRows,
+      addedSystemsMonsterNoteRows,
+      trackerAfterSystemsMonsterAdd,
+    })}`,
+  );
+}
+
+const addedSystemsMonsterCombatantId = Number(addedSystemsMonsterRow?.id || 0);
+
+const fixtureTurnUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/turn`,
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "PATCH", body: { turn_value: "21" } },
+);
+if (
+  fixtureTurnUpdateCombatState.status !== 403 ||
+  fixtureTurnUpdateCombatState.payload?.error?.code !== "forbidden"
+) {
+  throw new Error(
+    `Expected fixture combat turn update forbidden 403, got ${fixtureTurnUpdateCombatState.status} ${fixtureTurnUpdateCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerTurnUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/turn`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { turn_value: "21" } },
+);
+if (playerTurnUpdateCombatState.status !== 403 || playerTurnUpdateCombatState.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player combat turn update forbidden 403, got ${playerTurnUpdateCombatState.status} ${playerTurnUpdateCombatState.payload?.error?.code}`,
+  );
+}
+
+const missingCampaignTurnUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/definitely-not-a-campaign/combat/combatants/${addedSystemsMonsterCombatantId}/turn`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { turn_value: "21" } },
+);
+if (
+  missingCampaignTurnUpdateCombatState.status !== 404 ||
+  missingCampaignTurnUpdateCombatState.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing combat turn update campaign JSON 404, got ${missingCampaignTurnUpdateCombatState.status} ${missingCampaignTurnUpdateCombatState.payload?.error?.code}`,
+  );
+}
+
+const malformedTurnUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/turn`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: "{" },
+);
+if (
+  malformedTurnUpdateCombatState.status !== 400 ||
+  malformedTurnUpdateCombatState.payload?.error?.code !== "validation_error"
+) {
+  throw new Error(
+    `Expected malformed combat turn update validation_error 400, got ${malformedTurnUpdateCombatState.status} ${malformedTurnUpdateCombatState.payload?.error?.code}`,
+  );
+}
+
+const missingTurnUpdateCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/combatants/999999/turn",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { turn_value: "21" } },
+);
+if (
+  missingTurnUpdateCombatState.status !== 400 ||
+  missingTurnUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  missingTurnUpdateCombatState.payload?.error?.message !== "That combatant could not be found."
+) {
+  throw new Error(
+    `Expected missing combat turn update validation_error 400, got ${missingTurnUpdateCombatState.status} ${JSON.stringify(missingTurnUpdateCombatState.payload)}`,
+  );
+}
+
+const invalidTurnUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/turn`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { turn_value: "soon" } },
+);
+if (
+  invalidTurnUpdateCombatState.status !== 400 ||
+  invalidTurnUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  invalidTurnUpdateCombatState.payload?.error?.message !== "Turn value must be a whole number."
+) {
+  throw new Error(
+    `Expected invalid combat turn value validation_error 400, got ${invalidTurnUpdateCombatState.status} ${JSON.stringify(invalidTurnUpdateCombatState.payload)}`,
+  );
+}
+
+const invalidPriorityTurnUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/turn`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { initiative_priority: "0" } },
+);
+if (
+  invalidPriorityTurnUpdateCombatState.status !== 400 ||
+  invalidPriorityTurnUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  invalidPriorityTurnUpdateCombatState.payload?.error?.message !== "Priority must be 1 or higher."
+) {
+  throw new Error(
+    `Expected invalid combat turn priority validation_error 400, got ${invalidPriorityTurnUpdateCombatState.status} ${JSON.stringify(invalidPriorityTurnUpdateCombatState.payload)}`,
+  );
+}
+
+const staleTurnUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/turn`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { expected_combatant_revision: 999, turn_value: "21" } },
+);
+if (
+  staleTurnUpdateCombatState.status !== 409 ||
+  staleTurnUpdateCombatState.payload?.error?.code !== "state_conflict" ||
+  staleTurnUpdateCombatState.payload?.error?.message !==
+    "This combatant changed in another combat view. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale combat turn update state_conflict 409, got ${staleTurnUpdateCombatState.status} ${JSON.stringify(staleTurnUpdateCombatState.payload)}`,
+  );
+}
+
+const turnUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/turn`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { expected_combatant_revision: 1, turn_value: "21", initiative_priority: "2" } },
+);
+if (
+  turnUpdateCombatState.status !== 200 ||
+  turnUpdateCombatState.payload?.ok !== true ||
+  turnUpdateCombatState.payload?.changed !== true ||
+  turnUpdateCombatState.payload?.live_revision !== 21 ||
+  turnUpdateCombatState.payload?.tracker?.round_number !== 1 ||
+  turnUpdateCombatState.payload?.tracker?.current_turn_label !== "" ||
+  turnUpdateCombatState.payload?.tracker?.has_current_turn !== false ||
+  turnUpdateCombatState.payload?.selected_combatant_id !== addedSystemsMonsterCombatantId ||
+  turnUpdateCombatState.payload?.selected_combatant?.name !== "Goblin" ||
+  turnUpdateCombatState.payload?.selected_combatant?.turn_value !== 21 ||
+  turnUpdateCombatState.payload?.selected_combatant?.initiative_priority !== 2 ||
+  turnUpdateCombatState.payload?.selected_combatant?.combatant_revision !== 2 ||
+  turnUpdateCombatState.payload?.selected_player_character?.name !== "Arden March"
+) {
+  throw new Error(`Unexpected combat turn update payload: ${JSON.stringify(turnUpdateCombatState.payload)}`);
+}
+
+const combatTurnUpdateAssertionDb = new Database(dbPath, { readonly: true });
+const updatedSystemsMonsterRow = combatTurnUpdateAssertionDb
+  .prepare(
+    `
+      SELECT turn_value, initiative_priority, revision, updated_by_user_id
+      FROM campaign_combatants
+      WHERE id = ?
+    `,
+  )
+  .get(addedSystemsMonsterCombatantId);
+const trackerAfterTurnUpdate = combatTurnUpdateAssertionDb
+  .prepare("SELECT round_number, current_combatant_id, revision FROM campaign_combat_trackers WHERE campaign_slug = ?")
+  .get("linden-pass");
+combatTurnUpdateAssertionDb.close();
+if (
+  updatedSystemsMonsterRow?.turn_value !== 21 ||
+  updatedSystemsMonsterRow?.initiative_priority !== 2 ||
+  updatedSystemsMonsterRow?.revision !== 2 ||
+  updatedSystemsMonsterRow?.updated_by_user_id !== 77 ||
+  trackerAfterTurnUpdate?.round_number !== 1 ||
+  trackerAfterTurnUpdate?.current_combatant_id !== null ||
+  trackerAfterTurnUpdate?.revision !== 21
+) {
+  throw new Error(
+    `Unexpected combat turn update database rows: ${JSON.stringify({
+      updatedSystemsMonsterRow,
+      trackerAfterTurnUpdate,
+    })}`,
+  );
+}
+
+const fixtureVitalsUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/vitals`,
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "PATCH", body: { current_hp: "5" } },
+);
+if (
+  fixtureVitalsUpdateCombatState.status !== 403 ||
+  fixtureVitalsUpdateCombatState.payload?.error?.code !== "forbidden"
+) {
+  throw new Error(
+    `Expected fixture combat vitals update forbidden 403, got ${fixtureVitalsUpdateCombatState.status} ${fixtureVitalsUpdateCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerNpcVitalsUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/vitals`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { current_hp: "5" } },
+);
+if (
+  playerNpcVitalsUpdateCombatState.status !== 403 ||
+  playerNpcVitalsUpdateCombatState.payload?.error?.code !== "forbidden" ||
+  playerNpcVitalsUpdateCombatState.payload?.error?.message !== "You do not have permission to edit this combatant."
+) {
+  throw new Error(
+    `Expected player combat NPC vitals update forbidden 403, got ${playerNpcVitalsUpdateCombatState.status} ${JSON.stringify(playerNpcVitalsUpdateCombatState.payload)}`,
+  );
+}
+
+const missingCampaignVitalsUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/definitely-not-a-campaign/combat/combatants/${addedSystemsMonsterCombatantId}/vitals`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { current_hp: "5" } },
+);
+if (
+  missingCampaignVitalsUpdateCombatState.status !== 404 ||
+  missingCampaignVitalsUpdateCombatState.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing combat vitals update campaign JSON 404, got ${missingCampaignVitalsUpdateCombatState.status} ${missingCampaignVitalsUpdateCombatState.payload?.error?.code}`,
+  );
+}
+
+const malformedVitalsUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/vitals`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: "{" },
+);
+if (
+  malformedVitalsUpdateCombatState.status !== 400 ||
+  malformedVitalsUpdateCombatState.payload?.error?.code !== "validation_error"
+) {
+  throw new Error(
+    `Expected malformed combat vitals update validation_error 400, got ${malformedVitalsUpdateCombatState.status} ${malformedVitalsUpdateCombatState.payload?.error?.code}`,
+  );
+}
+
+const missingVitalsUpdateCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/combatants/999999/vitals",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { current_hp: "5" } },
+);
+if (
+  missingVitalsUpdateCombatState.status !== 400 ||
+  missingVitalsUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  missingVitalsUpdateCombatState.payload?.error?.message !== "That combatant could not be found."
+) {
+  throw new Error(
+    `Expected missing combat vitals update validation_error 400, got ${missingVitalsUpdateCombatState.status} ${JSON.stringify(missingVitalsUpdateCombatState.payload)}`,
+  );
+}
+
+const invalidVitalsUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/vitals`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { current_hp: "soon" } },
+);
+if (
+  invalidVitalsUpdateCombatState.status !== 400 ||
+  invalidVitalsUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  invalidVitalsUpdateCombatState.payload?.error?.message !== "Current HP must be a whole number."
+) {
+  throw new Error(
+    `Expected invalid combat vitals current HP validation_error 400, got ${invalidVitalsUpdateCombatState.status} ${JSON.stringify(invalidVitalsUpdateCombatState.payload)}`,
+  );
+}
+
+const invalidVitalsCeilingCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/vitals`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { current_hp: "12", max_hp: "7" } },
+);
+if (
+  invalidVitalsCeilingCombatState.status !== 400 ||
+  invalidVitalsCeilingCombatState.payload?.error?.code !== "validation_error" ||
+  invalidVitalsCeilingCombatState.payload?.error?.message !== "Current HP cannot exceed max HP."
+) {
+  throw new Error(
+    `Expected combat vitals HP ceiling validation_error 400, got ${invalidVitalsCeilingCombatState.status} ${JSON.stringify(invalidVitalsCeilingCombatState.payload)}`,
+  );
+}
+
+const staleNpcVitalsUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/vitals`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { expected_combatant_revision: 999, current_hp: "5" } },
+);
+if (
+  staleNpcVitalsUpdateCombatState.status !== 409 ||
+  staleNpcVitalsUpdateCombatState.payload?.error?.code !== "state_conflict" ||
+  staleNpcVitalsUpdateCombatState.payload?.error?.message !==
+    "This combatant changed in another combat view. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale combat NPC vitals update state_conflict 409, got ${staleNpcVitalsUpdateCombatState.status} ${JSON.stringify(staleNpcVitalsUpdateCombatState.payload)}`,
+  );
+}
+
+const npcVitalsUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/vitals`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_combatant_revision: 2,
+      current_hp: "5",
+      max_hp: "11",
+      temp_hp: "3",
+      movement_total: "20",
+    },
+  },
+);
+if (
+  npcVitalsUpdateCombatState.status !== 200 ||
+  npcVitalsUpdateCombatState.payload?.ok !== true ||
+  npcVitalsUpdateCombatState.payload?.changed !== true ||
+  npcVitalsUpdateCombatState.payload?.live_revision !== 22 ||
+  npcVitalsUpdateCombatState.payload?.selected_combatant?.id !== addedSystemsMonsterCombatantId ||
+  npcVitalsUpdateCombatState.payload?.selected_combatant?.current_hp !== 5 ||
+  npcVitalsUpdateCombatState.payload?.selected_combatant?.max_hp !== 11 ||
+  npcVitalsUpdateCombatState.payload?.selected_combatant?.temp_hp !== 3 ||
+  npcVitalsUpdateCombatState.payload?.selected_combatant?.movement_total !== 20 ||
+  npcVitalsUpdateCombatState.payload?.selected_combatant?.movement_remaining !== 20 ||
+  npcVitalsUpdateCombatState.payload?.selected_combatant?.combatant_revision !== 3
+) {
+  throw new Error(`Unexpected combat NPC vitals update payload: ${JSON.stringify(npcVitalsUpdateCombatState.payload)}`);
+}
+
+const combatNpcVitalsAssertionDb = new Database(dbPath, { readonly: true });
+const updatedSystemsMonsterVitalsRow = combatNpcVitalsAssertionDb
+  .prepare(
+    `
+      SELECT current_hp, max_hp, temp_hp, movement_total, movement_remaining, revision, updated_by_user_id
+      FROM campaign_combatants
+      WHERE id = ?
+    `,
+  )
+  .get(addedSystemsMonsterCombatantId);
+const trackerAfterNpcVitalsUpdate = combatNpcVitalsAssertionDb
+  .prepare("SELECT round_number, current_combatant_id, revision FROM campaign_combat_trackers WHERE campaign_slug = ?")
+  .get("linden-pass");
+combatNpcVitalsAssertionDb.close();
+if (
+  updatedSystemsMonsterVitalsRow?.current_hp !== 5 ||
+  updatedSystemsMonsterVitalsRow?.max_hp !== 11 ||
+  updatedSystemsMonsterVitalsRow?.temp_hp !== 3 ||
+  updatedSystemsMonsterVitalsRow?.movement_total !== 20 ||
+  updatedSystemsMonsterVitalsRow?.movement_remaining !== 20 ||
+  updatedSystemsMonsterVitalsRow?.revision !== 3 ||
+  updatedSystemsMonsterVitalsRow?.updated_by_user_id !== 77 ||
+  trackerAfterNpcVitalsUpdate?.round_number !== 1 ||
+  trackerAfterNpcVitalsUpdate?.current_combatant_id !== null ||
+  trackerAfterNpcVitalsUpdate?.revision !== 22
+) {
+  throw new Error(
+    `Unexpected combat NPC vitals update database rows: ${JSON.stringify({
+      updatedSystemsMonsterVitalsRow,
+      trackerAfterNpcVitalsUpdate,
+    })}`,
+  );
+}
+
+const stalePlayerVitalsUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedPlayerCombatantId}/vitals`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 999, current_hp: "34", temp_hp: "2" } },
+);
+if (
+  stalePlayerVitalsUpdateCombatState.status !== 409 ||
+  stalePlayerVitalsUpdateCombatState.payload?.error?.code !== "state_conflict" ||
+  stalePlayerVitalsUpdateCombatState.payload?.error?.message !==
+    "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale combat player vitals update state_conflict 409, got ${stalePlayerVitalsUpdateCombatState.status} ${JSON.stringify(stalePlayerVitalsUpdateCombatState.payload)}`,
+  );
+}
+
+const playerVitalsUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedPlayerCombatantId}/vitals`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 8, current_hp: "34", temp_hp: "2" } },
+);
+const playerVitalsCombatant = playerVitalsUpdateCombatState.payload?.tracker?.combatants?.find(
+  (combatant) => combatant.character_slug === "arden-march",
+);
+if (
+  playerVitalsUpdateCombatState.status !== 200 ||
+  playerVitalsUpdateCombatState.payload?.ok !== true ||
+  playerVitalsUpdateCombatState.payload?.changed !== true ||
+  playerVitalsUpdateCombatState.payload?.live_revision !== 23 ||
+  playerVitalsCombatant?.id !== addedPlayerCombatantId ||
+  playerVitalsCombatant?.current_hp !== 34 ||
+  playerVitalsCombatant?.max_hp !== 38 ||
+  playerVitalsCombatant?.temp_hp !== 2 ||
+  playerVitalsCombatant?.state_revision !== 9 ||
+  playerVitalsCombatant?.combatant_revision !== 2 ||
+  playerVitalsUpdateCombatState.payload?.selected_player_character !== null ||
+  (playerVitalsUpdateCombatState.payload?.player_character_targets || []).length !== 0
+) {
+  throw new Error(`Unexpected combat player vitals update payload: ${JSON.stringify(playerVitalsUpdateCombatState.payload)}`);
+}
+
+const combatPlayerVitalsAssertionDb = new Database(dbPath, { readonly: true });
+const updatedArdenStateRow = combatPlayerVitalsAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", "arden-march");
+const updatedArdenCombatantRow = combatPlayerVitalsAssertionDb
+  .prepare(
+    `
+      SELECT current_hp, max_hp, temp_hp, movement_total, movement_remaining, revision, updated_by_user_id
+      FROM campaign_combatants
+      WHERE id = ?
+    `,
+  )
+  .get(addedPlayerCombatantId);
+const trackerAfterPlayerVitalsUpdate = combatPlayerVitalsAssertionDb
+  .prepare("SELECT round_number, current_combatant_id, revision FROM campaign_combat_trackers WHERE campaign_slug = ?")
+  .get("linden-pass");
+combatPlayerVitalsAssertionDb.close();
+const updatedArdenState = JSON.parse(updatedArdenStateRow?.state_json || "{}");
+if (
+  updatedArdenStateRow?.revision !== 9 ||
+  updatedArdenStateRow?.updated_by_user_id !== 79 ||
+  updatedArdenState?.vitals?.current_hp !== 34 ||
+  updatedArdenState?.vitals?.temp_hp !== 2 ||
+  updatedArdenState?.vitals?.death_saves?.successes !== 0 ||
+  updatedArdenState?.hit_dice?.pools?.[0]?.current !== 2 ||
+  updatedArdenCombatantRow?.current_hp !== 34 ||
+  updatedArdenCombatantRow?.max_hp !== 38 ||
+  updatedArdenCombatantRow?.temp_hp !== 2 ||
+  updatedArdenCombatantRow?.movement_total !== 30 ||
+  updatedArdenCombatantRow?.movement_remaining !== 30 ||
+  updatedArdenCombatantRow?.revision !== 2 ||
+  updatedArdenCombatantRow?.updated_by_user_id !== 79 ||
+  trackerAfterPlayerVitalsUpdate?.round_number !== 1 ||
+  trackerAfterPlayerVitalsUpdate?.current_combatant_id !== null ||
+  trackerAfterPlayerVitalsUpdate?.revision !== 23
+) {
+  throw new Error(
+    `Unexpected combat player vitals update database rows: ${JSON.stringify({
+      updatedArdenStateRow,
+      updatedArdenState,
+      updatedArdenCombatantRow,
+      trackerAfterPlayerVitalsUpdate,
+    })}`,
+  );
+}
+
+const fixtureResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/resources`,
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "PATCH", body: { movement_remaining: "7" } },
+);
+if (
+  fixtureResourcesUpdateCombatState.status !== 403 ||
+  fixtureResourcesUpdateCombatState.payload?.error?.code !== "forbidden"
+) {
+  throw new Error(
+    `Expected fixture combat resources update forbidden 403, got ${fixtureResourcesUpdateCombatState.status} ${fixtureResourcesUpdateCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerNpcResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/resources`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { movement_remaining: "7" } },
+);
+if (
+  playerNpcResourcesUpdateCombatState.status !== 403 ||
+  playerNpcResourcesUpdateCombatState.payload?.error?.code !== "forbidden" ||
+  playerNpcResourcesUpdateCombatState.payload?.error?.message !== "You do not have permission to manage combat."
+) {
+  throw new Error(
+    `Expected player combat NPC resources update forbidden 403, got ${playerNpcResourcesUpdateCombatState.status} ${JSON.stringify(playerNpcResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const missingCampaignResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/definitely-not-a-campaign/combat/combatants/${addedSystemsMonsterCombatantId}/resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { movement_remaining: "7" } },
+);
+if (
+  missingCampaignResourcesUpdateCombatState.status !== 404 ||
+  missingCampaignResourcesUpdateCombatState.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing combat resources update campaign JSON 404, got ${missingCampaignResourcesUpdateCombatState.status} ${missingCampaignResourcesUpdateCombatState.payload?.error?.code}`,
+  );
+}
+
+const malformedResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: "{" },
+);
+if (
+  malformedResourcesUpdateCombatState.status !== 400 ||
+  malformedResourcesUpdateCombatState.payload?.error?.code !== "validation_error"
+) {
+  throw new Error(
+    `Expected malformed combat resources update validation_error 400, got ${malformedResourcesUpdateCombatState.status} ${malformedResourcesUpdateCombatState.payload?.error?.code}`,
+  );
+}
+
+const missingResourcesUpdateCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/combatants/999999/resources",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { movement_remaining: "7" } },
+);
+if (
+  missingResourcesUpdateCombatState.status !== 400 ||
+  missingResourcesUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  missingResourcesUpdateCombatState.payload?.error?.message !== "That combatant could not be found."
+) {
+  throw new Error(
+    `Expected missing combat resources update validation_error 400, got ${missingResourcesUpdateCombatState.status} ${JSON.stringify(missingResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const invalidBooleanResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { has_action: "maybe" } },
+);
+if (
+  invalidBooleanResourcesUpdateCombatState.status !== 400 ||
+  invalidBooleanResourcesUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  invalidBooleanResourcesUpdateCombatState.payload?.error?.message !== "has_action must be true or false."
+) {
+  throw new Error(
+    `Expected invalid combat resources boolean validation_error 400, got ${invalidBooleanResourcesUpdateCombatState.status} ${JSON.stringify(invalidBooleanResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const invalidMovementResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { movement_remaining: "far" } },
+);
+if (
+  invalidMovementResourcesUpdateCombatState.status !== 400 ||
+  invalidMovementResourcesUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  invalidMovementResourcesUpdateCombatState.payload?.error?.message !== "Remaining movement must be a whole number."
+) {
+  throw new Error(
+    `Expected invalid combat resources movement validation_error 400, got ${invalidMovementResourcesUpdateCombatState.status} ${JSON.stringify(invalidMovementResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const highMovementResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { movement_remaining: "99" } },
+);
+if (
+  highMovementResourcesUpdateCombatState.status !== 400 ||
+  highMovementResourcesUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  highMovementResourcesUpdateCombatState.payload?.error?.message !==
+    "Remaining movement cannot exceed total movement."
+) {
+  throw new Error(
+    `Expected high combat resources movement validation_error 400, got ${highMovementResourcesUpdateCombatState.status} ${JSON.stringify(highMovementResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const staleResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { expected_combatant_revision: 999, movement_remaining: "7" } },
+);
+if (
+  staleResourcesUpdateCombatState.status !== 409 ||
+  staleResourcesUpdateCombatState.payload?.error?.code !== "state_conflict" ||
+  staleResourcesUpdateCombatState.payload?.error?.message !==
+    "This combatant changed in another combat view. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale combat resources update state_conflict 409, got ${staleResourcesUpdateCombatState.status} ${JSON.stringify(staleResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const npcResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_combatant_revision: 3,
+      movement_remaining: "7",
+      has_action: false,
+      has_bonus_action: "true",
+      has_reaction: false,
+    },
+  },
+);
+if (
+  npcResourcesUpdateCombatState.status !== 200 ||
+  npcResourcesUpdateCombatState.payload?.ok !== true ||
+  npcResourcesUpdateCombatState.payload?.changed !== true ||
+  npcResourcesUpdateCombatState.payload?.live_revision !== 24 ||
+  npcResourcesUpdateCombatState.payload?.selected_combatant?.id !== addedSystemsMonsterCombatantId ||
+  npcResourcesUpdateCombatState.payload?.selected_combatant?.movement_remaining !== 7 ||
+  npcResourcesUpdateCombatState.payload?.selected_combatant?.has_action !== false ||
+  npcResourcesUpdateCombatState.payload?.selected_combatant?.has_bonus_action !== true ||
+  npcResourcesUpdateCombatState.payload?.selected_combatant?.has_reaction !== false ||
+  npcResourcesUpdateCombatState.payload?.selected_combatant?.combatant_revision !== 4
+) {
+  throw new Error(`Unexpected combat NPC resources update payload: ${JSON.stringify(npcResourcesUpdateCombatState.payload)}`);
+}
+
+const combatNpcResourcesAssertionDb = new Database(dbPath, { readonly: true });
+const updatedSystemsMonsterResourcesRow = combatNpcResourcesAssertionDb
+  .prepare(
+    `
+      SELECT has_action, has_bonus_action, has_reaction, movement_remaining, revision, updated_by_user_id
+      FROM campaign_combatants
+      WHERE id = ?
+    `,
+  )
+  .get(addedSystemsMonsterCombatantId);
+const trackerAfterNpcResourcesUpdate = combatNpcResourcesAssertionDb
+  .prepare("SELECT round_number, current_combatant_id, revision FROM campaign_combat_trackers WHERE campaign_slug = ?")
+  .get("linden-pass");
+combatNpcResourcesAssertionDb.close();
+if (
+  updatedSystemsMonsterResourcesRow?.has_action !== 0 ||
+  updatedSystemsMonsterResourcesRow?.has_bonus_action !== 1 ||
+  updatedSystemsMonsterResourcesRow?.has_reaction !== 0 ||
+  updatedSystemsMonsterResourcesRow?.movement_remaining !== 7 ||
+  updatedSystemsMonsterResourcesRow?.revision !== 4 ||
+  updatedSystemsMonsterResourcesRow?.updated_by_user_id !== 77 ||
+  trackerAfterNpcResourcesUpdate?.round_number !== 1 ||
+  trackerAfterNpcResourcesUpdate?.current_combatant_id !== null ||
+  trackerAfterNpcResourcesUpdate?.revision !== 24
+) {
+  throw new Error(
+    `Unexpected combat NPC resources update database rows: ${JSON.stringify({
+      updatedSystemsMonsterResourcesRow,
+      trackerAfterNpcResourcesUpdate,
+    })}`,
+  );
+}
+
+const playerResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedPlayerCombatantId}/resources`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_combatant_revision: 2,
+      movement_remaining: "11",
+      has_action: true,
+      has_bonus_action: false,
+      has_reaction: true,
+    },
+  },
+);
+const playerResourcesCombatant = playerResourcesUpdateCombatState.payload?.tracker?.combatants?.find(
+  (combatant) => combatant.character_slug === "arden-march",
+);
+if (
+  playerResourcesUpdateCombatState.status !== 200 ||
+  playerResourcesUpdateCombatState.payload?.ok !== true ||
+  playerResourcesUpdateCombatState.payload?.changed !== true ||
+  playerResourcesUpdateCombatState.payload?.live_revision !== 25 ||
+  playerResourcesCombatant?.id !== addedPlayerCombatantId ||
+  playerResourcesCombatant?.movement_remaining !== 11 ||
+  playerResourcesCombatant?.has_action !== true ||
+  playerResourcesCombatant?.has_bonus_action !== false ||
+  playerResourcesCombatant?.has_reaction !== true ||
+  playerResourcesCombatant?.combatant_revision !== 3 ||
+  playerResourcesCombatant?.state_revision !== 9
+) {
+  throw new Error(`Unexpected combat player resources update payload: ${JSON.stringify(playerResourcesUpdateCombatState.payload)}`);
+}
+
+const combatPlayerResourcesAssertionDb = new Database(dbPath, { readonly: true });
+const updatedArdenResourcesRow = combatPlayerResourcesAssertionDb
+  .prepare(
+    `
+      SELECT has_action, has_bonus_action, has_reaction, movement_remaining, revision, updated_by_user_id
+      FROM campaign_combatants
+      WHERE id = ?
+    `,
+  )
+  .get(addedPlayerCombatantId);
+const ardenStateAfterResources = combatPlayerResourcesAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", "arden-march");
+const trackerAfterPlayerResourcesUpdate = combatPlayerResourcesAssertionDb
+  .prepare("SELECT round_number, current_combatant_id, revision FROM campaign_combat_trackers WHERE campaign_slug = ?")
+  .get("linden-pass");
+combatPlayerResourcesAssertionDb.close();
+if (
+  updatedArdenResourcesRow?.has_action !== 1 ||
+  updatedArdenResourcesRow?.has_bonus_action !== 0 ||
+  updatedArdenResourcesRow?.has_reaction !== 1 ||
+  updatedArdenResourcesRow?.movement_remaining !== 11 ||
+  updatedArdenResourcesRow?.revision !== 3 ||
+  updatedArdenResourcesRow?.updated_by_user_id !== 79 ||
+  ardenStateAfterResources?.revision !== 9 ||
+  ardenStateAfterResources?.updated_by_user_id !== 79 ||
+  trackerAfterPlayerResourcesUpdate?.round_number !== 1 ||
+  trackerAfterPlayerResourcesUpdate?.current_combatant_id !== null ||
+  trackerAfterPlayerResourcesUpdate?.revision !== 25
+) {
+  throw new Error(
+    `Unexpected combat player resources update database rows: ${JSON.stringify({
+      updatedArdenResourcesRow,
+      ardenStateAfterResources,
+      trackerAfterPlayerResourcesUpdate,
+    })}`,
+  );
+}
+
+const fixtureNpcResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/npc-resources`,
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "PATCH", body: { counters: [{ resource_key: "battle-cry", current_value: "0" }] } },
+);
+if (
+  fixtureNpcResourcesUpdateCombatState.status !== 403 ||
+  fixtureNpcResourcesUpdateCombatState.payload?.error?.code !== "forbidden"
+) {
+  throw new Error(
+    `Expected fixture combat NPC resources update forbidden 403, got ${fixtureNpcResourcesUpdateCombatState.status} ${fixtureNpcResourcesUpdateCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerNpcCounterResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/npc-resources`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { counters: [{ resource_key: "battle-cry", current_value: "0" }] } },
+);
+if (
+  playerNpcCounterResourcesUpdateCombatState.status !== 403 ||
+  playerNpcCounterResourcesUpdateCombatState.payload?.error?.code !== "forbidden" ||
+  playerNpcCounterResourcesUpdateCombatState.payload?.error?.message !== "You do not have permission to manage combat."
+) {
+  throw new Error(
+    `Expected player combat NPC counter resources update forbidden 403, got ${playerNpcCounterResourcesUpdateCombatState.status} ${JSON.stringify(playerNpcCounterResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const missingCampaignNpcResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/definitely-not-a-campaign/combat/combatants/${addedSystemsMonsterCombatantId}/npc-resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { counters: [{ resource_key: "battle-cry", current_value: "0" }] } },
+);
+if (
+  missingCampaignNpcResourcesUpdateCombatState.status !== 404 ||
+  missingCampaignNpcResourcesUpdateCombatState.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing combat NPC resources update campaign JSON 404, got ${missingCampaignNpcResourcesUpdateCombatState.status} ${missingCampaignNpcResourcesUpdateCombatState.payload?.error?.code}`,
+  );
+}
+
+const malformedNpcResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/npc-resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: "{" },
+);
+if (
+  malformedNpcResourcesUpdateCombatState.status !== 400 ||
+  malformedNpcResourcesUpdateCombatState.payload?.error?.code !== "validation_error"
+) {
+  throw new Error(
+    `Expected malformed combat NPC resources update validation_error 400, got ${malformedNpcResourcesUpdateCombatState.status} ${malformedNpcResourcesUpdateCombatState.payload?.error?.code}`,
+  );
+}
+
+const missingNpcResourcesUpdateCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/combatants/999999/npc-resources",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { counters: [{ resource_key: "battle-cry", current_value: "0" }] } },
+);
+if (
+  missingNpcResourcesUpdateCombatState.status !== 400 ||
+  missingNpcResourcesUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  missingNpcResourcesUpdateCombatState.payload?.error?.message !== "That combatant could not be found."
+) {
+  throw new Error(
+    `Expected missing combat NPC resources update validation_error 400, got ${missingNpcResourcesUpdateCombatState.status} ${JSON.stringify(missingNpcResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const playerCharacterNpcResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedPlayerCombatantId}/npc-resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { counters: [{ resource_key: "battle-cry", current_value: "0" }] } },
+);
+if (
+  playerCharacterNpcResourcesUpdateCombatState.status !== 400 ||
+  playerCharacterNpcResourcesUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  playerCharacterNpcResourcesUpdateCombatState.payload?.error?.message !== "Only NPC source resources can be edited here."
+) {
+  throw new Error(
+    `Expected player-character combat NPC resources update validation_error 400, got ${playerCharacterNpcResourcesUpdateCombatState.status} ${JSON.stringify(playerCharacterNpcResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const manualNpcNoCountersResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${Number(addedNpcRow?.id || 0)}/npc-resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { counters: [{ resource_key: "battle-cry", current_value: "0" }] } },
+);
+if (
+  manualNpcNoCountersResourcesUpdateCombatState.status !== 400 ||
+  manualNpcNoCountersResourcesUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  manualNpcNoCountersResourcesUpdateCombatState.payload?.error?.message !==
+    "This NPC has no supported source-backed resource counters."
+) {
+  throw new Error(
+    `Expected manual NPC resources update validation_error 400, got ${manualNpcNoCountersResourcesUpdateCombatState.status} ${JSON.stringify(manualNpcNoCountersResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const nonListNpcResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/npc-resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { counters: { resource_key: "battle-cry", current_value: "0" } } },
+);
+if (
+  nonListNpcResourcesUpdateCombatState.status !== 400 ||
+  nonListNpcResourcesUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  nonListNpcResourcesUpdateCombatState.payload?.error?.message !== "NPC resource counters must be sent as a list."
+) {
+  throw new Error(
+    `Expected non-list combat NPC resources validation_error 400, got ${nonListNpcResourcesUpdateCombatState.status} ${JSON.stringify(nonListNpcResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const emptyNpcResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/npc-resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { counters: [] } },
+);
+if (
+  emptyNpcResourcesUpdateCombatState.status !== 400 ||
+  emptyNpcResourcesUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  emptyNpcResourcesUpdateCombatState.payload?.error?.message !== "Choose at least one NPC resource counter to update."
+) {
+  throw new Error(
+    `Expected empty combat NPC resources validation_error 400, got ${emptyNpcResourcesUpdateCombatState.status} ${JSON.stringify(emptyNpcResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const nonObjectNpcResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/npc-resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { counters: ["battle-cry"] } },
+);
+if (
+  nonObjectNpcResourcesUpdateCombatState.status !== 400 ||
+  nonObjectNpcResourcesUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  nonObjectNpcResourcesUpdateCombatState.payload?.error?.message !== "NPC resource row 1 must be an object."
+) {
+  throw new Error(
+    `Expected non-object combat NPC resources validation_error 400, got ${nonObjectNpcResourcesUpdateCombatState.status} ${JSON.stringify(nonObjectNpcResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const invalidKeyNpcResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/npc-resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { counters: [{ resource_key: "missing", current_value: "0" }] } },
+);
+if (
+  invalidKeyNpcResourcesUpdateCombatState.status !== 400 ||
+  invalidKeyNpcResourcesUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  invalidKeyNpcResourcesUpdateCombatState.payload?.error?.message !== "Choose a valid NPC resource counter."
+) {
+  throw new Error(
+    `Expected invalid-key combat NPC resources validation_error 400, got ${invalidKeyNpcResourcesUpdateCombatState.status} ${JSON.stringify(invalidKeyNpcResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const invalidValueNpcResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/npc-resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { counters: [{ resource_key: "battle-cry", current_value: "many" }] } },
+);
+if (
+  invalidValueNpcResourcesUpdateCombatState.status !== 400 ||
+  invalidValueNpcResourcesUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  invalidValueNpcResourcesUpdateCombatState.payload?.error?.message !== "Battle Cry current value must be a whole number."
+) {
+  throw new Error(
+    `Expected invalid-value combat NPC resources validation_error 400, got ${invalidValueNpcResourcesUpdateCombatState.status} ${JSON.stringify(invalidValueNpcResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const highValueNpcResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/npc-resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { counters: [{ resource_key: "battle-cry", current_value: "2" }] } },
+);
+if (
+  highValueNpcResourcesUpdateCombatState.status !== 400 ||
+  highValueNpcResourcesUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  highValueNpcResourcesUpdateCombatState.payload?.error?.message !== "Battle Cry cannot exceed 1."
+) {
+  throw new Error(
+    `Expected high-value combat NPC resources validation_error 400, got ${highValueNpcResourcesUpdateCombatState.status} ${JSON.stringify(highValueNpcResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const staleNpcCounterResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/npc-resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_combatant_revision: 999,
+      counters: [{ resource_key: "battle-cry", current_value: "0" }],
+    },
+  },
+);
+if (
+  staleNpcCounterResourcesUpdateCombatState.status !== 409 ||
+  staleNpcCounterResourcesUpdateCombatState.payload?.error?.code !== "state_conflict" ||
+  staleNpcCounterResourcesUpdateCombatState.payload?.error?.message !==
+    "This combatant changed in another combat view. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale combat NPC resources update state_conflict 409, got ${staleNpcCounterResourcesUpdateCombatState.status} ${JSON.stringify(staleNpcCounterResourcesUpdateCombatState.payload)}`,
+  );
+}
+
+const npcCounterResourcesUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/npc-resources`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_combatant_revision: 4,
+      counters: [{ resource_key: "battle-cry", current_value: "0" }],
+    },
+  },
+);
+if (
+  npcCounterResourcesUpdateCombatState.status !== 200 ||
+  npcCounterResourcesUpdateCombatState.payload?.ok !== true ||
+  npcCounterResourcesUpdateCombatState.payload?.changed !== true ||
+  npcCounterResourcesUpdateCombatState.payload?.live_revision !== 26 ||
+  npcCounterResourcesUpdateCombatState.payload?.selected_combatant?.id !== addedSystemsMonsterCombatantId ||
+  npcCounterResourcesUpdateCombatState.payload?.selected_combatant?.combatant_revision !== 5 ||
+  npcCounterResourcesUpdateCombatState.payload?.selected_combatant?.npc_resource_counters?.[0]?.resource_key !==
+    "battle-cry" ||
+  npcCounterResourcesUpdateCombatState.payload?.selected_combatant?.npc_resource_counters?.[0]?.current_value !== 0
+) {
+  throw new Error(`Unexpected combat NPC counter resources update payload: ${JSON.stringify(npcCounterResourcesUpdateCombatState.payload)}`);
+}
+
+const combatNpcCounterResourcesAssertionDb = new Database(dbPath, { readonly: true });
+const updatedSystemsMonsterNpcResourcesRow = combatNpcCounterResourcesAssertionDb
+  .prepare(
+    `
+      SELECT revision, updated_by_user_id
+      FROM campaign_combatants
+      WHERE id = ?
+    `,
+  )
+  .get(addedSystemsMonsterCombatantId);
+const updatedSystemsMonsterCounterRow = combatNpcCounterResourcesAssertionDb
+  .prepare(
+    `
+      SELECT current_value, updated_by_user_id
+      FROM campaign_combatant_resource_counters
+      WHERE combatant_id = ? AND resource_key = ?
+    `,
+  )
+  .get(addedSystemsMonsterCombatantId, "battle-cry");
+const trackerAfterNpcCounterResourcesUpdate = combatNpcCounterResourcesAssertionDb
+  .prepare("SELECT round_number, current_combatant_id, revision FROM campaign_combat_trackers WHERE campaign_slug = ?")
+  .get("linden-pass");
+combatNpcCounterResourcesAssertionDb.close();
+if (
+  updatedSystemsMonsterNpcResourcesRow?.revision !== 5 ||
+  updatedSystemsMonsterNpcResourcesRow?.updated_by_user_id !== 77 ||
+  updatedSystemsMonsterCounterRow?.current_value !== 0 ||
+  updatedSystemsMonsterCounterRow?.updated_by_user_id !== 77 ||
+  trackerAfterNpcCounterResourcesUpdate?.round_number !== 1 ||
+  trackerAfterNpcCounterResourcesUpdate?.current_combatant_id !== null ||
+  trackerAfterNpcCounterResourcesUpdate?.revision !== 26
+) {
+  throw new Error(
+    `Unexpected combat NPC counter resources update database rows: ${JSON.stringify({
+      updatedSystemsMonsterNpcResourcesRow,
+      updatedSystemsMonsterCounterRow,
+      trackerAfterNpcCounterResourcesUpdate,
+    })}`,
+  );
+}
+
+const fixturePlayerDetailVisibilityCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/player-detail-visibility`,
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "PATCH", body: { player_detail_visible: true } },
+);
+if (
+  fixturePlayerDetailVisibilityCombatState.status !== 403 ||
+  fixturePlayerDetailVisibilityCombatState.payload?.error?.code !== "forbidden"
+) {
+  throw new Error(
+    `Expected fixture combat player detail visibility forbidden 403, got ${fixturePlayerDetailVisibilityCombatState.status} ${fixturePlayerDetailVisibilityCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerPlayerDetailVisibilityCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/player-detail-visibility`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { player_detail_visible: true } },
+);
+if (
+  playerPlayerDetailVisibilityCombatState.status !== 403 ||
+  playerPlayerDetailVisibilityCombatState.payload?.error?.code !== "forbidden" ||
+  playerPlayerDetailVisibilityCombatState.payload?.error?.message !== "You do not have permission to manage combat."
+) {
+  throw new Error(
+    `Expected player combat player detail visibility forbidden 403, got ${playerPlayerDetailVisibilityCombatState.status} ${JSON.stringify(playerPlayerDetailVisibilityCombatState.payload)}`,
+  );
+}
+
+const missingCampaignPlayerDetailVisibilityCombatState = await requestJson(
+  `/api/v1/campaigns/definitely-not-a-campaign/combat/combatants/${addedSystemsMonsterCombatantId}/player-detail-visibility`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { player_detail_visible: true } },
+);
+if (
+  missingCampaignPlayerDetailVisibilityCombatState.status !== 404 ||
+  missingCampaignPlayerDetailVisibilityCombatState.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing combat player detail visibility campaign JSON 404, got ${missingCampaignPlayerDetailVisibilityCombatState.status} ${missingCampaignPlayerDetailVisibilityCombatState.payload?.error?.code}`,
+  );
+}
+
+const missingCombatantPlayerDetailVisibilityCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/combatants/999999/player-detail-visibility",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { player_detail_visible: true } },
+);
+if (
+  missingCombatantPlayerDetailVisibilityCombatState.status !== 400 ||
+  missingCombatantPlayerDetailVisibilityCombatState.payload?.error?.code !== "validation_error" ||
+  missingCombatantPlayerDetailVisibilityCombatState.payload?.error?.message !== "That combatant could not be found."
+) {
+  throw new Error(
+    `Expected missing combat player detail visibility validation_error 400, got ${missingCombatantPlayerDetailVisibilityCombatState.status} ${JSON.stringify(missingCombatantPlayerDetailVisibilityCombatState.payload)}`,
+  );
+}
+
+const playerCharacterPlayerDetailVisibilityCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedPlayerCombatantId}/player-detail-visibility`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { player_detail_visible: true } },
+);
+if (
+  playerCharacterPlayerDetailVisibilityCombatState.status !== 400 ||
+  playerCharacterPlayerDetailVisibilityCombatState.payload?.error?.code !== "validation_error" ||
+  playerCharacterPlayerDetailVisibilityCombatState.payload?.error?.message !==
+    "Only NPC combatants can toggle player-facing detail visibility."
+) {
+  throw new Error(
+    `Expected player-character combat player detail visibility validation_error 400, got ${playerCharacterPlayerDetailVisibilityCombatState.status} ${JSON.stringify(playerCharacterPlayerDetailVisibilityCombatState.payload)}`,
+  );
+}
+
+const missingFlagPlayerDetailVisibilityCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/player-detail-visibility`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: {} },
+);
+if (
+  missingFlagPlayerDetailVisibilityCombatState.status !== 400 ||
+  missingFlagPlayerDetailVisibilityCombatState.payload?.error?.code !== "validation_error" ||
+  missingFlagPlayerDetailVisibilityCombatState.payload?.error?.message !==
+    "player_detail_visible must be true or false."
+) {
+  throw new Error(
+    `Expected missing-flag combat player detail visibility validation_error 400, got ${missingFlagPlayerDetailVisibilityCombatState.status} ${JSON.stringify(missingFlagPlayerDetailVisibilityCombatState.payload)}`,
+  );
+}
+
+const invalidFlagPlayerDetailVisibilityCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/player-detail-visibility`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { player_detail_visible: "sometimes" } },
+);
+if (
+  invalidFlagPlayerDetailVisibilityCombatState.status !== 400 ||
+  invalidFlagPlayerDetailVisibilityCombatState.payload?.error?.code !== "validation_error" ||
+  invalidFlagPlayerDetailVisibilityCombatState.payload?.error?.message !==
+    "player_detail_visible must be true or false."
+) {
+  throw new Error(
+    `Expected invalid-flag combat player detail visibility validation_error 400, got ${invalidFlagPlayerDetailVisibilityCombatState.status} ${JSON.stringify(invalidFlagPlayerDetailVisibilityCombatState.payload)}`,
+  );
+}
+
+const stalePlayerDetailVisibilityCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/player-detail-visibility`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_combatant_revision: 999,
+      player_detail_visible: true,
+    },
+  },
+);
+if (
+  stalePlayerDetailVisibilityCombatState.status !== 409 ||
+  stalePlayerDetailVisibilityCombatState.payload?.error?.code !== "state_conflict" ||
+  stalePlayerDetailVisibilityCombatState.payload?.error?.message !==
+    "This combatant changed in another combat view. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale combat player detail visibility state_conflict 409, got ${stalePlayerDetailVisibilityCombatState.status} ${JSON.stringify(stalePlayerDetailVisibilityCombatState.payload)}`,
+  );
+}
+
+const playerDetailVisibilityCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/player-detail-visibility`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_combatant_revision: 5,
+      player_detail_visible: true,
+    },
+  },
+);
+if (
+  playerDetailVisibilityCombatState.status !== 200 ||
+  playerDetailVisibilityCombatState.payload?.ok !== true ||
+  playerDetailVisibilityCombatState.payload?.changed !== true ||
+  playerDetailVisibilityCombatState.payload?.live_revision !== 27 ||
+  playerDetailVisibilityCombatState.payload?.selected_combatant?.id !== addedSystemsMonsterCombatantId ||
+  playerDetailVisibilityCombatState.payload?.selected_combatant?.combatant_revision !== 6 ||
+  playerDetailVisibilityCombatState.payload?.selected_combatant?.player_detail_visible !== true
+) {
+  throw new Error(`Unexpected combat player detail visibility payload: ${JSON.stringify(playerDetailVisibilityCombatState.payload)}`);
+}
+
+const combatPlayerDetailVisibilityAssertionDb = new Database(dbPath, { readonly: true });
+const updatedSystemsMonsterPlayerDetailRow = combatPlayerDetailVisibilityAssertionDb
+  .prepare(
+    `
+      SELECT player_detail_visible, revision, updated_by_user_id
+      FROM campaign_combatants
+      WHERE id = ?
+    `,
+  )
+  .get(addedSystemsMonsterCombatantId);
+const trackerAfterPlayerDetailVisibility = combatPlayerDetailVisibilityAssertionDb
+  .prepare("SELECT round_number, current_combatant_id, revision, updated_by_user_id FROM campaign_combat_trackers WHERE campaign_slug = ?")
+  .get("linden-pass");
+combatPlayerDetailVisibilityAssertionDb.close();
+if (
+  updatedSystemsMonsterPlayerDetailRow?.player_detail_visible !== 1 ||
+  updatedSystemsMonsterPlayerDetailRow?.revision !== 6 ||
+  updatedSystemsMonsterPlayerDetailRow?.updated_by_user_id !== 77 ||
+  trackerAfterPlayerDetailVisibility?.round_number !== 1 ||
+  trackerAfterPlayerDetailVisibility?.current_combatant_id !== null ||
+  trackerAfterPlayerDetailVisibility?.revision !== 27 ||
+  trackerAfterPlayerDetailVisibility?.updated_by_user_id !== 77
+) {
+  throw new Error(
+    `Unexpected combat player detail visibility database rows: ${JSON.stringify({
+      updatedSystemsMonsterPlayerDetailRow,
+      trackerAfterPlayerDetailVisibility,
+    })}`,
+  );
+}
+
+const fixtureConditionCreateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/conditions`,
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "POST", body: { name: "Dazed", duration_text: "Until end of next turn" } },
+);
+if (
+  fixtureConditionCreateCombatState.status !== 403 ||
+  fixtureConditionCreateCombatState.payload?.error?.code !== "forbidden"
+) {
+  throw new Error(
+    `Expected fixture combat condition create forbidden 403, got ${fixtureConditionCreateCombatState.status} ${fixtureConditionCreateCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerConditionCreateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/conditions`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "POST", body: { name: "Dazed", duration_text: "Until end of next turn" } },
+);
+if (
+  playerConditionCreateCombatState.status !== 403 ||
+  playerConditionCreateCombatState.payload?.error?.code !== "forbidden" ||
+  playerConditionCreateCombatState.payload?.error?.message !== "You do not have permission to manage combat."
+) {
+  throw new Error(
+    `Expected player combat condition create forbidden 403, got ${playerConditionCreateCombatState.status} ${JSON.stringify(playerConditionCreateCombatState.payload)}`,
+  );
+}
+
+const missingCampaignConditionCreateCombatState = await requestJson(
+  `/api/v1/campaigns/definitely-not-a-campaign/combat/combatants/${addedSystemsMonsterCombatantId}/conditions`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { name: "Dazed", duration_text: "Until end of next turn" } },
+);
+if (
+  missingCampaignConditionCreateCombatState.status !== 404 ||
+  missingCampaignConditionCreateCombatState.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing combat condition create campaign JSON 404, got ${missingCampaignConditionCreateCombatState.status} ${missingCampaignConditionCreateCombatState.payload?.error?.code}`,
+  );
+}
+
+const malformedConditionCreateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/conditions`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: "{" },
+);
+if (
+  malformedConditionCreateCombatState.status !== 400 ||
+  malformedConditionCreateCombatState.payload?.error?.code !== "validation_error"
+) {
+  throw new Error(
+    `Expected malformed combat condition create validation_error 400, got ${malformedConditionCreateCombatState.status} ${malformedConditionCreateCombatState.payload?.error?.code}`,
+  );
+}
+
+const missingCombatantConditionCreateCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/combatants/999999/conditions",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { name: "Dazed", duration_text: "Until end of next turn" } },
+);
+if (
+  missingCombatantConditionCreateCombatState.status !== 400 ||
+  missingCombatantConditionCreateCombatState.payload?.error?.code !== "validation_error" ||
+  missingCombatantConditionCreateCombatState.payload?.error?.message !== "That combatant could not be found."
+) {
+  throw new Error(
+    `Expected missing combatant condition create validation_error 400, got ${missingCombatantConditionCreateCombatState.status} ${JSON.stringify(missingCombatantConditionCreateCombatState.payload)}`,
+  );
+}
+
+const blankConditionCreateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/conditions`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { name: "   ", duration_text: "Until end of next turn" } },
+);
+if (
+  blankConditionCreateCombatState.status !== 400 ||
+  blankConditionCreateCombatState.payload?.error?.code !== "validation_error" ||
+  blankConditionCreateCombatState.payload?.error?.message !== "Condition name is required."
+) {
+  throw new Error(
+    `Expected blank combat condition create validation_error 400, got ${blankConditionCreateCombatState.status} ${JSON.stringify(blankConditionCreateCombatState.payload)}`,
+  );
+}
+
+const longConditionCreateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/conditions`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { name: "X".repeat(81), duration_text: "Until end of next turn" } },
+);
+if (
+  longConditionCreateCombatState.status !== 400 ||
+  longConditionCreateCombatState.payload?.error?.code !== "validation_error" ||
+  longConditionCreateCombatState.payload?.error?.message !== "Condition names must stay under 80 characters."
+) {
+  throw new Error(
+    `Expected long-name combat condition create validation_error 400, got ${longConditionCreateCombatState.status} ${JSON.stringify(longConditionCreateCombatState.payload)}`,
+  );
+}
+
+const longDurationConditionCreateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/conditions`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { name: "Dazed", duration_text: "Y".repeat(121) } },
+);
+if (
+  longDurationConditionCreateCombatState.status !== 400 ||
+  longDurationConditionCreateCombatState.payload?.error?.code !== "validation_error" ||
+  longDurationConditionCreateCombatState.payload?.error?.message !==
+    "Condition duration text must stay under 120 characters."
+) {
+  throw new Error(
+    `Expected long-duration combat condition create validation_error 400, got ${longDurationConditionCreateCombatState.status} ${JSON.stringify(longDurationConditionCreateCombatState.payload)}`,
+  );
+}
+
+const conditionCreateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/conditions`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "POST", body: { name: "Dazed", duration_text: "Until end of next turn" } },
+);
+const conditionCreateCombatant = conditionCreateCombatState.payload?.tracker?.combatants?.find(
+  (combatant) => combatant.id === addedSystemsMonsterCombatantId,
+);
+const createdCombatCondition = conditionCreateCombatant?.conditions?.find((condition) => condition.name === "Dazed");
+if (
+  conditionCreateCombatState.status !== 200 ||
+  conditionCreateCombatState.payload?.ok !== true ||
+  conditionCreateCombatState.payload?.changed !== true ||
+  conditionCreateCombatState.payload?.live_revision !== 28 ||
+  conditionCreateCombatant?.id !== addedSystemsMonsterCombatantId ||
+  createdCombatCondition?.duration_text !== "Until end of next turn" ||
+  typeof createdCombatCondition?.id !== "number"
+) {
+  throw new Error(`Unexpected combat condition create payload: ${JSON.stringify(conditionCreateCombatState.payload)}`);
+}
+
+const createdCombatConditionId = Number(createdCombatCondition.id);
+const combatConditionCreateAssertionDb = new Database(dbPath, { readonly: true });
+const createdCombatConditionRow = combatConditionCreateAssertionDb
+  .prepare(
+    `
+      SELECT combatant_id, name, duration_text, created_by_user_id
+      FROM campaign_combat_conditions
+      WHERE id = ?
+    `,
+  )
+  .get(createdCombatConditionId);
+const trackerAfterConditionCreate = combatConditionCreateAssertionDb
+  .prepare("SELECT round_number, current_combatant_id, revision, updated_by_user_id FROM campaign_combat_trackers WHERE campaign_slug = ?")
+  .get("linden-pass");
+combatConditionCreateAssertionDb.close();
+if (
+  createdCombatConditionRow?.combatant_id !== addedSystemsMonsterCombatantId ||
+  createdCombatConditionRow?.name !== "Dazed" ||
+  createdCombatConditionRow?.duration_text !== "Until end of next turn" ||
+  createdCombatConditionRow?.created_by_user_id !== 77 ||
+  trackerAfterConditionCreate?.round_number !== 1 ||
+  trackerAfterConditionCreate?.current_combatant_id !== null ||
+  trackerAfterConditionCreate?.revision !== 28 ||
+  trackerAfterConditionCreate?.updated_by_user_id !== 77
+) {
+  throw new Error(
+    `Unexpected combat condition create database rows: ${JSON.stringify({
+      createdCombatConditionRow,
+      trackerAfterConditionCreate,
+    })}`,
+  );
+}
+
+const fixtureConditionDeleteCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/conditions/${createdCombatConditionId}`,
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "DELETE" },
+);
+if (
+  fixtureConditionDeleteCombatState.status !== 403 ||
+  fixtureConditionDeleteCombatState.payload?.error?.code !== "forbidden"
+) {
+  throw new Error(
+    `Expected fixture combat condition delete forbidden 403, got ${fixtureConditionDeleteCombatState.status} ${fixtureConditionDeleteCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerConditionDeleteCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/conditions/${createdCombatConditionId}`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "DELETE" },
+);
+if (
+  playerConditionDeleteCombatState.status !== 403 ||
+  playerConditionDeleteCombatState.payload?.error?.code !== "forbidden" ||
+  playerConditionDeleteCombatState.payload?.error?.message !== "You do not have permission to manage combat."
+) {
+  throw new Error(
+    `Expected player combat condition delete forbidden 403, got ${playerConditionDeleteCombatState.status} ${JSON.stringify(playerConditionDeleteCombatState.payload)}`,
+  );
+}
+
+const missingCampaignConditionDeleteCombatState = await requestJson(
+  `/api/v1/campaigns/definitely-not-a-campaign/combat/conditions/${createdCombatConditionId}`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "DELETE" },
+);
+if (
+  missingCampaignConditionDeleteCombatState.status !== 404 ||
+  missingCampaignConditionDeleteCombatState.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing combat condition delete campaign JSON 404, got ${missingCampaignConditionDeleteCombatState.status} ${missingCampaignConditionDeleteCombatState.payload?.error?.code}`,
+  );
+}
+
+const missingConditionDeleteCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/conditions/999999",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "DELETE" },
+);
+if (
+  missingConditionDeleteCombatState.status !== 400 ||
+  missingConditionDeleteCombatState.payload?.error?.code !== "validation_error" ||
+  missingConditionDeleteCombatState.payload?.error?.message !== "That condition could not be found."
+) {
+  throw new Error(
+    `Expected missing combat condition delete validation_error 400, got ${missingConditionDeleteCombatState.status} ${JSON.stringify(missingConditionDeleteCombatState.payload)}`,
+  );
+}
+
+const conditionDeleteCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/conditions/${createdCombatConditionId}`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "DELETE" },
+);
+const conditionDeleteCombatant = conditionDeleteCombatState.payload?.tracker?.combatants?.find(
+  (combatant) => combatant.id === addedSystemsMonsterCombatantId,
+);
+if (
+  conditionDeleteCombatState.status !== 200 ||
+  conditionDeleteCombatState.payload?.ok !== true ||
+  conditionDeleteCombatState.payload?.changed !== true ||
+  conditionDeleteCombatState.payload?.live_revision !== 29 ||
+  conditionDeleteCombatant?.conditions?.some((condition) => condition.id === createdCombatConditionId)
+) {
+  throw new Error(`Unexpected combat condition delete payload: ${JSON.stringify(conditionDeleteCombatState.payload)}`);
+}
+
+const combatConditionDeleteAssertionDb = new Database(dbPath, { readonly: true });
+const deletedCombatConditionRows = combatConditionDeleteAssertionDb
+  .prepare("SELECT COUNT(*) AS count FROM campaign_combat_conditions WHERE id = ?")
+  .get(createdCombatConditionId);
+const trackerAfterConditionDelete = combatConditionDeleteAssertionDb
+  .prepare("SELECT round_number, current_combatant_id, revision, updated_by_user_id FROM campaign_combat_trackers WHERE campaign_slug = ?")
+  .get("linden-pass");
+combatConditionDeleteAssertionDb.close();
+if (
+  deletedCombatConditionRows?.count !== 0 ||
+  trackerAfterConditionDelete?.round_number !== 1 ||
+  trackerAfterConditionDelete?.current_combatant_id !== null ||
+  trackerAfterConditionDelete?.revision !== 29 ||
+  trackerAfterConditionDelete?.updated_by_user_id !== null
+) {
+  throw new Error(
+    `Unexpected combat condition delete database rows: ${JSON.stringify({
+      deletedCombatConditionRows,
+      trackerAfterConditionDelete,
+    })}`,
+  );
+}
+
+const fixtureCombatantDeleteCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}`,
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "DELETE" },
+);
+if (
+  fixtureCombatantDeleteCombatState.status !== 403 ||
+  fixtureCombatantDeleteCombatState.payload?.error?.code !== "forbidden"
+) {
+  throw new Error(
+    `Expected fixture combatant delete forbidden 403, got ${fixtureCombatantDeleteCombatState.status} ${fixtureCombatantDeleteCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerCombatantDeleteCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "DELETE" },
+);
+if (
+  playerCombatantDeleteCombatState.status !== 403 ||
+  playerCombatantDeleteCombatState.payload?.error?.code !== "forbidden" ||
+  playerCombatantDeleteCombatState.payload?.error?.message !== "You do not have permission to manage combat."
+) {
+  throw new Error(
+    `Expected player combatant delete forbidden 403, got ${playerCombatantDeleteCombatState.status} ${JSON.stringify(playerCombatantDeleteCombatState.payload)}`,
+  );
+}
+
+const missingCampaignCombatantDeleteCombatState = await requestJson(
+  `/api/v1/campaigns/definitely-not-a-campaign/combat/combatants/${addedSystemsMonsterCombatantId}`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "DELETE" },
+);
+if (
+  missingCampaignCombatantDeleteCombatState.status !== 404 ||
+  missingCampaignCombatantDeleteCombatState.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing combatant delete campaign JSON 404, got ${missingCampaignCombatantDeleteCombatState.status} ${missingCampaignCombatantDeleteCombatState.payload?.error?.code}`,
+  );
+}
+
+const missingCombatantDeleteCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/combatants/999999",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "DELETE" },
+);
+if (
+  missingCombatantDeleteCombatState.status !== 400 ||
+  missingCombatantDeleteCombatState.payload?.error?.code !== "validation_error" ||
+  missingCombatantDeleteCombatState.payload?.error?.message !== "That combatant could not be found."
+) {
+  throw new Error(
+    `Expected missing combatant delete validation_error 400, got ${missingCombatantDeleteCombatState.status} ${JSON.stringify(missingCombatantDeleteCombatState.payload)}`,
+  );
+}
+
+const combatantDeleteCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "DELETE" },
+);
+if (
+  combatantDeleteCombatState.status !== 200 ||
+  combatantDeleteCombatState.payload?.ok !== true ||
+  combatantDeleteCombatState.payload?.changed !== true ||
+  combatantDeleteCombatState.payload?.live_revision !== 30 ||
+  combatantDeleteCombatState.payload?.tracker?.combatant_count !== 3 ||
+  combatantDeleteCombatState.payload?.tracker?.combatants?.some(
+    (combatant) => combatant.id === addedSystemsMonsterCombatantId,
+  )
+) {
+  throw new Error(`Unexpected combatant delete payload: ${JSON.stringify(combatantDeleteCombatState.payload)}`);
+}
+
+const combatantDeleteAssertionDb = new Database(dbPath, { readonly: true });
+const deletedCombatantRows = combatantDeleteAssertionDb
+  .prepare("SELECT COUNT(*) AS count FROM campaign_combatants WHERE id = ?")
+  .get(addedSystemsMonsterCombatantId);
+const deletedCombatantConditionRows = combatantDeleteAssertionDb
+  .prepare("SELECT COUNT(*) AS count FROM campaign_combat_conditions WHERE combatant_id = ?")
+  .get(addedSystemsMonsterCombatantId);
+const deletedCombatantCounterRows = combatantDeleteAssertionDb
+  .prepare("SELECT COUNT(*) AS count FROM campaign_combatant_resource_counters WHERE combatant_id = ?")
+  .get(addedSystemsMonsterCombatantId);
+const deletedCombatantNoteRows = combatantDeleteAssertionDb
+  .prepare("SELECT COUNT(*) AS count FROM campaign_combatant_resource_notes WHERE combatant_id = ?")
+  .get(addedSystemsMonsterCombatantId);
+const trackerAfterCombatantDelete = combatantDeleteAssertionDb
+  .prepare("SELECT round_number, current_combatant_id, revision, updated_by_user_id FROM campaign_combat_trackers WHERE campaign_slug = ?")
+  .get("linden-pass");
+combatantDeleteAssertionDb.close();
+if (
+  deletedCombatantRows?.count !== 0 ||
+  deletedCombatantConditionRows?.count !== 0 ||
+  deletedCombatantCounterRows?.count !== 0 ||
+  deletedCombatantNoteRows?.count !== 0 ||
+  trackerAfterCombatantDelete?.round_number !== 1 ||
+  trackerAfterCombatantDelete?.current_combatant_id !== null ||
+  trackerAfterCombatantDelete?.revision !== 30 ||
+  trackerAfterCombatantDelete?.updated_by_user_id !== null
+) {
+  throw new Error(
+    `Unexpected combatant delete database rows: ${JSON.stringify({
+      deletedCombatantRows,
+      deletedCombatantConditionRows,
+      deletedCombatantCounterRows,
+      deletedCombatantNoteRows,
+      trackerAfterCombatantDelete,
+    })}`,
+  );
 }
 
 const missingCombatState = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/combat", {

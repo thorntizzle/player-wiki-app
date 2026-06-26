@@ -66,6 +66,19 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/combat`
   - `GET /api/v1/campaigns/:campaignSlug/combat/live-state`
   - `GET /api/v1/campaigns/:campaignSlug/combat/systems-monsters/search`
+  - `POST /api/v1/campaigns/:campaignSlug/combat/advance-turn`
+  - `POST /api/v1/campaigns/:campaignSlug/combat/clear`
+  - `POST /api/v1/campaigns/:campaignSlug/combat/player-combatants`
+  - `POST /api/v1/campaigns/:campaignSlug/combat/npc-combatants`
+  - `POST /api/v1/campaigns/:campaignSlug/combat/statblock-combatants`
+  - `POST /api/v1/campaigns/:campaignSlug/combat/systems-monsters`
+  - `PATCH /api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/turn`
+  - `PATCH /api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/vitals`
+  - `PATCH /api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/resources`
+  - `PATCH /api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/npc-resources`
+  - `POST /api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/conditions`
+  - `DELETE /api/v1/campaigns/:campaignSlug/combat/conditions/:conditionId`
+  - `DELETE /api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId`
   - `GET /api/v1/campaigns`
   - `GET /api/v1/campaigns/:campaignSlug`
   - `GET /api/v1/campaigns/:campaignSlug/control`
@@ -136,6 +149,68 @@ Route parity check command:
   for bearer-token DM/admin users against fixture SQLite, denying fixture-role writes, validating
   supported Combat campaigns and combatant existence, resetting the selected combatant's movement
   and action economy, bumping tracker/combatant revisions, and returning the refreshed Combat payload.
+- The Combat advance-turn route now serves `POST .../combat/advance-turn` for bearer-token DM/admin
+  users against fixture SQLite, denying fixture-role writes, validating non-empty DND-5E Combat
+  encounters, cycling through the ordered combatant list, incrementing the round when wrapping,
+  resetting the new current combatant's movement and action economy, bumping tracker/combatant
+  revisions, and returning the refreshed Combat payload.
+- The Combat clear route now serves `POST .../combat/clear` for bearer-token DM/admin users against
+  fixture SQLite, denying fixture-role writes, removing campaign combatants plus condition/resource
+  rows, resetting the tracker to round 1 with no current combatant, bumping the tracker revision,
+  and returning the refreshed empty Combat payload.
+- The Combat player-combatant add route now serves `POST .../combat/player-combatants` for
+  bearer-token DM/admin users against fixture SQLite, denying fixture-role writes, validating visible
+  active characters, initializing missing character state through the existing content-state helper,
+  defaulting turn value from initiative, validating priority/duplicates, bumping tracker revision
+  without changing the current turn, and returning the refreshed Combat payload.
+- The Combat manual NPC add route now serves `POST .../combat/npc-combatants` for bearer-token
+  DM/admin users against fixture SQLite, denying fixture-role writes, validating manual NPC name,
+  initiative, HP, temp HP, movement, and priority fields, defaulting dexterity modifier from
+  initiative bonus when blank, storing manual source identity without resource seeds, bumping tracker
+  revision without changing the current turn, and returning the refreshed Combat payload.
+- The Combat DM Content statblock add route now serves `POST .../combat/statblock-combatants`
+  for bearer-token DM/admin users against fixture SQLite, denying fixture-role writes, validating
+  selected statblocks, defaulting name/initiative/HP/movement from DM Content rows, extracting the
+  DEX tie-breaker from statblock Markdown, seeding supported source-backed resource counters and
+  read-only mechanic notes, bumping tracker revision without changing the current turn, and returning
+  the refreshed Combat payload.
+- The Combat Systems monster add route now serves `POST .../combat/systems-monsters` for
+  bearer-token DM/admin users against fixture SQLite, denying fixture-role writes, validating enabled
+  Systems monster entries, deriving initiative/DEX/HP/movement from Systems metadata, seeding
+  supported source-backed resource counters and read-only mechanic notes from structured Systems body
+  JSON, storing Systems source identity, bumping tracker revision without changing the current turn,
+  and returning the refreshed Combat payload.
+- The Combat turn-value route now serves `PATCH .../combat/combatants/:combatantId/turn` for
+  bearer-token DM/admin users against fixture SQLite, denying fixture-role writes, validating
+  supported Combat campaigns and combatant existence, defaulting omitted turn/priority fields from
+  the existing combatant row, enforcing the combatant row revision guard when supplied, bumping both
+  combatant and tracker revisions, and returning the refreshed Combat payload.
+- The Combat vitals route now serves `PATCH .../combat/combatants/:combatantId/vitals` against
+  fixture SQLite, denying fixture-role writes, allowing bearer-token DM/admin users to update NPC or
+  player-character vitals, allowing assigned bearer-token players to update their own player-character
+  HP/temp HP through `character_state`, enforcing state/combatant revision guards, mirroring
+  player-character sheet vitals back to the combatant row, bumping combatant/tracker revisions, and
+  returning refreshed Combat payloads with player-character `state_revision` values.
+- The Combat resources route now serves `PATCH .../combat/combatants/:combatantId/resources`
+  against fixture SQLite, denying fixture-role writes, allowing bearer-token DM/admin users to update
+  movement/action economy on any combatant, allowing assigned bearer-token players to update their own
+  player-character combatant row, strictly validating action booleans and remaining movement, enforcing
+  the combatant revision guard when supplied, bumping combatant/tracker revisions, and returning the
+  refreshed Combat payload.
+- The Combat NPC source-resource route now serves
+  `PATCH .../combat/combatants/:combatantId/npc-resources` against fixture SQLite, denying fixture-role
+  writes and player bearer writes, validating source-backed NPC counter payloads, enforcing the
+  combatant revision guard when supplied, persisting existing counter current values only, bumping
+  combatant/tracker revisions, and returning the refreshed Combat payload.
+- The Combat condition add/delete routes now serve
+  `POST .../combat/combatants/:combatantId/conditions` and
+  `DELETE .../combat/conditions/:conditionId` against fixture SQLite, denying fixture-role writes and
+  player bearer writes, validating condition name/duration constraints and condition existence,
+  bumping the tracker revision, and returning refreshed Combat payloads.
+- The Combat combatant delete route now serves `DELETE .../combat/combatants/:combatantId` against
+  fixture SQLite, denying fixture-role writes and player bearer writes, validating combatant
+  existence, removing the combatant plus dependent condition/resource rows, clearing current-turn
+  focus when needed, bumping the tracker revision, and returning the refreshed Combat payload.
 - The first Session manager lookup slice now serves `GET .../session/article-sources/search`, preserving
   Flask-compatible unauthenticated `auth_required`, fixture or bearer-token membership-derived
   manager-only access, short-query guidance, visible wiki page results, accessible Systems entry
