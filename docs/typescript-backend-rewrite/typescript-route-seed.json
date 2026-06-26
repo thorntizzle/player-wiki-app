@@ -63,6 +63,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/sources",
+      "route_family": "api_v1_systems",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/systems/sources",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono campaign Systems source-list route with Flask-compatible unauthenticated auth_required behavior, fixture-role filtering, and SQLite library/source reads through CPW_DB_PATH."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/wiki",
       "route_family": "api_v1_wiki",
       "status": "implemented_fixture_readonly",

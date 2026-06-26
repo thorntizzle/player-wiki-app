@@ -54,6 +54,7 @@ Route parity check command:
   - `GET /api/v1/app`
   - `GET /api/v1/systems/import-runs`
   - `GET /api/v1/systems/import-runs/:importRunId`
+  - `GET /api/v1/campaigns/:campaignSlug/systems/sources`
   - `GET /api/v1/campaigns`
   - `GET /api/v1/campaigns/:campaignSlug`
   - `GET /api/v1/campaigns/:campaignSlug/help`
@@ -71,8 +72,9 @@ Route parity check command:
 - Campaign detail uses fixture-backed reads from `tests/fixtures/sample_campaigns` by default and supports
   `CPW_CAMPAIGNS_DIR` override.
 - The first tracked SQLite read path uses `better-sqlite3` against `CPW_DB_PATH` for
-  the Systems import-run list/detail routes, while unauthenticated requests still preserve
-  Flask's `auth_required` envelope and missing detail rows return explicit JSON 404s.
+  the Systems import-run list/detail routes and the campaign Systems source-list route,
+  while unauthenticated requests still preserve Flask's `auth_required` envelope and
+  missing detail rows return explicit JSON 404s.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

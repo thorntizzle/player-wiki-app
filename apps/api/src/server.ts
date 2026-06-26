@@ -11,6 +11,10 @@ import { buildCampaignHelpPayload } from "./help/view.js";
 import { ROUTES } from "./routes.js";
 import { buildSessionStatePayload } from "./session/view.js";
 import { getSystemsImportRun, listSystemsImportRuns } from "./systems/importRuns.js";
+import {
+  buildCampaignSystemsSourceListPayload,
+  type FixtureSystemsRole,
+} from "./systems/sources.js";
 import { getCampaignConfigFile } from "./content/repository.js";
 import {
   getCampaignContentAsset,
@@ -134,8 +138,15 @@ function notFound(code: string, message: string) {
 }
 
 function hasFixtureAdminAuth(ctx: { req: { header: (name: string) => string | undefined } }): boolean {
-  const fixtureRole = (ctx.req.header("X-CPW-Fixture-Role") || "").trim().toLowerCase();
-  return fixtureRole === "admin";
+  return fixtureRole(ctx) === "admin";
+}
+
+function fixtureRole(ctx: { req: { header: (name: string) => string | undefined } }): FixtureSystemsRole | null {
+  const role = (ctx.req.header("X-CPW-Fixture-Role") || "").trim().toLowerCase();
+  if (role === "player" || role === "dm" || role === "admin") {
+    return role;
+  }
+  return null;
 }
 
 function parsePositiveInteger(rawValue: string): number | null {
@@ -365,6 +376,27 @@ app.get(ROUTES.systemsImportRun, async (ctx) => {
   return ctx.json({
     ok: true,
     import_run: importRun,
+  });
+});
+
+app.get(ROUTES.systemsSources, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const role = fixtureRole(ctx);
+  if (!role) {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  return ctx.json({
+    ok: true,
+    ...buildCampaignSystemsSourceListPayload(config.dbPath, campaign, campaignConfig?.config || {}, role),
   });
 });
 

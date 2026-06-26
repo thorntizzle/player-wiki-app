@@ -66,6 +66,109 @@ insertImportRun.run(
   null,
   null,
 );
+smokeDb.exec(`
+  CREATE TABLE systems_libraries (
+    library_slug TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    system_code TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE systems_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    library_slug TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    license_class TEXT NOT NULL,
+    license_url TEXT NOT NULL DEFAULT '',
+    attribution_text TEXT NOT NULL DEFAULT '',
+    public_visibility_allowed INTEGER NOT NULL DEFAULT 0,
+    requires_unofficial_notice INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (library_slug, source_id)
+  );
+
+  CREATE TABLE campaign_enabled_sources (
+    campaign_slug TEXT NOT NULL,
+    library_slug TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    is_enabled INTEGER NOT NULL DEFAULT 0,
+    default_visibility TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_user_id INTEGER,
+    PRIMARY KEY (campaign_slug, source_id)
+  );
+
+  CREATE TABLE systems_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    library_slug TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    entry_key TEXT NOT NULL,
+    entry_type TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    title TEXT NOT NULL,
+    source_page TEXT NOT NULL DEFAULT '',
+    source_path TEXT NOT NULL DEFAULT '',
+    search_text TEXT NOT NULL DEFAULT '',
+    player_safe_default INTEGER NOT NULL DEFAULT 0,
+    dm_heavy INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    body_json TEXT NOT NULL DEFAULT '{}',
+    rendered_html TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (library_slug, entry_key),
+    UNIQUE (library_slug, slug)
+  );
+`);
+smokeDb
+  .prepare(
+    "INSERT INTO systems_libraries (library_slug, title, system_code, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+  .run("DND-5E", "DND 5E", "DND-5E", "active", "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+const insertSource = smokeDb.prepare(`
+  INSERT INTO systems_sources (
+    library_slug,
+    source_id,
+    title,
+    license_class,
+    public_visibility_allowed,
+    requires_unofficial_notice,
+    status,
+    created_at,
+    updated_at
+  )
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+insertSource.run("DND-5E", "PHB", "Player's Handbook", "proprietary_private", 0, 1, "active", "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+insertSource.run("DND-5E", "MM", "Monster Manual", "proprietary_private", 0, 1, "active", "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+insertSource.run("DND-5E", "XGE", "Xanathar's Guide to Everything", "proprietary_private", 0, 1, "active", "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+smokeDb
+  .prepare(
+    "INSERT INTO campaign_enabled_sources (campaign_slug, library_slug, source_id, is_enabled, default_visibility, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run("linden-pass", "DND-5E", "XGE", 0, "players", "2026-06-25T09:30:00+00:00", 42);
+const insertEntry = smokeDb.prepare(`
+  INSERT INTO systems_entries (
+    library_slug,
+    source_id,
+    entry_key,
+    entry_type,
+    slug,
+    title,
+    player_safe_default,
+    created_at,
+    updated_at
+  )
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+insertEntry.run("DND-5E", "PHB", "PHB:spell:mage-hand", "spell", "phb-spell-mage-hand", "Mage Hand", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+insertEntry.run("DND-5E", "PHB", "PHB:item:chain-mail", "item", "phb-item-chain-mail", "Chain Mail", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+insertEntry.run("DND-5E", "MM", "MM:monster:goblin", "monster", "mm-monster-goblin", "Goblin", 0, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 smokeDb.close();
 
 const nodePath = fileURLToPath(new URL("../dist/server.js", import.meta.url));
@@ -209,6 +312,50 @@ if (missingImportRunDetail.status !== 404 || missingImportRunDetail.payload?.err
   throw new Error(
     `Expected missing systems import run detail JSON 404, got ${missingImportRunDetail.status} ${missingImportRunDetail.payload?.error?.code}`,
   );
+}
+
+const blockedSystemsSources = await requestJson("/api/v1/campaigns/linden-pass/systems/sources");
+if (blockedSystemsSources.status !== 401 || blockedSystemsSources.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated systems source list to return auth_required 401, got ${blockedSystemsSources.status} ${blockedSystemsSources.payload?.error?.code}`,
+  );
+}
+
+const playerSystemsSources = await requestJson("/api/v1/campaigns/linden-pass/systems/sources", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (playerSystemsSources.status !== 200 || playerSystemsSources.payload?.ok !== true) {
+  throw new Error(`Expected player systems source list 200 ok, got ${playerSystemsSources.status}`);
+}
+if (playerSystemsSources.payload?.library?.library_slug !== "DND-5E") {
+  throw new Error(`Expected DND-5E systems library, got ${JSON.stringify(playerSystemsSources.payload?.library)}`);
+}
+const playerSourceIds = (playerSystemsSources.payload?.sources || []).map((source) => source.source_id);
+if (playerSourceIds.join("|") !== "PHB") {
+  throw new Error(`Expected player-visible systems sources to include only PHB, got ${JSON.stringify(playerSourceIds)}`);
+}
+const phbSource = playerSystemsSources.payload.sources[0];
+if (phbSource.entry_count !== 2 || phbSource.default_visibility !== "players" || phbSource.permissions?.can_manage !== false) {
+  throw new Error(`Unexpected PHB source state for player: ${JSON.stringify(phbSource)}`);
+}
+
+const dmSystemsSources = await requestJson("/api/v1/campaigns/linden-pass/systems/sources", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (dmSystemsSources.status !== 200 || dmSystemsSources.payload?.permissions?.can_manage_systems !== true) {
+  throw new Error(`Expected DM systems source list manage permission, got ${JSON.stringify(dmSystemsSources.payload?.permissions)}`);
+}
+const dmSourceIds = (dmSystemsSources.payload?.sources || []).map((source) => source.source_id);
+if (dmSourceIds.join("|") !== "MM|PHB|XGE") {
+  throw new Error(`Expected DM systems source list to include all seeded sources sorted by title, got ${JSON.stringify(dmSourceIds)}`);
+}
+const mmSource = dmSystemsSources.payload.sources.find((source) => source.source_id === "MM");
+if (mmSource?.entry_count !== 1 || mmSource?.default_visibility !== "dm" || mmSource?.permissions?.can_access !== true) {
+  throw new Error(`Unexpected MM source state for DM: ${JSON.stringify(mmSource)}`);
+}
+const xgeSource = dmSystemsSources.payload.sources.find((source) => source.source_id === "XGE");
+if (xgeSource?.is_enabled !== false || xgeSource?.is_configured !== true || xgeSource?.entry_count !== 0) {
+  throw new Error(`Expected XGE configured disabled source state, got ${JSON.stringify(xgeSource)}`);
 }
 
 const campaignList = await requestJson("/api/v1/campaigns");
