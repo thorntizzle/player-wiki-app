@@ -7,6 +7,7 @@ import { serve } from "@hono/node-server";
 
 import { getApiConfig } from "./config.js";
 import { getCampaignBySlug, listCampaigns, listCampaignSlugs } from "./campaigns/repository.js";
+import { buildCampaignHelpPayload } from "./help/view.js";
 import { ROUTES } from "./routes.js";
 import { buildSessionStatePayload } from "./session/view.js";
 import { getCampaignConfigFile } from "./content/repository.js";
@@ -324,6 +325,17 @@ app.get(ROUTES.campaignDetail, async (ctx) => {
     permissions: readOnlyPermissions(),
     fixture_auth: fixtureAuthBlock(),
   });
+});
+
+app.get(ROUTES.campaignHelp, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildCampaignHelpPayload(campaign));
 });
 
 app.get(ROUTES.wikiHome, async (ctx) => {

@@ -54,6 +54,7 @@ Route parity check command:
   - `GET /api/v1/app`
   - `GET /api/v1/campaigns`
   - `GET /api/v1/campaigns/:campaignSlug`
+  - `GET /api/v1/campaigns/:campaignSlug/help`
   - `GET /api/v1/campaigns/:campaignSlug/wiki`
   - `GET /api/v1/campaigns/:campaignSlug/wiki/sections/:sectionSlug`
   - `GET /api/v1/campaigns/:campaignSlug/wiki/pages/*`

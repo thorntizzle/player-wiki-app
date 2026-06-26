@@ -180,6 +180,32 @@ def test_typescript_campaign_list_matches_flask_campaign_payloads(typescript_api
     assert {entry["role"] for entry in payload["campaigns"]} == {"fixture_reader"}
 
 
+def test_typescript_campaign_help_matches_flask_public_contract(typescript_api_server, client):
+    flask_response = client.get("/api/v1/campaigns/linden-pass/help")
+    assert flask_response.status_code == 200
+    flask_payload = flask_response.get_json()
+    assert flask_payload["ok"] is True
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/help")
+    assert status == 200
+
+    assert payload["ok"] is True
+    assert payload["campaign"] == flask_payload["campaign"]
+    for key in (
+        "viewer_role_label",
+        "viewer_role_summary",
+        "campaign_system_label",
+        "is_authenticated",
+        "available_surface_labels",
+        "cross_cutting_limits",
+        "visibility_rows",
+        "surfaces",
+        "account_note",
+        "links",
+    ):
+        assert payload[key] == flask_payload[key]
+
+
 def _section_summary(payload):
     return [
         (section["section_name"], section["section_slug"], section["page_count"])
@@ -589,6 +615,11 @@ def test_typescript_wiki_missing_resources_return_json(typescript_api_server):
     assert payload["error"]["code"] == "wiki_page_not_found"
 
     status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/definitely-not-a-campaign/session")
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "campaign_not_found"
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/definitely-not-a-campaign/help")
     assert status == 404
     assert payload["ok"] is False
     assert payload["error"]["code"] == "campaign_not_found"

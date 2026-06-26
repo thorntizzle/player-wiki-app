@@ -54,6 +54,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/help",
+      "route_family": "api_v1_campaigns",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/help",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono public Campaign Help route backed by sanitized fixture campaign metadata and read-only public visibility assumptions."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/wiki/sections/<section_slug>",
       "route_family": "api_v1_wiki",
       "status": "implemented_fixture_readonly",

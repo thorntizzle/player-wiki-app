@@ -124,6 +124,23 @@ if (campaign.payload?.permissions?.can_manage_dm_content !== false) {
   throw new Error("Expected read-only permissions in campaign response.");
 }
 
+const campaignHelp = await requestJson("/api/v1/campaigns/linden-pass/help");
+if (campaignHelp.status !== 200 || campaignHelp.payload?.ok !== true) {
+  throw new Error(`Expected campaign help endpoint 200 ok, got ${campaignHelp.status}`);
+}
+if (campaignHelp.payload?.viewer_role_label !== "Public visitor") {
+  throw new Error(`Expected public visitor help role, got ${campaignHelp.payload?.viewer_role_label}`);
+}
+if (campaignHelp.payload?.campaign?.slug !== "linden-pass") {
+  throw new Error(`Expected campaign help campaign slug linden-pass, got ${campaignHelp.payload?.campaign?.slug}`);
+}
+if (campaignHelp.payload?.available_surface_labels?.join("|") !== "Campaign Home") {
+  throw new Error(`Expected public help surface labels to include only Campaign Home, got ${JSON.stringify(campaignHelp.payload?.available_surface_labels)}`);
+}
+if (campaignHelp.payload?.surfaces?.[0]?.links?.[0]?.href !== "/campaigns/linden-pass") {
+  throw new Error(`Expected campaign help Flask campaign link, got ${campaignHelp.payload?.surfaces?.[0]?.links?.[0]?.href}`);
+}
+
 const campaignConfig = await requestJson("/api/v1/campaigns/linden-pass/content/config");
 if (campaignConfig.status !== 200) {
   throw new Error(`Expected content config endpoint 200, got ${campaignConfig.status}`);
@@ -466,6 +483,11 @@ if (
 const missingSession = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/session");
 if (missingSession.status !== 404 || missingSession.payload?.error?.code !== "campaign_not_found") {
   throw new Error(`Expected missing session campaign JSON 404, got ${missingSession.status}`);
+}
+
+const missingHelp = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/help");
+if (missingHelp.status !== 404 || missingHelp.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(`Expected missing help campaign JSON 404, got ${missingHelp.status}`);
 }
 
 const missingCampaignConfig = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/content/config");

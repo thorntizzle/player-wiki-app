@@ -11,6 +11,7 @@ This document records the first implemented TypeScript read-only compatibility s
 - Implemented `GET /api/v1/app` using fixture runtime metadata.
 - Implemented `GET /api/v1/campaigns` using fixture-backed repository reads.
 - Implemented `GET /api/v1/campaigns/:campaignSlug` using fixture-backed repository reads.
+- Implemented `GET /api/v1/campaigns/:campaignSlug/help` using public fixture-read-only Campaign Help assumptions.
 - Implemented fixture-backed wiki read endpoints:
   - `GET /api/v1/campaigns/:campaignSlug/wiki`
   - `GET /api/v1/campaigns/:campaignSlug/wiki/sections/:sectionSlug`
@@ -50,6 +51,10 @@ This document records the first implemented TypeScript read-only compatibility s
 - App-state response includes Flask-compatible metadata fields:
   - `version`, `build_id`, `git_sha`, `git_dirty`, `runtime`, `instance_name`, `environment`, and `base_url`
   - fixture `db_path` and `campaigns_dir`
+- Campaign Help response preserves the stable public Flask fixture fields for:
+  - public viewer role and account note
+  - available surface labels, cross-cutting limits, visibility rows, and surface guidance
+  - Flask and Gen2 help/account/sign-in links
 - Wiki home response preserves the stable Flask fixture fields for:
   - `frontend_mode`
   - `can_view_wiki`
@@ -95,6 +100,7 @@ This document records the first implemented TypeScript read-only compatibility s
   - runs a focused Flask-vs-TypeScript contract check for stable `campaign` fields for `linden-pass` using sanitized fixture data.
   - compares Flask-vs-TypeScript app-state metadata fields under explicit test runtime overrides.
   - compares Flask-vs-TypeScript campaign-list payload campaign fields while asserting explicit fixture read-only roles.
+  - compares Flask-vs-TypeScript public Campaign Help payload fields under sanitized fixture data.
   - compares Flask-vs-TypeScript payload parity for `GET /api/v1/campaigns/linden-pass/content/config`.
   - compares Flask-vs-TypeScript payload parity for `GET /api/v1/campaigns/linden-pass/content/pages` and one `.../content/pages/locations/port-meridian` detail endpoint, including removal fields and omission/inclusion of `body_markdown`.
   - compares Flask-vs-TypeScript payload parity for `GET /api/v1/campaigns/linden-pass/content/assets` and one `.../content/assets/npcs/captain-lyra-vale.png` detail endpoint, including detail-only `data_base64`.
@@ -103,7 +109,7 @@ This document records the first implemented TypeScript read-only compatibility s
   - checks JSON missing-resource shapes for TypeScript wiki dynamic routes.
   - adds fixture session parity checks (active session state, messages, passive score flag, revision/token shape, short-circuit response, missing session campaign 404).
 - `apps/api/tests/smoke.mjs`:
-  - starts compiled API on a local port and verifies `/healthz`, app state, campaign list/detail, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
+  - starts compiled API on a local port and verifies `/healthz`, app state, campaign list/detail, public Campaign Help, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
   - validates fixture-backed content config endpoint payload for `linden-pass` (`campaign_slug`, `current_session`, `title`, `systems_sources`, `editable_fields`, `updated_at`) and missing-campaign 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/pages` list sorting/count/body omission and sampled `Port Meridian` metadata/removal fields, plus `GET /api/v1/campaigns/:campaignSlug/content/pages/*` detail payload body inclusion and missing-content-page 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/assets` list sorting/count/data omission and sampled PNG metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/assets/*` detail payload byte data and missing-content-asset 404.
