@@ -115,6 +115,7 @@ def _launch_typescript_api(node_bin: Path, campaigns_dir: Path, db_path: Path):
     env["PLAYER_WIKI_RUNTIME"] = "test-runtime"
     env["PLAYER_WIKI_INSTANCE_NAME"] = "test-instance"
     env["PLAYER_WIKI_BASE_URL"] = "http://127.0.0.1:5000"
+    env["PLAYER_WIKI_SESSION_TOUCH_INTERVAL_SECONDS"] = "300"
 
     process = subprocess.Popen(
         [str(node_bin), str(API_ROOT / "dist" / "server.js")],
@@ -342,6 +343,16 @@ def _read_sqlite_character_state(db_path: Path, character_slug: str) -> dict | N
     return {"revision": int(row["revision"]), "state": json.loads(row["state_json"])}
 
 
+def _read_sqlite_api_token_last_used(db_path: Path, token_id: int = 901) -> str:
+    connection = sqlite3.connect(db_path)
+    try:
+        row = connection.execute("SELECT last_used_at FROM api_tokens WHERE id = ?", (token_id,)).fetchone()
+    finally:
+        connection.close()
+    assert row is not None
+    return str(row[0])
+
+
 def _write_sqlite_character_state(db_path: Path, character_slug: str, *, revision: int, state: dict) -> None:
     now = "2026-06-25T13:00:00+00:00"
     connection = sqlite3.connect(db_path)
@@ -501,6 +512,21 @@ def test_typescript_me_fixture_auth_shell(typescript_api_server):
         "fixture-player@example.com",
         "fixture-dm@example.com",
     }
+
+
+def test_typescript_bearer_api_token_updates_last_used_like_flask(typescript_api_mutation_server):
+    before = _read_sqlite_api_token_last_used(typescript_api_mutation_server["db_path"])
+
+    status, payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/me",
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["auth_source"] == "api_token"
+    after = _read_sqlite_api_token_last_used(typescript_api_mutation_server["db_path"])
+    assert datetime.fromisoformat(after) > datetime.fromisoformat(before)
 
 
 def test_typescript_me_settings_requires_auth_like_flask(typescript_api_server, client):

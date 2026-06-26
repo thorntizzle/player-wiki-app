@@ -173,7 +173,8 @@ Route parity check command:
   behavior, the current theme preset and live-session chat-order choice metadata, fixture-role
   reads, bearer-token user/preference reads, bearer-token `user_preferences` writes, validation
   for theme/chat-order choices, retired `frontend_mode` rejection, and refreshed preference payloads.
-  The TypeScript auth slice still does not touch API token `last_used_at` timestamps.
+  Bearer API-token identity reads now update `api_tokens.last_used_at` when the stored timestamp is
+  older than the configured session-touch interval.
 - The Campaign Control read route now serves `GET .../control`, preserving Flask-compatible
   visibility-management auth for fixture or bearer-token DM/admin identities, default campaign
   visibility rows, optional SQLite visibility overrides, admin-only Private choices, rules, notes,

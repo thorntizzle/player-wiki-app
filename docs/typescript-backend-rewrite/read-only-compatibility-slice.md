@@ -108,7 +108,7 @@ fixture database.
   - preferences include `theme_key: parchment`, `session_chat_order: newest_first`, and `frontend_mode: gen2`
   - fixture admin reads expose View As availability and selectable player/DM fixture users, with no active target
   - bearer API tokens read active users, active memberships, normalized preferences, and admin View As choices from `CPW_DB_PATH`
-  - the TypeScript read-only slice validates token hash/revocation/expiration but does not update API token `last_used_at`
+  - bearer API-token requests update `api_tokens.last_used_at` when the stored timestamp is older than the configured session-touch interval
 - Account settings response preserves the `/api/v1/me/settings` read shell:
   - unauthenticated requests return Flask-compatible `auth_required`
   - fixture role reads return the same user and preference fields as the identity shell

@@ -733,6 +733,15 @@ const requestBytes = async (path, headers = {}) => {
   return { status: response.status, headers: response.headers, body };
 };
 
+const readApiTokenLastUsedAt = (tokenId) => {
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    return database.prepare("SELECT last_used_at FROM api_tokens WHERE id = ?").get(tokenId)?.last_used_at || "";
+  } finally {
+    database.close();
+  }
+};
+
 const waitForReady = async () => {
   const timeout = Number(process.env.CPW_SMOKE_TIMEOUT_MS || 5000);
   const start = Date.now();
@@ -798,6 +807,7 @@ if (invalidBearerMe.status !== 401 || invalidBearerMe.payload?.error?.code !== "
   );
 }
 
+const liveTokenLastUsedBeforeMe = readApiTokenLastUsedAt(901);
 const bearerMe = await requestJson("/api/v1/me", {
   Authorization: `Bearer ${liveApiToken}`,
 });
@@ -819,6 +829,15 @@ if (
     .includes("fixture-view-target@example.com")
 ) {
   throw new Error(`Unexpected bearer me payload: ${JSON.stringify(bearerMe.payload)}`);
+}
+const liveTokenLastUsedAfterMe = readApiTokenLastUsedAt(901);
+if (
+  liveTokenLastUsedAfterMe === liveTokenLastUsedBeforeMe ||
+  Date.parse(liveTokenLastUsedAfterMe) <= Date.parse(liveTokenLastUsedBeforeMe)
+) {
+  throw new Error(
+    `Expected bearer /me to touch api_tokens.last_used_at, before=${liveTokenLastUsedBeforeMe}, after=${liveTokenLastUsedAfterMe}`,
+  );
 }
 
 const playerMe = await requestJson("/api/v1/me", {

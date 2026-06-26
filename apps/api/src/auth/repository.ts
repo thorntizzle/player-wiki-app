@@ -105,6 +105,7 @@ const DEFAULT_PREFERENCES: AuthPreferences = {
 const VALID_THEME_KEYS = new Set(["parchment", "moonlit", "verdant", "ember"]);
 const VALID_SESSION_CHAT_ORDERS = new Set(["newest_first", "oldest_first"]);
 const VALID_FRONTEND_MODES = new Set(["gen2"]);
+const DEFAULT_API_TOKEN_TOUCH_INTERVAL_SECONDS = 300;
 
 function parseBearerToken(authorizationHeader: string | undefined): { present: boolean; token: string | null } {
   const rawHeader = (authorizationHeader || "").trim();
@@ -122,8 +123,8 @@ function parseBearerToken(authorizationHeader: string | undefined): { present: b
   return { present: true, token: credentials || null };
 }
 
-function utcIsoTimestamp(): string {
-  return new Date().toISOString().replace("Z", "+00:00");
+function utcIsoTimestamp(date = new Date()): string {
+  return date.toISOString().replace("Z", "+00:00");
 }
 
 function hashToken(rawToken: string): string {
@@ -147,6 +148,24 @@ function tokenIsActive(row: ApiTokenRow, nowMs: number): boolean {
 
   const expiresAtMs = parseTimestampMs(row.expires_at);
   return expiresAtMs === null || expiresAtMs > nowMs;
+}
+
+function apiTokenTouchIntervalMs(): number {
+  const configured = Number(process.env.PLAYER_WIKI_SESSION_TOUCH_INTERVAL_SECONDS || "");
+  const intervalSeconds = Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_API_TOKEN_TOUCH_INTERVAL_SECONDS;
+  return intervalSeconds * 1000;
+}
+
+function touchApiTokenIfStale(database: SqliteDatabase, tokenRow: ApiTokenRow, nowMs: number): void {
+  const lastUsedAtMs = parseTimestampMs(tokenRow.last_used_at);
+  if (lastUsedAtMs !== null && nowMs - lastUsedAtMs < apiTokenTouchIntervalMs()) {
+    return;
+  }
+  database
+    .prepare("UPDATE api_tokens SET last_used_at = ? WHERE id = ?")
+    .run(utcIsoTimestamp(new Date(nowMs)), tokenRow.id);
 }
 
 function normalizeThemeKey(value: unknown): string {
@@ -289,12 +308,13 @@ export function readApiTokenAuthContext(
     return { kind: "invalid" };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = new Database(dbPath, { fileMustExist: true });
   try {
+    const nowMs = Date.now();
     const tokenRow = database
       .prepare("SELECT * FROM api_tokens WHERE token_hash = ?")
       .get(hashToken(parsedToken.token)) as ApiTokenRow | undefined;
-    if (!tokenRow || !tokenIsActive(tokenRow, Date.now())) {
+    if (!tokenRow || !tokenIsActive(tokenRow, nowMs)) {
       return { kind: "invalid" };
     }
 
@@ -304,6 +324,7 @@ export function readApiTokenAuthContext(
     }
 
     const user = serializeUser(userRow);
+    touchApiTokenIfStale(database, tokenRow, nowMs);
     return {
       kind: "authenticated",
       context: {
