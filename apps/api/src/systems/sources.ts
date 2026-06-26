@@ -43,6 +43,11 @@ export interface SystemsSourceListPayload {
   };
 }
 
+export interface SystemsSourceCard extends SystemsSourceState {
+  has_rules_reference_entries: boolean;
+  rules_reference_search_scope: string;
+}
+
 export interface SystemsEntrySummary {
   id: number;
   library_slug: string;
@@ -89,6 +94,21 @@ export interface SystemsRulesReferenceResult {
   source_id: string;
   slug: string;
   reference_scope: string;
+}
+
+export interface SystemsIndexPayload {
+  campaign: CampaignViewModel;
+  library: SystemsLibrary | null;
+  query: string;
+  reference_query: string;
+  sources: SystemsSourceCard[];
+  search_results: SystemsEntrySummary[];
+  has_rules_reference_search: boolean;
+  rules_reference_results: SystemsRulesReferenceResult[];
+  source_scoped_rules_reference_sources: SystemsSourceCard[];
+  permissions: {
+    can_manage_systems: boolean;
+  };
 }
 
 export interface SystemsSourceDetailPayload {
@@ -323,6 +343,7 @@ const SYSTEMS_ENTRY_TYPE_ORDER = [
 ] as const;
 const SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES = new Set(["classfeature", "optionalfeature", "subclassfeature"]);
 const RULES_REFERENCE_ENTRY_TYPES = new Set(["book", "rule"]);
+const DND_SOURCE_ORDER = ["RULES", "PHB", "DMG", "MM", "VGM", "SCAG", "XGE", "TCE"] as const;
 
 function titleCaseFallback(value: string): string {
   return value
@@ -470,6 +491,28 @@ function emptyPayload(campaign: CampaignViewModel, canManage: boolean): SystemsS
     campaign,
     library: null,
     sources: [],
+    permissions: {
+      can_manage_systems: canManage,
+    },
+  };
+}
+
+function emptyIndexPayload(
+  campaign: CampaignViewModel,
+  canManage: boolean,
+  query = "",
+  referenceQuery = "",
+): SystemsIndexPayload {
+  return {
+    campaign,
+    library: null,
+    query,
+    reference_query: referenceQuery,
+    sources: [],
+    search_results: [],
+    has_rules_reference_search: false,
+    rules_reference_results: [],
+    source_scoped_rules_reference_sources: [],
     permissions: {
       can_manage_systems: canManage,
     },
@@ -710,6 +753,74 @@ function loadCampaignEntryOverride(
   }
 }
 
+function loadCampaignEntryOverrides(
+  database: Database.Database,
+  campaignSlug: string,
+  librarySlug: string,
+): Map<string, SystemsEntryOverride> {
+  const overrides = new Map<string, SystemsEntryOverride>();
+  try {
+    const rows = database
+      .prepare(
+        `
+          SELECT
+            entry_key,
+            visibility_override,
+            is_enabled_override,
+            updated_at,
+            updated_by_user_id
+          FROM campaign_entry_overrides
+          WHERE campaign_slug = ?
+            AND library_slug = ?
+        `,
+      )
+      .all(campaignSlug, librarySlug) as CampaignEntryOverrideRow[];
+    for (const row of rows) {
+      const override = serializeEntryOverride(row);
+      if (override) {
+        overrides.set(override.entry_key, override);
+      }
+    }
+  } catch (error) {
+    if (!isNoSuchTableError(error)) {
+      throw error;
+    }
+  }
+  return overrides;
+}
+
+function loadSourceRows(database: Database.Database, campaignSlug: string, librarySlug: string): SystemsSourceRow[] {
+  return database
+    .prepare(
+      `
+        SELECT
+          systems_sources.source_id,
+          systems_sources.title,
+          systems_sources.library_slug,
+          systems_sources.license_class,
+          systems_sources.public_visibility_allowed,
+          systems_sources.requires_unofficial_notice,
+          systems_sources.status,
+          campaign_enabled_sources.is_enabled AS configured_enabled,
+          campaign_enabled_sources.default_visibility AS configured_visibility,
+          (
+            SELECT COUNT(*)
+            FROM systems_entries
+            WHERE systems_entries.library_slug = systems_sources.library_slug
+              AND systems_entries.source_id = systems_sources.source_id
+          ) AS entry_count
+        FROM systems_sources
+        LEFT JOIN campaign_enabled_sources
+          ON campaign_enabled_sources.campaign_slug = ?
+         AND campaign_enabled_sources.library_slug = systems_sources.library_slug
+         AND campaign_enabled_sources.source_id = systems_sources.source_id
+        WHERE systems_sources.library_slug = ?
+        ORDER BY LOWER(systems_sources.title), systems_sources.source_id
+      `,
+    )
+    .all(campaignSlug, librarySlug) as SystemsSourceRow[];
+}
+
 function loadSourceRow(
   database: Database.Database,
   campaignSlug: string,
@@ -747,6 +858,46 @@ function loadSourceRow(
     .get(campaignSlug, librarySlug, sourceId) as SystemsSourceRow | undefined;
 }
 
+function loadEntriesForSources(
+  database: Database.Database,
+  librarySlug: string,
+  sourceIds: string[],
+): SystemsEntryRow[] {
+  const cleanedSourceIds = [...new Set(sourceIds.map((sourceId) => String(sourceId || "").trim()).filter(Boolean))];
+  if (cleanedSourceIds.length === 0) {
+    return [];
+  }
+  const placeholders = cleanedSourceIds.map(() => "?").join(", ");
+  return database
+    .prepare(
+      `
+        SELECT
+          id,
+          library_slug,
+          source_id,
+          entry_key,
+          entry_type,
+          slug,
+          title,
+          source_page,
+          source_path,
+          search_text,
+          player_safe_default,
+          dm_heavy,
+          metadata_json,
+          body_json,
+          rendered_html,
+          created_at,
+          updated_at
+        FROM systems_entries
+        WHERE library_slug = ?
+          AND source_id IN (${placeholders})
+        ORDER BY title ASC, id ASC
+      `,
+    )
+    .all(librarySlug, ...cleanedSourceIds) as SystemsEntryRow[];
+}
+
 function effectiveEntryVisibility(
   row: SystemsEntryRow,
   sourceState: SystemsSourceState,
@@ -782,6 +933,55 @@ function canAccessEntry(
   }
   const visibility = effectiveEntryVisibility(row, sourceState, override);
   return visibility === "public" || visibility === "players";
+}
+
+function filterRowsForEntryAccess(
+  rows: SystemsEntryRow[],
+  role: FixtureSystemsRole,
+  sourceStatesById: Map<string, SystemsSourceState>,
+  overridesByEntryKey: Map<string, SystemsEntryOverride>,
+): SystemsEntryRow[] {
+  return rows.filter((row) => {
+    const sourceState = sourceStatesById.get(row.source_id);
+    if (!sourceState) {
+      return false;
+    }
+    return canAccessEntry(row, role, sourceState, overridesByEntryKey.get(row.entry_key) || null);
+  });
+}
+
+function entryMatchesGlobalQuery(row: SystemsEntryRow, query: string): boolean {
+  const terms = normalizeLookup(query).split(/\s+/).filter(Boolean);
+  if (terms.length === 0) {
+    return false;
+  }
+  const title = String(row.title || "").toLowerCase();
+  const entryType = String(row.entry_type || "").toLowerCase();
+  const sourceId = String(row.source_id || "").toLowerCase();
+  return terms.every((term) => title.includes(term) || entryType.includes(term) || sourceId.includes(term));
+}
+
+function sourceCatalogSortKey(sourceId: string): [number, string] {
+  const normalizedSourceId = String(sourceId || "").trim().toUpperCase();
+  const index = DND_SOURCE_ORDER.indexOf(normalizedSourceId as (typeof DND_SOURCE_ORDER)[number]);
+  return [index >= 0 ? index : DND_SOURCE_ORDER.length, normalizedSourceId];
+}
+
+function compareRulesReferenceRows(left: SystemsEntryRow, right: SystemsEntryRow): number {
+  const leftSourceKey = sourceCatalogSortKey(left.source_id);
+  const rightSourceKey = sourceCatalogSortKey(right.source_id);
+  if (leftSourceKey[0] !== rightSourceKey[0]) {
+    return leftSourceKey[0] - rightSourceKey[0];
+  }
+  const sourceComparison = leftSourceKey[1].localeCompare(rightSourceKey[1]);
+  if (sourceComparison !== 0) {
+    return sourceComparison;
+  }
+  return compareEntryRowsForBrowse(left, right);
+}
+
+function rulesReferenceSearchScope(row: SystemsSourceState): string {
+  return row.source_id.trim().toUpperCase() === "DMG" ? "source_only" : "global";
 }
 
 function referenceSearchValues(value: unknown): string[] {
@@ -905,35 +1105,7 @@ export function buildCampaignSystemsSourceListPayload(
     }
 
     const seeds = parseSourceSeeds(campaignConfig);
-    const rows = database
-      .prepare(
-        `
-          SELECT
-            systems_sources.source_id,
-            systems_sources.title,
-            systems_sources.library_slug,
-            systems_sources.license_class,
-            systems_sources.public_visibility_allowed,
-            systems_sources.requires_unofficial_notice,
-            systems_sources.status,
-            campaign_enabled_sources.is_enabled AS configured_enabled,
-            campaign_enabled_sources.default_visibility AS configured_visibility,
-            (
-              SELECT COUNT(*)
-              FROM systems_entries
-              WHERE systems_entries.library_slug = systems_sources.library_slug
-                AND systems_entries.source_id = systems_sources.source_id
-            ) AS entry_count
-          FROM systems_sources
-          LEFT JOIN campaign_enabled_sources
-            ON campaign_enabled_sources.campaign_slug = ?
-           AND campaign_enabled_sources.library_slug = systems_sources.library_slug
-           AND campaign_enabled_sources.source_id = systems_sources.source_id
-          WHERE systems_sources.library_slug = ?
-          ORDER BY LOWER(systems_sources.title), systems_sources.source_id
-        `,
-      )
-      .all(campaign.slug, librarySlug) as SystemsSourceRow[];
+    const rows = loadSourceRows(database, campaign.slug, librarySlug);
     const sources = rows
       .map((row) => serializeSourceState(row, seeds.get(row.source_id), role))
       .filter((state) => canManage || (state.is_enabled && state.permissions.can_access));
@@ -947,8 +1119,115 @@ export function buildCampaignSystemsSourceListPayload(
       },
     };
   } catch (error) {
-    if (error instanceof Error && error.message.includes("no such table")) {
+    if (isNoSuchTableError(error)) {
       return emptyPayload(campaign, canManage);
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function buildCampaignSystemsIndexPayload(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  query = "",
+  referenceQuery = "",
+): SystemsIndexPayload {
+  const canManage = canManageSystems(role);
+  const librarySlug = campaign.systems_library_slug || "";
+  const cleanedQuery = String(query || "").trim();
+  const cleanedReferenceQuery = String(referenceQuery || "").trim();
+  if (!librarySlug || !existsSync(dbPath)) {
+    return emptyIndexPayload(campaign, canManage, cleanedQuery, cleanedReferenceQuery);
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const library = serializeLibrary(
+      database
+        .prepare(
+          `
+            SELECT library_slug, title, system_code, status, created_at, updated_at
+            FROM systems_libraries
+            WHERE library_slug = ?
+          `,
+        )
+        .get(librarySlug) as SystemsLibraryRow | undefined,
+    );
+    if (!library) {
+      return emptyIndexPayload(campaign, canManage, cleanedQuery, cleanedReferenceQuery);
+    }
+
+    const seeds = parseSourceSeeds(campaignConfig);
+    const accessibleSourceStates = loadSourceRows(database, campaign.slug, librarySlug)
+      .map((row) => serializeSourceState(row, seeds.get(row.source_id), role))
+      .filter((state) => state.is_enabled && state.permissions.can_access);
+    const sourceStatesById = new Map(accessibleSourceStates.map((state) => [state.source_id, state]));
+    const sourceIds = accessibleSourceStates.map((state) => state.source_id);
+    const overridesByEntryKey = loadCampaignEntryOverrides(database, campaign.slug, librarySlug);
+    const accessibleRows = filterRowsForEntryAccess(
+      loadEntriesForSources(database, librarySlug, sourceIds),
+      role,
+      sourceStatesById,
+      overridesByEntryKey,
+    );
+    const rulesReferenceRows = accessibleRows
+      .filter((row) => RULES_REFERENCE_ENTRY_TYPES.has(row.entry_type))
+      .sort(compareRulesReferenceRows);
+    const sourceCards = accessibleSourceStates.map((source) => {
+      const sourceRulesReferenceRows = rulesReferenceRows.filter((row) => row.source_id === source.source_id);
+      return {
+        ...source,
+        has_rules_reference_entries: sourceRulesReferenceRows.length > 0,
+        rules_reference_search_scope: rulesReferenceSearchScope(source),
+      };
+    });
+    const globalRulesReferenceSourceIds = new Set(
+      sourceCards
+        .filter(
+          (source) => source.has_rules_reference_entries && source.rules_reference_search_scope === "global",
+        )
+        .map((source) => source.source_id),
+    );
+    const referenceTerms = cleanedReferenceQuery
+      ? cleanedReferenceQuery.split(/\s+/).map(normalizeLookup).filter(Boolean)
+      : [];
+    const rulesReferenceResults =
+      referenceTerms.length > 0
+        ? rulesReferenceRows
+            .filter((row) => globalRulesReferenceSourceIds.has(row.source_id))
+            .filter((row) => {
+              const searchText = buildRulesReferenceSearchText(row);
+              return referenceTerms.every((term) => searchText.includes(term));
+            })
+            .slice(0, 100)
+            .map(serializeRulesReferenceResult)
+        : [];
+
+    return {
+      campaign,
+      library,
+      query: cleanedQuery,
+      reference_query: cleanedReferenceQuery,
+      sources: sourceCards,
+      search_results: cleanedQuery
+        ? accessibleRows.filter((row) => entryMatchesGlobalQuery(row, cleanedQuery)).slice(0, 250).map(serializeEntrySummary)
+        : [],
+      has_rules_reference_search: globalRulesReferenceSourceIds.size > 0,
+      rules_reference_results: rulesReferenceResults,
+      source_scoped_rules_reference_sources: sourceCards.filter(
+        (source) => source.has_rules_reference_entries && source.rules_reference_search_scope === "source_only",
+      ),
+      permissions: {
+        can_manage_systems: canManage,
+      },
+    };
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return emptyIndexPayload(campaign, canManage, cleanedQuery, cleanedReferenceQuery);
     }
     throw error;
   } finally {

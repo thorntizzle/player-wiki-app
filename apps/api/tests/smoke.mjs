@@ -353,6 +353,69 @@ if (missingImportRunDetail.status !== 404 || missingImportRunDetail.payload?.err
   );
 }
 
+const blockedSystemsIndex = await requestJson("/api/v1/campaigns/linden-pass/systems");
+if (blockedSystemsIndex.status !== 401 || blockedSystemsIndex.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated systems index to return auth_required 401, got ${blockedSystemsIndex.status} ${blockedSystemsIndex.payload?.error?.code}`,
+  );
+}
+
+const playerSystemsIndex = await requestJson("/api/v1/campaigns/linden-pass/systems", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (playerSystemsIndex.status !== 200 || playerSystemsIndex.payload?.ok !== true) {
+  throw new Error(`Expected player systems index 200 ok, got ${playerSystemsIndex.status}`);
+}
+if (playerSystemsIndex.payload?.library?.library_slug !== "DND-5E") {
+  throw new Error(`Expected systems index DND-5E library, got ${JSON.stringify(playerSystemsIndex.payload?.library)}`);
+}
+const playerIndexSourceIds = (playerSystemsIndex.payload?.sources || []).map((source) => source.source_id);
+if (playerIndexSourceIds.join("|") !== "PHB") {
+  throw new Error(`Expected player systems index to include only PHB, got ${JSON.stringify(playerIndexSourceIds)}`);
+}
+if (
+  playerSystemsIndex.payload?.query !== "" ||
+  playerSystemsIndex.payload?.reference_query !== "" ||
+  playerSystemsIndex.payload?.search_results?.length !== 0 ||
+  playerSystemsIndex.payload?.has_rules_reference_search !== false ||
+  playerSystemsIndex.payload?.source_scoped_rules_reference_sources?.length !== 0 ||
+  playerSystemsIndex.payload?.permissions?.can_manage_systems !== false
+) {
+  throw new Error(`Unexpected player systems index payload: ${JSON.stringify(playerSystemsIndex.payload)}`);
+}
+const phbIndexSource = playerSystemsIndex.payload.sources[0];
+if (
+  phbIndexSource.entry_count !== 2 ||
+  phbIndexSource.default_visibility !== "players" ||
+  phbIndexSource.has_rules_reference_entries !== false ||
+  phbIndexSource.rules_reference_search_scope !== "global"
+) {
+  throw new Error(`Unexpected PHB systems index source card: ${JSON.stringify(phbIndexSource)}`);
+}
+
+const playerSystemsSearch = await requestJson("/api/v1/campaigns/linden-pass/systems/search?q=chain", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (
+  playerSystemsSearch.status !== 200 ||
+  playerSystemsSearch.payload?.query !== "chain" ||
+  playerSystemsSearch.payload?.search_results?.length !== 1 ||
+  playerSystemsSearch.payload?.search_results?.[0]?.slug !== "phb-item-chain-mail"
+) {
+  throw new Error(`Unexpected player systems search payload: ${JSON.stringify(playerSystemsSearch.payload)}`);
+}
+
+const dmSystemsIndex = await requestJson("/api/v1/campaigns/linden-pass/systems", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (dmSystemsIndex.status !== 200 || dmSystemsIndex.payload?.permissions?.can_manage_systems !== true) {
+  throw new Error(`Expected DM systems index manage permission, got ${JSON.stringify(dmSystemsIndex.payload?.permissions)}`);
+}
+const dmIndexSourceIds = (dmSystemsIndex.payload?.sources || []).map((source) => source.source_id);
+if (dmIndexSourceIds.join("|") !== "MM|PHB") {
+  throw new Error(`Expected DM systems index to include enabled source cards sorted by title, got ${JSON.stringify(dmIndexSourceIds)}`);
+}
+
 const blockedSystemsSources = await requestJson("/api/v1/campaigns/linden-pass/systems/sources");
 if (blockedSystemsSources.status !== 401 || blockedSystemsSources.payload?.error?.code !== "auth_required") {
   throw new Error(

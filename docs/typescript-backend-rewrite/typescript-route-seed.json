@@ -63,6 +63,24 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems",
+      "route_family": "api_v1_systems",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/systems",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono campaign Systems landing route with Flask-compatible unauthenticated auth_required behavior, fixture-role source cards, optional entry search, global rules-reference metadata search, and explicit missing-campaign JSON."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/search",
+      "route_family": "api_v1_systems",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/systems/search",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono campaign Systems search alias route sharing the landing payload contract, q entry search, reference_q rules-reference search, and Flask-compatible unauthenticated auth_required behavior."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/systems/sources",
       "route_family": "api_v1_systems",
       "status": "implemented_fixture_sqlite_readonly",

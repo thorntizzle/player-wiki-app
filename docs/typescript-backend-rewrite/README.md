@@ -54,6 +54,8 @@ Route parity check command:
   - `GET /api/v1/app`
   - `GET /api/v1/systems/import-runs`
   - `GET /api/v1/systems/import-runs/:importRunId`
+  - `GET /api/v1/campaigns/:campaignSlug/systems`
+  - `GET /api/v1/campaigns/:campaignSlug/systems/search`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources/:sourceId`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources/:sourceId/types/:entryType`
@@ -75,11 +77,12 @@ Route parity check command:
 - Campaign detail uses fixture-backed reads from `tests/fixtures/sample_campaigns` by default and supports
   `CPW_CAMPAIGNS_DIR` override.
 - The first tracked SQLite read path uses `better-sqlite3` against `CPW_DB_PATH` for
-  the Systems import-run list/detail routes and the campaign Systems source list/detail/category routes,
-  plus the campaign Systems entry-detail route, while unauthenticated requests still preserve Flask's
-  `auth_required` envelope, fixture roles preserve source and entry visibility boundaries, entry detail
-  responses include parsed metadata/body JSON, source state, override payloads, and Flask compatibility links,
-  and missing detail rows return explicit JSON 404s.
+  the Systems import-run list/detail routes and the campaign Systems landing/search/source
+  list/detail/category/entry-detail routes, while unauthenticated requests still preserve Flask's
+  `auth_required` envelope, fixture roles preserve source and entry visibility boundaries, landing search
+  responses include source cards, entry search results, and rules-reference metadata search fields, entry
+  detail responses include parsed metadata/body JSON, source state, override payloads, and Flask compatibility
+  links, and missing detail rows return explicit JSON 404s.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

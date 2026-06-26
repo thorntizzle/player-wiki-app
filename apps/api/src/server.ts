@@ -2,7 +2,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
 
 import { getApiConfig } from "./config.js";
@@ -13,6 +13,7 @@ import { buildSessionStatePayload } from "./session/view.js";
 import { getSystemsImportRun, listSystemsImportRuns } from "./systems/importRuns.js";
 import {
   buildCampaignSystemsEntryDetailPayload,
+  buildCampaignSystemsIndexPayload,
   buildCampaignSystemsSourceCategoryPayload,
   buildCampaignSystemsSourceDetailPayload,
   buildCampaignSystemsSourceListPayload,
@@ -392,6 +393,37 @@ app.get(ROUTES.systemsImportRun, async (ctx) => {
     import_run: importRun,
   });
 });
+
+async function systemsIndexResponse(ctx: Context) {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const role = fixtureRole(ctx);
+  if (!role) {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  return ctx.json({
+    ok: true,
+    ...buildCampaignSystemsIndexPayload(
+      config.dbPath,
+      campaign,
+      campaignConfig?.config || {},
+      role,
+      ctx.req.query("q") || "",
+      ctx.req.query("reference_q") || "",
+    ),
+  });
+}
+
+app.get(ROUTES.systemsIndex, systemsIndexResponse);
+app.get(ROUTES.systemsSearch, systemsIndexResponse);
 
 app.get(ROUTES.systemsSources, async (ctx) => {
   const campaignSlug = ctx.req.param("campaignSlug") || "";

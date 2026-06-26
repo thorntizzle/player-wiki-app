@@ -181,6 +181,26 @@ def test_typescript_systems_import_run_detail_requires_auth_like_flask(typescrip
     assert payload == flask_payload
 
 
+def test_typescript_systems_index_requires_auth_like_flask(typescript_api_server, client):
+    flask_response = client.get("/api/v1/campaigns/linden-pass/systems")
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/systems")
+    assert status == 401
+    assert payload == flask_payload
+
+
+def test_typescript_systems_search_requires_auth_like_flask(typescript_api_server, client):
+    flask_response = client.get("/api/v1/campaigns/linden-pass/systems/search?q=chain")
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/systems/search?q=chain")
+    assert status == 401
+    assert payload == flask_payload
+
+
 def test_typescript_systems_source_list_requires_auth_like_flask(typescript_api_server, client):
     flask_response = client.get("/api/v1/campaigns/linden-pass/systems/sources")
     assert flask_response.status_code == 401
@@ -736,6 +756,16 @@ def test_typescript_wiki_missing_resources_return_json(typescript_api_server):
     assert status == 404
     assert payload["ok"] is False
     assert payload["error"]["code"] == "content_character_not_found"
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/definitely-not-a-campaign/systems")
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "campaign_not_found"
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/definitely-not-a-campaign/systems/search")
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "campaign_not_found"
 
     status, payload = _to_json(
         f"{typescript_api_server}/api/v1/campaigns/linden-pass/systems/sources/NOPE",
