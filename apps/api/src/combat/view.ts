@@ -4,6 +4,9 @@ import { existsSync } from "node:fs";
 import Database from "better-sqlite3";
 
 import type { CampaignViewModel } from "../campaigns/view.js";
+import type { ApiConfig } from "../config.js";
+import { listCampaignContentCharacters } from "../content/repository.js";
+import type { CampaignCharacterFileRecord } from "../content/types.js";
 import type { FixtureSystemsRole } from "../systems/sources.js";
 
 export type FixtureCombatRole = FixtureSystemsRole;
@@ -38,6 +41,13 @@ interface CombatTrackerPayload {
   combatants: [];
 }
 
+interface AvailableCharacterChoice {
+  slug: string;
+  name: string;
+  subtitle: string;
+  initiative_bonus: string;
+}
+
 interface AvailableStatblockChoice {
   id: string;
   title: string;
@@ -70,7 +80,7 @@ export interface CombatReadOnlyPayload {
   selected_player_character: null;
   selected_player_combat_sections: [];
   player_character_targets: [];
-  available_character_choices: [];
+  available_character_choices: AvailableCharacterChoice[];
   available_statblock_choices: AvailableStatblockChoice[];
   combat_condition_options: string[];
   poll_settings: {
@@ -96,6 +106,27 @@ export interface CombatReadOnlyPayload {
 
 function normalizeSystemKey(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
+  }
+  return fallback;
 }
 
 function supportsCombatTracker(system: string): boolean {
@@ -125,6 +156,58 @@ function serializeStatblockChoice(row: DMStatblockChoiceRow): AvailableStatblock
     subtitle: `HP ${Number(row.max_hp || 0)} - Speed ${String(row.speed_text || "")}`,
     initiative_bonus: formatInitiativeBonus(Number(row.initiative_bonus || 0)),
   };
+}
+
+function profileClassLevelText(profile: Record<string, unknown>, defaultValue = "Character"): string {
+  const classRows = Array.isArray(profile.classes) ? profile.classes : [];
+  const parts: string[] = [];
+  for (const classRow of classRows) {
+    const row = asRecord(classRow);
+    const systemsRef = asRecord(row.systems_ref);
+    const className = asString(systemsRef.title) || asString(row.class_name);
+    const classLevel = asNumber(row.level);
+    if (className && classLevel > 0) {
+      parts.push(`${className} ${classLevel}`);
+    } else if (className) {
+      parts.push(className);
+    } else if (classLevel > 0) {
+      parts.push(`Level ${classLevel}`);
+    }
+  }
+  if (parts.length > 0) {
+    return parts.join(" / ");
+  }
+
+  return asString(profile.class_level_text) || defaultValue;
+}
+
+function serializeCharacterChoice(record: CampaignCharacterFileRecord): AvailableCharacterChoice {
+  const definition = record.definition;
+  const profile = asRecord(definition.profile);
+  const stats = asRecord(definition.stats);
+  return {
+    slug: record.character_slug,
+    name: asString(definition.name) || record.character_slug,
+    subtitle: profileClassLevelText(profile).trim(),
+    initiative_bonus: String(asNumber(stats.initiative_bonus)),
+  };
+}
+
+async function listAvailableCharacterChoices(
+  config: ApiConfig,
+  campaignSlug: string,
+  canManageCombat: boolean,
+): Promise<AvailableCharacterChoice[]> {
+  if (!canManageCombat) {
+    return [];
+  }
+  const records = await listCampaignContentCharacters(config, campaignSlug);
+  if (!records) {
+    return [];
+  }
+  return records
+    .filter((record) => asString(record.definition.status) === "active")
+    .map(serializeCharacterChoice);
 }
 
 function listAvailableStatblockChoices(
@@ -210,17 +293,20 @@ export function buildCombatLiveViewToken(role: FixtureCombatRole, selectedCombat
   return buildLiveHash("combat", "player", canManageCombat ? "1" : "0", selectedCombatantId ?? "");
 }
 
-export function buildCombatReadOnlyPayload(
-  dbPath: string,
+export async function buildCombatReadOnlyPayload(
+  config: ApiConfig,
   campaign: CampaignViewModel,
   role: FixtureCombatRole,
-): CombatReadOnlyPayload {
+): Promise<CombatReadOnlyPayload> {
   const canManageCombat = role === "dm" || role === "admin";
   const canAccessScopedPlayerTools = role === "player" || canManageCombat;
   const canAccessDmContent = canManageCombat;
   const combatSystemSupported = supportsCombatTracker(campaign.system);
+  const availableCharacterChoices = combatSystemSupported
+    ? await listAvailableCharacterChoices(config, campaign.slug, canManageCombat)
+    : [];
   const dmContentChoices = combatSystemSupported
-    ? loadDmContentCombatChoices(dbPath, campaign.slug, canAccessDmContent)
+    ? loadDmContentCombatChoices(config.dbPath, campaign.slug, canAccessDmContent)
     : {
         availableStatblockChoices: [],
         combatConditionOptions: [...DND_5E_CONDITION_OPTIONS],
@@ -244,7 +330,7 @@ export function buildCombatReadOnlyPayload(
     selected_player_character: null,
     selected_player_combat_sections: [],
     player_character_targets: [],
-    available_character_choices: [],
+    available_character_choices: availableCharacterChoices,
     available_statblock_choices: dmContentChoices.availableStatblockChoices,
     combat_condition_options: dmContentChoices.combatConditionOptions,
     poll_settings: {

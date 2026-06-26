@@ -1636,6 +1636,7 @@ if (
   playerCombatState.payload?.selected_combatant !== null ||
   playerCombatState.payload?.selected_player_character !== null ||
   playerCombatState.payload?.player_character_targets?.length !== 0 ||
+  playerCombatState.payload?.available_character_choices?.length !== 0 ||
   playerCombatState.payload?.available_statblock_choices?.length !== 0 ||
   playerCombatState.payload?.combat_condition_options?.includes("Salt-Burned") !== true ||
   playerCombatState.payload?.permissions?.can_manage_combat !== false ||
@@ -1667,7 +1668,12 @@ if (
   dmCombatState.status !== 200 ||
   dmCombatState.payload?.permissions?.can_manage_combat !== true ||
   dmCombatState.payload?.permissions?.can_access_dm_content !== true ||
-  dmCombatState.payload?.available_character_choices?.length !== 0 ||
+  dmCombatState.payload?.available_character_choices?.length !== 3 ||
+  dmCombatState.payload?.available_character_choices?.map((item) => item.slug).join("|") !==
+    "arden-march|selene-brook|tobin-slate" ||
+  dmCombatState.payload?.available_character_choices?.[0]?.name !== "Arden March" ||
+  dmCombatState.payload?.available_character_choices?.[0]?.subtitle !== "Sorcerer 5" ||
+  dmCombatState.payload?.available_character_choices?.[0]?.initiative_bonus !== "2" ||
   dmCombatState.payload?.available_statblock_choices?.length !== 1 ||
   dmCombatState.payload?.available_statblock_choices?.[0]?.id !== "301" ||
   dmCombatState.payload?.available_statblock_choices?.[0]?.title !== "Dock Tough" ||
@@ -1690,6 +1696,7 @@ if (
   bearerAdminCombatState.status !== 200 ||
   bearerAdminCombatState.payload?.permissions?.can_manage_combat !== true ||
   bearerAdminCombatState.payload?.permissions?.can_access_dm_content !== true ||
+  bearerAdminCombatState.payload?.available_character_choices?.[1]?.name !== "Selene Brook" ||
   bearerAdminCombatState.payload?.available_statblock_choices?.[0]?.title !== "Dock Tough" ||
   bearerAdminCombatState.payload?.combat_condition_options?.includes("Salt-Burned") !== true ||
   bearerAdminCombatState.payload?.links?.flask_dm_status_url !== "/campaigns/linden-pass/combat/dm" ||

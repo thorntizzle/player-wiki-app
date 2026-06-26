@@ -796,7 +796,26 @@ def test_typescript_combat_state_fixture_shell(typescript_api_server):
     assert payload["selected_player_character"] is None
     assert payload["selected_player_combat_sections"] == []
     assert payload["player_character_targets"] == []
-    assert payload["available_character_choices"] == []
+    assert payload["available_character_choices"] == [
+        {
+            "slug": "arden-march",
+            "name": "Arden March",
+            "subtitle": "Sorcerer 5",
+            "initiative_bonus": "2",
+        },
+        {
+            "slug": "selene-brook",
+            "name": "Selene Brook",
+            "subtitle": "Ranger 4",
+            "initiative_bonus": "3",
+        },
+        {
+            "slug": "tobin-slate",
+            "name": "Tobin Slate",
+            "subtitle": "Fighter 5",
+            "initiative_bonus": "1",
+        },
+    ]
     assert payload["available_statblock_choices"] == []
     assert "Prone" in payload["combat_condition_options"]
     assert payload["poll_settings"]["active_interval_ms"] == 500
