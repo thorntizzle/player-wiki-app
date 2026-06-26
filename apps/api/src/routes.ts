@@ -673,6 +673,36 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "content_asset_not_found",
     },
   },
+  {
+    method: "PUT",
+    honoPath: "/api/v1/campaigns/:campaignSlug/content/pages/*",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/content/pages/<path:page_ref>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/content/pages/<path:page_ref>",
+    routeFamily: "api_v1_content",
+    missingResource: {
+      method: "PUT",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/content/pages/notes/api-field-report",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
+  {
+    method: "DELETE",
+    honoPath: "/api/v1/campaigns/:campaignSlug/content/pages/*",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/content/pages/<path:page_ref>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/content/pages/<path:page_ref>",
+    routeFamily: "api_v1_content",
+    missingResource: {
+      method: "DELETE",
+      path: "/api/v1/campaigns/linden-pass/content/pages/definitely-not-a-page",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_page_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -723,4 +753,6 @@ export const ROUTES = {
   campaignConfigUpdate: IMPLEMENTED_ROUTES[44].honoPath,
   contentAssetUpdate: IMPLEMENTED_ROUTES[45].honoPath,
   contentAssetDelete: IMPLEMENTED_ROUTES[46].honoPath,
+  contentPageUpdate: IMPLEMENTED_ROUTES[47].honoPath,
+  contentPageDelete: IMPLEMENTED_ROUTES[48].honoPath,
 } as const;

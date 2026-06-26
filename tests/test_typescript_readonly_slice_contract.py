@@ -766,6 +766,44 @@ def test_typescript_content_asset_mutations_require_auth_like_flask(typescript_a
     assert payload == flask_payload
 
 
+def test_typescript_content_page_mutations_require_auth_like_flask(typescript_api_server, client):
+    page_ref = "notes/api-field-report"
+    body = {
+        "metadata": {
+            "title": "API Field Report",
+            "section": "Notes",
+            "type": "note",
+            "summary": "Blocked without auth.",
+            "published": True,
+            "reveal_after_session": 0,
+        },
+        "body_markdown": "Blocked page body.",
+    }
+
+    flask_response = client.put(f"/api/v1/campaigns/linden-pass/content/pages/{page_ref}", json=body)
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/pages/{page_ref}",
+        method="PUT",
+        body=body,
+    )
+    assert status == 401
+    assert payload == flask_payload
+
+    flask_response = client.delete(f"/api/v1/campaigns/linden-pass/content/pages/{page_ref}")
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/pages/{page_ref}",
+        method="DELETE",
+    )
+    assert status == 401
+    assert payload == flask_payload
+
+
 def test_typescript_content_pages_list_matches_flask_contract(typescript_api_server, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     flask_response = client.get("/api/v1/campaigns/linden-pass/content/pages")

@@ -2512,6 +2512,236 @@ if (missingContentPage.status !== 404 || missingContentPage.payload?.error?.code
   throw new Error(`Expected missing content page JSON 404, got ${missingContentPage.status} ${missingContentPage.payload?.error?.code}`);
 }
 
+const managedPageRef = "notes/api-field-report";
+const managedPagePath = `/api/v1/campaigns/linden-pass/content/pages/${managedPageRef}`;
+const managedPageBody = {
+  metadata: {
+    title: "API Field Report",
+    section: "Notes",
+    type: "note",
+    summary: "A published note created through the TypeScript content API.",
+    published: true,
+    reveal_after_session: 0,
+  },
+  body_markdown: "The tower relay is stable, but the east pier wards are flickering.",
+};
+const blockedContentPagePut = await requestJson(
+  managedPagePath,
+  {},
+  { method: "PUT", body: managedPageBody },
+);
+if (blockedContentPagePut.status !== 401 || blockedContentPagePut.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated content page PUT 401, got ${blockedContentPagePut.status} ${blockedContentPagePut.payload?.error?.code}`,
+  );
+}
+
+const fixtureContentPagePut = await requestJson(
+  managedPagePath,
+  contentManagerHeaders,
+  { method: "PUT", body: managedPageBody },
+);
+if (
+  fixtureContentPagePut.status !== 403 ||
+  fixtureContentPagePut.payload?.error?.message !== "Content page writes require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture content page PUT bearer requirement, got ${fixtureContentPagePut.status} ${fixtureContentPagePut.payload?.error?.message}`,
+  );
+}
+
+const bearerPlayerContentPagePut = await requestJson(
+  managedPagePath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "PUT", body: managedPageBody },
+);
+if (
+  bearerPlayerContentPagePut.status !== 403 ||
+  bearerPlayerContentPagePut.payload?.error?.message !== "You do not have permission to manage campaign content."
+) {
+  throw new Error(
+    `Expected bearer player content page PUT forbidden, got ${bearerPlayerContentPagePut.status} ${bearerPlayerContentPagePut.payload?.error?.message}`,
+  );
+}
+
+const invalidContentPagePut = await requestJson(
+  managedPagePath,
+  bearerContentManagerHeaders,
+  { method: "PUT", body: { metadata: [], body_markdown: "Nope" } },
+);
+if (
+  invalidContentPagePut.status !== 400 ||
+  invalidContentPagePut.payload?.error?.message !== "Page metadata must be an object."
+) {
+  throw new Error(
+    `Expected content page PUT metadata validation, got ${invalidContentPagePut.status} ${invalidContentPagePut.payload?.error?.message}`,
+  );
+}
+
+const missingCampaignContentPagePut = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/content/pages/notes/api-field-report",
+  bearerContentManagerHeaders,
+  { method: "PUT", body: managedPageBody },
+);
+if (
+  missingCampaignContentPagePut.status !== 404 ||
+  missingCampaignContentPagePut.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing campaign content page PUT 404, got ${missingCampaignContentPagePut.status} ${missingCampaignContentPagePut.payload?.error?.code}`,
+  );
+}
+
+const contentPagePut = await requestJson(
+  managedPagePath,
+  bearerContentManagerHeaders,
+  { method: "PUT", body: managedPageBody },
+);
+if (
+  contentPagePut.status !== 200 ||
+  contentPagePut.payload?.page_file?.page_ref !== managedPageRef ||
+  contentPagePut.payload?.page_file?.page?.title !== "API Field Report" ||
+  contentPagePut.payload?.page_file?.page?.is_visible !== true ||
+  !contentPagePut.payload?.page_file?.body_markdown?.includes("east pier wards")
+) {
+  throw new Error(
+    `Expected content page PUT payload, got ${contentPagePut.status} ${JSON.stringify(contentPagePut.payload)}`,
+  );
+}
+const managedPageFilePath = path.join(campaignsDir, "linden-pass", "content", ...`${managedPageRef}.md`.split("/"));
+if (!existsSync(managedPageFilePath) || !readFileSync(managedPageFilePath, "utf8").includes("API Field Report")) {
+  throw new Error("Expected content page PUT to write markdown into the copied fixture tree.");
+}
+
+const contentPagesAfterPut = await requestJson("/api/v1/campaigns/linden-pass/content/pages", contentManagerHeaders);
+if (!contentPagesAfterPut.payload?.pages?.some((item) => item.page_ref === managedPageRef)) {
+  throw new Error(`Expected content pages list to include ${managedPageRef} after PUT.`);
+}
+
+const fixtureContentPageDelete = await requestJson(
+  managedPagePath,
+  contentManagerHeaders,
+  { method: "DELETE" },
+);
+if (
+  fixtureContentPageDelete.status !== 403 ||
+  fixtureContentPageDelete.payload?.error?.message !== "Content page writes require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture content page DELETE bearer requirement, got ${fixtureContentPageDelete.status} ${fixtureContentPageDelete.payload?.error?.message}`,
+  );
+}
+
+const contentPageDelete = await requestJson(
+  managedPagePath,
+  bearerContentManagerHeaders,
+  { method: "DELETE" },
+);
+if (
+  contentPageDelete.status !== 200 ||
+  contentPageDelete.payload?.deleted?.page_ref !== managedPageRef ||
+  contentPageDelete.payload?.deleted?.relative_path !== `${managedPageRef}.md`
+) {
+  throw new Error(
+    `Expected content page DELETE payload, got ${contentPageDelete.status} ${JSON.stringify(contentPageDelete.payload)}`,
+  );
+}
+if (existsSync(managedPageFilePath)) {
+  throw new Error("Expected content page DELETE to remove managed page from the copied fixture tree.");
+}
+
+const targetPageRef = "notes/api-reference-target";
+const referrerPageRef = "notes/api-reference-hub";
+const targetPagePath = `/api/v1/campaigns/linden-pass/content/pages/${targetPageRef}`;
+const referrerPagePath = `/api/v1/campaigns/linden-pass/content/pages/${referrerPageRef}`;
+const targetPageCreate = await requestJson(
+  targetPagePath,
+  bearerContentManagerHeaders,
+  {
+    method: "PUT",
+    body: {
+      metadata: {
+        title: "API Reference Target",
+        section: "Notes",
+        type: "note",
+        summary: "A page intended to be linked.",
+        published: true,
+        reveal_after_session: 0,
+      },
+      body_markdown: "This target page should be blocked from hard delete when linked.",
+    },
+  },
+);
+if (targetPageCreate.status !== 200) {
+  throw new Error(`Expected target page create 200, got ${targetPageCreate.status}`);
+}
+const referrerPageCreate = await requestJson(
+  referrerPagePath,
+  bearerContentManagerHeaders,
+  {
+    method: "PUT",
+    body: {
+      metadata: {
+        title: "API Reference Hub",
+        section: "Notes",
+        type: "note",
+        summary: "This page links to the reference target.",
+        published: true,
+        reveal_after_session: 0,
+      },
+      body_markdown: "Cross-check with [[API Reference Target]].",
+    },
+  },
+);
+if (referrerPageCreate.status !== 200) {
+  throw new Error(`Expected referrer page create 200, got ${referrerPageCreate.status}`);
+}
+
+const contentPagesWithBacklink = await requestJson("/api/v1/campaigns/linden-pass/content/pages", contentManagerHeaders);
+const targetListing = contentPagesWithBacklink.payload?.pages?.find((item) => item.page_ref === targetPageRef);
+if (
+  targetListing?.can_hard_delete !== false ||
+  !targetListing?.hard_delete_blockers?.some((blocker) => blocker.includes("Backlinked from API Reference Hub."))
+) {
+  throw new Error(`Expected backlink hard-delete blocker, got ${JSON.stringify(targetListing)}`);
+}
+
+const blockedPageDelete = await requestJson(
+  targetPagePath,
+  bearerContentManagerHeaders,
+  { method: "DELETE" },
+);
+if (
+  blockedPageDelete.status !== 409 ||
+  blockedPageDelete.payload?.error?.code !== "hard_delete_blocked" ||
+  blockedPageDelete.payload?.error?.details?.removal_safety?.can_hard_delete !== false
+) {
+  throw new Error(
+    `Expected hard-delete blocked response, got ${blockedPageDelete.status} ${JSON.stringify(blockedPageDelete.payload)}`,
+  );
+}
+
+const forcedPageDelete = await requestJson(
+  targetPagePath,
+  bearerContentManagerHeaders,
+  { method: "DELETE", body: { force: true } },
+);
+if (forcedPageDelete.status !== 200 || forcedPageDelete.payload?.deleted?.page_ref !== targetPageRef) {
+  throw new Error(
+    `Expected forced target page delete 200, got ${forcedPageDelete.status} ${JSON.stringify(forcedPageDelete.payload)}`,
+  );
+}
+const referrerPageDelete = await requestJson(
+  referrerPagePath,
+  bearerContentManagerHeaders,
+  { method: "DELETE" },
+);
+if (referrerPageDelete.status !== 200 || referrerPageDelete.payload?.deleted?.page_ref !== referrerPageRef) {
+  throw new Error(
+    `Expected referrer page delete 200, got ${referrerPageDelete.status} ${JSON.stringify(referrerPageDelete.payload)}`,
+  );
+}
+
 const missing = await requestJson("/api/v1/campaigns/definitely-not-a-campaign");
 if (missing.status !== 404) {
   throw new Error(`Expected missing campaign to return 404, got ${missing.status}`);

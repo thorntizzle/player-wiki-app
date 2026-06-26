@@ -11,6 +11,7 @@ import type {
   CampaignPageFileRecord,
   CampaignConfigRecord,
   ContentPage,
+  ContentPageRemovalSafety,
 } from "./types.js";
 
 const FRONTMATTER_PATTERN = /^---\s*\n([\s\S]*?)\n---\s*\n?/;
@@ -323,6 +324,80 @@ function resolveSafeAssetPath(assetsDir: string, assetRef: string): string | nul
 function invalidAssetRefMessage(rawAssetRef: string): string {
   const normalized = rawAssetRef.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
   return normalized ? "Relative file references must stay within the campaign directory." : "A relative file reference is required.";
+}
+
+function normalizeContentWriteRef(rawPageRef: string): { status: "ok"; page_ref: string } | { status: "validation_error"; message: string } {
+  let decoded = rawPageRef;
+  try {
+    decoded = decodeURIComponent(rawPageRef);
+  } catch {
+    // keep the raw value so normal safety checks can produce the validation message.
+  }
+
+  const normalized = decoded.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  if (!normalized) {
+    return { status: "validation_error", message: "A relative file reference is required." };
+  }
+
+  const extension = path.posix.extname(normalized);
+  if (extension && extension.toLowerCase() !== ".md") {
+    return { status: "validation_error", message: "Only .md files are supported." };
+  }
+
+  const withoutExtension = normalized.toLowerCase().endsWith(".md")
+    ? normalized.slice(0, -3)
+    : normalized;
+  if (!isSafeContentRef(withoutExtension)) {
+    return { status: "validation_error", message: "Relative file references must stay within the campaign directory." };
+  }
+  return { status: "ok", page_ref: withoutExtension };
+}
+
+function renderMarkdownWithFrontmatter(metadata: Record<string, unknown>, bodyMarkdown: string): string {
+  return `---\n${dumpYamlRecord(metadata)}---\n\n${bodyMarkdown.trim()}\n`;
+}
+
+function extractObsidianTargets(markdownText: string): string[] {
+  const pattern = /\[\[([^\]]+)\]\]/g;
+  const targets: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(markdownText)) !== null) {
+    const rawTarget = asString(match[1]);
+    if (!rawTarget) {
+      continue;
+    }
+    const targetPart = rawTarget.split("|", 1)[0]?.split("#", 1)[0]?.trim() ?? "";
+    if (targetPart) {
+      targets.push(targetPart);
+    }
+  }
+  return targets;
+}
+
+function normalizeLookup(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function formatUsageSample(values: string[], limit = 3): string {
+  const uniqueValues: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const cleaned = value.split(/\s+/).join(" ").trim();
+    const normalized = cleaned.toLowerCase();
+    if (!cleaned || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    uniqueValues.push(cleaned);
+  }
+
+  if (uniqueValues.length === 0) {
+    return "";
+  }
+
+  const shown = uniqueValues.slice(0, limit);
+  const remaining = uniqueValues.length - shown.length;
+  return remaining > 0 ? `${shown.join(", ")}, and ${remaining} more` : shown.join(", ");
 }
 
 function decodeEmbeddedAssetFile(
@@ -1030,6 +1105,185 @@ export async function listCampaignContentPages(
   }
   const records = await listCampaignContentPageRecords(config, campaignSlug);
   return stripDuplicateContentRefs(records);
+}
+
+export function buildCampaignContentPageRemovalSafety(
+  records: CampaignPageFileRecord[],
+): Record<string, ContentPageRemovalSafety> {
+  const visibleRecords = records.filter((record) => record.page.is_visible);
+  const aliasIndex = new Map<string, string>();
+  const titlesByRef = new Map<string, string>();
+
+  for (const record of visibleRecords) {
+    titlesByRef.set(record.page_ref, record.page.title);
+    for (const key of [record.page_ref, record.page.route_slug, record.page.title, ...record.page.aliases]) {
+      const normalized = normalizeLookup(key);
+      if (normalized && !aliasIndex.has(normalized)) {
+        aliasIndex.set(normalized, record.page_ref);
+      }
+    }
+  }
+
+  const backlinksByRef = new Map<string, Set<string>>();
+  for (const record of visibleRecords) {
+    for (const rawTarget of extractObsidianTargets(record.body_markdown)) {
+      const targetRef = aliasIndex.get(normalizeLookup(rawTarget));
+      if (!targetRef || targetRef === record.page_ref) {
+        continue;
+      }
+      if (!backlinksByRef.has(targetRef)) {
+        backlinksByRef.set(targetRef, new Set());
+      }
+      backlinksByRef.get(targetRef)!.add(record.page.title);
+    }
+  }
+
+  const safetyByRef: Record<string, ContentPageRemovalSafety> = {};
+  for (const record of records) {
+    const backlinks = [...(backlinksByRef.get(record.page_ref) || new Set<string>())].sort();
+    const backlinkSample = formatUsageSample(backlinks);
+    const hardDeleteBlockers = backlinkSample ? [`Backlinked from ${backlinkSample}.`] : [];
+    const canHardDelete = hardDeleteBlockers.length === 0;
+    safetyByRef[record.page_ref] = {
+      can_hard_delete: canHardDelete,
+      hard_delete_blockers: hardDeleteBlockers,
+      removal_status_label: canHardDelete ? "Hard delete available" : "Hard delete blocked",
+      removal_guidance: canHardDelete
+        ? "Hard delete is available after confirmation."
+        : "Unpublish/archive this page or clear the references before deleting its file.",
+      blockers_by_type: {
+        backlinks,
+        character_hooks: [],
+        session_provenance: [],
+      },
+      samples: {
+        backlinks: backlinkSample,
+        character_hooks: "",
+        session_provenance: "",
+      },
+      page_title: titlesByRef.get(record.page_ref) || record.page.title || record.page_ref,
+    };
+  }
+  return safetyByRef;
+}
+
+export async function writeCampaignContentPage(
+  config: ApiConfig,
+  campaignSlug: string,
+  rawPageRef: string,
+  payload: unknown,
+): Promise<
+  | {
+      status: "ok";
+      record: CampaignPageFileRecord;
+      removalSafety: Record<string, ContentPageRemovalSafety>;
+    }
+  | {
+      status: "not_found";
+    }
+  | {
+      status: "validation_error";
+      message: string;
+    }
+> {
+  const campaign = await loadCampaignContentContext(config, campaignSlug, { requireContentDir: false });
+  if (!campaign) {
+    return { status: "not_found" };
+  }
+
+  const pageRefResult = normalizeContentWriteRef(rawPageRef);
+  if (pageRefResult.status === "validation_error") {
+    return pageRefResult;
+  }
+
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { status: "validation_error", message: "Request body must be a JSON object." };
+  }
+  const payloadRecord = payload as Record<string, unknown>;
+  const metadata = payloadRecord.metadata ?? {};
+  const bodyMarkdown = payloadRecord.body_markdown ?? "";
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return { status: "validation_error", message: "Page metadata must be an object." };
+  }
+  if (typeof bodyMarkdown !== "string") {
+    return { status: "validation_error", message: "body_markdown must be a string." };
+  }
+
+  const pageRef = pageRefResult.page_ref;
+  const filePath = path.resolve(campaign.contentDir, ...`${pageRef}.md`.split("/"));
+  const contentRoot = path.resolve(campaign.contentDir);
+  if (filePath !== contentRoot && !filePath.startsWith(`${contentRoot}${path.sep}`)) {
+    return { status: "validation_error", message: "Resolved file path escapes the campaign directory." };
+  }
+
+  const normalizedMetadata = { ...(metadata as Record<string, unknown>) };
+  normalizedMetadata.slug ??= pageRef;
+  const normalizedSection = asString(normalizedMetadata.section) || normalizeDefaultSection(pageRef);
+  const normalizedPageType = asString(normalizedMetadata.type) || "page";
+  if (pageRef === "index" || pageRef.startsWith("overview/") || isDeprecatedIdentity(normalizedSection, normalizedPageType)) {
+    return { status: "validation_error", message: "Overview wiki pages are deprecated. Choose a supported section." };
+  }
+
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, renderMarkdownWithFrontmatter(normalizedMetadata, bodyMarkdown), "utf-8");
+
+  const fileStats = await fs.stat(filePath);
+  const rawText = await fs.readFile(filePath, "utf-8");
+  const record = toPageFromFile(campaign, filePath, campaign.contentDir, rawText, fileStats);
+  const records = stripDuplicateContentRefs(await listCampaignContentPageRecords(config, campaignSlug));
+  return {
+    status: "ok",
+    record,
+    removalSafety: buildCampaignContentPageRemovalSafety(records),
+  };
+}
+
+export async function deleteCampaignContentPage(
+  config: ApiConfig,
+  campaignSlug: string,
+  rawPageRef: string,
+): Promise<
+  | {
+      status: "ok";
+      record: CampaignPageFileRecord;
+    }
+  | {
+      status: "not_found";
+    }
+  | {
+      status: "validation_error";
+      message: string;
+    }
+> {
+  const campaign = await loadCampaignContentContext(config, campaignSlug, { requireContentDir: false });
+  if (!campaign) {
+    return { status: "not_found" };
+  }
+
+  const pageRefResult = normalizeContentWriteRef(rawPageRef);
+  if (pageRefResult.status === "validation_error") {
+    return pageRefResult;
+  }
+
+  const pageRef = pageRefResult.page_ref;
+  const existing = await getCampaignContentPage(config, campaignSlug, pageRef);
+  if (!existing) {
+    return { status: "not_found" };
+  }
+
+  const filePath = path.resolve(campaign.contentDir, ...`${pageRef}.md`.split("/"));
+  try {
+    const fileStats = await fs.stat(filePath);
+    if (!fileStats.isFile()) {
+      return { status: "not_found" };
+    }
+  } catch {
+    return { status: "not_found" };
+  }
+
+  await fs.unlink(filePath);
+  await pruneEmptyParentDirs(path.dirname(filePath), campaign.contentDir);
+  return { status: "ok", record: existing };
 }
 
 export async function listCampaignContentAssets(

@@ -55,7 +55,9 @@ import {
 } from "./systems/sources.js";
 import { getCampaignConfigFile } from "./content/repository.js";
 import {
+  buildCampaignContentPageRemovalSafety,
   deleteCampaignContentAsset,
+  deleteCampaignContentPage,
   getCampaignContentAsset,
   getCampaignContentCharacter,
   getCampaignContentPage,
@@ -67,6 +69,7 @@ import {
   sanitizeContentPageRef,
   updateCampaignConfigFile,
   writeCampaignContentAsset,
+  writeCampaignContentPage,
 } from "./content/repository.js";
 import {
   buildCampaignConfigPayload,
@@ -76,6 +79,7 @@ import {
   buildContentAssetWritePayload,
   buildContentCharacterDetailPayload,
   buildContentCharacterListPayload,
+  buildContentPageDeletePayload,
   buildContentPageDetailPayload,
   buildContentPageListPayload,
 } from "./content/view.js";
@@ -118,7 +122,7 @@ function readOnlyPermissions() {
 function jsonError(
   code: string,
   message: string,
-  status: 404 | 400 | 401 | 403 | 500,
+  status: 404 | 400 | 401 | 403 | 409 | 500,
   details: Record<string, unknown> = {},
 ) {
   return {
@@ -553,6 +557,14 @@ function contentPageRefFromWildcard(pathname: string, campaignSlug: string): str
   }
 }
 
+function rawContentPageRefFromWildcard(pathname: string, campaignSlug: string): string {
+  const prefix = `/api/v1/campaigns/${campaignSlug}/content/pages/`;
+  if (!pathname.startsWith(prefix)) {
+    return "";
+  }
+  return pathname.slice(prefix.length);
+}
+
 function contentAssetRefFromWildcard(pathname: string, campaignSlug: string): string {
   const prefix = `/api/v1/campaigns/${campaignSlug}/content/assets/`;
   if (!pathname.startsWith(prefix)) {
@@ -586,6 +598,20 @@ function contentPageNotFound(campaignSlug: string, pageRef: string) {
   );
 }
 
+function hardDeleteBlocked(pageRef: string, removalSafety: unknown) {
+  return jsonError(
+    "hard_delete_blocked",
+    "Hard delete blocked for this content page.",
+    409,
+    {
+      page_ref: pageRef,
+      removal_safety: removalSafety,
+      force_query_param: "force",
+      force_required: true,
+    },
+  );
+}
+
 function contentAssetNotFound(campaignSlug: string, assetRef: string) {
   return jsonError(
     "content_asset_not_found",
@@ -615,6 +641,16 @@ function parseLiveRevisionHeader(ctx: { req: { header: (name: string) => string 
 
 function parseLiveViewTokenHeader(ctx: { req: { header: (name: string) => string | undefined } }): string {
   return ctx.req.header("X-Live-View-Token")?.trim() || "";
+}
+
+function parseBooleanFlag(value: unknown): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (value === null || value === undefined) {
+    return false;
+  }
+  return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
 }
 
 function inlineContentDisposition(filename: string): string {
@@ -2052,7 +2088,8 @@ app.get(ROUTES.contentPages, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  return ctx.json(buildContentPageListPayload(pages));
+  const removalSafety = buildCampaignContentPageRemovalSafety(pages);
+  return ctx.json(buildContentPageListPayload(pages, removalSafety));
 });
 
 app.get(ROUTES.contentPage, async (ctx) => {
@@ -2081,7 +2118,104 @@ app.get(ROUTES.contentPage, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  return ctx.json(buildContentPageDetailPayload(page));
+  const pages = await listCampaignContentPages(config, campaignSlug);
+  const removalSafety = pages ? buildCampaignContentPageRemovalSafety(pages) : {};
+  return ctx.json(buildContentPageDetailPayload(page, removalSafety[page.page_ref]));
+});
+
+app.put(ROUTES.contentPageUpdate, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveContentManagerBearerWrite(
+    ctx,
+    campaign.slug,
+    "Content page writes require bearer API authentication.",
+  );
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const pageRef = rawContentPageRefFromWildcard(ctx.req.path, campaignSlug);
+  const result = await writeCampaignContentPage(config, campaign.slug, pageRef, jsonPayload.payload);
+  if (result.status === "not_found") {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildContentPageDetailPayload(result.record, result.removalSafety[result.record.page_ref]));
+});
+
+app.delete(ROUTES.contentPageDelete, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveContentManagerBearerWrite(
+    ctx,
+    campaign.slug,
+    "Content page writes require bearer API authentication.",
+  );
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const pageRef = rawContentPageRefFromWildcard(ctx.req.path, campaignSlug);
+  const existing = await getCampaignContentPage(config, campaign.slug, pageRef);
+  if (!existing) {
+    const sanitizedPageRef = sanitizeContentPageRef(pageRef) || pageRef;
+    const error = contentPageNotFound(campaign.slug, sanitizedPageRef);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const pages = await listCampaignContentPages(config, campaign.slug);
+  const removalSafety = pages ? buildCampaignContentPageRemovalSafety(pages) : {};
+  const pageSafety = removalSafety[existing.page_ref];
+
+  const jsonPayload = await readOptionalJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  const force =
+    parseBooleanFlag(new URL(ctx.req.url).searchParams.get("force")) ||
+    parseBooleanFlag(jsonPayload.payload.force);
+
+  if (pageSafety && !force && !pageSafety.can_hard_delete) {
+    const error = hardDeleteBlocked(existing.page_ref, pageSafety);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = await deleteCampaignContentPage(config, campaign.slug, existing.page_ref);
+  if (result.status === "not_found") {
+    const error = contentPageNotFound(campaign.slug, existing.page_ref);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildContentPageDeletePayload(result.record));
 });
 
 app.get(ROUTES.contentCharacters, async (ctx) => {

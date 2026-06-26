@@ -65,6 +65,9 @@ fixture database.
 - Added fixture-backed, content-management-gated content page management read endpoints:
   - `GET /api/v1/campaigns/:campaignSlug/content/pages`
   - `GET /api/v1/campaigns/:campaignSlug/content/pages/*`
+- Added fixture-backed content page write/delete endpoints with bearer-token DM/admin access:
+  - `PUT /api/v1/campaigns/:campaignSlug/content/pages/*`
+  - `DELETE /api/v1/campaigns/:campaignSlug/content/pages/*`
 - Added fixture-backed, content-management-gated content asset management read endpoints:
   - `GET /api/v1/campaigns/:campaignSlug/content/assets`
   - `GET /api/v1/campaigns/:campaignSlug/content/assets/*`
@@ -298,6 +301,17 @@ fixture database.
   - list endpoint `pages` shape with `29` fixture records, omitted `body_markdown`, and stable page/order sorting.
   - detail endpoint `page_file` shape with `body_markdown` included.
   - removal safety defaults (`can_hard_delete`, `hard_delete_blockers`, `removal_status_label`, `removal_guidance`, and nested `removal_safety` fields).
+- Content/page writes preserve the `/api/v1/campaigns/:campaignSlug/content/pages/*` mutation shell for copied fixture campaign trees:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture-role write attempts are rejected because the mutation needs a durable bearer-token actor
+  - bearer-token players and users without active manager access receive `forbidden`
+  - `metadata` must be an object and `body_markdown` must be a string
+  - writes render Markdown frontmatter, create parent directories safely, and return a detail payload with `body_markdown`
+  - subsequent list/detail reads reflect the written page file
+  - backlink removal-safety is recomputed for list/detail/upsert responses
+  - deletes return the deleted page reference, remove the copied fixture file, and prune empty parent directories
+  - backlink-blocked hard deletes return `409 hard_delete_blocked` unless forced with `force=true`
+  - missing campaigns and missing pages return explicit JSON errors
 - Content/asset-management payload checks cover:
   - list endpoint `assets` shape with `2` fixture records and omitted `data_base64`.
   - detail endpoint `asset_file` shape with exact Flask-compatible `data_base64`.
@@ -341,12 +355,13 @@ fixture database.
   - checks JSON missing-resource shapes for TypeScript wiki dynamic routes.
   - adds fixture session parity checks (active session state, messages, passive score flag, revision/token shape, short-circuit response, missing session campaign 404).
   - compares Flask-vs-TypeScript unauthenticated Session article-source search, Session article image, Session log detail, and Session log delete auth envelopes, and asserts the fixture lookup shell for short, wiki-result, player-forbidden, and missing-campaign cases.
-  - compares Flask-vs-TypeScript content-management unauthenticated and player-forbidden auth envelopes, plus the unauthenticated content/config and content asset mutation envelopes.
+  - compares Flask-vs-TypeScript content-management unauthenticated and player-forbidden auth envelopes, plus the unauthenticated content/config, content page, and content asset mutation envelopes.
 - `apps/api/tests/smoke.mjs`:
   - starts compiled API on a local port and verifies `/healthz`, app state, fixture `/api/v1/me` identity reads, fixture `/api/v1/me/settings` account-settings reads, SQLite bearer-token `/api/v1/me` and `/api/v1/me/settings` reads/writes, SQLite-backed systems import-run list/detail reads with bearer admin/non-admin gates, campaign Systems landing/search/source list/detail/category/entry reads with fixture and bearer-token role gates, Combat state/live-state shell reads with fixture and bearer-token role gates, Combat Systems monster search reads with fixture and bearer-token role gates, Session state/article-source/image/log reads with fixture and bearer-token role gates, campaign list/detail, public Campaign Help, Campaign Control auth/payload reads and visibility writes, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
   - validates content-management auth gates for anonymous, fixture player, bearer player, bearer outsider, and bearer app-admin content config reads.
   - validates fixture-backed content config endpoint payload for `linden-pass` (`campaign_slug`, `current_session`, `title`, `systems_sources`, `editable_fields`, `updated_at`), content/config PATCH auth and validation behavior, `campaign.yaml` writes against a copied fixture tree, reflected campaign-detail reads, empty-body no-op behavior, canonical system/library normalization, and missing-campaign 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/pages` list sorting/count/body omission and sampled `Port Meridian` metadata/removal fields, plus `GET /api/v1/campaigns/:campaignSlug/content/pages/*` detail payload body inclusion and missing-content-page 404.
+  - validates `PUT` and `DELETE /api/v1/campaigns/:campaignSlug/content/pages/*` auth, fixture-write denial, player-forbidden behavior, metadata validation, missing-campaign behavior, copied-fixture Markdown writes, list/detail refresh, backlink hard-delete blockers, forced delete, deleted-reference payloads, file removal, and cleanup before later wiki count assertions.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/assets` list sorting/count/data omission and sampled PNG metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/assets/*` detail payload byte data and missing-content-asset 404.
   - validates `PUT` and `DELETE /api/v1/campaigns/:campaignSlug/content/assets/*` auth, fixture-write denial, player-forbidden behavior, base64 validation, missing-campaign behavior, copied-fixture file writes, list/detail refresh, deleted-reference payloads, file removal, and missing-asset delete 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/characters` list sorting/count and sampled character summary metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` detail payload definition/import metadata and missing-content-character 404.

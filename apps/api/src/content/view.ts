@@ -255,3 +255,15 @@ export function buildContentPageDetailPayload(
     page_file: payload,
   };
 }
+
+export function buildContentPageDeletePayload(
+  record: CampaignPageFileRecord,
+): { ok: true; deleted: { page_ref: string; relative_path: string } } {
+  return {
+    ok: true,
+    deleted: {
+      page_ref: record.page_ref,
+      relative_path: record.relative_path,
+    },
+  };
+}

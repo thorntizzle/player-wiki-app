@@ -92,6 +92,8 @@ Route parity check command:
   - `PATCH /api/v1/campaigns/:campaignSlug/content/config`
   - `GET /api/v1/campaigns/:campaignSlug/content/pages`
   - `GET /api/v1/campaigns/:campaignSlug/content/pages/*`
+  - `PUT /api/v1/campaigns/:campaignSlug/content/pages/*`
+  - `DELETE /api/v1/campaigns/:campaignSlug/content/pages/*`
   - `GET /api/v1/campaigns/:campaignSlug/content/assets`
   - `GET /api/v1/campaigns/:campaignSlug/content/assets/*`
   - `PUT /api/v1/campaigns/:campaignSlug/content/assets/*`
@@ -190,6 +192,13 @@ Route parity check command:
   writes, refreshed campaign-detail reads, empty-body no-op behavior, and missing-campaign JSON.
   Current validation covers a disposable copied fixture campaign only; production/staging write
   readiness remains gated by migration, backup, and rollback rehearsal.
+- The content page write/delete routes now serve `PUT` and `DELETE .../content/pages/*` for bearer
+  API-token DM/admin users against copied fixture campaign trees, preserving metadata/body validation,
+  Markdown frontmatter writes, page list/detail refresh, backlink-based removal-safety payloads,
+  `hard_delete_blocked` responses, force-delete override support, deleted-reference payloads, and
+  missing-campaign/page JSON. Current validation covers disposable copied fixtures and backlink
+  blockers; broader character/session provenance blockers remain tied to later TypeScript content
+  parity work.
 - The content asset write/delete routes now serve `PUT` and `DELETE .../content/assets/*` for bearer
   API-token DM/admin users against copied fixture campaign trees, preserving Flask-compatible
   embedded `asset_file` validation, base64 decoding, safe asset path writes, list/detail refresh,
