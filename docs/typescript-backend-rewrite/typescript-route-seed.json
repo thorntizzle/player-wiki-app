@@ -198,6 +198,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/articles/<int:article_id>/image",
+      "route_family": "api_v1_session",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/session/articles/:articleId/image",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono session article image route streaming SQLite-backed fixture image bytes, preserving manager access to staged/revealed images and player access only to currently revealed active-session images."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/content/config",
       "route_family": "api_v1_content",
       "status": "implemented_fixture_readonly",

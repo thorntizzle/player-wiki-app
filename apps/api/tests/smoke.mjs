@@ -340,6 +340,19 @@ smokeDb
     "INSERT INTO campaign_session_article_images (article_id, filename, media_type, alt_text, caption, data_blob, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
   )
   .run(
+    101,
+    "staged-note.gif",
+    "image/gif",
+    "Staged note image",
+    "A manager-only staged fixture image.",
+    Buffer.from("staged-image"),
+    "2026-06-25T10:06:00+00:00",
+  );
+smokeDb
+  .prepare(
+    "INSERT INTO campaign_session_article_images (article_id, filename, media_type, alt_text, caption, data_blob, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
     102,
     "revealed-note.png",
     "image/png",
@@ -454,6 +467,14 @@ const requestJson = async (path, headers = {}) => {
   });
   const payload = await response.json();
   return { status: response.status, payload };
+};
+
+const requestBytes = async (path, headers = {}) => {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    headers,
+  });
+  const body = new Uint8Array(await response.arrayBuffer());
+  return { status: response.status, headers: response.headers, body };
 };
 
 const waitForReady = async () => {
@@ -1474,9 +1495,74 @@ if (
   throw new Error(`Unexpected player session payload: ${JSON.stringify(playerSession.payload)}`);
 }
 
+const blockedSessionImage = await requestJson("/api/v1/campaigns/linden-pass/session/articles/102/image");
+if (blockedSessionImage.status !== 401 || blockedSessionImage.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated session article image 401, got ${blockedSessionImage.status} ${blockedSessionImage.payload?.error?.code}`,
+  );
+}
+
+const dmStagedSessionImage = await requestBytes("/api/v1/campaigns/linden-pass/session/articles/101/image", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (
+  dmStagedSessionImage.status !== 200 ||
+  !dmStagedSessionImage.headers.get("content-type")?.startsWith("image/gif") ||
+  !dmStagedSessionImage.headers.get("content-disposition")?.includes("staged-note.gif") ||
+  Buffer.from(dmStagedSessionImage.body).toString("utf8") !== "staged-image"
+) {
+  throw new Error(
+    `Unexpected DM staged session image response: ${dmStagedSessionImage.status} ${dmStagedSessionImage.headers.get("content-type")} ${Buffer.from(dmStagedSessionImage.body).toString("utf8")}`,
+  );
+}
+
+const playerStagedSessionImage = await requestJson("/api/v1/campaigns/linden-pass/session/articles/101/image", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (playerStagedSessionImage.status !== 404 || playerStagedSessionImage.payload?.error?.code !== "session_article_image_not_found") {
+  throw new Error(
+    `Expected player staged session image 404, got ${playerStagedSessionImage.status} ${playerStagedSessionImage.payload?.error?.code}`,
+  );
+}
+
+const playerRevealedSessionImage = await requestBytes("/api/v1/campaigns/linden-pass/session/articles/102/image", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (
+  playerRevealedSessionImage.status !== 200 ||
+  !playerRevealedSessionImage.headers.get("content-type")?.startsWith("image/png") ||
+  !playerRevealedSessionImage.headers.get("content-disposition")?.includes("revealed-note.png") ||
+  Buffer.from(playerRevealedSessionImage.body).toString("utf8") !== "fixture-image"
+) {
+  throw new Error(
+    `Unexpected player revealed session image response: ${playerRevealedSessionImage.status} ${playerRevealedSessionImage.headers.get("content-type")} ${Buffer.from(playerRevealedSessionImage.body).toString("utf8")}`,
+  );
+}
+
+const missingSessionImage = await requestJson("/api/v1/campaigns/linden-pass/session/articles/999999/image", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (missingSessionImage.status !== 404 || missingSessionImage.payload?.error?.code !== "session_article_image_not_found") {
+  throw new Error(
+    `Expected missing session article image JSON 404, got ${missingSessionImage.status} ${missingSessionImage.payload?.error?.code}`,
+  );
+}
+
 const missingSession = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/session");
 if (missingSession.status !== 404 || missingSession.payload?.error?.code !== "campaign_not_found") {
   throw new Error(`Expected missing session campaign JSON 404, got ${missingSession.status}`);
+}
+
+const missingSessionImageCampaign = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/session/articles/102/image",
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+);
+if (missingSessionImageCampaign.status !== 404 || missingSessionImageCampaign.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(
+    `Expected missing session image campaign JSON 404, got ${missingSessionImageCampaign.status} ${missingSessionImageCampaign.payload?.error?.code}`,
+  );
 }
 
 const blockedSessionSourceSearch = await requestJson(

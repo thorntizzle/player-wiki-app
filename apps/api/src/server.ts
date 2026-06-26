@@ -11,7 +11,7 @@ import { buildCombatReadOnlyPayload } from "./combat/view.js";
 import { buildCampaignHelpPayload } from "./help/view.js";
 import { ROUTES } from "./routes.js";
 import { buildSessionArticleSourceSearchPayload } from "./session/sourceSearch.js";
-import { buildSessionStatePayload } from "./session/view.js";
+import { buildSessionStatePayload, readSessionArticleImage } from "./session/view.js";
 import { getSystemsImportRun, listSystemsImportRuns } from "./systems/importRuns.js";
 import {
   buildCombatSystemsMonsterSearchPayload,
@@ -322,6 +322,11 @@ function parseLiveRevisionHeader(ctx: { req: { header: (name: string) => string 
 
 function parseLiveViewTokenHeader(ctx: { req: { header: (name: string) => string | undefined } }): string {
   return ctx.req.header("X-Live-View-Token")?.trim() || "";
+}
+
+function inlineContentDisposition(filename: string): string {
+  const sanitized = filename.replace(/[\r\n"]/g, "").trim() || "session-article-image";
+  return `inline; filename="${sanitized}"`;
 }
 
 app.get(ROUTES.healthz, async (ctx) => {
@@ -892,6 +897,42 @@ app.get(ROUTES.sessionState, async (ctx) => {
   }
 
   return ctx.json(payload);
+});
+
+app.get(ROUTES.sessionArticleImage, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const role = fixtureRole(ctx);
+  if (!role) {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const articleId = parsePositiveInteger(ctx.req.param("articleId") || "");
+  if (articleId === null) {
+    const error = notFound("session_article_image_not_found", "Could not find that session article image.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = readSessionArticleImage(config.dbPath, campaign.slug, articleId, role);
+  if (result.status === "not_found") {
+    const error = notFound("session_article_image_not_found", "Could not find that session article image.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return new Response(result.data, {
+    status: 200,
+    headers: {
+      "Content-Type": result.mediaType,
+      "Content-Disposition": inlineContentDisposition(result.filename),
+      "Content-Length": String(result.data.byteLength),
+    },
+  });
 });
 
 app.get(ROUTES.sessionArticleSourceSearch, async (ctx) => {

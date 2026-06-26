@@ -49,6 +49,12 @@ interface SessionArticleImageRow {
   updated_at: string;
 }
 
+interface SessionArticleImageBlobRow extends SessionArticleImageRow {
+  data_blob: Uint8Array;
+  article_status: string;
+  revealed_in_session_id: number | null;
+}
+
 interface SessionMessageRow {
   id: number;
   session_id: number;
@@ -162,6 +168,13 @@ export interface SessionStatePayload {
   revealed_articles?: SessionArticlePayload[];
   session_logs?: SessionLogSummaryPayload[];
   session_dm_passive_scores?: [];
+}
+
+export interface SessionArticleImageReadResult {
+  status: "ok" | "not_found";
+  filename: string;
+  mediaType: string;
+  data: Uint8Array;
 }
 
 function stableHexDigest(value: string): string {
@@ -330,6 +343,36 @@ function loadArticleImages(database: Database.Database, articleIds: number[]): M
     )
     .all(...uniqueIds) as SessionArticleImageRow[];
   return new Map(rows.map((row) => [Number(row.article_id), row]));
+}
+
+function loadArticleImageBlob(
+  database: Database.Database,
+  campaignSlug: string,
+  articleId: number,
+): SessionArticleImageBlobRow | null {
+  return (
+    (database
+      .prepare(
+        `
+          SELECT
+            image.article_id,
+            image.filename,
+            image.media_type,
+            image.alt_text,
+            image.caption,
+            image.data_blob,
+            image.updated_at,
+            article.status AS article_status,
+            article.revealed_in_session_id
+          FROM campaign_session_article_images AS image
+          JOIN campaign_session_articles AS article ON article.id = image.article_id
+          WHERE article.campaign_slug = ?
+            AND article.id = ?
+          LIMIT 1
+        `,
+      )
+      .get(campaignSlug, articleId) as SessionArticleImageBlobRow | undefined) || null
+  );
 }
 
 function loadMessages(
@@ -624,6 +667,71 @@ export async function buildSessionStatePayload(
   } catch (error) {
     if (isNoSuchTableError(error)) {
       return emptySessionPayload(campaign, role);
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function readSessionArticleImage(
+  dbPath: string,
+  campaignSlug: string,
+  articleId: number,
+  role: FixtureSystemsRole,
+): SessionArticleImageReadResult {
+  if (!existsSync(dbPath)) {
+    return {
+      status: "not_found",
+      filename: "",
+      mediaType: "",
+      data: new Uint8Array(),
+    };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const row = loadArticleImageBlob(database, campaignSlug, articleId);
+    if (!row) {
+      return {
+        status: "not_found",
+        filename: "",
+        mediaType: "",
+        data: new Uint8Array(),
+      };
+    }
+
+    if (!canManageSession(role)) {
+      const activeSession = loadActiveSession(database, campaignSlug);
+      if (
+        !activeSession ||
+        String(row.article_status) !== "revealed" ||
+        row.revealed_in_session_id === null ||
+        Number(row.revealed_in_session_id) !== Number(activeSession.id)
+      ) {
+        return {
+          status: "not_found",
+          filename: "",
+          mediaType: "",
+          data: new Uint8Array(),
+        };
+      }
+    }
+
+    return {
+      status: "ok",
+      filename: String(row.filename || "session-article-image"),
+      mediaType: String(row.media_type || "application/octet-stream"),
+      data: Uint8Array.from(row.data_blob),
+    };
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return {
+        status: "not_found",
+        filename: "",
+        mediaType: "",
+        data: new Uint8Array(),
+      };
     }
     throw error;
   } finally {

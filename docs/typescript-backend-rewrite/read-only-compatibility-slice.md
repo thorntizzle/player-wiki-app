@@ -31,6 +31,8 @@ This document records the first implemented TypeScript read-only compatibility s
   - `GET /api/v1/campaigns/:campaignSlug/session`
 - Implemented fixture-backed Session manager article-source lookup endpoint:
   - `GET /api/v1/campaigns/:campaignSlug/session/article-sources/search`
+- Implemented SQLite-backed Session article image read endpoint:
+  - `GET /api/v1/campaigns/:campaignSlug/session/articles/:articleId/image`
 - Added `apps/api/src/wiki/` as the read-only Markdown/frontmatter fixture reader and wiki payload serializer.
 - Added fixture-backed content config endpoint:
   - `GET /api/v1/campaigns/:campaignSlug/content/config`
@@ -140,6 +142,7 @@ This document records the first implemented TypeScript read-only compatibility s
   - fixture player role reading active session and global messages while filtering DM-only messages and omitting manager arrays.
   - no-role requests keeping the inactive empty shell and unchanged short-circuit.
   - matching live headers short-circuiting role-aware responses too.
+- Session article image reads stream the stored SQLite `data_blob` with the stored `media_type`; fixture DM/admin roles can read staged or revealed images, while fixture players receive only currently revealed active-session images and get a missing-image response for staged or inaccessible images.
 - Session article-source search preserves the manager lookup API shell:
   - unauthenticated requests return Flask-compatible `auth_required`
   - fixture player role receives `forbidden`
@@ -186,9 +189,9 @@ This document records the first implemented TypeScript read-only compatibility s
   - compares stable Flask-vs-TypeScript wiki home, section, and page payload fields.
   - checks JSON missing-resource shapes for TypeScript wiki dynamic routes.
   - adds fixture session parity checks (active session state, messages, passive score flag, revision/token shape, short-circuit response, missing session campaign 404).
-  - compares Flask-vs-TypeScript unauthenticated Session article-source search auth envelopes and asserts the fixture lookup shell for short, wiki-result, player-forbidden, and missing-campaign cases.
+  - compares Flask-vs-TypeScript unauthenticated Session article-source search and Session article image auth envelopes, and asserts the fixture lookup shell for short, wiki-result, player-forbidden, and missing-campaign cases.
 - `apps/api/tests/smoke.mjs`:
-  - starts compiled API on a local port and verifies `/healthz`, app state, SQLite-backed systems import-run list/detail reads, campaign Systems landing/search/source list/detail/category/entry reads, Combat state/live-state shell reads, Combat Systems monster search reads, Session article-source search reads, campaign list/detail, public Campaign Help, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
+  - starts compiled API on a local port and verifies `/healthz`, app state, SQLite-backed systems import-run list/detail reads, campaign Systems landing/search/source list/detail/category/entry reads, Combat state/live-state shell reads, Combat Systems monster search reads, Session article-source search reads, Session article image byte reads, campaign list/detail, public Campaign Help, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
   - validates fixture-backed content config endpoint payload for `linden-pass` (`campaign_slug`, `current_session`, `title`, `systems_sources`, `editable_fields`, `updated_at`) and missing-campaign 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/pages` list sorting/count/body omission and sampled `Port Meridian` metadata/removal fields, plus `GET /api/v1/campaigns/:campaignSlug/content/pages/*` detail payload body inclusion and missing-content-page 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/assets` list sorting/count/data omission and sampled PNG metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/assets/*` detail payload byte data and missing-content-asset 404.
