@@ -96,6 +96,10 @@ Route parity check command:
 - The first Session manager lookup slice now serves `GET .../session/article-sources/search`, preserving
   Flask-compatible unauthenticated `auth_required`, manager-only access, short-query guidance, visible
   wiki page results, accessible Systems entry results, and explicit missing-campaign JSON.
+- The Session state route now has a role-aware SQLite fixture path for `X-CPW-Fixture-Role`,
+  reading active sessions, messages, staged/revealed article rows, article image metadata,
+  closed-session log summaries, and session revisions from `CPW_DB_PATH`, while no-header
+  requests keep the empty read-only fixture shell.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

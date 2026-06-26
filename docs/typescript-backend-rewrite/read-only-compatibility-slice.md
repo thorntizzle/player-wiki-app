@@ -27,7 +27,7 @@ This document records the first implemented TypeScript read-only compatibility s
   - `GET /api/v1/campaigns/:campaignSlug/wiki`
   - `GET /api/v1/campaigns/:campaignSlug/wiki/sections/:sectionSlug`
   - `GET /api/v1/campaigns/:campaignSlug/wiki/pages/*`
-- Implemented fixture-backed session read endpoint:
+- Implemented fixture-backed session read endpoint with a no-header empty shell plus role-aware SQLite fixture reads for active session state, messages, and manager article/log arrays:
   - `GET /api/v1/campaigns/:campaignSlug/session`
 - Implemented fixture-backed Session manager article-source lookup endpoint:
   - `GET /api/v1/campaigns/:campaignSlug/session/article-sources/search`
@@ -135,6 +135,11 @@ This document records the first implemented TypeScript read-only compatibility s
   - `session_revision` and deterministic 12-character `session_view_token`
   - unchanged-response short-circuit response using matching `X-Live-Revision` + `X-Live-View-Token` headers
 - Session response omits DM-only arrays (`staged_articles`, `revealed_articles`, `session_logs`, `session_dm_passive_scores`) in read-only fixture mode.
+- Session role-aware SQLite fixture reads cover:
+  - fixture DM/admin roles reading `campaign_session_states.revision`, active session, global/DM-only messages, staged/revealed articles, article image metadata, and closed-session log summaries.
+  - fixture player role reading active session and global messages while filtering DM-only messages and omitting manager arrays.
+  - no-role requests keeping the inactive empty shell and unchanged short-circuit.
+  - matching live headers short-circuiting role-aware responses too.
 - Session article-source search preserves the manager lookup API shell:
   - unauthenticated requests return Flask-compatible `auth_required`
   - fixture player role receives `forbidden`
@@ -188,7 +193,7 @@ This document records the first implemented TypeScript read-only compatibility s
   - validates `GET /api/v1/campaigns/:campaignSlug/content/pages` list sorting/count/body omission and sampled `Port Meridian` metadata/removal fields, plus `GET /api/v1/campaigns/:campaignSlug/content/pages/*` detail payload body inclusion and missing-content-page 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/assets` list sorting/count/data omission and sampled PNG metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/assets/*` detail payload byte data and missing-content-asset 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/characters` list sorting/count and sampled character summary metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` detail payload definition/import metadata and missing-content-character 404.
-  - verifies `GET /api/v1/campaigns/:campaignSlug/session` read-only payload shape, token/revision headers behavior, unchanged-response short-circuit, and session missing-campaign 404.
+  - verifies `GET /api/v1/campaigns/:campaignSlug/session` no-header read-only payload shape, role-aware SQLite Session state reads, token/revision headers behavior, unchanged-response short-circuit, and session missing-campaign 404.
 - `apps/api/tests/route-parity.mjs`:
   - checks implemented route coverage against `route-snapshots.json` and `typescript-route-seed.json`.
 

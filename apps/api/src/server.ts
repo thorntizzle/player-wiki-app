@@ -873,7 +873,9 @@ app.get(ROUTES.sessionState, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const payload = buildSessionStatePayload(campaign);
+  const role = fixtureRole(ctx);
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  const payload = await buildSessionStatePayload(config.dbPath, campaign, campaignConfig?.config || {}, role);
   const requestedRevision = parseLiveRevisionHeader(ctx);
   const requestedViewToken = parseLiveViewTokenHeader(ctx);
   if (

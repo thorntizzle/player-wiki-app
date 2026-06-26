@@ -135,6 +135,61 @@ smokeDb.exec(`
     updated_by_user_id INTEGER,
     PRIMARY KEY (campaign_slug, entry_key)
   );
+
+  CREATE TABLE campaign_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_slug TEXT NOT NULL,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    started_by_user_id INTEGER,
+    ended_at TEXT,
+    ended_by_user_id INTEGER
+  );
+
+  CREATE TABLE campaign_session_states (
+    campaign_slug TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL,
+    updated_by_user_id INTEGER
+  );
+
+  CREATE TABLE campaign_session_articles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_slug TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body_markdown TEXT NOT NULL,
+    source_page_ref TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by_user_id INTEGER,
+    revealed_at TEXT,
+    revealed_by_user_id INTEGER,
+    revealed_in_session_id INTEGER
+  );
+
+  CREATE TABLE campaign_session_article_images (
+    article_id INTEGER PRIMARY KEY,
+    filename TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    alt_text TEXT NOT NULL DEFAULT '',
+    caption TEXT NOT NULL DEFAULT '',
+    data_blob BLOB NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE campaign_session_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    campaign_slug TEXT NOT NULL,
+    message_type TEXT NOT NULL,
+    body_text TEXT NOT NULL,
+    recipient_scope TEXT NOT NULL DEFAULT 'global',
+    recipient_user_id INTEGER,
+    author_user_id INTEGER,
+    author_display_name TEXT NOT NULL,
+    article_id INTEGER,
+    created_at TEXT NOT NULL
+  );
 `);
 smokeDb
   .prepare(
@@ -223,6 +278,144 @@ smokeDb
     "INSERT INTO campaign_entry_overrides (campaign_slug, library_slug, entry_key, visibility_override, is_enabled_override, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
   )
   .run("linden-pass", "DND-5E", "PHB:item:chain-mail", "players", null, "2026-06-25T09:35:00+00:00", 42);
+smokeDb
+  .prepare(
+    "INSERT INTO campaign_session_states (campaign_slug, revision, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?)",
+  )
+  .run("linden-pass", 7, "2026-06-25T11:00:00+00:00", 42);
+smokeDb
+  .prepare(
+    "INSERT INTO campaign_sessions (id, campaign_slug, status, started_at, started_by_user_id, ended_at, ended_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(1, "linden-pass", "active", "2026-06-25T10:00:00+00:00", 42, null, null);
+smokeDb
+  .prepare(
+    "INSERT INTO campaign_sessions (id, campaign_slug, status, started_at, started_by_user_id, ended_at, ended_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(2, "linden-pass", "closed", "2026-06-24T10:00:00+00:00", 42, "2026-06-24T12:00:00+00:00", 42);
+const insertSessionArticle = smokeDb.prepare(`
+  INSERT INTO campaign_session_articles (
+    id,
+    campaign_slug,
+    title,
+    body_markdown,
+    source_page_ref,
+    status,
+    created_at,
+    created_by_user_id,
+    revealed_at,
+    revealed_by_user_id,
+    revealed_in_session_id
+  )
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+insertSessionArticle.run(
+  101,
+  "linden-pass",
+  "Harbor Clue",
+  "A staged clue for the table.",
+  "npcs/captain-lyra-vale",
+  "staged",
+  "2026-06-25T10:05:00+00:00",
+  42,
+  null,
+  null,
+  null,
+);
+insertSessionArticle.run(
+  102,
+  "linden-pass",
+  "Revealed Systems Note",
+  "<p>A revealed Systems note.</p>",
+  "systems:phb-item-chain-mail",
+  "revealed",
+  "2026-06-25T10:10:00+00:00",
+  42,
+  "2026-06-25T10:20:00+00:00",
+  42,
+  1,
+);
+smokeDb
+  .prepare(
+    "INSERT INTO campaign_session_article_images (article_id, filename, media_type, alt_text, caption, data_blob, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    102,
+    "revealed-note.png",
+    "image/png",
+    "Revealed note image",
+    "A fixture session image.",
+    Buffer.from("fixture-image"),
+    "2026-06-25T10:21:00+00:00",
+  );
+const insertSessionMessage = smokeDb.prepare(`
+  INSERT INTO campaign_session_messages (
+    id,
+    session_id,
+    campaign_slug,
+    message_type,
+    body_text,
+    recipient_scope,
+    recipient_user_id,
+    author_user_id,
+    author_display_name,
+    article_id,
+    created_at
+  )
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+insertSessionMessage.run(
+  201,
+  1,
+  "linden-pass",
+  "chat",
+  "The session begins.",
+  "global",
+  null,
+  42,
+  "Dungeon Master",
+  null,
+  "2026-06-25T10:15:00+00:00",
+);
+insertSessionMessage.run(
+  202,
+  1,
+  "linden-pass",
+  "system",
+  "DM-only note.",
+  "dm_only",
+  null,
+  42,
+  "Dungeon Master",
+  null,
+  "2026-06-25T10:16:00+00:00",
+);
+insertSessionMessage.run(
+  203,
+  1,
+  "linden-pass",
+  "article_reveal",
+  "Revealed Systems Note",
+  "global",
+  null,
+  42,
+  "Dungeon Master",
+  102,
+  "2026-06-25T10:20:00+00:00",
+);
+insertSessionMessage.run(
+  204,
+  2,
+  "linden-pass",
+  "chat",
+  "A closed-session message.",
+  "global",
+  null,
+  42,
+  "Dungeon Master",
+  null,
+  "2026-06-24T10:30:00+00:00",
+);
 smokeDb.close();
 
 const nodePath = fileURLToPath(new URL("../dist/server.js", import.meta.url));
@@ -1213,6 +1406,72 @@ if (
   Object.keys(unchangedSession.payload || {}).length !== 4
 ) {
   throw new Error(`Expected Flask-style unchanged payload, got ${JSON.stringify(unchangedSession.payload)}`);
+}
+
+const dmSession = await requestJson("/api/v1/campaigns/linden-pass/session", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (
+  dmSession.status !== 200 ||
+  dmSession.payload?.session_revision !== 7 ||
+  dmSession.payload?.permissions?.can_manage_session !== true ||
+  dmSession.payload?.permissions?.can_post_messages !== true ||
+  dmSession.payload?.active_session?.id !== 1 ||
+  dmSession.payload?.active_session?.is_active !== true ||
+  dmSession.payload?.messages?.length !== 3 ||
+  dmSession.payload?.messages?.[1]?.recipient_scope !== "dm_only" ||
+  dmSession.payload?.messages?.[1]?.recipient_label !== "DM" ||
+  dmSession.payload?.staged_articles?.length !== 1 ||
+  dmSession.payload?.staged_articles?.[0]?.source_kind !== "page" ||
+  dmSession.payload?.staged_articles?.[0]?.source?.title !== "Captain Lyra Vale" ||
+  dmSession.payload?.revealed_articles?.length !== 1 ||
+  dmSession.payload?.revealed_articles?.[0]?.source_kind !== "systems" ||
+  dmSession.payload?.revealed_articles?.[0]?.body_format !== "html" ||
+  dmSession.payload?.revealed_articles?.[0]?.image?.url !== "/api/v1/campaigns/linden-pass/session/articles/102/image" ||
+  dmSession.payload?.messages?.[2]?.article?.id !== 102 ||
+  dmSession.payload?.messages?.[2]?.article?.image?.filename !== "revealed-note.png" ||
+  dmSession.payload?.session_logs?.length !== 1 ||
+  dmSession.payload?.session_logs?.[0]?.session?.id !== 2 ||
+  dmSession.payload?.session_logs?.[0]?.message_count !== 1 ||
+  dmSession.payload?.session_logs?.[0]?.detail_url !== "/api/v1/campaigns/linden-pass/session/logs/2" ||
+  dmSession.payload?.show_session_dm_passive_scores !== true ||
+  dmSession.payload?.session_dm_passive_scores?.length !== 0
+) {
+  throw new Error(`Unexpected DM session payload: ${JSON.stringify(dmSession.payload)}`);
+}
+
+const unchangedDmSession = await requestJson("/api/v1/campaigns/linden-pass/session", {
+  "X-CPW-Fixture-Role": "dm",
+  "X-Live-Revision": String(dmSession.payload?.session_revision),
+  "X-Live-View-Token": String(dmSession.payload?.session_view_token),
+});
+if (
+  unchangedDmSession.status !== 200 ||
+  unchangedDmSession.payload?.changed !== false ||
+  unchangedDmSession.payload?.session_revision !== dmSession.payload?.session_revision ||
+  unchangedDmSession.payload?.session_view_token !== dmSession.payload?.session_view_token ||
+  Object.keys(unchangedDmSession.payload || {}).length !== 4
+) {
+  throw new Error(`Unexpected unchanged DM session payload: ${JSON.stringify(unchangedDmSession.payload)}`);
+}
+
+const playerSession = await requestJson("/api/v1/campaigns/linden-pass/session", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (
+  playerSession.status !== 200 ||
+  playerSession.payload?.permissions?.can_manage_session !== false ||
+  playerSession.payload?.permissions?.can_post_messages !== true ||
+  playerSession.payload?.active_session?.id !== 1 ||
+  playerSession.payload?.messages?.length !== 2 ||
+  playerSession.payload?.messages?.some((message) => message.recipient_scope === "dm_only") ||
+  playerSession.payload?.messages?.[1]?.article?.id !== 102 ||
+  playerSession.payload?.staged_articles !== undefined ||
+  playerSession.payload?.revealed_articles !== undefined ||
+  playerSession.payload?.session_logs !== undefined ||
+  playerSession.payload?.session_dm_passive_scores !== undefined
+) {
+  throw new Error(`Unexpected player session payload: ${JSON.stringify(playerSession.payload)}`);
 }
 
 const missingSession = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/session");
