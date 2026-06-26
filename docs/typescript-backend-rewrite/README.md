@@ -73,6 +73,7 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/session/article-sources/search`
   - `GET /api/v1/campaigns/:campaignSlug/session/articles/:articleId/image`
   - `GET /api/v1/campaigns/:campaignSlug/session/logs/:sessionId`
+  - `GET /api/v1/me`
   - `GET /api/v1/campaigns/:campaignSlug/content/config`
   - `GET /api/v1/campaigns/:campaignSlug/content/pages`
   - `GET /api/v1/campaigns/:campaignSlug/content/pages/*`
@@ -108,6 +109,9 @@ Route parity check command:
 - The Session log detail route now reads closed session records and all closed-session messages
   from SQLite for fixture DM/admin roles, preserving manager-only access and message recipient
   metadata for historical chat logs.
+- The first identity bootstrap slice now serves `GET /api/v1/me` in fixture mode, preserving
+  Flask-compatible unauthenticated `auth_required` behavior and returning synthetic role-header
+  user, membership, preference, and View As metadata for player, DM, and admin fixture reads.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

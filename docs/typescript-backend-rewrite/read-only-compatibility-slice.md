@@ -10,6 +10,7 @@ This document records the first implemented TypeScript read-only compatibility s
 - Added a tracked `better-sqlite3` runtime dependency for the first SQLite-backed read path.
 - Implemented `GET /healthz`.
 - Implemented `GET /api/v1/app` using fixture runtime metadata.
+- Implemented `GET /api/v1/me` with Flask-compatible unauthenticated auth failure and synthetic fixture-role identity, membership, preference, and View As metadata.
 - Implemented `GET /api/v1/systems/import-runs` with Flask-compatible unauthenticated auth failure and fixture-admin SQLite reads.
 - Implemented `GET /api/v1/systems/import-runs/:importRunId` with the same auth gate, fixture-admin SQLite detail reads, and explicit missing-resource JSON.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/systems` with Flask-compatible unauthenticated auth failure, fixture-role source cards, entry search, and rules-reference metadata search fields.
@@ -68,6 +69,12 @@ This document records the first implemented TypeScript read-only compatibility s
 - App-state response includes Flask-compatible metadata fields:
   - `version`, `build_id`, `git_sha`, `git_dirty`, `runtime`, `instance_name`, `environment`, and `base_url`
   - fixture `db_path` and `campaigns_dir`
+- Identity bootstrap response preserves the `/api/v1/me` shell:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture `player`, `dm`, and `admin` roles return synthetic active users with Flask-compatible user fields
+  - fixture memberships cover available fixture campaigns, with `player` or `dm` campaign roles
+  - preferences include `theme_key: parchment`, `session_chat_order: newest_first`, and `frontend_mode: gen2`
+  - fixture admin reads expose View As availability and selectable player/DM fixture users, with no active target
 - Systems import-run list/detail responses add the first tracked SQLite read:
   - unauthenticated requests return Flask-compatible `auth_required`
   - fixture-admin requests read `systems_import_runs` from `CPW_DB_PATH`
@@ -176,6 +183,7 @@ This document records the first implemented TypeScript read-only compatibility s
 - `tests/test_typescript_readonly_slice_contract.py`:
   - runs a focused Flask-vs-TypeScript contract check for stable `campaign` fields for `linden-pass` using sanitized fixture data.
   - compares Flask-vs-TypeScript app-state metadata fields under explicit test runtime overrides.
+  - compares Flask-vs-TypeScript unauthenticated `/api/v1/me` auth envelopes and asserts the fixture admin identity shell.
   - compares Flask-vs-TypeScript unauthenticated systems import-run list/detail and campaign Systems source-list auth envelopes.
   - compares Flask-vs-TypeScript unauthenticated campaign Systems landing/search auth envelopes.
   - compares Flask-vs-TypeScript unauthenticated campaign Systems source-detail auth envelopes.
@@ -194,7 +202,7 @@ This document records the first implemented TypeScript read-only compatibility s
   - adds fixture session parity checks (active session state, messages, passive score flag, revision/token shape, short-circuit response, missing session campaign 404).
   - compares Flask-vs-TypeScript unauthenticated Session article-source search, Session article image, and Session log detail auth envelopes, and asserts the fixture lookup shell for short, wiki-result, player-forbidden, and missing-campaign cases.
 - `apps/api/tests/smoke.mjs`:
-  - starts compiled API on a local port and verifies `/healthz`, app state, SQLite-backed systems import-run list/detail reads, campaign Systems landing/search/source list/detail/category/entry reads, Combat state/live-state shell reads, Combat Systems monster search reads, Session article-source search reads, Session article image byte reads, Session log detail reads, campaign list/detail, public Campaign Help, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
+  - starts compiled API on a local port and verifies `/healthz`, app state, fixture `/api/v1/me` identity reads, SQLite-backed systems import-run list/detail reads, campaign Systems landing/search/source list/detail/category/entry reads, Combat state/live-state shell reads, Combat Systems monster search reads, Session article-source search reads, Session article image byte reads, Session log detail reads, campaign list/detail, public Campaign Help, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
   - validates fixture-backed content config endpoint payload for `linden-pass` (`campaign_slug`, `current_session`, `title`, `systems_sources`, `editable_fields`, `updated_at`) and missing-campaign 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/pages` list sorting/count/body omission and sampled `Port Meridian` metadata/removal fields, plus `GET /api/v1/campaigns/:campaignSlug/content/pages/*` detail payload body inclusion and missing-content-page 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/assets` list sorting/count/data omission and sampled PNG metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/assets/*` detail payload byte data and missing-content-asset 404.

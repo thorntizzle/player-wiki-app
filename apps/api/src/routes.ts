@@ -439,6 +439,14 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "session_log_not_found",
     },
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/me",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/me",
+    seedPath: "/api/v1/me",
+    routeFamily: "api_v1",
+  },
 ];
 
 export const ROUTES = {
@@ -472,4 +480,5 @@ export const ROUTES = {
   systemsImportRun: IMPLEMENTED_ROUTES[27].honoPath,
   sessionArticleImage: IMPLEMENTED_ROUTES[28].honoPath,
   sessionLogDetail: IMPLEMENTED_ROUTES[29].honoPath,
+  me: IMPLEMENTED_ROUTES[30].honoPath,
 } as const;

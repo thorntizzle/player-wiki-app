@@ -526,6 +526,47 @@ if (appState.payload.app.db_path !== dbPath) {
   throw new Error(`Expected app state db_path ${dbPath}, got ${appState.payload.app.db_path}`);
 }
 
+const blockedMe = await requestJson("/api/v1/me");
+if (blockedMe.status !== 401 || blockedMe.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated me request to return auth_required 401, got ${blockedMe.status} ${blockedMe.payload?.error?.code}`,
+  );
+}
+
+const playerMe = await requestJson("/api/v1/me", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (
+  playerMe.status !== 200 ||
+  playerMe.payload?.ok !== true ||
+  playerMe.payload?.auth_source !== "fixture" ||
+  playerMe.payload?.user?.email !== "fixture-player@example.com" ||
+  playerMe.payload?.user?.is_admin !== false ||
+  playerMe.payload?.memberships?.[0]?.campaign_slug !== "linden-pass" ||
+  playerMe.payload?.memberships?.[0]?.role !== "player" ||
+  playerMe.payload?.preferences?.theme_key !== "parchment" ||
+  playerMe.payload?.preferences?.session_chat_order !== "newest_first" ||
+  playerMe.payload?.preferences?.frontend_mode !== "gen2" ||
+  playerMe.payload?.view_as?.can_view_as !== false
+) {
+  throw new Error(`Unexpected fixture player me payload: ${JSON.stringify(playerMe.payload)}`);
+}
+
+const adminMe = await requestJson("/api/v1/me", {
+  "X-CPW-Fixture-Role": "admin",
+});
+if (
+  adminMe.status !== 200 ||
+  adminMe.payload?.user?.is_admin !== true ||
+  adminMe.payload?.memberships?.[0]?.role !== "dm" ||
+  adminMe.payload?.view_as?.can_view_as !== true ||
+  adminMe.payload?.view_as?.active_user !== null ||
+  adminMe.payload?.view_as?.user_choices?.length !== 2 ||
+  adminMe.payload?.view_as?.user_choices?.some((user) => user.id === adminMe.payload?.user?.id)
+) {
+  throw new Error(`Unexpected fixture admin me payload: ${JSON.stringify(adminMe.payload)}`);
+}
+
 const blockedImportRuns = await requestJson("/api/v1/systems/import-runs");
 if (blockedImportRuns.status !== 401 || blockedImportRuns.payload?.error?.code !== "auth_required") {
   throw new Error(

@@ -161,6 +161,41 @@ def test_typescript_app_state_matches_flask_metadata_contract(typescript_api_ser
     assert payload["app"]["db_path"].endswith("typescript-fixture.sqlite3")
 
 
+def test_typescript_me_requires_auth_like_flask(typescript_api_server, client):
+    flask_response = client.get("/api/v1/me")
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/me")
+    assert status == 401
+    assert payload == flask_payload
+
+
+def test_typescript_me_fixture_auth_shell(typescript_api_server):
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/me",
+        headers={"X-CPW-Fixture-Role": "admin"},
+    )
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["auth_source"] == "fixture"
+    assert payload["user"]["email"] == "fixture-admin@example.com"
+    assert payload["user"]["is_admin"] is True
+    assert payload["memberships"][0]["campaign_slug"] == "linden-pass"
+    assert payload["memberships"][0]["role"] == "dm"
+    assert payload["preferences"] == {
+        "theme_key": "parchment",
+        "session_chat_order": "newest_first",
+        "frontend_mode": "gen2",
+    }
+    assert payload["view_as"]["can_view_as"] is True
+    assert payload["view_as"]["active_user"] is None
+    assert {user["email"] for user in payload["view_as"]["user_choices"]} == {
+        "fixture-player@example.com",
+        "fixture-dm@example.com",
+    }
+
+
 def test_typescript_systems_import_runs_requires_auth_like_flask(typescript_api_server, client):
     flask_response = client.get("/api/v1/systems/import-runs")
     assert flask_response.status_code == 401
