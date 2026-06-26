@@ -643,6 +643,36 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "campaign_not_found",
     },
   },
+  {
+    method: "PUT",
+    honoPath: "/api/v1/campaigns/:campaignSlug/content/assets/*",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/content/assets/<path:asset_ref>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/content/assets/<path:asset_ref>",
+    routeFamily: "api_v1_content",
+    missingResource: {
+      method: "PUT",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/content/assets/notes/api-sigil.txt",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
+  {
+    method: "DELETE",
+    honoPath: "/api/v1/campaigns/:campaignSlug/content/assets/*",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/content/assets/<path:asset_ref>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/content/assets/<path:asset_ref>",
+    routeFamily: "api_v1_content",
+    missingResource: {
+      method: "DELETE",
+      path: "/api/v1/campaigns/linden-pass/content/assets/definitely-not-an-asset.png",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_asset_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -691,4 +721,6 @@ export const ROUTES = {
   sessionArticlesRevealedClear: IMPLEMENTED_ROUTES[42].honoPath,
   sessionLogDelete: IMPLEMENTED_ROUTES[43].honoPath,
   campaignConfigUpdate: IMPLEMENTED_ROUTES[44].honoPath,
+  contentAssetUpdate: IMPLEMENTED_ROUTES[45].honoPath,
+  contentAssetDelete: IMPLEMENTED_ROUTES[46].honoPath,
 } as const;

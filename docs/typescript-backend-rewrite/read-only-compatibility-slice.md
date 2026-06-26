@@ -68,6 +68,9 @@ fixture database.
 - Added fixture-backed, content-management-gated content asset management read endpoints:
   - `GET /api/v1/campaigns/:campaignSlug/content/assets`
   - `GET /api/v1/campaigns/:campaignSlug/content/assets/*`
+- Added fixture-backed content asset write/delete endpoints with bearer-token DM/admin access:
+  - `PUT /api/v1/campaigns/:campaignSlug/content/assets/*`
+  - `DELETE /api/v1/campaigns/:campaignSlug/content/assets/*`
 - Added fixture-backed, content-management-gated content character management read endpoints:
   - `GET /api/v1/campaigns/:campaignSlug/content/characters`
   - `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
@@ -299,6 +302,15 @@ fixture database.
   - list endpoint `assets` shape with `2` fixture records and omitted `data_base64`.
   - detail endpoint `asset_file` shape with exact Flask-compatible `data_base64`.
   - stable asset fields (`asset_ref`, `relative_path`, `size_bytes`, `media_type`, and protected asset `url`).
+- Content/asset writes preserve the `/api/v1/campaigns/:campaignSlug/content/assets/*` mutation shell for copied fixture campaign trees:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture-role write attempts are rejected because the mutation needs a durable bearer-token actor
+  - bearer-token players and users without active manager access receive `forbidden`
+  - `asset_file` must be an object with `filename` and valid `data_base64`
+  - writes use the URL asset path, safely create parent directories, and return an asset summary without `data_base64`
+  - subsequent list/detail reads reflect the written file bytes
+  - deletes return the deleted asset reference, remove the copied fixture file, and prune empty parent directories
+  - missing campaigns and missing assets return explicit JSON errors
 - Content/character-management payload checks cover:
   - list endpoint `characters` shape with `3` fixture records and stable slug ordering.
   - summary fields (`character_slug`, `name`, `status`, and `import_status`).
@@ -329,13 +341,14 @@ fixture database.
   - checks JSON missing-resource shapes for TypeScript wiki dynamic routes.
   - adds fixture session parity checks (active session state, messages, passive score flag, revision/token shape, short-circuit response, missing session campaign 404).
   - compares Flask-vs-TypeScript unauthenticated Session article-source search, Session article image, Session log detail, and Session log delete auth envelopes, and asserts the fixture lookup shell for short, wiki-result, player-forbidden, and missing-campaign cases.
-  - compares Flask-vs-TypeScript content-management unauthenticated and player-forbidden auth envelopes, plus the unauthenticated content/config mutation envelope.
+  - compares Flask-vs-TypeScript content-management unauthenticated and player-forbidden auth envelopes, plus the unauthenticated content/config and content asset mutation envelopes.
 - `apps/api/tests/smoke.mjs`:
   - starts compiled API on a local port and verifies `/healthz`, app state, fixture `/api/v1/me` identity reads, fixture `/api/v1/me/settings` account-settings reads, SQLite bearer-token `/api/v1/me` and `/api/v1/me/settings` reads/writes, SQLite-backed systems import-run list/detail reads with bearer admin/non-admin gates, campaign Systems landing/search/source list/detail/category/entry reads with fixture and bearer-token role gates, Combat state/live-state shell reads with fixture and bearer-token role gates, Combat Systems monster search reads with fixture and bearer-token role gates, Session state/article-source/image/log reads with fixture and bearer-token role gates, campaign list/detail, public Campaign Help, Campaign Control auth/payload reads and visibility writes, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
   - validates content-management auth gates for anonymous, fixture player, bearer player, bearer outsider, and bearer app-admin content config reads.
   - validates fixture-backed content config endpoint payload for `linden-pass` (`campaign_slug`, `current_session`, `title`, `systems_sources`, `editable_fields`, `updated_at`), content/config PATCH auth and validation behavior, `campaign.yaml` writes against a copied fixture tree, reflected campaign-detail reads, empty-body no-op behavior, canonical system/library normalization, and missing-campaign 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/pages` list sorting/count/body omission and sampled `Port Meridian` metadata/removal fields, plus `GET /api/v1/campaigns/:campaignSlug/content/pages/*` detail payload body inclusion and missing-content-page 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/assets` list sorting/count/data omission and sampled PNG metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/assets/*` detail payload byte data and missing-content-asset 404.
+  - validates `PUT` and `DELETE /api/v1/campaigns/:campaignSlug/content/assets/*` auth, fixture-write denial, player-forbidden behavior, base64 validation, missing-campaign behavior, copied-fixture file writes, list/detail refresh, deleted-reference payloads, file removal, and missing-asset delete 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/characters` list sorting/count and sampled character summary metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` detail payload definition/import metadata and missing-content-character 404.
   - verifies `GET /api/v1/campaigns/:campaignSlug/session` no-header read-only payload shape, role-aware fixture and bearer-token SQLite Session state reads, auth/forbidden bearer envelopes, token/revision headers behavior, unchanged-response short-circuit, and session missing-campaign 404.
   - verifies `POST /api/v1/campaigns/:campaignSlug/session/messages` auth, fixture-write denial, malformed JSON handling, validation messages, SQLite persistence, private-message visibility, recipient labels, revision bumps, and missing-campaign 404 against the disposable smoke-test database.

@@ -191,6 +191,28 @@ export function buildContentAssetDetailPayload(
   };
 }
 
+export function buildContentAssetWritePayload(
+  campaignSlug: string,
+  record: CampaignAssetFileRecord,
+): { ok: true; asset_file: ReturnType<typeof buildContentAssetFilePayload> } {
+  return {
+    ok: true,
+    asset_file: buildContentAssetFilePayload(campaignSlug, record, false),
+  };
+}
+
+export function buildContentAssetDeletePayload(
+  record: CampaignAssetFileRecord,
+): { ok: true; deleted: { asset_ref: string; relative_path: string } } {
+  return {
+    ok: true,
+    deleted: {
+      asset_ref: record.asset_ref,
+      relative_path: record.relative_path,
+    },
+  };
+}
+
 function buildContentPageFilePayload(
   record: CampaignPageFileRecord,
   includeBody: boolean,

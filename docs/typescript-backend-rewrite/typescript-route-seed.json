@@ -359,6 +359,24 @@
       "notes": "Tracked Hono content asset management detail endpoint for fixture read-only mode behind Flask-compatible content-management auth for fixture or bearer-token DM/admin roles."
     },
     {
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/assets/<path:asset_ref>",
+      "route_family": "api_v1_content",
+      "status": "implemented_fixture_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/content/assets/*",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono content asset write route with bearer API-token DM/admin access, embedded asset_file validation, safe path writes into copied fixture campaign trees, summary payloads, and explicit missing-campaign JSON."
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/assets/<path:asset_ref>",
+      "route_family": "api_v1_content",
+      "status": "implemented_fixture_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/content/assets/*",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono content asset delete route with bearer API-token DM/admin access, safe path deletes from copied fixture campaign trees, empty-directory pruning, deleted reference payloads, and explicit missing-asset JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/content/pages/<path:page_ref>",
       "route_family": "api_v1_content",

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -2284,6 +2284,168 @@ const missingContentAsset = await requestJson(
 if (missingContentAsset.status !== 404 || missingContentAsset.payload?.error?.code !== "content_asset_not_found") {
   throw new Error(
     `Expected missing content asset JSON 404, got ${missingContentAsset.status} ${missingContentAsset.payload?.error?.code}`,
+  );
+}
+
+const managedAssetRef = "notes/api-sigil.txt";
+const managedAssetPath = `/api/v1/campaigns/linden-pass/content/assets/${managedAssetRef}`;
+const managedAssetBytes = Buffer.from("API managed asset bytes", "utf8");
+const managedAssetBody = {
+  asset_file: {
+    filename: "ignored-by-url-path.txt",
+    data_base64: managedAssetBytes.toString("base64"),
+  },
+};
+const blockedContentAssetPut = await requestJson(
+  managedAssetPath,
+  {},
+  { method: "PUT", body: managedAssetBody },
+);
+if (blockedContentAssetPut.status !== 401 || blockedContentAssetPut.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated content asset PUT 401, got ${blockedContentAssetPut.status} ${blockedContentAssetPut.payload?.error?.code}`,
+  );
+}
+
+const fixtureContentAssetPut = await requestJson(
+  managedAssetPath,
+  contentManagerHeaders,
+  { method: "PUT", body: managedAssetBody },
+);
+if (
+  fixtureContentAssetPut.status !== 403 ||
+  fixtureContentAssetPut.payload?.error?.message !== "Content asset writes require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture content asset PUT bearer requirement, got ${fixtureContentAssetPut.status} ${fixtureContentAssetPut.payload?.error?.message}`,
+  );
+}
+
+const bearerPlayerContentAssetPut = await requestJson(
+  managedAssetPath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "PUT", body: managedAssetBody },
+);
+if (
+  bearerPlayerContentAssetPut.status !== 403 ||
+  bearerPlayerContentAssetPut.payload?.error?.message !== "You do not have permission to manage campaign content."
+) {
+  throw new Error(
+    `Expected bearer player content asset PUT forbidden, got ${bearerPlayerContentAssetPut.status} ${bearerPlayerContentAssetPut.payload?.error?.message}`,
+  );
+}
+
+const invalidContentAssetPut = await requestJson(
+  managedAssetPath,
+  bearerContentManagerHeaders,
+  { method: "PUT", body: { asset_file: { filename: "api-sigil.txt", data_base64: "%%%invalid%%%" } } },
+);
+if (
+  invalidContentAssetPut.status !== 400 ||
+  invalidContentAssetPut.payload?.error?.message !== "asset_file data_base64 must be valid base64."
+) {
+  throw new Error(
+    `Expected content asset PUT base64 validation, got ${invalidContentAssetPut.status} ${invalidContentAssetPut.payload?.error?.message}`,
+  );
+}
+
+const missingCampaignContentAssetPut = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/content/assets/notes/api-sigil.txt",
+  bearerContentManagerHeaders,
+  { method: "PUT", body: managedAssetBody },
+);
+if (
+  missingCampaignContentAssetPut.status !== 404 ||
+  missingCampaignContentAssetPut.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing campaign content asset PUT 404, got ${missingCampaignContentAssetPut.status} ${missingCampaignContentAssetPut.payload?.error?.code}`,
+  );
+}
+
+const contentAssetPut = await requestJson(
+  managedAssetPath,
+  bearerContentManagerHeaders,
+  { method: "PUT", body: managedAssetBody },
+);
+if (
+  contentAssetPut.status !== 200 ||
+  contentAssetPut.payload?.asset_file?.asset_ref !== managedAssetRef ||
+  contentAssetPut.payload?.asset_file?.relative_path !== managedAssetRef ||
+  contentAssetPut.payload?.asset_file?.media_type !== "text/plain" ||
+  contentAssetPut.payload?.asset_file?.size_bytes !== managedAssetBytes.length
+) {
+  throw new Error(
+    `Expected content asset PUT summary payload, got ${contentAssetPut.status} ${JSON.stringify(contentAssetPut.payload)}`,
+  );
+}
+if (Object.hasOwn(contentAssetPut.payload?.asset_file || {}, "data_base64")) {
+  throw new Error("Expected content asset PUT payload to omit data_base64.");
+}
+const managedAssetFilePath = path.join(campaignsDir, "linden-pass", "assets", ...managedAssetRef.split("/"));
+if (!existsSync(managedAssetFilePath) || readFileSync(managedAssetFilePath).toString("utf8") !== "API managed asset bytes") {
+  throw new Error("Expected content asset PUT to write managed asset bytes into the copied fixture tree.");
+}
+
+const contentAssetsAfterPut = await requestJson("/api/v1/campaigns/linden-pass/content/assets", contentManagerHeaders);
+if (!contentAssetsAfterPut.payload?.assets?.some((item) => item.asset_ref === managedAssetRef)) {
+  throw new Error(`Expected content assets list to include ${managedAssetRef} after PUT.`);
+}
+
+const managedContentAsset = await requestJson(managedAssetPath, contentManagerHeaders);
+if (
+  managedContentAsset.status !== 200 ||
+  Buffer.from(managedContentAsset.payload?.asset_file?.data_base64 || "", "base64").toString("utf8") !==
+    "API managed asset bytes"
+) {
+  throw new Error(
+    `Expected managed content asset detail to return written bytes, got ${managedContentAsset.status} ${JSON.stringify(managedContentAsset.payload)}`,
+  );
+}
+
+const fixtureContentAssetDelete = await requestJson(
+  managedAssetPath,
+  contentManagerHeaders,
+  { method: "DELETE" },
+);
+if (
+  fixtureContentAssetDelete.status !== 403 ||
+  fixtureContentAssetDelete.payload?.error?.message !== "Content asset writes require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture content asset DELETE bearer requirement, got ${fixtureContentAssetDelete.status} ${fixtureContentAssetDelete.payload?.error?.message}`,
+  );
+}
+
+const contentAssetDelete = await requestJson(
+  managedAssetPath,
+  bearerContentManagerHeaders,
+  { method: "DELETE" },
+);
+if (
+  contentAssetDelete.status !== 200 ||
+  contentAssetDelete.payload?.deleted?.asset_ref !== managedAssetRef ||
+  contentAssetDelete.payload?.deleted?.relative_path !== managedAssetRef
+) {
+  throw new Error(
+    `Expected content asset DELETE payload, got ${contentAssetDelete.status} ${JSON.stringify(contentAssetDelete.payload)}`,
+  );
+}
+if (existsSync(managedAssetFilePath)) {
+  throw new Error("Expected content asset DELETE to remove managed asset from the copied fixture tree.");
+}
+
+const missingManagedAssetDelete = await requestJson(
+  managedAssetPath,
+  bearerContentManagerHeaders,
+  { method: "DELETE" },
+);
+if (
+  missingManagedAssetDelete.status !== 404 ||
+  missingManagedAssetDelete.payload?.error?.code !== "content_asset_not_found"
+) {
+  throw new Error(
+    `Expected missing managed content asset DELETE 404, got ${missingManagedAssetDelete.status} ${missingManagedAssetDelete.payload?.error?.code}`,
   );
 }
 

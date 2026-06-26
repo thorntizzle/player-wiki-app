@@ -733,6 +733,39 @@ def test_typescript_content_config_mutation_requires_auth_like_flask(typescript_
     assert payload == flask_payload
 
 
+def test_typescript_content_asset_mutations_require_auth_like_flask(typescript_api_server, client):
+    asset_ref = "notes/api-sigil.txt"
+    body = {
+        "asset_file": {
+            "filename": "api-sigil.txt",
+            "data_base64": base64.b64encode(b"blocked asset bytes").decode("ascii"),
+        }
+    }
+
+    flask_response = client.put(f"/api/v1/campaigns/linden-pass/content/assets/{asset_ref}", json=body)
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/assets/{asset_ref}",
+        method="PUT",
+        body=body,
+    )
+    assert status == 401
+    assert payload == flask_payload
+
+    flask_response = client.delete(f"/api/v1/campaigns/linden-pass/content/assets/{asset_ref}")
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/assets/{asset_ref}",
+        method="DELETE",
+    )
+    assert status == 401
+    assert payload == flask_payload
+
+
 def test_typescript_content_pages_list_matches_flask_contract(typescript_api_server, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     flask_response = client.get("/api/v1/campaigns/linden-pass/content/pages")

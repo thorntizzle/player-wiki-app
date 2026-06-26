@@ -55,6 +55,7 @@ import {
 } from "./systems/sources.js";
 import { getCampaignConfigFile } from "./content/repository.js";
 import {
+  deleteCampaignContentAsset,
   getCampaignContentAsset,
   getCampaignContentCharacter,
   getCampaignContentPage,
@@ -65,11 +66,14 @@ import {
   sanitizeContentCharacterSlug,
   sanitizeContentPageRef,
   updateCampaignConfigFile,
+  writeCampaignContentAsset,
 } from "./content/repository.js";
 import {
   buildCampaignConfigPayload,
+  buildContentAssetDeletePayload,
   buildContentAssetDetailPayload,
   buildContentAssetListPayload,
+  buildContentAssetWritePayload,
   buildContentCharacterDetailPayload,
   buildContentCharacterListPayload,
   buildContentPageDetailPayload,
@@ -563,6 +567,14 @@ function contentAssetRefFromWildcard(pathname: string, campaignSlug: string): st
   } catch {
     return "";
   }
+}
+
+function rawContentAssetRefFromWildcard(pathname: string, campaignSlug: string): string {
+  const prefix = `/api/v1/campaigns/${campaignSlug}/content/assets/`;
+  if (!pathname.startsWith(prefix)) {
+    return "";
+  }
+  return pathname.slice(prefix.length);
 }
 
 function contentPageNotFound(campaignSlug: string, pageRef: string) {
@@ -1947,6 +1959,77 @@ app.get(ROUTES.contentAsset, async (ctx) => {
   }
 
   return ctx.json(buildContentAssetDetailPayload(campaignSlug, asset));
+});
+
+app.put(ROUTES.contentAssetUpdate, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveContentManagerBearerWrite(
+    ctx,
+    campaign.slug,
+    "Content asset writes require bearer API authentication.",
+  );
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const assetRef = rawContentAssetRefFromWildcard(ctx.req.path, campaignSlug);
+  const result = await writeCampaignContentAsset(config, campaign.slug, assetRef, jsonPayload.payload);
+  if (result.status === "not_found") {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildContentAssetWritePayload(campaign.slug, result.record));
+});
+
+app.delete(ROUTES.contentAssetDelete, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveContentManagerBearerWrite(
+    ctx,
+    campaign.slug,
+    "Content asset writes require bearer API authentication.",
+  );
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const assetRef = rawContentAssetRefFromWildcard(ctx.req.path, campaignSlug);
+  const result = await deleteCampaignContentAsset(config, campaign.slug, assetRef);
+  if (result.status === "not_found") {
+    const sanitizedAssetRef = sanitizeContentAssetRef(assetRef) || assetRef;
+    const error = contentAssetNotFound(campaign.slug, sanitizedAssetRef);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildContentAssetDeletePayload(result.record));
 });
 
 app.get(ROUTES.contentPages, async (ctx) => {

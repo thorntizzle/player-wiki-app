@@ -94,6 +94,8 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/content/pages/*`
   - `GET /api/v1/campaigns/:campaignSlug/content/assets`
   - `GET /api/v1/campaigns/:campaignSlug/content/assets/*`
+  - `PUT /api/v1/campaigns/:campaignSlug/content/assets/*`
+  - `DELETE /api/v1/campaigns/:campaignSlug/content/assets/*`
   - `GET /api/v1/campaigns/:campaignSlug/content/characters`
   - `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
 - Campaign detail uses fixture-backed reads from `tests/fixtures/sample_campaigns` by default and supports
@@ -188,6 +190,12 @@ Route parity check command:
   writes, refreshed campaign-detail reads, empty-body no-op behavior, and missing-campaign JSON.
   Current validation covers a disposable copied fixture campaign only; production/staging write
   readiness remains gated by migration, backup, and rollback rehearsal.
+- The content asset write/delete routes now serve `PUT` and `DELETE .../content/assets/*` for bearer
+  API-token DM/admin users against copied fixture campaign trees, preserving Flask-compatible
+  embedded `asset_file` validation, base64 decoding, safe asset path writes, list/detail refresh,
+  summary and deleted-reference payloads, missing-campaign JSON, missing-asset JSON, and empty parent
+  directory pruning on delete. Current validation covers disposable copied fixtures only; production
+  or live publication still requires the normal backup, sync, and rollback gates.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

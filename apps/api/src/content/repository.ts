@@ -320,6 +320,51 @@ function resolveSafeAssetPath(assetsDir: string, assetRef: string): string | nul
   return resolvedPath;
 }
 
+function invalidAssetRefMessage(rawAssetRef: string): string {
+  const normalized = rawAssetRef.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  return normalized ? "Relative file references must stay within the campaign directory." : "A relative file reference is required.";
+}
+
+function decodeEmbeddedAssetFile(
+  payload: unknown,
+): { status: "ok"; data_blob: Buffer } | { status: "validation_error"; message: string } {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { status: "validation_error", message: "asset_file must be an object." };
+  }
+
+  const record = payload as Record<string, unknown>;
+  const filename = String(record.filename || "").trim();
+  const dataBase64 = String(record.data_base64 || "").trim();
+  if (!filename) {
+    return { status: "validation_error", message: "asset_file filename is required." };
+  }
+  if (!dataBase64) {
+    return { status: "validation_error", message: "asset_file data_base64 is required." };
+  }
+  if (dataBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(dataBase64)) {
+    return { status: "validation_error", message: "asset_file data_base64 must be valid base64." };
+  }
+
+  const dataBlob = Buffer.from(dataBase64, "base64");
+  if (dataBlob.toString("base64").replace(/=+$/g, "") !== dataBase64.replace(/=+$/g, "")) {
+    return { status: "validation_error", message: "asset_file data_base64 must be valid base64." };
+  }
+  return { status: "ok", data_blob: dataBlob };
+}
+
+async function pruneEmptyParentDirs(startDir: string, stopDir: string): Promise<void> {
+  const stopPath = path.resolve(stopDir);
+  let currentPath = path.resolve(startDir);
+  while (currentPath !== stopPath && currentPath.startsWith(`${stopPath}${path.sep}`)) {
+    try {
+      await fs.rmdir(currentPath);
+    } catch {
+      return;
+    }
+    currentPath = path.dirname(currentPath);
+  }
+}
+
 function resolveSafeCharacterDir(charactersDir: string, characterSlug: string): string | null {
   const safeCharacterSlug = normalizeCharacterSlug(characterSlug);
   if (!safeCharacterSlug) {
@@ -1087,6 +1132,111 @@ export async function getCampaignContentAsset(
   const record = toAssetFileRecord(assetPath, campaign.assetsDir, fileStats);
   record.data_base64 = (await fs.readFile(assetPath)).toString("base64");
   return record;
+}
+
+export async function writeCampaignContentAsset(
+  config: ApiConfig,
+  campaignSlug: string,
+  rawAssetRef: string,
+  payload: unknown,
+): Promise<
+  | {
+      status: "ok";
+      record: CampaignAssetFileRecord;
+    }
+  | {
+      status: "not_found";
+    }
+  | {
+      status: "validation_error";
+      message: string;
+    }
+> {
+  const campaign = await loadCampaignContentContext(config, campaignSlug, { requireContentDir: false });
+  if (!campaign) {
+    return { status: "not_found" };
+  }
+
+  const assetRef = sanitizeContentAssetRef(rawAssetRef);
+  if (!assetRef) {
+    return { status: "validation_error", message: invalidAssetRefMessage(rawAssetRef) };
+  }
+
+  const assetFile = decodeEmbeddedAssetFile(
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>).asset_file
+      : undefined,
+  );
+  if (assetFile.status === "validation_error") {
+    return assetFile;
+  }
+
+  const assetPath = resolveSafeAssetPath(campaign.assetsDir, assetRef);
+  if (!assetPath) {
+    return { status: "validation_error", message: "Resolved file path escapes the campaign directory." };
+  }
+
+  try {
+    const existingStats = await fs.stat(assetPath);
+    if (existingStats.isDirectory()) {
+      return { status: "validation_error", message: "Asset file references must point to files, not directories." };
+    }
+  } catch {
+    // Missing files are created below.
+  }
+
+  await fs.mkdir(path.dirname(assetPath), { recursive: true });
+  await fs.writeFile(assetPath, assetFile.data_blob);
+  const fileStats = await fs.stat(assetPath);
+  return { status: "ok", record: toAssetFileRecord(assetPath, campaign.assetsDir, fileStats) };
+}
+
+export async function deleteCampaignContentAsset(
+  config: ApiConfig,
+  campaignSlug: string,
+  rawAssetRef: string,
+): Promise<
+  | {
+      status: "ok";
+      record: CampaignAssetFileRecord;
+    }
+  | {
+      status: "not_found";
+    }
+  | {
+      status: "validation_error";
+      message: string;
+    }
+> {
+  const campaign = await loadCampaignContentContext(config, campaignSlug, { requireContentDir: false });
+  if (!campaign) {
+    return { status: "not_found" };
+  }
+
+  const assetRef = sanitizeContentAssetRef(rawAssetRef);
+  if (!assetRef) {
+    return { status: "validation_error", message: invalidAssetRefMessage(rawAssetRef) };
+  }
+
+  const assetPath = resolveSafeAssetPath(campaign.assetsDir, assetRef);
+  if (!assetPath) {
+    return { status: "validation_error", message: "Resolved file path escapes the campaign directory." };
+  }
+
+  let fileStats;
+  try {
+    fileStats = await fs.stat(assetPath);
+    if (!fileStats.isFile()) {
+      return { status: "not_found" };
+    }
+  } catch {
+    return { status: "not_found" };
+  }
+
+  const record = toAssetFileRecord(assetPath, campaign.assetsDir, fileStats);
+  await fs.unlink(assetPath);
+  await pruneEmptyParentDirs(path.dirname(assetPath), campaign.assetsDir);
+  return { status: "ok", record };
 }
 
 export async function getCampaignContentCharacter(
