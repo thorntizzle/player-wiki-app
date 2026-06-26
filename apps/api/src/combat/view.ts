@@ -1,8 +1,14 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+
+import Database from "better-sqlite3";
 
 import type { CampaignViewModel } from "../campaigns/view.js";
+import type { FixtureSystemsRole } from "../systems/sources.js";
 
-export type FixtureCombatRole = "player" | "dm" | "admin";
+export type FixtureCombatRole = FixtureSystemsRole;
+
+type SqliteDatabase = Database.Database;
 
 const COMBAT_READONLY_REVISION = 0;
 
@@ -32,6 +38,25 @@ interface CombatTrackerPayload {
   combatants: [];
 }
 
+interface AvailableStatblockChoice {
+  id: string;
+  title: string;
+  subtitle: string;
+  initiative_bonus: string;
+}
+
+interface DMStatblockChoiceRow {
+  id: number;
+  title: string;
+  max_hp: number;
+  speed_text: string;
+  initiative_bonus: number;
+}
+
+interface DMConditionOptionRow {
+  name: string;
+}
+
 export interface CombatReadOnlyPayload {
   ok: true;
   campaign: CampaignViewModel;
@@ -46,7 +71,7 @@ export interface CombatReadOnlyPayload {
   selected_player_combat_sections: [];
   player_character_targets: [];
   available_character_choices: [];
-  available_statblock_choices: [];
+  available_statblock_choices: AvailableStatblockChoice[];
   combat_condition_options: string[];
   poll_settings: {
     active_interval_ms: number;
@@ -77,9 +102,107 @@ function supportsCombatTracker(system: string): boolean {
   return normalizeSystemKey(system) === "dnd5e";
 }
 
+function isNoSuchTableOrColumnError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.message.includes("no such table") || error.message.includes("no such column"))
+  );
+}
+
+function formatInitiativeBonus(value: number): string {
+  return value > 0 ? `+${value}` : String(value);
+}
+
 function buildLiveHash(...parts: unknown[]): string {
   const normalized = parts.map((part) => String(part ?? "").trim().toLowerCase()).join("||");
   return createHash("sha1").update(normalized).digest("hex").slice(0, 12);
+}
+
+function serializeStatblockChoice(row: DMStatblockChoiceRow): AvailableStatblockChoice {
+  return {
+    id: String(row.id),
+    title: String(row.title || ""),
+    subtitle: `HP ${Number(row.max_hp || 0)} - Speed ${String(row.speed_text || "")}`,
+    initiative_bonus: formatInitiativeBonus(Number(row.initiative_bonus || 0)),
+  };
+}
+
+function listAvailableStatblockChoices(
+  database: SqliteDatabase,
+  campaignSlug: string,
+  canAccessDmContent: boolean,
+): AvailableStatblockChoice[] {
+  if (!canAccessDmContent) {
+    return [];
+  }
+  try {
+    return (
+      database
+        .prepare(
+          `
+            SELECT id, title, max_hp, speed_text, initiative_bonus
+            FROM campaign_dm_statblocks
+            WHERE campaign_slug = ?
+            ORDER BY updated_at DESC, title COLLATE NOCASE ASC, id DESC
+          `,
+        )
+        .all(campaignSlug) as DMStatblockChoiceRow[]
+    ).map(serializeStatblockChoice);
+  } catch (error) {
+    if (isNoSuchTableOrColumnError(error)) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+function listCombatConditionOptions(database: SqliteDatabase, campaignSlug: string): string[] {
+  try {
+    const conditionNames = (
+      database
+        .prepare(
+          `
+            SELECT name
+            FROM campaign_dm_condition_definitions
+            WHERE campaign_slug = ?
+            ORDER BY name COLLATE NOCASE ASC, id ASC
+          `,
+        )
+        .all(campaignSlug) as DMConditionOptionRow[]
+    ).map((row) => String(row.name || "").trim()).filter(Boolean);
+    return [...new Set<string>([...DND_5E_CONDITION_OPTIONS, ...conditionNames])].sort();
+  } catch (error) {
+    if (isNoSuchTableOrColumnError(error)) {
+      return [...DND_5E_CONDITION_OPTIONS];
+    }
+    throw error;
+  }
+}
+
+function loadDmContentCombatChoices(
+  dbPath: string,
+  campaignSlug: string,
+  canAccessDmContent: boolean,
+): {
+  availableStatblockChoices: AvailableStatblockChoice[];
+  combatConditionOptions: string[];
+} {
+  if (!existsSync(dbPath)) {
+    return {
+      availableStatblockChoices: [],
+      combatConditionOptions: [...DND_5E_CONDITION_OPTIONS],
+    };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    return {
+      availableStatblockChoices: listAvailableStatblockChoices(database, campaignSlug, canAccessDmContent),
+      combatConditionOptions: listCombatConditionOptions(database, campaignSlug),
+    };
+  } finally {
+    database.close();
+  }
 }
 
 export function buildCombatLiveViewToken(role: FixtureCombatRole, selectedCombatantId: number | null): string {
@@ -87,14 +210,25 @@ export function buildCombatLiveViewToken(role: FixtureCombatRole, selectedCombat
   return buildLiveHash("combat", "player", canManageCombat ? "1" : "0", selectedCombatantId ?? "");
 }
 
-export function buildCombatReadOnlyPayload(campaign: CampaignViewModel, role: FixtureCombatRole): CombatReadOnlyPayload {
+export function buildCombatReadOnlyPayload(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  role: FixtureCombatRole,
+): CombatReadOnlyPayload {
   const canManageCombat = role === "dm" || role === "admin";
   const canAccessScopedPlayerTools = role === "player" || canManageCombat;
   const canAccessDmContent = canManageCombat;
+  const combatSystemSupported = supportsCombatTracker(campaign.system);
+  const dmContentChoices = combatSystemSupported
+    ? loadDmContentCombatChoices(dbPath, campaign.slug, canAccessDmContent)
+    : {
+        availableStatblockChoices: [],
+        combatConditionOptions: [...DND_5E_CONDITION_OPTIONS],
+      };
   return {
     ok: true,
     campaign,
-    combat_system_supported: supportsCombatTracker(campaign.system),
+    combat_system_supported: combatSystemSupported,
     changed: true,
     live_revision: COMBAT_READONLY_REVISION,
     live_view_token: buildCombatLiveViewToken(role, null),
@@ -111,8 +245,8 @@ export function buildCombatReadOnlyPayload(campaign: CampaignViewModel, role: Fi
     selected_player_combat_sections: [],
     player_character_targets: [],
     available_character_choices: [],
-    available_statblock_choices: [],
-    combat_condition_options: [...DND_5E_CONDITION_OPTIONS],
+    available_statblock_choices: dmContentChoices.availableStatblockChoices,
+    combat_condition_options: dmContentChoices.combatConditionOptions,
     poll_settings: {
       active_interval_ms: 500,
       idle_interval_ms: 3000,

@@ -126,7 +126,9 @@ Route parity check command:
 - The first Combat state shell now serves read-only empty tracker payloads for `GET .../combat` and
   `GET .../combat/live-state`, preserving Flask-compatible unauthenticated `auth_required`, fixture
   or bearer-token membership-derived player/DM permission splits, live polling metadata,
-  invalid/no-membership bearer auth envelopes, and unchanged-response short-circuit behavior.
+  invalid/no-membership bearer auth envelopes, unchanged-response short-circuit behavior, DM/admin
+  DM Content statblock setup choices, and custom condition names merged into the combat condition
+  options.
 - The first Session manager lookup slice now serves `GET .../session/article-sources/search`, preserving
   Flask-compatible unauthenticated `auth_required`, fixture or bearer-token membership-derived
   manager-only access, short-query guidance, visible wiki page results, accessible Systems entry

@@ -1636,6 +1636,8 @@ if (
   playerCombatState.payload?.selected_combatant !== null ||
   playerCombatState.payload?.selected_player_character !== null ||
   playerCombatState.payload?.player_character_targets?.length !== 0 ||
+  playerCombatState.payload?.available_statblock_choices?.length !== 0 ||
+  playerCombatState.payload?.combat_condition_options?.includes("Salt-Burned") !== true ||
   playerCombatState.payload?.permissions?.can_manage_combat !== false ||
   playerCombatState.payload?.permissions?.can_access_systems !== true ||
   playerCombatState.payload?.links?.flask_dm_status_url !== ""
@@ -1666,8 +1668,13 @@ if (
   dmCombatState.payload?.permissions?.can_manage_combat !== true ||
   dmCombatState.payload?.permissions?.can_access_dm_content !== true ||
   dmCombatState.payload?.available_character_choices?.length !== 0 ||
-  dmCombatState.payload?.available_statblock_choices?.length !== 0 ||
+  dmCombatState.payload?.available_statblock_choices?.length !== 1 ||
+  dmCombatState.payload?.available_statblock_choices?.[0]?.id !== "301" ||
+  dmCombatState.payload?.available_statblock_choices?.[0]?.title !== "Dock Tough" ||
+  dmCombatState.payload?.available_statblock_choices?.[0]?.subtitle !== "HP 16 - Speed 30 ft." ||
+  dmCombatState.payload?.available_statblock_choices?.[0]?.initiative_bonus !== "+2" ||
   dmCombatState.payload?.combat_condition_options?.includes("Prone") !== true ||
+  dmCombatState.payload?.combat_condition_options?.includes("Salt-Burned") !== true ||
   dmCombatState.payload?.poll_settings?.active_interval_ms !== 500 ||
   dmCombatState.payload?.links?.flask_dm_status_url !== "/campaigns/linden-pass/combat/dm" ||
   dmCombatState.payload?.links?.flask_dm_controls_url !== "/campaigns/linden-pass/combat/dm?view=controls" ||
@@ -1683,6 +1690,8 @@ if (
   bearerAdminCombatState.status !== 200 ||
   bearerAdminCombatState.payload?.permissions?.can_manage_combat !== true ||
   bearerAdminCombatState.payload?.permissions?.can_access_dm_content !== true ||
+  bearerAdminCombatState.payload?.available_statblock_choices?.[0]?.title !== "Dock Tough" ||
+  bearerAdminCombatState.payload?.combat_condition_options?.includes("Salt-Burned") !== true ||
   bearerAdminCombatState.payload?.links?.flask_dm_status_url !== "/campaigns/linden-pass/combat/dm" ||
   bearerAdminCombatState.payload?.links?.flask_dm_controls_url !== "/campaigns/linden-pass/combat/dm?view=controls" ||
   bearerAdminCombatState.payload?.live_view_token !== dmCombatState.payload?.live_view_token

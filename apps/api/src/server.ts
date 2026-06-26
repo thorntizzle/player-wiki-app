@@ -1068,7 +1068,7 @@ app.get(ROUTES.combatState, async (ctx) => {
   }
   const role = auth.role;
 
-  const payload = buildCombatReadOnlyPayload(campaign, role);
+  const payload = buildCombatReadOnlyPayload(config.dbPath, campaign, role);
   const requestedRevision = parseLiveRevisionHeader(ctx);
   const requestedViewToken = parseLiveViewTokenHeader(ctx);
   if (
@@ -1097,7 +1097,7 @@ app.get(ROUTES.combatLiveState, async (ctx) => {
   }
   const role = auth.role;
 
-  const payload = buildCombatReadOnlyPayload(campaign, role);
+  const payload = buildCombatReadOnlyPayload(config.dbPath, campaign, role);
   const requestedRevision = parseLiveRevisionHeader(ctx);
   const requestedViewToken = parseLiveViewTokenHeader(ctx);
   if (
