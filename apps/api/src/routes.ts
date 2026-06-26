@@ -1141,6 +1141,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "validation_error",
     },
   },
+  {
+    method: "PATCH",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/xianxia-active-state",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-active-state",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-active-state",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "PATCH",
+      path: "/api/v1/campaigns/linden-pass/characters/arden-march/session/xianxia-active-state",
+      status: 400,
+      contentType: "application/json",
+      errorCode: "validation_error",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1222,4 +1237,5 @@ export const ROUTES = {
   characterSessionResource: IMPLEMENTED_ROUTES[75].honoPath,
   characterSessionSpellSlots: IMPLEMENTED_ROUTES[76].honoPath,
   characterSessionInventory: IMPLEMENTED_ROUTES[77].honoPath,
+  characterSessionXianxiaActiveState: IMPLEMENTED_ROUTES[78].honoPath,
 } as const;

@@ -4370,6 +4370,31 @@ if (
   throw new Error(`Unexpected character session vitals PATCH payload: ${JSON.stringify(playerSessionVitalsUpdate.payload)}`);
 }
 
+const dndXianxiaActiveStateUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/characters/arden-march/session/xianxia-active-state",
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_revision: 10,
+      active_stance_name: "Forbidden Stance",
+      active_aura_name: "Forbidden Aura",
+    },
+  },
+);
+if (
+  dndXianxiaActiveStateUpdate.status !== 400 ||
+  dndXianxiaActiveStateUpdate.payload?.error?.code !== "validation_error" ||
+  dndXianxiaActiveStateUpdate.payload?.error?.message !==
+    "Active Stance and Aura state is only supported for Xianxia characters."
+) {
+  throw new Error(
+    `Expected DND Xianxia active-state PATCH validation_error, got ${dndXianxiaActiveStateUpdate.status} ${JSON.stringify(dndXianxiaActiveStateUpdate.payload)}`,
+  );
+}
+
 const sessionVitalsAssertionDb = new Database(dbPath, { readonly: true });
 const ardenStateAfterSessionVitals = sessionVitalsAssertionDb
   .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
@@ -6690,6 +6715,7 @@ xianxiaMutableState.xianxia.energies.jing.current = 2;
 xianxiaMutableState.xianxia.yin_yang.yin_current = 1;
 xianxiaMutableState.xianxia.dao.current = 2;
 xianxiaMutableState.xianxia.active_stance = { name: "Stone Root" };
+xianxiaMutableState.xianxia.active_aura = { name: "Azure Bell" };
 xianxiaMutableState.xianxia.inventory = {
   enabled: true,
   quantities: [
@@ -6784,6 +6810,7 @@ if (
   xianxiaUpdatedState.xianxia?.yin_yang?.yang_current !== 1 ||
   xianxiaUpdatedState.xianxia?.dao?.current !== 2 ||
   xianxiaUpdatedState.xianxia?.active_stance?.name !== "Stone Root" ||
+  xianxiaUpdatedState.xianxia?.active_aura?.name !== "Azure Bell" ||
   xianxiaUpdatedState.notes?.player_notes_markdown !== "Keep the manual pool edits in SQLite."
 ) {
   throw new Error(
@@ -6900,6 +6927,67 @@ if (
     `Unexpected Xianxia session inventory database row: ${JSON.stringify({
       xianxiaInventoryRow,
       xianxiaInventoryState,
+    })}`,
+  );
+}
+
+const staleXianxiaActiveStateUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/xianxia-active-state`,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 999, active_stance_name: "Stale Crane" } },
+);
+if (
+  staleXianxiaActiveStateUpdate.status !== 409 ||
+  staleXianxiaActiveStateUpdate.payload?.error?.code !== "state_conflict" ||
+  staleXianxiaActiveStateUpdate.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale Xianxia active-state PATCH conflict, got ${staleXianxiaActiveStateUpdate.status} ${JSON.stringify(staleXianxiaActiveStateUpdate.payload)}`,
+  );
+}
+
+const xianxiaActiveStateUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/xianxia-active-state`,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_revision: editedXianxiaRevision + 3,
+      active_stance_name: "  Flowing   Reed  ",
+      active_aura_name: "",
+    },
+  },
+);
+if (
+  xianxiaActiveStateUpdate.status !== 200 ||
+  xianxiaActiveStateUpdate.payload?.ok !== true ||
+  xianxiaActiveStateUpdate.payload?.character?.state_record?.revision !== editedXianxiaRevision + 4 ||
+  xianxiaActiveStateUpdate.payload?.character?.state_record?.state?.xianxia?.active_stance?.name !== "Flowing Reed" ||
+  xianxiaActiveStateUpdate.payload?.character?.state_record?.state?.xianxia?.active_aura !== null
+) {
+  throw new Error(`Unexpected Xianxia active-state PATCH payload: ${JSON.stringify(xianxiaActiveStateUpdate.payload)}`);
+}
+
+const xianxiaActiveStateAssertionDb = new Database(dbPath, { readonly: true });
+const xianxiaActiveStateRow = xianxiaActiveStateAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", xianxiaCharacterSlug);
+xianxiaActiveStateAssertionDb.close();
+const xianxiaActiveState = JSON.parse(xianxiaActiveStateRow?.state_json || "{}");
+if (
+  Number(xianxiaActiveStateRow?.revision) !== editedXianxiaRevision + 4 ||
+  xianxiaActiveStateRow?.updated_by_user_id !== 81 ||
+  xianxiaActiveState.xianxia?.active_stance?.name !== "Flowing Reed" ||
+  xianxiaActiveState.xianxia?.active_aura !== null
+) {
+  throw new Error(
+    `Unexpected Xianxia active-state database row: ${JSON.stringify({
+      xianxiaActiveStateRow,
+      xianxiaActiveState,
     })}`,
   );
 }

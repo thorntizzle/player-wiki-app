@@ -441,6 +441,10 @@ fixture database.
   - missing-item validation envelopes for DND inventory rows.
   - assigned-player DND quantity/delta inventory updates through `character_state`, including shared revision bumps and `updated_by_user_id`.
   - DM Xianxia nested inventory quantity/delta updates with synchronized top-level inventory mirrors.
+- Character session Xianxia active-state payload checks cover:
+  - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-active-state` with bearer-only writes.
+  - non-Xianxia validation envelopes and stale-revision conflict envelopes.
+  - DM Xianxia active Stance/Aura manual state updates through `character_state`, including whitespace normalization, blank-value clearing, shared revision bumps, and `updated_by_user_id`.
 
 ## Added Tests and Checks
 
