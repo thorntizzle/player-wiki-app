@@ -710,6 +710,15 @@
       "notes": "Tracked Hono character session notes route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflict handling, player_notes_markdown updates that preserve whitespace and leave other notes fields intact, null-to-empty-string clearing, refreshed character state payloads, and explicit missing-character JSON."
     },
     {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/personal",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/personal",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono character session personal route with bearer API-token writes, Flask-compatible characters-scope visibility precheck, shared character_state revision conflict handling, physical_description_markdown/background_markdown updates that clear omitted/null values to empty strings while preserving other notes fields, refreshed character state payloads, and explicit missing-character JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/me",
       "route_family": "api_v1",

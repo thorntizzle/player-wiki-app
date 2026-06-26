@@ -20,6 +20,7 @@ import {
 import { getApiConfig } from "./config.js";
 import {
   buildCampaignControlPayload,
+  campaignRoleCanAccessScope,
   campaignRoleCanManageVisibility,
   updateCampaignVisibilitySettings,
 } from "./campaigns/control.js";
@@ -106,6 +107,7 @@ import {
   updateCharacterSessionCurrency,
   updateCharacterSessionInventory,
   updateCharacterSessionNotes,
+  updateCharacterSessionPersonal,
   updateCharacterSessionResource,
   updateCharacterSessionSpellSlots,
   updateCharacterSessionXianxiaActiveState,
@@ -4035,6 +4037,92 @@ app.patch(ROUTES.characterSessionNotes, async (ctx) => {
   }
 
   const result = updateCharacterSessionNotes(
+    config,
+    campaign.slug,
+    characterSlug,
+    character.definition,
+    jsonPayload.payload,
+    auth.actorUserId ?? 0,
+  );
+  if (result.status === "state_conflict") {
+    const error = stateConflict(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const updatedCharacter = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!updatedCharacter) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    character: {
+      definition: updatedCharacter.definition,
+      import_metadata: updatedCharacter.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: characterSlug,
+        revision: result.revision,
+        state: result.state,
+        updated_at: result.updatedAt,
+        updated_by_user_id: auth.actorUserId ?? null,
+      },
+    },
+  });
+});
+
+app.patch(ROUTES.characterSessionPersonal, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCharacterSessionBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "characters")) {
+    const error = forbidden("You do not have access to this campaign scope.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!canEditCharacterSessionState(config, campaign.slug, characterSlug, auth.role, auth.actorUserId)) {
+    const error = forbidden("You do not have permission to update this character from this view.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = updateCharacterSessionPersonal(
     config,
     campaign.slug,
     characterSlug,

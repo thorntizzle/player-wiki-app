@@ -2556,6 +2556,12 @@ export interface CharacterNotesPatchPayload {
   player_notes_markdown: string;
 }
 
+export interface CharacterPersonalPatchPayload {
+  expected_revision: number;
+  physical_description_markdown?: string | null;
+  background_markdown?: string | null;
+}
+
 export interface CharacterPortraitUpsertPayload {
   expected_revision: number;
   portrait_file: {
@@ -2584,6 +2590,10 @@ export interface CharacterVitalsPatchResponse extends ApiResponseBase {
 }
 
 export interface CharacterNotesPatchResponse extends ApiResponseBase {
+  character: CharacterRecord;
+}
+
+export interface CharacterPersonalPatchResponse extends ApiResponseBase {
   character: CharacterRecord;
 }
 

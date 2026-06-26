@@ -454,6 +454,10 @@ fixture database.
   - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/notes` with bearer-only writes.
   - stale-revision conflict envelopes.
   - assigned-player player-note text updates through `state.notes.player_notes_markdown`, preserving whitespace, null-clearing to an empty string, and leaving other note fields intact.
+- Character session personal payload checks cover:
+  - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/personal` with bearer-only writes and the Flask-compatible `characters` scope precheck.
+  - stale-revision conflict envelopes.
+  - DM physical/background personal text updates through `state.notes`, null/omitted clearing to empty strings, and preservation of player notes/session notes.
 
 ## Added Tests and Checks
 

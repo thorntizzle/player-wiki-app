@@ -8,7 +8,7 @@ import type { CampaignViewModel } from "./view.js";
 type SqliteDatabase = InstanceType<typeof Database>;
 
 const VISIBILITY_SCOPES = ["campaign", "wiki", "systems", "session", "combat", "characters", "dm_content"] as const;
-type VisibilityScope = (typeof VISIBILITY_SCOPES)[number];
+export type VisibilityScope = (typeof VISIBILITY_SCOPES)[number];
 
 const VISIBILITY_LABELS: Record<string, string> = {
   public: "Public",
@@ -308,6 +308,17 @@ export function campaignRoleCanManageVisibility(
   const defaults = campaignDefaultVisibility(campaign);
   const settings = readVisibilitySettings(dbPath, campaign.slug);
   return roleSatisfiesVisibility(role, getEffectiveVisibility("campaign", defaults, settings));
+}
+
+export function campaignRoleCanAccessScope(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  role: AuthRouteRole,
+  scope: VisibilityScope,
+): boolean {
+  const defaults = campaignDefaultVisibility(campaign);
+  const settings = readVisibilitySettings(dbPath, campaign.slug);
+  return roleSatisfiesVisibility(role, getEffectiveVisibility(scope, defaults, settings));
 }
 
 export function buildCampaignControlPayload(

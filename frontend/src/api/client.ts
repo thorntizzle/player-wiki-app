@@ -39,6 +39,8 @@ import type {
   CharacterLevelUpResponse,
   CharacterNotesPatchPayload,
   CharacterNotesPatchResponse,
+  CharacterPersonalPatchPayload,
+  CharacterPersonalPatchResponse,
   CharacterPortraitDeletePayload,
   CharacterPortraitMutationResponse,
   CharacterPortraitUpsertPayload,
@@ -1537,6 +1539,20 @@ export class CampaignApiClient {
   ): Promise<CharacterNotesPatchResponse> {
     return this.requestJson<CharacterNotesPatchResponse>(
       `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/session/notes`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async patchCharacterPersonal(
+    slug: string,
+    characterSlug: string,
+    payload: CharacterPersonalPatchPayload,
+  ): Promise<CharacterPersonalPatchResponse> {
+    return this.requestJson<CharacterPersonalPatchResponse>(
+      `/api/v1/campaigns/${encodeURIComponent(slug)}/characters/${encodeURIComponent(characterSlug)}/session/personal`,
       {
         method: "PATCH",
         body: JSON.stringify(payload),

@@ -6711,6 +6711,100 @@ if (
   );
 }
 
+const staleSessionPersonalUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/personal`,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_revision: 999,
+      physical_description_markdown: "This revision should conflict.",
+      background_markdown: "This revision should conflict.",
+    },
+  },
+);
+if (
+  staleSessionPersonalUpdate.status !== 409 ||
+  staleSessionPersonalUpdate.payload?.error?.code !== "state_conflict" ||
+  staleSessionPersonalUpdate.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale character session personal PATCH conflict, got ${staleSessionPersonalUpdate.status} ${JSON.stringify(staleSessionPersonalUpdate.payload)}`,
+  );
+}
+
+const personalPhysical = "Broad-shouldered and steady-eyed.";
+const personalBackground = "Spent years running messages along the harbor roads.";
+const dmSessionPersonalUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/personal`,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_revision: 7,
+      physical_description_markdown: personalPhysical,
+      background_markdown: personalBackground,
+    },
+  },
+);
+if (
+  dmSessionPersonalUpdate.status !== 200 ||
+  dmSessionPersonalUpdate.payload?.ok !== true ||
+  dmSessionPersonalUpdate.payload?.character?.state_record?.revision !== 8 ||
+  dmSessionPersonalUpdate.payload?.character?.state_record?.state?.notes?.physical_description_markdown !==
+    personalPhysical ||
+  dmSessionPersonalUpdate.payload?.character?.state_record?.state?.notes?.background_markdown !== personalBackground ||
+  dmSessionPersonalUpdate.payload?.character?.state_record?.state?.notes?.player_notes_markdown !== "" ||
+  JSON.stringify(dmSessionPersonalUpdate.payload?.character?.state_record?.state?.notes?.session_notes || []) !==
+    JSON.stringify(managedNotesBefore.session_notes || [])
+) {
+  throw new Error(`Unexpected character session personal PATCH payload: ${JSON.stringify(dmSessionPersonalUpdate.payload)}`);
+}
+
+const dmSessionPersonalClear = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/personal`,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 8, physical_description_markdown: null, background_markdown: "" } },
+);
+if (
+  dmSessionPersonalClear.status !== 200 ||
+  dmSessionPersonalClear.payload?.ok !== true ||
+  dmSessionPersonalClear.payload?.character?.state_record?.revision !== 9 ||
+  dmSessionPersonalClear.payload?.character?.state_record?.state?.notes?.physical_description_markdown !== "" ||
+  dmSessionPersonalClear.payload?.character?.state_record?.state?.notes?.background_markdown !== "" ||
+  dmSessionPersonalClear.payload?.character?.state_record?.state?.notes?.player_notes_markdown !== ""
+) {
+  throw new Error(`Unexpected character session personal clear payload: ${JSON.stringify(dmSessionPersonalClear.payload)}`);
+}
+
+const sessionPersonalAssertionDb = new Database(dbPath, { readonly: true });
+const managedStateAfterPersonal = sessionPersonalAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", managedCharacterSlug);
+sessionPersonalAssertionDb.close();
+const managedPersonalState = JSON.parse(managedStateAfterPersonal?.state_json || "{}");
+if (
+  managedStateAfterPersonal?.revision !== 9 ||
+  managedStateAfterPersonal?.updated_by_user_id !== 81 ||
+  managedPersonalState.notes?.player_notes_markdown !== "" ||
+  managedPersonalState.notes?.physical_description_markdown !== "" ||
+  managedPersonalState.notes?.background_markdown !== "" ||
+  JSON.stringify(managedPersonalState.notes?.session_notes || []) !== JSON.stringify(managedNotesBefore.session_notes || [])
+) {
+  throw new Error(
+    `Unexpected character session personal database row: ${JSON.stringify({
+      managedStateAfterPersonal,
+      managedPersonalState,
+    })}`,
+  );
+}
+
 const contentCharactersAfterPut = await requestJson("/api/v1/campaigns/linden-pass/content/characters", contentManagerHeaders);
 if (!contentCharactersAfterPut.payload?.characters?.some((item) => item.character_slug === managedCharacterSlug)) {
   throw new Error(`Expected content characters list to include ${managedCharacterSlug} after PUT.`);
