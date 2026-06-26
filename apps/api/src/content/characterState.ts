@@ -32,6 +32,8 @@ export type CharacterSessionSpellSlotsUpdateResult = CharacterSessionVitalsUpdat
 
 export type CharacterSessionInventoryUpdateResult = CharacterSessionVitalsUpdateResult;
 
+export type CharacterSessionXianxiaInventoryEquippedUpdateResult = CharacterSessionVitalsUpdateResult;
+
 export type CharacterSessionXianxiaActiveStateUpdateResult = CharacterSessionVitalsUpdateResult;
 
 export type CharacterSessionCurrencyUpdateResult = CharacterSessionVitalsUpdateResult;
@@ -1037,6 +1039,101 @@ function syncTopLevelXianxiaInventory(state: Record<string, unknown>, quantities
   }));
 }
 
+function normalizeXianxiaInventoryItemType(value: unknown): string {
+  const normalized = asString(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (normalized === "weapon" || normalized === "weapons") {
+    return "Weapon";
+  }
+  if (normalized === "armor" || normalized === "armors" || normalized === "armour" || normalized === "armours") {
+    return "Armor";
+  }
+  if (normalized === "artifact" || normalized === "artifacts" || normalized === "relic" || normalized === "relics") {
+    return "Artifact";
+  }
+  if (normalized === "consumable" || normalized === "consumables") {
+    return "Consumable";
+  }
+  if (normalized === "misc" || normalized === "miscellaneous" || normalized === "tool" || normalized === "tools") {
+    return "Miscellaneous";
+  }
+  return "Miscellaneous";
+}
+
+function normalizeStateBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  const normalized = asString(value).toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["", "0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return Boolean(value);
+}
+
+function normalizeSubmittedXianxiaInventoryRows(value: unknown): Record<string, unknown>[] {
+  const rawRows =
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? Object.entries(value as Record<string, unknown>)
+          .filter(([key]) => key.trim() !== "")
+          .map(([key, quantity]) => ({ id: key, quantity }))
+      : typeof value === "string"
+        ? [{ name: value, quantity: 1 }]
+        : asArray(value);
+  const rows: Record<string, unknown>[] = [];
+  for (const rawRow of rawRows) {
+    const row = typeof rawRow === "object" && rawRow !== null && !Array.isArray(rawRow)
+      ? asRecord(rawRow)
+      : { name: rawRow, quantity: 1 };
+    const id = asString(row.id);
+    const catalogRef = asString(row.catalog_ref);
+    const name = asString(row.name || row.label);
+    if (!id && !catalogRef && !name) {
+      continue;
+    }
+
+    const itemType = normalizeXianxiaInventoryItemType(row.item_type);
+    const hasExplicitEquippable = Object.hasOwn(row, "equippable");
+    const equippable = hasExplicitEquippable ? normalizeStateBoolean(row.equippable) : itemType === "Weapon" || itemType === "Armor";
+    const normalized: Record<string, unknown> = {
+      ...row,
+      quantity: asInt(Object.hasOwn(row, "quantity") ? row.quantity : row.default_quantity, 0),
+      item_type: itemType,
+      equippable,
+      is_equipped: normalizeStateBoolean(row.is_equipped) && equippable,
+    };
+    if (id) {
+      normalized.id = id;
+    }
+    if (catalogRef) {
+      normalized.catalog_ref = catalogRef;
+    }
+    if (name) {
+      normalized.name = name;
+    }
+    rows.push(normalized);
+  }
+  return rows;
+}
+
+function normalizeXianxiaInventoryStatePayload(state: Record<string, unknown>): void {
+  const xianxia = { ...asRecord(state.xianxia) };
+  const rawInventory = xianxia.inventory;
+  const inventory = asRecord(rawInventory);
+  const rawQuantities = Array.isArray(rawInventory)
+    ? rawInventory
+    : Object.hasOwn(inventory, "quantities")
+      ? inventory.quantities
+      : inventory.items;
+  const quantities = normalizeSubmittedXianxiaInventoryRows(rawQuantities ?? []);
+  syncTopLevelXianxiaInventory(state, quantities);
+}
+
 function xianxiaInventoryRows(state: Record<string, unknown>): Record<string, unknown>[] {
   const xianxiaInventory = asRecord(asRecord(state.xianxia).inventory);
   const rows = Array.isArray(xianxiaInventory.quantities)
@@ -1084,6 +1181,25 @@ function applyInventoryQuantityUpdate(
   }
   item.quantity = quantity;
   state.inventory = inventory;
+}
+
+function applyXianxiaInventoryEquippedStateUpdate(
+  state: Record<string, unknown>,
+  itemId: string,
+  payload: Record<string, unknown>,
+): void {
+  normalizeXianxiaInventoryStatePayload(state);
+  const quantities = xianxiaInventoryRows(state);
+  const item = quantities.find((row) => asString(row.id) === itemId);
+  if (!item) {
+    throw new Error(`Unknown Xianxia inventory item: ${itemId}`);
+  }
+  const isEquipped = Boolean(payload.is_equipped);
+  if (isEquipped && !Boolean(item.equippable)) {
+    throw new Error("Cannot equip a non-equippable item.");
+  }
+  item.is_equipped = isEquipped;
+  syncTopLevelXianxiaInventory(state, quantities);
 }
 
 function applyCurrencyUpdate(
@@ -1834,6 +1950,97 @@ export function updateCharacterSessionInventory(
       applyInventoryQuantityUpdate(nextState, itemId, payload, normalizeSystemKey(definition.system) === XIANXIA_SYSTEM_CODE);
     } catch (error) {
       return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character inventory payload." };
+    }
+
+    const now = utcIsoTimestamp();
+    if (stateRowMissing) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(campaignSlug, characterSlug, expectedRevision + 1, JSON.stringify(nextState), now, updatedByUserId);
+      return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+    }
+
+    const result = database
+      .prepare(
+        `
+          UPDATE character_state
+          SET revision = revision + 1,
+              state_json = ?,
+              updated_at = ?,
+              updated_by_user_id = ?
+          WHERE campaign_slug = ?
+            AND character_slug = ?
+            AND revision = ?
+        `,
+      )
+      .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
+    if (result.changes <= 0) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+    return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCharacterSessionXianxiaInventoryEquipped(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+  itemId: string,
+  payload: Record<string, unknown>,
+  updatedByUserId: number,
+): CharacterSessionXianxiaInventoryEquippedUpdateResult {
+  let expectedRevision: number;
+  try {
+    expectedRevision = parseRequiredWholeNumber(payload.expected_revision, "Expected revision");
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid Xianxia inventory equipment payload." };
+  }
+
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+
+    let existingState = readCharacterState(database, campaignSlug, characterSlug);
+    const stateRowMissing = !existingState;
+    existingState ??= { revision: 1, state: buildInitialState(definition) };
+
+    if (normalizeSystemKey(definition.system) !== XIANXIA_SYSTEM_CODE) {
+      return {
+        status: "validation_error",
+        message: "Xianxia inventory operations require a Xianxia character.",
+      };
+    }
+
+    if (existingState.revision !== expectedRevision) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+
+    const nextState = copyState(existingState.state);
+    try {
+      applyXianxiaInventoryEquippedStateUpdate(nextState, itemId, payload);
+    } catch (error) {
+      return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid Xianxia inventory equipment payload." };
     }
 
     const now = utcIsoTimestamp();

@@ -746,6 +746,15 @@
       "notes": "Tracked Hono character session feature-state route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflict handling, supported Arcane Armor feature-state key normalization, Armorer-sheet feature validation, SQLite state.feature_states.arcane_armor.enabled persistence, refreshed character state payloads, validation_error unsupported-key/non-Arcane-sheet JSON, and explicit missing-character JSON."
     },
     {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/equipped",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/xianxia-inventory/:itemId/equipped",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Xianxia inventory equipped-state route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflicts, Xianxia-only validation, unknown/non-equippable item validation, SQLite state.xianxia.inventory.quantities is_equipped persistence, synchronized top-level state.inventory mirror, refreshed character state payloads, and explicit missing-character JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/me",
       "route_family": "api_v1",

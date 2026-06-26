@@ -7037,6 +7037,23 @@ if (
   );
 }
 
+const nonXianxiaInventoryEquippedUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/xianxia-inventory/jade-sword/equipped`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 11, is_equipped: true } },
+);
+if (
+  nonXianxiaInventoryEquippedUpdate.status !== 400 ||
+  nonXianxiaInventoryEquippedUpdate.payload?.error?.code !== "validation_error" ||
+  nonXianxiaInventoryEquippedUpdate.payload?.error?.message !== "Xianxia inventory operations require a Xianxia character."
+) {
+  throw new Error(
+    `Expected non-Xianxia inventory equipped validation_error, got ${nonXianxiaInventoryEquippedUpdate.status} ${JSON.stringify(nonXianxiaInventoryEquippedUpdate.payload)}`,
+  );
+}
+
 const contentCharactersAfterPut = await requestJson("/api/v1/campaigns/linden-pass/content/characters", contentManagerHeaders);
 if (!contentCharactersAfterPut.payload?.characters?.some((item) => item.character_slug === managedCharacterSlug)) {
   throw new Error(`Expected content characters list to include ${managedCharacterSlug} after PUT.`);
@@ -7194,6 +7211,17 @@ xianxiaMutableState.xianxia.inventory = {
       notes: "Cook before travel.",
       tags: ["food"],
     },
+    {
+      id: "jade-sword",
+      name: "Jade Sword",
+      quantity: 1,
+      item_type: "Weapon",
+      item_nature: "mundane",
+      equippable: true,
+      is_equipped: false,
+      notes: "Practice blade.",
+      tags: ["weapon"],
+    },
   ],
 };
 xianxiaMutableState.inventory = [
@@ -7205,6 +7233,17 @@ xianxiaMutableState.inventory = [
     item_nature: "mundane",
     notes: "Cook before travel.",
     tags: ["food"],
+  },
+  {
+    id: "jade-sword",
+    name: "Jade Sword",
+    quantity: 1,
+    item_type: "Weapon",
+    item_nature: "mundane",
+    equippable: true,
+    is_equipped: false,
+    notes: "Practice blade.",
+    tags: ["weapon"],
   },
 ];
 xianxiaMutableState.notes.player_notes_markdown = "Keep the manual pool edits in SQLite.";
@@ -7397,6 +7436,132 @@ if (
   );
 }
 
+const xianxiaInventoryEquippedPath =
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/xianxia-inventory/jade-sword/equipped`;
+const anonymousXianxiaInventoryEquippedUpdate = await requestJson(
+  xianxiaInventoryEquippedPath,
+  {},
+  { method: "PATCH", body: { expected_revision: editedXianxiaRevision + 3, is_equipped: true } },
+);
+if (
+  anonymousXianxiaInventoryEquippedUpdate.status !== 401 ||
+  anonymousXianxiaInventoryEquippedUpdate.payload?.error?.code !== "auth_required"
+) {
+  throw new Error(
+    `Expected anonymous Xianxia inventory equipped PATCH auth_required, got ${anonymousXianxiaInventoryEquippedUpdate.status} ${JSON.stringify(anonymousXianxiaInventoryEquippedUpdate.payload)}`,
+  );
+}
+
+const fixtureXianxiaInventoryEquippedUpdate = await requestJson(
+  xianxiaInventoryEquippedPath,
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "PATCH", body: { expected_revision: editedXianxiaRevision + 3, is_equipped: true } },
+);
+if (
+  fixtureXianxiaInventoryEquippedUpdate.status !== 403 ||
+  fixtureXianxiaInventoryEquippedUpdate.payload?.error?.message !==
+    "Character session state writes require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture Xianxia inventory equipped PATCH bearer requirement, got ${fixtureXianxiaInventoryEquippedUpdate.status} ${JSON.stringify(fixtureXianxiaInventoryEquippedUpdate.payload)}`,
+  );
+}
+
+const staleXianxiaInventoryEquippedUpdate = await requestJson(
+  xianxiaInventoryEquippedPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 999, is_equipped: true } },
+);
+if (
+  staleXianxiaInventoryEquippedUpdate.status !== 409 ||
+  staleXianxiaInventoryEquippedUpdate.payload?.error?.code !== "state_conflict" ||
+  staleXianxiaInventoryEquippedUpdate.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale Xianxia inventory equipped PATCH conflict, got ${staleXianxiaInventoryEquippedUpdate.status} ${JSON.stringify(staleXianxiaInventoryEquippedUpdate.payload)}`,
+  );
+}
+
+const unknownXianxiaInventoryEquippedUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/xianxia-inventory/missing-item/equipped`,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: editedXianxiaRevision + 3, is_equipped: true } },
+);
+if (
+  unknownXianxiaInventoryEquippedUpdate.status !== 400 ||
+  unknownXianxiaInventoryEquippedUpdate.payload?.error?.code !== "validation_error" ||
+  unknownXianxiaInventoryEquippedUpdate.payload?.error?.message !== "Unknown Xianxia inventory item: missing-item"
+) {
+  throw new Error(
+    `Expected unknown Xianxia inventory equipped validation_error, got ${unknownXianxiaInventoryEquippedUpdate.status} ${JSON.stringify(unknownXianxiaInventoryEquippedUpdate.payload)}`,
+  );
+}
+
+const nonEquippableXianxiaInventoryEquippedUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/xianxia-inventory/spirit-rice/equipped`,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: editedXianxiaRevision + 3, is_equipped: true } },
+);
+if (
+  nonEquippableXianxiaInventoryEquippedUpdate.status !== 400 ||
+  nonEquippableXianxiaInventoryEquippedUpdate.payload?.error?.code !== "validation_error" ||
+  nonEquippableXianxiaInventoryEquippedUpdate.payload?.error?.message !== "Cannot equip a non-equippable item."
+) {
+  throw new Error(
+    `Expected non-equippable Xianxia inventory equipped validation_error, got ${nonEquippableXianxiaInventoryEquippedUpdate.status} ${JSON.stringify(nonEquippableXianxiaInventoryEquippedUpdate.payload)}`,
+  );
+}
+
+const xianxiaInventoryEquippedUpdate = await requestJson(
+  xianxiaInventoryEquippedPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: editedXianxiaRevision + 3, is_equipped: true } },
+);
+const equippedPayloadQuantities =
+  xianxiaInventoryEquippedUpdate.payload?.character?.state_record?.state?.xianxia?.inventory?.quantities || [];
+const equippedPayloadMirror = xianxiaInventoryEquippedUpdate.payload?.character?.state_record?.state?.inventory || [];
+if (
+  xianxiaInventoryEquippedUpdate.status !== 200 ||
+  xianxiaInventoryEquippedUpdate.payload?.ok !== true ||
+  xianxiaInventoryEquippedUpdate.payload?.character?.state_record?.revision !== editedXianxiaRevision + 4 ||
+  equippedPayloadQuantities.find((item) => item?.id === "jade-sword")?.is_equipped !== true ||
+  equippedPayloadMirror.find((item) => item?.id === "jade-sword")?.is_equipped !== true
+) {
+  throw new Error(`Unexpected Xianxia inventory equipped PATCH payload: ${JSON.stringify(xianxiaInventoryEquippedUpdate.payload)}`);
+}
+
+const xianxiaInventoryEquippedAssertionDb = new Database(dbPath, { readonly: true });
+const xianxiaInventoryEquippedRow = xianxiaInventoryEquippedAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", xianxiaCharacterSlug);
+xianxiaInventoryEquippedAssertionDb.close();
+const xianxiaInventoryEquippedState = JSON.parse(xianxiaInventoryEquippedRow?.state_json || "{}");
+const equippedDbQuantities = xianxiaInventoryEquippedState.xianxia?.inventory?.quantities || [];
+const equippedDbMirror = xianxiaInventoryEquippedState.inventory || [];
+if (
+  Number(xianxiaInventoryEquippedRow?.revision) !== editedXianxiaRevision + 4 ||
+  xianxiaInventoryEquippedRow?.updated_by_user_id !== 81 ||
+  equippedDbQuantities.find((item) => item?.id === "jade-sword")?.is_equipped !== true ||
+  equippedDbMirror.find((item) => item?.id === "jade-sword")?.is_equipped !== true
+) {
+  throw new Error(
+    `Unexpected Xianxia inventory equipped database row: ${JSON.stringify({
+      xianxiaInventoryEquippedRow,
+      xianxiaInventoryEquippedState,
+    })}`,
+  );
+}
+
 const staleXianxiaActiveStateUpdate = await requestJson(
   `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/xianxia-active-state`,
   {
@@ -7422,7 +7587,7 @@ const xianxiaActiveStateUpdate = await requestJson(
   {
     method: "PATCH",
     body: {
-      expected_revision: editedXianxiaRevision + 3,
+      expected_revision: editedXianxiaRevision + 4,
       active_stance_name: "  Flowing   Reed  ",
       active_aura_name: "",
     },
@@ -7431,7 +7596,7 @@ const xianxiaActiveStateUpdate = await requestJson(
 if (
   xianxiaActiveStateUpdate.status !== 200 ||
   xianxiaActiveStateUpdate.payload?.ok !== true ||
-  xianxiaActiveStateUpdate.payload?.character?.state_record?.revision !== editedXianxiaRevision + 4 ||
+  xianxiaActiveStateUpdate.payload?.character?.state_record?.revision !== editedXianxiaRevision + 5 ||
   xianxiaActiveStateUpdate.payload?.character?.state_record?.state?.xianxia?.active_stance?.name !== "Flowing Reed" ||
   xianxiaActiveStateUpdate.payload?.character?.state_record?.state?.xianxia?.active_aura !== null
 ) {
@@ -7445,7 +7610,7 @@ const xianxiaActiveStateRow = xianxiaActiveStateAssertionDb
 xianxiaActiveStateAssertionDb.close();
 const xianxiaActiveState = JSON.parse(xianxiaActiveStateRow?.state_json || "{}");
 if (
-  Number(xianxiaActiveStateRow?.revision) !== editedXianxiaRevision + 4 ||
+  Number(xianxiaActiveStateRow?.revision) !== editedXianxiaRevision + 5 ||
   xianxiaActiveStateRow?.updated_by_user_id !== 81 ||
   xianxiaActiveState.xianxia?.active_stance?.name !== "Flowing Reed" ||
   xianxiaActiveState.xianxia?.active_aura !== null
@@ -7464,12 +7629,12 @@ const xianxiaSessionCurrencyUpdate = await requestJson(
   {
     Authorization: `Bearer ${dmApiToken}`,
   },
-  { method: "PATCH", body: { expected_revision: editedXianxiaRevision + 4, coin: "7", supply: "-3", spirit_stones: "" } },
+  { method: "PATCH", body: { expected_revision: editedXianxiaRevision + 5, coin: "7", supply: "-3", spirit_stones: "" } },
 );
 if (
   xianxiaSessionCurrencyUpdate.status !== 200 ||
   xianxiaSessionCurrencyUpdate.payload?.ok !== true ||
-  xianxiaSessionCurrencyUpdate.payload?.character?.state_record?.revision !== editedXianxiaRevision + 5 ||
+  xianxiaSessionCurrencyUpdate.payload?.character?.state_record?.revision !== editedXianxiaRevision + 6 ||
   xianxiaSessionCurrencyUpdate.payload?.character?.state_record?.state?.xianxia?.currency?.coin !== 7 ||
   xianxiaSessionCurrencyUpdate.payload?.character?.state_record?.state?.xianxia?.currency?.supply !== 0 ||
   xianxiaSessionCurrencyUpdate.payload?.character?.state_record?.state?.xianxia?.currency?.spirit_stones !==
@@ -7485,7 +7650,7 @@ const xianxiaCurrencyRow = xianxiaCurrencyAssertionDb
 xianxiaCurrencyAssertionDb.close();
 const xianxiaCurrencyState = JSON.parse(xianxiaCurrencyRow?.state_json || "{}");
 if (
-  Number(xianxiaCurrencyRow?.revision) !== editedXianxiaRevision + 5 ||
+  Number(xianxiaCurrencyRow?.revision) !== editedXianxiaRevision + 6 ||
   xianxiaCurrencyRow?.updated_by_user_id !== 81 ||
   xianxiaCurrencyState.xianxia?.currency?.coin !== 7 ||
   xianxiaCurrencyState.xianxia?.currency?.supply !== 0 ||
@@ -7525,7 +7690,7 @@ const xianxiaLongRestApply = await requestJson(
   {
     method: "POST",
     body: {
-      expected_revision: editedXianxiaRevision + 5,
+      expected_revision: editedXianxiaRevision + 6,
       current_hp: "",
       hit_dice_current: { d6: "1" },
     },
@@ -7534,7 +7699,7 @@ const xianxiaLongRestApply = await requestJson(
 if (
   xianxiaLongRestApply.status !== 200 ||
   xianxiaLongRestApply.payload?.ok !== true ||
-  xianxiaLongRestApply.payload?.character?.state_record?.revision !== editedXianxiaRevision + 6 ||
+  xianxiaLongRestApply.payload?.character?.state_record?.revision !== editedXianxiaRevision + 7 ||
   xianxiaLongRestApply.payload?.character?.state_record?.state?.vitals?.current_hp !== 6 ||
   xianxiaLongRestApply.payload?.character?.state_record?.state?.xianxia?.vitals?.current_hp !== 6 ||
   xianxiaLongRestApply.payload?.character?.state_record?.state?.xianxia?.vitals?.current_stance !== 4 ||
@@ -7555,7 +7720,7 @@ const xianxiaRestRow = xianxiaRestAssertionDb
 xianxiaRestAssertionDb.close();
 const xianxiaRestState = JSON.parse(xianxiaRestRow?.state_json || "{}");
 if (
-  Number(xianxiaRestRow?.revision) !== editedXianxiaRevision + 6 ||
+  Number(xianxiaRestRow?.revision) !== editedXianxiaRevision + 7 ||
   xianxiaRestRow?.updated_by_user_id !== 81 ||
   xianxiaRestState.vitals?.current_hp !== 6 ||
   xianxiaRestState.xianxia?.vitals?.current_hp !== 6 ||
