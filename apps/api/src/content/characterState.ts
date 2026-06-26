@@ -20,10 +20,17 @@ export interface DeletedCharacterPersistenceResult {
   deletedAssignment: boolean;
 }
 
+export type CharacterSessionVitalsUpdateResult =
+  | { status: "ok"; revision: number; state: Record<string, unknown>; updatedAt: string }
+  | { status: "not_found" }
+  | { status: "state_conflict"; message: string }
+  | { status: "validation_error"; message: string };
+
 const XIANXIA_SYSTEM_CODE = "xianxia";
 const XIANXIA_ENERGY_KEYS = ["jing", "qi", "shen"] as const;
 const XIANXIA_CURRENCY_KEYS = ["coin", "supply", "spirit_stones"] as const;
 const VALID_HIT_DIE_FACES = new Set([4, 6, 8, 10, 12]);
+const CHARACTER_STATE_CONFLICT_MESSAGE = "This sheet changed in another session. Refresh and try again.";
 const STANDARD_DND_CLASS_HIT_DICE: Record<string, number> = {
   artificer: 8,
   barbarian: 12,
@@ -69,6 +76,35 @@ function asInt(value: unknown, fallback = 0): number {
     }
   }
   return fallback;
+}
+
+function hasSubmittedValue(value: unknown): boolean {
+  return value !== null && value !== undefined && String(value).trim() !== "";
+}
+
+function parseOptionalWholeNumber(value: unknown, fieldLabel: string): number | null {
+  if (!hasSubmittedValue(value)) {
+    return null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
+  const rawValue = String(value).trim();
+  if (!/^[+-]?\d+$/.test(rawValue)) {
+    throw new Error(`${fieldLabel} must be an integer.`);
+  }
+  return Number.parseInt(rawValue, 10);
+}
+
+function parseRequiredWholeNumber(value: unknown, fieldLabel: string): number {
+  const parsed = parseOptionalWholeNumber(value, fieldLabel);
+  if (parsed === null) {
+    throw new Error(`${fieldLabel} is required.`);
+  }
+  return parsed;
 }
 
 function nonNegativeInt(value: unknown, fallback = 0): number {
@@ -436,6 +472,83 @@ function buildHitDiceState(definition: Record<string, unknown>): Record<string, 
   };
 }
 
+function existingHitDiceCurrentByFaces(rawState: unknown): Map<number, number> {
+  const currentByFaces = new Map<number, number>();
+  for (const rawPool of asArray(asRecord(rawState).pools)) {
+    const pool = asRecord(rawPool);
+    const faces = asInt(pool.faces ?? pool.die_size ?? pool.die, 0);
+    if (faces <= 0) {
+      continue;
+    }
+    currentByFaces.set(faces, nonNegativeInt(pool.current, 0));
+  }
+  return currentByFaces;
+}
+
+function normalizeHitDiceState(definition: Record<string, unknown>, rawState: unknown): Record<string, unknown> {
+  const derived = asArray(buildHitDiceState(definition).pools).map(asRecord);
+  const existingCurrentByFaces = existingHitDiceCurrentByFaces(rawState);
+  const pools = derived
+    .map((pool) => {
+      const faces = asInt(pool.faces, 0);
+      const max = nonNegativeInt(pool.max, 0);
+      const existingCurrent = existingCurrentByFaces.get(faces);
+      return {
+        faces,
+        current: Math.max(0, Math.min(existingCurrent ?? max, max)),
+        max,
+      };
+    })
+    .filter((pool) => pool.faces > 0 && pool.max > 0);
+  return { pools };
+}
+
+function normalizeHitDiceCurrentPayload(payload: Record<string, unknown>): Map<number, unknown> | null {
+  const rawValue = payload.hit_dice_current ?? payload.hit_dice;
+  if (rawValue === null || rawValue === undefined || rawValue === "") {
+    return null;
+  }
+  if (typeof rawValue !== "object" || Array.isArray(rawValue)) {
+    throw new Error("Hit Dice must be submitted as an object keyed by die size.");
+  }
+  const valuesByFaces = new Map<number, unknown>();
+  for (const [rawFaces, current] of Object.entries(rawValue as Record<string, unknown>)) {
+    if (!hasSubmittedValue(current)) {
+      continue;
+    }
+    const normalizedFaces = rawFaces.startsWith("d") ? rawFaces.slice(1) : rawFaces;
+    const faces = Number.parseInt(normalizedFaces, 10);
+    if (!/^\d+$/.test(normalizedFaces) || !Number.isFinite(faces)) {
+      throw new Error("Hit Dice keys must be die sizes such as 6, 8, or d10.");
+    }
+    valuesByFaces.set(faces, current);
+  }
+  return valuesByFaces.size > 0 ? valuesByFaces : null;
+}
+
+function applyHitDiceCurrentValues(
+  definition: Record<string, unknown>,
+  state: Record<string, unknown>,
+  valuesByFaces: Map<number, unknown>,
+): Record<string, unknown> {
+  const normalized = normalizeHitDiceState(definition, state.hit_dice);
+  const pools = asArray(normalized.pools).map((rawPool) => {
+    const pool = asRecord(rawPool);
+    const faces = asInt(pool.faces, 0);
+    const max = nonNegativeInt(pool.max, 0);
+    const submittedCurrent = valuesByFaces.get(faces);
+    const current = submittedCurrent === undefined
+      ? nonNegativeInt(pool.current, 0)
+      : parseRequiredWholeNumber(submittedCurrent, "Hit Dice");
+    return {
+      faces,
+      current: Math.max(0, Math.min(current, max)),
+      max,
+    };
+  });
+  return { ...state, hit_dice: { pools } };
+}
+
 function normalizeNotes(value: unknown): Record<string, unknown> {
   const notes = asRecord(value);
   return {
@@ -574,6 +687,217 @@ function buildInitialState(definition: Record<string, unknown>): Record<string, 
   return normalizeSystemKey(definition.system) === XIANXIA_SYSTEM_CODE
     ? buildXianxiaInitialState(definition)
     : buildDndInitialState(definition);
+}
+
+function copyState(state: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(state)) as Record<string, unknown>;
+}
+
+function applyVitalsUpdate(state: Record<string, unknown>, payload: Record<string, unknown>): void {
+  const vitals = { ...asRecord(state.vitals) };
+  let currentHp = asInt(vitals.current_hp, 0);
+  let tempHp = asInt(vitals.temp_hp, 0);
+  const currentHpValue = parseOptionalWholeNumber(payload.current_hp, "Current HP");
+  if (currentHpValue !== null) {
+    currentHp = currentHpValue;
+  }
+  const hpDeltaValue = parseOptionalWholeNumber(payload.hp_delta, "HP delta");
+  if (hpDeltaValue !== null) {
+    currentHp += hpDeltaValue;
+  }
+
+  if (Boolean(payload.clear_temp_hp)) {
+    tempHp = 0;
+  } else {
+    const tempHpValue = parseOptionalWholeNumber(payload.temp_hp, "Temp HP");
+    if (tempHpValue !== null) {
+      tempHp = tempHpValue;
+    }
+  }
+  const tempHpDeltaValue = parseOptionalWholeNumber(payload.temp_hp_delta, "Temp HP delta");
+  if (tempHpDeltaValue !== null) {
+    tempHp += tempHpDeltaValue;
+  }
+
+  vitals.current_hp = currentHp;
+  vitals.temp_hp = tempHp;
+  state.vitals = vitals;
+}
+
+function applyXianxiaVitalsUpdate(state: Record<string, unknown>, payload: Record<string, unknown>): void {
+  const xianxia = { ...asRecord(state.xianxia) };
+  const vitals = { ...asRecord(xianxia.vitals) };
+  const currentStance = parseOptionalWholeNumber(payload.current_stance, "Current Stance");
+  if (currentStance !== null) {
+    vitals.current_stance = currentStance;
+  }
+  const tempStance = parseOptionalWholeNumber(payload.temp_stance, "Temp Stance");
+  if (tempStance !== null) {
+    vitals.temp_stance = tempStance;
+  }
+  xianxia.vitals = vitals;
+
+  const energies = { ...asRecord(xianxia.energies) };
+  for (const [payloadKey, energyKey, label] of [
+    ["current_jing", "jing", "Jing"],
+    ["current_qi", "qi", "Qi"],
+    ["current_shen", "shen", "Shen"],
+  ] as const) {
+    const energyValue = parseOptionalWholeNumber(payload[payloadKey], label);
+    if (energyValue === null) {
+      continue;
+    }
+    energies[energyKey] = { ...asRecord(energies[energyKey]), current: energyValue };
+  }
+  xianxia.energies = energies;
+
+  const yinYang = { ...asRecord(xianxia.yin_yang) };
+  const currentYin = parseOptionalWholeNumber(payload.current_yin, "Yin");
+  if (currentYin !== null) {
+    yinYang.yin_current = currentYin;
+  }
+  const currentYang = parseOptionalWholeNumber(payload.current_yang, "Yang");
+  if (currentYang !== null) {
+    yinYang.yang_current = currentYang;
+  }
+  xianxia.yin_yang = yinYang;
+
+  const dao = { ...asRecord(xianxia.dao) };
+  const currentDao = parseOptionalWholeNumber(payload.current_dao, "Dao");
+  if (currentDao !== null) {
+    dao.current = currentDao;
+  }
+  xianxia.dao = dao;
+  state.xianxia = xianxia;
+}
+
+export function canEditCharacterSessionState(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  role: string,
+  userId: number | undefined,
+): boolean {
+  if (role === "admin" || role === "dm") {
+    return true;
+  }
+  if (role !== "player" || userId === undefined) {
+    return false;
+  }
+  const database = openDatabase(config);
+  if (!database) {
+    return false;
+  }
+  try {
+    if (!tableExists(database, "character_assignments")) {
+      return false;
+    }
+    const row = database
+      .prepare(
+        `
+          SELECT id
+          FROM character_assignments
+          WHERE user_id = ?
+            AND campaign_slug = ?
+            AND character_slug = ?
+        `,
+      )
+      .get(userId, campaignSlug, characterSlug) as { id?: number } | undefined;
+    return Boolean(row?.id);
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCharacterSessionVitals(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  updatedByUserId: number,
+): CharacterSessionVitalsUpdateResult {
+  let expectedRevision: number;
+  let hitDiceCurrentValues: Map<number, unknown> | null;
+  try {
+    expectedRevision = parseRequiredWholeNumber(payload.expected_revision, "Expected revision");
+    hitDiceCurrentValues = normalizeHitDiceCurrentPayload(payload);
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character vitals payload." };
+  }
+
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+
+    let existingState = readCharacterState(database, campaignSlug, characterSlug);
+    const stateRowMissing = !existingState;
+    existingState ??= { revision: 1, state: buildInitialState(definition) };
+
+    if (existingState.revision !== expectedRevision) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+
+    let nextState = copyState(existingState.state);
+    try {
+      applyVitalsUpdate(nextState, payload);
+      if (hitDiceCurrentValues && normalizeSystemKey(definition.system) !== XIANXIA_SYSTEM_CODE) {
+        nextState = applyHitDiceCurrentValues(definition, nextState, hitDiceCurrentValues);
+      }
+      if (normalizeSystemKey(definition.system) === XIANXIA_SYSTEM_CODE) {
+        applyXianxiaVitalsUpdate(nextState, payload);
+      }
+    } catch (error) {
+      return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character vitals payload." };
+    }
+
+    const now = utcIsoTimestamp();
+    if (stateRowMissing) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(campaignSlug, characterSlug, expectedRevision + 1, JSON.stringify(nextState), now, updatedByUserId);
+      return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+    }
+
+    const result = database
+      .prepare(
+        `
+          UPDATE character_state
+          SET revision = revision + 1,
+              state_json = ?,
+              updated_at = ?,
+              updated_by_user_id = ?
+          WHERE campaign_slug = ?
+            AND character_slug = ?
+            AND revision = ?
+        `,
+      )
+      .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
+    if (result.changes <= 0) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+    return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+  } finally {
+    database.close();
+  }
 }
 
 function mergeXianxiaStateWithDefinition(

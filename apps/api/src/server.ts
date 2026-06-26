@@ -102,6 +102,10 @@ import {
   writeCampaignContentPage,
 } from "./content/repository.js";
 import {
+  canEditCharacterSessionState,
+  updateCharacterSessionVitals,
+} from "./content/characterState.js";
+import {
   buildCampaignConfigPayload,
   buildContentAssetDeletePayload,
   buildContentAssetDetailPayload,
@@ -491,6 +495,33 @@ function resolveCombatBearerWrite(
 
   if (fixtureRole(ctx)) {
     return { kind: "forbidden", message: "Combat writes require bearer API authentication." };
+  }
+  return { kind: "missing" };
+}
+
+function resolveCharacterSessionBearerWrite(
+  ctx: { req: { header: (name: string) => string | undefined } },
+  campaignSlug: string,
+): RoleResolution {
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "authenticated") {
+    const role = apiTokenRoleForCampaign(apiAuth.context, campaignSlug);
+    if (role) {
+      return {
+        kind: "authenticated",
+        role: toFixtureSystemsRole(role),
+        actorUserId: apiAuth.context.user.id,
+        actorDisplayName: apiAuth.context.user.display_name,
+      };
+    }
+    return { kind: "forbidden", message: "You do not have access to this campaign scope." };
+  }
+  if (apiAuth.kind === "invalid") {
+    return { kind: "invalid" };
+  }
+
+  if (fixtureRole(ctx)) {
+    return { kind: "forbidden", message: "Character session state writes require bearer API authentication." };
   }
   return { kind: "missing" };
 }
@@ -3469,6 +3500,87 @@ app.delete(ROUTES.contentCharacterDelete, async (ctx) => {
   }
 
   return ctx.json(buildContentCharacterDeletePayload(result.deleted));
+});
+
+app.patch(ROUTES.characterSessionVitals, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCharacterSessionBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!canEditCharacterSessionState(config, campaign.slug, characterSlug, auth.role, auth.actorUserId)) {
+    const error = forbidden("You do not have permission to update this character from this view.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = updateCharacterSessionVitals(
+    config,
+    campaign.slug,
+    characterSlug,
+    character.definition,
+    jsonPayload.payload,
+    auth.actorUserId ?? 0,
+  );
+  if (result.status === "state_conflict") {
+    const error = stateConflict(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const updatedCharacter = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!updatedCharacter) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    character: {
+      definition: updatedCharacter.definition,
+      import_metadata: updatedCharacter.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: characterSlug,
+        revision: result.revision,
+        state: result.state,
+        updated_at: result.updatedAt,
+        updated_by_user_id: auth.actorUserId ?? null,
+      },
+    },
+  });
 });
 
 app.notFound((ctx) =>

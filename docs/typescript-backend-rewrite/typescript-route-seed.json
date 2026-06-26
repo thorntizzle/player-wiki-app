@@ -647,6 +647,15 @@
       "notes": "Tracked Hono content character delete route with bearer API-token DM/admin access, safe definition/import YAML removal plus portrait asset directory cleanup against copied fixture campaign trees, SQLite character_state and character_assignments cleanup with Flask-style delete payload flags, and explicit missing-character JSON."
     },
     {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/vitals",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono character session vitals route with bearer API-token writes for app admin, campaign DM, or assigned player, fixture-role write denial, shared character_state revision conflict handling, DND HP/temp HP/Hit Dice updates, Xianxia HP/temp HP plus Stance/Energy/Yin-Yang/Dao state updates, refreshed character state payloads, and explicit missing-character JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/me",
       "route_family": "api_v1",

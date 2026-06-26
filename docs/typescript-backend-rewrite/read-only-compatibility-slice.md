@@ -423,6 +423,11 @@ fixture database.
   - Xianxia content-character creation initializes SQLite mutable state, and Xianxia definition update reconciles existing current HP/temp HP, Stance/temp Stance, Jing, Yin/Yang, Dao, active Stance, and notes against lowered definition maxima without writing mutable state back into `definition.yaml`.
   - Flask-vs-TypeScript golden contract tests now compare DND-5E initialized state JSON and delete cleanup directly, and compare Xianxia mutable-state clamping/preservation plus definition-file separation directly.
   - The copied-data content-character rehearsal takes a Python backup, performs a Hono write/delete against an existing fixture character with realistic SQLite state/assignment rows and portrait assets, restores the backup, and verifies the original YAML files, asset file, state row/revision, and assignment row are recovered. The staging-readiness decision is tracked separately in `content-character-staging-readiness.md`.
+- Character session vitals payload checks cover:
+  - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals` with bearer-only writes.
+  - unauthenticated, fixture-role, unassigned-player, stale-revision, and missing-character error envelopes.
+  - assigned-player DND HP/temp HP/Hit Dice updates through `character_state`, including shared revision bumps and `updated_by_user_id`.
+  - DM Xianxia shared HP/temp HP plus Stance, Jing/Qi/Shen, Yin/Yang, and Dao writes through `character_state`, preserving Flask's route-level separation between shared HP/temp HP and the nested Xianxia-only vitals branch.
 
 ## Added Tests and Checks
 

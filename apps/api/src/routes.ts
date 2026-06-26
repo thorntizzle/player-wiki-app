@@ -1081,6 +1081,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "validation_error",
     },
   },
+  {
+    method: "PATCH",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/vitals",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "PATCH",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/session/vitals",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1158,4 +1173,5 @@ export const ROUTES = {
   combatCombatant: IMPLEMENTED_ROUTES[71].honoPath,
   combatCombatantPlayerDetailVisibility: IMPLEMENTED_ROUTES[72].honoPath,
   combatConditionUpdate: IMPLEMENTED_ROUTES[73].honoPath,
+  characterSessionVitals: IMPLEMENTED_ROUTES[74].honoPath,
 } as const;

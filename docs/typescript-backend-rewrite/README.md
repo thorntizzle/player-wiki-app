@@ -333,6 +333,13 @@ Route parity check command:
   SQLite state rows, and assignment rows. The staging-readiness decision labels this route family
   `copied-data rollback ready; staging snapshot required`, so staging or production write enablement
   still requires an approved staging-volume snapshot rehearsal.
+- The first character session-state write route now serves
+  `PATCH .../characters/:characterSlug/session/vitals` for bearer API-token app admins, campaign
+  DMs, and assigned players. It writes only the shared SQLite `character_state` row, enforces the
+  shared state revision, supports DND HP/temp HP/Hit Dice and Xianxia HP/temp HP plus
+  Stance/Energy/Yin-Yang/Dao fields, denies fixture-role writes, and returns a refreshed
+  `character.state_record` payload. Current validation covers disposable copied fixture files and
+  fixture SQLite only; the remaining character session-state route family is still sliced separately.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

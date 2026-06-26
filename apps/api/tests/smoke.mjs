@@ -4278,6 +4278,137 @@ if (
   );
 }
 
+const blockedSessionVitalsUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/characters/arden-march/session/vitals",
+  {},
+  { method: "PATCH", body: { expected_revision: 9, current_hp: "31" } },
+);
+if (blockedSessionVitalsUpdate.status !== 401 || blockedSessionVitalsUpdate.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated character session vitals PATCH 401, got ${blockedSessionVitalsUpdate.status} ${blockedSessionVitalsUpdate.payload?.error?.code}`,
+  );
+}
+
+const fixtureSessionVitalsUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/characters/arden-march/session/vitals",
+  {
+    "X-CPW-Fixture-Role": "player",
+  },
+  { method: "PATCH", body: { expected_revision: 9, current_hp: "31" } },
+);
+if (
+  fixtureSessionVitalsUpdate.status !== 403 ||
+  fixtureSessionVitalsUpdate.payload?.error?.message !== "Character session state writes require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture character session vitals PATCH bearer requirement, got ${fixtureSessionVitalsUpdate.status} ${JSON.stringify(fixtureSessionVitalsUpdate.payload)}`,
+  );
+}
+
+const unassignedPlayerSessionVitalsUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/characters/selene-brook/session/vitals",
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 1, current_hp: "31" } },
+);
+if (
+  unassignedPlayerSessionVitalsUpdate.status !== 403 ||
+  unassignedPlayerSessionVitalsUpdate.payload?.error?.message !==
+    "You do not have permission to update this character from this view."
+) {
+  throw new Error(
+    `Expected unassigned player character session vitals PATCH forbidden, got ${unassignedPlayerSessionVitalsUpdate.status} ${JSON.stringify(unassignedPlayerSessionVitalsUpdate.payload)}`,
+  );
+}
+
+const staleSessionVitalsUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/characters/arden-march/session/vitals",
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 999, current_hp: "31" } },
+);
+if (
+  staleSessionVitalsUpdate.status !== 409 ||
+  staleSessionVitalsUpdate.payload?.error?.code !== "state_conflict" ||
+  staleSessionVitalsUpdate.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale character session vitals PATCH conflict, got ${staleSessionVitalsUpdate.status} ${JSON.stringify(staleSessionVitalsUpdate.payload)}`,
+  );
+}
+
+const playerSessionVitalsUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/characters/arden-march/session/vitals",
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_revision: 9,
+      current_hp: "31",
+      hp_delta: "-2",
+      temp_hp: "6",
+      temp_hp_delta: "1",
+      hit_dice_current: { d6: "4" },
+    },
+  },
+);
+if (
+  playerSessionVitalsUpdate.status !== 200 ||
+  playerSessionVitalsUpdate.payload?.ok !== true ||
+  playerSessionVitalsUpdate.payload?.character?.definition?.character_slug !== "arden-march" ||
+  playerSessionVitalsUpdate.payload?.character?.state_record?.revision !== 10 ||
+  playerSessionVitalsUpdate.payload?.character?.state_record?.state?.vitals?.current_hp !== 29 ||
+  playerSessionVitalsUpdate.payload?.character?.state_record?.state?.vitals?.temp_hp !== 7 ||
+  playerSessionVitalsUpdate.payload?.character?.state_record?.state?.hit_dice?.pools?.[0]?.faces !== 6 ||
+  playerSessionVitalsUpdate.payload?.character?.state_record?.state?.hit_dice?.pools?.[0]?.current !== 4 ||
+  playerSessionVitalsUpdate.payload?.character?.state_record?.state?.hit_dice?.pools?.[0]?.max !== 5
+) {
+  throw new Error(`Unexpected character session vitals PATCH payload: ${JSON.stringify(playerSessionVitalsUpdate.payload)}`);
+}
+
+const sessionVitalsAssertionDb = new Database(dbPath, { readonly: true });
+const ardenStateAfterSessionVitals = sessionVitalsAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", "arden-march");
+sessionVitalsAssertionDb.close();
+const ardenSessionVitalsState = JSON.parse(ardenStateAfterSessionVitals?.state_json || "{}");
+if (
+  ardenStateAfterSessionVitals?.revision !== 10 ||
+  ardenStateAfterSessionVitals?.updated_by_user_id !== 79 ||
+  ardenSessionVitalsState?.vitals?.current_hp !== 29 ||
+  ardenSessionVitalsState?.vitals?.temp_hp !== 7 ||
+  ardenSessionVitalsState?.hit_dice?.pools?.[0]?.faces !== 6 ||
+  ardenSessionVitalsState?.hit_dice?.pools?.[0]?.current !== 4 ||
+  ardenSessionVitalsState?.hit_dice?.pools?.[0]?.max !== 5
+) {
+  throw new Error(
+    `Unexpected character session vitals database row: ${JSON.stringify({
+      ardenStateAfterSessionVitals,
+      ardenSessionVitalsState,
+    })}`,
+  );
+}
+
+const missingCharacterSessionVitalsUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/characters/missing-character/session/vitals",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 1, current_hp: "1" } },
+);
+if (
+  missingCharacterSessionVitalsUpdate.status !== 404 ||
+  missingCharacterSessionVitalsUpdate.payload?.error?.code !== "content_character_not_found"
+) {
+  throw new Error(
+    `Expected missing character session vitals PATCH JSON 404, got ${missingCharacterSessionVitalsUpdate.status} ${JSON.stringify(missingCharacterSessionVitalsUpdate.payload)}`,
+  );
+}
+
 const fixtureNpcResourcesUpdateCombatState = await requestJson(
   `/api/v1/campaigns/linden-pass/combat/combatants/${addedSystemsMonsterCombatantId}/npc-resources`,
   {
@@ -6417,6 +6548,78 @@ if (
 ) {
   throw new Error(
     `Expected Xianxia mutable state reconciliation, got revision=${xianxiaUpdatedRow?.revision} state=${JSON.stringify(xianxiaUpdatedState)}`,
+  );
+}
+
+const xianxiaSessionVitalsUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/vitals`,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_revision: editedXianxiaRevision + 1,
+      current_hp: "4",
+      temp_hp: "-1",
+      current_stance: "3",
+      temp_stance: "2",
+      current_jing: "5",
+      current_qi: "1",
+      current_shen: "0",
+      current_yin: "2",
+      current_yang: "1",
+      current_dao: "3",
+    },
+  },
+);
+if (
+  xianxiaSessionVitalsUpdate.status !== 200 ||
+  xianxiaSessionVitalsUpdate.payload?.ok !== true ||
+  xianxiaSessionVitalsUpdate.payload?.character?.definition?.character_slug !== xianxiaCharacterSlug ||
+  xianxiaSessionVitalsUpdate.payload?.character?.state_record?.revision !== editedXianxiaRevision + 2 ||
+  xianxiaSessionVitalsUpdate.payload?.character?.state_record?.state?.vitals?.current_hp !== 4 ||
+  xianxiaSessionVitalsUpdate.payload?.character?.state_record?.state?.vitals?.temp_hp !== -1 ||
+  xianxiaSessionVitalsUpdate.payload?.character?.state_record?.state?.xianxia?.vitals?.current_hp !== 6 ||
+  xianxiaSessionVitalsUpdate.payload?.character?.state_record?.state?.xianxia?.vitals?.current_stance !== 3 ||
+  xianxiaSessionVitalsUpdate.payload?.character?.state_record?.state?.xianxia?.vitals?.temp_stance !== 2 ||
+  xianxiaSessionVitalsUpdate.payload?.character?.state_record?.state?.xianxia?.energies?.jing?.current !== 5 ||
+  xianxiaSessionVitalsUpdate.payload?.character?.state_record?.state?.xianxia?.energies?.qi?.current !== 1 ||
+  xianxiaSessionVitalsUpdate.payload?.character?.state_record?.state?.xianxia?.energies?.shen?.current !== 0 ||
+  xianxiaSessionVitalsUpdate.payload?.character?.state_record?.state?.xianxia?.yin_yang?.yin_current !== 2 ||
+  xianxiaSessionVitalsUpdate.payload?.character?.state_record?.state?.xianxia?.yin_yang?.yang_current !== 1 ||
+  xianxiaSessionVitalsUpdate.payload?.character?.state_record?.state?.xianxia?.dao?.current !== 3
+) {
+  throw new Error(`Unexpected Xianxia session vitals PATCH payload: ${JSON.stringify(xianxiaSessionVitalsUpdate.payload)}`);
+}
+
+const xianxiaVitalsAssertionDb = new Database(dbPath, { readonly: true });
+const xianxiaVitalsRow = xianxiaVitalsAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", xianxiaCharacterSlug);
+xianxiaVitalsAssertionDb.close();
+const xianxiaVitalsState = JSON.parse(xianxiaVitalsRow?.state_json || "{}");
+if (
+  Number(xianxiaVitalsRow?.revision) !== editedXianxiaRevision + 2 ||
+  xianxiaVitalsRow?.updated_by_user_id !== 81 ||
+  xianxiaVitalsState.vitals?.current_hp !== 4 ||
+  xianxiaVitalsState.vitals?.temp_hp !== -1 ||
+  xianxiaVitalsState.xianxia?.vitals?.current_hp !== 6 ||
+  xianxiaVitalsState.xianxia?.vitals?.temp_hp !== 0 ||
+  xianxiaVitalsState.xianxia?.vitals?.current_stance !== 3 ||
+  xianxiaVitalsState.xianxia?.vitals?.temp_stance !== 2 ||
+  xianxiaVitalsState.xianxia?.energies?.jing?.current !== 5 ||
+  xianxiaVitalsState.xianxia?.energies?.qi?.current !== 1 ||
+  xianxiaVitalsState.xianxia?.energies?.shen?.current !== 0 ||
+  xianxiaVitalsState.xianxia?.yin_yang?.yin_current !== 2 ||
+  xianxiaVitalsState.xianxia?.yin_yang?.yang_current !== 1 ||
+  xianxiaVitalsState.xianxia?.dao?.current !== 3
+) {
+  throw new Error(
+    `Unexpected Xianxia session vitals database row: ${JSON.stringify({
+      xianxiaVitalsRow,
+      xianxiaVitalsState,
+    })}`,
   );
 }
 
