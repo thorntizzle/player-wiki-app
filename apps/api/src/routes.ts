@@ -493,6 +493,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "campaign_not_found",
     },
   },
+  {
+    method: "POST",
+    honoPath: "/api/v1/campaigns/:campaignSlug/session/messages",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/session/messages",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/session/messages",
+    routeFamily: "api_v1_session",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/session/messages",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -531,4 +546,5 @@ export const ROUTES = {
   meSettingsUpdate: IMPLEMENTED_ROUTES[32].honoPath,
   campaignControl: IMPLEMENTED_ROUTES[33].honoPath,
   campaignControlVisibility: IMPLEMENTED_ROUTES[34].honoPath,
+  sessionMessageCreate: IMPLEMENTED_ROUTES[35].honoPath,
 } as const;

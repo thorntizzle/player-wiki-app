@@ -73,6 +73,7 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/wiki/sections/:sectionSlug`
   - `GET /api/v1/campaigns/:campaignSlug/wiki/pages/*`
   - `GET /api/v1/campaigns/:campaignSlug/session`
+  - `POST /api/v1/campaigns/:campaignSlug/session/messages`
   - `GET /api/v1/campaigns/:campaignSlug/session/article-sources/search`
   - `GET /api/v1/campaigns/:campaignSlug/session/articles/:articleId/image`
   - `GET /api/v1/campaigns/:campaignSlug/session/logs/:sessionId`
@@ -109,9 +110,17 @@ Route parity check command:
   results, and explicit missing-campaign JSON.
 - The Session state route now has a role-aware SQLite read path for fixture roles or bearer API tokens,
   reading active sessions, messages, staged/revealed article rows, article image metadata,
-  closed-session log summaries, and session revisions from `CPW_DB_PATH`, while no-header
-  requests keep the empty read-only fixture shell and invalid/no-membership bearer requests use the
-  standard auth/forbidden JSON envelopes.
+  closed-session log summaries, session recipient player choices, and session revisions from
+  `CPW_DB_PATH`, while no-header requests keep the empty read-only fixture shell and
+  invalid/no-membership bearer requests use the standard auth/forbidden JSON envelopes. Bearer-token
+  player reads now preserve Flask's private-message visibility rule for global messages, messages
+  targeted to that player, and messages authored by that player.
+- The first Session write route now serves `POST .../session/messages` for bearer API-token campaign
+  members against `CPW_DB_PATH`, preserving Flask-compatible JSON parsing, active-session checks,
+  message length/body validation, `global`/`dm_only`/targeted `player` recipient validation, SQLite
+  `campaign_session_messages` inserts, session revision bumps, recipient labels, refreshed read
+  visibility, and missing-campaign JSON. Current validation covers a disposable fixture database only;
+  production/staging write readiness remains gated by migration, backup, and rollback rehearsal.
 - The Session article image route now streams SQLite-backed fixture image bytes with stored media
   types, preserving fixture or bearer-token manager access to staged/revealed images and player
   access only to images on articles revealed in the active session.

@@ -203,7 +203,16 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/session",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono session state route with a no-header inactive-state shell, fixture-role and bearer-token membership-derived SQLite active-session reads, filtered messages, manager arrays, auth/forbidden bearer envelopes, and live revision short-circuit behavior."
+      "notes": "Tracked Hono session state route with a no-header inactive-state shell, fixture-role and bearer-token membership-derived SQLite active-session reads, private-message filtering for bearer-token players, recipient player choices, manager arrays, auth/forbidden bearer envelopes, and live revision short-circuit behavior."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/messages",
+      "route_family": "api_v1_session",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/session/messages",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono session message write route with bearer API-token campaign access, Flask-compatible body/audience/target-player validation, active-session checks, SQLite message inserts, session revision bumps, recipient labels, refreshed read visibility, and explicit missing-campaign JSON."
     },
     {
       "method": "GET",

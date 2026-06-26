@@ -2467,6 +2467,213 @@ if (
   throw new Error(`Unexpected bearer player session payload: ${JSON.stringify(bearerPlayerSession.payload)}`);
 }
 
+const blockedSessionMessage = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/messages",
+  {},
+  { method: "POST", body: { body: "No auth should not post." } },
+);
+if (blockedSessionMessage.status !== 401 || blockedSessionMessage.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated session message POST 401, got ${blockedSessionMessage.status} ${blockedSessionMessage.payload?.error?.code}`,
+  );
+}
+
+const fixtureSessionMessage = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/messages",
+  { "X-CPW-Fixture-Role": "player" },
+  { method: "POST", body: { body: "Fixture role writes stay blocked." } },
+);
+if (fixtureSessionMessage.status !== 403 || fixtureSessionMessage.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected fixture session message POST forbidden 403, got ${fixtureSessionMessage.status} ${fixtureSessionMessage.payload?.error?.code}`,
+  );
+}
+
+const outsiderSessionMessage = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/messages",
+  { Authorization: `Bearer ${outsiderApiToken}` },
+  { method: "POST", body: { body: "Outsider should not post." } },
+);
+if (outsiderSessionMessage.status !== 403 || outsiderSessionMessage.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected outsider session message POST forbidden 403, got ${outsiderSessionMessage.status} ${outsiderSessionMessage.payload?.error?.code}`,
+  );
+}
+
+const malformedSessionMessage = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/messages",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: "not-json" },
+);
+if (malformedSessionMessage.status !== 400 || malformedSessionMessage.payload?.error?.code !== "invalid_json") {
+  throw new Error(
+    `Expected malformed session message POST invalid_json 400, got ${malformedSessionMessage.status} ${malformedSessionMessage.payload?.error?.code}`,
+  );
+}
+
+const blankSessionMessage = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/messages",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: { body: "   " } },
+);
+if (
+  blankSessionMessage.status !== 400 ||
+  blankSessionMessage.payload?.error?.message !== "Enter a message before posting it to the chat."
+) {
+  throw new Error(
+    `Expected blank session message validation, got ${blankSessionMessage.status} ${blankSessionMessage.payload?.error?.message}`,
+  );
+}
+
+const invalidAudienceSessionMessage = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/messages",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: { body: "Hello.", recipient_scope: "table" } },
+);
+if (
+  invalidAudienceSessionMessage.status !== 400 ||
+  invalidAudienceSessionMessage.payload?.error?.message !== "Message audience must be global, dm_only, or player."
+) {
+  throw new Error(
+    `Expected invalid audience validation, got ${invalidAudienceSessionMessage.status} ${invalidAudienceSessionMessage.payload?.error?.message}`,
+  );
+}
+
+const missingTargetPlayerMessage = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/messages",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { body: "Choose someone.", recipient_scope: "player" } },
+);
+if (
+  missingTargetPlayerMessage.status !== 400 ||
+  missingTargetPlayerMessage.payload?.error?.message !== "Choose a valid player for the targeted message."
+) {
+  throw new Error(
+    `Expected missing target-player validation, got ${missingTargetPlayerMessage.status} ${missingTargetPlayerMessage.payload?.error?.message}`,
+  );
+}
+
+const inactiveTargetPlayerMessage = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/messages",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { body: "Target inactive player.", recipient_scope: "player", recipient_user_id: 78 } },
+);
+if (
+  inactiveTargetPlayerMessage.status !== 400 ||
+  inactiveTargetPlayerMessage.payload?.error?.message !== "Choose an active campaign player for the targeted message."
+) {
+  throw new Error(
+    `Expected inactive target-player validation, got ${inactiveTargetPlayerMessage.status} ${inactiveTargetPlayerMessage.payload?.error?.message}`,
+  );
+}
+
+const playerDmOnlyMessageBody = "Player whispers to the DM.";
+const playerDmOnlyMessage = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/messages",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: { body: ` ${playerDmOnlyMessageBody} `, recipient_scope: "dm_only" } },
+);
+if (
+  playerDmOnlyMessage.status !== 200 ||
+  playerDmOnlyMessage.payload?.message?.body_text !== playerDmOnlyMessageBody ||
+  playerDmOnlyMessage.payload?.message?.author_user_id !== 79 ||
+  playerDmOnlyMessage.payload?.message?.author_display_name !== "Fixture Token Player" ||
+  playerDmOnlyMessage.payload?.message?.recipient_scope !== "dm_only" ||
+  playerDmOnlyMessage.payload?.message?.recipient_label !== "DM"
+) {
+  throw new Error(`Unexpected player DM-only message payload: ${JSON.stringify(playerDmOnlyMessage.payload)}`);
+}
+
+const dmTargetedMessageBody = "DM sends a targeted player note.";
+const dmTargetedMessage = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/messages",
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: { body: dmTargetedMessageBody, recipient_scope: "player", recipient_user_id: 79 },
+  },
+);
+if (
+  dmTargetedMessage.status !== 200 ||
+  dmTargetedMessage.payload?.message?.body_text !== dmTargetedMessageBody ||
+  dmTargetedMessage.payload?.message?.author_user_id !== 81 ||
+  dmTargetedMessage.payload?.message?.recipient_scope !== "player" ||
+  dmTargetedMessage.payload?.message?.recipient_user_id !== 79 ||
+  dmTargetedMessage.payload?.message?.recipient_label !== "Fixture Token Player"
+) {
+  throw new Error(`Unexpected DM targeted message payload: ${JSON.stringify(dmTargetedMessage.payload)}`);
+}
+
+const playerSessionAfterMessageWrites = await requestJson("/api/v1/campaigns/linden-pass/session", {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+const playerSessionMessageBodiesAfterWrites = playerSessionAfterMessageWrites.payload?.messages?.map((message) => message.body_text) || [];
+if (
+  playerSessionAfterMessageWrites.status !== 200 ||
+  !playerSessionMessageBodiesAfterWrites.includes(playerDmOnlyMessageBody) ||
+  !playerSessionMessageBodiesAfterWrites.includes(dmTargetedMessageBody) ||
+  playerSessionMessageBodiesAfterWrites.includes("DM-only note.") ||
+  playerSessionAfterMessageWrites.payload?.session_message_recipient_player_choices?.[0]?.label !== "Fixture Token Player"
+) {
+  throw new Error(`Unexpected player session after message writes: ${JSON.stringify(playerSessionAfterMessageWrites.payload)}`);
+}
+
+const dmSessionAfterMessageWrites = await requestJson("/api/v1/campaigns/linden-pass/session", {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+const dmSessionMessagesAfterWrites = dmSessionAfterMessageWrites.payload?.messages || [];
+if (
+  dmSessionAfterMessageWrites.status !== 200 ||
+  Number(dmSessionAfterMessageWrites.payload?.session_revision) !== Number(bearerAdminSession.payload?.session_revision) + 2 ||
+  !dmSessionMessagesAfterWrites.some(
+    (message) => message.body_text === playerDmOnlyMessageBody && message.recipient_scope === "dm_only",
+  ) ||
+  !dmSessionMessagesAfterWrites.some(
+    (message) =>
+      message.body_text === dmTargetedMessageBody &&
+      message.recipient_scope === "player" &&
+      message.recipient_label === "Fixture Token Player",
+  )
+) {
+  throw new Error(`Unexpected DM session after message writes: ${JSON.stringify(dmSessionAfterMessageWrites.payload)}`);
+}
+
+const messageAssertionDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const messageAssertionRows = messageAssertionDb
+  .prepare(
+    "SELECT body_text, recipient_scope, recipient_user_id, author_user_id FROM campaign_session_messages WHERE body_text IN (?, ?) ORDER BY id ASC",
+  )
+  .all(playerDmOnlyMessageBody, dmTargetedMessageBody);
+const messageRevisionRow = messageAssertionDb
+  .prepare("SELECT revision, updated_by_user_id FROM campaign_session_states WHERE campaign_slug = ?")
+  .get("linden-pass");
+messageAssertionDb.close();
+if (
+  messageAssertionRows.length !== 2 ||
+  messageAssertionRows[0]?.recipient_scope !== "dm_only" ||
+  messageAssertionRows[0]?.author_user_id !== 79 ||
+  messageAssertionRows[1]?.recipient_scope !== "player" ||
+  messageAssertionRows[1]?.recipient_user_id !== 79 ||
+  messageAssertionRows[1]?.author_user_id !== 81 ||
+  Number(messageRevisionRow?.revision) !== Number(bearerAdminSession.payload?.session_revision) + 2 ||
+  Number(messageRevisionRow?.updated_by_user_id) !== 81
+) {
+  throw new Error(
+    `Expected persisted session messages and revision bump, got rows=${JSON.stringify(messageAssertionRows)} revision=${JSON.stringify(messageRevisionRow)}`,
+  );
+}
+
+const missingSessionMessageCampaign = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/session/messages",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { body: "Missing campaign should return JSON 404." } },
+);
+if (missingSessionMessageCampaign.status !== 404 || missingSessionMessageCampaign.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(
+    `Expected missing session message campaign JSON 404, got ${missingSessionMessageCampaign.status} ${missingSessionMessageCampaign.payload?.error?.code}`,
+  );
+}
+
 const blockedSessionImage = await requestJson("/api/v1/campaigns/linden-pass/session/articles/102/image");
 if (blockedSessionImage.status !== 401 || blockedSessionImage.payload?.error?.code !== "auth_required") {
   throw new Error(

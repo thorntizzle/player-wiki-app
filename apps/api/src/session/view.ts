@@ -69,6 +69,11 @@ interface SessionMessageRow {
   created_at: string;
 }
 
+interface ActivePlayerRow {
+  user_id: number;
+  display_name: string;
+}
+
 interface SessionSummaryRow extends SessionRow {
   message_count: number;
   last_message_at: string | null;
@@ -147,6 +152,11 @@ export interface SessionMessagePayload {
   article: SessionArticlePayload | null;
 }
 
+export interface SessionMessageRecipientPlayerChoice {
+  user_id: number;
+  label: string;
+}
+
 export interface SessionLogSummaryPayload {
   session: SessionRecordPayload;
   message_count: number;
@@ -160,7 +170,7 @@ export interface SessionStatePayload {
   permissions: SessionPermissionBlock;
   active_session: SessionRecordPayload | null;
   messages: SessionMessagePayload[];
-  session_message_recipient_player_choices: [];
+  session_message_recipient_player_choices: SessionMessageRecipientPlayerChoice[];
   show_session_dm_passive_scores: boolean;
   session_revision: number;
   session_view_token: string;
@@ -192,6 +202,17 @@ export type SessionLogDetailResult =
       status: "not_found";
     };
 
+export type SessionMessagePostResult =
+  | {
+      status: "ok";
+      message: SessionMessagePayload;
+      sessionRevision: number;
+    }
+  | {
+      status: "validation_error";
+      message: string;
+    };
+
 function stableHexDigest(value: string): string {
   return createHash("sha1").update(value).digest("hex");
 }
@@ -211,6 +232,10 @@ function isNoSuchTableError(error: unknown): boolean {
 function isoString(value: unknown): string | null {
   const rawValue = String(value ?? "").trim();
   return rawValue || null;
+}
+
+function utcIsoTimestamp(): string {
+  return new Date().toISOString().replace("Z", "+00:00");
 }
 
 function parseSessionArticleSourceRef(value: string): [SessionSourceKind, string] {
@@ -419,11 +444,13 @@ function loadMessages(
   campaignSlug: string,
   sessionId: number,
   role: FixtureSystemsRole,
+  viewerUserId: number | null = null,
 ): SessionMessageRow[] {
   const manager = canManageSession(role);
-  const rows = database
-    .prepare(
-      `
+  if (manager) {
+    return database
+      .prepare(
+        `
         SELECT
           id,
           session_id,
@@ -441,9 +468,77 @@ function loadMessages(
           AND session_id = ?
         ORDER BY created_at ASC, id ASC
       `,
+      )
+      .all(campaignSlug, sessionId) as SessionMessageRow[];
+  }
+
+  const viewerId = Math.trunc(Number(viewerUserId || 0));
+  return database
+    .prepare(
+      `
+        SELECT
+          id,
+          session_id,
+          campaign_slug,
+          message_type,
+          body_text,
+          recipient_scope,
+          recipient_user_id,
+          author_user_id,
+          author_display_name,
+          article_id,
+          created_at
+        FROM campaign_session_messages
+        WHERE campaign_slug = ?
+          AND session_id = ?
+          AND (
+            COALESCE(recipient_scope, 'global') = 'global'
+            OR (recipient_scope = 'player' AND recipient_user_id = ?)
+            OR author_user_id = ?
+          )
+        ORDER BY created_at ASC, id ASC
+      `,
     )
-    .all(campaignSlug, sessionId) as SessionMessageRow[];
-  return manager ? rows : rows.filter((row) => String(row.recipient_scope || "global") === "global");
+    .all(campaignSlug, sessionId, viewerId, viewerId) as SessionMessageRow[];
+}
+
+function loadActivePlayerRows(database: Database.Database, campaignSlug: string): ActivePlayerRow[] {
+  return database
+    .prepare(
+      `
+        SELECT
+          users.id AS user_id,
+          users.display_name AS display_name
+        FROM users
+        JOIN campaign_memberships
+          ON campaign_memberships.user_id = users.id
+        WHERE campaign_memberships.campaign_slug = ?
+          AND campaign_memberships.role = 'player'
+          AND campaign_memberships.status = 'active'
+          AND users.status = 'active'
+        ORDER BY users.display_name ASC, users.email ASC
+      `,
+    )
+    .all(campaignSlug) as ActivePlayerRow[];
+}
+
+function buildRecipientLabelMap(activePlayers: ActivePlayerRow[]): Map<number, string> {
+  return new Map(
+    activePlayers.map((row) => {
+      const userId = Number(row.user_id);
+      return [userId, String(row.display_name || "").trim() || `User ${userId}`];
+    }),
+  );
+}
+
+function serializeActivePlayerChoices(activePlayers: ActivePlayerRow[]): SessionMessageRecipientPlayerChoice[] {
+  return activePlayers.map((row) => {
+    const userId = Number(row.user_id);
+    return {
+      user_id: userId,
+      label: String(row.display_name || "").trim() || `User ${userId}`,
+    };
+  });
 }
 
 function loadSessionLogs(database: Database.Database, campaignSlug: string, limit = 20): SessionSummaryRow[] {
@@ -607,10 +702,22 @@ async function serializeMessages(
   messages: SessionMessageRow[],
   articlesById: Map<number, SessionArticleRow>,
   imagesByArticleId: Map<number, SessionArticleImageRow>,
+  recipientLabelsByUserId: Map<number, string>,
 ): Promise<SessionMessagePayload[]> {
   const payloads: SessionMessagePayload[] = [];
   for (const message of messages) {
     const article = message.article_id === null ? undefined : articlesById.get(Number(message.article_id));
+    const recipientScope = String(message.recipient_scope || "global");
+    const recipientUserId = message.recipient_user_id === null ? null : Number(message.recipient_user_id);
+    let recipientLabel = "";
+    if (recipientScope === "dm_only") {
+      recipientLabel = "DM";
+    } else if (recipientScope === "player") {
+      recipientLabel =
+        recipientUserId === null
+          ? "Unknown player"
+          : recipientLabelsByUserId.get(recipientUserId) || `User ${recipientUserId}`;
+    }
     payloads.push({
       id: Number(message.id),
       session_id: Number(message.session_id),
@@ -621,14 +728,9 @@ async function serializeMessages(
       author_display_name: String(message.author_display_name || ""),
       article_id: message.article_id === null ? null : Number(message.article_id),
       created_at: isoString(message.created_at),
-      recipient_scope: String(message.recipient_scope || "global"),
-      recipient_user_id: message.recipient_user_id === null ? null : Number(message.recipient_user_id),
-      recipient_label:
-        String(message.recipient_scope || "global") === "dm_only"
-          ? "DM"
-          : message.recipient_user_id
-            ? `User ${message.recipient_user_id}`
-            : "",
+      recipient_scope: recipientScope,
+      recipient_user_id: recipientUserId,
+      recipient_label: recipientLabel,
       article: article
         ? await serializeArticle(
             dbPath,
@@ -658,6 +760,7 @@ export async function buildSessionStatePayload(
   campaign: CampaignViewModel,
   campaignConfig: Record<string, unknown> = {},
   role: FixtureSystemsRole | null = null,
+  viewerUserId: number | null = null,
 ): Promise<SessionStatePayload> {
   if (!role || !existsSync(dbPath)) {
     return emptySessionPayload(campaign, role);
@@ -672,7 +775,9 @@ export async function buildSessionStatePayload(
     const articles = loadArticles(database, campaign.slug, articleStatuses);
     const articleImages = loadArticleImages(database, articles.map((article) => Number(article.id)));
     const articlesById = new Map(articles.map((article) => [Number(article.id), article]));
-    const messages = activeSession ? loadMessages(database, campaign.slug, Number(activeSession.id), role) : [];
+    const activePlayers = loadActivePlayerRows(database, campaign.slug);
+    const recipientLabels = buildRecipientLabelMap(activePlayers);
+    const messages = activeSession ? loadMessages(database, campaign.slug, Number(activeSession.id), role, viewerUserId) : [];
 
     const payload: SessionStatePayload = {
       ok: true,
@@ -690,8 +795,9 @@ export async function buildSessionStatePayload(
         messages,
         articlesById,
         articleImages,
+        recipientLabels,
       ),
-      session_message_recipient_player_choices: [],
+      session_message_recipient_player_choices: canPostMessages(role) ? serializeActivePlayerChoices(activePlayers) : [],
       show_session_dm_passive_scores: false,
       session_revision: sessionRevision,
       session_view_token: buildSessionViewToken(campaign, sessionRevision, role),
@@ -795,6 +901,181 @@ export function readSessionArticleImage(
   }
 }
 
+function normalizeRecipientScope(value: unknown): string {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return "global";
+  }
+  return String(value).trim().toLowerCase();
+}
+
+function validateRecipientUserId(value: unknown): number | null {
+  if (typeof value === "boolean") {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function bumpSessionRevision(database: Database.Database, campaignSlug: string, actorUserId: number, now: string): number {
+  const existing = database
+    .prepare("SELECT revision FROM campaign_session_states WHERE campaign_slug = ?")
+    .get(campaignSlug) as { revision: number } | undefined;
+  if (!existing) {
+    database
+      .prepare(
+        `
+          INSERT INTO campaign_session_states (
+            campaign_slug,
+            revision,
+            updated_at,
+            updated_by_user_id
+          ) VALUES (?, 1, ?, ?)
+        `,
+      )
+      .run(campaignSlug, now, actorUserId);
+    return 1;
+  }
+
+  const nextRevision = Number(existing.revision || 0) + 1;
+  database
+    .prepare(
+      `
+        UPDATE campaign_session_states
+        SET revision = ?,
+            updated_at = ?,
+            updated_by_user_id = ?
+        WHERE campaign_slug = ?
+      `,
+    )
+    .run(nextRevision, now, actorUserId, campaignSlug);
+  return nextRevision;
+}
+
+export async function postSessionMessage(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  actor: { id: number; display_name: string },
+  payload: Record<string, unknown>,
+): Promise<SessionMessagePostResult> {
+  const bodyText = String(payload.body || "").trim();
+  if (!bodyText) {
+    return { status: "validation_error", message: "Enter a message before posting it to the chat." };
+  }
+  if (bodyText.length > 4000) {
+    return { status: "validation_error", message: "Session chat messages must stay under 4,000 characters." };
+  }
+  if (!existsSync(dbPath)) {
+    return { status: "validation_error", message: "The chat window opens when the DM begins a session." };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const activeSession = loadActiveSession(database, campaign.slug);
+    if (!activeSession) {
+      return { status: "validation_error", message: "The chat window opens when the DM begins a session." };
+    }
+
+    const recipientScope = normalizeRecipientScope(payload.recipient_scope);
+    if (!["global", "dm_only", "player"].includes(recipientScope)) {
+      return { status: "validation_error", message: "Message audience must be global, dm_only, or player." };
+    }
+
+    const activePlayers = loadActivePlayerRows(database, campaign.slug);
+    const recipientLabels = buildRecipientLabelMap(activePlayers);
+    let recipientUserId: number | null = null;
+    if (recipientScope === "player") {
+      recipientUserId = validateRecipientUserId(payload.recipient_user_id);
+      if (recipientUserId === null) {
+        return { status: "validation_error", message: "Choose a valid player for the targeted message." };
+      }
+      if (!recipientLabels.has(recipientUserId)) {
+        return { status: "validation_error", message: "Choose an active campaign player for the targeted message." };
+      }
+    }
+
+    const now = utcIsoTimestamp();
+    const writeMessage = database.transaction(() => {
+      const insertResult = database
+        .prepare(
+          `
+            INSERT INTO campaign_session_messages (
+              session_id,
+              campaign_slug,
+              message_type,
+              body_text,
+              recipient_scope,
+              recipient_user_id,
+              author_user_id,
+              author_display_name,
+              article_id,
+              created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(
+          Number(activeSession.id),
+          campaign.slug,
+          "chat",
+          bodyText,
+          recipientScope,
+          recipientUserId,
+          actor.id,
+          String(actor.display_name || "").trim() || `User ${actor.id}`,
+          null,
+          now,
+        );
+      const sessionRevision = bumpSessionRevision(database, campaign.slug, actor.id, now);
+      const message = database
+        .prepare(
+          `
+            SELECT
+              id,
+              session_id,
+              campaign_slug,
+              message_type,
+              body_text,
+              recipient_scope,
+              recipient_user_id,
+              author_user_id,
+              author_display_name,
+              article_id,
+              created_at
+            FROM campaign_session_messages
+            WHERE id = ?
+          `,
+        )
+        .get(Number(insertResult.lastInsertRowid)) as SessionMessageRow;
+      return { message, sessionRevision };
+    });
+
+    const result = writeMessage();
+    const messages = await serializeMessages(
+      dbPath,
+      campaign,
+      campaignConfig,
+      role,
+      [result.message],
+      new Map(),
+      new Map(),
+      recipientLabels,
+    );
+    return {
+      status: "ok",
+      message: messages[0]!,
+      sessionRevision: result.sessionRevision,
+    };
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return { status: "validation_error", message: "The chat window opens when the DM begins a session." };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
 export async function buildSessionLogDetailPayload(
   dbPath: string,
   campaign: CampaignViewModel,
@@ -815,6 +1096,7 @@ export async function buildSessionLogDetailPayload(
     const articles = loadAllArticles(database, campaign.slug);
     const articleImages = loadArticleImages(database, articles.map((article) => Number(article.id)));
     const articlesById = new Map(articles.map((article) => [Number(article.id), article]));
+    const recipientLabels = buildRecipientLabelMap(loadActivePlayerRows(database, campaign.slug));
     const messages = loadMessages(database, campaign.slug, Number(session.id), role);
     return {
       status: "ok",
@@ -829,6 +1111,7 @@ export async function buildSessionLogDetailPayload(
           messages,
           articlesById,
           articleImages,
+          recipientLabels,
         ),
       },
     };

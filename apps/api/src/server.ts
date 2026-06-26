@@ -29,7 +29,12 @@ import { buildCombatReadOnlyPayload } from "./combat/view.js";
 import { buildCampaignHelpPayload } from "./help/view.js";
 import { ROUTES } from "./routes.js";
 import { buildSessionArticleSourceSearchPayload } from "./session/sourceSearch.js";
-import { buildSessionLogDetailPayload, buildSessionStatePayload, readSessionArticleImage } from "./session/view.js";
+import {
+  buildSessionLogDetailPayload,
+  buildSessionStatePayload,
+  postSessionMessage,
+  readSessionArticleImage,
+} from "./session/view.js";
 import { getSystemsImportRun, listSystemsImportRuns } from "./systems/importRuns.js";
 import {
   buildCombatSystemsMonsterSearchPayload,
@@ -151,6 +156,17 @@ function validationError(message: string) {
   };
 }
 
+function invalidJson(message: string) {
+  return {
+    ok: false,
+    error: {
+      code: "invalid_json",
+      message,
+    },
+    status: 400 as const,
+  };
+}
+
 async function readJsonObject(ctx: Context): Promise<{ status: "ok"; payload: Record<string, unknown> } | { status: "error"; message: string }> {
   try {
     const payload = await ctx.req.json();
@@ -194,7 +210,7 @@ function fixtureRole(ctx: { req: { header: (name: string) => string | undefined 
 }
 
 type RoleResolution =
-  | { kind: "authenticated"; role: FixtureSystemsRole }
+  | { kind: "authenticated"; role: FixtureSystemsRole; actorUserId?: number; actorDisplayName?: string }
   | { kind: "missing" }
   | { kind: "invalid" }
   | { kind: "forbidden"; message: string };
@@ -226,7 +242,12 @@ function resolveCampaignRole(
     if (!role) {
       return { kind: "forbidden", message: "You do not have access to this campaign scope." };
     }
-    return { kind: "authenticated", role: toFixtureSystemsRole(role) };
+    return {
+      kind: "authenticated",
+      role: toFixtureSystemsRole(role),
+      actorUserId: apiAuth.context.user.id,
+      actorDisplayName: apiAuth.context.user.display_name,
+    };
   }
   if (apiAuth.kind === "invalid") {
     return { kind: "invalid" };
@@ -1198,7 +1219,13 @@ app.get(ROUTES.sessionState, async (ctx) => {
 
   const role = auth.kind === "authenticated" ? auth.role : null;
   const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
-  const payload = await buildSessionStatePayload(config.dbPath, campaign, campaignConfig?.config || {}, role);
+  const payload = await buildSessionStatePayload(
+    config.dbPath,
+    campaign,
+    campaignConfig?.config || {},
+    role,
+    auth.kind === "authenticated" ? auth.actorUserId || null : null,
+  );
   const requestedRevision = parseLiveRevisionHeader(ctx);
   const requestedViewToken = parseLiveViewTokenHeader(ctx);
   if (
@@ -1215,6 +1242,63 @@ app.get(ROUTES.sessionState, async (ctx) => {
   }
 
   return ctx.json(payload);
+});
+
+app.post(ROUTES.sessionMessageCreate, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "invalid") {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (apiAuth.kind !== "authenticated") {
+    if (fixtureRole(ctx)) {
+      const error = forbidden("Session message writes require bearer API authentication.");
+      return ctx.json({ ok: error.ok, error: error.error }, error.status);
+    }
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const role = apiTokenRoleForCampaign(apiAuth.context, campaign.slug);
+  if (!role) {
+    const error = forbidden("You do not have access to this campaign scope.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = invalidJson(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  const result = await postSessionMessage(
+    config.dbPath,
+    campaign,
+    campaignConfig?.config || {},
+    toFixtureSystemsRole(role),
+    {
+      id: apiAuth.context.user.id,
+      display_name: apiAuth.context.user.display_name,
+    },
+    jsonPayload.payload,
+  );
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    message: result.message,
+  });
 });
 
 app.get(ROUTES.sessionArticleImage, async (ctx) => {
