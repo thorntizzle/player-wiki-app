@@ -1220,6 +1220,95 @@ if (missingSession.status !== 404 || missingSession.payload?.error?.code !== "ca
   throw new Error(`Expected missing session campaign JSON 404, got ${missingSession.status}`);
 }
 
+const blockedSessionSourceSearch = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/article-sources/search?q=capt",
+);
+if (blockedSessionSourceSearch.status !== 401 || blockedSessionSourceSearch.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated session article-source search 401, got ${blockedSessionSourceSearch.status} ${blockedSessionSourceSearch.payload?.error?.code}`,
+  );
+}
+
+const playerSessionSourceSearch = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/article-sources/search?q=capt",
+  {
+    "X-CPW-Fixture-Role": "player",
+  },
+);
+if (playerSessionSourceSearch.status !== 403 || playerSessionSourceSearch.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player session article-source search forbidden 403, got ${playerSessionSourceSearch.status} ${playerSessionSourceSearch.payload?.error?.code}`,
+  );
+}
+
+const shortSessionSourceSearch = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/article-sources/search?q=c",
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+);
+if (
+  shortSessionSourceSearch.status !== 200 ||
+  shortSessionSourceSearch.payload?.message !==
+    "Type at least 2 letters to search published wiki pages and Systems entries." ||
+  shortSessionSourceSearch.payload?.results?.length !== 0
+) {
+  throw new Error(`Unexpected short session article-source search payload: ${JSON.stringify(shortSessionSourceSearch.payload)}`);
+}
+
+const wikiSessionSourceSearch = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/article-sources/search?q=capt",
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+);
+const captainSource = wikiSessionSourceSearch.payload?.results?.find(
+  (result) => result.source_ref === "npcs/captain-lyra-vale",
+);
+if (
+  wikiSessionSourceSearch.status !== 200 ||
+  wikiSessionSourceSearch.payload?.message !== "Found 2 matching articles." ||
+  wikiSessionSourceSearch.payload?.results?.length !== 2 ||
+  captainSource?.source_kind !== "page" ||
+  captainSource?.title !== "Captain Lyra Vale" ||
+  captainSource?.subtitle !== "NPCs" ||
+  captainSource?.kind_label !== "Wiki" ||
+  captainSource?.select_label !== "Captain Lyra Vale - Wiki - NPCs"
+) {
+  throw new Error(`Unexpected wiki session article-source search payload: ${JSON.stringify(wikiSessionSourceSearch.payload)}`);
+}
+
+const systemsSessionSourceSearch = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/article-sources/search?q=gob",
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+);
+if (
+  systemsSessionSourceSearch.status !== 200 ||
+  systemsSessionSourceSearch.payload?.message !== "Found 1 matching article." ||
+  systemsSessionSourceSearch.payload?.results?.[0]?.source_kind !== "systems" ||
+  systemsSessionSourceSearch.payload?.results?.[0]?.source_ref !== "systems:mm-monster-goblin" ||
+  systemsSessionSourceSearch.payload?.results?.[0]?.title !== "Goblin" ||
+  systemsSessionSourceSearch.payload?.results?.[0]?.subtitle !== "Monsters - MM" ||
+  systemsSessionSourceSearch.payload?.results?.[0]?.kind_label !== "Systems" ||
+  systemsSessionSourceSearch.payload?.results?.[0]?.select_label !== "Goblin - Systems - Monsters - MM"
+) {
+  throw new Error(`Unexpected Systems session article-source search payload: ${JSON.stringify(systemsSessionSourceSearch.payload)}`);
+}
+
+const missingSessionSourceSearch = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/session/article-sources/search?q=capt",
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+);
+if (missingSessionSourceSearch.status !== 404 || missingSessionSourceSearch.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(
+    `Expected missing session article-source search campaign JSON 404, got ${missingSessionSourceSearch.status}`,
+  );
+}
+
 const missingHelp = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/help");
 if (missingHelp.status !== 404 || missingHelp.payload?.error?.code !== "campaign_not_found") {
   throw new Error(`Expected missing help campaign JSON 404, got ${missingHelp.status}`);

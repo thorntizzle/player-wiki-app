@@ -182,6 +182,15 @@ export interface CombatSystemsMonsterSearchResult {
   initiative_bonus: string;
 }
 
+export interface SessionArticleSystemsSourceResult {
+  source_ref: string;
+  source_kind: "systems";
+  title: string;
+  subtitle: string;
+  kind_label: "Systems";
+  select_label: string;
+}
+
 export interface CombatSystemsMonsterSearchPayload {
   results: CombatSystemsMonsterSearchResult[];
   message: string;
@@ -1433,6 +1442,74 @@ export function buildCampaignSystemsIndexPayload(
   } catch (error) {
     if (isNoSuchTableError(error)) {
       return emptyIndexPayload(campaign, canManage, cleanedQuery, cleanedReferenceQuery);
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function searchSessionArticleSystemsSources(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  query: string,
+  limit = 30,
+): SessionArticleSystemsSourceResult[] {
+  const librarySlug = campaign.systems_library_slug || "";
+  const cleanedQuery = String(query || "").trim();
+  const safeLimit = Math.max(1, Math.trunc(limit));
+  if (!librarySlug || cleanedQuery.length < 2 || !existsSync(dbPath)) {
+    return [];
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const library = serializeLibrary(
+      database
+        .prepare(
+          `
+            SELECT library_slug, title, system_code, status, created_at, updated_at
+            FROM systems_libraries
+            WHERE library_slug = ?
+          `,
+        )
+        .get(librarySlug) as SystemsLibraryRow | undefined,
+    );
+    if (!library) {
+      return [];
+    }
+
+    const seeds = parseSourceSeeds(campaignConfig);
+    const accessibleSourceStates = loadSourceRows(database, campaign.slug, librarySlug)
+      .map((row) => serializeSourceState(row, seeds.get(row.source_id), role))
+      .filter((state) => state.is_enabled && state.permissions.can_access);
+    const sourceStatesById = new Map(accessibleSourceStates.map((state) => [state.source_id, state]));
+    const overridesByEntryKey = loadCampaignEntryOverrides(database, campaign.slug, librarySlug);
+    return filterRowsForEntryAccess(
+      loadEntriesForSources(database, librarySlug, accessibleSourceStates.map((state) => state.source_id)),
+      role,
+      sourceStatesById,
+      overridesByEntryKey,
+    )
+      .filter((row) => entryMatchesGlobalQuery(row, cleanedQuery))
+      .slice(0, safeLimit)
+      .map((row) => {
+        const label = entryTypeLabel(row.entry_type);
+        const sourceId = String(row.source_id || "");
+        return {
+          source_ref: `systems:${String(row.slug || "")}`,
+          source_kind: "systems",
+          title: String(row.title || ""),
+          subtitle: `${label} - ${sourceId}`,
+          kind_label: "Systems",
+          select_label: `${String(row.title || "")} - Systems - ${label} - ${sourceId}`,
+        };
+      });
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return [];
     }
     throw error;
   } finally {

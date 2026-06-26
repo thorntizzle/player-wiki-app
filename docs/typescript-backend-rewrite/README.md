@@ -70,6 +70,7 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/wiki/sections/:sectionSlug`
   - `GET /api/v1/campaigns/:campaignSlug/wiki/pages/*`
   - `GET /api/v1/campaigns/:campaignSlug/session`
+  - `GET /api/v1/campaigns/:campaignSlug/session/article-sources/search`
   - `GET /api/v1/campaigns/:campaignSlug/content/config`
   - `GET /api/v1/campaigns/:campaignSlug/content/pages`
   - `GET /api/v1/campaigns/:campaignSlug/content/pages/*`
@@ -92,6 +93,9 @@ Route parity check command:
 - The first Combat state shell now serves read-only empty tracker payloads for `GET .../combat` and
   `GET .../combat/live-state`, preserving Flask-compatible unauthenticated `auth_required`, fixture
   player/DM permission splits, live polling metadata, and unchanged-response short-circuit behavior.
+- The first Session manager lookup slice now serves `GET .../session/article-sources/search`, preserving
+  Flask-compatible unauthenticated `auth_required`, manager-only access, short-query guidance, visible
+  wiki page results, accessible Systems entry results, and explicit missing-campaign JSON.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

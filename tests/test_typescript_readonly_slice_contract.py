@@ -261,6 +261,58 @@ def test_typescript_combat_state_requires_auth_like_flask(typescript_api_server,
     assert payload == flask_payload
 
 
+def test_typescript_session_article_source_search_requires_auth_like_flask(typescript_api_server, client):
+    flask_response = client.get("/api/v1/campaigns/linden-pass/session/article-sources/search?q=capt")
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/session/article-sources/search?q=capt"
+    )
+    assert status == 401
+    assert payload == flask_payload
+
+
+def test_typescript_session_article_source_search_fixture_shell(typescript_api_server):
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/session/article-sources/search?q=c",
+        headers={"X-CPW-Fixture-Role": "dm"},
+    )
+    assert status == 200
+    assert payload == {
+        "ok": True,
+        "results": [],
+        "message": "Type at least 2 letters to search published wiki pages and Systems entries.",
+    }
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/session/article-sources/search?q=capt",
+        headers={"X-CPW-Fixture-Role": "dm"},
+    )
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["message"] == "Found 2 matching articles."
+    assert len(payload["results"]) == 2
+    captain = next(result for result in payload["results"] if result["source_ref"] == "npcs/captain-lyra-vale")
+    assert captain == {
+        "source_ref": "npcs/captain-lyra-vale",
+        "source_kind": "page",
+        "title": "Captain Lyra Vale",
+        "subtitle": "NPCs",
+        "kind_label": "Wiki",
+        "select_label": "Captain Lyra Vale - Wiki - NPCs",
+    }
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/session/article-sources/search?q=capt",
+        headers={"X-CPW-Fixture-Role": "player"},
+    )
+    assert status == 403
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "forbidden"
+    assert payload["error"]["message"] == "You do not have permission to manage this session."
+
+
 def test_typescript_combat_state_fixture_shell(typescript_api_server):
     status, payload = _to_json(
         f"{typescript_api_server}/api/v1/campaigns/linden-pass/combat",
@@ -834,6 +886,14 @@ def test_typescript_wiki_missing_resources_return_json(typescript_api_server):
     assert payload["error"]["code"] == "campaign_not_found"
 
     status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/definitely-not-a-campaign/systems/search")
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "campaign_not_found"
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/definitely-not-a-campaign/session/article-sources/search?q=capt",
+        headers={"X-CPW-Fixture-Role": "admin"},
+    )
     assert status == 404
     assert payload["ok"] is False
     assert payload["error"]["code"] == "campaign_not_found"
