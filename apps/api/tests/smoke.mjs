@@ -7740,6 +7740,170 @@ if (
   );
 }
 
+const xianxiaInventoryAddPath =
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/xianxia-inventory`;
+const staleXianxiaInventoryAdd = await requestJson(
+  xianxiaInventoryAddPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "POST", body: { expected_revision: 999, item: { name: "Jade Charm" } } },
+);
+if (
+  staleXianxiaInventoryAdd.status !== 409 ||
+  staleXianxiaInventoryAdd.payload?.error?.code !== "state_conflict" ||
+  staleXianxiaInventoryAdd.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale Xianxia inventory add conflict, got ${staleXianxiaInventoryAdd.status} ${JSON.stringify(staleXianxiaInventoryAdd.payload)}`,
+  );
+}
+
+const missingNameXianxiaInventoryAdd = await requestJson(
+  xianxiaInventoryAddPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "POST", body: { expected_revision: editedXianxiaRevision + 7, item: { quantity: 1 } } },
+);
+if (
+  missingNameXianxiaInventoryAdd.status !== 400 ||
+  missingNameXianxiaInventoryAdd.payload?.error?.code !== "validation_error" ||
+  missingNameXianxiaInventoryAdd.payload?.error?.message !== "Inventory item requires a name."
+) {
+  throw new Error(
+    `Expected missing-name Xianxia inventory add validation_error, got ${missingNameXianxiaInventoryAdd.status} ${JSON.stringify(missingNameXianxiaInventoryAdd.payload)}`,
+  );
+}
+
+const duplicateXianxiaInventoryAdd = await requestJson(
+  xianxiaInventoryAddPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  {
+    method: "POST",
+    body: {
+      expected_revision: editedXianxiaRevision + 7,
+      item: { id: "spirit-rice", name: "Duplicate Rice" },
+    },
+  },
+);
+if (
+  duplicateXianxiaInventoryAdd.status !== 400 ||
+  duplicateXianxiaInventoryAdd.payload?.error?.code !== "validation_error" ||
+  duplicateXianxiaInventoryAdd.payload?.error?.message !== "Duplicate inventory item id: spirit-rice"
+) {
+  throw new Error(
+    `Expected duplicate Xianxia inventory add validation_error, got ${duplicateXianxiaInventoryAdd.status} ${JSON.stringify(duplicateXianxiaInventoryAdd.payload)}`,
+  );
+}
+
+const nonEquippableXianxiaInventoryAdd = await requestJson(
+  xianxiaInventoryAddPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  {
+    method: "POST",
+    body: {
+      expected_revision: editedXianxiaRevision + 7,
+      item: {
+        name: "Silk Robe",
+        item_type: "Miscellaneous",
+        equippable: false,
+        is_equipped: true,
+      },
+    },
+  },
+);
+if (
+  nonEquippableXianxiaInventoryAdd.status !== 400 ||
+  nonEquippableXianxiaInventoryAdd.payload?.error?.code !== "validation_error" ||
+  nonEquippableXianxiaInventoryAdd.payload?.error?.message !== "Cannot equip non-equippable item."
+) {
+  throw new Error(
+    `Expected non-equippable Xianxia inventory add validation_error, got ${nonEquippableXianxiaInventoryAdd.status} ${JSON.stringify(nonEquippableXianxiaInventoryAdd.payload)}`,
+  );
+}
+
+const xianxiaInventoryAdd = await requestJson(
+  xianxiaInventoryAddPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  {
+    method: "POST",
+    body: {
+      expected_revision: editedXianxiaRevision + 7,
+      item: {
+        name: "Jade Charm",
+        quantity: "2",
+        item_type: "Artifact",
+        item_nature: "Relic",
+        equippable: true,
+        is_equipped: true,
+        notes: "Hums quietly.",
+        tags: ["relic"],
+      },
+    },
+  },
+);
+const addedPayloadQuantities = xianxiaInventoryAdd.payload?.character?.state_record?.state?.xianxia?.inventory?.quantities || [];
+const addedPayloadItem = addedPayloadQuantities.find((item) => item?.id === "artifact-jade-charm");
+const addedPayloadMirror = xianxiaInventoryAdd.payload?.character?.state_record?.state?.inventory || [];
+const addedMirrorItem = addedPayloadMirror.find((item) => item?.id === "artifact-jade-charm");
+if (
+  xianxiaInventoryAdd.status !== 200 ||
+  xianxiaInventoryAdd.payload?.ok !== true ||
+  xianxiaInventoryAdd.payload?.character?.state_record?.revision !== editedXianxiaRevision + 8 ||
+  addedPayloadItem?.name !== "Jade Charm" ||
+  addedPayloadItem?.quantity !== 2 ||
+  addedPayloadItem?.item_type !== "Artifact" ||
+  addedPayloadItem?.item_nature !== "Relic" ||
+  addedPayloadItem?.equippable !== true ||
+  addedPayloadItem?.is_equipped !== true ||
+  addedPayloadItem?.notes !== "Hums quietly." ||
+  addedPayloadItem?.tags?.[0] !== "relic" ||
+  addedMirrorItem?.name !== "Jade Charm" ||
+  addedMirrorItem?.quantity !== 2 ||
+  addedMirrorItem?.item_type !== "Artifact" ||
+  addedMirrorItem?.item_nature !== "Relic" ||
+  addedMirrorItem?.is_equipped !== true
+) {
+  throw new Error(`Unexpected Xianxia inventory add POST payload: ${JSON.stringify(xianxiaInventoryAdd.payload)}`);
+}
+
+const xianxiaInventoryAddAssertionDb = new Database(dbPath, { readonly: true });
+const xianxiaInventoryAddRow = xianxiaInventoryAddAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", xianxiaCharacterSlug);
+xianxiaInventoryAddAssertionDb.close();
+const xianxiaInventoryAddState = JSON.parse(xianxiaInventoryAddRow?.state_json || "{}");
+const addedDbQuantities = xianxiaInventoryAddState.xianxia?.inventory?.quantities || [];
+const addedDbItem = addedDbQuantities.find((item) => item?.id === "artifact-jade-charm");
+const addedDbMirror = xianxiaInventoryAddState.inventory || [];
+const addedDbMirrorItem = addedDbMirror.find((item) => item?.id === "artifact-jade-charm");
+if (
+  Number(xianxiaInventoryAddRow?.revision) !== editedXianxiaRevision + 8 ||
+  xianxiaInventoryAddRow?.updated_by_user_id !== 81 ||
+  addedDbItem?.name !== "Jade Charm" ||
+  addedDbItem?.quantity !== 2 ||
+  addedDbItem?.item_type !== "Artifact" ||
+  addedDbItem?.item_nature !== "Relic" ||
+  addedDbItem?.equippable !== true ||
+  addedDbItem?.is_equipped !== true ||
+  addedDbMirrorItem?.id !== "artifact-jade-charm" ||
+  addedDbMirrorItem?.is_equipped !== true
+) {
+  throw new Error(
+    `Unexpected Xianxia inventory add database row: ${JSON.stringify({
+      xianxiaInventoryAddRow,
+      xianxiaInventoryAddState,
+    })}`,
+  );
+}
+
 const xianxiaDeleteResponse = await requestJson(
   xianxiaCharacterPath,
   bearerContentManagerHeaders,

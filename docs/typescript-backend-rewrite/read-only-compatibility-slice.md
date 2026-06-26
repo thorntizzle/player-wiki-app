@@ -473,6 +473,10 @@ fixture database.
   - unauthenticated, fixture-role bearer requirement, and stale-revision envelopes.
   - non-Xianxia, unknown item, and non-equippable item validation.
   - DM equipped-state persistence through `state.xianxia.inventory.quantities`, synchronized top-level `state.inventory`, shared revision bumps, and `updated_by_user_id`.
+- Character Xianxia inventory add payload checks cover:
+  - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory` with bearer-only writes.
+  - stale-revision, missing-name/catalog, duplicate explicit-id, and non-equippable equipped-item validation.
+  - DM item insertion with generated item IDs, canonical Xianxia item type/nature fields, quantity coercion, equipped-state persistence, synchronized top-level `state.inventory`, shared revision bumps, and `updated_by_user_id`.
 
 ## Added Tests and Checks
 
@@ -531,6 +535,7 @@ fixture database.
   - validates character rest preview/apply auth, no-access forbidden, invalid-rest, stale-revision, DND long-rest, and Xianxia long-rest behavior against disposable copied fixture files and SQLite state.
   - validates character feature-state stale conflict, unsupported key validation, missing Arcane Armor feature validation, and assigned-player Arcane Armor toggle persistence against disposable copied fixture files and SQLite state.
   - validates Xianxia inventory equipped-state auth, fixture bearer requirement, stale conflict, non-Xianxia validation, unknown item validation, non-equippable validation, and DM equippable-item toggle persistence with top-level inventory mirror sync against disposable copied fixture files and SQLite state.
+  - validates Xianxia inventory add stale conflict, missing-name/catalog validation, duplicate explicit-id validation, non-equippable equipped-item validation, and DM item insertion with generated IDs, canonical type/nature fields, quantity coercion, equipped-state persistence, and top-level inventory mirror sync against disposable copied fixture files and SQLite state.
   - verifies `GET /api/v1/campaigns/:campaignSlug/session` no-header read-only payload shape, role-aware fixture and bearer-token SQLite Session state reads, auth/forbidden bearer envelopes, token/revision headers behavior, unchanged-response short-circuit, and session missing-campaign 404.
   - verifies `POST /api/v1/campaigns/:campaignSlug/session/messages` auth, fixture-write denial, malformed JSON handling, validation messages, SQLite persistence, private-message visibility, recipient labels, revision bumps, and missing-campaign 404 against the disposable smoke-test database.
   - verifies `POST /api/v1/campaigns/:campaignSlug/session/start` and `.../session/close` auth, fixture-write denial, player-forbidden behavior, duplicate-start/empty-close validation, SQLite session persistence, revision bumps, refreshed Session reads/log summaries, and missing-campaign 404 against the disposable smoke-test database.

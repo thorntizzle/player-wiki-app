@@ -1261,6 +1261,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "content_character_not_found",
     },
   },
+  {
+    method: "POST",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/xianxia-inventory",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/session/xianxia-inventory",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1350,4 +1365,5 @@ export const ROUTES = {
   characterSessionRest: IMPLEMENTED_ROUTES[83].honoPath,
   characterSessionFeatureState: IMPLEMENTED_ROUTES[84].honoPath,
   characterSessionXianxiaInventoryEquipped: IMPLEMENTED_ROUTES[85].honoPath,
+  characterSessionXianxiaInventoryAdd: IMPLEMENTED_ROUTES[86].honoPath,
 } as const;
