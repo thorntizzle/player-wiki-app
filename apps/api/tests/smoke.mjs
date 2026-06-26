@@ -358,6 +358,69 @@ if (xgeSource?.is_enabled !== false || xgeSource?.is_configured !== true || xgeS
   throw new Error(`Expected XGE configured disabled source state, got ${JSON.stringify(xgeSource)}`);
 }
 
+const blockedSystemsSourceDetail = await requestJson("/api/v1/campaigns/linden-pass/systems/sources/PHB");
+if (blockedSystemsSourceDetail.status !== 401 || blockedSystemsSourceDetail.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated systems source detail to return auth_required 401, got ${blockedSystemsSourceDetail.status} ${blockedSystemsSourceDetail.payload?.error?.code}`,
+  );
+}
+
+const playerPhbDetail = await requestJson("/api/v1/campaigns/linden-pass/systems/sources/PHB", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (playerPhbDetail.status !== 200 || playerPhbDetail.payload?.ok !== true) {
+  throw new Error(`Expected player PHB source detail 200 ok, got ${playerPhbDetail.status}`);
+}
+if (playerPhbDetail.payload?.source?.source_id !== "PHB" || playerPhbDetail.payload?.source?.entry_count !== 2) {
+  throw new Error(`Unexpected player PHB source detail source state: ${JSON.stringify(playerPhbDetail.payload?.source)}`);
+}
+const phbEntryGroups = (playerPhbDetail.payload?.entry_groups || []).map((group) => `${group.entry_type}:${group.count}`);
+if (phbEntryGroups.join("|") !== "spell:1|item:1") {
+  throw new Error(`Expected PHB source detail groups spell/item, got ${JSON.stringify(playerPhbDetail.payload?.entry_groups)}`);
+}
+if (
+  playerPhbDetail.payload?.entry_count !== 2 ||
+  playerPhbDetail.payload?.browsable_entry_count !== 2 ||
+  playerPhbDetail.payload?.permissions?.can_manage_systems !== false
+) {
+  throw new Error(`Unexpected PHB source detail counts/permissions: ${JSON.stringify(playerPhbDetail.payload)}`);
+}
+if (playerPhbDetail.payload?.has_rules_reference_search !== false || playerPhbDetail.payload?.reference_query !== "") {
+  throw new Error(`Unexpected PHB rules-reference state: ${JSON.stringify(playerPhbDetail.payload)}`);
+}
+
+const playerBlockedMmDetail = await requestJson("/api/v1/campaigns/linden-pass/systems/sources/MM", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (playerBlockedMmDetail.status !== 403 || playerBlockedMmDetail.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player MM source detail forbidden 403, got ${playerBlockedMmDetail.status} ${playerBlockedMmDetail.payload?.error?.code}`,
+  );
+}
+
+const dmMmDetail = await requestJson("/api/v1/campaigns/linden-pass/systems/sources/MM", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (dmMmDetail.status !== 200 || dmMmDetail.payload?.ok !== true) {
+  throw new Error(`Expected DM MM source detail 200 ok, got ${dmMmDetail.status}`);
+}
+const mmEntryGroups = (dmMmDetail.payload?.entry_groups || []).map((group) => `${group.entry_type}:${group.count}`);
+if (dmMmDetail.payload?.source?.source_id !== "MM" || mmEntryGroups.join("|") !== "monster:1") {
+  throw new Error(`Unexpected DM MM source detail: ${JSON.stringify(dmMmDetail.payload)}`);
+}
+if (dmMmDetail.payload?.permissions?.can_manage_systems !== true || dmMmDetail.payload?.book_entries?.length !== 0) {
+  throw new Error(`Unexpected DM MM source detail permissions/book entries: ${JSON.stringify(dmMmDetail.payload)}`);
+}
+
+const missingSystemsSourceDetail = await requestJson("/api/v1/campaigns/linden-pass/systems/sources/NOPE", {
+  "X-CPW-Fixture-Role": "admin",
+});
+if (missingSystemsSourceDetail.status !== 404 || missingSystemsSourceDetail.payload?.error?.code !== "systems_source_not_found") {
+  throw new Error(
+    `Expected missing systems source detail JSON 404, got ${missingSystemsSourceDetail.status} ${missingSystemsSourceDetail.payload?.error?.code}`,
+  );
+}
+
 const campaignList = await requestJson("/api/v1/campaigns");
 if (campaignList.status !== 200) {
   throw new Error(`Expected campaign list endpoint 200, got ${campaignList.status}`);

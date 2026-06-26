@@ -12,6 +12,7 @@ import { ROUTES } from "./routes.js";
 import { buildSessionStatePayload } from "./session/view.js";
 import { getSystemsImportRun, listSystemsImportRuns } from "./systems/importRuns.js";
 import {
+  buildCampaignSystemsSourceDetailPayload,
   buildCampaignSystemsSourceListPayload,
   type FixtureSystemsRole,
 } from "./systems/sources.js";
@@ -134,6 +135,17 @@ function notFound(code: string, message: string) {
       message,
     },
     status: 404 as const,
+  };
+}
+
+function forbidden(message: string) {
+  return {
+    ok: false,
+    error: {
+      code: "forbidden",
+      message,
+    },
+    status: 403 as const,
   };
 }
 
@@ -397,6 +409,44 @@ app.get(ROUTES.systemsSources, async (ctx) => {
   return ctx.json({
     ok: true,
     ...buildCampaignSystemsSourceListPayload(config.dbPath, campaign, campaignConfig?.config || {}, role),
+  });
+});
+
+app.get(ROUTES.systemsSourceDetail, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const role = fixtureRole(ctx);
+  if (!role) {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  const result = buildCampaignSystemsSourceDetailPayload(
+    config.dbPath,
+    campaign,
+    campaignConfig?.config || {},
+    ctx.req.param("sourceId") || "",
+    role,
+    ctx.req.query("reference_q") || "",
+  );
+  if (result.status === "forbidden") {
+    const error = forbidden(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "not_found") {
+    const error = notFound("systems_source_not_found", "Could not find that Systems source.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    ...result.payload,
   });
 });
 

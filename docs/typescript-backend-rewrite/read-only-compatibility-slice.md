@@ -1,6 +1,6 @@
 # Read-Only Compatibility Slice Evidence
 
-Last updated: 2026-06-25
+Last updated: 2026-06-26
 
 This document records the first implemented TypeScript read-only compatibility surface.
 
@@ -13,6 +13,7 @@ This document records the first implemented TypeScript read-only compatibility s
 - Implemented `GET /api/v1/systems/import-runs` with Flask-compatible unauthenticated auth failure and fixture-admin SQLite reads.
 - Implemented `GET /api/v1/systems/import-runs/:importRunId` with the same auth gate, fixture-admin SQLite detail reads, and explicit missing-resource JSON.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/systems/sources` with Flask-compatible unauthenticated auth failure, fixture-role source filtering, campaign YAML source defaults, and SQLite library/source reads.
+- Implemented `GET /api/v1/campaigns/:campaignSlug/systems/sources/:sourceId` with Flask-compatible unauthenticated auth failure, fixture-role source access checks, entry grouping, book-entry summaries, rules-reference metadata fields, and explicit missing-source JSON.
 - Implemented `GET /api/v1/campaigns` using fixture-backed repository reads.
 - Implemented `GET /api/v1/campaigns/:campaignSlug` using fixture-backed repository reads.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/help` using public fixture-read-only Campaign Help assumptions.
@@ -65,6 +66,12 @@ This document records the first implemented TypeScript read-only compatibility s
   - fixture `player` role sees enabled player-visible sources only
   - fixture `dm` and `admin` roles see/manage the full source list
   - `campaign.yaml` `systems_sources` seeds default enablement/visibility when no SQLite campaign source row exists
+- Campaign Systems source-detail response preserves the source page API shell:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture `player` role can load player-visible enabled sources and receives `forbidden` for inaccessible sources
+  - fixture `dm` and `admin` roles can load manager-visible enabled sources
+  - response fields include `source`, `entry_groups`, `book_entries`, entry counts, hidden entry type metadata, rules-reference search metadata, reference query/results, book visibility note, and manage permissions
+  - missing source detail rows return `systems_source_not_found` JSON
 - Campaign Help response preserves the stable public Flask fixture fields for:
   - public viewer role and account note
   - available surface labels, cross-cutting limits, visibility rows, and surface guidance
@@ -114,6 +121,7 @@ This document records the first implemented TypeScript read-only compatibility s
   - runs a focused Flask-vs-TypeScript contract check for stable `campaign` fields for `linden-pass` using sanitized fixture data.
   - compares Flask-vs-TypeScript app-state metadata fields under explicit test runtime overrides.
   - compares Flask-vs-TypeScript unauthenticated systems import-run list/detail and campaign Systems source-list auth envelopes.
+  - compares Flask-vs-TypeScript unauthenticated campaign Systems source-detail auth envelopes.
   - compares Flask-vs-TypeScript campaign-list payload campaign fields while asserting explicit fixture read-only roles.
   - compares Flask-vs-TypeScript public Campaign Help payload fields under sanitized fixture data.
   - compares Flask-vs-TypeScript payload parity for `GET /api/v1/campaigns/linden-pass/content/config`.
@@ -124,7 +132,7 @@ This document records the first implemented TypeScript read-only compatibility s
   - checks JSON missing-resource shapes for TypeScript wiki dynamic routes.
   - adds fixture session parity checks (active session state, messages, passive score flag, revision/token shape, short-circuit response, missing session campaign 404).
 - `apps/api/tests/smoke.mjs`:
-  - starts compiled API on a local port and verifies `/healthz`, app state, SQLite-backed systems import-run list/detail reads, campaign Systems source-list reads, campaign list/detail, public Campaign Help, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
+  - starts compiled API on a local port and verifies `/healthz`, app state, SQLite-backed systems import-run list/detail reads, campaign Systems source list/detail reads, campaign list/detail, public Campaign Help, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
   - validates fixture-backed content config endpoint payload for `linden-pass` (`campaign_slug`, `current_session`, `title`, `systems_sources`, `editable_fields`, `updated_at`) and missing-campaign 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/pages` list sorting/count/body omission and sampled `Port Meridian` metadata/removal fields, plus `GET /api/v1/campaigns/:campaignSlug/content/pages/*` detail payload body inclusion and missing-content-page 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/assets` list sorting/count/data omission and sampled PNG metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/assets/*` detail payload byte data and missing-content-asset 404.
