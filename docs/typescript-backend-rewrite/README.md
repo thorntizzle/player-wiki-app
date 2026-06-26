@@ -14,6 +14,7 @@ This folder tracks the deliberate TypeScript backend rewrite path for Campaign P
 - `route-snapshots.json`: tracked executable snapshot from
   `scripts/route_snapshots.py` used by parity checks.
 - `typescript-route-seed.json`: provisional route seed for initial TypeScript handlers.
+- `content-character-staging-readiness.md`: content-character write/delete rollback evidence and staging-readiness decision.
 - `.local/roadmaps/typescript-backend-rewrite-roadmap.md`: local active task queue for the rewrite track.
 - `docs/current-state/INDEX.md`: current product contract index. Use it to confirm present behavior before porting any workflow.
 - `docs/api-v1.md`: current JSON API contract.
@@ -219,8 +220,9 @@ Route parity check command:
   Flask-vs-TypeScript golden parity for DND-5E state initialization/deletion plus Xianxia mutable
   state preservation/clamping. It also includes a copied-data backup/restore rehearsal that proves
   a content-character write/delete can be rolled back across definition/import YAML, portrait assets,
-  SQLite state rows, and assignment rows. Staging or production write readiness still needs an explicit
-  readiness decision and, if required, a rehearsal against an approved staging-volume snapshot.
+  SQLite state rows, and assignment rows. The staging-readiness decision labels this route family
+  `copied-data rollback ready; staging snapshot required`, so staging or production write enablement
+  still requires an approved staging-volume snapshot rehearsal.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

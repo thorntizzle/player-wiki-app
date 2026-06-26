@@ -336,7 +336,7 @@ fixture database.
   - DND-5E content-character creation initializes a real SQLite `character_state` row with HP, resources, spell slots, Hit Dice, inventory, and notes from the copied fixture definition; raw delete removes the state row plus a seeded assignment row and reports `deleted_state` / `deleted_assignment` from row counts.
   - Xianxia content-character creation initializes SQLite mutable state, and Xianxia definition update reconciles existing current HP/temp HP, Stance/temp Stance, Jing, Yin/Yang, Dao, active Stance, and notes against lowered definition maxima without writing mutable state back into `definition.yaml`.
   - Flask-vs-TypeScript golden contract tests now compare DND-5E initialized state JSON and delete cleanup directly, and compare Xianxia mutable-state clamping/preservation plus definition-file separation directly.
-  - The copied-data content-character rehearsal takes a Python backup, performs a Hono write/delete against an existing fixture character with realistic SQLite state/assignment rows and portrait assets, restores the backup, and verifies the original YAML files, asset file, state row/revision, and assignment row are recovered.
+  - The copied-data content-character rehearsal takes a Python backup, performs a Hono write/delete against an existing fixture character with realistic SQLite state/assignment rows and portrait assets, restores the backup, and verifies the original YAML files, asset file, state row/revision, and assignment row are recovered. The staging-readiness decision is tracked separately in `content-character-staging-readiness.md`.
 
 ## Added Tests and Checks
 
