@@ -82,6 +82,14 @@ def typescript_api_server():
     env["NODE_ENV"] = "test"
     env["PORT"] = str(port)
     env["CPW_CAMPAIGNS_DIR"] = str(PROJECT_ROOT / "tests" / "fixtures" / "sample_campaigns")
+    env["CPW_DB_PATH"] = str(PROJECT_ROOT / ".local" / "typescript-fixture.sqlite3")
+    env["PLAYER_WIKI_VERSION"] = "test-version"
+    env["PLAYER_WIKI_BUILD_ID"] = "test-build"
+    env["PLAYER_WIKI_GIT_SHA"] = "test-git-sha"
+    env["PLAYER_WIKI_GIT_DIRTY"] = "0"
+    env["PLAYER_WIKI_RUNTIME"] = "test-runtime"
+    env["PLAYER_WIKI_INSTANCE_NAME"] = "test-instance"
+    env["PLAYER_WIKI_BASE_URL"] = "http://127.0.0.1:5000"
 
     process = subprocess.Popen(
         [str(node_bin), str(API_ROOT / "dist" / "server.js")],
@@ -126,6 +134,31 @@ def test_typescript_campaign_detail_matches_flask_contract(typescript_api_server
     assert payload["auth_source"] == "fixture"
     assert payload["permissions"]["can_manage_dm_content"] is False
     assert payload["campaign"] == flask_payload["campaign"]
+
+
+def test_typescript_app_state_matches_flask_metadata_contract(typescript_api_server, client):
+    flask_response = client.get("/api/v1/app")
+    assert flask_response.status_code == 200
+    flask_payload = flask_response.get_json()
+    assert flask_payload["ok"] is True
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/app")
+    assert status == 200
+
+    assert payload["ok"] is True
+    for key in (
+        "version",
+        "build_id",
+        "git_sha",
+        "git_dirty",
+        "runtime",
+        "instance_name",
+        "environment",
+        "base_url",
+    ):
+        assert payload["app"][key] == flask_payload["app"][key]
+    assert payload["app"]["campaigns_dir"] == str(PROJECT_ROOT / "tests" / "fixtures" / "sample_campaigns")
+    assert payload["app"]["db_path"].endswith("typescript-fixture.sqlite3")
 
 
 def test_typescript_campaign_list_matches_flask_campaign_payloads(typescript_api_server, client, sign_in, users):

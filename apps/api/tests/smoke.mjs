@@ -74,6 +74,22 @@ if (health.payload?.campaign_count < 1) {
   throw new Error(`Expected at least one campaign fixture under ${repoRoot}.`);
 }
 
+const appState = await requestJson("/api/v1/app");
+if (appState.status !== 200 || appState.payload?.ok !== true) {
+  throw new Error(`Expected app state endpoint 200 ok, got ${appState.status}`);
+}
+for (const key of ["version", "build_id", "git_sha", "runtime", "instance_name", "environment", "base_url", "db_path", "campaigns_dir"]) {
+  if (typeof appState.payload?.app?.[key] !== "string" || !appState.payload.app[key]) {
+    throw new Error(`Expected app state string field ${key}, got ${appState.payload?.app?.[key]}`);
+  }
+}
+if (typeof appState.payload?.app?.git_dirty !== "boolean") {
+  throw new Error(`Expected app state git_dirty boolean, got ${appState.payload?.app?.git_dirty}`);
+}
+if (appState.payload.app.campaigns_dir !== campaignsDir) {
+  throw new Error(`Expected app state campaigns_dir ${campaignsDir}, got ${appState.payload.app.campaigns_dir}`);
+}
+
 const campaignList = await requestJson("/api/v1/campaigns");
 if (campaignList.status !== 200) {
   throw new Error(`Expected campaign list endpoint 200, got ${campaignList.status}`);

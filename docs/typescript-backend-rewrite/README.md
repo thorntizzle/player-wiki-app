@@ -51,6 +51,7 @@ Route parity check command:
 
 - `apps/api` exists and now serves:
   - `GET /healthz`
+  - `GET /api/v1/app`
   - `GET /api/v1/campaigns`
   - `GET /api/v1/campaigns/:campaignSlug`
   - `GET /api/v1/campaigns/:campaignSlug/wiki`

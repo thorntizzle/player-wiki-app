@@ -213,6 +213,14 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
     seedPath: "/api/v1/campaigns",
     routeFamily: "api_v1_campaigns",
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/app",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/app",
+    seedPath: "/api/v1/app",
+    routeFamily: "api_v1",
+  },
 ];
 
 export const ROUTES = {
@@ -230,4 +238,5 @@ export const ROUTES = {
   contentCharacters: IMPLEMENTED_ROUTES[11].honoPath,
   contentCharacter: IMPLEMENTED_ROUTES[12].honoPath,
   campaignList: IMPLEMENTED_ROUTES[13].honoPath,
+  appState: IMPLEMENTED_ROUTES[14].honoPath,
 } as const;

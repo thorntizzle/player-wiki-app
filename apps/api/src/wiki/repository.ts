@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { parse as parseYaml } from "yaml";
 
-import type { ApiConfig } from "../config.js";
+import { getApiConfig, type ApiConfig } from "../config.js";
 import type { WikiCampaignConfig, WikiPageRecord } from "./types.js";
 
 const FRONTMATTER_PATTERN = /^---\s*\n([\s\S]*?)\n---\s*\n?/;
@@ -73,11 +73,7 @@ interface CampaignData {
 
 const repositoryCache = new Map<string, Promise<CampaignData | null>>();
 
-let currentConfig: ApiConfig = {
-  campaignsDir: process.cwd(),
-  environment: "development",
-  runtimeMode: "fixture",
-};
+let currentConfig: ApiConfig = getApiConfig();
 
 export function setWikiConfig(config: ApiConfig): void {
   currentConfig = config;

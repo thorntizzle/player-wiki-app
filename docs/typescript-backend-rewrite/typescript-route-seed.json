@@ -36,6 +36,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/app",
+      "route_family": "api_v1",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/app",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono app-state route exposing fixture runtime metadata and active fixture paths."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/wiki",
       "route_family": "api_v1_wiki",
       "status": "implemented_fixture_readonly",

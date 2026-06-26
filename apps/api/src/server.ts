@@ -263,6 +263,17 @@ app.get(ROUTES.healthz, async (ctx) => {
   });
 });
 
+app.get(ROUTES.appState, async (ctx) =>
+  ctx.json({
+    ok: true,
+    app: {
+      ...config.app,
+      db_path: config.dbPath,
+      campaigns_dir: config.campaignsDir,
+    },
+  }),
+);
+
 app.get(ROUTES.campaignList, async (ctx) => {
   const campaigns = await listCampaigns(config);
   return ctx.json({
