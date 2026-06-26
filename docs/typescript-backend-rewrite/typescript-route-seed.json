@@ -281,19 +281,19 @@
       "method": "GET",
       "path": "/api/v1/me",
       "route_family": "api_v1",
-      "status": "implemented_fixture_readonly",
+      "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/me",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono identity bootstrap route with Flask-compatible unauthenticated auth_required behavior and synthetic fixture-role user, membership, preference, and View As metadata."
+      "notes": "Tracked Hono identity bootstrap route with Flask-compatible unauthenticated auth_required behavior, synthetic fixture-role user/membership/preference/View As metadata, and read-only SQLite API-token user, active membership, normalized preference, and admin View As choice reads through CPW_DB_PATH."
     },
     {
       "method": "GET",
       "path": "/api/v1/me/settings",
       "route_family": "api_v1",
-      "status": "implemented_fixture_readonly",
+      "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/me/settings",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono account settings read route with Flask-compatible unauthenticated auth_required behavior and synthetic fixture-role user, preference, theme preset, and live-session chat-order metadata."
+      "notes": "Tracked Hono account settings read route with Flask-compatible unauthenticated auth_required behavior, synthetic fixture-role user/preference/static-choice metadata, and read-only SQLite API-token user/preference reads through CPW_DB_PATH."
     },
     {
       "method": "GET",

@@ -110,12 +110,16 @@ Route parity check command:
 - The Session log detail route now reads closed session records and all closed-session messages
   from SQLite for fixture DM/admin roles, preserving manager-only access and message recipient
   metadata for historical chat logs.
-- The first identity bootstrap slice now serves `GET /api/v1/me` in fixture mode, preserving
-  Flask-compatible unauthenticated `auth_required` behavior and returning synthetic role-header
-  user, membership, preference, and View As metadata for player, DM, and admin fixture reads.
-- The account settings read slice now serves `GET /api/v1/me/settings` in fixture mode,
-  preserving Flask-compatible unauthenticated `auth_required` behavior plus the current theme
-  preset and live-session chat-order choice metadata.
+- The first identity bootstrap slice now serves `GET /api/v1/me`, preserving
+  Flask-compatible unauthenticated `auth_required` behavior, returning synthetic role-header
+  user, membership, preference, and View As metadata for player, DM, and admin fixture reads,
+  and reading live-style API-token identity, active memberships, normalized preferences, and
+  admin View As choices from `CPW_DB_PATH` when a bearer token is supplied.
+- The account settings read slice now serves `GET /api/v1/me/settings`, preserving
+  Flask-compatible unauthenticated `auth_required` behavior, the current theme preset and
+  live-session chat-order choice metadata, fixture-role reads, and API-token user/preference
+  reads from `CPW_DB_PATH`. The TypeScript slice remains read-only and does not touch API
+  token `last_used_at` timestamps.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

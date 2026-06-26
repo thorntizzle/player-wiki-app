@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -14,9 +15,53 @@ const campaignsDir =
   fileURLToPath(new URL("../../../tests/fixtures/sample_campaigns", import.meta.url));
 const smokeTempDir = mkdtempSync(path.join(tmpdir(), "cpw-api-smoke-"));
 const dbPath = path.join(smokeTempDir, "player_wiki.sqlite3");
+const liveApiToken = "fixture-live-api-token";
+const hashToken = (rawToken) => createHash("sha256").update(rawToken, "utf8").digest("hex");
 
 const smokeDb = new Database(dbPath);
 smokeDb.exec(`
+  CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    is_admin INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL,
+    password_hash TEXT,
+    auth_version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE user_preferences (
+    user_id INTEGER PRIMARY KEY,
+    theme_key TEXT NOT NULL DEFAULT 'parchment',
+    session_chat_order TEXT NOT NULL DEFAULT 'newest_first',
+    frontend_mode TEXT NOT NULL DEFAULT 'gen2',
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE campaign_memberships (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    campaign_slug TEXT NOT NULL,
+    role TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE api_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT NOT NULL,
+    expires_at TEXT,
+    revoked_at TEXT,
+    created_by_user_id INTEGER
+  );
+
   CREATE TABLE systems_import_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     library_slug TEXT NOT NULL,
@@ -30,6 +75,61 @@ smokeDb.exec(`
     started_by_user_id INTEGER
   );
 `);
+smokeDb
+  .prepare(
+    "INSERT INTO users (id, email, display_name, is_admin, status, password_hash, auth_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    77,
+    "fixture-token-user@example.com",
+    "Fixture Token User",
+    1,
+    "active",
+    null,
+    3,
+    "2026-06-25T08:00:00+00:00",
+    "2026-06-25T08:30:00+00:00",
+  );
+smokeDb
+  .prepare(
+    "INSERT INTO users (id, email, display_name, is_admin, status, password_hash, auth_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    78,
+    "fixture-view-target@example.com",
+    "Fixture View Target",
+    0,
+    "active",
+    null,
+    1,
+    "2026-06-25T08:05:00+00:00",
+    "2026-06-25T08:05:00+00:00",
+  );
+smokeDb
+  .prepare(
+    "INSERT INTO user_preferences (user_id, theme_key, session_chat_order, frontend_mode, updated_at) VALUES (?, ?, ?, ?, ?)",
+  )
+  .run(77, "moonlit", "oldest_first", "flask", "2026-06-25T08:35:00+00:00");
+smokeDb
+  .prepare(
+    "INSERT INTO campaign_memberships (id, user_id, campaign_slug, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(501, 77, "linden-pass", "dm", "active", "2026-06-25T08:10:00+00:00", "2026-06-25T08:10:00+00:00");
+smokeDb
+  .prepare(
+    "INSERT INTO api_tokens (id, user_id, label, token_hash, created_at, last_used_at, expires_at, revoked_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    901,
+    77,
+    "Smoke Token",
+    hashToken(liveApiToken),
+    "2026-06-25T08:40:00+00:00",
+    "2026-06-25T08:40:00+00:00",
+    null,
+    null,
+    null,
+  );
 const insertImportRun = smokeDb.prepare(`
   INSERT INTO systems_import_runs (
     library_slug,
@@ -533,6 +633,36 @@ if (blockedMe.status !== 401 || blockedMe.payload?.error?.code !== "auth_require
   );
 }
 
+const invalidBearerMe = await requestJson("/api/v1/me", {
+  Authorization: "Bearer definitely-invalid",
+});
+if (invalidBearerMe.status !== 401 || invalidBearerMe.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected invalid bearer me request to return auth_required 401, got ${invalidBearerMe.status} ${invalidBearerMe.payload?.error?.code}`,
+  );
+}
+
+const bearerMe = await requestJson("/api/v1/me", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (
+  bearerMe.status !== 200 ||
+  bearerMe.payload?.ok !== true ||
+  bearerMe.payload?.auth_source !== "api_token" ||
+  bearerMe.payload?.user?.email !== "fixture-token-user@example.com" ||
+  bearerMe.payload?.user?.is_admin !== true ||
+  bearerMe.payload?.memberships?.[0]?.campaign_slug !== "linden-pass" ||
+  bearerMe.payload?.memberships?.[0]?.role !== "dm" ||
+  bearerMe.payload?.preferences?.theme_key !== "moonlit" ||
+  bearerMe.payload?.preferences?.session_chat_order !== "oldest_first" ||
+  bearerMe.payload?.preferences?.frontend_mode !== "gen2" ||
+  bearerMe.payload?.view_as?.can_view_as !== true ||
+  bearerMe.payload?.view_as?.active_user !== null ||
+  bearerMe.payload?.view_as?.user_choices?.[0]?.email !== "fixture-view-target@example.com"
+) {
+  throw new Error(`Unexpected bearer me payload: ${JSON.stringify(bearerMe.payload)}`);
+}
+
 const playerMe = await requestJson("/api/v1/me", {
   "X-CPW-Fixture-Role": "player",
 });
@@ -591,6 +721,23 @@ if (
   "frontend_mode_choices" in (playerMeSettings.payload || {})
 ) {
   throw new Error(`Unexpected fixture player settings payload: ${JSON.stringify(playerMeSettings.payload)}`);
+}
+
+const bearerMeSettings = await requestJson("/api/v1/me/settings", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (
+  bearerMeSettings.status !== 200 ||
+  bearerMeSettings.payload?.ok !== true ||
+  bearerMeSettings.payload?.user?.email !== "fixture-token-user@example.com" ||
+  bearerMeSettings.payload?.preferences?.theme_key !== "moonlit" ||
+  bearerMeSettings.payload?.preferences?.session_chat_order !== "oldest_first" ||
+  bearerMeSettings.payload?.preferences?.frontend_mode !== "gen2" ||
+  bearerMeSettings.payload?.theme_presets?.length !== 4 ||
+  bearerMeSettings.payload?.session_chat_order_choices?.length !== 2 ||
+  "frontend_mode_choices" in (bearerMeSettings.payload || {})
+) {
+  throw new Error(`Unexpected bearer settings payload: ${JSON.stringify(bearerMeSettings.payload)}`);
 }
 
 const blockedImportRuns = await requestJson("/api/v1/systems/import-runs");

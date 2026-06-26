@@ -5,7 +5,13 @@ import { fileURLToPath } from "node:url";
 import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
 
-import { buildFixtureAccountSettingsPayload, buildFixtureMePayload } from "./auth/view.js";
+import { readApiTokenAuthContext } from "./auth/repository.js";
+import {
+  buildApiTokenAccountSettingsPayload,
+  buildApiTokenMePayload,
+  buildFixtureAccountSettingsPayload,
+  buildFixtureMePayload,
+} from "./auth/view.js";
 import { getApiConfig } from "./config.js";
 import { getCampaignBySlug, listCampaigns, listCampaignSlugs } from "./campaigns/repository.js";
 import { buildCombatReadOnlyPayload } from "./combat/view.js";
@@ -355,6 +361,15 @@ app.get(ROUTES.appState, async (ctx) =>
 );
 
 app.get(ROUTES.me, async (ctx) => {
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "authenticated") {
+    return ctx.json(buildApiTokenMePayload(config, apiAuth.context));
+  }
+  if (apiAuth.kind === "invalid") {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
   const role = fixtureRole(ctx);
   if (!role) {
     const error = authRequired();
@@ -366,6 +381,15 @@ app.get(ROUTES.me, async (ctx) => {
 });
 
 app.get(ROUTES.meSettings, async (ctx) => {
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "authenticated") {
+    return ctx.json(buildApiTokenAccountSettingsPayload(apiAuth.context));
+  }
+  if (apiAuth.kind === "invalid") {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
   const role = fixtureRole(ctx);
   if (!role) {
     const error = authRequired();

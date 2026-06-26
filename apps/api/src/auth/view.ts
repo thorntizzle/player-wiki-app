@@ -1,6 +1,7 @@
 import type { ApiConfig } from "../config.js";
 import type { CampaignViewModel } from "../campaigns/view.js";
 import type { FixtureSystemsRole } from "../systems/sources.js";
+import type { ApiTokenAuthContext } from "./repository.js";
 
 const FIXTURE_TIMESTAMP = "2026-06-25T00:00:00+00:00";
 const FIXTURE_PREFERENCES = {
@@ -143,5 +144,39 @@ export function buildFixtureAccountSettingsPayload(role: FixtureSystemsRole) {
     session_chat_order_choices: SESSION_CHAT_ORDER_CHOICES,
     preferences: { ...FIXTURE_PREFERENCES },
     user: fixtureUser(role),
+  };
+}
+
+function appState(config: ApiConfig) {
+  return {
+    ...config.app,
+    db_path: config.dbPath,
+    campaigns_dir: config.campaignsDir,
+  };
+}
+
+export function buildApiTokenMePayload(config: ApiConfig, authContext: ApiTokenAuthContext) {
+  return {
+    ok: true,
+    app: appState(config),
+    auth_source: authContext.authSource,
+    user: authContext.user,
+    memberships: authContext.memberships,
+    preferences: authContext.preferences,
+    view_as: {
+      can_view_as: authContext.user.is_admin,
+      active_user: null,
+      user_choices: authContext.viewAsUserChoices,
+    },
+  };
+}
+
+export function buildApiTokenAccountSettingsPayload(authContext: ApiTokenAuthContext) {
+  return {
+    ok: true,
+    theme_presets: THEME_PRESETS,
+    session_chat_order_choices: SESSION_CHAT_ORDER_CHOICES,
+    preferences: authContext.preferences,
+    user: authContext.user,
   };
 }
