@@ -6331,6 +6331,94 @@ dndStateAssertionDb
   .run(79, "linden-pass", managedCharacterSlug, "owner", assignmentTimestamp, assignmentTimestamp);
 dndStateAssertionDb.close();
 
+const fixtureSessionResourceUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/resources/sorcery-points`,
+  {
+    "X-CPW-Fixture-Role": "player",
+  },
+  { method: "PATCH", body: { expected_revision: 1, current: "3" } },
+);
+if (
+  fixtureSessionResourceUpdate.status !== 403 ||
+  fixtureSessionResourceUpdate.payload?.error?.message !== "Character session state writes require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture character session resource PATCH bearer requirement, got ${fixtureSessionResourceUpdate.status} ${JSON.stringify(fixtureSessionResourceUpdate.payload)}`,
+  );
+}
+
+const staleSessionResourceUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/resources/sorcery-points`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 999, current: "3" } },
+);
+if (
+  staleSessionResourceUpdate.status !== 409 ||
+  staleSessionResourceUpdate.payload?.error?.code !== "state_conflict" ||
+  staleSessionResourceUpdate.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale character session resource PATCH conflict, got ${staleSessionResourceUpdate.status} ${JSON.stringify(staleSessionResourceUpdate.payload)}`,
+  );
+}
+
+const missingSessionResourceUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/resources/not-a-resource`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 1, current: "3" } },
+);
+if (
+  missingSessionResourceUpdate.status !== 400 ||
+  missingSessionResourceUpdate.payload?.error?.code !== "validation_error" ||
+  missingSessionResourceUpdate.payload?.error?.message !== "Unknown resource: not-a-resource"
+) {
+  throw new Error(
+    `Expected missing character session resource PATCH validation_error, got ${missingSessionResourceUpdate.status} ${JSON.stringify(missingSessionResourceUpdate.payload)}`,
+  );
+}
+
+const playerSessionResourceUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/resources/sorcery-points`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 1, current: "3", delta: "-1" } },
+);
+if (
+  playerSessionResourceUpdate.status !== 200 ||
+  playerSessionResourceUpdate.payload?.ok !== true ||
+  playerSessionResourceUpdate.payload?.character?.definition?.character_slug !== managedCharacterSlug ||
+  playerSessionResourceUpdate.payload?.character?.state_record?.revision !== 2 ||
+  playerSessionResourceUpdate.payload?.character?.state_record?.state?.resources?.[0]?.id !== "sorcery-points" ||
+  playerSessionResourceUpdate.payload?.character?.state_record?.state?.resources?.[0]?.current !== 2
+) {
+  throw new Error(`Unexpected character session resource PATCH payload: ${JSON.stringify(playerSessionResourceUpdate.payload)}`);
+}
+
+const sessionResourceAssertionDb = new Database(dbPath, { readonly: true });
+const managedStateAfterResource = sessionResourceAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", managedCharacterSlug);
+sessionResourceAssertionDb.close();
+const managedResourceState = JSON.parse(managedStateAfterResource?.state_json || "{}");
+if (
+  managedStateAfterResource?.revision !== 2 ||
+  managedStateAfterResource?.updated_by_user_id !== 79 ||
+  managedResourceState.resources?.[0]?.id !== "sorcery-points" ||
+  managedResourceState.resources?.[0]?.current !== 2
+) {
+  throw new Error(
+    `Unexpected character session resource database row: ${JSON.stringify({
+      managedStateAfterResource,
+      managedResourceState,
+    })}`,
+  );
+}
+
 const contentCharactersAfterPut = await requestJson("/api/v1/campaigns/linden-pass/content/characters", contentManagerHeaders);
 if (!contentCharactersAfterPut.payload?.characters?.some((item) => item.character_slug === managedCharacterSlug)) {
   throw new Error(`Expected content characters list to include ${managedCharacterSlug} after PUT.`);

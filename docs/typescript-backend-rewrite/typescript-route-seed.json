@@ -656,6 +656,15 @@
       "notes": "Tracked Hono character session vitals route with bearer API-token writes for app admin, campaign DM, or assigned player, fixture-role write denial, shared character_state revision conflict handling, DND HP/temp HP/Hit Dice updates, Xianxia HP/temp HP plus Stance/Energy/Yin-Yang/Dao state updates, refreshed character state payloads, and explicit missing-character JSON."
     },
     {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/resources/:resourceId",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono character session resource route with bearer API-token writes for app admin, campaign DM, or assigned player, fixture-role write denial, shared character_state revision conflict handling, current/delta resource updates by state resource id, refreshed character state payloads, and validation_error missing-resource JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/me",
       "route_family": "api_v1",

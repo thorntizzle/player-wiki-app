@@ -1096,6 +1096,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "content_character_not_found",
     },
   },
+  {
+    method: "PATCH",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/resources/:resourceId",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "PATCH",
+      path: "/api/v1/campaigns/linden-pass/characters/arden-march/session/resources/not-a-resource",
+      status: 400,
+      contentType: "application/json",
+      errorCode: "validation_error",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1174,4 +1189,5 @@ export const ROUTES = {
   combatCombatantPlayerDetailVisibility: IMPLEMENTED_ROUTES[72].honoPath,
   combatConditionUpdate: IMPLEMENTED_ROUTES[73].honoPath,
   characterSessionVitals: IMPLEMENTED_ROUTES[74].honoPath,
+  characterSessionResource: IMPLEMENTED_ROUTES[75].honoPath,
 } as const;

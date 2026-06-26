@@ -26,6 +26,8 @@ export type CharacterSessionVitalsUpdateResult =
   | { status: "state_conflict"; message: string }
   | { status: "validation_error"; message: string };
 
+export type CharacterSessionResourceUpdateResult = CharacterSessionVitalsUpdateResult;
+
 const XIANXIA_SYSTEM_CODE = "xianxia";
 const XIANXIA_ENERGY_KEYS = ["jing", "qi", "shen"] as const;
 const XIANXIA_CURRENCY_KEYS = ["coin", "supply", "spirit_stones"] as const;
@@ -771,6 +773,30 @@ function applyXianxiaVitalsUpdate(state: Record<string, unknown>, payload: Recor
   state.xianxia = xianxia;
 }
 
+function findStateItemById(items: unknown, targetId: string, itemType: string): Record<string, unknown> {
+  const match = asArray(items).map(asRecord).find((item) => asString(item.id) === targetId);
+  if (!match) {
+    throw new Error(`Unknown ${itemType}: ${targetId}`);
+  }
+  return match;
+}
+
+function applyResourceUpdate(state: Record<string, unknown>, resourceId: string, payload: Record<string, unknown>): void {
+  const resources = asArray(state.resources);
+  const resource = findStateItemById(resources, resourceId, "resource");
+  let current = asInt(resource.current, 0);
+  const currentValue = parseOptionalWholeNumber(payload.current, "Current");
+  if (currentValue !== null) {
+    current = currentValue;
+  }
+  const deltaValue = parseOptionalWholeNumber(payload.delta, "Delta");
+  if (deltaValue !== null) {
+    current += deltaValue;
+  }
+  resource.current = current;
+  state.resources = resources;
+}
+
 export function canEditCharacterSessionState(
   config: ApiConfig,
   campaignSlug: string,
@@ -855,6 +881,90 @@ export function updateCharacterSessionVitals(
       }
     } catch (error) {
       return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character vitals payload." };
+    }
+
+    const now = utcIsoTimestamp();
+    if (stateRowMissing) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(campaignSlug, characterSlug, expectedRevision + 1, JSON.stringify(nextState), now, updatedByUserId);
+      return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+    }
+
+    const result = database
+      .prepare(
+        `
+          UPDATE character_state
+          SET revision = revision + 1,
+              state_json = ?,
+              updated_at = ?,
+              updated_by_user_id = ?
+          WHERE campaign_slug = ?
+            AND character_slug = ?
+            AND revision = ?
+        `,
+      )
+      .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
+    if (result.changes <= 0) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+    return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCharacterSessionResource(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+  resourceId: string,
+  payload: Record<string, unknown>,
+  updatedByUserId: number,
+): CharacterSessionResourceUpdateResult {
+  let expectedRevision: number;
+  try {
+    expectedRevision = parseRequiredWholeNumber(payload.expected_revision, "Expected revision");
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character resource payload." };
+  }
+
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+
+    let existingState = readCharacterState(database, campaignSlug, characterSlug);
+    const stateRowMissing = !existingState;
+    existingState ??= { revision: 1, state: buildInitialState(definition) };
+
+    if (existingState.revision !== expectedRevision) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+
+    const nextState = copyState(existingState.state);
+    try {
+      applyResourceUpdate(nextState, resourceId, payload);
+    } catch (error) {
+      return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character resource payload." };
     }
 
     const now = utcIsoTimestamp();

@@ -428,6 +428,10 @@ fixture database.
   - unauthenticated, fixture-role, unassigned-player, stale-revision, and missing-character error envelopes.
   - assigned-player DND HP/temp HP/Hit Dice updates through `character_state`, including shared revision bumps and `updated_by_user_id`.
   - DM Xianxia shared HP/temp HP plus Stance, Jing/Qi/Shen, Yin/Yang, and Dao writes through `character_state`, preserving Flask's route-level separation between shared HP/temp HP and the nested Xianxia-only vitals branch.
+- Character session resource payload checks cover:
+  - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>` with bearer-only writes.
+  - fixture-role, stale-revision, and missing-resource validation envelopes.
+  - assigned-player current/delta resource updates through `character_state`, including shared revision bumps and `updated_by_user_id`.
 
 ## Added Tests and Checks
 
