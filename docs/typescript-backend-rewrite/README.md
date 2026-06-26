@@ -73,6 +73,8 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/wiki/sections/:sectionSlug`
   - `GET /api/v1/campaigns/:campaignSlug/wiki/pages/*`
   - `GET /api/v1/campaigns/:campaignSlug/session`
+  - `POST /api/v1/campaigns/:campaignSlug/session/start`
+  - `POST /api/v1/campaigns/:campaignSlug/session/close`
   - `POST /api/v1/campaigns/:campaignSlug/session/messages`
   - `GET /api/v1/campaigns/:campaignSlug/session/article-sources/search`
   - `GET /api/v1/campaigns/:campaignSlug/session/articles/:articleId/image`
@@ -121,6 +123,13 @@ Route parity check command:
   `campaign_session_messages` inserts, session revision bumps, recipient labels, refreshed read
   visibility, and missing-campaign JSON. Current validation covers a disposable fixture database only;
   production/staging write readiness remains gated by migration, backup, and rollback rehearsal.
+- The Session lifecycle write routes now serve `POST .../session/start` and `POST .../session/close`
+  for bearer API-token DM/admin users against `CPW_DB_PATH`, preserving Flask-compatible manager
+  permission checks, duplicate-start and empty-close validation messages, SQLite
+  `campaign_sessions` inserts/updates, session revision bumps, serialized session responses, refreshed
+  closed-log summaries, and missing-campaign JSON. Current validation covers a disposable fixture
+  database only; production/staging write readiness remains gated by migration, backup, and rollback
+  rehearsal.
 - The Session article image route now streams SQLite-backed fixture image bytes with stored media
   types, preserving fixture or bearer-token manager access to staged/revealed images and player
   access only to images on articles revealed in the active session.

@@ -508,6 +508,36 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "campaign_not_found",
     },
   },
+  {
+    method: "POST",
+    honoPath: "/api/v1/campaigns/:campaignSlug/session/start",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/session/start",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/session/start",
+    routeFamily: "api_v1_session",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/session/start",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
+  {
+    method: "POST",
+    honoPath: "/api/v1/campaigns/:campaignSlug/session/close",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/session/close",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/session/close",
+    routeFamily: "api_v1_session",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/session/close",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -547,4 +577,6 @@ export const ROUTES = {
   campaignControl: IMPLEMENTED_ROUTES[33].honoPath,
   campaignControlVisibility: IMPLEMENTED_ROUTES[34].honoPath,
   sessionMessageCreate: IMPLEMENTED_ROUTES[35].honoPath,
+  sessionStart: IMPLEMENTED_ROUTES[36].honoPath,
+  sessionClose: IMPLEMENTED_ROUTES[37].honoPath,
 } as const;

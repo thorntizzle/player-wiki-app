@@ -34,6 +34,9 @@ fixture database.
   - `GET /api/v1/campaigns/:campaignSlug/wiki/pages/*`
 - Implemented Session state read endpoint with a no-header empty shell plus role-aware SQLite fixture or bearer-token reads for active session state, messages, and manager article/log arrays:
   - `GET /api/v1/campaigns/:campaignSlug/session`
+- Implemented Session lifecycle write endpoints with bearer-token DM/admin access, SQLite session inserts/updates, and session revision bumps:
+  - `POST /api/v1/campaigns/:campaignSlug/session/start`
+  - `POST /api/v1/campaigns/:campaignSlug/session/close`
 - Implemented Session message write endpoint with bearer-token campaign access, SQLite message inserts, and session revision bumps:
   - `POST /api/v1/campaigns/:campaignSlug/session/messages`
 - Implemented Session manager article-source lookup endpoint with fixture or bearer-token manager access:
@@ -217,6 +220,18 @@ fixture database.
   - response messages include author metadata, recipient scope/user/label metadata, trimmed body text, and no article payload for normal chat messages
   - subsequent Session reads reflect Flask-compatible private-message visibility for the posting player, targeted player, and DM/admin readers
   - missing campaign message writes return `campaign_not_found` JSON
+- Session lifecycle writes preserve the `/api/v1/campaigns/:campaignSlug/session/start` and
+  `/api/v1/campaigns/:campaignSlug/session/close` mutation shells for a disposable fixture SQLite database:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture-role write attempts are rejected because the mutation needs a durable bearer-token actor
+  - bearer-token players and users without active manager access receive `forbidden`
+  - duplicate start requests return Flask-compatible `A live session is already running for this campaign.`
+  - close requests without an active session return Flask-compatible `There is no active session to close.`
+  - start inserts an active `campaign_sessions` row with `started_by_user_id`
+  - close updates the active `campaign_sessions` row to `closed` with `ended_at` and `ended_by_user_id`
+  - both lifecycle writes bump `campaign_session_states.revision` and set `updated_by_user_id` to the actor
+  - response sessions preserve Flask-compatible serialized session fields and subsequent Session reads expose the new active session or closed-session log summary
+  - missing campaign lifecycle writes return `campaign_not_found` JSON
 - Session article image reads stream the stored SQLite `data_blob` with the stored `media_type`; fixture or bearer-token DM/admin roles can read staged or revealed images, while fixture or bearer-token players receive only currently revealed active-session images and get a missing-image response for staged or inaccessible images.
 - Session log detail reads cover closed-session records and all related messages for fixture or bearer-token DM/admin roles, including DM-only recipient metadata, while unauthenticated requests keep Flask-compatible `auth_required` and fixture or bearer-token player requests receive `forbidden`.
 - Session article-source search preserves the manager lookup API shell:
@@ -284,6 +299,7 @@ fixture database.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/characters` list sorting/count and sampled character summary metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` detail payload definition/import metadata and missing-content-character 404.
   - verifies `GET /api/v1/campaigns/:campaignSlug/session` no-header read-only payload shape, role-aware fixture and bearer-token SQLite Session state reads, auth/forbidden bearer envelopes, token/revision headers behavior, unchanged-response short-circuit, and session missing-campaign 404.
   - verifies `POST /api/v1/campaigns/:campaignSlug/session/messages` auth, fixture-write denial, malformed JSON handling, validation messages, SQLite persistence, private-message visibility, recipient labels, revision bumps, and missing-campaign 404 against the disposable smoke-test database.
+  - verifies `POST /api/v1/campaigns/:campaignSlug/session/start` and `.../session/close` auth, fixture-write denial, player-forbidden behavior, duplicate-start/empty-close validation, SQLite session persistence, revision bumps, refreshed Session reads/log summaries, and missing-campaign 404 against the disposable smoke-test database.
   - verifies `PATCH /api/v1/me/settings` auth, fixture-write denial, validation messages, retired frontend-mode rejection, SQLite persistence, and `/me` preference hydration after writes.
   - verifies `PATCH /api/v1/campaigns/:campaignSlug/control/visibility` auth, validation, Private restrictions, changed-scope response shape, SQLite persistence, audit rows, idempotent no-change response, and missing-campaign 404 against the disposable smoke-test database.
 - `apps/api/tests/route-parity.mjs`:

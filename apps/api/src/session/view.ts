@@ -213,6 +213,17 @@ export type SessionMessagePostResult =
       message: string;
     };
 
+export type SessionLifecycleWriteResult =
+  | {
+      status: "ok";
+      session: SessionRecordPayload;
+      sessionRevision: number;
+    }
+  | {
+      status: "validation_error";
+      message: string;
+    };
+
 function stableHexDigest(value: string): string {
   return createHash("sha1").update(value).digest("hex");
 }
@@ -577,6 +588,22 @@ function loadSessionLog(database: Database.Database, campaignSlug: string, sessi
           WHERE campaign_slug = ?
             AND id = ?
             AND status = 'closed'
+          LIMIT 1
+        `,
+      )
+      .get(campaignSlug, sessionId) as SessionRow | undefined) || null
+  );
+}
+
+function loadSession(database: Database.Database, campaignSlug: string, sessionId: number): SessionRow | null {
+  return (
+    (database
+      .prepare(
+        `
+          SELECT id, campaign_slug, status, started_at, started_by_user_id, ended_at, ended_by_user_id
+          FROM campaign_sessions
+          WHERE campaign_slug = ?
+            AND id = ?
           LIMIT 1
         `,
       )
@@ -949,6 +976,126 @@ function bumpSessionRevision(database: Database.Database, campaignSlug: string, 
     )
     .run(nextRevision, now, actorUserId, campaignSlug);
   return nextRevision;
+}
+
+export function startSession(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  actor: { id: number },
+): SessionLifecycleWriteResult {
+  if (!existsSync(dbPath)) {
+    return { status: "validation_error", message: "Session storage is not initialized." };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const activeSession = loadActiveSession(database, campaign.slug);
+    if (activeSession) {
+      return { status: "validation_error", message: "A live session is already running for this campaign." };
+    }
+
+    const now = utcIsoTimestamp();
+    const writeSession = database.transaction(() => {
+      const insertResult = database
+        .prepare(
+          `
+            INSERT INTO campaign_sessions (
+              campaign_slug,
+              status,
+              started_at,
+              started_by_user_id,
+              ended_at,
+              ended_by_user_id
+            ) VALUES (?, 'active', ?, ?, NULL, NULL)
+          `,
+        )
+        .run(campaign.slug, now, actor.id);
+      const sessionRevision = bumpSessionRevision(database, campaign.slug, actor.id, now);
+      const session = loadSession(database, campaign.slug, Number(insertResult.lastInsertRowid));
+      if (!session) {
+        throw new Error("Failed to persist session lifecycle record.");
+      }
+      return { session, sessionRevision };
+    });
+
+    const result = writeSession();
+    return {
+      status: "ok",
+      session: serializeSessionRecord(result.session)!,
+      sessionRevision: result.sessionRevision,
+    };
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return { status: "validation_error", message: "Session storage is not initialized." };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function closeSession(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  actor: { id: number },
+): SessionLifecycleWriteResult {
+  if (!existsSync(dbPath)) {
+    return { status: "validation_error", message: "There is no active session to close." };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const activeSession = loadActiveSession(database, campaign.slug);
+    if (!activeSession) {
+      return { status: "validation_error", message: "There is no active session to close." };
+    }
+
+    const now = utcIsoTimestamp();
+    const writeSession = database.transaction(() => {
+      const updateResult = database
+        .prepare(
+          `
+            UPDATE campaign_sessions
+            SET status = 'closed',
+                ended_at = ?,
+                ended_by_user_id = ?
+            WHERE campaign_slug = ?
+              AND id = ?
+              AND status = 'active'
+          `,
+        )
+        .run(now, actor.id, campaign.slug, Number(activeSession.id));
+      if (updateResult.changes !== 1) {
+        return {
+          session: null,
+          sessionRevision: loadStateRevision(database, campaign.slug),
+        };
+      }
+      const sessionRevision = bumpSessionRevision(database, campaign.slug, actor.id, now);
+      return {
+        session: loadSession(database, campaign.slug, Number(activeSession.id)),
+        sessionRevision,
+      };
+    });
+
+    const result = writeSession();
+    if (!result.session) {
+      return { status: "validation_error", message: "There is no active session to close." };
+    }
+
+    return {
+      status: "ok",
+      session: serializeSessionRecord(result.session)!,
+      sessionRevision: result.sessionRevision,
+    };
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return { status: "validation_error", message: "There is no active session to close." };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
 }
 
 export async function postSessionMessage(

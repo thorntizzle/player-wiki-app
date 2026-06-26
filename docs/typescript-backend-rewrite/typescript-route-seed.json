@@ -207,6 +207,24 @@
     },
     {
       "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/start",
+      "route_family": "api_v1_session",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/session/start",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono session start route with bearer API-token DM/admin access, Flask-compatible duplicate-active-session validation, SQLite active session inserts, session revision bumps, serialized session payloads, and explicit missing-campaign JSON."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/close",
+      "route_family": "api_v1_session",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/session/close",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono session close route with bearer API-token DM/admin access, Flask-compatible no-active-session validation, SQLite active session close updates, session revision bumps, serialized session payloads, refreshed log summaries, and explicit missing-campaign JSON."
+    },
+    {
+      "method": "POST",
       "path": "/api/v1/campaigns/<campaign_slug>/session/messages",
       "route_family": "api_v1_session",
       "status": "implemented_fixture_sqlite_write",

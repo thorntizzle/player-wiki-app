@@ -2956,6 +2956,172 @@ if (missingSessionSourceSearch.status !== 404 || missingSessionSourceSearch.payl
   );
 }
 
+const blockedSessionStart = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/start",
+  {},
+  { method: "POST" },
+);
+if (blockedSessionStart.status !== 401 || blockedSessionStart.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated session start 401, got ${blockedSessionStart.status} ${blockedSessionStart.payload?.error?.code}`,
+  );
+}
+
+const fixtureSessionStart = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/start",
+  { "X-CPW-Fixture-Role": "dm" },
+  { method: "POST" },
+);
+if (fixtureSessionStart.status !== 403 || fixtureSessionStart.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected fixture session start forbidden 403, got ${fixtureSessionStart.status} ${fixtureSessionStart.payload?.error?.code}`,
+  );
+}
+
+const playerSessionStart = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/start",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST" },
+);
+if (
+  playerSessionStart.status !== 403 ||
+  playerSessionStart.payload?.error?.message !== "You do not have permission to manage this session."
+) {
+  throw new Error(
+    `Expected player session start forbidden, got ${playerSessionStart.status} ${playerSessionStart.payload?.error?.message}`,
+  );
+}
+
+const duplicateSessionStart = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/start",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST" },
+);
+if (
+  duplicateSessionStart.status !== 400 ||
+  duplicateSessionStart.payload?.error?.message !== "A live session is already running for this campaign."
+) {
+  throw new Error(
+    `Expected duplicate session start validation, got ${duplicateSessionStart.status} ${duplicateSessionStart.payload?.error?.message}`,
+  );
+}
+
+const missingSessionStartCampaign = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/session/start",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST" },
+);
+if (missingSessionStartCampaign.status !== 404 || missingSessionStartCampaign.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(
+    `Expected missing session start campaign JSON 404, got ${missingSessionStartCampaign.status} ${missingSessionStartCampaign.payload?.error?.code}`,
+  );
+}
+
+const playerSessionClose = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/close",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST" },
+);
+if (
+  playerSessionClose.status !== 403 ||
+  playerSessionClose.payload?.error?.message !== "You do not have permission to manage this session."
+) {
+  throw new Error(
+    `Expected player session close forbidden, got ${playerSessionClose.status} ${playerSessionClose.payload?.error?.message}`,
+  );
+}
+
+const closeSessionResponse = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/close",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST" },
+);
+if (
+  closeSessionResponse.status !== 200 ||
+  closeSessionResponse.payload?.ok !== true ||
+  closeSessionResponse.payload?.session?.id !== 1 ||
+  closeSessionResponse.payload?.session?.status !== "closed" ||
+  closeSessionResponse.payload?.session?.is_active !== false ||
+  closeSessionResponse.payload?.session?.ended_by_user_id !== 81 ||
+  typeof closeSessionResponse.payload?.session?.ended_at !== "string"
+) {
+  throw new Error(`Unexpected session close payload: ${JSON.stringify(closeSessionResponse.payload)}`);
+}
+
+const duplicateSessionClose = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/close",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST" },
+);
+if (
+  duplicateSessionClose.status !== 400 ||
+  duplicateSessionClose.payload?.error?.message !== "There is no active session to close."
+) {
+  throw new Error(
+    `Expected duplicate session close validation, got ${duplicateSessionClose.status} ${duplicateSessionClose.payload?.error?.message}`,
+  );
+}
+
+const missingSessionCloseCampaign = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/session/close",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST" },
+);
+if (missingSessionCloseCampaign.status !== 404 || missingSessionCloseCampaign.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(
+    `Expected missing session close campaign JSON 404, got ${missingSessionCloseCampaign.status} ${missingSessionCloseCampaign.payload?.error?.code}`,
+  );
+}
+
+const lifecycleAfterCloseDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const closedSessionRow = lifecycleAfterCloseDb
+  .prepare("SELECT status, ended_by_user_id FROM campaign_sessions WHERE id = ?")
+  .get(1);
+const closeRevisionRow = lifecycleAfterCloseDb
+  .prepare("SELECT revision, updated_by_user_id FROM campaign_session_states WHERE campaign_slug = ?")
+  .get("linden-pass");
+lifecycleAfterCloseDb.close();
+if (
+  closedSessionRow?.status !== "closed" ||
+  Number(closedSessionRow?.ended_by_user_id) !== 81 ||
+  Number(closeRevisionRow?.revision) !== Number(messageRevisionRow?.revision) + 1 ||
+  Number(closeRevisionRow?.updated_by_user_id) !== 81
+) {
+  throw new Error(
+    `Expected closed session and revision bump, got session=${JSON.stringify(closedSessionRow)} revision=${JSON.stringify(closeRevisionRow)}`,
+  );
+}
+
+const restartSessionResponse = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/start",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST" },
+);
+if (
+  restartSessionResponse.status !== 200 ||
+  restartSessionResponse.payload?.ok !== true ||
+  restartSessionResponse.payload?.session?.status !== "active" ||
+  restartSessionResponse.payload?.session?.is_active !== true ||
+  restartSessionResponse.payload?.session?.started_by_user_id !== 81 ||
+  restartSessionResponse.payload?.session?.ended_at !== null ||
+  Number(restartSessionResponse.payload?.session?.id) <= 2
+) {
+  throw new Error(`Unexpected session restart payload: ${JSON.stringify(restartSessionResponse.payload)}`);
+}
+
+const dmSessionAfterLifecycle = await requestJson("/api/v1/campaigns/linden-pass/session", {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  dmSessionAfterLifecycle.status !== 200 ||
+  dmSessionAfterLifecycle.payload?.active_session?.id !== restartSessionResponse.payload?.session?.id ||
+  dmSessionAfterLifecycle.payload?.messages?.length !== 0 ||
+  Number(dmSessionAfterLifecycle.payload?.session_revision) !== Number(closeRevisionRow?.revision) + 1 ||
+  !dmSessionAfterLifecycle.payload?.session_logs?.some((entry) => entry.session?.id === 1 && entry.message_count >= 5)
+) {
+  throw new Error(`Unexpected DM session after lifecycle writes: ${JSON.stringify(dmSessionAfterLifecycle.payload)}`);
+}
+
 const missingHelp = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/help");
 if (missingHelp.status !== 404 || missingHelp.payload?.error?.code !== "campaign_not_found") {
   throw new Error(`Expected missing help campaign JSON 404, got ${missingHelp.status}`);

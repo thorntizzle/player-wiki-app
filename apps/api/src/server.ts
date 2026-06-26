@@ -32,8 +32,10 @@ import { buildSessionArticleSourceSearchPayload } from "./session/sourceSearch.j
 import {
   buildSessionLogDetailPayload,
   buildSessionStatePayload,
+  closeSession,
   postSessionMessage,
   readSessionArticleImage,
+  startSession,
 } from "./session/view.js";
 import { getSystemsImportRun, listSystemsImportRuns } from "./systems/importRuns.js";
 import {
@@ -1242,6 +1244,86 @@ app.get(ROUTES.sessionState, async (ctx) => {
   }
 
   return ctx.json(payload);
+});
+
+app.post(ROUTES.sessionStart, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "invalid") {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (apiAuth.kind !== "authenticated") {
+    if (fixtureRole(ctx)) {
+      const error = forbidden("Session lifecycle writes require bearer API authentication.");
+      return ctx.json({ ok: error.ok, error: error.error }, error.status);
+    }
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const role = apiTokenRoleForCampaign(apiAuth.context, campaign.slug);
+  if (role !== "dm" && role !== "admin") {
+    const error = forbidden("You do not have permission to manage this session.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = startSession(config.dbPath, campaign, { id: apiAuth.context.user.id });
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    session: result.session,
+  });
+});
+
+app.post(ROUTES.sessionClose, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "invalid") {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (apiAuth.kind !== "authenticated") {
+    if (fixtureRole(ctx)) {
+      const error = forbidden("Session lifecycle writes require bearer API authentication.");
+      return ctx.json({ ok: error.ok, error: error.error }, error.status);
+    }
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const role = apiTokenRoleForCampaign(apiAuth.context, campaign.slug);
+  if (role !== "dm" && role !== "admin") {
+    const error = forbidden("You do not have permission to manage this session.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = closeSession(config.dbPath, campaign, { id: apiAuth.context.user.id });
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    session: result.session,
+  });
 });
 
 app.post(ROUTES.sessionMessageCreate, async (ctx) => {
