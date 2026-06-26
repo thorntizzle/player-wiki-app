@@ -6571,6 +6571,67 @@ if (
   );
 }
 
+const staleSessionCurrencyUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/currency`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 999, gp: "12" } },
+);
+if (
+  staleSessionCurrencyUpdate.status !== 409 ||
+  staleSessionCurrencyUpdate.payload?.error?.code !== "state_conflict" ||
+  staleSessionCurrencyUpdate.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale character session currency PATCH conflict, got ${staleSessionCurrencyUpdate.status} ${JSON.stringify(staleSessionCurrencyUpdate.payload)}`,
+  );
+}
+
+const managedCurrencyBefore = managedInventoryState.currency || {};
+const playerSessionCurrencyUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/currency`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 4, cp: "11", gp: "12", pp: "" } },
+);
+if (
+  playerSessionCurrencyUpdate.status !== 200 ||
+  playerSessionCurrencyUpdate.payload?.ok !== true ||
+  playerSessionCurrencyUpdate.payload?.character?.state_record?.revision !== 5 ||
+  playerSessionCurrencyUpdate.payload?.character?.state_record?.state?.currency?.cp !== 11 ||
+  playerSessionCurrencyUpdate.payload?.character?.state_record?.state?.currency?.gp !== 12 ||
+  playerSessionCurrencyUpdate.payload?.character?.state_record?.state?.currency?.sp !== (managedCurrencyBefore.sp ?? 0) ||
+  playerSessionCurrencyUpdate.payload?.character?.state_record?.state?.currency?.ep !== (managedCurrencyBefore.ep ?? 0) ||
+  playerSessionCurrencyUpdate.payload?.character?.state_record?.state?.currency?.pp !== (managedCurrencyBefore.pp ?? 0)
+) {
+  throw new Error(`Unexpected character session currency PATCH payload: ${JSON.stringify(playerSessionCurrencyUpdate.payload)}`);
+}
+
+const sessionCurrencyAssertionDb = new Database(dbPath, { readonly: true });
+const managedStateAfterCurrency = sessionCurrencyAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", managedCharacterSlug);
+sessionCurrencyAssertionDb.close();
+const managedCurrencyState = JSON.parse(managedStateAfterCurrency?.state_json || "{}");
+if (
+  managedStateAfterCurrency?.revision !== 5 ||
+  managedStateAfterCurrency?.updated_by_user_id !== 79 ||
+  managedCurrencyState.currency?.cp !== 11 ||
+  managedCurrencyState.currency?.gp !== 12 ||
+  managedCurrencyState.currency?.sp !== (managedCurrencyBefore.sp ?? 0) ||
+  managedCurrencyState.currency?.ep !== (managedCurrencyBefore.ep ?? 0) ||
+  managedCurrencyState.currency?.pp !== (managedCurrencyBefore.pp ?? 0)
+) {
+  throw new Error(
+    `Unexpected character session currency database row: ${JSON.stringify({
+      managedStateAfterCurrency,
+      managedCurrencyState,
+    })}`,
+  );
+}
+
 const contentCharactersAfterPut = await requestJson("/api/v1/campaigns/linden-pass/content/characters", contentManagerHeaders);
 if (!contentCharactersAfterPut.payload?.characters?.some((item) => item.character_slug === managedCharacterSlug)) {
   throw new Error(`Expected content characters list to include ${managedCharacterSlug} after PUT.`);
@@ -6988,6 +7049,47 @@ if (
     `Unexpected Xianxia active-state database row: ${JSON.stringify({
       xianxiaActiveStateRow,
       xianxiaActiveState,
+    })}`,
+  );
+}
+
+const xianxiaCurrencyBefore = xianxiaActiveState.xianxia?.currency || {};
+const xianxiaSessionCurrencyUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/currency`,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: editedXianxiaRevision + 4, coin: "7", supply: "-3", spirit_stones: "" } },
+);
+if (
+  xianxiaSessionCurrencyUpdate.status !== 200 ||
+  xianxiaSessionCurrencyUpdate.payload?.ok !== true ||
+  xianxiaSessionCurrencyUpdate.payload?.character?.state_record?.revision !== editedXianxiaRevision + 5 ||
+  xianxiaSessionCurrencyUpdate.payload?.character?.state_record?.state?.xianxia?.currency?.coin !== 7 ||
+  xianxiaSessionCurrencyUpdate.payload?.character?.state_record?.state?.xianxia?.currency?.supply !== 0 ||
+  xianxiaSessionCurrencyUpdate.payload?.character?.state_record?.state?.xianxia?.currency?.spirit_stones !==
+    (xianxiaCurrencyBefore.spirit_stones ?? 0)
+) {
+  throw new Error(`Unexpected Xianxia session currency PATCH payload: ${JSON.stringify(xianxiaSessionCurrencyUpdate.payload)}`);
+}
+
+const xianxiaCurrencyAssertionDb = new Database(dbPath, { readonly: true });
+const xianxiaCurrencyRow = xianxiaCurrencyAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", xianxiaCharacterSlug);
+xianxiaCurrencyAssertionDb.close();
+const xianxiaCurrencyState = JSON.parse(xianxiaCurrencyRow?.state_json || "{}");
+if (
+  Number(xianxiaCurrencyRow?.revision) !== editedXianxiaRevision + 5 ||
+  xianxiaCurrencyRow?.updated_by_user_id !== 81 ||
+  xianxiaCurrencyState.xianxia?.currency?.coin !== 7 ||
+  xianxiaCurrencyState.xianxia?.currency?.supply !== 0 ||
+  xianxiaCurrencyState.xianxia?.currency?.spirit_stones !== (xianxiaCurrencyBefore.spirit_stones ?? 0)
+) {
+  throw new Error(
+    `Unexpected Xianxia session currency database row: ${JSON.stringify({
+      xianxiaCurrencyRow,
+      xianxiaCurrencyState,
     })}`,
   );
 }

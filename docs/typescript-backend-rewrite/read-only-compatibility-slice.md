@@ -445,6 +445,11 @@ fixture database.
   - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-active-state` with bearer-only writes.
   - non-Xianxia validation envelopes and stale-revision conflict envelopes.
   - DM Xianxia active Stance/Aura manual state updates through `character_state`, including whitespace normalization, blank-value clearing, shared revision bumps, and `updated_by_user_id`.
+- Character session currency payload checks cover:
+  - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/currency` with bearer-only writes.
+  - stale-revision conflict envelopes.
+  - assigned-player DND absolute denomination updates through `state.currency`, preserving omitted/blank denominations.
+  - DM Xianxia absolute denomination updates through `state.xianxia.currency`, including non-negative clamping.
 
 ## Added Tests and Checks
 

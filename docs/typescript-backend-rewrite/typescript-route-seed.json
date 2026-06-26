@@ -692,6 +692,15 @@
       "notes": "Tracked Hono character session Xianxia active-state route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflict handling, Xianxia-only validation, active Stance/Aura whitespace-normalized manual state updates, blank active-state clearing, refreshed character state payloads, and validation_error non-Xianxia JSON."
     },
     {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/currency",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/currency",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono character session currency route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflict handling, absolute denomination updates, DND state.currency writes, Xianxia state.xianxia.currency writes with non-negative clamping, refreshed character state payloads, and explicit missing-character JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/me",
       "route_family": "api_v1",

@@ -338,13 +338,16 @@ Route parity check command:
   `PATCH .../characters/:characterSlug/session/resources/:resourceId` plus
   `PATCH .../characters/:characterSlug/session/spell-slots/:level` and
   `PATCH .../characters/:characterSlug/session/inventory/:itemId` and
-  `PATCH .../characters/:characterSlug/session/xianxia-active-state` for bearer API-token app
-  admins, campaign DMs, and assigned players. They write only the shared SQLite `character_state`
+  `PATCH .../characters/:characterSlug/session/xianxia-active-state` and
+  `PATCH .../characters/:characterSlug/session/currency` for bearer API-token app admins,
+  campaign DMs, and assigned players. They write only the shared SQLite `character_state`
   row, enforce the shared state revision, support DND HP/temp HP/Hit Dice, resource current/delta
   updates, spell-slot used/delta-used updates with optional slot-lane migration, DND inventory
   quantity/delta updates, and Xianxia HP/temp HP plus Stance/Energy/Yin-Yang/Dao fields, nested
-  inventory quantity updates with top-level mirror sync, and active Stance/Aura manual state edits,
-  deny fixture-role writes, and return refreshed `character.state_record` payloads. Current
+  inventory quantity updates with top-level mirror sync, active Stance/Aura manual state edits, and
+  absolute currency denomination updates for DND `state.currency` plus Xianxia
+  `state.xianxia.currency` with non-negative Xianxia clamping, deny fixture-role writes, and return
+  refreshed `character.state_record` payloads. Current
   validation covers disposable copied fixture files and fixture SQLite only; the remaining character
   session-state route family is still sliced separately.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.

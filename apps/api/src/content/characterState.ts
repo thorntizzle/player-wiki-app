@@ -34,7 +34,10 @@ export type CharacterSessionInventoryUpdateResult = CharacterSessionVitalsUpdate
 
 export type CharacterSessionXianxiaActiveStateUpdateResult = CharacterSessionVitalsUpdateResult;
 
+export type CharacterSessionCurrencyUpdateResult = CharacterSessionVitalsUpdateResult;
+
 const XIANXIA_SYSTEM_CODE = "xianxia";
+const DND_CURRENCY_KEYS = ["cp", "sp", "ep", "gp", "pp"] as const;
 const XIANXIA_ENERGY_KEYS = ["jing", "qi", "shen"] as const;
 const XIANXIA_CURRENCY_KEYS = ["coin", "supply", "spirit_stones"] as const;
 const VALID_HIT_DIE_FACES = new Set([4, 6, 8, 10, 12]);
@@ -236,7 +239,7 @@ function normalizeDndCurrencyFromEquipment(definition: Record<string, unknown>):
   const currency: Record<string, unknown> = { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0, other: [] };
   for (const item of asArray(definition.equipment_catalog)) {
     const itemCurrency = asRecord(asRecord(item).currency);
-    for (const denomination of ["cp", "sp", "ep", "gp", "pp"]) {
+    for (const denomination of DND_CURRENCY_KEYS) {
       currency[denomination] = asInt(currency[denomination], 0) + asInt(itemCurrency[denomination], 0);
     }
   }
@@ -950,6 +953,41 @@ function applyInventoryQuantityUpdate(
   state.inventory = inventory;
 }
 
+function applyCurrencyUpdate(
+  state: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  isXianxia: boolean,
+): void {
+  if (isXianxia) {
+    const xianxia = { ...asRecord(state.xianxia) };
+    const currency = { ...asRecord(xianxia.currency) };
+    for (const key of XIANXIA_CURRENCY_KEYS) {
+      const value = parseOptionalWholeNumber(payload[key], key.replace(/_/g, " "));
+      if (value !== null) {
+        currency[key] = Math.max(0, value);
+      }
+      if (!Object.hasOwn(currency, key)) {
+        currency[key] = 0;
+      }
+    }
+    xianxia.currency = currency;
+    state.xianxia = xianxia;
+    return;
+  }
+
+  const currency = { ...asRecord(state.currency) };
+  for (const key of DND_CURRENCY_KEYS) {
+    const value = parseOptionalWholeNumber(payload[key], key.toUpperCase());
+    if (value !== null) {
+      currency[key] = value;
+    }
+    if (!Object.hasOwn(currency, key)) {
+      currency[key] = 0;
+    }
+  }
+  state.currency = currency;
+}
+
 export function canEditCharacterSessionState(
   config: ApiConfig,
   campaignSlug: string,
@@ -1378,6 +1416,89 @@ export function updateCharacterSessionXianxiaActiveState(
       applyXianxiaActiveStateUpdate(nextState, payload);
     } catch (error) {
       return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character active state payload." };
+    }
+
+    const now = utcIsoTimestamp();
+    if (stateRowMissing) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(campaignSlug, characterSlug, expectedRevision + 1, JSON.stringify(nextState), now, updatedByUserId);
+      return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+    }
+
+    const result = database
+      .prepare(
+        `
+          UPDATE character_state
+          SET revision = revision + 1,
+              state_json = ?,
+              updated_at = ?,
+              updated_by_user_id = ?
+          WHERE campaign_slug = ?
+            AND character_slug = ?
+            AND revision = ?
+        `,
+      )
+      .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
+    if (result.changes <= 0) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+    return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCharacterSessionCurrency(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  updatedByUserId: number,
+): CharacterSessionCurrencyUpdateResult {
+  let expectedRevision: number;
+  try {
+    expectedRevision = parseRequiredWholeNumber(payload.expected_revision, "Expected revision");
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character currency payload." };
+  }
+
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+
+    let existingState = readCharacterState(database, campaignSlug, characterSlug);
+    const stateRowMissing = !existingState;
+    existingState ??= { revision: 1, state: buildInitialState(definition) };
+
+    if (existingState.revision !== expectedRevision) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+
+    const nextState = copyState(existingState.state);
+    try {
+      applyCurrencyUpdate(nextState, payload, normalizeSystemKey(definition.system) === XIANXIA_SYSTEM_CODE);
+    } catch (error) {
+      return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character currency payload." };
     }
 
     const now = utcIsoTimestamp();
