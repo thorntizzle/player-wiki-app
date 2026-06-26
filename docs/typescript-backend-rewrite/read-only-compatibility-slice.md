@@ -464,6 +464,10 @@ fixture database.
   - unauthenticated, no-access bearer, invalid-rest-type, and stale-revision envelopes.
   - DND-5E long-rest preview shape, resource reset changes, spell-slot clearing, submitted final Current HP, submitted final Hit Dice current counts, shared revision bumps, and `updated_by_user_id`.
   - Xianxia long-rest preview/apply restoration for HP, Stance, Jing/Qi/Shen, and Yin/Yang while preserving Dao and ignoring blank submitted Current HP.
+- Character feature-state payload checks cover:
+  - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/feature-states/<feature_key>` with bearer-only writes.
+  - stale-revision conflict envelopes.
+  - unsupported feature-state key validation, non-Arcane-Armor-sheet validation, and assigned-player Arcane Armor enablement through `state.feature_states.arcane_armor.enabled`.
 
 ## Added Tests and Checks
 
@@ -520,6 +524,7 @@ fixture database.
   - validates content-character SQLite persistence for DND-5E create/delete and Xianxia create/update/delete, including actual `state_created`, `deleted_state`, and `deleted_assignment` response flags and Xianxia mutable-state clamping/preservation.
   - validates `PUT` and `DELETE /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` auth, fixture-write denial, player-forbidden behavior, definition validation, missing-campaign behavior, copied-fixture definition/import YAML writes, list/detail refresh, deleted-character payload flags, file removal, and missing-character delete 404.
   - validates character rest preview/apply auth, no-access forbidden, invalid-rest, stale-revision, DND long-rest, and Xianxia long-rest behavior against disposable copied fixture files and SQLite state.
+  - validates character feature-state stale conflict, unsupported key validation, missing Arcane Armor feature validation, and assigned-player Arcane Armor toggle persistence against disposable copied fixture files and SQLite state.
   - verifies `GET /api/v1/campaigns/:campaignSlug/session` no-header read-only payload shape, role-aware fixture and bearer-token SQLite Session state reads, auth/forbidden bearer envelopes, token/revision headers behavior, unchanged-response short-circuit, and session missing-campaign 404.
   - verifies `POST /api/v1/campaigns/:campaignSlug/session/messages` auth, fixture-write denial, malformed JSON handling, validation messages, SQLite persistence, private-message visibility, recipient labels, revision bumps, and missing-campaign 404 against the disposable smoke-test database.
   - verifies `POST /api/v1/campaigns/:campaignSlug/session/start` and `.../session/close` auth, fixture-write denial, player-forbidden behavior, duplicate-start/empty-close validation, SQLite session persistence, revision bumps, refreshed Session reads/log summaries, and missing-campaign 404 against the disposable smoke-test database.

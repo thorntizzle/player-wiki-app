@@ -737,6 +737,15 @@
       "notes": "Tracked Hono character session rest apply route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflict handling, DND short/long rest resource resets, long-rest spell-slot clearing, long-rest Hit Dice recovery plus submitted final current HP/Hit Dice values, Xianxia long-rest HP/Stance/Energy/Yin-Yang restoration with Dao preservation, refreshed character state payloads, validation_error invalid rest types, auth_required anonymous denial, forbidden no-access or unassigned-player denial, and explicit missing-character JSON."
     },
     {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/feature-states/<feature_key>",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/feature-states/:featureKey",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono character session feature-state route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflict handling, supported Arcane Armor feature-state key normalization, Armorer-sheet feature validation, SQLite state.feature_states.arcane_armor.enabled persistence, refreshed character state payloads, validation_error unsupported-key/non-Arcane-sheet JSON, and explicit missing-character JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/me",
       "route_family": "api_v1",

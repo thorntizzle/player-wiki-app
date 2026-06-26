@@ -6212,6 +6212,13 @@ managedCharacterDefinition.profile = {
   ...(managedCharacterDefinition.profile || {}),
   biography_markdown: "A remotely managed scout prepared through the TypeScript API.",
 };
+managedCharacterDefinition.features = [
+  ...((Array.isArray(managedCharacterDefinition.features) ? managedCharacterDefinition.features : [])),
+  {
+    name: "Arcane Armor",
+    description_markdown: "Smoke-test Armorer feature state support.",
+  },
+];
 const managedCharacterImportMetadata = structuredClone(contentCharacter.payload.character_file.import_metadata);
 managedCharacterImportMetadata.source_path = "api://campaigns/linden-pass/characters/api-scout";
 managedCharacterImportMetadata.parser_version = "api-test";
@@ -6939,6 +6946,93 @@ if (
     `Unexpected DND rest database row: ${JSON.stringify({
       managedStateAfterRest,
       managedRestState,
+    })}`,
+  );
+}
+
+const staleFeatureStateUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/feature-states/arcane-armor`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 999, enabled: true } },
+);
+if (
+  staleFeatureStateUpdate.status !== 409 ||
+  staleFeatureStateUpdate.payload?.error?.code !== "state_conflict" ||
+  staleFeatureStateUpdate.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale feature-state PATCH conflict, got ${staleFeatureStateUpdate.status} ${JSON.stringify(staleFeatureStateUpdate.payload)}`,
+  );
+}
+
+const unsupportedFeatureStateUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/feature-states/not-supported`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 10, enabled: true } },
+);
+if (
+  unsupportedFeatureStateUpdate.status !== 400 ||
+  unsupportedFeatureStateUpdate.payload?.error?.code !== "validation_error" ||
+  unsupportedFeatureStateUpdate.payload?.error?.message !== "Choose a supported feature state to update."
+) {
+  throw new Error(
+    `Expected unsupported feature-state validation_error, got ${unsupportedFeatureStateUpdate.status} ${JSON.stringify(unsupportedFeatureStateUpdate.payload)}`,
+  );
+}
+
+const missingFeatureOnSheetUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/characters/selene-brook/session/feature-states/arcane-armor",
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 1, enabled: true } },
+);
+if (
+  missingFeatureOnSheetUpdate.status !== 400 ||
+  missingFeatureOnSheetUpdate.payload?.error?.code !== "validation_error" ||
+  missingFeatureOnSheetUpdate.payload?.error?.message !==
+    "Arcane Armor state is only available for Armorer sheets with Arcane Armor."
+) {
+  throw new Error(
+    `Expected missing Arcane Armor feature validation_error, got ${missingFeatureOnSheetUpdate.status} ${JSON.stringify(missingFeatureOnSheetUpdate.payload)}`,
+  );
+}
+
+const playerFeatureStateUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/feature-states/arcane-armor`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 10, enabled: true } },
+);
+if (
+  playerFeatureStateUpdate.status !== 200 ||
+  playerFeatureStateUpdate.payload?.ok !== true ||
+  playerFeatureStateUpdate.payload?.character?.state_record?.revision !== 11 ||
+  playerFeatureStateUpdate.payload?.character?.state_record?.state?.feature_states?.arcane_armor?.enabled !== true
+) {
+  throw new Error(`Unexpected feature-state PATCH payload: ${JSON.stringify(playerFeatureStateUpdate.payload)}`);
+}
+
+const featureStateAssertionDb = new Database(dbPath, { readonly: true });
+const managedStateAfterFeatureState = featureStateAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", managedCharacterSlug);
+featureStateAssertionDb.close();
+const managedFeatureState = JSON.parse(managedStateAfterFeatureState?.state_json || "{}");
+if (
+  managedStateAfterFeatureState?.revision !== 11 ||
+  managedStateAfterFeatureState?.updated_by_user_id !== 79 ||
+  managedFeatureState.feature_states?.arcane_armor?.enabled !== true
+) {
+  throw new Error(
+    `Unexpected feature-state database row: ${JSON.stringify({
+      managedStateAfterFeatureState,
+      managedFeatureState,
     })}`,
   );
 }

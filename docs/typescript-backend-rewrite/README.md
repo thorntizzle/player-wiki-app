@@ -364,6 +364,12 @@ Route parity check command:
   long-rest Hit Dice before applying submitted final HP/Hit Dice values, restores Xianxia
   HP/Stance/Jing/Qi/Shen/Yin/Yang while preserving Dao, and keeps missing-character responses on
   the TypeScript `content_character_not_found` JSON convention.
+- The first feature-state session write now serves
+  `PATCH .../characters/:characterSlug/session/feature-states/:featureKey` for Arcane Armor
+  enablement on sheets that actually carry an `Arcane Armor` feature. It preserves the bearer-only
+  session-state write gate, shared revision conflicts, unsupported-key validation, non-Armorer
+  validation, SQLite-only `state.feature_states.arcane_armor.enabled` writes, and refreshed
+  `character.state_record` payloads.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

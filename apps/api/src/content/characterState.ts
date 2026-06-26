@@ -40,6 +40,8 @@ export type CharacterSessionNotesUpdateResult = CharacterSessionVitalsUpdateResu
 
 export type CharacterSessionPersonalUpdateResult = CharacterSessionVitalsUpdateResult;
 
+export type CharacterSessionFeatureStateUpdateResult = CharacterSessionVitalsUpdateResult;
+
 export interface CharacterRestChangePayload {
   label: string;
   from_value: string;
@@ -1140,6 +1142,40 @@ function applyPersonalDetailsUpdate(state: Record<string, unknown>, payload: Rec
   state.notes = notes;
 }
 
+function normalizeFeatureStateKey(value: unknown): string {
+  const normalized = String(value ?? "").split(/\s+/).join(" ").trim().replace(/[- ]+/g, "_").toLowerCase();
+  if (normalized === "arcane_armor" || normalized === "arcanearmor") {
+    return "arcane_armor";
+  }
+  throw new Error("Choose a supported feature state to update.");
+}
+
+function definitionHasFeature(definition: Record<string, unknown>, featureName: string): boolean {
+  const target = featureName.split(/\s+/).join(" ").trim().toLowerCase();
+  return asArray(definition.features).some((rawFeature) => {
+    const feature = asRecord(rawFeature);
+    return String(feature.name ?? "").split(/\s+/).join(" ").trim().toLowerCase() === target;
+  });
+}
+
+function applyFeatureStateUpdate(
+  state: Record<string, unknown>,
+  definition: Record<string, unknown>,
+  featureKey: string,
+  payload: Record<string, unknown>,
+): void {
+  const normalizedKey = normalizeFeatureStateKey(featureKey);
+  if (normalizedKey === "arcane_armor" && !definitionHasFeature(definition, "arcane armor")) {
+    throw new Error("Arcane Armor state is only available for Armorer sheets with Arcane Armor.");
+  }
+
+  const featureStates = { ...asRecord(state.feature_states) };
+  const featureState = { ...asRecord(featureStates[normalizedKey]) };
+  featureState.enabled = Boolean(payload.enabled);
+  featureStates[normalizedKey] = featureState;
+  state.feature_states = featureStates;
+}
+
 function isXianxiaDefinition(definition: Record<string, unknown>): boolean {
   return normalizeSystemKey(definition.system) === XIANXIA_SYSTEM_CODE;
 }
@@ -2130,6 +2166,90 @@ export function updateCharacterSessionPersonal(
 
     const nextState = copyState(existingState.state);
     applyPersonalDetailsUpdate(nextState, payload);
+
+    const now = utcIsoTimestamp();
+    if (stateRowMissing) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(campaignSlug, characterSlug, expectedRevision + 1, JSON.stringify(nextState), now, updatedByUserId);
+      return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+    }
+
+    const result = database
+      .prepare(
+        `
+          UPDATE character_state
+          SET revision = revision + 1,
+              state_json = ?,
+              updated_at = ?,
+              updated_by_user_id = ?
+          WHERE campaign_slug = ?
+            AND character_slug = ?
+            AND revision = ?
+        `,
+      )
+      .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
+    if (result.changes <= 0) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+    return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCharacterSessionFeatureState(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+  featureKey: string,
+  payload: Record<string, unknown>,
+  updatedByUserId: number,
+): CharacterSessionFeatureStateUpdateResult {
+  let expectedRevision: number;
+  try {
+    expectedRevision = parseRequiredWholeNumber(payload.expected_revision, "Expected revision");
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character feature state payload." };
+  }
+
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+
+    let existingState = readCharacterState(database, campaignSlug, characterSlug);
+    const stateRowMissing = !existingState;
+    existingState ??= { revision: 1, state: buildInitialState(definition) };
+
+    if (existingState.revision !== expectedRevision) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+
+    const nextState = copyState(existingState.state);
+    try {
+      applyFeatureStateUpdate(nextState, definition, featureKey, payload);
+    } catch (error) {
+      return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character feature state payload." };
+    }
 
     const now = utcIsoTimestamp();
     if (stateRowMissing) {

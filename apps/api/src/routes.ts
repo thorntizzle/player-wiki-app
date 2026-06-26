@@ -1231,6 +1231,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "content_character_not_found",
     },
   },
+  {
+    method: "PATCH",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/feature-states/:featureKey",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/feature-states/<feature_key>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/feature-states/<feature_key>",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "PATCH",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/session/feature-states/arcane-armor",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1318,4 +1333,5 @@ export const ROUTES = {
   characterSessionPersonal: IMPLEMENTED_ROUTES[81].honoPath,
   characterRestPreview: IMPLEMENTED_ROUTES[82].honoPath,
   characterSessionRest: IMPLEMENTED_ROUTES[83].honoPath,
+  characterSessionFeatureState: IMPLEMENTED_ROUTES[84].honoPath,
 } as const;
