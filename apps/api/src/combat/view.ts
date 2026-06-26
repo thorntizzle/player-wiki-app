@@ -2431,6 +2431,88 @@ export function addCombatCondition(
   }
 }
 
+export function updateCombatCondition(
+  dbPath: string,
+  campaignSlug: string,
+  conditionId: number,
+  payload: Record<string, unknown>,
+  actorUserId: number,
+  actorRole: FixtureCombatRole,
+): CombatMutationResult {
+  if (!existsSync(dbPath)) {
+    return { status: "validation_error", message: "Combat storage is not initialized." };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const writeCondition = database.transaction((): CombatMutationResult => {
+      if (!isCombatManager(actorRole)) {
+        return { status: "forbidden", message: "You do not have permission to manage combat." };
+      }
+
+      const condition =
+        (database
+          .prepare(
+            `
+              SELECT c.id
+              FROM campaign_combat_conditions AS c
+              JOIN campaign_combatants AS e ON e.id = c.combatant_id
+              WHERE e.campaign_slug = ? AND c.id = ?
+            `,
+          )
+          .get(campaignSlug, conditionId) as { id: number } | undefined) || null;
+      if (!condition) {
+        return { status: "validation_error", message: "That condition could not be found." };
+      }
+
+      const name = payloadString(payload.name);
+      if (!name) {
+        return { status: "validation_error", message: "Condition name is required." };
+      }
+      if (name.length > 80) {
+        return { status: "validation_error", message: "Condition names must stay under 80 characters." };
+      }
+
+      const durationText = payloadString(payload.duration_text);
+      if (durationText.length > 120) {
+        return {
+          status: "validation_error",
+          message: "Condition duration text must stay under 120 characters.",
+        };
+      }
+
+      const updateResult = database
+        .prepare(
+          `
+            UPDATE campaign_combat_conditions
+            SET name = ?,
+                duration_text = ?
+            WHERE id = ?
+          `,
+        )
+        .run(name, durationText, conditionId);
+      if (updateResult.changes !== 1) {
+        throw new CombatMutationConflictError("That condition could not be found.");
+      }
+
+      bumpCombatTrackerRevision(database, campaignSlug, actorUserId, utcIsoTimestamp());
+      return { status: "ok" };
+    });
+
+    return writeCondition();
+  } catch (error) {
+    if (error instanceof CombatMutationConflictError) {
+      return { status: "validation_error", message: error.message };
+    }
+    if (isNoSuchTableOrColumnError(error)) {
+      return { status: "validation_error", message: "Combat storage is not initialized." };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
 export function deleteCombatCondition(
   dbPath: string,
   campaignSlug: string,

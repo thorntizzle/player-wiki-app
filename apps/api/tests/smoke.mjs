@@ -4979,6 +4979,197 @@ if (
   );
 }
 
+const fixtureConditionUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/conditions/${createdCombatConditionId}`,
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+  { method: "PATCH", body: { name: "Slowed", duration_text: "1 round" } },
+);
+if (
+  fixtureConditionUpdateCombatState.status !== 403 ||
+  fixtureConditionUpdateCombatState.payload?.error?.code !== "forbidden"
+) {
+  throw new Error(
+    `Expected fixture combat condition update forbidden 403, got ${fixtureConditionUpdateCombatState.status} ${fixtureConditionUpdateCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerConditionUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/conditions/${createdCombatConditionId}`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { name: "Slowed", duration_text: "1 round" } },
+);
+if (
+  playerConditionUpdateCombatState.status !== 403 ||
+  playerConditionUpdateCombatState.payload?.error?.code !== "forbidden" ||
+  playerConditionUpdateCombatState.payload?.error?.message !== "You do not have permission to manage combat."
+) {
+  throw new Error(
+    `Expected player combat condition update forbidden 403, got ${playerConditionUpdateCombatState.status} ${JSON.stringify(playerConditionUpdateCombatState.payload)}`,
+  );
+}
+
+const missingCampaignConditionUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/definitely-not-a-campaign/combat/conditions/${createdCombatConditionId}`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { name: "Slowed", duration_text: "1 round" } },
+);
+if (
+  missingCampaignConditionUpdateCombatState.status !== 404 ||
+  missingCampaignConditionUpdateCombatState.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing combat condition update campaign JSON 404, got ${missingCampaignConditionUpdateCombatState.status} ${missingCampaignConditionUpdateCombatState.payload?.error?.code}`,
+  );
+}
+
+const malformedConditionUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/conditions/${createdCombatConditionId}`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: "{" },
+);
+if (
+  malformedConditionUpdateCombatState.status !== 400 ||
+  malformedConditionUpdateCombatState.payload?.error?.code !== "validation_error"
+) {
+  throw new Error(
+    `Expected malformed combat condition update validation_error 400, got ${malformedConditionUpdateCombatState.status} ${malformedConditionUpdateCombatState.payload?.error?.code}`,
+  );
+}
+
+const missingConditionUpdateCombatState = await requestJson(
+  "/api/v1/campaigns/linden-pass/combat/conditions/999999",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { name: "Slowed", duration_text: "1 round" } },
+);
+if (
+  missingConditionUpdateCombatState.status !== 400 ||
+  missingConditionUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  missingConditionUpdateCombatState.payload?.error?.message !== "That condition could not be found."
+) {
+  throw new Error(
+    `Expected missing combat condition update validation_error 400, got ${missingConditionUpdateCombatState.status} ${JSON.stringify(missingConditionUpdateCombatState.payload)}`,
+  );
+}
+
+const blankConditionUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/conditions/${createdCombatConditionId}`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { name: "", duration_text: "1 round" } },
+);
+if (
+  blankConditionUpdateCombatState.status !== 400 ||
+  blankConditionUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  blankConditionUpdateCombatState.payload?.error?.message !== "Condition name is required."
+) {
+  throw new Error(
+    `Expected blank combat condition update validation_error 400, got ${blankConditionUpdateCombatState.status} ${JSON.stringify(blankConditionUpdateCombatState.payload)}`,
+  );
+}
+
+const longConditionUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/conditions/${createdCombatConditionId}`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { name: "X".repeat(81), duration_text: "1 round" } },
+);
+if (
+  longConditionUpdateCombatState.status !== 400 ||
+  longConditionUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  longConditionUpdateCombatState.payload?.error?.message !== "Condition names must stay under 80 characters."
+) {
+  throw new Error(
+    `Expected long-name combat condition update validation_error 400, got ${longConditionUpdateCombatState.status} ${JSON.stringify(longConditionUpdateCombatState.payload)}`,
+  );
+}
+
+const longDurationConditionUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/conditions/${createdCombatConditionId}`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { name: "Slowed", duration_text: "Y".repeat(121) } },
+);
+if (
+  longDurationConditionUpdateCombatState.status !== 400 ||
+  longDurationConditionUpdateCombatState.payload?.error?.code !== "validation_error" ||
+  longDurationConditionUpdateCombatState.payload?.error?.message !==
+    "Condition duration text must stay under 120 characters."
+) {
+  throw new Error(
+    `Expected long-duration combat condition update validation_error 400, got ${longDurationConditionUpdateCombatState.status} ${JSON.stringify(longDurationConditionUpdateCombatState.payload)}`,
+  );
+}
+
+const conditionUpdateCombatState = await requestJson(
+  `/api/v1/campaigns/linden-pass/combat/conditions/${createdCombatConditionId}`,
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+  { method: "PATCH", body: { name: "Slowed", duration_text: "1 round" } },
+);
+const conditionUpdateCombatant = conditionUpdateCombatState.payload?.tracker?.combatants?.find(
+  (combatant) => combatant.id === addedSystemsMonsterCombatantId,
+);
+const updatedCombatCondition = conditionUpdateCombatant?.conditions?.find(
+  (condition) => condition.id === createdCombatConditionId,
+);
+if (
+  conditionUpdateCombatState.status !== 200 ||
+  conditionUpdateCombatState.payload?.ok !== true ||
+  conditionUpdateCombatState.payload?.changed !== true ||
+  conditionUpdateCombatState.payload?.live_revision !== 29 ||
+  conditionUpdateCombatant?.id !== addedSystemsMonsterCombatantId ||
+  updatedCombatCondition?.name !== "Slowed" ||
+  updatedCombatCondition?.duration_text !== "1 round"
+) {
+  throw new Error(`Unexpected combat condition update payload: ${JSON.stringify(conditionUpdateCombatState.payload)}`);
+}
+
+const combatConditionUpdateAssertionDb = new Database(dbPath, { readonly: true });
+const updatedCombatConditionRow = combatConditionUpdateAssertionDb
+  .prepare(
+    `
+      SELECT combatant_id, name, duration_text, created_by_user_id
+      FROM campaign_combat_conditions
+      WHERE id = ?
+    `,
+  )
+  .get(createdCombatConditionId);
+const trackerAfterConditionUpdate = combatConditionUpdateAssertionDb
+  .prepare("SELECT round_number, current_combatant_id, revision, updated_by_user_id FROM campaign_combat_trackers WHERE campaign_slug = ?")
+  .get("linden-pass");
+combatConditionUpdateAssertionDb.close();
+if (
+  updatedCombatConditionRow?.combatant_id !== addedSystemsMonsterCombatantId ||
+  updatedCombatConditionRow?.name !== "Slowed" ||
+  updatedCombatConditionRow?.duration_text !== "1 round" ||
+  updatedCombatConditionRow?.created_by_user_id !== 77 ||
+  trackerAfterConditionUpdate?.round_number !== 1 ||
+  trackerAfterConditionUpdate?.current_combatant_id !== null ||
+  trackerAfterConditionUpdate?.revision !== 29 ||
+  trackerAfterConditionUpdate?.updated_by_user_id !== 77
+) {
+  throw new Error(
+    `Unexpected combat condition update database rows: ${JSON.stringify({
+      updatedCombatConditionRow,
+      trackerAfterConditionUpdate,
+    })}`,
+  );
+}
+
 const fixtureConditionDeleteCombatState = await requestJson(
   `/api/v1/campaigns/linden-pass/combat/conditions/${createdCombatConditionId}`,
   {
@@ -5059,7 +5250,7 @@ if (
   conditionDeleteCombatState.status !== 200 ||
   conditionDeleteCombatState.payload?.ok !== true ||
   conditionDeleteCombatState.payload?.changed !== true ||
-  conditionDeleteCombatState.payload?.live_revision !== 29 ||
+  conditionDeleteCombatState.payload?.live_revision !== 30 ||
   conditionDeleteCombatant?.conditions?.some((condition) => condition.id === createdCombatConditionId)
 ) {
   throw new Error(`Unexpected combat condition delete payload: ${JSON.stringify(conditionDeleteCombatState.payload)}`);
@@ -5077,7 +5268,7 @@ if (
   deletedCombatConditionRows?.count !== 0 ||
   trackerAfterConditionDelete?.round_number !== 1 ||
   trackerAfterConditionDelete?.current_combatant_id !== null ||
-  trackerAfterConditionDelete?.revision !== 29 ||
+  trackerAfterConditionDelete?.revision !== 30 ||
   trackerAfterConditionDelete?.updated_by_user_id !== null
 ) {
   throw new Error(
@@ -5165,7 +5356,7 @@ if (
   combatantDeleteCombatState.status !== 200 ||
   combatantDeleteCombatState.payload?.ok !== true ||
   combatantDeleteCombatState.payload?.changed !== true ||
-  combatantDeleteCombatState.payload?.live_revision !== 30 ||
+  combatantDeleteCombatState.payload?.live_revision !== 31 ||
   combatantDeleteCombatState.payload?.tracker?.combatant_count !== 3 ||
   combatantDeleteCombatState.payload?.tracker?.combatants?.some(
     (combatant) => combatant.id === addedSystemsMonsterCombatantId,
@@ -5198,7 +5389,7 @@ if (
   deletedCombatantNoteRows?.count !== 0 ||
   trackerAfterCombatantDelete?.round_number !== 1 ||
   trackerAfterCombatantDelete?.current_combatant_id !== null ||
-  trackerAfterCombatantDelete?.revision !== 30 ||
+  trackerAfterCombatantDelete?.revision !== 31 ||
   trackerAfterCombatantDelete?.updated_by_user_id !== null
 ) {
   throw new Error(

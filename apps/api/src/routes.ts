@@ -1065,6 +1065,22 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "validation_error",
     },
   },
+  {
+    method: "PATCH",
+    honoPath: "/api/v1/campaigns/:campaignSlug/combat/conditions/:conditionId",
+    snapshotFamily: "flask",
+    snapshotMethod: "POST",
+    snapshotPath: "/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>",
+    routeFamily: "api_v1_combat",
+    missingResource: {
+      method: "PATCH",
+      path: "/api/v1/campaigns/linden-pass/combat/conditions/999999",
+      status: 400,
+      contentType: "application/json",
+      errorCode: "validation_error",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1141,4 +1157,5 @@ export const ROUTES = {
   combatCondition: IMPLEMENTED_ROUTES[70].honoPath,
   combatCombatant: IMPLEMENTED_ROUTES[71].honoPath,
   combatCombatantPlayerDetailVisibility: IMPLEMENTED_ROUTES[72].honoPath,
+  combatConditionUpdate: IMPLEMENTED_ROUTES[73].honoPath,
 } as const;

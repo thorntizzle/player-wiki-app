@@ -77,6 +77,7 @@ Route parity check command:
   - `PATCH /api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/resources`
   - `PATCH /api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/npc-resources`
   - `POST /api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/conditions`
+  - `PATCH /api/v1/campaigns/:campaignSlug/combat/conditions/:conditionId`
   - `DELETE /api/v1/campaigns/:campaignSlug/combat/conditions/:conditionId`
   - `DELETE /api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId`
   - `GET /api/v1/campaigns`
@@ -207,6 +208,11 @@ Route parity check command:
   `DELETE .../combat/conditions/:conditionId` against fixture SQLite, denying fixture-role writes and
   player bearer writes, validating condition name/duration constraints and condition existence,
   bumping the tracker revision, and returning refreshed Combat payloads.
+- The Combat condition update route now serves API-only
+  `PATCH .../combat/conditions/:conditionId` as the JSON replacement for Flask's form
+  `POST /campaigns/<slug>/combat/conditions/<id>`, denying fixture-role writes and player bearer
+  writes, validating condition name/duration constraints and condition existence, bumping the tracker
+  revision with the acting user, and returning refreshed Combat payloads.
 - The Combat combatant delete route now serves `DELETE .../combat/combatants/:combatantId` against
   fixture SQLite, denying fixture-role writes and player bearer writes, validating combatant
   existence, removing the combatant plus dependent condition/resource rows, clearing current-turn

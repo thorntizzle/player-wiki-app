@@ -38,6 +38,7 @@ import {
   deleteCombatant,
   setCurrentCombatant,
   supportsCombatTracker,
+  updateCombatCondition,
   updateCombatantNpcResources,
   updateCombatantPlayerDetailVisibility,
   updateCombatantResources,
@@ -1820,6 +1821,69 @@ app.post(ROUTES.combatCombatantConditions, async (ctx) => {
     config.dbPath,
     campaign.slug,
     combatantId,
+    jsonPayload.payload,
+    actorUserId,
+    auth.role,
+  );
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "forbidden") {
+    const error = forbidden(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "state_conflict") {
+    const error = stateConflict(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(await buildCombatReadOnlyPayload(config, campaign, auth.role));
+});
+
+app.patch(ROUTES.combatConditionUpdate, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCombatManagerBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!supportsCombatTracker(campaign.system)) {
+    const error = validationError(
+      `Combat tracker support for ${campaign.system || "this system"} is not available yet.`,
+    );
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const conditionId = parsePositiveInteger(ctx.req.param("conditionId") || "");
+  if (conditionId === null) {
+    const error = validationError("Choose a valid condition.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const actorUserId = auth.actorUserId;
+  if (typeof actorUserId !== "number") {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = updateCombatCondition(
+    config.dbPath,
+    campaign.slug,
+    conditionId,
     jsonPayload.payload,
     actorUserId,
     auth.role,

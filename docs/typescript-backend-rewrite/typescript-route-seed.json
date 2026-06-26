@@ -332,6 +332,15 @@
       "notes": "Tracked Hono Combat condition create mutation with bearer API-token DM/admin access, fixture-role write denial, player bearer write denial, supported-combat validation, SQLite combatant existence validation, condition name and duration validation, tracker revision bump, refreshed Combat payloads, and missing-campaign JSON."
     },
     {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/conditions/:conditionId",
+      "snapshot_family": "flask",
+      "notes": "API-only Hono Combat replacement for Flask form POST /campaigns/<campaign_slug>/combat/conditions/<int:condition_id>. Provides bearer API-token DM/admin access, fixture-role write denial, player bearer write denial, supported-combat validation, SQLite condition existence validation, condition name and duration validation, tracker revision bump with acting user, refreshed Combat payloads, and missing-campaign JSON."
+    },
+    {
       "method": "DELETE",
       "path": "/api/v1/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>",
       "route_family": "api_v1_combat",
