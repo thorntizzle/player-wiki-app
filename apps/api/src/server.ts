@@ -57,6 +57,7 @@ import { getCampaignConfigFile } from "./content/repository.js";
 import {
   buildCampaignContentPageRemovalSafety,
   deleteCampaignContentAsset,
+  deleteCampaignContentCharacter,
   deleteCampaignContentPage,
   getCampaignContentAsset,
   getCampaignContentCharacter,
@@ -69,6 +70,7 @@ import {
   sanitizeContentPageRef,
   updateCampaignConfigFile,
   writeCampaignContentAsset,
+  writeCampaignContentCharacter,
   writeCampaignContentPage,
 } from "./content/repository.js";
 import {
@@ -77,6 +79,7 @@ import {
   buildContentAssetDetailPayload,
   buildContentAssetListPayload,
   buildContentAssetWritePayload,
+  buildContentCharacterDeletePayload,
   buildContentCharacterDetailPayload,
   buildContentCharacterListPayload,
   buildContentPageDeletePayload,
@@ -2268,6 +2271,84 @@ app.get(ROUTES.contentCharacter, async (ctx) => {
   }
 
   return ctx.json(buildContentCharacterDetailPayload(character));
+});
+
+app.put(ROUTES.contentCharacterUpdate, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveContentManagerBearerWrite(
+    ctx,
+    campaign.slug,
+    "Content character writes require bearer API authentication.",
+  );
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = await writeCampaignContentCharacter(
+    config,
+    campaign.slug,
+    ctx.req.param("characterSlug") || "",
+    jsonPayload.payload,
+  );
+  if (result.status === "not_found") {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildContentCharacterDetailPayload(result.record));
+});
+
+app.delete(ROUTES.contentCharacterDelete, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveContentManagerBearerWrite(
+    ctx,
+    campaign.slug,
+    "Content character writes require bearer API authentication.",
+  );
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = await deleteCampaignContentCharacter(
+    config,
+    campaign.slug,
+    ctx.req.param("characterSlug") || "",
+  );
+  if (result.status === "not_found") {
+    const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildContentCharacterDeletePayload(result.deleted));
 });
 
 app.notFound((ctx) =>

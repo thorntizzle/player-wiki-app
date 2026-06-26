@@ -703,6 +703,36 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "content_page_not_found",
     },
   },
+  {
+    method: "PUT",
+    honoPath: "/api/v1/campaigns/:campaignSlug/content/characters/:characterSlug",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/content/characters/<character_slug>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/content/characters/<character_slug>",
+    routeFamily: "api_v1_content",
+    missingResource: {
+      method: "PUT",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/content/characters/api-scout",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
+  {
+    method: "DELETE",
+    honoPath: "/api/v1/campaigns/:campaignSlug/content/characters/:characterSlug",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/content/characters/<character_slug>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/content/characters/<character_slug>",
+    routeFamily: "api_v1_content",
+    missingResource: {
+      method: "DELETE",
+      path: "/api/v1/campaigns/linden-pass/content/characters/missing-character",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -755,4 +785,6 @@ export const ROUTES = {
   contentAssetDelete: IMPLEMENTED_ROUTES[46].honoPath,
   contentPageUpdate: IMPLEMENTED_ROUTES[47].honoPath,
   contentPageDelete: IMPLEMENTED_ROUTES[48].honoPath,
+  contentCharacterUpdate: IMPLEMENTED_ROUTES[49].honoPath,
+  contentCharacterDelete: IMPLEMENTED_ROUTES[50].honoPath,
 } as const;

@@ -422,6 +422,24 @@
       "notes": "Tracked Hono content character management detail endpoint for fixture read-only mode behind Flask-compatible content-management auth for fixture or bearer-token DM/admin roles."
     },
     {
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/characters/<character_slug>",
+      "route_family": "api_v1_content",
+      "status": "implemented_fixture_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/content/characters/:characterSlug",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono content character upsert route with bearer API-token DM/admin access, safe definition/import YAML writes against copied fixture campaign trees, Flask-style default API import metadata, and explicit validation/missing-campaign JSON. Full SQLite mutable-state initialization/reconciliation remains a later character persistence parity item."
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/content/characters/<character_slug>",
+      "route_family": "api_v1_content",
+      "status": "implemented_fixture_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/content/characters/:characterSlug",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono content character delete route with bearer API-token DM/admin access, safe definition/import YAML removal plus portrait asset directory cleanup against copied fixture campaign trees, Flask-style delete payload flags, and explicit missing-character JSON. Full SQLite mutable-state and assignment cleanup remains a later character persistence parity item."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/me",
       "route_family": "api_v1",

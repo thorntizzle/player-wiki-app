@@ -12,6 +12,7 @@ import type {
   CampaignConfigRecord,
   ContentPage,
   ContentPageRemovalSafety,
+  DeletedCharacterContent,
 } from "./types.js";
 
 const FRONTMATTER_PATTERN = /^---\s*\n([\s\S]*?)\n---\s*\n?/;
@@ -305,6 +306,26 @@ function normalizeCharacterSlug(value: string): string | null {
     return null;
   }
   return normalized;
+}
+
+function normalizeContentCharacterWriteSlug(
+  rawCharacterSlug: string,
+): { status: "ok"; character_slug: string } | { status: "validation_error"; message: string } {
+  let decoded = rawCharacterSlug;
+  try {
+    decoded = decodeURIComponent(rawCharacterSlug);
+  } catch {
+    // keep the raw value so normal safety checks can produce the validation message.
+  }
+
+  const normalized = normalizeCharacterSlug(decoded);
+  if (!normalized) {
+    return {
+      status: "validation_error",
+      message: "Character slug must contain only letters, numbers, underscores, or hyphens.",
+    };
+  }
+  return { status: "ok", character_slug: normalized };
 }
 
 function resolveSafeAssetPath(assetsDir: string, assetRef: string): string | null {
@@ -891,6 +912,7 @@ async function toCharacterFileRecord(
   campaign: CampaignContentContext,
   campaignSlug: string,
   characterSlug: string,
+  options: { stateCreated?: boolean } = {},
 ): Promise<CampaignCharacterFileRecord | null> {
   const characterDir = resolveSafeCharacterDir(campaign.charactersDir, characterSlug);
   if (!characterDir) {
@@ -932,7 +954,7 @@ async function toCharacterFileRecord(
       characterSlug,
     ),
     updated_at: toIsoTimestamp(updatedAt),
-    state_created: false,
+    state_created: options.stateCreated ?? false,
   };
 }
 
@@ -1327,6 +1349,203 @@ export async function listCampaignContentCharacters(
     }
   }
   return records;
+}
+
+export async function writeCampaignContentCharacter(
+  config: ApiConfig,
+  campaignSlug: string,
+  rawCharacterSlug: string,
+  payload: unknown,
+): Promise<
+  | {
+      status: "ok";
+      record: CampaignCharacterFileRecord;
+    }
+  | {
+      status: "not_found";
+    }
+  | {
+      status: "validation_error";
+      message: string;
+    }
+> {
+  const campaign = await loadCampaignContentContext(config, campaignSlug, { requireContentDir: false });
+  if (!campaign) {
+    return { status: "not_found" };
+  }
+
+  const characterSlugResult = normalizeContentCharacterWriteSlug(rawCharacterSlug);
+  if (characterSlugResult.status === "validation_error") {
+    return characterSlugResult;
+  }
+  const characterSlug = characterSlugResult.character_slug;
+
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { status: "validation_error", message: "Request body must be a JSON object." };
+  }
+  const payloadRecord = payload as Record<string, unknown>;
+  const definitionPayload = payloadRecord.definition;
+  if (!definitionPayload || typeof definitionPayload !== "object" || Array.isArray(definitionPayload)) {
+    return { status: "validation_error", message: "Character definition must be an object." };
+  }
+  const importMetadataPayload = payloadRecord.import_metadata;
+  if (
+    importMetadataPayload !== undefined &&
+    importMetadataPayload !== null &&
+    (typeof importMetadataPayload !== "object" || Array.isArray(importMetadataPayload))
+  ) {
+    return { status: "validation_error", message: "import_metadata must be an object when provided." };
+  }
+
+  const existingRecord = await getCampaignContentCharacter(config, campaignSlug, characterSlug);
+  const defaultImportMetadata: Record<string, unknown> = existingRecord
+    ? { ...existingRecord.import_metadata }
+    : {
+        campaign_slug: campaignSlug,
+        character_slug: characterSlug,
+        source_path: `api://campaigns/${campaignSlug}/characters/${characterSlug}`,
+        imported_at_utc: toIsoTimestamp(new Date()),
+        parser_version: "api-v1",
+        import_status: "managed",
+        warnings: [],
+      };
+
+  if (importMetadataPayload && typeof importMetadataPayload === "object" && !Array.isArray(importMetadataPayload)) {
+    Object.assign(defaultImportMetadata, importMetadataPayload as Record<string, unknown>);
+  }
+  defaultImportMetadata.campaign_slug = campaignSlug;
+  defaultImportMetadata.character_slug = characterSlug;
+  defaultImportMetadata.imported_at_utc =
+    asString(defaultImportMetadata.imported_at_utc) || toIsoTimestamp(new Date());
+  defaultImportMetadata.parser_version = asString(defaultImportMetadata.parser_version) || "api-v1";
+  defaultImportMetadata.import_status = asString(defaultImportMetadata.import_status) || "managed";
+  if (!Array.isArray(defaultImportMetadata.warnings)) {
+    defaultImportMetadata.warnings = [];
+  }
+
+  const normalizedDefinitionPayload: Record<string, unknown> = {
+    ...(definitionPayload as Record<string, unknown>),
+    campaign_slug: campaignSlug,
+    character_slug: characterSlug,
+  };
+  normalizedDefinitionPayload.status = asString(normalizedDefinitionPayload.status) || "active";
+  normalizedDefinitionPayload.system =
+    normalizeSystemCode(normalizedDefinitionPayload.system ?? normalizedDefinitionPayload.system_code ?? campaign.system) ||
+    DND_5E_SYSTEM_CODE;
+  normalizedDefinitionPayload.name = asString(normalizedDefinitionPayload.name) || titleFromSlug(characterSlug);
+
+  const normalizedDefinition = normalizeCharacterDefinition(
+    normalizedDefinitionPayload,
+    campaignSlug,
+    characterSlug,
+    campaign.system,
+  );
+  const normalizedImportMetadata = normalizeCharacterImportMetadata(
+    defaultImportMetadata,
+    campaignSlug,
+    characterSlug,
+  );
+
+  const characterDir = resolveSafeCharacterDir(campaign.charactersDir, characterSlug);
+  if (!characterDir) {
+    return { status: "validation_error", message: "Character slug must contain only letters, numbers, underscores, or hyphens." };
+  }
+
+  await fs.mkdir(characterDir, { recursive: true });
+  await Promise.all([
+    fs.writeFile(path.join(characterDir, "definition.yaml"), dumpYamlRecord(normalizedDefinition), "utf-8"),
+    fs.writeFile(path.join(characterDir, "import.yaml"), dumpYamlRecord(normalizedImportMetadata), "utf-8"),
+  ]);
+
+  const record = await toCharacterFileRecord(campaign, campaignSlug, characterSlug, {
+    stateCreated: existingRecord === null,
+  });
+  if (!record) {
+    return { status: "validation_error", message: "Character files were not readable after writing." };
+  }
+  return { status: "ok", record };
+}
+
+export async function deleteCampaignContentCharacter(
+  config: ApiConfig,
+  campaignSlug: string,
+  rawCharacterSlug: string,
+): Promise<
+  | {
+      status: "ok";
+      deleted: DeletedCharacterContent;
+    }
+  | {
+      status: "not_found";
+    }
+  | {
+      status: "validation_error";
+      message: string;
+    }
+> {
+  const campaign = await loadCampaignContentContext(config, campaignSlug, { requireContentDir: false });
+  if (!campaign) {
+    return { status: "not_found" };
+  }
+
+  const characterSlugResult = normalizeContentCharacterWriteSlug(rawCharacterSlug);
+  if (characterSlugResult.status === "validation_error") {
+    return characterSlugResult;
+  }
+  const characterSlug = characterSlugResult.character_slug;
+  const characterDir = resolveSafeCharacterDir(campaign.charactersDir, characterSlug);
+  if (!characterDir) {
+    return { status: "validation_error", message: "Character slug must contain only letters, numbers, underscores, or hyphens." };
+  }
+
+  let deletedFiles = false;
+  for (const fileName of ["definition.yaml", "import.yaml"]) {
+    try {
+      await fs.unlink(path.join(characterDir, fileName));
+      deletedFiles = true;
+    } catch {
+      // Missing files do not make the delete fail; Flask also deletes whichever side exists.
+    }
+  }
+
+  try {
+    const entries = await fs.readdir(characterDir);
+    if (entries.length === 0) {
+      await fs.rmdir(characterDir);
+    }
+  } catch {
+    // Missing or non-empty directories are handled through the deleted flags.
+  }
+
+  const portraitAssetsDir = path.resolve(campaign.assetsDir, "characters", characterSlug);
+  const assetsRoot = path.resolve(campaign.assetsDir);
+  let deletedAssets = false;
+  if (portraitAssetsDir.startsWith(`${assetsRoot}${path.sep}`)) {
+    try {
+      const stats = await fs.stat(portraitAssetsDir);
+      if (stats.isDirectory()) {
+        await fs.rm(portraitAssetsDir, { recursive: true, force: true });
+        deletedAssets = true;
+      }
+    } catch {
+      // No portrait asset directory to remove.
+    }
+  }
+
+  if (!deletedFiles && !deletedAssets) {
+    return { status: "not_found" };
+  }
+
+  return {
+    status: "ok",
+    deleted: {
+      character_slug: characterSlug,
+      deleted_files: deletedFiles,
+      deleted_state: false,
+      deleted_assignment: false,
+      deleted_assets: deletedAssets,
+    },
+  };
 }
 
 export async function getCampaignContentPage(

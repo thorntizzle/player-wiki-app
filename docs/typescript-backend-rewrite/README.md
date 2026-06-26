@@ -100,6 +100,8 @@ Route parity check command:
   - `DELETE /api/v1/campaigns/:campaignSlug/content/assets/*`
   - `GET /api/v1/campaigns/:campaignSlug/content/characters`
   - `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
+  - `PUT /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
+  - `DELETE /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
 - Campaign detail uses fixture-backed reads from `tests/fixtures/sample_campaigns` by default and supports
   `CPW_CAMPAIGNS_DIR` override.
 - The first tracked SQLite read path uses `better-sqlite3` against `CPW_DB_PATH` for
@@ -205,6 +207,13 @@ Route parity check command:
   summary and deleted-reference payloads, missing-campaign JSON, missing-asset JSON, and empty parent
   directory pruning on delete. Current validation covers disposable copied fixtures only; production
   or live publication still requires the normal backup, sync, and rollback gates.
+- The content character write/delete routes now serve `PUT` and `DELETE .../content/characters/:characterSlug`
+  for bearer API-token DM/admin users against copied fixture campaign trees, preserving
+  definition/import YAML validation, route-slug normalization, Flask-style default API import
+  metadata, list/detail refresh, deleted-character payload flags, missing-campaign JSON, and
+  missing-character JSON. Current validation covers disposable copied fixture files only; full
+  SQLite mutable-state initialization/reconciliation and assignment cleanup remain later character
+  persistence parity work before this route is production-ready.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

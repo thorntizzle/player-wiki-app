@@ -2232,6 +2232,194 @@ if (missingContentCharacter.status !== 404 || missingContentCharacter.payload?.e
   );
 }
 
+const managedCharacterSlug = "api-scout";
+const managedCharacterPath = `/api/v1/campaigns/linden-pass/content/characters/${managedCharacterSlug}`;
+const managedCharacterDefinition = structuredClone(contentCharacter.payload.character_file.definition);
+managedCharacterDefinition.name = "API Scout";
+managedCharacterDefinition.profile = {
+  ...(managedCharacterDefinition.profile || {}),
+  biography_markdown: "A remotely managed scout prepared through the TypeScript API.",
+};
+const managedCharacterImportMetadata = structuredClone(contentCharacter.payload.character_file.import_metadata);
+managedCharacterImportMetadata.source_path = "api://campaigns/linden-pass/characters/api-scout";
+managedCharacterImportMetadata.parser_version = "api-test";
+managedCharacterImportMetadata.import_status = "managed";
+const managedCharacterBody = {
+  definition: managedCharacterDefinition,
+  import_metadata: managedCharacterImportMetadata,
+};
+
+const blockedContentCharacterPut = await requestJson(
+  managedCharacterPath,
+  {},
+  { method: "PUT", body: managedCharacterBody },
+);
+if (blockedContentCharacterPut.status !== 401 || blockedContentCharacterPut.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated content character PUT 401, got ${blockedContentCharacterPut.status} ${blockedContentCharacterPut.payload?.error?.code}`,
+  );
+}
+
+const fixtureContentCharacterPut = await requestJson(
+  managedCharacterPath,
+  contentManagerHeaders,
+  { method: "PUT", body: managedCharacterBody },
+);
+if (
+  fixtureContentCharacterPut.status !== 403 ||
+  fixtureContentCharacterPut.payload?.error?.message !== "Content character writes require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture content character PUT bearer requirement, got ${fixtureContentCharacterPut.status} ${fixtureContentCharacterPut.payload?.error?.message}`,
+  );
+}
+
+const bearerPlayerContentCharacterPut = await requestJson(
+  managedCharacterPath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "PUT", body: managedCharacterBody },
+);
+if (
+  bearerPlayerContentCharacterPut.status !== 403 ||
+  bearerPlayerContentCharacterPut.payload?.error?.message !== "You do not have permission to manage campaign content."
+) {
+  throw new Error(
+    `Expected bearer player content character PUT forbidden, got ${bearerPlayerContentCharacterPut.status} ${bearerPlayerContentCharacterPut.payload?.error?.message}`,
+  );
+}
+
+const invalidContentCharacterPut = await requestJson(
+  managedCharacterPath,
+  bearerContentManagerHeaders,
+  { method: "PUT", body: { definition: [] } },
+);
+if (
+  invalidContentCharacterPut.status !== 400 ||
+  invalidContentCharacterPut.payload?.error?.message !== "Character definition must be an object."
+) {
+  throw new Error(
+    `Expected content character PUT definition validation, got ${invalidContentCharacterPut.status} ${invalidContentCharacterPut.payload?.error?.message}`,
+  );
+}
+
+const missingCampaignContentCharacterPut = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/content/characters/api-scout",
+  bearerContentManagerHeaders,
+  { method: "PUT", body: managedCharacterBody },
+);
+if (
+  missingCampaignContentCharacterPut.status !== 404 ||
+  missingCampaignContentCharacterPut.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing campaign content character PUT 404, got ${missingCampaignContentCharacterPut.status} ${missingCampaignContentCharacterPut.payload?.error?.code}`,
+  );
+}
+
+const contentCharacterPut = await requestJson(
+  managedCharacterPath,
+  bearerContentManagerHeaders,
+  { method: "PUT", body: managedCharacterBody },
+);
+if (
+  contentCharacterPut.status !== 200 ||
+  contentCharacterPut.payload?.character_file?.character_slug !== managedCharacterSlug ||
+  contentCharacterPut.payload?.character_file?.definition?.character_slug !== managedCharacterSlug ||
+  contentCharacterPut.payload?.character_file?.definition?.name !== "API Scout" ||
+  contentCharacterPut.payload?.character_file?.import_metadata?.parser_version !== "api-test" ||
+  contentCharacterPut.payload?.character_file?.state_created !== true
+) {
+  throw new Error(
+    `Expected content character PUT payload, got ${contentCharacterPut.status} ${JSON.stringify(contentCharacterPut.payload)}`,
+  );
+}
+const managedCharacterDefinitionPath = path.join(
+  campaignsDir,
+  "linden-pass",
+  "characters",
+  managedCharacterSlug,
+  "definition.yaml",
+);
+const managedCharacterImportPath = path.join(
+  campaignsDir,
+  "linden-pass",
+  "characters",
+  managedCharacterSlug,
+  "import.yaml",
+);
+if (
+  !existsSync(managedCharacterDefinitionPath) ||
+  !readFileSync(managedCharacterDefinitionPath, "utf8").includes("API Scout") ||
+  !existsSync(managedCharacterImportPath) ||
+  !readFileSync(managedCharacterImportPath, "utf8").includes("api-test")
+) {
+  throw new Error("Expected content character PUT to write definition/import YAML into the copied fixture tree.");
+}
+
+const contentCharactersAfterPut = await requestJson("/api/v1/campaigns/linden-pass/content/characters", contentManagerHeaders);
+if (!contentCharactersAfterPut.payload?.characters?.some((item) => item.character_slug === managedCharacterSlug)) {
+  throw new Error(`Expected content characters list to include ${managedCharacterSlug} after PUT.`);
+}
+
+const managedContentCharacter = await requestJson(managedCharacterPath, contentManagerHeaders);
+if (
+  managedContentCharacter.status !== 200 ||
+  managedContentCharacter.payload?.character_file?.definition?.name !== "API Scout" ||
+  managedContentCharacter.payload?.character_file?.state_created !== false
+) {
+  throw new Error(
+    `Expected managed content character detail to return written YAML, got ${managedContentCharacter.status} ${JSON.stringify(managedContentCharacter.payload)}`,
+  );
+}
+
+const fixtureContentCharacterDelete = await requestJson(
+  managedCharacterPath,
+  contentManagerHeaders,
+  { method: "DELETE" },
+);
+if (
+  fixtureContentCharacterDelete.status !== 403 ||
+  fixtureContentCharacterDelete.payload?.error?.message !== "Content character writes require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture content character DELETE bearer requirement, got ${fixtureContentCharacterDelete.status} ${fixtureContentCharacterDelete.payload?.error?.message}`,
+  );
+}
+
+const contentCharacterDelete = await requestJson(
+  managedCharacterPath,
+  bearerContentManagerHeaders,
+  { method: "DELETE" },
+);
+if (
+  contentCharacterDelete.status !== 200 ||
+  contentCharacterDelete.payload?.deleted?.character_slug !== managedCharacterSlug ||
+  contentCharacterDelete.payload?.deleted?.deleted_files !== true ||
+  contentCharacterDelete.payload?.deleted?.deleted_state !== false ||
+  contentCharacterDelete.payload?.deleted?.deleted_assignment !== false
+) {
+  throw new Error(
+    `Expected content character DELETE payload, got ${contentCharacterDelete.status} ${JSON.stringify(contentCharacterDelete.payload)}`,
+  );
+}
+if (existsSync(managedCharacterDefinitionPath) || existsSync(managedCharacterImportPath)) {
+  throw new Error("Expected content character DELETE to remove managed definition/import files from the copied fixture tree.");
+}
+
+const missingManagedCharacterDelete = await requestJson(
+  managedCharacterPath,
+  bearerContentManagerHeaders,
+  { method: "DELETE" },
+);
+if (
+  missingManagedCharacterDelete.status !== 404 ||
+  missingManagedCharacterDelete.payload?.error?.code !== "content_character_not_found"
+) {
+  throw new Error(
+    `Expected missing managed content character DELETE 404, got ${missingManagedCharacterDelete.status} ${missingManagedCharacterDelete.payload?.error?.code}`,
+  );
+}
+
 const contentAssets = await requestJson("/api/v1/campaigns/linden-pass/content/assets", contentManagerHeaders);
 if (contentAssets.status !== 200) {
   throw new Error(`Expected content assets list endpoint 200, got ${contentAssets.status}`);

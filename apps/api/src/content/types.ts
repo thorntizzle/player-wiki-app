@@ -51,6 +51,14 @@ export interface CampaignCharacterFileRecord {
   state_created: boolean;
 }
 
+export interface DeletedCharacterContent {
+  character_slug: string;
+  deleted_files: boolean;
+  deleted_state: boolean;
+  deleted_assignment: boolean;
+  deleted_assets: boolean;
+}
+
 export interface ContentPageRemovalSafety {
   blockers_by_type: Record<string, string[]>;
   samples: Record<string, string>;

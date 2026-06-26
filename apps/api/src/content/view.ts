@@ -5,6 +5,7 @@ import type {
   CampaignPageFileRecord,
   ContentPagePayload,
   ContentPageRemovalSafety,
+  DeletedCharacterContent,
 } from "./types.js";
 
 const EDITABLE_FIELDS = [
@@ -140,6 +141,18 @@ export function buildContentCharacterDetailPayload(
       import_metadata: record.import_metadata,
       state_created: record.state_created,
     },
+  };
+}
+
+export function buildContentCharacterDeletePayload(
+  deleted: DeletedCharacterContent,
+): {
+  ok: true;
+  deleted: DeletedCharacterContent;
+} {
+  return {
+    ok: true,
+    deleted,
   };
 }
 
