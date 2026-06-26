@@ -38,6 +38,8 @@ This document records the first implemented TypeScript read-only compatibility s
 - Implemented SQLite-backed Session log detail read endpoint with fixture or bearer-token manager access:
   - `GET /api/v1/campaigns/:campaignSlug/session/logs/:sessionId`
 - Added `apps/api/src/wiki/` as the read-only Markdown/frontmatter fixture reader and wiki payload serializer.
+- Added Campaign Control read endpoint with fixture or bearer-token visibility-manager access:
+  - `GET /api/v1/campaigns/:campaignSlug/control`
 - Added fixture-backed, content-management-gated content config endpoint:
   - `GET /api/v1/campaigns/:campaignSlug/content/config`
 - Added fixture-backed, content-management-gated content page management read endpoints:
@@ -142,6 +144,13 @@ This document records the first implemented TypeScript read-only compatibility s
   - public viewer role and account note
   - available surface labels, cross-cutting limits, visibility rows, and surface guidance
   - Flask and Gen2 help/account/sign-in links
+- Campaign Control response preserves the visibility-management API shell:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture or bearer-token player roles receive `forbidden`
+  - fixture or bearer-token DM/admin roles receive campaign metadata, visibility rows, rules, notes, and control links
+  - fixture or bearer-token admin reads include the Private visibility choice while DM reads omit it
+  - rows include selected, configured, default, effective, label, choice, and campaign-floor override fields
+  - missing campaign control reads return `campaign_not_found` JSON
 - Wiki home response preserves the stable Flask fixture fields for:
   - `frontend_mode`
   - `can_view_wiki`
@@ -217,6 +226,7 @@ This document records the first implemented TypeScript read-only compatibility s
   - compares Flask-vs-TypeScript unauthenticated Combat state auth envelopes and asserts the fixture combat shell/unchanged-response shape.
   - compares Flask-vs-TypeScript campaign-list payload campaign fields while asserting explicit fixture read-only roles.
   - compares Flask-vs-TypeScript public Campaign Help payload fields under sanitized fixture data.
+  - compares Flask-vs-TypeScript Campaign Control auth envelopes and DM payload parity.
   - compares Flask-vs-TypeScript payload parity for `GET /api/v1/campaigns/linden-pass/content/config`.
   - compares Flask-vs-TypeScript payload parity for `GET /api/v1/campaigns/linden-pass/content/pages` and one `.../content/pages/locations/port-meridian` detail endpoint, including removal fields and omission/inclusion of `body_markdown`.
   - compares Flask-vs-TypeScript payload parity for `GET /api/v1/campaigns/linden-pass/content/assets` and one `.../content/assets/npcs/captain-lyra-vale.png` detail endpoint, including detail-only `data_base64`.
@@ -227,7 +237,7 @@ This document records the first implemented TypeScript read-only compatibility s
   - compares Flask-vs-TypeScript unauthenticated Session article-source search, Session article image, and Session log detail auth envelopes, and asserts the fixture lookup shell for short, wiki-result, player-forbidden, and missing-campaign cases.
   - compares Flask-vs-TypeScript content-management unauthenticated and player-forbidden auth envelopes.
 - `apps/api/tests/smoke.mjs`:
-  - starts compiled API on a local port and verifies `/healthz`, app state, fixture `/api/v1/me` identity reads, fixture `/api/v1/me/settings` account-settings reads, SQLite bearer-token `/api/v1/me` and `/api/v1/me/settings` reads, SQLite-backed systems import-run list/detail reads with bearer admin/non-admin gates, campaign Systems landing/search/source list/detail/category/entry reads with fixture and bearer-token role gates, Combat state/live-state shell reads with fixture and bearer-token role gates, Combat Systems monster search reads with fixture and bearer-token role gates, Session state/article-source/image/log reads with fixture and bearer-token role gates, campaign list/detail, public Campaign Help, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
+  - starts compiled API on a local port and verifies `/healthz`, app state, fixture `/api/v1/me` identity reads, fixture `/api/v1/me/settings` account-settings reads, SQLite bearer-token `/api/v1/me` and `/api/v1/me/settings` reads, SQLite-backed systems import-run list/detail reads with bearer admin/non-admin gates, campaign Systems landing/search/source list/detail/category/entry reads with fixture and bearer-token role gates, Combat state/live-state shell reads with fixture and bearer-token role gates, Combat Systems monster search reads with fixture and bearer-token role gates, Session state/article-source/image/log reads with fixture and bearer-token role gates, campaign list/detail, public Campaign Help, Campaign Control auth/payload reads, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
   - validates content-management auth gates for anonymous, fixture player, bearer player, bearer outsider, and bearer app-admin content config reads.
   - validates fixture-backed content config endpoint payload for `linden-pass` (`campaign_slug`, `current_session`, `title`, `systems_sources`, `editable_fields`, `updated_at`) and missing-campaign 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/pages` list sorting/count/body omission and sampled `Port Meridian` metadata/removal fields, plus `GET /api/v1/campaigns/:campaignSlug/content/pages/*` detail payload body inclusion and missing-content-page 404.

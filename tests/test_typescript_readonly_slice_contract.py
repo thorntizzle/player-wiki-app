@@ -517,6 +517,40 @@ def test_typescript_campaign_help_matches_flask_public_contract(typescript_api_s
         assert payload[key] == flask_payload[key]
 
 
+def test_typescript_campaign_control_matches_flask_auth_and_payload_contract(typescript_api_server, client, sign_in, users):
+    flask_response = client.get("/api/v1/campaigns/linden-pass/control")
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/control")
+    assert status == 401
+    assert payload == flask_payload
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    flask_response = client.get("/api/v1/campaigns/linden-pass/control")
+    assert flask_response.status_code == 403
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/control",
+        headers={"X-CPW-Fixture-Role": "player"},
+    )
+    assert status == 403
+    assert payload == flask_payload
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    flask_response = client.get("/api/v1/campaigns/linden-pass/control")
+    assert flask_response.status_code == 200
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/control",
+        headers={"X-CPW-Fixture-Role": "dm"},
+    )
+    assert status == 200
+    assert payload == flask_payload
+
+
 def _section_summary(payload):
     return [
         (section["section_name"], section["section_slug"], section["page_count"])

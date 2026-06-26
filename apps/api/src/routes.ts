@@ -455,6 +455,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
     seedPath: "/api/v1/me/settings",
     routeFamily: "api_v1",
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/campaigns/:campaignSlug/control",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/control",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/control",
+    routeFamily: "api_v1_campaigns",
+    missingResource: {
+      method: "GET",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/control",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -490,4 +505,5 @@ export const ROUTES = {
   sessionLogDetail: IMPLEMENTED_ROUTES[29].honoPath,
   me: IMPLEMENTED_ROUTES[30].honoPath,
   meSettings: IMPLEMENTED_ROUTES[31].honoPath,
+  campaignControl: IMPLEMENTED_ROUTES[32].honoPath,
 } as const;

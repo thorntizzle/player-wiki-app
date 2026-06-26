@@ -13,7 +13,9 @@ import {
   buildFixtureMePayload,
 } from "./auth/view.js";
 import { getApiConfig } from "./config.js";
+import { buildCampaignControlPayload, campaignRoleCanManageVisibility } from "./campaigns/control.js";
 import { getCampaignBySlug, listCampaigns, listCampaignSlugs } from "./campaigns/repository.js";
+import type { CampaignViewModel } from "./campaigns/view.js";
 import { buildCombatReadOnlyPayload } from "./combat/view.js";
 import { buildCampaignHelpPayload } from "./help/view.js";
 import { ROUTES } from "./routes.js";
@@ -229,6 +231,33 @@ function resolveContentManagerRole(
     return { kind: "authenticated", role };
   }
   if (role === "player") {
+    return { kind: "forbidden", message: forbiddenMessage };
+  }
+  return { kind: "missing" };
+}
+
+function resolveCampaignVisibilityManagerRole(
+  ctx: { req: { header: (name: string) => string | undefined } },
+  campaign: CampaignViewModel,
+): RoleResolution {
+  const forbiddenMessage = "You do not have permission to manage campaign visibility.";
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "authenticated") {
+    const role = apiTokenRoleForCampaign(apiAuth.context, campaign.slug);
+    if (role && campaignRoleCanManageVisibility(config.dbPath, campaign, role)) {
+      return { kind: "authenticated", role: toFixtureSystemsRole(role) };
+    }
+    return { kind: "forbidden", message: forbiddenMessage };
+  }
+  if (apiAuth.kind === "invalid") {
+    return { kind: "invalid" };
+  }
+
+  const role = fixtureRole(ctx);
+  if (role && campaignRoleCanManageVisibility(config.dbPath, campaign, role)) {
+    return { kind: "authenticated", role };
+  }
+  if (role) {
     return { kind: "forbidden", message: forbiddenMessage };
   }
   return { kind: "missing" };
@@ -857,6 +886,23 @@ app.get(ROUTES.campaignHelp, async (ctx) => {
   }
 
   return ctx.json(buildCampaignHelpPayload(campaign));
+});
+
+app.get(ROUTES.campaignControl, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignVisibilityManagerRole(ctx, campaign);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(buildCampaignControlPayload(config.dbPath, campaign, auth.role));
 });
 
 app.get(ROUTES.wikiHome, async (ctx) => {

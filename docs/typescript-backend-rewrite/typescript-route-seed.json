@@ -27,6 +27,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/control",
+      "route_family": "api_v1_campaigns",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/control",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Campaign Control read route with Flask-compatible campaign-visibility manager auth, fixture or bearer-token DM/admin access, SQLite visibility overrides when present, default visibility rows, rules, notes, and control links."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/campaigns",
       "route_family": "api_v1_campaigns",
       "status": "implemented_fixture_readonly",

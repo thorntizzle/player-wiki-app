@@ -1541,6 +1541,71 @@ if (campaignHelp.payload?.surfaces?.[0]?.links?.[0]?.href !== "/campaigns/linden
   throw new Error(`Expected campaign help Flask campaign link, got ${campaignHelp.payload?.surfaces?.[0]?.links?.[0]?.href}`);
 }
 
+const blockedCampaignControl = await requestJson("/api/v1/campaigns/linden-pass/control");
+if (blockedCampaignControl.status !== 401 || blockedCampaignControl.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated campaign control to return auth_required 401, got ${blockedCampaignControl.status} ${blockedCampaignControl.payload?.error?.code}`,
+  );
+}
+const playerCampaignControl = await requestJson("/api/v1/campaigns/linden-pass/control", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (playerCampaignControl.status !== 403 || playerCampaignControl.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected fixture player campaign control to return forbidden 403, got ${playerCampaignControl.status} ${playerCampaignControl.payload?.error?.code}`,
+  );
+}
+if (playerCampaignControl.payload?.error?.message !== "You do not have permission to manage campaign visibility.") {
+  throw new Error(`Expected campaign-control forbidden message, got ${playerCampaignControl.payload?.error?.message}`);
+}
+const bearerPlayerCampaignControl = await requestJson("/api/v1/campaigns/linden-pass/control", {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (bearerPlayerCampaignControl.status !== 403 || bearerPlayerCampaignControl.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected bearer player campaign control to return forbidden 403, got ${bearerPlayerCampaignControl.status} ${bearerPlayerCampaignControl.payload?.error?.code}`,
+  );
+}
+const dmCampaignControl = await requestJson("/api/v1/campaigns/linden-pass/control", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (dmCampaignControl.status !== 200 || dmCampaignControl.payload?.ok !== true) {
+  throw new Error(`Expected fixture DM campaign control endpoint 200 ok, got ${dmCampaignControl.status}`);
+}
+if (dmCampaignControl.payload?.campaign?.slug !== "linden-pass") {
+  throw new Error(`Expected campaign control campaign slug linden-pass, got ${dmCampaignControl.payload?.campaign?.slug}`);
+}
+if (dmCampaignControl.payload?.links?.gen2_control_url !== "/app-next/campaigns/linden-pass/control") {
+  throw new Error(`Expected Gen2 campaign control link, got ${dmCampaignControl.payload?.links?.gen2_control_url}`);
+}
+if (dmCampaignControl.payload?.can_set_private_visibility !== false) {
+  throw new Error(`Expected fixture DM control can_set_private_visibility false, got ${dmCampaignControl.payload?.can_set_private_visibility}`);
+}
+const controlRowsByScope = Object.fromEntries(
+  (dmCampaignControl.payload?.visibility_rows || []).map((row) => [row.scope, row]),
+);
+if (controlRowsByScope.campaign?.selected_visibility !== "public") {
+  throw new Error(`Expected campaign control campaign visibility public, got ${controlRowsByScope.campaign?.selected_visibility}`);
+}
+if (controlRowsByScope.characters?.effective_visibility !== "dm") {
+  throw new Error(`Expected campaign control characters effective visibility dm, got ${controlRowsByScope.characters?.effective_visibility}`);
+}
+if ((controlRowsByScope.campaign?.choices || []).some((choice) => choice.value === "private")) {
+  throw new Error("Expected fixture DM campaign control choices to omit private visibility.");
+}
+const bearerAdminCampaignControl = await requestJson("/api/v1/campaigns/linden-pass/control", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (bearerAdminCampaignControl.status !== 200 || bearerAdminCampaignControl.payload?.can_set_private_visibility !== true) {
+  throw new Error(
+    `Expected bearer app-admin campaign control 200 with private visibility permission, got ${bearerAdminCampaignControl.status} ${bearerAdminCampaignControl.payload?.can_set_private_visibility}`,
+  );
+}
+const adminCampaignRow = (bearerAdminCampaignControl.payload?.visibility_rows || []).find((row) => row.scope === "campaign");
+if (!adminCampaignRow?.choices?.some((choice) => choice.value === "private")) {
+  throw new Error(`Expected bearer app-admin campaign control choices to include private, got ${JSON.stringify(adminCampaignRow?.choices)}`);
+}
+
 const contentManagerHeaders = { "X-CPW-Fixture-Role": "dm" };
 const bearerContentManagerHeaders = { Authorization: `Bearer ${liveApiToken}` };
 
@@ -2354,6 +2419,13 @@ if (missingSessionSourceSearch.status !== 404 || missingSessionSourceSearch.payl
 const missingHelp = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/help");
 if (missingHelp.status !== 404 || missingHelp.payload?.error?.code !== "campaign_not_found") {
   throw new Error(`Expected missing help campaign JSON 404, got ${missingHelp.status}`);
+}
+
+const missingCampaignControl = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/control", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (missingCampaignControl.status !== 404 || missingCampaignControl.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(`Expected missing campaign control JSON 404, got ${missingCampaignControl.status}`);
 }
 
 const missingCampaignConfig = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/content/config");

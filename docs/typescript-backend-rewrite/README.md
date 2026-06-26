@@ -65,6 +65,7 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/combat/systems-monsters/search`
   - `GET /api/v1/campaigns`
   - `GET /api/v1/campaigns/:campaignSlug`
+  - `GET /api/v1/campaigns/:campaignSlug/control`
   - `GET /api/v1/campaigns/:campaignSlug/help`
   - `GET /api/v1/campaigns/:campaignSlug/wiki`
   - `GET /api/v1/campaigns/:campaignSlug/wiki/sections/:sectionSlug`
@@ -124,6 +125,10 @@ Route parity check command:
   live-session chat-order choice metadata, fixture-role reads, and API-token user/preference
   reads from `CPW_DB_PATH`. The TypeScript slice remains read-only and does not touch API
   token `last_used_at` timestamps.
+- The Campaign Control read route now serves `GET .../control`, preserving Flask-compatible
+  visibility-management auth for fixture or bearer-token DM/admin identities, default campaign
+  visibility rows, optional SQLite visibility overrides, admin-only Private choices, rules, notes,
+  and Flask/Gen2 control links.
 - The content/config, content page, content asset, and content character management read routes now
   preserve Flask-compatible content-management auth: no identity returns `auth_required`, fixture or
   bearer-token player/outsider identities return `forbidden`, and fixture or bearer-token DM/admin
