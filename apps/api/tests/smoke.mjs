@@ -1284,6 +1284,24 @@ if (blockedCombatState.status !== 401 || blockedCombatState.payload?.error?.code
   );
 }
 
+const invalidBearerCombatState = await requestJson("/api/v1/campaigns/linden-pass/combat", {
+  Authorization: "Bearer definitely-invalid-token",
+});
+if (invalidBearerCombatState.status !== 401 || invalidBearerCombatState.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected invalid bearer combat state to return auth_required 401, got ${invalidBearerCombatState.status} ${invalidBearerCombatState.payload?.error?.code}`,
+  );
+}
+
+const outsiderCombatState = await requestJson("/api/v1/campaigns/linden-pass/combat", {
+  Authorization: `Bearer ${outsiderApiToken}`,
+});
+if (outsiderCombatState.status !== 403 || outsiderCombatState.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected outsider bearer combat state forbidden 403, got ${outsiderCombatState.status} ${outsiderCombatState.payload?.error?.code}`,
+  );
+}
+
 const playerCombatState = await requestJson("/api/v1/campaigns/linden-pass/combat", {
   "X-CPW-Fixture-Role": "player",
 });
@@ -1310,6 +1328,21 @@ if (
   throw new Error(`Unexpected player combat state payload: ${JSON.stringify(playerCombatState.payload)}`);
 }
 
+const bearerPlayerCombatState = await requestJson("/api/v1/campaigns/linden-pass/combat", {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (
+  bearerPlayerCombatState.status !== 200 ||
+  bearerPlayerCombatState.payload?.ok !== true ||
+  bearerPlayerCombatState.payload?.campaign?.slug !== "linden-pass" ||
+  bearerPlayerCombatState.payload?.permissions?.can_manage_combat !== false ||
+  bearerPlayerCombatState.payload?.permissions?.can_access_systems !== true ||
+  bearerPlayerCombatState.payload?.links?.flask_dm_status_url !== "" ||
+  bearerPlayerCombatState.payload?.live_view_token !== playerCombatState.payload?.live_view_token
+) {
+  throw new Error(`Unexpected bearer player combat state payload: ${JSON.stringify(bearerPlayerCombatState.payload)}`);
+}
+
 const dmCombatState = await requestJson("/api/v1/campaigns/linden-pass/combat", {
   "X-CPW-Fixture-Role": "dm",
 });
@@ -1328,6 +1361,20 @@ if (
   throw new Error(`Unexpected DM combat state payload: ${JSON.stringify(dmCombatState.payload)}`);
 }
 
+const bearerAdminCombatState = await requestJson("/api/v1/campaigns/linden-pass/combat", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (
+  bearerAdminCombatState.status !== 200 ||
+  bearerAdminCombatState.payload?.permissions?.can_manage_combat !== true ||
+  bearerAdminCombatState.payload?.permissions?.can_access_dm_content !== true ||
+  bearerAdminCombatState.payload?.links?.flask_dm_status_url !== "/campaigns/linden-pass/combat/dm" ||
+  bearerAdminCombatState.payload?.links?.flask_dm_controls_url !== "/campaigns/linden-pass/combat/dm?view=controls" ||
+  bearerAdminCombatState.payload?.live_view_token !== dmCombatState.payload?.live_view_token
+) {
+  throw new Error(`Unexpected bearer admin combat state payload: ${JSON.stringify(bearerAdminCombatState.payload)}`);
+}
+
 const unchangedCombatState = await requestJson("/api/v1/campaigns/linden-pass/combat/live-state", {
   "X-CPW-Fixture-Role": "dm",
   "X-Live-Revision": String(dmCombatState.payload.live_revision),
@@ -1341,6 +1388,23 @@ if (
   "tracker" in unchangedCombatState.payload
 ) {
   throw new Error(`Unexpected unchanged combat live-state payload: ${JSON.stringify(unchangedCombatState.payload)}`);
+}
+
+const unchangedBearerAdminCombatState = await requestJson("/api/v1/campaigns/linden-pass/combat/live-state", {
+  Authorization: `Bearer ${liveApiToken}`,
+  "X-Live-Revision": String(bearerAdminCombatState.payload.live_revision),
+  "X-Live-View-Token": bearerAdminCombatState.payload.live_view_token,
+});
+if (
+  unchangedBearerAdminCombatState.status !== 200 ||
+  unchangedBearerAdminCombatState.payload?.changed !== false ||
+  unchangedBearerAdminCombatState.payload?.live_revision !== bearerAdminCombatState.payload.live_revision ||
+  unchangedBearerAdminCombatState.payload?.live_view_token !== bearerAdminCombatState.payload.live_view_token ||
+  "tracker" in unchangedBearerAdminCombatState.payload
+) {
+  throw new Error(
+    `Unexpected unchanged bearer admin combat live-state payload: ${JSON.stringify(unchangedBearerAdminCombatState.payload)}`,
+  );
 }
 
 const missingCombatState = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/combat", {

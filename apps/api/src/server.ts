@@ -719,11 +719,12 @@ app.get(ROUTES.combatState, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const role = fixtureRole(ctx);
-  if (!role) {
-    const error = authRequired();
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
+  const role = auth.role;
 
   const payload = buildCombatReadOnlyPayload(campaign, role);
   const requestedRevision = parseLiveRevisionHeader(ctx);
@@ -747,11 +748,12 @@ app.get(ROUTES.combatLiveState, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const role = fixtureRole(ctx);
-  if (!role) {
-    const error = authRequired();
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
+  const role = auth.role;
 
   const payload = buildCombatReadOnlyPayload(campaign, role);
   const requestedRevision = parseLiveRevisionHeader(ctx);
