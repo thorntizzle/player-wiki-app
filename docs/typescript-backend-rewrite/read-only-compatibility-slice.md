@@ -58,6 +58,8 @@ fixture database.
   - `GET /api/v1/campaigns/:campaignSlug/control`
 - Added Campaign Control visibility write endpoint with bearer-token visibility-manager access:
   - `PATCH /api/v1/campaigns/:campaignSlug/control/visibility`
+- Added DM Content read endpoint with fixture or bearer-token DM/admin access:
+  - `GET /api/v1/campaigns/:campaignSlug/dm-content`
 - Added fixture-backed, content-management-gated content config endpoint:
   - `GET /api/v1/campaigns/:campaignSlug/content/config`
 - Added fixture-backed content config write endpoint with bearer-token DM/admin access:
@@ -199,6 +201,13 @@ fixture database.
   - changed scopes write `auth_audit_log` rows with `campaign_visibility_updated` and `campaign_control_api` metadata
   - responses return a refreshed Campaign Control payload plus `changed_scopes` and `message`
   - missing campaign control writes return `campaign_not_found` JSON
+- DM Content response preserves the read API shell:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture or bearer-token player roles receive `forbidden`
+  - fixture or bearer-token DM/admin roles receive campaign metadata, DM Content permissions, statblocks, custom condition definitions, and subpage counts
+  - statblocks include source filename, subsection, parsed combat fields, timestamps, actor ids, and the Flask-compatible parser feedback summary
+  - subpage counts cover statblocks, conditions, visible Player Wiki pages, staged Session articles, and campaign Systems source-state rows
+  - missing campaign DM Content reads return `campaign_not_found` JSON
 - Wiki home response preserves the stable Flask fixture fields for:
   - `frontend_mode`
   - `can_view_wiki`

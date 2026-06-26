@@ -26,6 +26,7 @@ import {
 import { getCampaignBySlug, listCampaigns, listCampaignSlugs } from "./campaigns/repository.js";
 import type { CampaignViewModel } from "./campaigns/view.js";
 import { buildCombatReadOnlyPayload } from "./combat/view.js";
+import { buildDmContentPayload } from "./dmContent/view.js";
 import { buildCampaignHelpPayload } from "./help/view.js";
 import { ROUTES } from "./routes.js";
 import { buildSessionArticleSourceSearchPayload } from "./session/sourceSearch.js";
@@ -1388,6 +1389,28 @@ app.get(ROUTES.sessionState, async (ctx) => {
   }
 
   return ctx.json(payload);
+});
+
+app.get(ROUTES.dmContentState, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (auth.role === "player") {
+    const error = forbidden("You do not have access to this campaign scope.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const playerWikiPages = await campaignWikiRepository.listVisiblePages(campaign.slug);
+  return ctx.json(buildDmContentPayload(config.dbPath, campaign, auth.role, playerWikiPages.length));
 });
 
 app.post(ROUTES.sessionStart, async (ctx) => {

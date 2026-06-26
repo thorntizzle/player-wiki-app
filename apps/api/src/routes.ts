@@ -733,6 +733,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "content_character_not_found",
     },
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/campaigns/:campaignSlug/dm-content",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/dm-content",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/dm-content",
+    routeFamily: "api_v1_dm_content",
+    missingResource: {
+      method: "GET",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/dm-content",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -787,4 +802,5 @@ export const ROUTES = {
   contentPageDelete: IMPLEMENTED_ROUTES[48].honoPath,
   contentCharacterUpdate: IMPLEMENTED_ROUTES[49].honoPath,
   contentCharacterDelete: IMPLEMENTED_ROUTES[50].honoPath,
+  dmContentState: IMPLEMENTED_ROUTES[51].honoPath,
 } as const;

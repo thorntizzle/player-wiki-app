@@ -436,6 +436,35 @@ smokeDb.exec(`
     article_id INTEGER,
     created_at TEXT NOT NULL
   );
+
+  CREATE TABLE campaign_dm_statblocks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_slug TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body_markdown TEXT NOT NULL,
+    source_filename TEXT NOT NULL,
+    subsection TEXT NOT NULL DEFAULT '',
+    armor_class INTEGER,
+    max_hp INTEGER NOT NULL DEFAULT 0,
+    speed_text TEXT NOT NULL DEFAULT '',
+    movement_total INTEGER NOT NULL DEFAULT 0,
+    initiative_bonus INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by_user_id INTEGER,
+    updated_by_user_id INTEGER
+  );
+
+  CREATE TABLE campaign_dm_condition_definitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_slug TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description_markdown TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by_user_id INTEGER,
+    updated_by_user_id INTEGER
+  );
 `);
 smokeDb
   .prepare(
@@ -675,6 +704,72 @@ insertSessionMessage.run(
   null,
   "2026-06-24T10:30:00+00:00",
 );
+smokeDb
+  .prepare(
+    `
+      INSERT INTO campaign_dm_statblocks (
+        id,
+        campaign_slug,
+        title,
+        body_markdown,
+        source_filename,
+        subsection,
+        armor_class,
+        max_hp,
+        speed_text,
+        movement_total,
+        initiative_bonus,
+        created_at,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  )
+  .run(
+    301,
+    "linden-pass",
+    "Dock Tough",
+    "## Dock Tough\nArmor Class: 12\nHit Points: 16\nSpeed: 30 ft.\nDEX 14 (+2)",
+    "dock-tough.md",
+    "Dock Crew",
+    12,
+    16,
+    "30 ft.",
+    30,
+    2,
+    "2026-06-25T10:40:00+00:00",
+    "2026-06-25T10:45:00+00:00",
+    77,
+    77,
+  );
+smokeDb
+  .prepare(
+    `
+      INSERT INTO campaign_dm_condition_definitions (
+        id,
+        campaign_slug,
+        name,
+        description_markdown,
+        created_at,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  )
+  .run(
+    401,
+    "linden-pass",
+    "Salt-Burned",
+    "A custom fixture condition.",
+    "2026-06-25T10:42:00+00:00",
+    "2026-06-25T10:46:00+00:00",
+    77,
+    77,
+  );
 smokeDb.close();
 
 const nodePath = fileURLToPath(new URL("../dist/server.js", import.meta.url));
@@ -3381,6 +3476,66 @@ if (
   dmSession.payload?.session_dm_passive_scores?.length !== 0
 ) {
   throw new Error(`Unexpected DM session payload: ${JSON.stringify(dmSession.payload)}`);
+}
+
+const blockedDmContent = await requestJson("/api/v1/campaigns/linden-pass/dm-content");
+if (blockedDmContent.status !== 401 || blockedDmContent.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated DM Content to return auth_required 401, got ${blockedDmContent.status} ${blockedDmContent.payload?.error?.code}`,
+  );
+}
+
+const playerDmContent = await requestJson("/api/v1/campaigns/linden-pass/dm-content", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (playerDmContent.status !== 403 || playerDmContent.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected fixture player DM Content to return forbidden 403, got ${playerDmContent.status} ${playerDmContent.payload?.error?.code}`,
+  );
+}
+
+const dmContent = await requestJson("/api/v1/campaigns/linden-pass/dm-content", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (
+  dmContent.status !== 200 ||
+  dmContent.payload?.ok !== true ||
+  dmContent.payload?.campaign?.slug !== "linden-pass" ||
+  dmContent.payload?.permissions?.can_manage_dm_content !== true ||
+  dmContent.payload?.statblocks?.length !== 1 ||
+  dmContent.payload?.statblocks?.[0]?.title !== "Dock Tough" ||
+  dmContent.payload?.statblocks?.[0]?.parser_feedback?.summary !==
+    "Parsed combat fields: AC 12, HP 16, Speed 30 ft. (30 ft. movement), Init +2." ||
+  dmContent.payload?.conditions?.length !== 1 ||
+  dmContent.payload?.conditions?.[0]?.name !== "Salt-Burned" ||
+  dmContent.payload?.subpage_counts?.statblocks !== 1 ||
+  dmContent.payload?.subpage_counts?.conditions !== 1 ||
+  dmContent.payload?.subpage_counts?.staged_articles !== 1 ||
+  dmContent.payload?.subpage_counts?.systems !== 3 ||
+  Number(dmContent.payload?.subpage_counts?.player_wiki || 0) <= 0
+) {
+  throw new Error(`Unexpected DM Content payload: ${JSON.stringify(dmContent.payload)}`);
+}
+
+const bearerDmContent = await requestJson("/api/v1/campaigns/linden-pass/dm-content", {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  bearerDmContent.status !== 200 ||
+  bearerDmContent.payload?.ok !== true ||
+  bearerDmContent.payload?.statblocks?.[0]?.title !== "Dock Tough" ||
+  bearerDmContent.payload?.conditions?.[0]?.name !== "Salt-Burned"
+) {
+  throw new Error(`Unexpected bearer DM Content payload: ${JSON.stringify(bearerDmContent.payload)}`);
+}
+
+const missingDmContentCampaign = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/dm-content", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (missingDmContentCampaign.status !== 404 || missingDmContentCampaign.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(
+    `Expected missing DM Content campaign JSON 404, got ${missingDmContentCampaign.status} ${missingDmContentCampaign.payload?.error?.code}`,
+  );
 }
 
 const unchangedDmSession = await requestJson("/api/v1/campaigns/linden-pass/session", {

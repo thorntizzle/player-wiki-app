@@ -69,6 +69,7 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug`
   - `GET /api/v1/campaigns/:campaignSlug/control`
   - `PATCH /api/v1/campaigns/:campaignSlug/control/visibility`
+  - `GET /api/v1/campaigns/:campaignSlug/dm-content`
   - `GET /api/v1/campaigns/:campaignSlug/help`
   - `GET /api/v1/campaigns/:campaignSlug/wiki`
   - `GET /api/v1/campaigns/:campaignSlug/wiki/sections/:sectionSlug`
@@ -186,6 +187,12 @@ Route parity check command:
   metadata, refreshed control payloads, and missing-campaign JSON. Current validation covers a
   disposable fixture database only; production/staging write readiness remains gated by migration,
   backup, and rollback rehearsal.
+- The first DM Content read route now serves `GET .../dm-content`, preserving Flask-compatible
+  unauthenticated `auth_required`, DM/admin-only access for fixture roles and bearer API tokens,
+  SQLite statblock and custom condition serialization, statblock parser feedback summaries, lane
+  counts for Player Wiki pages, staged Session articles, and Systems sources, and missing-campaign
+  JSON. This is read-only route parity only; DM Content statblock/condition mutations and browser
+  page workflows remain Flask-owned until separate Hono route slices land.
 - The content/config, content page, content asset, and content character management read routes now
   preserve Flask-compatible content-management auth: no identity returns `auth_required`, fixture or
   bearer-token player/outsider identities return `forbidden`, and fixture or bearer-token DM/admin
