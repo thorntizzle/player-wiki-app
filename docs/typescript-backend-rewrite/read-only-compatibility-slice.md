@@ -450,6 +450,10 @@ fixture database.
   - stale-revision conflict envelopes.
   - assigned-player DND absolute denomination updates through `state.currency`, preserving omitted/blank denominations.
   - DM Xianxia absolute denomination updates through `state.xianxia.currency`, including non-negative clamping.
+- Character session notes payload checks cover:
+  - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/notes` with bearer-only writes.
+  - stale-revision conflict envelopes.
+  - assigned-player player-note text updates through `state.notes.player_notes_markdown`, preserving whitespace, null-clearing to an empty string, and leaving other note fields intact.
 
 ## Added Tests and Checks
 

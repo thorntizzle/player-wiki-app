@@ -6632,6 +6632,85 @@ if (
   );
 }
 
+const staleSessionNotesUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/notes`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 999, player_notes_markdown: "This revision should conflict." } },
+);
+if (
+  staleSessionNotesUpdate.status !== 409 ||
+  staleSessionNotesUpdate.payload?.error?.code !== "state_conflict" ||
+  staleSessionNotesUpdate.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale character session notes PATCH conflict, got ${staleSessionNotesUpdate.status} ${JSON.stringify(staleSessionNotesUpdate.payload)}`,
+  );
+}
+
+const managedNotesBefore = managedCurrencyState.notes || {};
+const managedNoteText = "  Remember the ash-yard contract.\nKeep whitespace.  ";
+const playerSessionNotesUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/notes`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 5, player_notes_markdown: managedNoteText } },
+);
+if (
+  playerSessionNotesUpdate.status !== 200 ||
+  playerSessionNotesUpdate.payload?.ok !== true ||
+  playerSessionNotesUpdate.payload?.character?.state_record?.revision !== 6 ||
+  playerSessionNotesUpdate.payload?.character?.state_record?.state?.notes?.player_notes_markdown !== managedNoteText ||
+  playerSessionNotesUpdate.payload?.character?.state_record?.state?.notes?.physical_description_markdown !==
+    managedNotesBefore.physical_description_markdown ||
+  playerSessionNotesUpdate.payload?.character?.state_record?.state?.notes?.background_markdown !==
+    managedNotesBefore.background_markdown ||
+  JSON.stringify(playerSessionNotesUpdate.payload?.character?.state_record?.state?.notes?.session_notes || []) !==
+    JSON.stringify(managedNotesBefore.session_notes || [])
+) {
+  throw new Error(`Unexpected character session notes PATCH payload: ${JSON.stringify(playerSessionNotesUpdate.payload)}`);
+}
+
+const playerSessionNotesClear = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/notes`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 6, player_notes_markdown: null } },
+);
+if (
+  playerSessionNotesClear.status !== 200 ||
+  playerSessionNotesClear.payload?.ok !== true ||
+  playerSessionNotesClear.payload?.character?.state_record?.revision !== 7 ||
+  playerSessionNotesClear.payload?.character?.state_record?.state?.notes?.player_notes_markdown !== ""
+) {
+  throw new Error(`Unexpected character session notes clear payload: ${JSON.stringify(playerSessionNotesClear.payload)}`);
+}
+
+const sessionNotesAssertionDb = new Database(dbPath, { readonly: true });
+const managedStateAfterNotes = sessionNotesAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", managedCharacterSlug);
+sessionNotesAssertionDb.close();
+const managedNotesState = JSON.parse(managedStateAfterNotes?.state_json || "{}");
+if (
+  managedStateAfterNotes?.revision !== 7 ||
+  managedStateAfterNotes?.updated_by_user_id !== 79 ||
+  managedNotesState.notes?.player_notes_markdown !== "" ||
+  managedNotesState.notes?.physical_description_markdown !== managedNotesBefore.physical_description_markdown ||
+  managedNotesState.notes?.background_markdown !== managedNotesBefore.background_markdown ||
+  JSON.stringify(managedNotesState.notes?.session_notes || []) !== JSON.stringify(managedNotesBefore.session_notes || [])
+) {
+  throw new Error(
+    `Unexpected character session notes database row: ${JSON.stringify({
+      managedStateAfterNotes,
+      managedNotesState,
+    })}`,
+  );
+}
+
 const contentCharactersAfterPut = await requestJson("/api/v1/campaigns/linden-pass/content/characters", contentManagerHeaders);
 if (!contentCharactersAfterPut.payload?.characters?.some((item) => item.character_slug === managedCharacterSlug)) {
   throw new Error(`Expected content characters list to include ${managedCharacterSlug} after PUT.`);

@@ -701,6 +701,15 @@
       "notes": "Tracked Hono character session currency route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflict handling, absolute denomination updates, DND state.currency writes, Xianxia state.xianxia.currency writes with non-negative clamping, refreshed character state payloads, and explicit missing-character JSON."
     },
     {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/notes",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/notes",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono character session notes route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflict handling, player_notes_markdown updates that preserve whitespace and leave other notes fields intact, null-to-empty-string clearing, refreshed character state payloads, and explicit missing-character JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/me",
       "route_family": "api_v1",
