@@ -30,6 +30,8 @@ export type CharacterSessionResourceUpdateResult = CharacterSessionVitalsUpdateR
 
 export type CharacterSessionSpellSlotsUpdateResult = CharacterSessionVitalsUpdateResult;
 
+export type CharacterSessionInventoryUpdateResult = CharacterSessionVitalsUpdateResult;
+
 const XIANXIA_SYSTEM_CODE = "xianxia";
 const XIANXIA_ENERGY_KEYS = ["jing", "qi", "shen"] as const;
 const XIANXIA_CURRENCY_KEYS = ["coin", "supply", "spirit_stones"] as const;
@@ -841,6 +843,82 @@ function applySpellSlotsUpdate(
   state.spell_slots = slots;
 }
 
+function syncTopLevelXianxiaInventory(state: Record<string, unknown>, quantities: Record<string, unknown>[]): void {
+  const xianxia = { ...asRecord(state.xianxia) };
+  xianxia.inventory = {
+    enabled: quantities.length > 0,
+    quantities,
+  };
+  state.xianxia = xianxia;
+  state.inventory = quantities.map((item) => ({
+    id: item.id,
+    catalog_ref: item.catalog_ref,
+    name: item.name,
+    quantity: asInt(item.quantity, 0),
+    item_type: item.item_type,
+    item_nature: item.item_nature,
+    equippable: Boolean(item.equippable),
+    is_equipped: Boolean(item.is_equipped),
+    weight: item.weight,
+    is_attuned: Boolean(item.is_attuned),
+    charges_current: item.charges_current,
+    charges_max: item.charges_max,
+    notes: item.notes ?? "",
+    tags: asArray(item.tags),
+    legacy_tags: asArray(item.legacy_tags),
+    systems_ref: item.systems_ref,
+  }));
+}
+
+function xianxiaInventoryRows(state: Record<string, unknown>): Record<string, unknown>[] {
+  const xianxiaInventory = asRecord(asRecord(state.xianxia).inventory);
+  const rows = Array.isArray(xianxiaInventory.quantities)
+    ? asArray(xianxiaInventory.quantities)
+    : asArray(state.inventory);
+  return rows.map((row) => ({ ...asRecord(row), quantity: asInt(asRecord(row).quantity, 0) }));
+}
+
+function applyInventoryQuantityUpdate(
+  state: Record<string, unknown>,
+  itemId: string,
+  payload: Record<string, unknown>,
+  isXianxia: boolean,
+): void {
+  if (isXianxia) {
+    const quantities = xianxiaInventoryRows(state);
+    const item = quantities.find((row) => asString(row.id) === itemId);
+    if (!item) {
+      throw new Error(`Unknown Xianxia inventory item: ${itemId}`);
+    }
+    let quantity = asInt(item.quantity, 0);
+    const quantityValue = parseOptionalWholeNumber(payload.quantity, "Quantity");
+    if (quantityValue !== null) {
+      quantity = quantityValue;
+    }
+    const deltaValue = parseOptionalWholeNumber(payload.delta, "Quantity delta");
+    if (deltaValue !== null) {
+      quantity += deltaValue;
+    }
+    item.quantity = quantity;
+    syncTopLevelXianxiaInventory(state, quantities);
+    return;
+  }
+
+  const inventory = asArray(state.inventory);
+  const item = findStateItemById(inventory, itemId, "inventory item");
+  let quantity = asInt(item.quantity, 0);
+  const quantityValue = parseOptionalWholeNumber(payload.quantity, "Quantity");
+  if (quantityValue !== null) {
+    quantity = quantityValue;
+  }
+  const deltaValue = parseOptionalWholeNumber(payload.delta, "Quantity delta");
+  if (deltaValue !== null) {
+    quantity += deltaValue;
+  }
+  item.quantity = quantity;
+  state.inventory = inventory;
+}
+
 export function canEditCharacterSessionState(
   config: ApiConfig,
   campaignSlug: string,
@@ -1095,6 +1173,90 @@ export function updateCharacterSessionSpellSlots(
       applySpellSlotsUpdate(nextState, level, payload);
     } catch (error) {
       return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character spell slot payload." };
+    }
+
+    const now = utcIsoTimestamp();
+    if (stateRowMissing) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(campaignSlug, characterSlug, expectedRevision + 1, JSON.stringify(nextState), now, updatedByUserId);
+      return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+    }
+
+    const result = database
+      .prepare(
+        `
+          UPDATE character_state
+          SET revision = revision + 1,
+              state_json = ?,
+              updated_at = ?,
+              updated_by_user_id = ?
+          WHERE campaign_slug = ?
+            AND character_slug = ?
+            AND revision = ?
+        `,
+      )
+      .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
+    if (result.changes <= 0) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+    return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCharacterSessionInventory(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+  itemId: string,
+  payload: Record<string, unknown>,
+  updatedByUserId: number,
+): CharacterSessionInventoryUpdateResult {
+  let expectedRevision: number;
+  try {
+    expectedRevision = parseRequiredWholeNumber(payload.expected_revision, "Expected revision");
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character inventory payload." };
+  }
+
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+
+    let existingState = readCharacterState(database, campaignSlug, characterSlug);
+    const stateRowMissing = !existingState;
+    existingState ??= { revision: 1, state: buildInitialState(definition) };
+
+    if (existingState.revision !== expectedRevision) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+
+    const nextState = copyState(existingState.state);
+    try {
+      applyInventoryQuantityUpdate(nextState, itemId, payload, normalizeSystemKey(definition.system) === XIANXIA_SYSTEM_CODE);
+    } catch (error) {
+      return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character inventory payload." };
     }
 
     const now = utcIsoTimestamp();

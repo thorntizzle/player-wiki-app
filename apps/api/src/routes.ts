@@ -1126,6 +1126,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "validation_error",
     },
   },
+  {
+    method: "PATCH",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/inventory/:itemId",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "PATCH",
+      path: "/api/v1/campaigns/linden-pass/characters/arden-march/session/inventory/not-an-item",
+      status: 400,
+      contentType: "application/json",
+      errorCode: "validation_error",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1206,4 +1221,5 @@ export const ROUTES = {
   characterSessionVitals: IMPLEMENTED_ROUTES[74].honoPath,
   characterSessionResource: IMPLEMENTED_ROUTES[75].honoPath,
   characterSessionSpellSlots: IMPLEMENTED_ROUTES[76].honoPath,
+  characterSessionInventory: IMPLEMENTED_ROUTES[77].honoPath,
 } as const;

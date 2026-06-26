@@ -674,6 +674,15 @@
       "notes": "Tracked Hono character session spell-slot route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflict handling, used/delta_used updates by spell-slot level and optional slot_lane_id, legacy unlabeled slot lane migration, refreshed character state payloads, and validation_error missing-slot JSON."
     },
     {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/inventory/:itemId",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono character session inventory route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflict handling, DND inventory quantity/delta updates, Xianxia nested inventory quantity/delta updates with top-level inventory mirror sync, refreshed character state payloads, and validation_error missing-item JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/me",
       "route_family": "api_v1",

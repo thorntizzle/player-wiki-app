@@ -436,6 +436,11 @@ fixture database.
   - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<int:level>` with bearer-only writes.
   - stale-revision and missing-slot validation envelopes.
   - assigned-player used/delta-used spell-slot updates through `character_state`, including shared revision bumps, `updated_by_user_id`, and legacy unlabeled slot-lane migration.
+- Character session inventory payload checks cover:
+  - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>` with bearer-only writes.
+  - missing-item validation envelopes for DND inventory rows.
+  - assigned-player DND quantity/delta inventory updates through `character_state`, including shared revision bumps and `updated_by_user_id`.
+  - DM Xianxia nested inventory quantity/delta updates with synchronized top-level inventory mirrors.
 
 ## Added Tests and Checks
 

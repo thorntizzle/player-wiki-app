@@ -6492,6 +6492,60 @@ if (
   );
 }
 
+const missingSessionInventoryUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/inventory/not-an-item`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 3, quantity: "2" } },
+);
+if (
+  missingSessionInventoryUpdate.status !== 400 ||
+  missingSessionInventoryUpdate.payload?.error?.code !== "validation_error" ||
+  missingSessionInventoryUpdate.payload?.error?.message !== "Unknown inventory item: not-an-item"
+) {
+  throw new Error(
+    `Expected missing character session inventory PATCH validation_error, got ${missingSessionInventoryUpdate.status} ${JSON.stringify(missingSessionInventoryUpdate.payload)}`,
+  );
+}
+
+const playerSessionInventoryUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/inventory/light-crossbow-1`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 3, quantity: "5", delta: "-2" } },
+);
+if (
+  playerSessionInventoryUpdate.status !== 200 ||
+  playerSessionInventoryUpdate.payload?.ok !== true ||
+  playerSessionInventoryUpdate.payload?.character?.state_record?.revision !== 4 ||
+  playerSessionInventoryUpdate.payload?.character?.state_record?.state?.inventory?.[0]?.id !== "light-crossbow-1" ||
+  playerSessionInventoryUpdate.payload?.character?.state_record?.state?.inventory?.[0]?.quantity !== 3
+) {
+  throw new Error(`Unexpected character session inventory PATCH payload: ${JSON.stringify(playerSessionInventoryUpdate.payload)}`);
+}
+
+const sessionInventoryAssertionDb = new Database(dbPath, { readonly: true });
+const managedStateAfterInventory = sessionInventoryAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", managedCharacterSlug);
+sessionInventoryAssertionDb.close();
+const managedInventoryState = JSON.parse(managedStateAfterInventory?.state_json || "{}");
+if (
+  managedStateAfterInventory?.revision !== 4 ||
+  managedStateAfterInventory?.updated_by_user_id !== 79 ||
+  managedInventoryState.inventory?.[0]?.id !== "light-crossbow-1" ||
+  managedInventoryState.inventory?.[0]?.quantity !== 3
+) {
+  throw new Error(
+    `Unexpected character session inventory database row: ${JSON.stringify({
+      managedStateAfterInventory,
+      managedInventoryState,
+    })}`,
+  );
+}
+
 const contentCharactersAfterPut = await requestJson("/api/v1/campaigns/linden-pass/content/characters", contentManagerHeaders);
 if (!contentCharactersAfterPut.payload?.characters?.some((item) => item.character_slug === managedCharacterSlug)) {
   throw new Error(`Expected content characters list to include ${managedCharacterSlug} after PUT.`);
@@ -6636,6 +6690,31 @@ xianxiaMutableState.xianxia.energies.jing.current = 2;
 xianxiaMutableState.xianxia.yin_yang.yin_current = 1;
 xianxiaMutableState.xianxia.dao.current = 2;
 xianxiaMutableState.xianxia.active_stance = { name: "Stone Root" };
+xianxiaMutableState.xianxia.inventory = {
+  enabled: true,
+  quantities: [
+    {
+      id: "spirit-rice",
+      name: "Spirit Rice",
+      quantity: 2,
+      item_type: "provision",
+      item_nature: "mundane",
+      notes: "Cook before travel.",
+      tags: ["food"],
+    },
+  ],
+};
+xianxiaMutableState.inventory = [
+  {
+    id: "spirit-rice",
+    name: "Spirit Rice",
+    quantity: 2,
+    item_type: "provision",
+    item_nature: "mundane",
+    notes: "Cook before travel.",
+    tags: ["food"],
+  },
+];
 xianxiaMutableState.notes.player_notes_markdown = "Keep the manual pool edits in SQLite.";
 const editedXianxiaRevision = Number(xianxiaInitialRow.revision) + 1;
 xianxiaStateSetupDb
@@ -6780,6 +6859,47 @@ if (
     `Unexpected Xianxia session vitals database row: ${JSON.stringify({
       xianxiaVitalsRow,
       xianxiaVitalsState,
+    })}`,
+  );
+}
+
+const xianxiaSessionInventoryUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/inventory/spirit-rice`,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: editedXianxiaRevision + 2, quantity: "4", delta: "-1" } },
+);
+if (
+  xianxiaSessionInventoryUpdate.status !== 200 ||
+  xianxiaSessionInventoryUpdate.payload?.ok !== true ||
+  xianxiaSessionInventoryUpdate.payload?.character?.state_record?.revision !== editedXianxiaRevision + 3 ||
+  xianxiaSessionInventoryUpdate.payload?.character?.state_record?.state?.xianxia?.inventory?.quantities?.[0]?.id !== "spirit-rice" ||
+  xianxiaSessionInventoryUpdate.payload?.character?.state_record?.state?.xianxia?.inventory?.quantities?.[0]?.quantity !== 3 ||
+  xianxiaSessionInventoryUpdate.payload?.character?.state_record?.state?.inventory?.[0]?.id !== "spirit-rice" ||
+  xianxiaSessionInventoryUpdate.payload?.character?.state_record?.state?.inventory?.[0]?.quantity !== 3
+) {
+  throw new Error(`Unexpected Xianxia session inventory PATCH payload: ${JSON.stringify(xianxiaSessionInventoryUpdate.payload)}`);
+}
+
+const xianxiaInventoryAssertionDb = new Database(dbPath, { readonly: true });
+const xianxiaInventoryRow = xianxiaInventoryAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", xianxiaCharacterSlug);
+xianxiaInventoryAssertionDb.close();
+const xianxiaInventoryState = JSON.parse(xianxiaInventoryRow?.state_json || "{}");
+if (
+  Number(xianxiaInventoryRow?.revision) !== editedXianxiaRevision + 3 ||
+  xianxiaInventoryRow?.updated_by_user_id !== 81 ||
+  xianxiaInventoryState.xianxia?.inventory?.quantities?.[0]?.id !== "spirit-rice" ||
+  xianxiaInventoryState.xianxia?.inventory?.quantities?.[0]?.quantity !== 3 ||
+  xianxiaInventoryState.inventory?.[0]?.id !== "spirit-rice" ||
+  xianxiaInventoryState.inventory?.[0]?.quantity !== 3
+) {
+  throw new Error(
+    `Unexpected Xianxia session inventory database row: ${JSON.stringify({
+      xianxiaInventoryRow,
+      xianxiaInventoryState,
     })}`,
   );
 }

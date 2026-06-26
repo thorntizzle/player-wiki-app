@@ -103,6 +103,7 @@ import {
 } from "./content/repository.js";
 import {
   canEditCharacterSessionState,
+  updateCharacterSessionInventory,
   updateCharacterSessionResource,
   updateCharacterSessionSpellSlots,
   updateCharacterSessionVitals,
@@ -3710,6 +3711,88 @@ app.patch(ROUTES.characterSessionSpellSlots, async (ctx) => {
     characterSlug,
     character.definition,
     ctx.req.param("level") || "",
+    jsonPayload.payload,
+    auth.actorUserId ?? 0,
+  );
+  if (result.status === "state_conflict") {
+    const error = stateConflict(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const updatedCharacter = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!updatedCharacter) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    character: {
+      definition: updatedCharacter.definition,
+      import_metadata: updatedCharacter.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: characterSlug,
+        revision: result.revision,
+        state: result.state,
+        updated_at: result.updatedAt,
+        updated_by_user_id: auth.actorUserId ?? null,
+      },
+    },
+  });
+});
+
+app.patch(ROUTES.characterSessionInventory, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCharacterSessionBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!canEditCharacterSessionState(config, campaign.slug, characterSlug, auth.role, auth.actorUserId)) {
+    const error = forbidden("You do not have permission to update this character from this view.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = updateCharacterSessionInventory(
+    config,
+    campaign.slug,
+    characterSlug,
+    character.definition,
+    ctx.req.param("itemId") || "",
     jsonPayload.payload,
     auth.actorUserId ?? 0,
   );
