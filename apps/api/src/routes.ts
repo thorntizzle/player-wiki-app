@@ -424,6 +424,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "session_article_image_not_found",
     },
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/campaigns/:campaignSlug/session/logs/:sessionId",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/session/logs/<int:session_id>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/session/logs/<int:session_id>",
+    routeFamily: "api_v1_session",
+    missingResource: {
+      method: "GET",
+      path: "/api/v1/campaigns/linden-pass/session/logs/999999",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "session_log_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -456,4 +471,5 @@ export const ROUTES = {
   systemsImportRuns: IMPLEMENTED_ROUTES[26].honoPath,
   systemsImportRun: IMPLEMENTED_ROUTES[27].honoPath,
   sessionArticleImage: IMPLEMENTED_ROUTES[28].honoPath,
+  sessionLogDetail: IMPLEMENTED_ROUTES[29].honoPath,
 } as const;

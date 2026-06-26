@@ -177,6 +177,21 @@ export interface SessionArticleImageReadResult {
   data: Uint8Array;
 }
 
+export interface SessionLogDetailPayload {
+  ok: true;
+  session: SessionRecordPayload;
+  messages: SessionMessagePayload[];
+}
+
+export type SessionLogDetailResult =
+  | {
+      status: "ok";
+      payload: SessionLogDetailPayload;
+    }
+  | {
+      status: "not_found";
+    };
+
 function stableHexDigest(value: string): string {
   return createHash("sha1").update(value).digest("hex");
 }
@@ -327,6 +342,30 @@ function loadArticles(database: Database.Database, campaignSlug: string, statuse
     .all(campaignSlug, ...statuses) as SessionArticleRow[];
 }
 
+function loadAllArticles(database: Database.Database, campaignSlug: string): SessionArticleRow[] {
+  return database
+    .prepare(
+      `
+        SELECT
+          id,
+          campaign_slug,
+          title,
+          body_markdown,
+          source_page_ref,
+          status,
+          created_at,
+          created_by_user_id,
+          revealed_at,
+          revealed_by_user_id,
+          revealed_in_session_id
+        FROM campaign_session_articles
+        WHERE campaign_slug = ?
+        ORDER BY created_at ASC, id ASC
+      `,
+    )
+    .all(campaignSlug) as SessionArticleRow[];
+}
+
 function loadArticleImages(database: Database.Database, articleIds: number[]): Map<number, SessionArticleImageRow> {
   const uniqueIds = [...new Set(articleIds.map((id) => Math.trunc(id)).filter((id) => id > 0))];
   if (uniqueIds.length === 0) {
@@ -431,6 +470,23 @@ function loadSessionLogs(database: Database.Database, campaignSlug: string, limi
       `,
     )
     .all(campaignSlug, Math.max(1, Math.trunc(limit))) as SessionSummaryRow[];
+}
+
+function loadSessionLog(database: Database.Database, campaignSlug: string, sessionId: number): SessionRow | null {
+  return (
+    (database
+      .prepare(
+        `
+          SELECT id, campaign_slug, status, started_at, started_by_user_id, ended_at, ended_by_user_id
+          FROM campaign_sessions
+          WHERE campaign_slug = ?
+            AND id = ?
+            AND status = 'closed'
+          LIMIT 1
+        `,
+      )
+      .get(campaignSlug, sessionId) as SessionRow | undefined) || null
+  );
 }
 
 async function buildSourceMetadata(
@@ -732,6 +788,53 @@ export function readSessionArticleImage(
         mediaType: "",
         data: new Uint8Array(),
       };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export async function buildSessionLogDetailPayload(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  sessionId: number,
+  role: FixtureSystemsRole,
+): Promise<SessionLogDetailResult> {
+  if (!canManageSession(role) || !existsSync(dbPath)) {
+    return { status: "not_found" };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const session = loadSessionLog(database, campaign.slug, sessionId);
+    if (!session) {
+      return { status: "not_found" };
+    }
+    const articles = loadAllArticles(database, campaign.slug);
+    const articleImages = loadArticleImages(database, articles.map((article) => Number(article.id)));
+    const articlesById = new Map(articles.map((article) => [Number(article.id), article]));
+    const messages = loadMessages(database, campaign.slug, Number(session.id), role);
+    return {
+      status: "ok",
+      payload: {
+        ok: true,
+        session: serializeSessionRecord(session)!,
+        messages: await serializeMessages(
+          dbPath,
+          campaign,
+          campaignConfig,
+          role,
+          messages,
+          articlesById,
+          articleImages,
+        ),
+      },
+    };
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return { status: "not_found" };
     }
     throw error;
   } finally {

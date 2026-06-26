@@ -285,6 +285,16 @@ def test_typescript_session_article_image_requires_auth_like_flask(typescript_ap
     assert payload == flask_payload
 
 
+def test_typescript_session_log_detail_requires_auth_like_flask(typescript_api_server, client):
+    flask_response = client.get("/api/v1/campaigns/linden-pass/session/logs/999999")
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/session/logs/999999")
+    assert status == 401
+    assert payload == flask_payload
+
+
 def test_typescript_session_article_source_search_fixture_shell(typescript_api_server):
     status, payload = _to_json(
         f"{typescript_api_server}/api/v1/campaigns/linden-pass/session/article-sources/search?q=c",

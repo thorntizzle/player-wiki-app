@@ -72,6 +72,7 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/session`
   - `GET /api/v1/campaigns/:campaignSlug/session/article-sources/search`
   - `GET /api/v1/campaigns/:campaignSlug/session/articles/:articleId/image`
+  - `GET /api/v1/campaigns/:campaignSlug/session/logs/:sessionId`
   - `GET /api/v1/campaigns/:campaignSlug/content/config`
   - `GET /api/v1/campaigns/:campaignSlug/content/pages`
   - `GET /api/v1/campaigns/:campaignSlug/content/pages/*`
@@ -104,6 +105,9 @@ Route parity check command:
 - The Session article image route now streams SQLite-backed fixture image bytes with stored media
   types, preserving manager access to staged/revealed images and player access only to images
   on articles revealed in the active session.
+- The Session log detail route now reads closed session records and all closed-session messages
+  from SQLite for fixture DM/admin roles, preserving manager-only access and message recipient
+  metadata for historical chat logs.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

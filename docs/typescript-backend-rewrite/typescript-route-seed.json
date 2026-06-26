@@ -207,6 +207,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/logs/<int:session_id>",
+      "route_family": "api_v1_session",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/session/logs/:sessionId",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono session log detail route with Flask-compatible unauthenticated auth_required behavior, fixture manager-only access, SQLite closed-session reads, and all-message serialization."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/content/config",
       "route_family": "api_v1_content",
       "status": "implemented_fixture_readonly",

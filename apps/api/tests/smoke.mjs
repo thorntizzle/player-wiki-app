@@ -421,8 +421,8 @@ insertSessionMessage.run(
   2,
   "linden-pass",
   "chat",
-  "A closed-session message.",
-  "global",
+  "A closed-session DM-only message.",
+  "dm_only",
   null,
   42,
   "Dungeon Master",
@@ -1545,6 +1545,57 @@ const missingSessionImage = await requestJson("/api/v1/campaigns/linden-pass/ses
 if (missingSessionImage.status !== 404 || missingSessionImage.payload?.error?.code !== "session_article_image_not_found") {
   throw new Error(
     `Expected missing session article image JSON 404, got ${missingSessionImage.status} ${missingSessionImage.payload?.error?.code}`,
+  );
+}
+
+const blockedSessionLog = await requestJson("/api/v1/campaigns/linden-pass/session/logs/2");
+if (blockedSessionLog.status !== 401 || blockedSessionLog.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated session log detail 401, got ${blockedSessionLog.status} ${blockedSessionLog.payload?.error?.code}`,
+  );
+}
+
+const playerSessionLog = await requestJson("/api/v1/campaigns/linden-pass/session/logs/2", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (playerSessionLog.status !== 403 || playerSessionLog.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player session log detail forbidden 403, got ${playerSessionLog.status} ${playerSessionLog.payload?.error?.code}`,
+  );
+}
+
+const dmSessionLog = await requestJson("/api/v1/campaigns/linden-pass/session/logs/2", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (
+  dmSessionLog.status !== 200 ||
+  dmSessionLog.payload?.ok !== true ||
+  dmSessionLog.payload?.session?.id !== 2 ||
+  dmSessionLog.payload?.session?.status !== "closed" ||
+  dmSessionLog.payload?.session?.is_active !== false ||
+  dmSessionLog.payload?.messages?.length !== 1 ||
+  dmSessionLog.payload?.messages?.[0]?.body_text !== "A closed-session DM-only message." ||
+  dmSessionLog.payload?.messages?.[0]?.recipient_scope !== "dm_only" ||
+  dmSessionLog.payload?.messages?.[0]?.recipient_label !== "DM"
+) {
+  throw new Error(`Unexpected DM session log detail payload: ${JSON.stringify(dmSessionLog.payload)}`);
+}
+
+const activeSessionLog = await requestJson("/api/v1/campaigns/linden-pass/session/logs/1", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (activeSessionLog.status !== 404 || activeSessionLog.payload?.error?.code !== "session_log_not_found") {
+  throw new Error(
+    `Expected active session log detail 404, got ${activeSessionLog.status} ${activeSessionLog.payload?.error?.code}`,
+  );
+}
+
+const missingSessionLog = await requestJson("/api/v1/campaigns/linden-pass/session/logs/999999", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (missingSessionLog.status !== 404 || missingSessionLog.payload?.error?.code !== "session_log_not_found") {
+  throw new Error(
+    `Expected missing session log detail JSON 404, got ${missingSessionLog.status} ${missingSessionLog.payload?.error?.code}`,
   );
 }
 

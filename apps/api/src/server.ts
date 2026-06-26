@@ -11,7 +11,7 @@ import { buildCombatReadOnlyPayload } from "./combat/view.js";
 import { buildCampaignHelpPayload } from "./help/view.js";
 import { ROUTES } from "./routes.js";
 import { buildSessionArticleSourceSearchPayload } from "./session/sourceSearch.js";
-import { buildSessionStatePayload, readSessionArticleImage } from "./session/view.js";
+import { buildSessionLogDetailPayload, buildSessionStatePayload, readSessionArticleImage } from "./session/view.js";
 import { getSystemsImportRun, listSystemsImportRuns } from "./systems/importRuns.js";
 import {
   buildCombatSystemsMonsterSearchPayload,
@@ -933,6 +933,46 @@ app.get(ROUTES.sessionArticleImage, async (ctx) => {
       "Content-Length": String(result.data.byteLength),
     },
   });
+});
+
+app.get(ROUTES.sessionLogDetail, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const role = fixtureRole(ctx);
+  if (!role) {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (role === "player") {
+    const error = forbidden("You do not have permission to manage this session.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const sessionId = parsePositiveInteger(ctx.req.param("sessionId") || "");
+  if (sessionId === null) {
+    const error = notFound("session_log_not_found", "Could not find that session log.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  const result = await buildSessionLogDetailPayload(
+    config.dbPath,
+    campaign,
+    campaignConfig?.config || {},
+    sessionId,
+    role,
+  );
+  if (result.status === "not_found") {
+    const error = notFound("session_log_not_found", "Could not find that session log.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(result.payload);
 });
 
 app.get(ROUTES.sessionArticleSourceSearch, async (ctx) => {
