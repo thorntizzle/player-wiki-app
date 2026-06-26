@@ -99,18 +99,20 @@ Route parity check command:
   `GET .../combat/live-state`, preserving Flask-compatible unauthenticated `auth_required`, fixture
   player/DM permission splits, live polling metadata, and unchanged-response short-circuit behavior.
 - The first Session manager lookup slice now serves `GET .../session/article-sources/search`, preserving
-  Flask-compatible unauthenticated `auth_required`, manager-only access, short-query guidance, visible
-  wiki page results, accessible Systems entry results, and explicit missing-campaign JSON.
-- The Session state route now has a role-aware SQLite fixture path for `X-CPW-Fixture-Role`,
+  Flask-compatible unauthenticated `auth_required`, fixture or bearer-token membership-derived
+  manager-only access, short-query guidance, visible wiki page results, accessible Systems entry
+  results, and explicit missing-campaign JSON.
+- The Session state route now has a role-aware SQLite read path for fixture roles or bearer API tokens,
   reading active sessions, messages, staged/revealed article rows, article image metadata,
   closed-session log summaries, and session revisions from `CPW_DB_PATH`, while no-header
-  requests keep the empty read-only fixture shell.
+  requests keep the empty read-only fixture shell and invalid/no-membership bearer requests use the
+  standard auth/forbidden JSON envelopes.
 - The Session article image route now streams SQLite-backed fixture image bytes with stored media
-  types, preserving manager access to staged/revealed images and player access only to images
-  on articles revealed in the active session.
+  types, preserving fixture or bearer-token manager access to staged/revealed images and player
+  access only to images on articles revealed in the active session.
 - The Session log detail route now reads closed session records and all closed-session messages
-  from SQLite for fixture DM/admin roles, preserving manager-only access and message recipient
-  metadata for historical chat logs.
+  from SQLite for fixture or bearer-token DM/admin roles, preserving manager-only access and message
+  recipient metadata for historical chat logs.
 - The first identity bootstrap slice now serves `GET /api/v1/me`, preserving
   Flask-compatible unauthenticated `auth_required` behavior, returning synthetic role-header
   user, membership, preference, and View As metadata for player, DM, and admin fixture reads,

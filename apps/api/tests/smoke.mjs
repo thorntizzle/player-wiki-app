@@ -1816,6 +1816,22 @@ if (
   throw new Error(`Expected Flask-style unchanged payload, got ${JSON.stringify(unchangedSession.payload)}`);
 }
 
+const invalidBearerSession = await requestJson("/api/v1/campaigns/linden-pass/session", {
+  Authorization: "Bearer definitely-invalid-token",
+});
+if (invalidBearerSession.status !== 401 || invalidBearerSession.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected invalid bearer session request 401, got ${invalidBearerSession.status} ${invalidBearerSession.payload?.error?.code}`,
+  );
+}
+
+const outsiderSession = await requestJson("/api/v1/campaigns/linden-pass/session", {
+  Authorization: `Bearer ${outsiderApiToken}`,
+});
+if (outsiderSession.status !== 403 || outsiderSession.payload?.error?.code !== "forbidden") {
+  throw new Error(`Expected outsider bearer session request forbidden 403, got ${outsiderSession.status}`);
+}
+
 const dmSession = await requestJson("/api/v1/campaigns/linden-pass/session", {
   "X-CPW-Fixture-Role": "dm",
 });
@@ -1863,6 +1879,35 @@ if (
   throw new Error(`Unexpected unchanged DM session payload: ${JSON.stringify(unchangedDmSession.payload)}`);
 }
 
+const bearerAdminSession = await requestJson("/api/v1/campaigns/linden-pass/session", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (
+  bearerAdminSession.status !== 200 ||
+  bearerAdminSession.payload?.session_revision !== 7 ||
+  bearerAdminSession.payload?.permissions?.can_manage_session !== true ||
+  bearerAdminSession.payload?.messages?.length !== 3 ||
+  bearerAdminSession.payload?.staged_articles?.length !== 1 ||
+  bearerAdminSession.payload?.session_logs?.[0]?.session?.id !== 2
+) {
+  throw new Error(`Unexpected bearer admin session payload: ${JSON.stringify(bearerAdminSession.payload)}`);
+}
+
+const unchangedBearerAdminSession = await requestJson("/api/v1/campaigns/linden-pass/session", {
+  Authorization: `Bearer ${liveApiToken}`,
+  "X-Live-Revision": String(bearerAdminSession.payload?.session_revision),
+  "X-Live-View-Token": String(bearerAdminSession.payload?.session_view_token),
+});
+if (
+  unchangedBearerAdminSession.status !== 200 ||
+  unchangedBearerAdminSession.payload?.changed !== false ||
+  unchangedBearerAdminSession.payload?.session_revision !== bearerAdminSession.payload?.session_revision ||
+  unchangedBearerAdminSession.payload?.session_view_token !== bearerAdminSession.payload?.session_view_token ||
+  Object.keys(unchangedBearerAdminSession.payload || {}).length !== 4
+) {
+  throw new Error(`Unexpected unchanged bearer admin session payload: ${JSON.stringify(unchangedBearerAdminSession.payload)}`);
+}
+
 const playerSession = await requestJson("/api/v1/campaigns/linden-pass/session", {
   "X-CPW-Fixture-Role": "player",
 });
@@ -1880,6 +1925,22 @@ if (
   playerSession.payload?.session_dm_passive_scores !== undefined
 ) {
   throw new Error(`Unexpected player session payload: ${JSON.stringify(playerSession.payload)}`);
+}
+
+const bearerPlayerSession = await requestJson("/api/v1/campaigns/linden-pass/session", {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (
+  bearerPlayerSession.status !== 200 ||
+  bearerPlayerSession.payload?.permissions?.can_manage_session !== false ||
+  bearerPlayerSession.payload?.permissions?.can_post_messages !== true ||
+  bearerPlayerSession.payload?.active_session?.id !== 1 ||
+  bearerPlayerSession.payload?.messages?.length !== 2 ||
+  bearerPlayerSession.payload?.messages?.some((message) => message.recipient_scope === "dm_only") ||
+  bearerPlayerSession.payload?.staged_articles !== undefined ||
+  bearerPlayerSession.payload?.session_logs !== undefined
+) {
+  throw new Error(`Unexpected bearer player session payload: ${JSON.stringify(bearerPlayerSession.payload)}`);
 }
 
 const blockedSessionImage = await requestJson("/api/v1/campaigns/linden-pass/session/articles/102/image");
@@ -1903,6 +1964,17 @@ if (
   );
 }
 
+const bearerAdminStagedSessionImage = await requestBytes("/api/v1/campaigns/linden-pass/session/articles/101/image", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (
+  bearerAdminStagedSessionImage.status !== 200 ||
+  !bearerAdminStagedSessionImage.headers.get("content-type")?.startsWith("image/gif") ||
+  Buffer.from(bearerAdminStagedSessionImage.body).toString("utf8") !== "staged-image"
+) {
+  throw new Error(`Unexpected bearer admin staged session image response: ${bearerAdminStagedSessionImage.status}`);
+}
+
 const playerStagedSessionImage = await requestJson("/api/v1/campaigns/linden-pass/session/articles/101/image", {
   "X-CPW-Fixture-Role": "player",
 });
@@ -1924,6 +1996,17 @@ if (
   throw new Error(
     `Unexpected player revealed session image response: ${playerRevealedSessionImage.status} ${playerRevealedSessionImage.headers.get("content-type")} ${Buffer.from(playerRevealedSessionImage.body).toString("utf8")}`,
   );
+}
+
+const bearerPlayerRevealedSessionImage = await requestBytes("/api/v1/campaigns/linden-pass/session/articles/102/image", {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (
+  bearerPlayerRevealedSessionImage.status !== 200 ||
+  !bearerPlayerRevealedSessionImage.headers.get("content-type")?.startsWith("image/png") ||
+  Buffer.from(bearerPlayerRevealedSessionImage.body).toString("utf8") !== "fixture-image"
+) {
+  throw new Error(`Unexpected bearer player revealed session image response: ${bearerPlayerRevealedSessionImage.status}`);
 }
 
 const missingSessionImage = await requestJson("/api/v1/campaigns/linden-pass/session/articles/999999/image", {
@@ -1951,6 +2034,15 @@ if (playerSessionLog.status !== 403 || playerSessionLog.payload?.error?.code !==
   );
 }
 
+const bearerPlayerSessionLog = await requestJson("/api/v1/campaigns/linden-pass/session/logs/2", {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (bearerPlayerSessionLog.status !== 403 || bearerPlayerSessionLog.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected bearer player session log detail forbidden 403, got ${bearerPlayerSessionLog.status} ${bearerPlayerSessionLog.payload?.error?.code}`,
+  );
+}
+
 const dmSessionLog = await requestJson("/api/v1/campaigns/linden-pass/session/logs/2", {
   "X-CPW-Fixture-Role": "dm",
 });
@@ -1966,6 +2058,17 @@ if (
   dmSessionLog.payload?.messages?.[0]?.recipient_label !== "DM"
 ) {
   throw new Error(`Unexpected DM session log detail payload: ${JSON.stringify(dmSessionLog.payload)}`);
+}
+
+const bearerAdminSessionLog = await requestJson("/api/v1/campaigns/linden-pass/session/logs/2", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (
+  bearerAdminSessionLog.status !== 200 ||
+  bearerAdminSessionLog.payload?.session?.id !== 2 ||
+  bearerAdminSessionLog.payload?.messages?.[0]?.recipient_scope !== "dm_only"
+) {
+  throw new Error(`Unexpected bearer admin session log detail payload: ${JSON.stringify(bearerAdminSessionLog.payload)}`);
 }
 
 const activeSessionLog = await requestJson("/api/v1/campaigns/linden-pass/session/logs/1", {
@@ -2024,6 +2127,18 @@ if (playerSessionSourceSearch.status !== 403 || playerSessionSourceSearch.payloa
   );
 }
 
+const bearerPlayerSessionSourceSearch = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/article-sources/search?q=capt",
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+);
+if (bearerPlayerSessionSourceSearch.status !== 403 || bearerPlayerSessionSourceSearch.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected bearer player session article-source search forbidden 403, got ${bearerPlayerSessionSourceSearch.status} ${bearerPlayerSessionSourceSearch.payload?.error?.code}`,
+  );
+}
+
 const shortSessionSourceSearch = await requestJson(
   "/api/v1/campaigns/linden-pass/session/article-sources/search?q=c",
   {
@@ -2059,6 +2174,24 @@ if (
   captainSource?.select_label !== "Captain Lyra Vale - Wiki - NPCs"
 ) {
   throw new Error(`Unexpected wiki session article-source search payload: ${JSON.stringify(wikiSessionSourceSearch.payload)}`);
+}
+
+const bearerAdminWikiSessionSourceSearch = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/article-sources/search?q=capt",
+  {
+    Authorization: `Bearer ${liveApiToken}`,
+  },
+);
+if (
+  bearerAdminWikiSessionSourceSearch.status !== 200 ||
+  bearerAdminWikiSessionSourceSearch.payload?.results?.length !== 2 ||
+  !bearerAdminWikiSessionSourceSearch.payload?.results?.some(
+    (result) => result.source_ref === "npcs/captain-lyra-vale" && result.source_kind === "page",
+  )
+) {
+  throw new Error(
+    `Unexpected bearer admin wiki session article-source search payload: ${JSON.stringify(bearerAdminWikiSessionSourceSearch.payload)}`,
+  );
 }
 
 const systemsSessionSourceSearch = await requestJson(

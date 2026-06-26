@@ -980,7 +980,13 @@ app.get(ROUTES.sessionState, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const role = fixtureRole(ctx);
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind === "invalid" || auth.kind === "forbidden") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const role = auth.kind === "authenticated" ? auth.role : null;
   const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
   const payload = await buildSessionStatePayload(config.dbPath, campaign, campaignConfig?.config || {}, role);
   const requestedRevision = parseLiveRevisionHeader(ctx);
@@ -1009,11 +1015,12 @@ app.get(ROUTES.sessionArticleImage, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const role = fixtureRole(ctx);
-  if (!role) {
-    const error = authRequired();
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
+  const role = auth.role;
 
   const articleId = parsePositiveInteger(ctx.req.param("articleId") || "");
   if (articleId === null) {
@@ -1045,11 +1052,12 @@ app.get(ROUTES.sessionLogDetail, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const role = fixtureRole(ctx);
-  if (!role) {
-    const error = authRequired();
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
+  const role = auth.role;
   if (role === "player") {
     const error = forbidden("You do not have permission to manage this session.");
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
@@ -1085,11 +1093,12 @@ app.get(ROUTES.sessionArticleSourceSearch, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const role = fixtureRole(ctx);
-  if (!role) {
-    const error = authRequired();
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
+  const role = auth.role;
 
   const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
   const result = await buildSessionArticleSourceSearchPayload(

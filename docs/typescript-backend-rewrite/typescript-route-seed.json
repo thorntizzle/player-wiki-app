@@ -182,19 +182,19 @@
       "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/session",
       "route_family": "api_v1_session",
-      "status": "implemented_fixture_readonly",
+      "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/session",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono session fixture read-only route with inactive-state payload, read-only permissions, and live revision short-circuit behavior."
+      "notes": "Tracked Hono session state route with a no-header inactive-state shell, fixture-role and bearer-token membership-derived SQLite active-session reads, filtered messages, manager arrays, auth/forbidden bearer envelopes, and live revision short-circuit behavior."
     },
     {
       "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/session/article-sources/search",
       "route_family": "api_v1_session",
-      "status": "implemented_fixture_readonly",
+      "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/session/article-sources/search",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono session article-source search route with Flask-compatible unauthenticated auth_required behavior, fixture manager-only access, short-query guidance, visible wiki page results, accessible Systems entry results, and explicit missing-campaign JSON."
+      "notes": "Tracked Hono session article-source search route with Flask-compatible unauthenticated auth_required behavior, fixture-role and bearer-token membership-derived manager-only access, short-query guidance, visible wiki page results, accessible Systems entry results, and explicit missing-campaign JSON."
     },
     {
       "method": "GET",
@@ -203,7 +203,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/session/articles/:articleId/image",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono session article image route streaming SQLite-backed fixture image bytes, preserving manager access to staged/revealed images and player access only to currently revealed active-session images."
+      "notes": "Tracked Hono session article image route streaming SQLite-backed fixture image bytes, preserving fixture-role and bearer-token manager access to staged/revealed images and player access only to currently revealed active-session images."
     },
     {
       "method": "GET",
@@ -212,7 +212,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/session/logs/:sessionId",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono session log detail route with Flask-compatible unauthenticated auth_required behavior, fixture manager-only access, SQLite closed-session reads, and all-message serialization."
+      "notes": "Tracked Hono session log detail route with Flask-compatible unauthenticated auth_required behavior, fixture-role and bearer-token membership-derived manager-only access, SQLite closed-session reads, and all-message serialization."
     },
     {
       "method": "GET",
