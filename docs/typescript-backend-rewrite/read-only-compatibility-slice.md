@@ -458,6 +458,12 @@ fixture database.
   - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/personal` with bearer-only writes and the Flask-compatible `characters` scope precheck.
   - stale-revision conflict envelopes.
   - DM physical/background personal text updates through `state.notes`, null/omitted clearing to empty strings, and preservation of player notes/session notes.
+- Character rest preview/apply payload checks cover:
+  - `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>` as a read-only derivation behind the session-mode character access gate.
+  - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>` with bearer-only writes and shared revision conflicts.
+  - unauthenticated, no-access bearer, invalid-rest-type, and stale-revision envelopes.
+  - DND-5E long-rest preview shape, resource reset changes, spell-slot clearing, submitted final Current HP, submitted final Hit Dice current counts, shared revision bumps, and `updated_by_user_id`.
+  - Xianxia long-rest preview/apply restoration for HP, Stance, Jing/Qi/Shen, and Yin/Yang while preserving Dao and ignoring blank submitted Current HP.
 
 ## Added Tests and Checks
 
@@ -513,6 +519,7 @@ fixture database.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/characters` list sorting/count and sampled character summary metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` detail payload definition/import metadata and missing-content-character 404.
   - validates content-character SQLite persistence for DND-5E create/delete and Xianxia create/update/delete, including actual `state_created`, `deleted_state`, and `deleted_assignment` response flags and Xianxia mutable-state clamping/preservation.
   - validates `PUT` and `DELETE /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` auth, fixture-write denial, player-forbidden behavior, definition validation, missing-campaign behavior, copied-fixture definition/import YAML writes, list/detail refresh, deleted-character payload flags, file removal, and missing-character delete 404.
+  - validates character rest preview/apply auth, no-access forbidden, invalid-rest, stale-revision, DND long-rest, and Xianxia long-rest behavior against disposable copied fixture files and SQLite state.
   - verifies `GET /api/v1/campaigns/:campaignSlug/session` no-header read-only payload shape, role-aware fixture and bearer-token SQLite Session state reads, auth/forbidden bearer envelopes, token/revision headers behavior, unchanged-response short-circuit, and session missing-campaign 404.
   - verifies `POST /api/v1/campaigns/:campaignSlug/session/messages` auth, fixture-write denial, malformed JSON handling, validation messages, SQLite persistence, private-message visibility, recipient labels, revision bumps, and missing-campaign 404 against the disposable smoke-test database.
   - verifies `POST /api/v1/campaigns/:campaignSlug/session/start` and `.../session/close` auth, fixture-write denial, player-forbidden behavior, duplicate-start/empty-close validation, SQLite session persistence, revision bumps, refreshed Session reads/log summaries, and missing-campaign 404 against the disposable smoke-test database.

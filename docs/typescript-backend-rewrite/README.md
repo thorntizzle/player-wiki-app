@@ -352,8 +352,18 @@ Route parity check command:
   preserve the rest of the notes object, and personal physical/background note updates that preserve
   other note fields while clearing null/omitted values to empty strings, deny fixture-role writes, and return refreshed
   `character.state_record` payloads. Current
-  validation covers disposable copied fixture files and fixture SQLite only; the remaining character
-  session-state route family is still sliced separately.
+  validation covers disposable copied fixture files and fixture SQLite only; further character
+  session-state route families remain sliced separately.
+- Character rest preview/apply parity now serves
+  `GET .../characters/:characterSlug/rest-preview/:restType` and
+  `POST .../characters/:characterSlug/session/rest/:restType`. Preview is a read-only SQLite
+  derivation behind the session-mode character access gate; apply is bearer-token authenticated,
+  shared-revision checked, and returns the refreshed `character.state_record` payload. The slice
+  normalizes `short`/`long`, rejects unsupported rest types with Flask-compatible
+  `validation_error`, resets modeled DND resources, clears long-rest spell-slot usage, recovers
+  long-rest Hit Dice before applying submitted final HP/Hit Dice values, restores Xianxia
+  HP/Stance/Jing/Qi/Shen/Yin/Yang while preserving Dao, and keeps missing-character responses on
+  the TypeScript `content_character_not_found` JSON convention.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

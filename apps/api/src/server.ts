@@ -103,7 +103,9 @@ import {
   writeCampaignContentPage,
 } from "./content/repository.js";
 import {
+  applyCharacterSessionRest,
   canEditCharacterSessionState,
+  previewCharacterRest,
   updateCharacterSessionCurrency,
   updateCharacterSessionInventory,
   updateCharacterSessionNotes,
@@ -3508,6 +3510,137 @@ app.delete(ROUTES.contentCharacterDelete, async (ctx) => {
   }
 
   return ctx.json(buildContentCharacterDeletePayload(result.deleted));
+});
+
+app.get(ROUTES.characterRestPreview, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!canEditCharacterSessionState(config, campaign.slug, characterSlug, auth.role, auth.actorUserId)) {
+    const error = forbidden("You do not have permission to use rest actions for this character.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = previewCharacterRest(
+    config,
+    campaign.slug,
+    characterSlug,
+    character.definition,
+    ctx.req.param("restType") || "",
+  );
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    preview: result.preview,
+  });
+});
+
+app.post(ROUTES.characterSessionRest, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCharacterSessionBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!canEditCharacterSessionState(config, campaign.slug, characterSlug, auth.role, auth.actorUserId)) {
+    const error = forbidden("You do not have permission to update this character from this view.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = applyCharacterSessionRest(
+    config,
+    campaign.slug,
+    characterSlug,
+    character.definition,
+    ctx.req.param("restType") || "",
+    jsonPayload.payload,
+    auth.actorUserId ?? 0,
+  );
+  if (result.status === "state_conflict") {
+    const error = stateConflict(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const updatedCharacter = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!updatedCharacter) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    character: {
+      definition: updatedCharacter.definition,
+      import_metadata: updatedCharacter.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: characterSlug,
+        revision: result.revision,
+        state: result.state,
+        updated_at: result.updatedAt,
+        updated_by_user_id: auth.actorUserId ?? null,
+      },
+    },
+  });
 });
 
 app.patch(ROUTES.characterSessionVitals, async (ctx) => {

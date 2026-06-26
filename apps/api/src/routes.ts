@@ -1201,6 +1201,36 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "content_character_not_found",
     },
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/rest-preview/:restType",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "GET",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/rest-preview/long",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
+  {
+    method: "POST",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/rest/:restType",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/session/rest/long",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1286,4 +1316,6 @@ export const ROUTES = {
   characterSessionCurrency: IMPLEMENTED_ROUTES[79].honoPath,
   characterSessionNotes: IMPLEMENTED_ROUTES[80].honoPath,
   characterSessionPersonal: IMPLEMENTED_ROUTES[81].honoPath,
+  characterRestPreview: IMPLEMENTED_ROUTES[82].honoPath,
+  characterSessionRest: IMPLEMENTED_ROUTES[83].honoPath,
 } as const;

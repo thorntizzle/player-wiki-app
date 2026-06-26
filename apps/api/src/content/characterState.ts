@@ -40,9 +40,33 @@ export type CharacterSessionNotesUpdateResult = CharacterSessionVitalsUpdateResu
 
 export type CharacterSessionPersonalUpdateResult = CharacterSessionVitalsUpdateResult;
 
+export interface CharacterRestChangePayload {
+  label: string;
+  from_value: string;
+  to_value: string;
+}
+
+export interface CharacterRestPreviewPayload {
+  rest_type: "short" | "long";
+  label: string;
+  changes: CharacterRestChangePayload[];
+  adjustments: Record<string, unknown>;
+}
+
+export type CharacterRestPreviewResult =
+  | { status: "ok"; preview: CharacterRestPreviewPayload }
+  | { status: "validation_error"; message: string };
+
+export type CharacterSessionRestApplyResult = CharacterSessionVitalsUpdateResult;
+
 const XIANXIA_SYSTEM_CODE = "xianxia";
 const DND_CURRENCY_KEYS = ["cp", "sp", "ep", "gp", "pp"] as const;
 const XIANXIA_ENERGY_KEYS = ["jing", "qi", "shen"] as const;
+const XIANXIA_ENERGY_LABELS: Record<(typeof XIANXIA_ENERGY_KEYS)[number], string> = {
+  jing: "Jing",
+  qi: "Qi",
+  shen: "Shen",
+};
 const XIANXIA_CURRENCY_KEYS = ["coin", "supply", "spirit_stones"] as const;
 const VALID_HIT_DIE_FACES = new Set([4, 6, 8, 10, 12]);
 const CHARACTER_STATE_CONFLICT_MESSAGE = "This sheet changed in another session. Refresh and try again.";
@@ -516,6 +540,109 @@ function normalizeHitDiceState(definition: Record<string, unknown>, rawState: un
     })
     .filter((pool) => pool.faces > 0 && pool.max > 0);
   return { pools };
+}
+
+function normalizeHitDiceStatePayload(
+  definition: Record<string, unknown>,
+  state: Record<string, unknown>,
+): Record<string, unknown> {
+  const payload = copyState(state);
+  const normalized = normalizeHitDiceState(definition, payload.hit_dice);
+  if (asArray(normalized.pools).length > 0) {
+    payload.hit_dice = normalized;
+  } else {
+    delete payload.hit_dice;
+  }
+  return payload;
+}
+
+function hitDiceLongRestRegainAmount(definition: Record<string, unknown>): number {
+  const totalLevel = asArray(buildHitDiceState(definition).pools)
+    .map(asRecord)
+    .reduce((total, pool) => total + nonNegativeInt(pool.max, 0), 0);
+  return totalLevel > 0 ? Math.max(1, Math.floor(totalLevel / 2)) : 0;
+}
+
+function applyLongRestHitDiceRecovery(
+  definition: Record<string, unknown>,
+  state: Record<string, unknown>,
+): Record<string, unknown> {
+  const payload = normalizeHitDiceStatePayload(definition, state);
+  const hitDice = { ...asRecord(payload.hit_dice) };
+  const pools = asArray(hitDice.pools).map((rawPool) => ({ ...asRecord(rawPool) }));
+  let remaining = hitDiceLongRestRegainAmount(definition);
+  if (remaining <= 0) {
+    return payload;
+  }
+
+  for (const pool of [...pools].sort((left, right) => asInt(right.faces, 0) - asInt(left.faces, 0))) {
+    if (remaining <= 0) {
+      break;
+    }
+    const current = nonNegativeInt(pool.current, 0);
+    const maximum = nonNegativeInt(pool.max, 0);
+    const missing = Math.max(0, maximum - current);
+    if (missing <= 0) {
+      continue;
+    }
+    const recovered = Math.min(missing, remaining);
+    pool.current = current + recovered;
+    remaining -= recovered;
+  }
+
+  hitDice.pools = pools.sort((left, right) => asInt(left.faces, 0) - asInt(right.faces, 0));
+  payload.hit_dice = hitDice;
+  return payload;
+}
+
+function hitDiceSummaryFromState(
+  definition: Record<string, unknown>,
+  state: Record<string, unknown>,
+): Record<string, unknown> {
+  const normalized = normalizeHitDiceState(definition, state.hit_dice);
+  const pools = asArray(normalized.pools)
+    .map(asRecord)
+    .map((pool) => {
+      const faces = asInt(pool.faces, 0);
+      return {
+        faces,
+        label: `d${faces}`,
+        current: asInt(pool.current, 0),
+        max: asInt(pool.max, 0),
+        input_name: `hit_dice_d${faces}`,
+      };
+    })
+    .filter((pool) => pool.faces > 0);
+  const value = pools.map((pool) => `${pool.label} ${pool.current}/${pool.max}`).join(" | ");
+  const fullValue = pools
+    .filter((pool) => pool.max > 0)
+    .map((pool) => `${pool.max}d${pool.faces}`)
+    .join(" + ");
+  return {
+    pools,
+    value: value || "--",
+    full_value: fullValue || "--",
+    regain_on_long_rest: hitDiceLongRestRegainAmount(definition),
+  };
+}
+
+function hitDiceRestChanges(
+  definition: Record<string, unknown>,
+  beforeState: Record<string, unknown>,
+  afterState: Record<string, unknown>,
+): CharacterRestChangePayload[] {
+  const before = hitDiceSummaryFromState(definition, beforeState);
+  const after = hitDiceSummaryFromState(definition, afterState);
+  if (before.value === after.value) {
+    return [];
+  }
+  return [
+    {
+      label: "Hit Dice",
+      from_value: String(before.value),
+      to_value: String(after.value),
+    },
+  ];
 }
 
 function normalizeHitDiceCurrentPayload(payload: Record<string, unknown>): Map<number, unknown> | null {
@@ -1011,6 +1138,326 @@ function applyPersonalDetailsUpdate(state: Record<string, unknown>, payload: Rec
   notes.physical_description_markdown = normalizeSubmittedPersonalMarkdown(payload.physical_description_markdown);
   notes.background_markdown = normalizeSubmittedPersonalMarkdown(payload.background_markdown);
   state.notes = notes;
+}
+
+function isXianxiaDefinition(definition: Record<string, unknown>): boolean {
+  return normalizeSystemKey(definition.system) === XIANXIA_SYSTEM_CODE;
+}
+
+function normalizeRestType(restType: unknown): "short" | "long" {
+  const rawRestType = String(restType ?? "");
+  const normalized = rawRestType.trim().toLowerCase();
+  if (normalized !== "short" && normalized !== "long") {
+    throw new Error(`Unsupported rest type: ${rawRestType}`);
+  }
+  return normalized;
+}
+
+function restLabel(restType: "short" | "long"): string {
+  return restType === "short" ? "Short Rest" : "Long Rest";
+}
+
+function shouldResetResource(resource: Record<string, unknown>, restType: "short" | "long"): boolean {
+  const resetOn = asString(resource.reset_on || "manual").toLowerCase();
+  const restBehavior = asString(resource.rest_behavior).toLowerCase();
+  if (restBehavior === "manual_only") {
+    return false;
+  }
+  if (restType === "short") {
+    return resetOn === "short_rest";
+  }
+  return resetOn === "short_rest" || resetOn === "long_rest";
+}
+
+function resetResourceValue(resource: Record<string, unknown>): number {
+  const resetTo = asString(resource.reset_to || "unchanged").toLowerCase();
+  const current = asInt(resource.current, 0);
+  const maxValue = resource.max;
+  if (resetTo === "unchanged") {
+    return current;
+  }
+  if (resetTo === "max") {
+    return maxValue === null || maxValue === undefined ? current : asInt(maxValue, current);
+  }
+  if (resetTo === "zero" || resetTo === "0") {
+    return 0;
+  }
+  return Number.parseInt(resetTo, 10);
+}
+
+function resourceValueText(current: number, maxValue: unknown): string {
+  if (maxValue === null || maxValue === undefined) {
+    return String(current);
+  }
+  return `${current} / ${asInt(maxValue, 0)}`;
+}
+
+function normalizeSpellSlotProgression(rawProgression: unknown): Record<string, number>[] {
+  return asArray(rawProgression)
+    .map(asRecord)
+    .map((slot) => ({
+      level: asInt(slot.level, 0),
+      max_slots: nonNegativeInt(slot.max_slots, 0),
+    }))
+    .filter((slot) => slot.level > 0);
+}
+
+function spellSlotLaneTitleMap(spellcasting: unknown): Map<string, string> {
+  const payload = asRecord(spellcasting);
+  const rawLanes = asArray(payload.slot_lanes).map(asRecord).filter((lane) => Object.keys(lane).length > 0);
+  if (rawLanes.length > 0) {
+    const laneTitles = new Map<string, string>();
+    rawLanes.forEach((lane, index) => {
+      const laneId = normalizeSpellSlotLaneId(lane.id || lane.slot_lane_id || `slot-lane-${index + 1}`);
+      laneTitles.set(laneId, asString(lane.title) || "Spell slots");
+    });
+    return laneTitles;
+  }
+  return normalizeSpellSlotProgression(payload.slot_progression).length > 0
+    ? new Map([["", "Spell slots"]])
+    : new Map();
+}
+
+function spellLevelLabel(level: number): string {
+  if (level === 1) {
+    return "1st level";
+  }
+  if (level === 2) {
+    return "2nd level";
+  }
+  if (level === 3) {
+    return "3rd level";
+  }
+  return `${level}th level`;
+}
+
+function applyXianxiaOneDayRest(state: Record<string, unknown>, definition: Record<string, unknown>): void {
+  const xianxia = { ...asRecord(state.xianxia) };
+  const vitals = { ...asRecord(xianxia.vitals) };
+  const hpMax = xianxiaHpMax(definition);
+  const stanceMax = xianxiaStanceMax(definition);
+  vitals.current_hp = hpMax;
+  vitals.current_stance = stanceMax;
+  xianxia.vitals = vitals;
+
+  const energies: Record<string, Record<string, number>> = {};
+  for (const key of XIANXIA_ENERGY_KEYS) {
+    energies[key] = { current: xianxiaEnergyMax(definition, key) };
+  }
+  xianxia.energies = energies;
+  xianxia.yin_yang = {
+    yin_current: xianxiaYinMax(definition),
+    yang_current: xianxiaYangMax(definition),
+  };
+  state.xianxia = xianxia;
+
+  const sharedVitals = { ...asRecord(state.vitals) };
+  sharedVitals.current_hp = hpMax;
+  state.vitals = sharedVitals;
+}
+
+function appendPoolRecoveryChange(
+  changes: CharacterRestChangePayload[],
+  label: string,
+  current: unknown,
+  maximum: number,
+): void {
+  const currentValue = Math.max(0, asInt(current, 0));
+  const maxValue = Math.max(0, Math.trunc(maximum));
+  if (currentValue === maxValue) {
+    return;
+  }
+  changes.push({
+    label,
+    from_value: resourceValueText(currentValue, maxValue),
+    to_value: resourceValueText(maxValue, maxValue),
+  });
+}
+
+function collectXianxiaOneDayRestChanges(
+  state: Record<string, unknown>,
+  definition: Record<string, unknown>,
+): CharacterRestChangePayload[] {
+  const changes: CharacterRestChangePayload[] = [];
+  const xianxia = asRecord(state.xianxia);
+  const vitals = asRecord(xianxia.vitals);
+  appendPoolRecoveryChange(changes, "HP", vitals.current_hp, xianxiaHpMax(definition));
+  appendPoolRecoveryChange(changes, "Stance", vitals.current_stance, xianxiaStanceMax(definition));
+
+  const energies = asRecord(xianxia.energies);
+  for (const key of XIANXIA_ENERGY_KEYS) {
+    const energy = asRecord(energies[key]);
+    appendPoolRecoveryChange(
+      changes,
+      `${XIANXIA_ENERGY_LABELS[key]} Energy`,
+      energy.current,
+      xianxiaEnergyMax(definition, key),
+    );
+  }
+
+  const yinYang = asRecord(xianxia.yin_yang);
+  appendPoolRecoveryChange(changes, "Yin", yinYang.yin_current, xianxiaYinMax(definition));
+  appendPoolRecoveryChange(changes, "Yang", yinYang.yang_current, xianxiaYangMax(definition));
+  return changes;
+}
+
+function modeledRestState(
+  state: Record<string, unknown>,
+  restType: "short" | "long",
+  definition: Record<string, unknown>,
+): Record<string, unknown> {
+  let modeledState = copyState(state);
+  for (const rawResource of asArray(modeledState.resources)) {
+    const resource = asRecord(rawResource);
+    if (shouldResetResource(resource, restType)) {
+      resource.current = resetResourceValue(resource);
+    }
+  }
+
+  if (restType === "long") {
+    for (const rawSlot of asArray(modeledState.spell_slots)) {
+      asRecord(rawSlot).used = 0;
+    }
+    if (isXianxiaDefinition(definition)) {
+      applyXianxiaOneDayRest(modeledState, definition);
+    } else {
+      modeledState = applyLongRestHitDiceRecovery(definition, modeledState);
+    }
+  } else if (!isXianxiaDefinition(definition)) {
+    modeledState = normalizeHitDiceStatePayload(definition, modeledState);
+  }
+  return modeledState;
+}
+
+function restAdjustmentsFromState(
+  state: Record<string, unknown>,
+  definition: Record<string, unknown>,
+): Record<string, unknown> {
+  const vitals = asRecord(state.vitals);
+  const adjustments: Record<string, unknown> = {
+    current_hp: asInt(vitals.current_hp, 0),
+  };
+  const hitDice = hitDiceSummaryFromState(definition, state);
+  if (asArray(hitDice.pools).length > 0) {
+    adjustments.hit_dice = hitDice;
+  }
+  return adjustments;
+}
+
+function collectRestChanges(
+  state: Record<string, unknown>,
+  restType: "short" | "long",
+  definition: Record<string, unknown>,
+): CharacterRestChangePayload[] {
+  const changes: CharacterRestChangePayload[] = [];
+  for (const rawResource of asArray(state.resources)) {
+    const resource = asRecord(rawResource);
+    if (!shouldResetResource(resource, restType)) {
+      continue;
+    }
+    const nextCurrent = resetResourceValue(resource);
+    const current = asInt(resource.current, 0);
+    if (current === nextCurrent) {
+      continue;
+    }
+    changes.push({
+      label: asString(resource.label) || "Resource",
+      from_value: resourceValueText(current, resource.max),
+      to_value: resourceValueText(nextCurrent, resource.max),
+    });
+  }
+
+  if (restType !== "long") {
+    return changes;
+  }
+
+  if (isXianxiaDefinition(definition)) {
+    changes.push(...collectXianxiaOneDayRestChanges(state, definition));
+  } else {
+    const restedState = applyLongRestHitDiceRecovery(definition, state);
+    changes.push(...hitDiceRestChanges(definition, state, restedState));
+  }
+
+  const laneTitles = spellSlotLaneTitleMap(definition.spellcasting);
+  const totalLanes = laneTitles.size;
+  for (const rawSlot of asArray(state.spell_slots)) {
+    const slot = asRecord(rawSlot);
+    const used = asInt(slot.used, 0);
+    const maxSlots = asInt(slot.max, 0);
+    if (used <= 0) {
+      continue;
+    }
+    const laneId = normalizeSpellSlotLaneId(slot.slot_lane_id);
+    const laneTitle = laneTitles.get(laneId) || "Spell slots";
+    let label = `${spellLevelLabel(asInt(slot.level, 0))} spell slots`;
+    if (totalLanes > 1) {
+      label = `${laneTitle}: ${label}`;
+    }
+    changes.push({
+      label,
+      from_value: `${maxSlots - used} available / ${maxSlots}`,
+      to_value: `${maxSlots} available / ${maxSlots}`,
+    });
+  }
+
+  return changes;
+}
+
+function readCharacterStateForRest(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+): { status: "ok"; revision: number; state: Record<string, unknown> } | { status: "validation_error"; message: string } {
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+    const existingState = readCharacterState(database, campaignSlug, characterSlug);
+    return {
+      status: "ok",
+      revision: existingState?.revision ?? 1,
+      state: existingState?.state ?? buildInitialState(definition),
+    };
+  } finally {
+    database.close();
+  }
+}
+
+export function previewCharacterRest(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+  restType: string,
+): CharacterRestPreviewResult {
+  let normalizedRest: "short" | "long";
+  try {
+    normalizedRest = normalizeRestType(restType);
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid rest type." };
+  }
+
+  const stateResult = readCharacterStateForRest(config, campaignSlug, characterSlug, definition);
+  if (stateResult.status === "validation_error") {
+    return stateResult;
+  }
+
+  const modeledState = modeledRestState(stateResult.state, normalizedRest, definition);
+  return {
+    status: "ok",
+    preview: {
+      rest_type: normalizedRest,
+      label: restLabel(normalizedRest),
+      changes: collectRestChanges(stateResult.state, normalizedRest, definition),
+      adjustments: restAdjustmentsFromState(modeledState, definition),
+    },
+  };
 }
 
 export function canEditCharacterSessionState(
@@ -1683,6 +2130,99 @@ export function updateCharacterSessionPersonal(
 
     const nextState = copyState(existingState.state);
     applyPersonalDetailsUpdate(nextState, payload);
+
+    const now = utcIsoTimestamp();
+    if (stateRowMissing) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(campaignSlug, characterSlug, expectedRevision + 1, JSON.stringify(nextState), now, updatedByUserId);
+      return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+    }
+
+    const result = database
+      .prepare(
+        `
+          UPDATE character_state
+          SET revision = revision + 1,
+              state_json = ?,
+              updated_at = ?,
+              updated_by_user_id = ?
+          WHERE campaign_slug = ?
+            AND character_slug = ?
+            AND revision = ?
+        `,
+      )
+      .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
+    if (result.changes <= 0) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+    return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+  } finally {
+    database.close();
+  }
+}
+
+export function applyCharacterSessionRest(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+  restType: string,
+  payload: Record<string, unknown>,
+  updatedByUserId: number,
+): CharacterSessionRestApplyResult {
+  let normalizedRest: "short" | "long";
+  let expectedRevision: number;
+  let hitDiceCurrentValues: Map<number, unknown> | null;
+  try {
+    normalizedRest = normalizeRestType(restType);
+    expectedRevision = parseRequiredWholeNumber(payload.expected_revision, "Expected revision");
+    hitDiceCurrentValues = normalizeHitDiceCurrentPayload(payload);
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character rest payload." };
+  }
+
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+
+    let existingState = readCharacterState(database, campaignSlug, characterSlug);
+    const stateRowMissing = !existingState;
+    existingState ??= { revision: 1, state: buildInitialState(definition) };
+
+    if (existingState.revision !== expectedRevision) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+
+    let nextState = modeledRestState(existingState.state, normalizedRest, definition);
+    try {
+      if (hasSubmittedValue(payload.current_hp)) {
+        applyVitalsUpdate(nextState, { current_hp: payload.current_hp });
+      }
+      if (hitDiceCurrentValues && !isXianxiaDefinition(definition)) {
+        nextState = applyHitDiceCurrentValues(definition, nextState, hitDiceCurrentValues);
+      }
+    } catch (error) {
+      return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character rest payload." };
+    }
 
     const now = utcIsoTimestamp();
     if (stateRowMissing) {

@@ -6805,6 +6805,144 @@ if (
   );
 }
 
+const blockedRestPreview = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/rest-preview/long`,
+);
+if (blockedRestPreview.status !== 401 || blockedRestPreview.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated rest preview auth_required, got ${blockedRestPreview.status} ${JSON.stringify(blockedRestPreview.payload)}`,
+  );
+}
+
+const blockedRestApply = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/rest/long`,
+  {},
+  { method: "POST", body: { expected_revision: 9 } },
+);
+if (blockedRestApply.status !== 401 || blockedRestApply.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated rest apply auth_required, got ${blockedRestApply.status} ${JSON.stringify(blockedRestApply.payload)}`,
+  );
+}
+
+const noAccessRestPreview = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/rest-preview/long`,
+  {
+    Authorization: `Bearer ${outsiderApiToken}`,
+  },
+);
+if (
+  noAccessRestPreview.status !== 403 ||
+  noAccessRestPreview.payload?.error?.code !== "forbidden" ||
+  noAccessRestPreview.payload?.error?.message !== "You do not have access to this campaign scope."
+) {
+  throw new Error(
+    `Expected no-access bearer rest preview forbidden, got ${noAccessRestPreview.status} ${JSON.stringify(noAccessRestPreview.payload)}`,
+  );
+}
+
+const invalidRestPreview = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/rest-preview/overnight`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+);
+if (
+  invalidRestPreview.status !== 400 ||
+  invalidRestPreview.payload?.error?.code !== "validation_error" ||
+  invalidRestPreview.payload?.error?.message !== "Unsupported rest type: overnight"
+) {
+  throw new Error(
+    `Expected invalid rest preview validation_error, got ${invalidRestPreview.status} ${JSON.stringify(invalidRestPreview.payload)}`,
+  );
+}
+
+const dndLongRestPreview = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/rest-preview/long`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+);
+if (
+  dndLongRestPreview.status !== 200 ||
+  dndLongRestPreview.payload?.ok !== true ||
+  dndLongRestPreview.payload?.preview?.rest_type !== "long" ||
+  dndLongRestPreview.payload?.preview?.label !== "Long Rest" ||
+  !Array.isArray(dndLongRestPreview.payload?.preview?.changes) ||
+  dndLongRestPreview.payload.preview.changes.length === 0 ||
+  typeof dndLongRestPreview.payload?.preview?.adjustments?.current_hp !== "number" ||
+  !Array.isArray(dndLongRestPreview.payload?.preview?.adjustments?.hit_dice?.pools) ||
+  dndLongRestPreview.payload.preview.adjustments.hit_dice.pools[0]?.faces !== 6
+) {
+  throw new Error(`Unexpected DND long-rest preview payload: ${JSON.stringify(dndLongRestPreview.payload)}`);
+}
+
+const staleDndLongRestApply = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/rest/long`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "POST", body: { expected_revision: 999, current_hp: "17" } },
+);
+if (
+  staleDndLongRestApply.status !== 409 ||
+  staleDndLongRestApply.payload?.error?.code !== "state_conflict" ||
+  staleDndLongRestApply.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale DND long-rest apply conflict, got ${staleDndLongRestApply.status} ${JSON.stringify(staleDndLongRestApply.payload)}`,
+  );
+}
+
+const dndLongRestApply = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/rest/long`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  {
+    method: "POST",
+    body: {
+      expected_revision: 9,
+      current_hp: "17",
+      hit_dice_current: { d6: "3" },
+    },
+  },
+);
+if (
+  dndLongRestApply.status !== 200 ||
+  dndLongRestApply.payload?.ok !== true ||
+  dndLongRestApply.payload?.character?.state_record?.revision !== 10 ||
+  dndLongRestApply.payload?.character?.state_record?.state?.vitals?.current_hp !== 17 ||
+  dndLongRestApply.payload?.character?.state_record?.state?.resources?.[0]?.current !== 5 ||
+  dndLongRestApply.payload?.character?.state_record?.state?.spell_slots?.[0]?.used !== 0 ||
+  dndLongRestApply.payload?.character?.state_record?.state?.hit_dice?.pools?.[0]?.faces !== 6 ||
+  dndLongRestApply.payload?.character?.state_record?.state?.hit_dice?.pools?.[0]?.current !== 3
+) {
+  throw new Error(`Unexpected DND long-rest apply payload: ${JSON.stringify(dndLongRestApply.payload)}`);
+}
+
+const dndRestAssertionDb = new Database(dbPath, { readonly: true });
+const managedStateAfterRest = dndRestAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", managedCharacterSlug);
+dndRestAssertionDb.close();
+const managedRestState = JSON.parse(managedStateAfterRest?.state_json || "{}");
+if (
+  managedStateAfterRest?.revision !== 10 ||
+  managedStateAfterRest?.updated_by_user_id !== 79 ||
+  managedRestState.vitals?.current_hp !== 17 ||
+  managedRestState.resources?.[0]?.current !== 5 ||
+  managedRestState.spell_slots?.[0]?.used !== 0 ||
+  managedRestState.hit_dice?.pools?.[0]?.current !== 3
+) {
+  throw new Error(
+    `Unexpected DND rest database row: ${JSON.stringify({
+      managedStateAfterRest,
+      managedRestState,
+    })}`,
+  );
+}
+
 const contentCharactersAfterPut = await requestJson("/api/v1/campaigns/linden-pass/content/characters", contentManagerHeaders);
 if (!contentCharactersAfterPut.payload?.characters?.some((item) => item.character_slug === managedCharacterSlug)) {
   throw new Error(`Expected content characters list to include ${managedCharacterSlug} after PUT.`);
@@ -7263,6 +7401,82 @@ if (
     `Unexpected Xianxia session currency database row: ${JSON.stringify({
       xianxiaCurrencyRow,
       xianxiaCurrencyState,
+    })}`,
+  );
+}
+
+const xianxiaLongRestPreview = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/rest-preview/long`,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+);
+if (
+  xianxiaLongRestPreview.status !== 200 ||
+  xianxiaLongRestPreview.payload?.ok !== true ||
+  xianxiaLongRestPreview.payload?.preview?.rest_type !== "long" ||
+  xianxiaLongRestPreview.payload?.preview?.label !== "Long Rest" ||
+  !Array.isArray(xianxiaLongRestPreview.payload?.preview?.changes) ||
+  xianxiaLongRestPreview.payload.preview.changes.length === 0 ||
+  xianxiaLongRestPreview.payload?.preview?.adjustments?.current_hp !== 6
+) {
+  throw new Error(`Unexpected Xianxia long-rest preview payload: ${JSON.stringify(xianxiaLongRestPreview.payload)}`);
+}
+
+const xianxiaLongRestApply = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/rest/long`,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  {
+    method: "POST",
+    body: {
+      expected_revision: editedXianxiaRevision + 5,
+      current_hp: "",
+      hit_dice_current: { d6: "1" },
+    },
+  },
+);
+if (
+  xianxiaLongRestApply.status !== 200 ||
+  xianxiaLongRestApply.payload?.ok !== true ||
+  xianxiaLongRestApply.payload?.character?.state_record?.revision !== editedXianxiaRevision + 6 ||
+  xianxiaLongRestApply.payload?.character?.state_record?.state?.vitals?.current_hp !== 6 ||
+  xianxiaLongRestApply.payload?.character?.state_record?.state?.xianxia?.vitals?.current_hp !== 6 ||
+  xianxiaLongRestApply.payload?.character?.state_record?.state?.xianxia?.vitals?.current_stance !== 4 ||
+  xianxiaLongRestApply.payload?.character?.state_record?.state?.xianxia?.energies?.jing?.current !== 1 ||
+  xianxiaLongRestApply.payload?.character?.state_record?.state?.xianxia?.energies?.qi?.current !== 2 ||
+  xianxiaLongRestApply.payload?.character?.state_record?.state?.xianxia?.energies?.shen?.current !== 1 ||
+  xianxiaLongRestApply.payload?.character?.state_record?.state?.xianxia?.yin_yang?.yin_current !== 1 ||
+  xianxiaLongRestApply.payload?.character?.state_record?.state?.xianxia?.yin_yang?.yang_current !== 1 ||
+  xianxiaLongRestApply.payload?.character?.state_record?.state?.xianxia?.dao?.current !== 3
+) {
+  throw new Error(`Unexpected Xianxia long-rest apply payload: ${JSON.stringify(xianxiaLongRestApply.payload)}`);
+}
+
+const xianxiaRestAssertionDb = new Database(dbPath, { readonly: true });
+const xianxiaRestRow = xianxiaRestAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", xianxiaCharacterSlug);
+xianxiaRestAssertionDb.close();
+const xianxiaRestState = JSON.parse(xianxiaRestRow?.state_json || "{}");
+if (
+  Number(xianxiaRestRow?.revision) !== editedXianxiaRevision + 6 ||
+  xianxiaRestRow?.updated_by_user_id !== 81 ||
+  xianxiaRestState.vitals?.current_hp !== 6 ||
+  xianxiaRestState.xianxia?.vitals?.current_hp !== 6 ||
+  xianxiaRestState.xianxia?.vitals?.current_stance !== 4 ||
+  xianxiaRestState.xianxia?.energies?.jing?.current !== 1 ||
+  xianxiaRestState.xianxia?.energies?.qi?.current !== 2 ||
+  xianxiaRestState.xianxia?.energies?.shen?.current !== 1 ||
+  xianxiaRestState.xianxia?.yin_yang?.yin_current !== 1 ||
+  xianxiaRestState.xianxia?.yin_yang?.yang_current !== 1 ||
+  xianxiaRestState.xianxia?.dao?.current !== 3
+) {
+  throw new Error(
+    `Unexpected Xianxia rest database row: ${JSON.stringify({
+      xianxiaRestRow,
+      xianxiaRestState,
     })}`,
   );
 }
