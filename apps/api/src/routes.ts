@@ -456,6 +456,14 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
     routeFamily: "api_v1",
   },
   {
+    method: "PATCH",
+    honoPath: "/api/v1/me/settings",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/me/settings",
+    seedPath: "/api/v1/me/settings",
+    routeFamily: "api_v1",
+  },
+  {
     method: "GET",
     honoPath: "/api/v1/campaigns/:campaignSlug/control",
     snapshotFamily: "api_v1",
@@ -520,6 +528,7 @@ export const ROUTES = {
   sessionLogDetail: IMPLEMENTED_ROUTES[29].honoPath,
   me: IMPLEMENTED_ROUTES[30].honoPath,
   meSettings: IMPLEMENTED_ROUTES[31].honoPath,
-  campaignControl: IMPLEMENTED_ROUTES[32].honoPath,
-  campaignControlVisibility: IMPLEMENTED_ROUTES[33].honoPath,
+  meSettingsUpdate: IMPLEMENTED_ROUTES[32].honoPath,
+  campaignControl: IMPLEMENTED_ROUTES[33].honoPath,
+  campaignControlVisibility: IMPLEMENTED_ROUTES[34].honoPath,
 } as const;

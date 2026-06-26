@@ -53,6 +53,10 @@ export type ApiTokenAuthResult =
   | { kind: "invalid" }
   | { kind: "authenticated"; context: ApiTokenAuthContext };
 
+export type AccountSettingsUpdateResult =
+  | { status: "ok"; preferences: AuthPreferences }
+  | { status: "validation_error"; message: string };
+
 interface ApiTokenRow {
   id: number;
   user_id: number;
@@ -118,6 +122,10 @@ function parseBearerToken(authorizationHeader: string | undefined): { present: b
   return { present: true, token: credentials || null };
 }
 
+function utcIsoTimestamp(): string {
+  return new Date().toISOString().replace("Z", "+00:00");
+}
+
 function hashToken(rawToken: string): string {
   return createHash("sha256").update(rawToken, "utf8").digest("hex");
 }
@@ -146,9 +154,17 @@ function normalizeThemeKey(value: unknown): string {
   return VALID_THEME_KEYS.has(normalized) ? normalized : DEFAULT_PREFERENCES.theme_key;
 }
 
+function isValidThemeKey(value: unknown): boolean {
+  return VALID_THEME_KEYS.has(String(value || "").trim().toLowerCase());
+}
+
 function normalizeSessionChatOrder(value: unknown): string {
   const normalized = String(value || "").trim().toLowerCase();
   return VALID_SESSION_CHAT_ORDERS.has(normalized) ? normalized : DEFAULT_PREFERENCES.session_chat_order;
+}
+
+function isValidSessionChatOrder(value: unknown): boolean {
+  return VALID_SESSION_CHAT_ORDERS.has(String(value || "").trim().toLowerCase());
 }
 
 function normalizeFrontendMode(value: unknown): string {
@@ -221,6 +237,46 @@ function loadViewAsChoices(database: SqliteDatabase, actor: AuthUser): ViewAsCho
   return rows.filter((row) => Number(row.id) !== actor.id).map(serializeViewAsChoice);
 }
 
+function setUserThemeKey(database: SqliteDatabase, userId: number, themeKey: string, now: string) {
+  database
+    .prepare(
+      `INSERT INTO user_preferences (
+        user_id,
+        theme_key,
+        session_chat_order,
+        frontend_mode,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        theme_key = excluded.theme_key,
+        updated_at = excluded.updated_at`,
+    )
+    .run(userId, normalizeThemeKey(themeKey), DEFAULT_PREFERENCES.session_chat_order, DEFAULT_PREFERENCES.frontend_mode, now);
+}
+
+function setUserSessionChatOrder(database: SqliteDatabase, userId: number, sessionChatOrder: string, now: string) {
+  database
+    .prepare(
+      `INSERT INTO user_preferences (
+        user_id,
+        theme_key,
+        session_chat_order,
+        frontend_mode,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        session_chat_order = excluded.session_chat_order,
+        updated_at = excluded.updated_at`,
+    )
+    .run(
+      userId,
+      DEFAULT_PREFERENCES.theme_key,
+      normalizeSessionChatOrder(sessionChatOrder),
+      DEFAULT_PREFERENCES.frontend_mode,
+      now,
+    );
+}
+
 export function readApiTokenAuthContext(
   dbPath: string,
   authorizationHeader: string | undefined,
@@ -263,6 +319,73 @@ export function readApiTokenAuthContext(
       return { kind: "invalid" };
     }
     throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function updateApiTokenAccountSettings(
+  dbPath: string,
+  authContext: ApiTokenAuthContext,
+  payload: Record<string, unknown>,
+): AccountSettingsUpdateResult {
+  const requestedThemeKey = Object.hasOwn(payload, "theme_key") ? payload.theme_key : "";
+  const requestedChatOrder = Object.hasOwn(payload, "session_chat_order") ? payload.session_chat_order : "";
+  const hasThemeUpdate = Boolean(String(requestedThemeKey).trim());
+  const hasChatOrderUpdate = Boolean(String(requestedChatOrder).trim());
+
+  if (Object.hasOwn(payload, "frontend_mode")) {
+    return {
+      status: "validation_error",
+      message: "Preferred frontend selection is no longer available.",
+    };
+  }
+
+  if (!hasThemeUpdate && !hasChatOrderUpdate) {
+    return {
+      status: "validation_error",
+      message: "No account settings were provided.",
+    };
+  }
+
+  if (hasThemeUpdate && !isValidThemeKey(requestedThemeKey)) {
+    return {
+      status: "validation_error",
+      message: "Choose a valid theme preset.",
+    };
+  }
+
+  if (hasChatOrderUpdate && !isValidSessionChatOrder(requestedChatOrder)) {
+    return {
+      status: "validation_error",
+      message: "Choose a valid live session chat order.",
+    };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const currentPreferences = loadPreferences(database, authContext.user.id);
+    const normalizedThemeKey = hasThemeUpdate ? normalizeThemeKey(requestedThemeKey) : currentPreferences.theme_key;
+    const normalizedChatOrder = hasChatOrderUpdate
+      ? normalizeSessionChatOrder(requestedChatOrder)
+      : currentPreferences.session_chat_order;
+    const now = utcIsoTimestamp();
+
+    const writePreferences = database.transaction(() => {
+      if (hasThemeUpdate && normalizedThemeKey !== currentPreferences.theme_key) {
+        setUserThemeKey(database, authContext.user.id, normalizedThemeKey, now);
+      }
+      if (hasChatOrderUpdate && normalizedChatOrder !== currentPreferences.session_chat_order) {
+        setUserSessionChatOrder(database, authContext.user.id, normalizedChatOrder, now);
+      }
+    });
+
+    writePreferences();
+
+    return {
+      status: "ok",
+      preferences: loadPreferences(database, authContext.user.id),
+    };
   } finally {
     database.close();
   }

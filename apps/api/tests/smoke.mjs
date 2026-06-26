@@ -875,6 +875,118 @@ if (
   throw new Error(`Unexpected bearer settings payload: ${JSON.stringify(bearerMeSettings.payload)}`);
 }
 
+const blockedMeSettingsPatch = await requestJson(
+  "/api/v1/me/settings",
+  {},
+  { method: "PATCH", body: { theme_key: "moonlit" } },
+);
+if (blockedMeSettingsPatch.status !== 401 || blockedMeSettingsPatch.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated settings PATCH to return auth_required 401, got ${blockedMeSettingsPatch.status} ${blockedMeSettingsPatch.payload?.error?.code}`,
+  );
+}
+const fixtureMeSettingsPatch = await requestJson(
+  "/api/v1/me/settings",
+  { "X-CPW-Fixture-Role": "player" },
+  { method: "PATCH", body: { theme_key: "moonlit" } },
+);
+if (
+  fixtureMeSettingsPatch.status !== 403 ||
+  fixtureMeSettingsPatch.payload?.error?.message !== "Account settings updates require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture settings PATCH to require bearer auth, got ${fixtureMeSettingsPatch.status} ${fixtureMeSettingsPatch.payload?.error?.message}`,
+  );
+}
+const invalidThemeSettingsPatch = await requestJson(
+  "/api/v1/me/settings",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "PATCH", body: { theme_key: "bad-theme", session_chat_order: "oldest_first" } },
+);
+if (
+  invalidThemeSettingsPatch.status !== 400 ||
+  invalidThemeSettingsPatch.payload?.error?.message !== "Choose a valid theme preset."
+) {
+  throw new Error(
+    `Expected invalid theme settings PATCH validation, got ${invalidThemeSettingsPatch.status} ${invalidThemeSettingsPatch.payload?.error?.message}`,
+  );
+}
+const invalidOrderSettingsPatch = await requestJson(
+  "/api/v1/me/settings",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "PATCH", body: { theme_key: "moonlit", session_chat_order: "sideways" } },
+);
+if (
+  invalidOrderSettingsPatch.status !== 400 ||
+  invalidOrderSettingsPatch.payload?.error?.message !== "Choose a valid live session chat order."
+) {
+  throw new Error(
+    `Expected invalid chat-order settings PATCH validation, got ${invalidOrderSettingsPatch.status} ${invalidOrderSettingsPatch.payload?.error?.message}`,
+  );
+}
+const retiredFrontendSettingsPatch = await requestJson(
+  "/api/v1/me/settings",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "PATCH", body: { frontend_mode: "gen2" } },
+);
+if (
+  retiredFrontendSettingsPatch.status !== 400 ||
+  retiredFrontendSettingsPatch.payload?.error?.message !== "Preferred frontend selection is no longer available."
+) {
+  throw new Error(
+    `Expected retired frontend settings PATCH validation, got ${retiredFrontendSettingsPatch.status} ${retiredFrontendSettingsPatch.payload?.error?.message}`,
+  );
+}
+const emptySettingsPatch = await requestJson(
+  "/api/v1/me/settings",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "PATCH", body: {} },
+);
+if (emptySettingsPatch.status !== 400 || emptySettingsPatch.payload?.error?.message !== "No account settings were provided.") {
+  throw new Error(
+    `Expected empty settings PATCH validation, got ${emptySettingsPatch.status} ${emptySettingsPatch.payload?.error?.message}`,
+  );
+}
+const updatedSettingsPatch = await requestJson(
+  "/api/v1/me/settings",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "PATCH", body: { theme_key: "moonlit", session_chat_order: "oldest_first" } },
+);
+if (
+  updatedSettingsPatch.status !== 200 ||
+  updatedSettingsPatch.payload?.ok !== true ||
+  updatedSettingsPatch.payload?.user?.email !== "fixture-token-player@example.com" ||
+  updatedSettingsPatch.payload?.preferences?.theme_key !== "moonlit" ||
+  updatedSettingsPatch.payload?.preferences?.session_chat_order !== "oldest_first" ||
+  updatedSettingsPatch.payload?.preferences?.frontend_mode !== "gen2" ||
+  "theme_presets" in (updatedSettingsPatch.payload || {})
+) {
+  throw new Error(`Unexpected account settings PATCH payload: ${JSON.stringify(updatedSettingsPatch.payload)}`);
+}
+const playerMeAfterSettingsPatch = await requestJson("/api/v1/me", {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (
+  playerMeAfterSettingsPatch.status !== 200 ||
+  playerMeAfterSettingsPatch.payload?.preferences?.theme_key !== "moonlit" ||
+  playerMeAfterSettingsPatch.payload?.preferences?.session_chat_order !== "oldest_first" ||
+  playerMeAfterSettingsPatch.payload?.preferences?.frontend_mode !== "gen2"
+) {
+  throw new Error(`Expected /me to reflect settings PATCH, got ${JSON.stringify(playerMeAfterSettingsPatch.payload)}`);
+}
+const accountSettingsAssertionDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const playerPreferenceRow = accountSettingsAssertionDb
+  .prepare("SELECT theme_key, session_chat_order, frontend_mode FROM user_preferences WHERE user_id = ?")
+  .get(79);
+accountSettingsAssertionDb.close();
+if (
+  playerPreferenceRow?.theme_key !== "moonlit" ||
+  playerPreferenceRow?.session_chat_order !== "oldest_first" ||
+  playerPreferenceRow?.frontend_mode !== "gen2"
+) {
+  throw new Error(`Expected persisted player preferences, got ${JSON.stringify(playerPreferenceRow)}`);
+}
+
 const blockedImportRuns = await requestJson("/api/v1/systems/import-runs");
 if (blockedImportRuns.status !== 401 || blockedImportRuns.payload?.error?.code !== "auth_required") {
   throw new Error(

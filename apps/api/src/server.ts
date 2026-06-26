@@ -5,7 +5,12 @@ import { fileURLToPath } from "node:url";
 import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
 
-import { apiTokenRoleForCampaign, readApiTokenAuthContext, type AuthRouteRole } from "./auth/repository.js";
+import {
+  apiTokenRoleForCampaign,
+  readApiTokenAuthContext,
+  updateApiTokenAccountSettings,
+  type AuthRouteRole,
+} from "./auth/repository.js";
 import {
   buildApiTokenAccountSettingsPayload,
   buildApiTokenMePayload,
@@ -550,6 +555,40 @@ app.get(ROUTES.meSettings, async (ctx) => {
   }
 
   return ctx.json(buildFixtureAccountSettingsPayload(role));
+});
+
+app.patch(ROUTES.meSettingsUpdate, async (ctx) => {
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "invalid") {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (apiAuth.kind !== "authenticated") {
+    if (fixtureRole(ctx)) {
+      const error = forbidden("Account settings updates require bearer API authentication.");
+      return ctx.json({ ok: error.ok, error: error.error }, error.status);
+    }
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = updateApiTokenAccountSettings(config.dbPath, apiAuth.context, jsonPayload.payload);
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    user: apiAuth.context.user,
+    preferences: result.preferences,
+  });
 });
 
 app.get(ROUTES.systemsImportRuns, async (ctx) => {

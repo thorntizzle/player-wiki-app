@@ -314,6 +314,15 @@
       "notes": "Tracked Hono account settings read route with Flask-compatible unauthenticated auth_required behavior, synthetic fixture-role user/preference/static-choice metadata, and read-only SQLite API-token user/preference reads through CPW_DB_PATH."
     },
     {
+      "method": "PATCH",
+      "path": "/api/v1/me/settings",
+      "route_family": "api_v1",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/me/settings",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono account settings write route with bearer API-token auth, Flask-compatible theme/chat-order validation, retired frontend_mode rejection, SQLite user_preferences updates, and refreshed preference payloads."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/session/login",
       "route_family": "api_v1",

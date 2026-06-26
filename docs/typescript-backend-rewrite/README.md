@@ -78,6 +78,7 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/session/logs/:sessionId`
   - `GET /api/v1/me`
   - `GET /api/v1/me/settings`
+  - `PATCH /api/v1/me/settings`
   - `GET /api/v1/campaigns/:campaignSlug/content/config`
   - `GET /api/v1/campaigns/:campaignSlug/content/pages`
   - `GET /api/v1/campaigns/:campaignSlug/content/pages/*`
@@ -122,11 +123,12 @@ Route parity check command:
   user, membership, preference, and View As metadata for player, DM, and admin fixture reads,
   and reading live-style API-token identity, active memberships, normalized preferences, and
   admin View As choices from `CPW_DB_PATH` when a bearer token is supplied.
-- The account settings read slice now serves `GET /api/v1/me/settings`, preserving
-  Flask-compatible unauthenticated `auth_required` behavior, the current theme preset and
-  live-session chat-order choice metadata, fixture-role reads, and API-token user/preference
-  reads from `CPW_DB_PATH`. The TypeScript slice remains read-only and does not touch API
-  token `last_used_at` timestamps.
+- The account settings slice now serves `GET /api/v1/me/settings` and
+  `PATCH /api/v1/me/settings`, preserving Flask-compatible unauthenticated `auth_required`
+  behavior, the current theme preset and live-session chat-order choice metadata, fixture-role
+  reads, bearer-token user/preference reads, bearer-token `user_preferences` writes, validation
+  for theme/chat-order choices, retired `frontend_mode` rejection, and refreshed preference payloads.
+  The TypeScript auth slice still does not touch API token `last_used_at` timestamps.
 - The Campaign Control read route now serves `GET .../control`, preserving Flask-compatible
   visibility-management auth for fixture or bearer-token DM/admin identities, default campaign
   visibility rows, optional SQLite visibility overrides, admin-only Private choices, rules, notes,

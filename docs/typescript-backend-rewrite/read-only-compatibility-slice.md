@@ -14,6 +14,7 @@ disposable fixture database.
 - Implemented `GET /api/v1/app` using fixture runtime metadata.
 - Implemented `GET /api/v1/me` with Flask-compatible unauthenticated auth failure, synthetic fixture-role identity, membership, preference, and View As metadata, plus read-only SQLite API-token identity, active membership, normalized preference, and admin View As choice reads.
 - Implemented `GET /api/v1/me/settings` with Flask-compatible unauthenticated auth failure, fixture-role user, preference, theme preset, and live-session chat-order metadata, plus read-only SQLite API-token user/preference reads.
+- Implemented `PATCH /api/v1/me/settings` with Flask-compatible unauthenticated auth failure, bearer-token user preference writes, theme/chat-order validation, retired frontend-mode rejection, and refreshed preference payloads.
 - Implemented `GET /api/v1/systems/import-runs` with Flask-compatible unauthenticated auth failure and fixture-admin SQLite reads.
 - Implemented `GET /api/v1/systems/import-runs/:importRunId` with the same auth gate, fixture-admin SQLite detail reads, and explicit missing-resource JSON.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/systems` with Flask-compatible unauthenticated auth failure, fixture-role source cards, entry search, and rules-reference metadata search fields.
@@ -90,6 +91,13 @@ disposable fixture database.
   - bearer API tokens read the same user and normalized preference fields from `CPW_DB_PATH`
   - `theme_presets` and `session_chat_order_choices` match Flask's static account-settings choices
   - retired `frontend_mode_choices` remains omitted
+- Account settings writes preserve the `/api/v1/me/settings` mutation shell against the disposable SQLite fixture database:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture-role write attempts are rejected because the mutation needs a durable bearer-token actor
+  - bearer API tokens update `user_preferences` rows for `theme_key` and/or `session_chat_order`
+  - invalid themes, invalid chat order values, empty payloads, and retired `frontend_mode` writes return Flask-compatible `validation_error` messages
+  - responses return `ok`, serialized `user`, and refreshed normalized `preferences`
+  - subsequent `/api/v1/me` reads reflect the updated preference values
 - Systems import-run list/detail responses add the first tracked SQLite read:
   - unauthenticated requests return Flask-compatible `auth_required`
   - fixture-admin requests read `systems_import_runs` from `CPW_DB_PATH`
@@ -253,13 +261,14 @@ disposable fixture database.
   - compares Flask-vs-TypeScript unauthenticated Session article-source search, Session article image, and Session log detail auth envelopes, and asserts the fixture lookup shell for short, wiki-result, player-forbidden, and missing-campaign cases.
   - compares Flask-vs-TypeScript content-management unauthenticated and player-forbidden auth envelopes.
 - `apps/api/tests/smoke.mjs`:
-  - starts compiled API on a local port and verifies `/healthz`, app state, fixture `/api/v1/me` identity reads, fixture `/api/v1/me/settings` account-settings reads, SQLite bearer-token `/api/v1/me` and `/api/v1/me/settings` reads, SQLite-backed systems import-run list/detail reads with bearer admin/non-admin gates, campaign Systems landing/search/source list/detail/category/entry reads with fixture and bearer-token role gates, Combat state/live-state shell reads with fixture and bearer-token role gates, Combat Systems monster search reads with fixture and bearer-token role gates, Session state/article-source/image/log reads with fixture and bearer-token role gates, campaign list/detail, public Campaign Help, Campaign Control auth/payload reads and visibility writes, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
+  - starts compiled API on a local port and verifies `/healthz`, app state, fixture `/api/v1/me` identity reads, fixture `/api/v1/me/settings` account-settings reads, SQLite bearer-token `/api/v1/me` and `/api/v1/me/settings` reads/writes, SQLite-backed systems import-run list/detail reads with bearer admin/non-admin gates, campaign Systems landing/search/source list/detail/category/entry reads with fixture and bearer-token role gates, Combat state/live-state shell reads with fixture and bearer-token role gates, Combat Systems monster search reads with fixture and bearer-token role gates, Session state/article-source/image/log reads with fixture and bearer-token role gates, campaign list/detail, public Campaign Help, Campaign Control auth/payload reads and visibility writes, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
   - validates content-management auth gates for anonymous, fixture player, bearer player, bearer outsider, and bearer app-admin content config reads.
   - validates fixture-backed content config endpoint payload for `linden-pass` (`campaign_slug`, `current_session`, `title`, `systems_sources`, `editable_fields`, `updated_at`) and missing-campaign 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/pages` list sorting/count/body omission and sampled `Port Meridian` metadata/removal fields, plus `GET /api/v1/campaigns/:campaignSlug/content/pages/*` detail payload body inclusion and missing-content-page 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/assets` list sorting/count/data omission and sampled PNG metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/assets/*` detail payload byte data and missing-content-asset 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/characters` list sorting/count and sampled character summary metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` detail payload definition/import metadata and missing-content-character 404.
   - verifies `GET /api/v1/campaigns/:campaignSlug/session` no-header read-only payload shape, role-aware fixture and bearer-token SQLite Session state reads, auth/forbidden bearer envelopes, token/revision headers behavior, unchanged-response short-circuit, and session missing-campaign 404.
+  - verifies `PATCH /api/v1/me/settings` auth, fixture-write denial, validation messages, retired frontend-mode rejection, SQLite persistence, and `/me` preference hydration after writes.
   - verifies `PATCH /api/v1/campaigns/:campaignSlug/control/visibility` auth, validation, Private restrictions, changed-scope response shape, SQLite persistence, audit rows, idempotent no-change response, and missing-campaign 404 against the disposable smoke-test database.
 - `apps/api/tests/route-parity.mjs`:
   - checks implemented route coverage against `route-snapshots.json` and `typescript-route-seed.json`.
