@@ -3206,6 +3206,161 @@ if (missingSessionLog.status !== 404 || missingSessionLog.payload?.error?.code !
   );
 }
 
+const blockedSessionLogDelete = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/logs/2",
+  {},
+  { method: "DELETE" },
+);
+if (blockedSessionLogDelete.status !== 401 || blockedSessionLogDelete.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated session log delete 401, got ${blockedSessionLogDelete.status} ${blockedSessionLogDelete.payload?.error?.code}`,
+  );
+}
+
+const fixtureSessionLogDelete = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/logs/2",
+  { "X-CPW-Fixture-Role": "dm" },
+  { method: "DELETE" },
+);
+if (
+  fixtureSessionLogDelete.status !== 403 ||
+  fixtureSessionLogDelete.payload?.error?.message !== "Session log writes require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture session log delete forbidden, got ${fixtureSessionLogDelete.status} ${fixtureSessionLogDelete.payload?.error?.message}`,
+  );
+}
+
+const playerSessionLogDelete = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/logs/2",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "DELETE" },
+);
+if (
+  playerSessionLogDelete.status !== 403 ||
+  playerSessionLogDelete.payload?.error?.message !== "You do not have permission to manage this session."
+) {
+  throw new Error(
+    `Expected player session log delete forbidden, got ${playerSessionLogDelete.status} ${playerSessionLogDelete.payload?.error?.message}`,
+  );
+}
+
+const activeSessionLogDelete = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/logs/1",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "DELETE" },
+);
+if (
+  activeSessionLogDelete.status !== 400 ||
+  activeSessionLogDelete.payload?.error?.message !== "Close the live session before deleting its chat log."
+) {
+  throw new Error(
+    `Expected active session log delete validation, got ${activeSessionLogDelete.status} ${activeSessionLogDelete.payload?.error?.message}`,
+  );
+}
+
+const missingSessionLogDelete = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/logs/999999",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "DELETE" },
+);
+if (
+  missingSessionLogDelete.status !== 400 ||
+  missingSessionLogDelete.payload?.error?.message !== "That chat log could not be found."
+) {
+  throw new Error(
+    `Expected missing session log delete validation, got ${missingSessionLogDelete.status} ${missingSessionLogDelete.payload?.error?.message}`,
+  );
+}
+
+const missingSessionLogDeleteCampaign = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/session/logs/2",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "DELETE" },
+);
+if (
+  missingSessionLogDeleteCampaign.status !== 404 ||
+  missingSessionLogDeleteCampaign.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing session log delete campaign JSON 404, got ${missingSessionLogDeleteCampaign.status} ${missingSessionLogDeleteCampaign.payload?.error?.code}`,
+  );
+}
+
+const logDeleteSetupDb = new Database(dbPath, { fileMustExist: true });
+const closedLogArticleId = Number(
+  logDeleteSetupDb.prepare("SELECT COALESCE(MAX(id), 0) + 1 AS id FROM campaign_session_articles").get().id,
+);
+logDeleteSetupDb
+  .prepare(
+    `
+      INSERT INTO campaign_session_articles (
+        id,
+        campaign_slug,
+        title,
+        body_markdown,
+        source_page_ref,
+        status,
+        created_at,
+        created_by_user_id,
+        revealed_at,
+        revealed_by_user_id,
+        revealed_in_session_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  )
+  .run(
+    closedLogArticleId,
+    "linden-pass",
+    "Closed Log Provenance",
+    "A revealed article linked to the deleted chat log.",
+    "",
+    "revealed",
+    "2026-06-24T10:35:00+00:00",
+    42,
+    "2026-06-24T10:35:00+00:00",
+    42,
+    2,
+  );
+logDeleteSetupDb.close();
+
+const deleteSessionLogResponse = await requestJson(
+  "/api/v1/campaigns/linden-pass/session/logs/2",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "DELETE" },
+);
+if (
+  deleteSessionLogResponse.status !== 200 ||
+  deleteSessionLogResponse.payload?.ok !== true ||
+  deleteSessionLogResponse.payload?.deleted_session_id !== 2
+) {
+  throw new Error(`Unexpected session log delete payload: ${JSON.stringify(deleteSessionLogResponse.payload)}`);
+}
+
+const logDeleteAssertionDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const deletedSessionRow = logDeleteAssertionDb.prepare("SELECT id FROM campaign_sessions WHERE id = ?").get(2);
+const deletedSessionMessageCount = logDeleteAssertionDb
+  .prepare("SELECT COUNT(*) AS count FROM campaign_session_messages WHERE session_id = ?")
+  .get(2);
+const unlinkedClosedLogArticle = logDeleteAssertionDb
+  .prepare("SELECT revealed_in_session_id FROM campaign_session_articles WHERE id = ?")
+  .get(closedLogArticleId);
+const logDeleteRevisionRow = logDeleteAssertionDb
+  .prepare("SELECT revision, updated_by_user_id FROM campaign_session_states WHERE campaign_slug = ?")
+  .get("linden-pass");
+logDeleteAssertionDb.close();
+if (
+  deletedSessionRow !== undefined ||
+  Number(deletedSessionMessageCount?.count) !== 0 ||
+  unlinkedClosedLogArticle?.revealed_in_session_id !== null ||
+  Number(logDeleteRevisionRow?.revision) !== Number(articleRevisionRow?.revision) + 1 ||
+  Number(logDeleteRevisionRow?.updated_by_user_id) !== 81
+) {
+  throw new Error(
+    `Expected deleted session log rows and revision bump, got session=${JSON.stringify(deletedSessionRow)} messages=${JSON.stringify(deletedSessionMessageCount)} article=${JSON.stringify(unlinkedClosedLogArticle)} revision=${JSON.stringify(logDeleteRevisionRow)}`,
+  );
+}
+
 const missingSession = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/session");
 if (missingSession.status !== 404 || missingSession.payload?.error?.code !== "campaign_not_found") {
   throw new Error(`Expected missing session campaign JSON 404, got ${missingSession.status}`);
@@ -3470,7 +3625,7 @@ lifecycleAfterCloseDb.close();
 if (
   closedSessionRow?.status !== "closed" ||
   Number(closedSessionRow?.ended_by_user_id) !== 81 ||
-  Number(closeRevisionRow?.revision) !== Number(articleRevisionRow?.revision) + 1 ||
+  Number(closeRevisionRow?.revision) !== Number(logDeleteRevisionRow?.revision) + 1 ||
   Number(closeRevisionRow?.updated_by_user_id) !== 81
 ) {
   throw new Error(

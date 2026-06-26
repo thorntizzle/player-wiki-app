@@ -613,6 +613,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "campaign_not_found",
     },
   },
+  {
+    method: "DELETE",
+    honoPath: "/api/v1/campaigns/:campaignSlug/session/logs/:sessionId",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/session/logs/<int:session_id>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/session/logs/<int:session_id>",
+    routeFamily: "api_v1_session",
+    missingResource: {
+      method: "DELETE",
+      path: "/api/v1/campaigns/linden-pass/session/logs/999999",
+      status: 400,
+      contentType: "application/json",
+      errorCode: "validation_error",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -659,4 +674,5 @@ export const ROUTES = {
   sessionArticleReveal: IMPLEMENTED_ROUTES[40].honoPath,
   sessionArticleDelete: IMPLEMENTED_ROUTES[41].honoPath,
   sessionArticlesRevealedClear: IMPLEMENTED_ROUTES[42].honoPath,
+  sessionLogDelete: IMPLEMENTED_ROUTES[43].honoPath,
 } as const;

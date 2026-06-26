@@ -149,6 +149,11 @@ Route parity check command:
 - The Session log detail route now reads closed session records and all closed-session messages
   from SQLite for fixture or bearer-token DM/admin roles, preserving manager-only access and message
   recipient metadata for historical chat logs.
+- The Session log delete route now removes closed chat logs for bearer-token DM/admin users against
+  `CPW_DB_PATH`, preserving Flask-compatible missing/active-log validation, closed-log message
+  cleanup, revealed-article session provenance unlinking, and session revision bumps. Current
+  validation covers a disposable fixture database only; production/staging write readiness remains
+  gated by migration, backup, and rollback rehearsal.
 - The first identity bootstrap slice now serves `GET /api/v1/me`, preserving
   Flask-compatible unauthenticated `auth_required` behavior, returning synthetic role-header
   user, membership, preference, and View As metadata for player, DM, and admin fixture reads,

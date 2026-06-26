@@ -51,6 +51,8 @@ fixture database.
   - `GET /api/v1/campaigns/:campaignSlug/session/articles/:articleId/image`
 - Implemented SQLite-backed Session log detail read endpoint with fixture or bearer-token manager access:
   - `GET /api/v1/campaigns/:campaignSlug/session/logs/:sessionId`
+- Implemented SQLite-backed Session log delete endpoint with bearer-token DM/admin access:
+  - `DELETE /api/v1/campaigns/:campaignSlug/session/logs/:sessionId`
 - Added `apps/api/src/wiki/` as the read-only Markdown/frontmatter fixture reader and wiki payload serializer.
 - Added Campaign Control read endpoint with fixture or bearer-token visibility-manager access:
   - `GET /api/v1/campaigns/:campaignSlug/control`
@@ -255,6 +257,13 @@ fixture database.
   - missing campaign article writes return `campaign_not_found`; missing article update/reveal/delete returns `validation_error`
 - Session article image reads stream the stored SQLite `data_blob` with the stored `media_type`; fixture or bearer-token DM/admin roles can read staged or revealed images, while fixture or bearer-token players receive only currently revealed active-session images and get a missing-image response for staged or inaccessible images.
 - Session log detail reads cover closed-session records and all related messages for fixture or bearer-token DM/admin roles, including DM-only recipient metadata, while unauthenticated requests keep Flask-compatible `auth_required` and fixture or bearer-token player requests receive `forbidden`.
+- Session log deletes preserve the `/api/v1/campaigns/:campaignSlug/session/logs/:sessionId` mutation shell for a disposable fixture SQLite database:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture-role write attempts are rejected because the mutation needs a durable bearer-token actor
+  - bearer-token players and users without active manager access receive `forbidden`
+  - missing logs return Flask-compatible `That chat log could not be found.`
+  - active sessions return Flask-compatible `Close the live session before deleting its chat log.`
+  - closed-log deletion unlinks article `revealed_in_session_id` provenance for that session, deletes related chat messages, deletes the closed session row, and bumps `campaign_session_states.revision`
 - Session article-source search preserves the manager lookup API shell:
   - unauthenticated requests return Flask-compatible `auth_required`
   - fixture or bearer-token player roles receive `forbidden`
@@ -309,7 +318,7 @@ fixture database.
   - compares stable Flask-vs-TypeScript wiki home, section, and page payload fields.
   - checks JSON missing-resource shapes for TypeScript wiki dynamic routes.
   - adds fixture session parity checks (active session state, messages, passive score flag, revision/token shape, short-circuit response, missing session campaign 404).
-  - compares Flask-vs-TypeScript unauthenticated Session article-source search, Session article image, and Session log detail auth envelopes, and asserts the fixture lookup shell for short, wiki-result, player-forbidden, and missing-campaign cases.
+  - compares Flask-vs-TypeScript unauthenticated Session article-source search, Session article image, Session log detail, and Session log delete auth envelopes, and asserts the fixture lookup shell for short, wiki-result, player-forbidden, and missing-campaign cases.
   - compares Flask-vs-TypeScript content-management unauthenticated and player-forbidden auth envelopes.
 - `apps/api/tests/smoke.mjs`:
   - starts compiled API on a local port and verifies `/healthz`, app state, fixture `/api/v1/me` identity reads, fixture `/api/v1/me/settings` account-settings reads, SQLite bearer-token `/api/v1/me` and `/api/v1/me/settings` reads/writes, SQLite-backed systems import-run list/detail reads with bearer admin/non-admin gates, campaign Systems landing/search/source list/detail/category/entry reads with fixture and bearer-token role gates, Combat state/live-state shell reads with fixture and bearer-token role gates, Combat Systems monster search reads with fixture and bearer-token role gates, Session state/article-source/image/log reads with fixture and bearer-token role gates, campaign list/detail, public Campaign Help, Campaign Control auth/payload reads and visibility writes, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
@@ -322,6 +331,7 @@ fixture database.
   - verifies `POST /api/v1/campaigns/:campaignSlug/session/messages` auth, fixture-write denial, malformed JSON handling, validation messages, SQLite persistence, private-message visibility, recipient labels, revision bumps, and missing-campaign 404 against the disposable smoke-test database.
   - verifies `POST /api/v1/campaigns/:campaignSlug/session/start` and `.../session/close` auth, fixture-write denial, player-forbidden behavior, duplicate-start/empty-close validation, SQLite session persistence, revision bumps, refreshed Session reads/log summaries, and missing-campaign 404 against the disposable smoke-test database.
   - verifies Session article create/update/reveal/delete/clear auth, fixture-write denial, player-forbidden behavior, malformed JSON handling, validation messages, manual image-only staging, upload-mode referenced image handling, wiki-page image copying, Systems HTML snapshot staging, reveal chat-message creation, SQLite persistence, revision bumps, missing-article validation, and missing-campaign 404 against the disposable smoke-test database.
+  - verifies Session log delete auth, fixture-write denial, player-forbidden behavior, active-log and missing-log validation, SQLite closed-session/message deletion, revealed-article provenance unlinking, revision bumps, and missing-campaign 404 against the disposable smoke-test database.
   - verifies `PATCH /api/v1/me/settings` auth, fixture-write denial, validation messages, retired frontend-mode rejection, SQLite persistence, and `/me` preference hydration after writes.
   - verifies `PATCH /api/v1/campaigns/:campaignSlug/control/visibility` auth, validation, Private restrictions, changed-scope response shape, SQLite persistence, audit rows, idempotent no-change response, and missing-campaign 404 against the disposable smoke-test database.
 - `apps/api/tests/route-parity.mjs`:

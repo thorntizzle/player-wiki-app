@@ -36,6 +36,7 @@ import {
   closeSession,
   createSessionArticle,
   deleteSessionArticle,
+  deleteSessionLog,
   postSessionMessage,
   readSessionArticleImage,
   revealSessionArticle,
@@ -1726,6 +1727,37 @@ app.get(ROUTES.sessionLogDetail, async (ctx) => {
   }
 
   return ctx.json(result.payload);
+});
+
+app.delete(ROUTES.sessionLogDelete, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveSessionManagerBearerWrite(ctx, campaign.slug, "Session log writes require bearer API authentication.");
+  if (auth.kind === "error") {
+    return ctx.json({ ok: auth.error.ok, error: auth.error.error }, auth.error.status);
+  }
+
+  const sessionId = parsePositiveInteger(ctx.req.param("sessionId") || "");
+  if (sessionId === null) {
+    const error = validationError("That chat log could not be found.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = deleteSessionLog(config.dbPath, campaign, { id: auth.actor.id }, sessionId);
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    deleted_session_id: result.deletedSessionId,
+  });
 });
 
 app.get(ROUTES.sessionArticleSourceSearch, async (ctx) => {

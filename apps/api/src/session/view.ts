@@ -235,6 +235,17 @@ export type SessionLogDetailResult =
       status: "not_found";
     };
 
+export type SessionLogDeleteResult =
+  | {
+      status: "ok";
+      deletedSessionId: number;
+      sessionRevision: number;
+    }
+  | {
+      status: "validation_error";
+      message: string;
+    };
+
 export type SessionMessagePostResult =
   | {
       status: "ok";
@@ -2197,6 +2208,67 @@ export async function clearRevealedSessionArticles(
   } catch (error) {
     if (isNoSuchTableError(error)) {
       return { status: "ok", deletedArticles: [], deletedArticleIds: [], sessionRevision: SESSION_READONLY_REVISION };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function deleteSessionLog(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  actor: { id: number },
+  sessionId: number,
+): SessionLogDeleteResult {
+  if (!existsSync(dbPath)) {
+    return { status: "validation_error", message: "That chat log could not be found." };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const session = loadSession(database, campaign.slug, sessionId);
+    if (!session) {
+      return { status: "validation_error", message: "That chat log could not be found." };
+    }
+    if (String(session.status) === "active") {
+      return { status: "validation_error", message: "Close the live session before deleting its chat log." };
+    }
+
+    const now = utcIsoTimestamp();
+    const writeDelete = database.transaction(() => {
+      database
+        .prepare("UPDATE campaign_session_articles SET revealed_in_session_id = NULL WHERE revealed_in_session_id = ?")
+        .run(sessionId);
+      database.prepare("DELETE FROM campaign_session_messages WHERE session_id = ?").run(sessionId);
+      const deleteResult = database
+        .prepare("DELETE FROM campaign_sessions WHERE campaign_slug = ? AND id = ? AND status = 'closed'")
+        .run(campaign.slug, sessionId);
+      if (deleteResult.changes !== 1) {
+        return { deleted: false, sessionRevision: loadStateRevision(database, campaign.slug) };
+      }
+      return {
+        deleted: true,
+        sessionRevision: bumpSessionRevision(database, campaign.slug, actor.id, now),
+      };
+    });
+
+    const result = writeDelete();
+    if (!result.deleted) {
+      return {
+        status: "validation_error",
+        message: "That chat log could not be deleted. Refresh the page and try again.",
+      };
+    }
+
+    return {
+      status: "ok",
+      deletedSessionId: sessionId,
+      sessionRevision: result.sessionRevision,
+    };
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return { status: "validation_error", message: "That chat log could not be found." };
     }
     throw error;
   } finally {

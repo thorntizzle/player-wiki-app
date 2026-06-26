@@ -390,9 +390,10 @@ def test_typescript_session_log_detail_requires_auth_like_flask(typescript_api_s
         ("POST", "/api/v1/campaigns/linden-pass/session/articles/999999/reveal", None),
         ("DELETE", "/api/v1/campaigns/linden-pass/session/articles/999999", None),
         ("DELETE", "/api/v1/campaigns/linden-pass/session/articles/revealed", None),
+        ("DELETE", "/api/v1/campaigns/linden-pass/session/logs/999999", None),
     ],
 )
-def test_typescript_session_article_mutations_require_auth_like_flask(
+def test_typescript_session_mutations_require_auth_like_flask(
     typescript_api_server,
     client,
     method,

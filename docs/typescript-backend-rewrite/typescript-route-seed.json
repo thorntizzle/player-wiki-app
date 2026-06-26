@@ -305,6 +305,15 @@
       "notes": "Tracked Hono session log detail route with Flask-compatible unauthenticated auth_required behavior, fixture-role and bearer-token membership-derived manager-only access, SQLite closed-session reads, and all-message serialization."
     },
     {
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/session/logs/<int:session_id>",
+      "route_family": "api_v1_session",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/session/logs/:sessionId",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono session log delete route with bearer API-token DM/admin access, Flask-compatible missing/active-log validation, SQLite closed-session deletion, closed-log message cleanup, revealed-article session provenance unlinking, and session revision bumps."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/content/config",
       "route_family": "api_v1_content",
