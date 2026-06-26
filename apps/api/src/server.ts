@@ -10,6 +10,7 @@ import { getCampaignBySlug, listCampaigns, listCampaignSlugs } from "./campaigns
 import { buildCampaignHelpPayload } from "./help/view.js";
 import { ROUTES } from "./routes.js";
 import { buildSessionStatePayload } from "./session/view.js";
+import { listSystemsImportRuns } from "./systems/importRuns.js";
 import { getCampaignConfigFile } from "./content/repository.js";
 import {
   getCampaignContentAsset,
@@ -70,7 +71,7 @@ function readOnlyPermissions() {
 function jsonError(
   code: string,
   message: string,
-  status: 404 | 400 | 500,
+  status: 404 | 400 | 401 | 403 | 500,
   details: Record<string, unknown> = {},
 ) {
   return {
@@ -97,6 +98,33 @@ function campaignNotFound(campaignSlug: string) {
       campaigns_dir: config.campaignsDir,
     },
   );
+}
+
+function authRequired() {
+  return {
+    ok: false,
+    error: {
+      code: "auth_required",
+      message: "Authentication required.",
+    },
+    status: 401 as const,
+  };
+}
+
+function validationError(message: string) {
+  return {
+    ok: false,
+    error: {
+      code: "validation_error",
+      message,
+    },
+    status: 400 as const,
+  };
+}
+
+function hasFixtureAdminAuth(ctx: { req: { header: (name: string) => string | undefined } }): boolean {
+  const fixtureRole = (ctx.req.header("X-CPW-Fixture-Role") || "").trim().toLowerCase();
+  return fixtureRole === "admin";
 }
 
 function campaignHref(campaignSlug: string, suffix = ""): string {
@@ -274,6 +302,31 @@ app.get(ROUTES.appState, async (ctx) =>
     },
   }),
 );
+
+app.get(ROUTES.systemsImportRuns, async (ctx) => {
+  if (!hasFixtureAdminAuth(ctx)) {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const rawLimit = (ctx.req.query("limit") || "20").trim();
+  const parsedLimit = Number(rawLimit);
+  if (!Number.isInteger(parsedLimit)) {
+    const error = validationError("limit must be an integer.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const importRuns = listSystemsImportRuns(config.dbPath, {
+    librarySlug: (ctx.req.query("library_slug") || "").trim() || null,
+    sourceId: (ctx.req.query("source_id") || "").trim() || null,
+    limit: parsedLimit,
+  });
+
+  return ctx.json({
+    ok: true,
+    import_runs: importRuns,
+  });
+});
 
 app.get(ROUTES.campaignList, async (ctx) => {
   const campaigns = await listCampaigns(config);

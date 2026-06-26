@@ -161,6 +161,27 @@ def test_typescript_app_state_matches_flask_metadata_contract(typescript_api_ser
     assert payload["app"]["db_path"].endswith("typescript-fixture.sqlite3")
 
 
+def test_typescript_systems_import_runs_requires_auth_like_flask(typescript_api_server, client):
+    flask_response = client.get("/api/v1/systems/import-runs")
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/systems/import-runs")
+    assert status == 401
+    assert payload == flask_payload
+
+
+def test_typescript_systems_import_runs_success_shape_matches_flask(typescript_api_server):
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/systems/import-runs",
+        headers={"X-CPW-Fixture-Role": "admin"},
+    )
+    assert status == 200
+    assert set(payload) == {"ok", "import_runs"}
+    assert payload["ok"] is True
+    assert isinstance(payload["import_runs"], list)
+
+
 def test_typescript_campaign_list_matches_flask_campaign_payloads(typescript_api_server, client, sign_in, users):
     sign_in(users["party"]["email"], users["party"]["password"])
     flask_response = client.get("/api/v1/campaigns")

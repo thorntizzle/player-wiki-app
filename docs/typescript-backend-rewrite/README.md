@@ -52,6 +52,7 @@ Route parity check command:
 - `apps/api` exists and now serves:
   - `GET /healthz`
   - `GET /api/v1/app`
+  - `GET /api/v1/systems/import-runs`
   - `GET /api/v1/campaigns`
   - `GET /api/v1/campaigns/:campaignSlug`
   - `GET /api/v1/campaigns/:campaignSlug/help`
@@ -68,6 +69,9 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
 - Campaign detail uses fixture-backed reads from `tests/fixtures/sample_campaigns` by default and supports
   `CPW_CAMPAIGNS_DIR` override.
+- The first tracked SQLite read path uses `better-sqlite3` against `CPW_DB_PATH` for
+  `GET /api/v1/systems/import-runs`, while unauthenticated requests still preserve Flask's
+  `auth_required` envelope.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

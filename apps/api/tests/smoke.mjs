@@ -1,5 +1,10 @@
 import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import Database from "better-sqlite3";
 
 const DEFAULT_PORT = 39873;
 const port = Number(process.env.CPW_SMOKE_PORT || DEFAULT_PORT);
@@ -7,6 +12,61 @@ const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const campaignsDir =
   process.env.CPW_CAMPAIGNS_DIR ||
   fileURLToPath(new URL("../../../tests/fixtures/sample_campaigns", import.meta.url));
+const smokeTempDir = mkdtempSync(path.join(tmpdir(), "cpw-api-smoke-"));
+const dbPath = path.join(smokeTempDir, "player_wiki.sqlite3");
+
+const smokeDb = new Database(dbPath);
+smokeDb.exec(`
+  CREATE TABLE systems_import_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    library_slug TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    import_version TEXT NOT NULL DEFAULT '',
+    source_path TEXT NOT NULL DEFAULT '',
+    summary_json TEXT NOT NULL DEFAULT '{}',
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    started_by_user_id INTEGER
+  );
+`);
+const insertImportRun = smokeDb.prepare(`
+  INSERT INTO systems_import_runs (
+    library_slug,
+    source_id,
+    status,
+    import_version,
+    source_path,
+    summary_json,
+    started_at,
+    completed_at,
+    started_by_user_id
+  )
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+insertImportRun.run(
+  "DND-5E",
+  "MM",
+  "completed",
+  "mm-import",
+  "api-upload:mm-import.zip",
+  JSON.stringify({ entry_types: ["monster"], imported_count: 1, source_files: ["data/bestiary/bestiary-mm.json"] }),
+  "2026-06-25T10:00:00+00:00",
+  "2026-06-25T10:01:00+00:00",
+  42,
+);
+insertImportRun.run(
+  "DND-5E",
+  "PHB",
+  "started",
+  "phb-import",
+  "api-upload:phb-import.zip",
+  JSON.stringify({ entry_types: ["spell"], imported_count: 0 }),
+  "2026-06-25T09:00:00+00:00",
+  null,
+  null,
+);
+smokeDb.close();
 
 const nodePath = fileURLToPath(new URL("../dist/server.js", import.meta.url));
 const child = spawn(process.execPath, [nodePath], {
@@ -15,6 +75,7 @@ const child = spawn(process.execPath, [nodePath], {
     PORT: String(port),
     NODE_ENV: "test",
     CPW_CAMPAIGNS_DIR: campaignsDir,
+    CPW_DB_PATH: dbPath,
   },
   stdio: ["ignore", "pipe", "pipe"],
 });
@@ -23,6 +84,7 @@ const ensureStopped = () => {
   if (!child.killed) {
     child.kill("SIGINT");
   }
+  rmSync(smokeTempDir, { recursive: true, force: true });
 };
 
 process.on("exit", ensureStopped);
@@ -88,6 +150,36 @@ if (typeof appState.payload?.app?.git_dirty !== "boolean") {
 }
 if (appState.payload.app.campaigns_dir !== campaignsDir) {
   throw new Error(`Expected app state campaigns_dir ${campaignsDir}, got ${appState.payload.app.campaigns_dir}`);
+}
+if (appState.payload.app.db_path !== dbPath) {
+  throw new Error(`Expected app state db_path ${dbPath}, got ${appState.payload.app.db_path}`);
+}
+
+const blockedImportRuns = await requestJson("/api/v1/systems/import-runs");
+if (blockedImportRuns.status !== 401 || blockedImportRuns.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated systems import runs request to return auth_required 401, got ${blockedImportRuns.status} ${blockedImportRuns.payload?.error?.code}`,
+  );
+}
+
+const importRuns = await requestJson("/api/v1/systems/import-runs?source_id=MM", {
+  "X-CPW-Fixture-Role": "admin",
+});
+if (importRuns.status !== 200 || importRuns.payload?.ok !== true) {
+  throw new Error(`Expected systems import runs endpoint 200 ok, got ${importRuns.status}`);
+}
+if (!Array.isArray(importRuns.payload?.import_runs) || importRuns.payload.import_runs.length !== 1) {
+  throw new Error(`Expected one MM import run, got ${JSON.stringify(importRuns.payload?.import_runs)}`);
+}
+const mmImportRun = importRuns.payload.import_runs[0];
+if (mmImportRun.source_id !== "MM" || mmImportRun.import_version !== "mm-import" || mmImportRun.status !== "completed") {
+  throw new Error(`Unexpected MM import run payload: ${JSON.stringify(mmImportRun)}`);
+}
+if (mmImportRun.summary?.imported_count !== 1 || mmImportRun.summary?.entry_types?.[0] !== "monster") {
+  throw new Error(`Unexpected MM import run summary: ${JSON.stringify(mmImportRun.summary)}`);
+}
+if (mmImportRun.completed_at !== "2026-06-25T10:01:00+00:00" || mmImportRun.started_by_user_id !== 42) {
+  throw new Error(`Unexpected MM import run completion metadata: ${JSON.stringify(mmImportRun)}`);
 }
 
 const campaignList = await requestJson("/api/v1/campaigns");
