@@ -707,6 +707,81 @@ if (missingSystemsEntryDetail.status !== 404 || missingSystemsEntryDetail.payloa
   );
 }
 
+const blockedCombatState = await requestJson("/api/v1/campaigns/linden-pass/combat");
+if (blockedCombatState.status !== 401 || blockedCombatState.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated combat state to return auth_required 401, got ${blockedCombatState.status} ${blockedCombatState.payload?.error?.code}`,
+  );
+}
+
+const playerCombatState = await requestJson("/api/v1/campaigns/linden-pass/combat", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (
+  playerCombatState.status !== 200 ||
+  playerCombatState.payload?.ok !== true ||
+  playerCombatState.payload?.changed !== true ||
+  playerCombatState.payload?.campaign?.slug !== "linden-pass" ||
+  playerCombatState.payload?.combat_system_supported !== true ||
+  playerCombatState.payload?.live_revision !== 0 ||
+  typeof playerCombatState.payload?.live_view_token !== "string" ||
+  playerCombatState.payload.live_view_token.length !== 12 ||
+  playerCombatState.payload?.tracker?.round_number !== 1 ||
+  playerCombatState.payload?.tracker?.combatant_count !== 0 ||
+  playerCombatState.payload?.tracker?.combatants?.length !== 0 ||
+  playerCombatState.payload?.selected_combatant_id !== null ||
+  playerCombatState.payload?.selected_combatant !== null ||
+  playerCombatState.payload?.selected_player_character !== null ||
+  playerCombatState.payload?.player_character_targets?.length !== 0 ||
+  playerCombatState.payload?.permissions?.can_manage_combat !== false ||
+  playerCombatState.payload?.permissions?.can_access_systems !== true ||
+  playerCombatState.payload?.links?.flask_dm_status_url !== ""
+) {
+  throw new Error(`Unexpected player combat state payload: ${JSON.stringify(playerCombatState.payload)}`);
+}
+
+const dmCombatState = await requestJson("/api/v1/campaigns/linden-pass/combat", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (
+  dmCombatState.status !== 200 ||
+  dmCombatState.payload?.permissions?.can_manage_combat !== true ||
+  dmCombatState.payload?.permissions?.can_access_dm_content !== true ||
+  dmCombatState.payload?.available_character_choices?.length !== 0 ||
+  dmCombatState.payload?.available_statblock_choices?.length !== 0 ||
+  dmCombatState.payload?.combat_condition_options?.includes("Prone") !== true ||
+  dmCombatState.payload?.poll_settings?.active_interval_ms !== 500 ||
+  dmCombatState.payload?.links?.flask_dm_status_url !== "/campaigns/linden-pass/combat/dm" ||
+  dmCombatState.payload?.links?.flask_dm_controls_url !== "/campaigns/linden-pass/combat/dm?view=controls" ||
+  dmCombatState.payload?.links?.flask_status_url !== "/campaigns/linden-pass/combat/status"
+) {
+  throw new Error(`Unexpected DM combat state payload: ${JSON.stringify(dmCombatState.payload)}`);
+}
+
+const unchangedCombatState = await requestJson("/api/v1/campaigns/linden-pass/combat/live-state", {
+  "X-CPW-Fixture-Role": "dm",
+  "X-Live-Revision": String(dmCombatState.payload.live_revision),
+  "X-Live-View-Token": dmCombatState.payload.live_view_token,
+});
+if (
+  unchangedCombatState.status !== 200 ||
+  unchangedCombatState.payload?.changed !== false ||
+  unchangedCombatState.payload?.live_revision !== dmCombatState.payload.live_revision ||
+  unchangedCombatState.payload?.live_view_token !== dmCombatState.payload.live_view_token ||
+  "tracker" in unchangedCombatState.payload
+) {
+  throw new Error(`Unexpected unchanged combat live-state payload: ${JSON.stringify(unchangedCombatState.payload)}`);
+}
+
+const missingCombatState = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/combat", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (missingCombatState.status !== 404 || missingCombatState.payload?.error?.code !== "campaign_not_found") {
+  throw new Error(
+    `Expected missing combat state JSON 404, got ${missingCombatState.status} ${missingCombatState.payload?.error?.code}`,
+  );
+}
+
 const blockedCombatMonsterSearch = await requestJson("/api/v1/campaigns/linden-pass/combat/systems-monsters/search?q=gob");
 if (blockedCombatMonsterSearch.status !== 401 || blockedCombatMonsterSearch.payload?.error?.code !== "auth_required") {
   throw new Error(

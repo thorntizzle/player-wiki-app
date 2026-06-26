@@ -7,6 +7,7 @@ import { serve } from "@hono/node-server";
 
 import { getApiConfig } from "./config.js";
 import { getCampaignBySlug, listCampaigns, listCampaignSlugs } from "./campaigns/repository.js";
+import { buildCombatReadOnlyPayload } from "./combat/view.js";
 import { buildCampaignHelpPayload } from "./help/view.js";
 import { ROUTES } from "./routes.js";
 import { buildSessionStatePayload } from "./session/view.js";
@@ -591,6 +592,71 @@ app.get(ROUTES.combatSystemsMonsterSearch, async (ctx) => {
     ok: true,
     ...result.payload,
   });
+});
+
+function combatUnchangedResponse(payload: { live_revision: number; live_view_token: string }) {
+  return {
+    ok: true,
+    changed: false,
+    live_revision: payload.live_revision,
+    live_view_token: payload.live_view_token,
+  };
+}
+
+app.get(ROUTES.combatState, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const role = fixtureRole(ctx);
+  if (!role) {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const payload = buildCombatReadOnlyPayload(campaign, role);
+  const requestedRevision = parseLiveRevisionHeader(ctx);
+  const requestedViewToken = parseLiveViewTokenHeader(ctx);
+  if (
+    requestedRevision === payload.live_revision &&
+    requestedViewToken.length > 0 &&
+    requestedViewToken === payload.live_view_token
+  ) {
+    return ctx.json(combatUnchangedResponse(payload));
+  }
+
+  return ctx.json(payload);
+});
+
+app.get(ROUTES.combatLiveState, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const role = fixtureRole(ctx);
+  if (!role) {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const payload = buildCombatReadOnlyPayload(campaign, role);
+  const requestedRevision = parseLiveRevisionHeader(ctx);
+  const requestedViewToken = parseLiveViewTokenHeader(ctx);
+  if (
+    requestedRevision === payload.live_revision &&
+    requestedViewToken.length > 0 &&
+    requestedViewToken === payload.live_view_token
+  ) {
+    return ctx.json(combatUnchangedResponse(payload));
+  }
+
+  return ctx.json(payload);
 });
 
 app.get(ROUTES.campaignList, async (ctx) => {

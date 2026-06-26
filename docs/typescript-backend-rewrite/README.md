@@ -60,6 +60,8 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources/:sourceId`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources/:sourceId/types/:entryType`
   - `GET /api/v1/campaigns/:campaignSlug/systems/entries/:entrySlug`
+  - `GET /api/v1/campaigns/:campaignSlug/combat`
+  - `GET /api/v1/campaigns/:campaignSlug/combat/live-state`
   - `GET /api/v1/campaigns/:campaignSlug/combat/systems-monsters/search`
   - `GET /api/v1/campaigns`
   - `GET /api/v1/campaigns/:campaignSlug`
@@ -87,6 +89,9 @@ Route parity check command:
 - The first combat-adjacent read path reuses the Systems SQLite fixture layer for Combat Systems monster
   search, preserving Flask-compatible unauthenticated `auth_required`, manager-only access, short-query
   guidance, and monster HP/speed/initiative result formatting.
+- The first Combat state shell now serves read-only empty tracker payloads for `GET .../combat` and
+  `GET .../combat/live-state`, preserving Flask-compatible unauthenticated `auth_required`, fixture
+  player/DM permission splits, live polling metadata, and unchanged-response short-circuit behavior.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

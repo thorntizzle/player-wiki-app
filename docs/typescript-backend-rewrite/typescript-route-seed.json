@@ -126,6 +126,24 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat state route with Flask-compatible unauthenticated auth_required behavior, empty fixture tracker payload, fixture player/DM permission flags, live polling metadata, and explicit missing-campaign JSON."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/combat/live-state",
+      "route_family": "api_v1_combat",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/combat/live-state",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Combat live-state route sharing the fixture combat state payload and unchanged-response short-circuit contract."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/wiki",
       "route_family": "api_v1_wiki",
       "status": "implemented_fixture_readonly",

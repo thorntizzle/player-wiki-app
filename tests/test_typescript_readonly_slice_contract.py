@@ -251,6 +251,67 @@ def test_typescript_combat_systems_monster_search_requires_auth_like_flask(types
     assert payload == flask_payload
 
 
+def test_typescript_combat_state_requires_auth_like_flask(typescript_api_server, client):
+    flask_response = client.get("/api/v1/campaigns/linden-pass/combat")
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/combat")
+    assert status == 401
+    assert payload == flask_payload
+
+
+def test_typescript_combat_state_fixture_shell(typescript_api_server):
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/combat",
+        headers={"X-CPW-Fixture-Role": "dm"},
+    )
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["changed"] is True
+    assert payload["campaign"]["slug"] == "linden-pass"
+    assert payload["combat_system_supported"] is True
+    assert payload["live_revision"] == 0
+    assert len(payload["live_view_token"]) == 12
+    assert payload["tracker"] == {
+        "round_number": 1,
+        "current_turn_label": "",
+        "has_current_turn": False,
+        "combatant_count": 0,
+        "combatants": [],
+    }
+    assert payload["selected_combatant_id"] is None
+    assert payload["selected_combatant"] is None
+    assert payload["selected_player_character"] is None
+    assert payload["selected_player_combat_sections"] == []
+    assert payload["player_character_targets"] == []
+    assert payload["available_character_choices"] == []
+    assert payload["available_statblock_choices"] == []
+    assert "Prone" in payload["combat_condition_options"]
+    assert payload["poll_settings"]["active_interval_ms"] == 500
+    assert payload["permissions"] == {
+        "can_manage_combat": True,
+        "can_access_dm_content": True,
+        "can_access_systems": True,
+    }
+
+    status, unchanged = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/combat/live-state",
+        headers={
+            "X-CPW-Fixture-Role": "dm",
+            "X-Live-Revision": str(payload["live_revision"]),
+            "X-Live-View-Token": payload["live_view_token"],
+        },
+    )
+    assert status == 200
+    assert unchanged == {
+        "ok": True,
+        "changed": False,
+        "live_revision": payload["live_revision"],
+        "live_view_token": payload["live_view_token"],
+    }
+
+
 def test_typescript_systems_import_runs_success_shape_matches_flask(typescript_api_server):
     status, payload = _to_json(
         f"{typescript_api_server}/api/v1/systems/import-runs",
@@ -800,6 +861,22 @@ def test_typescript_wiki_missing_resources_return_json(typescript_api_server):
     assert status == 404
     assert payload["ok"] is False
     assert payload["error"]["code"] == "systems_entry_not_found"
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/definitely-not-a-campaign/combat",
+        headers={"X-CPW-Fixture-Role": "admin"},
+    )
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "campaign_not_found"
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/definitely-not-a-campaign/combat/live-state",
+        headers={"X-CPW-Fixture-Role": "admin"},
+    )
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "campaign_not_found"
 
     status, payload = _to_json(
         f"{typescript_api_server}/api/v1/campaigns/definitely-not-a-campaign/combat/systems-monsters/search",
