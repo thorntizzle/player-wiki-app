@@ -27,6 +27,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns",
+      "route_family": "api_v1_campaigns",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/api/v1/campaigns",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono campaign-list route backed by sanitized fixture campaign.yaml reads."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/wiki",
       "route_family": "api_v1_wiki",
       "status": "implemented_fixture_readonly",

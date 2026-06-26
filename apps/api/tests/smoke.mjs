@@ -74,6 +74,23 @@ if (health.payload?.campaign_count < 1) {
   throw new Error(`Expected at least one campaign fixture under ${repoRoot}.`);
 }
 
+const campaignList = await requestJson("/api/v1/campaigns");
+if (campaignList.status !== 200) {
+  throw new Error(`Expected campaign list endpoint 200, got ${campaignList.status}`);
+}
+if (!Array.isArray(campaignList.payload?.campaigns) || campaignList.payload.campaigns.length !== 1) {
+  throw new Error(`Expected one fixture campaign in list, got ${campaignList.payload?.campaigns?.length}`);
+}
+if (campaignList.payload.campaigns[0]?.campaign?.slug !== "linden-pass") {
+  throw new Error(`Expected campaign list to include linden-pass, got ${campaignList.payload.campaigns[0]?.campaign?.slug}`);
+}
+if (campaignList.payload.campaigns[0]?.role !== "fixture_reader") {
+  throw new Error(`Expected fixture_reader campaign list role, got ${campaignList.payload.campaigns[0]?.role}`);
+}
+if (campaignList.payload?.auth?.mode !== "fixture_read_only") {
+  throw new Error(`Expected campaign list fixture auth, got ${campaignList.payload?.auth?.mode}`);
+}
+
 const campaign = await requestJson("/api/v1/campaigns/linden-pass");
 if (campaign.status !== 200) {
   throw new Error(`Expected campaign endpoint 200, got ${campaign.status}`);

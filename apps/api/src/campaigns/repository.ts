@@ -64,6 +64,18 @@ export async function getCampaignBySlug(
   return normalized;
 }
 
+export async function listCampaigns(config: ApiConfig): Promise<CampaignViewModel[]> {
+  const campaignSlugs = await listCampaignSlugs(config.campaignsDir);
+  const campaigns: CampaignViewModel[] = [];
+  for (const campaignSlug of campaignSlugs) {
+    const campaign = await getCampaignBySlug(config, campaignSlug);
+    if (campaign) {
+      campaigns.push(campaign);
+    }
+  }
+  return campaigns.sort((left, right) => left.title.toLowerCase().localeCompare(right.title.toLowerCase()));
+}
+
 function isSafeCampaignSlug(slug: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(slug);
 }

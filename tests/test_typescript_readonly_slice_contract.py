@@ -128,6 +128,25 @@ def test_typescript_campaign_detail_matches_flask_contract(typescript_api_server
     assert payload["campaign"] == flask_payload["campaign"]
 
 
+def test_typescript_campaign_list_matches_flask_campaign_payloads(typescript_api_server, client, sign_in, users):
+    sign_in(users["party"]["email"], users["party"]["password"])
+    flask_response = client.get("/api/v1/campaigns")
+    assert flask_response.status_code == 200
+    flask_payload = flask_response.get_json()
+    assert flask_payload["ok"] is True
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns")
+    assert status == 200
+
+    assert payload["ok"] is True
+    assert payload["auth"]["mode"] == "fixture_read_only"
+    assert isinstance(payload["campaigns"], list)
+    assert [entry["campaign"] for entry in payload["campaigns"]] == [
+        entry["campaign"] for entry in flask_payload["campaigns"]
+    ]
+    assert {entry["role"] for entry in payload["campaigns"]} == {"fixture_reader"}
+
+
 def _section_summary(payload):
     return [
         (section["section_name"], section["section_slug"], section["page_count"])

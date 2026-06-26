@@ -205,6 +205,14 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "content_character_not_found",
     },
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/campaigns",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns",
+    seedPath: "/api/v1/campaigns",
+    routeFamily: "api_v1_campaigns",
+  },
 ];
 
 export const ROUTES = {
@@ -221,4 +229,5 @@ export const ROUTES = {
   contentPage: IMPLEMENTED_ROUTES[10].honoPath,
   contentCharacters: IMPLEMENTED_ROUTES[11].honoPath,
   contentCharacter: IMPLEMENTED_ROUTES[12].honoPath,
+  campaignList: IMPLEMENTED_ROUTES[13].honoPath,
 } as const;

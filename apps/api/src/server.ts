@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 
 import { getApiConfig } from "./config.js";
-import { getCampaignBySlug, listCampaignSlugs } from "./campaigns/repository.js";
+import { getCampaignBySlug, listCampaigns, listCampaignSlugs } from "./campaigns/repository.js";
 import { ROUTES } from "./routes.js";
 import { buildSessionStatePayload } from "./session/view.js";
 import { getCampaignConfigFile } from "./content/repository.js";
@@ -260,6 +260,18 @@ app.get(ROUTES.healthz, async (ctx) => {
     data: {
       campaigns_dir: config.campaignsDir,
     },
+  });
+});
+
+app.get(ROUTES.campaignList, async (ctx) => {
+  const campaigns = await listCampaigns(config);
+  return ctx.json({
+    ok: true,
+    campaigns: campaigns.map((campaign) => ({
+      campaign,
+      role: "fixture_reader",
+    })),
+    auth: fixtureAuthBlock(),
   });
 });
 
