@@ -20,6 +20,7 @@ import pytest
 import yaml
 
 from player_wiki.auth_store import AuthStore
+from player_wiki.operations import create_backup_archive, restore_backup_archive
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -339,6 +340,28 @@ def _read_sqlite_character_state(db_path: Path, character_slug: str) -> dict | N
     if row is None:
         return None
     return {"revision": int(row["revision"]), "state": json.loads(row["state_json"])}
+
+
+def _write_sqlite_character_state(db_path: Path, character_slug: str, *, revision: int, state: dict) -> None:
+    now = "2026-06-25T13:00:00+00:00"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO character_state (
+              campaign_slug, character_slug, revision, state_json, updated_at, updated_by_user_id
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(campaign_slug, character_slug) DO UPDATE SET
+              revision = excluded.revision,
+              state_json = excluded.state_json,
+              updated_at = excluded.updated_at,
+              updated_by_user_id = excluded.updated_by_user_id
+            """,
+            ("linden-pass", character_slug, revision, json.dumps(state, sort_keys=True), now, 77),
+        )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def _insert_sqlite_character_assignment(db_path: Path, character_slug: str) -> None:
@@ -1189,6 +1212,120 @@ def test_typescript_content_character_dnd_persistence_matches_flask_golden(
     with app.app_context():
         assert AuthStore().get_character_assignment("linden-pass", character_slug) is None
     assert _sqlite_character_assignment_count(typescript_api_mutation_server["db_path"], character_slug) == 0
+
+
+def test_typescript_content_character_backup_restore_rehearsal_recovers_files_assets_and_sqlite(
+    tmp_path,
+    typescript_api_mutation_server,
+):
+    character_slug = "arden-march"
+    campaigns_dir = typescript_api_mutation_server["campaigns_dir"]
+    db_path = typescript_api_mutation_server["db_path"]
+    character_dir = campaigns_dir / "linden-pass" / "characters" / character_slug
+    definition_path = character_dir / "definition.yaml"
+    import_path = character_dir / "import.yaml"
+    portrait_path = campaigns_dir / "linden-pass" / "assets" / "characters" / character_slug / "portrait.txt"
+
+    original_definition_text = definition_path.read_text(encoding="utf-8")
+    original_import_text = import_path.read_text(encoding="utf-8")
+    portrait_path.parent.mkdir(parents=True, exist_ok=True)
+    portrait_path.write_text("rollback portrait asset\n", encoding="utf-8")
+
+    seed_state = {
+        "status": "active",
+        "vitals": {"current_hp": 22, "temp_hp": 3, "death_saves": {"successes": 1, "failures": 0}},
+        "hit_dice": {"pools": [{"faces": 6, "current": 2, "max": 5}]},
+        "resources": [
+            {
+                "id": "sorcery-points",
+                "label": "Sorcery Points",
+                "category": "spellcasting",
+                "current": 2,
+                "max": 5,
+                "reset_on": "long_rest",
+                "reset_to": "max",
+                "rest_behavior": "restore_full",
+                "notes": "",
+                "display_order": 10,
+            }
+        ],
+        "inventory": [
+            {
+                "id": "light-crossbow-1",
+                "catalog_ref": "light-crossbow-1",
+                "name": "Light Crossbow",
+                "quantity": 1,
+                "weight": "5 lb.",
+                "is_equipped": True,
+                "is_attuned": False,
+                "charges_current": None,
+                "charges_max": None,
+                "notes": "",
+                "tags": ["rehearsal"],
+            }
+        ],
+        "currency": {"cp": 0, "sp": 0, "ep": 0, "gp": 12, "pp": 0, "other": []},
+        "spell_slots": [{"level": 1, "max": 4, "used": 2}],
+        "attunement": {"max_attuned_items": 3, "attuned_item_refs": []},
+        "notes": {
+            "player_notes_markdown": "rollback rehearsal state",
+            "physical_description_markdown": "",
+            "background_markdown": "",
+            "session_notes": [],
+        },
+    }
+    _write_sqlite_character_state(db_path, character_slug, revision=7, state=seed_state)
+    _insert_sqlite_character_assignment(db_path, character_slug)
+    assert _read_sqlite_character_state(db_path, character_slug) == {"revision": 7, "state": seed_state}
+    assert _sqlite_character_assignment_count(db_path, character_slug) == 1
+
+    backup = create_backup_archive(
+        db_path=db_path,
+        campaigns_dir=campaigns_dir,
+        backup_root=tmp_path / "typescript-backups",
+        label="ts-content-character-rehearsal",
+    )
+
+    updated_definition = yaml.safe_load(original_definition_text)
+    updated_definition["name"] = "Arden March Rehearsed"
+    updated_definition["profile"]["biography_markdown"] = "Temporary TypeScript rehearsal edit."
+    update_status, update_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/characters/{character_slug}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={"definition": updated_definition},
+    )
+    assert update_status == 200
+    assert update_payload["character_file"]["state_created"] is False
+    assert "Arden March Rehearsed" in definition_path.read_text(encoding="utf-8")
+    assert _read_sqlite_character_state(db_path, character_slug) == {"revision": 7, "state": seed_state}
+
+    delete_status, delete_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/characters/{character_slug}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="DELETE",
+    )
+    assert delete_status == 200
+    assert delete_payload["deleted"] == {
+        "character_slug": character_slug,
+        "deleted_files": True,
+        "deleted_state": True,
+        "deleted_assignment": True,
+        "deleted_assets": True,
+    }
+    assert not definition_path.exists()
+    assert not import_path.exists()
+    assert not portrait_path.exists()
+    assert _read_sqlite_character_state(db_path, character_slug) is None
+    assert _sqlite_character_assignment_count(db_path, character_slug) == 0
+
+    restore = restore_backup_archive(archive_path=backup.archive_path, db_path=db_path, campaigns_dir=campaigns_dir)
+    assert restore.database_path == db_path.resolve()
+    assert definition_path.read_text(encoding="utf-8") == original_definition_text
+    assert import_path.read_text(encoding="utf-8") == original_import_text
+    assert portrait_path.read_text(encoding="utf-8") == "rollback portrait asset\n"
+    assert _read_sqlite_character_state(db_path, character_slug) == {"revision": 7, "state": seed_state}
+    assert _sqlite_character_assignment_count(db_path, character_slug) == 1
 
 
 def test_typescript_content_character_xianxia_persistence_matches_flask_golden(

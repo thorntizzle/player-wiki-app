@@ -336,6 +336,7 @@ fixture database.
   - DND-5E content-character creation initializes a real SQLite `character_state` row with HP, resources, spell slots, Hit Dice, inventory, and notes from the copied fixture definition; raw delete removes the state row plus a seeded assignment row and reports `deleted_state` / `deleted_assignment` from row counts.
   - Xianxia content-character creation initializes SQLite mutable state, and Xianxia definition update reconciles existing current HP/temp HP, Stance/temp Stance, Jing, Yin/Yang, Dao, active Stance, and notes against lowered definition maxima without writing mutable state back into `definition.yaml`.
   - Flask-vs-TypeScript golden contract tests now compare DND-5E initialized state JSON and delete cleanup directly, and compare Xianxia mutable-state clamping/preservation plus definition-file separation directly.
+  - The copied-data content-character rehearsal takes a Python backup, performs a Hono write/delete against an existing fixture character with realistic SQLite state/assignment rows and portrait assets, restores the backup, and verifies the original YAML files, asset file, state row/revision, and assignment row are recovered.
 
 ## Added Tests and Checks
 
@@ -366,6 +367,7 @@ fixture database.
   - compares Flask-vs-TypeScript unauthenticated content character mutation envelopes for `PUT` and `DELETE .../content/characters/:characterSlug`.
   - compares Flask-vs-TypeScript DND-5E content-character create/delete golden behavior against copied campaign files and temp SQLite, including exact initialized state JSON, assignment cleanup, and delete flags.
   - compares Flask-vs-TypeScript Xianxia content-character create/update/delete golden behavior against copied campaign files and temp SQLite, including clamped current pools, preserved active Stance/notes/Dao, no mutable fields in `definition.yaml`, and delete flags.
+  - rehearses copied-data content-character backup/restore recovery after Hono write/delete mutation, including `definition.yaml`, `import.yaml`, portrait assets, `character_state`, and `character_assignments`.
 - `apps/api/tests/smoke.mjs`:
   - starts compiled API on a local port and verifies `/healthz`, app state, fixture `/api/v1/me` identity reads, fixture `/api/v1/me/settings` account-settings reads, SQLite bearer-token `/api/v1/me` and `/api/v1/me/settings` reads/writes, SQLite-backed systems import-run list/detail reads with bearer admin/non-admin gates, campaign Systems landing/search/source list/detail/category/entry reads with fixture and bearer-token role gates, Combat state/live-state shell reads with fixture and bearer-token role gates, Combat Systems monster search reads with fixture and bearer-token role gates, Session state/article-source/image/log reads with fixture and bearer-token role gates, campaign list/detail, public Campaign Help, Campaign Control auth/payload reads and visibility writes, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
   - validates content-management auth gates for anonymous, fixture player, bearer player, bearer outsider, and bearer app-admin content config reads.
@@ -401,7 +403,7 @@ npm --prefix apps/api test
 
 ## Outside This Slice
 
-- Production auth, live SQLite cutover, production write readiness, backup/restore rehearsal, and deployment cutover are intentionally outside this fixture-only slice.
+- Production auth, live SQLite cutover, production write readiness, staging-volume backup/restore rehearsal, and deployment cutover are intentionally outside this fixture-only slice.
 
 ## Frontend Dev-Mode Pointer
 

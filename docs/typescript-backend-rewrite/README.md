@@ -217,8 +217,10 @@ Route parity check command:
   character-state plus assignment rows while reporting `deleted_state` / `deleted_assignment` from
   real deletes. Current validation covers disposable copied fixture files, fixture SQLite, and
   Flask-vs-TypeScript golden parity for DND-5E state initialization/deletion plus Xianxia mutable
-  state preservation/clamping. Staging or production write readiness still needs migration, backup,
-  and rollback rehearsal.
+  state preservation/clamping. It also includes a copied-data backup/restore rehearsal that proves
+  a content-character write/delete can be rolled back across definition/import YAML, portrait assets,
+  SQLite state rows, and assignment rows. Staging or production write readiness still needs an explicit
+  readiness decision and, if required, a rehearsal against an approved staging-volume snapshot.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.
