@@ -38,15 +38,15 @@ This document records the first implemented TypeScript read-only compatibility s
 - Implemented SQLite-backed Session log detail read endpoint with fixture or bearer-token manager access:
   - `GET /api/v1/campaigns/:campaignSlug/session/logs/:sessionId`
 - Added `apps/api/src/wiki/` as the read-only Markdown/frontmatter fixture reader and wiki payload serializer.
-- Added fixture-backed content config endpoint:
+- Added fixture-backed, content-management-gated content config endpoint:
   - `GET /api/v1/campaigns/:campaignSlug/content/config`
-- Added fixture-backed content page management read endpoints:
+- Added fixture-backed, content-management-gated content page management read endpoints:
   - `GET /api/v1/campaigns/:campaignSlug/content/pages`
   - `GET /api/v1/campaigns/:campaignSlug/content/pages/*`
-- Added fixture-backed content asset management read endpoints:
+- Added fixture-backed, content-management-gated content asset management read endpoints:
   - `GET /api/v1/campaigns/:campaignSlug/content/assets`
   - `GET /api/v1/campaigns/:campaignSlug/content/assets/*`
-- Added fixture-backed content character management read endpoints:
+- Added fixture-backed, content-management-gated content character management read endpoints:
   - `GET /api/v1/campaigns/:campaignSlug/content/characters`
   - `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
 - Default campaign fixture directory is `tests/fixtures/sample_campaigns`.
@@ -178,6 +178,11 @@ This document records the first implemented TypeScript read-only compatibility s
   - fixture or bearer-token DM/admin roles receive visible published wiki page results and accessible Systems entry results
   - result rows include `source_ref`, `source_kind`, `title`, `subtitle`, `kind_label`, and `select_label`
   - missing campaign lookup requests return `campaign_not_found` JSON
+- Content-management read routes preserve Flask's manager gate before returning fixture-backed payloads:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture or bearer-token player/outsider identities receive `forbidden` with the content-management message
+  - fixture or bearer-token DM/admin identities can read content config, page, asset, and character management payloads
+  - missing campaigns still return `campaign_not_found` before the auth gate
 - Content/config payload compatibility checks cover:
   - `config_file.campaign_slug`
   - stable `config_file.config` fields, including `title`, `current_session`, and `source_wiki_root`
@@ -220,8 +225,10 @@ This document records the first implemented TypeScript read-only compatibility s
   - checks JSON missing-resource shapes for TypeScript wiki dynamic routes.
   - adds fixture session parity checks (active session state, messages, passive score flag, revision/token shape, short-circuit response, missing session campaign 404).
   - compares Flask-vs-TypeScript unauthenticated Session article-source search, Session article image, and Session log detail auth envelopes, and asserts the fixture lookup shell for short, wiki-result, player-forbidden, and missing-campaign cases.
+  - compares Flask-vs-TypeScript content-management unauthenticated and player-forbidden auth envelopes.
 - `apps/api/tests/smoke.mjs`:
   - starts compiled API on a local port and verifies `/healthz`, app state, fixture `/api/v1/me` identity reads, fixture `/api/v1/me/settings` account-settings reads, SQLite bearer-token `/api/v1/me` and `/api/v1/me/settings` reads, SQLite-backed systems import-run list/detail reads with bearer admin/non-admin gates, campaign Systems landing/search/source list/detail/category/entry reads with fixture and bearer-token role gates, Combat state/live-state shell reads with fixture and bearer-token role gates, Combat Systems monster search reads with fixture and bearer-token role gates, Session state/article-source/image/log reads with fixture and bearer-token role gates, campaign list/detail, public Campaign Help, wiki home, wiki section, wiki page, image metadata, and 404 behavior.
+  - validates content-management auth gates for anonymous, fixture player, bearer player, bearer outsider, and bearer app-admin content config reads.
   - validates fixture-backed content config endpoint payload for `linden-pass` (`campaign_slug`, `current_session`, `title`, `systems_sources`, `editable_fields`, `updated_at`) and missing-campaign 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/pages` list sorting/count/body omission and sampled `Port Meridian` metadata/removal fields, plus `GET /api/v1/campaigns/:campaignSlug/content/pages/*` detail payload body inclusion and missing-content-page 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/assets` list sorting/count/data omission and sampled PNG metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/assets/*` detail payload byte data and missing-content-asset 404.

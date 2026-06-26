@@ -124,6 +124,10 @@ Route parity check command:
   live-session chat-order choice metadata, fixture-role reads, and API-token user/preference
   reads from `CPW_DB_PATH`. The TypeScript slice remains read-only and does not touch API
   token `last_used_at` timestamps.
+- The content/config, content page, content asset, and content character management read routes now
+  preserve Flask-compatible content-management auth: no identity returns `auth_required`, fixture or
+  bearer-token player/outsider identities return `forbidden`, and fixture or bearer-token DM/admin
+  identities can read the fixture-backed payloads.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.

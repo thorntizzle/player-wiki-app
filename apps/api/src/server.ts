@@ -207,6 +207,33 @@ function resolveCampaignRole(
   return role ? { kind: "authenticated", role } : { kind: "missing" };
 }
 
+function resolveContentManagerRole(
+  ctx: { req: { header: (name: string) => string | undefined } },
+  campaignSlug: string,
+): RoleResolution {
+  const forbiddenMessage = "You do not have permission to manage campaign content.";
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "authenticated") {
+    const role = apiTokenRoleForCampaign(apiAuth.context, campaignSlug);
+    if (role === "admin" || role === "dm") {
+      return { kind: "authenticated", role: toFixtureSystemsRole(role) };
+    }
+    return { kind: "forbidden", message: forbiddenMessage };
+  }
+  if (apiAuth.kind === "invalid") {
+    return { kind: "invalid" };
+  }
+
+  const role = fixtureRole(ctx);
+  if (role === "admin" || role === "dm") {
+    return { kind: "authenticated", role };
+  }
+  if (role === "player") {
+    return { kind: "forbidden", message: forbiddenMessage };
+  }
+  return { kind: "missing" };
+}
+
 function resolveAppAdminAuth(ctx: { req: { header: (name: string) => string | undefined } }): RoleResolution {
   const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
   if (apiAuth.kind === "authenticated") {
@@ -1129,6 +1156,12 @@ app.get(ROUTES.campaignConfig, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
+  const auth = resolveContentManagerRole(ctx, campaignSlug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
   return ctx.json(buildCampaignConfigPayload(campaignConfig));
 });
 
@@ -1137,6 +1170,12 @@ app.get(ROUTES.contentAssets, async (ctx) => {
   const campaign = await getCampaignBySlug(config, campaignSlug);
   if (!campaign) {
     const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveContentManagerRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
@@ -1154,6 +1193,12 @@ app.get(ROUTES.contentAsset, async (ctx) => {
   const campaign = await getCampaignBySlug(config, campaignSlug);
   if (!campaign) {
     const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveContentManagerRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
@@ -1180,6 +1225,12 @@ app.get(ROUTES.contentPages, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
+  const auth = resolveContentManagerRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
   const pages = await listCampaignContentPages(config, campaignSlug);
   if (!pages) {
     const error = campaignNotFound(campaignSlug);
@@ -1194,6 +1245,12 @@ app.get(ROUTES.contentPage, async (ctx) => {
   const campaign = await getCampaignBySlug(config, campaignSlug);
   if (!campaign) {
     const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveContentManagerRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
@@ -1220,6 +1277,12 @@ app.get(ROUTES.contentCharacters, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
+  const auth = resolveContentManagerRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
   const characters = await listCampaignContentCharacters(config, campaignSlug);
   if (!characters) {
     const error = campaignNotFound(campaignSlug);
@@ -1234,6 +1297,12 @@ app.get(ROUTES.contentCharacter, async (ctx) => {
   const campaign = await getCampaignBySlug(config, campaignSlug);
   if (!campaign) {
     const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveContentManagerRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 

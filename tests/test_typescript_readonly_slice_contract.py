@@ -21,6 +21,8 @@ NODE_CANDIDATES = [
     PROJECT_ROOT / ".task-temp" / "typescript-backend-sqlite-migration-spike-20260625" / "node-v22.12.0-win-x64" / "node.exe",
     PROJECT_ROOT.parent / ".task-temp" / "typescript-backend-sqlite-migration-spike-20260625" / "node-v22.12.0-win-x64" / "node.exe",
 ]
+CONTENT_MANAGER_HEADERS = {"X-CPW-Fixture-Role": "dm"}
+CONTENT_PLAYER_HEADERS = {"X-CPW-Fixture-Role": "player"}
 
 
 def _to_json(url: str, headers: dict[str, str] | None = None):
@@ -617,13 +619,38 @@ def _normalize_timestamp(value: str) -> None:
     datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def test_typescript_content_management_auth_matches_flask_contract(typescript_api_server, client, sign_in, users):
+    flask_response = client.get("/api/v1/campaigns/linden-pass/content/config")
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/config")
+    assert status == 401
+    assert payload == flask_payload
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    flask_response = client.get("/api/v1/campaigns/linden-pass/content/config")
+    assert flask_response.status_code == 403
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/config",
+        headers=CONTENT_PLAYER_HEADERS,
+    )
+    assert status == 403
+    assert payload == flask_payload
+
+
 def test_typescript_content_pages_list_matches_flask_contract(typescript_api_server, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     flask_response = client.get("/api/v1/campaigns/linden-pass/content/pages")
     assert flask_response.status_code == 200
     flask_payload = flask_response.get_json()
 
-    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/pages")
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/pages",
+        headers=CONTENT_MANAGER_HEADERS,
+    )
     assert status == 200
 
     assert payload["ok"] is True
@@ -660,7 +687,8 @@ def test_typescript_content_page_detail_matches_flask_contract(typescript_api_se
     assert flask_payload["ok"] is True
 
     status, payload = _to_json(
-        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/pages/{target_page_ref}"
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/pages/{target_page_ref}",
+        headers=CONTENT_MANAGER_HEADERS,
     )
     assert status == 200
 
@@ -681,7 +709,10 @@ def test_typescript_content_assets_list_matches_flask_contract(typescript_api_se
     assert flask_response.status_code == 200
     flask_payload = flask_response.get_json()
 
-    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/assets")
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/assets",
+        headers=CONTENT_MANAGER_HEADERS,
+    )
     assert status == 200
 
     assert payload["ok"] is True
@@ -708,7 +739,8 @@ def test_typescript_content_asset_detail_matches_flask_contract(typescript_api_s
     assert flask_payload["ok"] is True
 
     status, payload = _to_json(
-        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/assets/{target_asset_ref}"
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/assets/{target_asset_ref}",
+        headers=CONTENT_MANAGER_HEADERS,
     )
     assert status == 200
 
@@ -728,7 +760,10 @@ def test_typescript_content_characters_list_matches_flask_contract(typescript_ap
     assert flask_response.status_code == 200
     flask_payload = flask_response.get_json()
 
-    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/characters")
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/characters",
+        headers=CONTENT_MANAGER_HEADERS,
+    )
     assert status == 200
 
     assert payload["ok"] is True
@@ -754,7 +789,8 @@ def test_typescript_content_character_detail_matches_flask_contract(typescript_a
     assert flask_payload["ok"] is True
 
     status, payload = _to_json(
-        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/characters/{target_character_slug}"
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/characters/{target_character_slug}",
+        headers=CONTENT_MANAGER_HEADERS,
     )
     assert status == 200
 
@@ -886,7 +922,10 @@ def test_typescript_content_config_matches_flask_contract(typescript_api_server,
     flask_payload = flask_response.get_json()
     assert flask_payload["ok"] is True
 
-    status, payload = _to_json(f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/config")
+    status, payload = _to_json(
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/config",
+        headers=CONTENT_MANAGER_HEADERS,
+    )
     assert status == 200
 
     assert payload["ok"] is True
@@ -941,7 +980,8 @@ def test_typescript_wiki_missing_resources_return_json(typescript_api_server):
     assert payload["error"]["code"] == "campaign_not_found"
 
     status, payload = _to_json(
-        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/pages/definitely-not-a-page"
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/pages/definitely-not-a-page",
+        headers=CONTENT_MANAGER_HEADERS,
     )
     assert status == 404
     assert payload["ok"] is False
@@ -955,7 +995,8 @@ def test_typescript_wiki_missing_resources_return_json(typescript_api_server):
     assert payload["error"]["code"] == "campaign_not_found"
 
     status, payload = _to_json(
-        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/assets/definitely-not-an-asset.png"
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/assets/definitely-not-an-asset.png",
+        headers=CONTENT_MANAGER_HEADERS,
     )
     assert status == 404
     assert payload["ok"] is False
@@ -969,7 +1010,8 @@ def test_typescript_wiki_missing_resources_return_json(typescript_api_server):
     assert payload["error"]["code"] == "campaign_not_found"
 
     status, payload = _to_json(
-        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/characters/missing-character"
+        f"{typescript_api_server}/api/v1/campaigns/linden-pass/content/characters/missing-character",
+        headers=CONTENT_MANAGER_HEADERS,
     )
     assert status == 404
     assert payload["ok"] is False

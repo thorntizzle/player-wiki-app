@@ -1541,7 +1541,51 @@ if (campaignHelp.payload?.surfaces?.[0]?.links?.[0]?.href !== "/campaigns/linden
   throw new Error(`Expected campaign help Flask campaign link, got ${campaignHelp.payload?.surfaces?.[0]?.links?.[0]?.href}`);
 }
 
-const campaignConfig = await requestJson("/api/v1/campaigns/linden-pass/content/config");
+const contentManagerHeaders = { "X-CPW-Fixture-Role": "dm" };
+const bearerContentManagerHeaders = { Authorization: `Bearer ${liveApiToken}` };
+
+const blockedContentConfig = await requestJson("/api/v1/campaigns/linden-pass/content/config");
+if (blockedContentConfig.status !== 401 || blockedContentConfig.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated content config to return auth_required 401, got ${blockedContentConfig.status} ${blockedContentConfig.payload?.error?.code}`,
+  );
+}
+const playerContentConfig = await requestJson("/api/v1/campaigns/linden-pass/content/config", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (playerContentConfig.status !== 403 || playerContentConfig.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected fixture player content config to return forbidden 403, got ${playerContentConfig.status} ${playerContentConfig.payload?.error?.code}`,
+  );
+}
+if (playerContentConfig.payload?.error?.message !== "You do not have permission to manage campaign content.") {
+  throw new Error(`Expected content-management forbidden message, got ${playerContentConfig.payload?.error?.message}`);
+}
+const bearerPlayerContentConfig = await requestJson("/api/v1/campaigns/linden-pass/content/config", {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (bearerPlayerContentConfig.status !== 403 || bearerPlayerContentConfig.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected bearer player content config to return forbidden 403, got ${bearerPlayerContentConfig.status} ${bearerPlayerContentConfig.payload?.error?.code}`,
+  );
+}
+const outsiderContentConfig = await requestJson("/api/v1/campaigns/linden-pass/content/config", {
+  Authorization: `Bearer ${outsiderApiToken}`,
+});
+if (outsiderContentConfig.status !== 403 || outsiderContentConfig.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected bearer outsider content config to return forbidden 403, got ${outsiderContentConfig.status} ${outsiderContentConfig.payload?.error?.code}`,
+  );
+}
+
+const bearerCampaignConfig = await requestJson("/api/v1/campaigns/linden-pass/content/config", bearerContentManagerHeaders);
+if (bearerCampaignConfig.status !== 200 || bearerCampaignConfig.payload?.config_file?.config?.current_session !== 2) {
+  throw new Error(
+    `Expected bearer app-admin content config endpoint 200 with current_session 2, got ${bearerCampaignConfig.status} ${bearerCampaignConfig.payload?.config_file?.config?.current_session}`,
+  );
+}
+
+const campaignConfig = await requestJson("/api/v1/campaigns/linden-pass/content/config", contentManagerHeaders);
 if (campaignConfig.status !== 200) {
   throw new Error(`Expected content config endpoint 200, got ${campaignConfig.status}`);
 }
@@ -1577,7 +1621,7 @@ if (typeof campaignConfig.payload?.config_file?.updated_at !== "string" || !camp
   throw new Error(`Expected non-empty updated_at string, got ${campaignConfig.payload?.config_file?.updated_at}`);
 }
 
-const contentCharacters = await requestJson("/api/v1/campaigns/linden-pass/content/characters");
+const contentCharacters = await requestJson("/api/v1/campaigns/linden-pass/content/characters", contentManagerHeaders);
 if (contentCharacters.status !== 200) {
   throw new Error(`Expected content characters list endpoint 200, got ${contentCharacters.status}`);
 }
@@ -1597,7 +1641,10 @@ if (typeof ardenSummary.updated_at !== "string" || !ardenSummary.updated_at) {
   throw new Error(`Expected Arden content character summary updated_at, got ${ardenSummary.updated_at}`);
 }
 
-const contentCharacter = await requestJson("/api/v1/campaigns/linden-pass/content/characters/arden-march");
+const contentCharacter = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/characters/arden-march",
+  contentManagerHeaders,
+);
 if (contentCharacter.status !== 200) {
   throw new Error(`Expected content character detail endpoint 200, got ${contentCharacter.status}`);
 }
@@ -1621,14 +1668,17 @@ if (contentCharacter.payload?.character_file?.import_metadata?.parser_version !=
   );
 }
 
-const missingContentCharacter = await requestJson("/api/v1/campaigns/linden-pass/content/characters/missing-character");
+const missingContentCharacter = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/characters/missing-character",
+  contentManagerHeaders,
+);
 if (missingContentCharacter.status !== 404 || missingContentCharacter.payload?.error?.code !== "content_character_not_found") {
   throw new Error(
     `Expected missing content character JSON 404, got ${missingContentCharacter.status} ${missingContentCharacter.payload?.error?.code}`,
   );
 }
 
-const contentAssets = await requestJson("/api/v1/campaigns/linden-pass/content/assets");
+const contentAssets = await requestJson("/api/v1/campaigns/linden-pass/content/assets", contentManagerHeaders);
 if (contentAssets.status !== 200) {
   throw new Error(`Expected content assets list endpoint 200, got ${contentAssets.status}`);
 }
@@ -1655,7 +1705,10 @@ if (Object.hasOwn(lyraAsset, "data_base64")) {
   throw new Error("Expected content asset list payload to omit data_base64.");
 }
 
-const contentAsset = await requestJson("/api/v1/campaigns/linden-pass/content/assets/npcs/captain-lyra-vale.png");
+const contentAsset = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/assets/npcs/captain-lyra-vale.png",
+  contentManagerHeaders,
+);
 if (contentAsset.status !== 200) {
   throw new Error(`Expected content asset detail endpoint 200, got ${contentAsset.status}`);
 }
@@ -1670,14 +1723,17 @@ if (assetBytes.length !== 69) {
   throw new Error(`Expected Captain Lyra asset detail to include 69 bytes, got ${assetBytes.length}`);
 }
 
-const missingContentAsset = await requestJson("/api/v1/campaigns/linden-pass/content/assets/definitely-not-an-asset.png");
+const missingContentAsset = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/assets/definitely-not-an-asset.png",
+  contentManagerHeaders,
+);
 if (missingContentAsset.status !== 404 || missingContentAsset.payload?.error?.code !== "content_asset_not_found") {
   throw new Error(
     `Expected missing content asset JSON 404, got ${missingContentAsset.status} ${missingContentAsset.payload?.error?.code}`,
   );
 }
 
-const contentPages = await requestJson("/api/v1/campaigns/linden-pass/content/pages");
+const contentPages = await requestJson("/api/v1/campaigns/linden-pass/content/pages", contentManagerHeaders);
 if (contentPages.status !== 200) {
   throw new Error(`Expected content pages list endpoint 200, got ${contentPages.status}`);
 }
@@ -1712,7 +1768,10 @@ if (portMeridianInList.removal_guidance !== "Hard delete is available after conf
   throw new Error(`Expected hard delete guidance label, got ${portMeridianInList.removal_guidance}`);
 }
 
-const contentPage = await requestJson("/api/v1/campaigns/linden-pass/content/pages/locations/port-meridian");
+const contentPage = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/pages/locations/port-meridian",
+  contentManagerHeaders,
+);
 if (contentPage.status !== 200) {
   throw new Error(`Expected content page detail endpoint 200, got ${contentPage.status}`);
 }
@@ -1729,7 +1788,10 @@ if (typeof contentPage.payload.page_file.body_markdown !== "string" || !contentP
   throw new Error(`Unexpected Port Meridian body markdown: ${contentPage.payload.page_file?.body_markdown}`);
 }
 
-const missingContentPage = await requestJson("/api/v1/campaigns/linden-pass/content/pages/definitely-not-a-page");
+const missingContentPage = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/pages/definitely-not-a-page",
+  contentManagerHeaders,
+);
 if (missingContentPage.status !== 404 || missingContentPage.payload?.error?.code !== "content_page_not_found") {
   throw new Error(`Expected missing content page JSON 404, got ${missingContentPage.status} ${missingContentPage.payload?.error?.code}`);
 }
