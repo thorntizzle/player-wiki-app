@@ -56,6 +56,7 @@ Route parity check command:
   - `GET /api/v1/systems/import-runs/:importRunId`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources/:sourceId`
+  - `GET /api/v1/campaigns/:campaignSlug/systems/sources/:sourceId/types/:entryType`
   - `GET /api/v1/campaigns`
   - `GET /api/v1/campaigns/:campaignSlug`
   - `GET /api/v1/campaigns/:campaignSlug/help`
@@ -73,7 +74,7 @@ Route parity check command:
 - Campaign detail uses fixture-backed reads from `tests/fixtures/sample_campaigns` by default and supports
   `CPW_CAMPAIGNS_DIR` override.
 - The first tracked SQLite read path uses `better-sqlite3` against `CPW_DB_PATH` for
-  the Systems import-run list/detail routes and the campaign Systems source list/detail routes,
+  the Systems import-run list/detail routes and the campaign Systems source list/detail/category routes,
   while unauthenticated requests still preserve Flask's `auth_required` envelope,
   fixture roles preserve source visibility boundaries, and missing detail rows return explicit JSON 404s.
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.

@@ -81,6 +81,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/sources/<source_id>/types/<entry_type>",
+      "route_family": "api_v1_systems",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/systems/sources/:sourceId/types/:entryType",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono campaign Systems source-category route with Flask-compatible unauthenticated auth_required behavior, fixture-role source access checks, SQLite category entry reads, title/type query filtering, and explicit missing-category JSON."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/wiki",
       "route_family": "api_v1_wiki",
       "status": "implemented_fixture_readonly",

@@ -12,6 +12,7 @@ import { ROUTES } from "./routes.js";
 import { buildSessionStatePayload } from "./session/view.js";
 import { getSystemsImportRun, listSystemsImportRuns } from "./systems/importRuns.js";
 import {
+  buildCampaignSystemsSourceCategoryPayload,
   buildCampaignSystemsSourceDetailPayload,
   buildCampaignSystemsSourceListPayload,
   type FixtureSystemsRole,
@@ -441,6 +442,45 @@ app.get(ROUTES.systemsSourceDetail, async (ctx) => {
   }
   if (result.status === "not_found") {
     const error = notFound("systems_source_not_found", "Could not find that Systems source.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    ...result.payload,
+  });
+});
+
+app.get(ROUTES.systemsSourceCategory, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const role = fixtureRole(ctx);
+  if (!role) {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  const result = buildCampaignSystemsSourceCategoryPayload(
+    config.dbPath,
+    campaign,
+    campaignConfig?.config || {},
+    ctx.req.param("sourceId") || "",
+    ctx.req.param("entryType") || "",
+    role,
+    ctx.req.query("q") || "",
+  );
+  if (result.status === "forbidden") {
+    const error = forbidden(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "not_found") {
+    const error = notFound("systems_source_category_not_found", "Could not find that Systems source category.");
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 

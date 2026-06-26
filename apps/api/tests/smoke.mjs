@@ -421,6 +421,86 @@ if (missingSystemsSourceDetail.status !== 404 || missingSystemsSourceDetail.payl
   );
 }
 
+const blockedSystemsSourceCategory = await requestJson("/api/v1/campaigns/linden-pass/systems/sources/PHB/types/spell");
+if (blockedSystemsSourceCategory.status !== 401 || blockedSystemsSourceCategory.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated systems source category to return auth_required 401, got ${blockedSystemsSourceCategory.status} ${blockedSystemsSourceCategory.payload?.error?.code}`,
+  );
+}
+
+const playerPhbSpellCategory = await requestJson("/api/v1/campaigns/linden-pass/systems/sources/PHB/types/spell", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (playerPhbSpellCategory.status !== 200 || playerPhbSpellCategory.payload?.ok !== true) {
+  throw new Error(`Expected player PHB spell category 200 ok, got ${playerPhbSpellCategory.status}`);
+}
+if (
+  playerPhbSpellCategory.payload?.source?.source_id !== "PHB" ||
+  playerPhbSpellCategory.payload?.entry_type !== "spell" ||
+  playerPhbSpellCategory.payload?.entry_type_label !== "Spells"
+) {
+  throw new Error(`Unexpected player PHB spell category identity: ${JSON.stringify(playerPhbSpellCategory.payload)}`);
+}
+if (
+  playerPhbSpellCategory.payload?.entry_count !== 1 ||
+  playerPhbSpellCategory.payload?.filtered_entry_count !== 1 ||
+  playerPhbSpellCategory.payload?.entries?.[0]?.title !== "Mage Hand"
+) {
+  throw new Error(`Unexpected player PHB spell category entries: ${JSON.stringify(playerPhbSpellCategory.payload)}`);
+}
+if ((playerPhbSpellCategory.payload?.entry_groups || []).map((group) => `${group.entry_type}:${group.count}`).join("|") !== "spell:1|item:1") {
+  throw new Error(`Unexpected player PHB category groups: ${JSON.stringify(playerPhbSpellCategory.payload?.entry_groups)}`);
+}
+
+const playerPhbSpellFiltered = await requestJson("/api/v1/campaigns/linden-pass/systems/sources/PHB/types/spell?q=chain", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (
+  playerPhbSpellFiltered.status !== 200 ||
+  playerPhbSpellFiltered.payload?.query !== "chain" ||
+  playerPhbSpellFiltered.payload?.entry_count !== 1 ||
+  playerPhbSpellFiltered.payload?.filtered_entry_count !== 0
+) {
+  throw new Error(`Unexpected filtered PHB spell category payload: ${JSON.stringify(playerPhbSpellFiltered)}`);
+}
+
+const playerBlockedMmCategory = await requestJson("/api/v1/campaigns/linden-pass/systems/sources/MM/types/monster", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (playerBlockedMmCategory.status !== 403 || playerBlockedMmCategory.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player MM source category forbidden 403, got ${playerBlockedMmCategory.status} ${playerBlockedMmCategory.payload?.error?.code}`,
+  );
+}
+
+const dmMmCategory = await requestJson("/api/v1/campaigns/linden-pass/systems/sources/MM/types/monster", {
+  "X-CPW-Fixture-Role": "dm",
+});
+if (
+  dmMmCategory.status !== 200 ||
+  dmMmCategory.payload?.entry_type !== "monster" ||
+  dmMmCategory.payload?.entry_count !== 1 ||
+  dmMmCategory.payload?.entries?.[0]?.slug !== "mm-monster-goblin" ||
+  dmMmCategory.payload?.permissions?.can_manage_systems !== true
+) {
+  throw new Error(`Unexpected DM MM category payload: ${JSON.stringify(dmMmCategory.payload)}`);
+}
+
+const missingSystemsSourceCategory = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/sources/PHB/types/definitely-not-a-type",
+  {
+    "X-CPW-Fixture-Role": "admin",
+  },
+);
+if (
+  missingSystemsSourceCategory.status !== 404 ||
+  missingSystemsSourceCategory.payload?.error?.code !== "systems_source_category_not_found"
+) {
+  throw new Error(
+    `Expected missing systems source category JSON 404, got ${missingSystemsSourceCategory.status} ${missingSystemsSourceCategory.payload?.error?.code}`,
+  );
+}
+
 const campaignList = await requestJson("/api/v1/campaigns");
 if (campaignList.status !== 200) {
   throw new Error(`Expected campaign list endpoint 200, got ${campaignList.status}`);

@@ -99,6 +99,26 @@ export type SystemsSourceDetailResult =
   | { status: "not_found" }
   | { status: "forbidden"; message: string };
 
+export interface SystemsSourceCategoryPayload {
+  campaign: CampaignViewModel;
+  source: SystemsSourceState;
+  entry_groups: SystemsEntryGroup[];
+  entry_type: string;
+  entry_type_label: string;
+  query: string;
+  entry_count: number;
+  filtered_entry_count: number;
+  entries: SystemsEntrySummary[];
+  permissions: {
+    can_manage_systems: boolean;
+  };
+}
+
+export type SystemsSourceCategoryResult =
+  | { status: "ok"; payload: SystemsSourceCategoryPayload }
+  | { status: "not_found" }
+  | { status: "forbidden"; message: string };
+
 interface SystemsLibraryRow {
   library_slug: string;
   title: string;
@@ -520,6 +540,61 @@ function buildEntryGroups(rows: SystemsEntryRow[]): SystemsEntryGroup[] {
   return groups;
 }
 
+function entryMatchesCategoryQuery(row: SystemsEntryRow, query: string): boolean {
+  const terms = normalizeLookup(query).split(/\s+/).filter(Boolean);
+  if (terms.length === 0) {
+    return true;
+  }
+  const title = String(row.title || "").toLowerCase();
+  const entryType = String(row.entry_type || "").toLowerCase();
+  return terms.every((term) => title.includes(term) || entryType.includes(term));
+}
+
+function loadAccessibleSourceEntries(
+  database: Database.Database,
+  librarySlug: string,
+  sourceId: string,
+  role: FixtureSystemsRole,
+  options: {
+    entryType?: string;
+    query?: string;
+  } = {},
+): SystemsEntryRow[] {
+  const rows = database
+    .prepare(
+      `
+        SELECT
+          id,
+          library_slug,
+          source_id,
+          entry_key,
+          entry_type,
+          slug,
+          title,
+          source_page,
+          source_path,
+          search_text,
+          player_safe_default,
+          dm_heavy,
+          metadata_json,
+          created_at,
+          updated_at
+        FROM systems_entries
+        WHERE library_slug = ?
+          AND source_id = ?
+        ORDER BY title ASC, id ASC
+      `,
+    )
+    .all(librarySlug, sourceId) as SystemsEntryRow[];
+  const normalizedEntryType = String(options.entryType || "").trim().toLowerCase();
+  const filteredRows = normalizedEntryType
+    ? rows.filter((row) => String(row.entry_type || "").trim().toLowerCase() === normalizedEntryType)
+    : rows;
+  return filterAccessibleEntryRows(filteredRows, role)
+    .filter((row) => entryMatchesCategoryQuery(row, options.query || ""))
+    .sort(compareEntryRowsForBrowse);
+}
+
 function referenceSearchValues(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.flatMap((item) => referenceSearchValues(item));
@@ -766,35 +841,7 @@ export function buildCampaignSystemsSourceDetailPayload(
       return { status: "not_found" };
     }
 
-    const accessibleEntries = filterAccessibleEntryRows(
-      database
-        .prepare(
-          `
-            SELECT
-              id,
-              library_slug,
-              source_id,
-              entry_key,
-              entry_type,
-              slug,
-              title,
-              source_page,
-              source_path,
-              search_text,
-              player_safe_default,
-              dm_heavy,
-              metadata_json,
-              created_at,
-              updated_at
-            FROM systems_entries
-            WHERE library_slug = ?
-              AND source_id = ?
-            ORDER BY title ASC, id ASC
-          `,
-        )
-        .all(librarySlug, normalizedSourceId) as SystemsEntryRow[],
-      role,
-    ).sort(compareEntryRowsForBrowse);
+    const accessibleEntries = loadAccessibleSourceEntries(database, librarySlug, normalizedSourceId, role);
     const allEntryGroups = buildEntryGroups(accessibleEntries);
     const entryGroups = allEntryGroups.filter(
       (group) => !SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES.has(group.entry_type),
@@ -833,6 +880,126 @@ export function buildCampaignSystemsSourceDetailPayload(
         reference_query: cleanedReferenceQuery,
         rules_reference_results: rulesReferenceResults,
         book_visibility_policy_note: "",
+        permissions: {
+          can_manage_systems: canManage,
+        },
+      },
+    };
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("no such table")) {
+      return { status: "not_found" };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function buildCampaignSystemsSourceCategoryPayload(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  sourceId: string,
+  entryType: string,
+  role: FixtureSystemsRole,
+  query = "",
+): SystemsSourceCategoryResult {
+  const canManage = canManageSystems(role);
+  const librarySlug = campaign.systems_library_slug || "";
+  const normalizedSourceId = String(sourceId || "").trim();
+  const normalizedEntryType = String(entryType || "").trim().toLowerCase();
+  if (!librarySlug || !normalizedSourceId || !normalizedEntryType || !existsSync(dbPath)) {
+    return { status: "not_found" };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const library = serializeLibrary(
+      database
+        .prepare(
+          `
+            SELECT library_slug, title, system_code, status, created_at, updated_at
+            FROM systems_libraries
+            WHERE library_slug = ?
+          `,
+        )
+        .get(librarySlug) as SystemsLibraryRow | undefined,
+    );
+    if (!library) {
+      return { status: "not_found" };
+    }
+
+    const seeds = parseSourceSeeds(campaignConfig);
+    const row = database
+      .prepare(
+        `
+          SELECT
+            systems_sources.source_id,
+            systems_sources.title,
+            systems_sources.library_slug,
+            systems_sources.license_class,
+            systems_sources.public_visibility_allowed,
+            systems_sources.requires_unofficial_notice,
+            systems_sources.status,
+            campaign_enabled_sources.is_enabled AS configured_enabled,
+            campaign_enabled_sources.default_visibility AS configured_visibility,
+            (
+              SELECT COUNT(*)
+              FROM systems_entries
+              WHERE systems_entries.library_slug = systems_sources.library_slug
+                AND systems_entries.source_id = systems_sources.source_id
+            ) AS entry_count
+          FROM systems_sources
+          LEFT JOIN campaign_enabled_sources
+            ON campaign_enabled_sources.campaign_slug = ?
+           AND campaign_enabled_sources.library_slug = systems_sources.library_slug
+           AND campaign_enabled_sources.source_id = systems_sources.source_id
+          WHERE systems_sources.library_slug = ?
+            AND systems_sources.source_id = ?
+        `,
+      )
+      .get(campaign.slug, librarySlug, normalizedSourceId) as SystemsSourceRow | undefined;
+    if (!row) {
+      return { status: "not_found" };
+    }
+
+    const source = serializeSourceState(row, seeds.get(row.source_id), role);
+    if (!source.permissions.can_access) {
+      return { status: "forbidden", message: "You do not have access to this systems source." };
+    }
+    if (!source.is_enabled) {
+      return { status: "not_found" };
+    }
+
+    const accessibleEntries = loadAccessibleSourceEntries(database, librarySlug, normalizedSourceId, role);
+    const allEntryGroups = buildEntryGroups(accessibleEntries);
+    const entryGroups = allEntryGroups.filter(
+      (group) => !SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES.has(group.entry_type),
+    );
+    const allCategoryEntries = loadAccessibleSourceEntries(database, librarySlug, normalizedSourceId, role, {
+      entryType: normalizedEntryType,
+    });
+    if (allCategoryEntries.length <= 0) {
+      return { status: "not_found" };
+    }
+
+    const cleanedQuery = String(query || "").trim();
+    const entries = cleanedQuery
+      ? allCategoryEntries.filter((entry) => entryMatchesCategoryQuery(entry, cleanedQuery))
+      : allCategoryEntries;
+
+    return {
+      status: "ok",
+      payload: {
+        campaign,
+        source,
+        entry_groups: entryGroups,
+        entry_type: normalizedEntryType,
+        entry_type_label: entryTypeLabel(normalizedEntryType),
+        query: cleanedQuery,
+        entry_count: allCategoryEntries.length,
+        filtered_entry_count: entries.length,
+        entries: entries.map(serializeEntrySummary),
         permissions: {
           can_manage_systems: canManage,
         },
