@@ -172,7 +172,7 @@ Do not implement these routes as part of the parity program unless a later archi
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (context shell only; POST/save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (context shell only; POST/save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (supported Xianxia read context)
-  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (`save_insight`, `record_gathering_insight`, `spend_cultivation_energy`, `spend_meditation_yin_yang`, `spend_conditioning`, `spend_training`, `advance_martial_art_rank`, `learn_generic_technique`, `start_realm_ascension_review`, `reset_realm_ascension_stats`, `apply_immortal_realm_rebuild`, and `apply_divine_realm_rebuild` only; remaining Realm Ascension final-confirmation action parity pending)
+  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (`save_insight`, `record_gathering_insight`, `spend_cultivation_energy`, `spend_meditation_yin_yang`, `spend_conditioning`, `spend_training`, `advance_martial_art_rank`, `learn_generic_technique`, `start_realm_ascension_review`, `reset_realm_ascension_stats`, `apply_immortal_realm_rebuild`, `apply_divine_realm_rebuild`, and `confirm_realm_ascension`)
   - `PATCH /api/v1/campaigns/:campaignSlug/characters/:characterSlug/sheet-edit`
   - `GET /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual`
   - `POST /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual` (preview and confirmed local fixture/SQLite create)
@@ -596,7 +596,8 @@ Do not implement these routes as part of the parity program unless a later archi
   `spend_cultivation_energy`, `spend_meditation_yin_yang`, `spend_conditioning`,
   `spend_training`, `advance_martial_art_rank`, `learn_generic_technique`,
   `start_realm_ascension_review`, `reset_realm_ascension_stats`,
-  `apply_immortal_realm_rebuild`, and `apply_divine_realm_rebuild` actions. They preserve
+  `apply_immortal_realm_rebuild`, `apply_divine_realm_rebuild`, and
+  `confirm_realm_ascension` actions. They preserve
   bearer-token DM/admin management access, Xianxia-only validation, shared revision conflicts,
   flat or nested JSON value parsing, non-negative whole-number Insight available/spent validation,
   positive whole-number Gathering Insight validation, Cultivation Energy key and available-Insight
@@ -604,7 +605,7 @@ Do not implement these routes as part of the parity program unless a later archi
   Conditioning HP/Effort target validation, Training Stance/Attribute target validation,
   Martial Art selection/rank/structured metadata/Insight validation,
   Generic Technique selection/catalog/direct-spend/duplicate/Insight validation,
-  Realm Ascension target/prerequisite/review-note/reset/rebuild sequencing validation,
+  Realm Ascension target/prerequisite/review-note/reset/rebuild/final-confirmation sequencing validation,
   available-Insight validation, HP and Stance maximum cap validation,
   copied-fixture `definition.yaml` writes, SQLite state revision bumps and Xianxia state
   reconciliation without refilling current HP/Stance/Energy/Yin-Yang pools, `insight_counter_adjustment`,
@@ -612,8 +613,8 @@ Do not implement these routes as part of the parity program unless a later archi
   `conditioning_hp_increase`, `conditioning_effort_increase`, `training_stance_increase`,
   `training_attribute_increase`, `martial_art_rank_advance`, `generic_technique_learned`,
   `realm_ascension_review_started`, `realm_ascension_attributes_efforts_reset`,
-  `realm_ascension_immortal_rebuild_applied`, and `realm_ascension_divine_rebuild_applied`
-  history rows, and refreshed Cultivation payloads. Remaining Realm Ascension final-confirmation action parity remains pending.
+  `realm_ascension_immortal_rebuild_applied`, `realm_ascension_divine_rebuild_applied`,
+  and `realm_ascension_gm_confirmation_recorded` history rows, and refreshed Cultivation payloads.
 - The first Xianxia inventory equipment write now serves
   `PATCH .../characters/:characterSlug/session/xianxia-inventory/:itemId/equipped`. It preserves the
   bearer-only session-state write gate, shared revision conflicts, Xianxia-only validation, unknown

@@ -3426,6 +3426,24 @@ def test_typescript_character_cultivation_context_shell_and_supported_xianxia_co
         == "The Immortal rebuild budget applies only to Mortal to Immortal ascension."
     )
 
+    blank_realm_confirmation_status, blank_realm_confirmation_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{realm_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": realm_revision + 3,
+            "cultivation_action": "confirm_realm_ascension",
+            "target_realm": "Immortal",
+            "realm_ascension_gm_confirmation_note": "   ",
+        },
+    )
+    assert blank_realm_confirmation_status == 400
+    assert blank_realm_confirmation_payload["error"]["code"] == "validation_error"
+    assert (
+        blank_realm_confirmation_payload["error"]["message"]
+        == "Record a GM confirmation note before confirming Realm ascension."
+    )
+
     realm_confirmation_status, realm_confirmation_payload = _to_json(
         f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{realm_slug}/cultivation",
         headers=typescript_api_mutation_server["dm_headers"],
@@ -3437,9 +3455,60 @@ def test_typescript_character_cultivation_context_shell_and_supported_xianxia_co
             "realm_ascension_gm_confirmation_note": "Approved final ascension.",
         },
     )
-    assert realm_confirmation_status == 400
-    assert realm_confirmation_payload["error"]["code"] == "validation_error"
-    assert realm_confirmation_payload["error"]["message"] == "Unsupported cultivation action. Refresh the page and try again."
+    assert realm_confirmation_status == 200
+    assert realm_confirmation_payload["ok"] is True
+    assert realm_confirmation_payload["message"] == "Recorded GM confirmation for the Immortal Realm ascension."
+    assert realm_confirmation_payload["anchor"] == "xianxia-cultivation-realm-ascension"
+    assert realm_confirmation_payload["character"]["state_record"]["revision"] == realm_revision + 4
+    realm_confirmation_xianxia = realm_confirmation_payload["character"]["definition"]["xianxia"]
+    assert realm_confirmation_xianxia["realm"] == "Immortal"
+    assert realm_confirmation_xianxia["actions_per_turn"] == 3
+    assert realm_confirmation_xianxia["attributes"] == realm_rebuild_xianxia["attributes"]
+    assert realm_confirmation_xianxia["efforts"] == realm_rebuild_xianxia["efforts"]
+    assert realm_confirmation_xianxia["advancement_history"][-2]["action"] == "realm_ascension_immortal_rebuild_applied"
+    assert realm_confirmation_xianxia["advancement_history"][-2]["status"] == "confirmed"
+    confirmation_history = realm_confirmation_xianxia["advancement_history"][-1]
+    assert confirmation_history == {
+        "action": "realm_ascension_gm_confirmation_recorded",
+        "target": "Immortal",
+        "current_realm": "Mortal",
+        "target_realm": "Immortal",
+        "confirmed_realm": "Immortal",
+        "status": "confirmed",
+        "confirmed_rebuild_action": "realm_ascension_immortal_rebuild_applied",
+        "confirmed_rebuild_index": len(realm_confirmation_xianxia["advancement_history"]) - 2,
+        "actions_per_turn": 3,
+        "attributes_after_total": 14,
+        "efforts_after_total": 3,
+        "gm_confirmation_note": "Approved final ascension.",
+        "post_ascension_summary": (
+            "Immortal Realm, 3 actions; Attributes 14, Efforts 3; HP max 22, Stance max 24; "
+            "Insight 11 available/7 spent; Martial Arts 1; Generic Techniques 1"
+        ),
+    }
+    realm_confirmation_ascension = realm_confirmation_payload["cultivation"]["realm_ascension"]
+    assert realm_confirmation_ascension["can_confirm_rebuild"] is False
+    assert realm_confirmation_ascension["pending_confirmation_rebuild"] is None
+    assert "confirmation_blocking_message" not in realm_confirmation_ascension
+    assert realm_confirmation_ascension["can_start_review"] is False
+
+    no_pending_confirmation_status, no_pending_confirmation_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{realm_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": realm_revision + 4,
+            "cultivation_action": "confirm_realm_ascension",
+            "target_realm": "Immortal",
+            "realm_ascension_gm_confirmation_note": "Confirm again.",
+        },
+    )
+    assert no_pending_confirmation_status == 400
+    assert no_pending_confirmation_payload["error"]["code"] == "validation_error"
+    assert (
+        no_pending_confirmation_payload["error"]["message"]
+        == "Apply a pending Realm rebuild before recording GM confirmation."
+    )
 
     cap_character_slug = "api-cultivation-cap"
     cap_body = deepcopy(xianxia_body)

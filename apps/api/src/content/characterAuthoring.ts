@@ -499,6 +499,9 @@ export function applyCharacterCultivationAction(
   if (action === "apply_divine_realm_rebuild") {
     return applyXianxiaRealmAscensionRebuildAction(definition, values, "Immortal", "Divine");
   }
+  if (action === "confirm_realm_ascension") {
+    return applyXianxiaRealmAscensionConfirmationAction(definition, values);
+  }
   return {
     status: "validation_error",
     message: "Unsupported cultivation action. Refresh the page and try again.",
@@ -775,6 +778,25 @@ function applyXianxiaRealmAscensionRebuildAction(
     status: "ok",
     definition: result.definition,
     message: `Applied the ${result.targetRealm} rebuild budget for ${result.totalRebuildPoints} points and ${result.actionsPerTurn} actions.`,
+    anchor: "xianxia-cultivation-realm-ascension",
+  };
+}
+
+function applyXianxiaRealmAscensionConfirmationAction(
+  definition: Record<string, unknown>,
+  values: Record<string, string>,
+): CharacterCultivationActionApplyResult {
+  const result = confirmXianxiaRealmAscensionDefinition(definition, {
+    targetRealm: values.target_realm,
+    gmConfirmationNote: collapseWhitespace(values.realm_ascension_gm_confirmation_note),
+  });
+  if (result.status === "validation_error") {
+    return { status: "validation_error", message: result.message };
+  }
+  return {
+    status: "ok",
+    definition: result.definition,
+    message: `Recorded GM confirmation for the ${result.targetRealm} Realm ascension.`,
     anchor: "xianxia-cultivation-realm-ascension",
   };
 }
@@ -1884,6 +1906,84 @@ function applyXianxiaRealmAscensionRebuildDefinition(
   };
 }
 
+function confirmXianxiaRealmAscensionDefinition(
+  definition: Record<string, unknown>,
+  payload: { targetRealm: unknown; gmConfirmationNote: string },
+):
+  | {
+      status: "ok";
+      definition: Record<string, unknown>;
+      currentRealm: string;
+      targetRealm: string;
+    }
+  | { status: "validation_error"; message: string } {
+  const nextDefinition = deepCloneRecord(definition);
+  const xianxia = asRecord(nextDefinition.xianxia);
+  const currentRealm = normalizeRealmLabel(xianxia.realm);
+  const normalizedTargetRealm = normalizeRealmLabel(payload.targetRealm);
+  if (!payload.gmConfirmationNote) {
+    return {
+      status: "validation_error",
+      message: "Record a GM confirmation note before confirming Realm ascension.",
+    };
+  }
+
+  const history = xianxiaAdvancementHistory(xianxia);
+  const rebuildIndex = latestUnconfirmedRealmAscensionRebuildIndex(history, normalizedTargetRealm);
+  if (rebuildIndex === null) {
+    return {
+      status: "validation_error",
+      message: "Apply a pending Realm rebuild before recording GM confirmation.",
+    };
+  }
+
+  const rebuildEvent = asRecord(history[rebuildIndex]);
+  const confirmedTargetRealm = normalizeRealmLabel(rebuildEvent.target_realm || rebuildEvent.target);
+  if (normalizedTargetRealm && normalizedTargetRealm !== confirmedTargetRealm) {
+    return {
+      status: "validation_error",
+      message: `GM confirmation target must match the pending ${confirmedTargetRealm} rebuild.`,
+    };
+  }
+  if (currentRealm !== confirmedTargetRealm) {
+    return {
+      status: "validation_error",
+      message: `GM confirmation for ${confirmedTargetRealm} requires the character to already be in the ${confirmedTargetRealm} Realm.`,
+    };
+  }
+
+  rebuildEvent.status = "confirmed";
+  history[rebuildIndex] = rebuildEvent;
+  const historyRow: Record<string, unknown> = {
+    action: "realm_ascension_gm_confirmation_recorded",
+    target: confirmedTargetRealm,
+    current_realm: String(rebuildEvent.current_realm || "").trim(),
+    target_realm: confirmedTargetRealm,
+    confirmed_realm: confirmedTargetRealm,
+    status: "confirmed",
+    confirmed_rebuild_action: String(rebuildEvent.action || "").trim(),
+    confirmed_rebuild_index: rebuildIndex,
+    actions_per_turn: nonNegativeLooseInt(rebuildEvent.actions_per_turn, 0),
+    attributes_after_total: nonNegativeLooseInt(rebuildEvent.attributes_after_total, 0),
+    efforts_after_total: nonNegativeLooseInt(rebuildEvent.efforts_after_total, 0),
+    gm_confirmation_note: payload.gmConfirmationNote,
+  };
+  const postAscensionSummary = String(rebuildEvent.post_ascension_summary || "").trim();
+  if (postAscensionSummary) {
+    historyRow.post_ascension_summary = postAscensionSummary;
+  }
+
+  history.push(historyRow);
+  xianxia.advancement_history = history;
+  nextDefinition.xianxia = xianxia;
+  return {
+    status: "ok",
+    definition: nextDefinition,
+    currentRealm: String(rebuildEvent.current_realm || "").trim(),
+    targetRealm: confirmedTargetRealm,
+  };
+}
+
 function recordXianxiaGatheringInsightDefinition(
   definition: Record<string, unknown>,
   payload: { amount: number; downtime: string; notes: string },
@@ -2473,6 +2573,11 @@ function latestRealmAscensionRebuild(history: Array<Record<string, unknown>>, ta
 }
 
 function latestUnconfirmedRealmAscensionRebuild(history: Array<Record<string, unknown>>, targetRealm = ""): Record<string, unknown> | null {
+  const index = latestUnconfirmedRealmAscensionRebuildIndex(history, targetRealm);
+  return index === null ? null : history[index];
+}
+
+function latestUnconfirmedRealmAscensionRebuildIndex(history: Array<Record<string, unknown>>, targetRealm = ""): number | null {
   const normalizedFilter = targetRealm ? normalizeRealmLabel(targetRealm) : "";
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const record = history[index];
@@ -2491,7 +2596,7 @@ function latestUnconfirmedRealmAscensionRebuild(history: Array<Record<string, un
       normalizeRealmLabel(candidate.target_realm || candidate.target) === recordTarget,
     );
     if (!hasConfirmation) {
-      return record;
+      return index;
     }
   }
   return null;
