@@ -220,6 +220,42 @@ const ADVANCED_EDITOR_STATE_NOTE_FIELD_NAMES = new Set([
   "physical_description_markdown",
   "background_markdown",
 ]);
+const ADVANCED_EDITOR_PROFICIENCY_FIELDS: Array<{
+  name: string;
+  key: "languages" | "armor" | "weapons" | "tools";
+  label: string;
+  helpText: string;
+}> = [
+  {
+    name: "languages_text",
+    key: "languages",
+    label: "Languages",
+    helpText: "One entry per line. Save the full list you want on the sheet.",
+  },
+  {
+    name: "armor_proficiencies_text",
+    key: "armor",
+    label: "Armor Proficiencies",
+    helpText: "One entry per line. Use this for campaign-granted proficiencies or revisions.",
+  },
+  {
+    name: "weapon_proficiencies_text",
+    key: "weapons",
+    label: "Weapon Proficiencies",
+    helpText: "One entry per line. Use this for campaign-granted proficiencies or revisions.",
+  },
+  {
+    name: "tool_proficiencies_text",
+    key: "tools",
+    label: "Tool Proficiencies",
+    helpText: "One entry per line. Use this for campaign-granted proficiencies or revisions.",
+  },
+];
+const ADVANCED_EDITOR_PROFICIENCY_FIELD_NAMES = new Set(ADVANCED_EDITOR_PROFICIENCY_FIELDS.map((field) => field.name));
+const ADVANCED_EDITOR_SUPPORTED_FIELD_NAMES = new Set([
+  ...ADVANCED_EDITOR_REFERENCE_FIELD_NAMES,
+  ...ADVANCED_EDITOR_PROFICIENCY_FIELD_NAMES,
+]);
 const DND_SYSTEMS_OPTION_PREFIX = "systems:";
 const DND_PHB_SOURCE_ID = "PHB";
 const DND_SUPPORTED_NON_PHB_BASE_CLASSES = new Set(["TCE|artificer"]);
@@ -286,6 +322,7 @@ export interface CharacterAdvancedEditorPayload {
   links: Record<string, string>;
   editor: {
     state_revision: number;
+    proficiency_fields: Array<Record<string, unknown>>;
     reference_fields: Array<Record<string, unknown>>;
     feature_rows: Array<Record<string, unknown>>;
     equipment_rows: Array<Record<string, unknown>>;
@@ -3076,6 +3113,30 @@ function buildReferenceField(
   };
 }
 
+function joinEditorMultilineValues(value: unknown): string {
+  return asArray(value)
+    .map((entry) => stringifyEditorValue(entry).trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function parseEditorMultilineValues(value: unknown): string[] {
+  const values: string[] = [];
+  const seen = new Set<string>();
+  for (const line of stringifyEditorValue(value).replace(/\r/g, "").split("\n")) {
+    for (const fragment of line.split(",")) {
+      const entry = fragment.trim();
+      const normalized = entry.toLowerCase();
+      if (!entry || seen.has(normalized)) {
+        continue;
+      }
+      seen.add(normalized);
+      values.push(entry);
+    }
+  }
+  return values;
+}
+
 export function buildCharacterAdvancedEditorPayload({
   campaign,
   characterSlug,
@@ -3104,6 +3165,7 @@ export function buildCharacterAdvancedEditorPayload({
   const stateNotes = asRecord(state.notes);
   const profile = asRecord(definition.profile);
   const referenceNotes = asRecord(definition.reference_notes);
+  const proficiencies = asRecord(definition.proficiencies);
   const features = asArray(definition.features).map((value, index) => {
     const feature = asRecord(value);
     return {
@@ -3134,6 +3196,14 @@ export function buildCharacterAdvancedEditorPayload({
     links,
     editor: {
       state_revision: stateRevision,
+      proficiency_fields: ADVANCED_EDITOR_PROFICIENCY_FIELDS.map((field) =>
+        buildReferenceField(
+          field.name,
+          field.label,
+          field.helpText,
+          joinEditorMultilineValues(proficiencies[field.key]),
+        ),
+      ),
       reference_fields: [
         buildReferenceField(
           "physical_description_markdown",
@@ -3198,17 +3268,18 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
     }
   }
 
-  const unsupportedFields = Object.keys(values).filter((fieldName) => !ADVANCED_EDITOR_REFERENCE_FIELD_NAMES.has(fieldName));
+  const unsupportedFields = Object.keys(values).filter((fieldName) => !ADVANCED_EDITOR_SUPPORTED_FIELD_NAMES.has(fieldName));
   if (unsupportedFields.length > 0) {
     return {
       status: "validation_error",
-      message: `Unsupported Advanced Editor fields for the TypeScript reference-field slice: ${unsupportedFields.join(", ")}.`,
+      message: `Unsupported Advanced Editor fields for the TypeScript reference/proficiency-field slice: ${unsupportedFields.join(", ")}.`,
     };
   }
 
   const nextDefinition = JSON.parse(JSON.stringify(definition || {})) as Record<string, unknown>;
   const profile = { ...asRecord(nextDefinition.profile) };
   const referenceNotes = { ...asRecord(nextDefinition.reference_notes) };
+  const proficiencies = { ...asRecord(nextDefinition.proficiencies) };
   const stateNoteValues: Record<string, string> = {};
 
   for (const [fieldName, value] of Object.entries(values)) {
@@ -3218,11 +3289,17 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
       referenceNotes[fieldName] = value;
     } else if (ADVANCED_EDITOR_STATE_NOTE_FIELD_NAMES.has(fieldName)) {
       stateNoteValues[fieldName] = value;
+    } else {
+      const proficiencyField = ADVANCED_EDITOR_PROFICIENCY_FIELDS.find((field) => field.name === fieldName);
+      if (proficiencyField) {
+        proficiencies[proficiencyField.key] = parseEditorMultilineValues(value);
+      }
     }
   }
 
   nextDefinition.profile = profile;
   nextDefinition.reference_notes = referenceNotes;
+  nextDefinition.proficiencies = proficiencies;
   return {
     status: "ok",
     definition: nextDefinition,

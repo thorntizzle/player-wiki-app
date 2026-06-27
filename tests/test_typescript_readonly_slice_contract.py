@@ -1611,6 +1611,11 @@ def test_typescript_character_advanced_editor_context_matches_flask_shell(
 
     editor = payload["editor"]
     assert editor["state_revision"] == payload["character"]["state_record"]["revision"]
+    assert [field["name"] for field in editor["proficiency_fields"]] == [
+        field["name"] for field in flask_payload["editor"]["proficiency_fields"]
+    ]
+    assert editor["proficiency_fields"][0]["label"] == flask_payload["editor"]["proficiency_fields"][0]["label"]
+    assert editor["proficiency_fields"][1]["help_text"] == flask_payload["editor"]["proficiency_fields"][1]["help_text"]
     assert [field["name"] for field in editor["reference_fields"]] == [
         field["name"] for field in flask_payload["editor"]["reference_fields"]
     ]
@@ -1670,6 +1675,10 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert stale_payload["error"]["code"] == "state_conflict"
 
     values = {
+        "languages_text": "Common, Elvish\ncommon\n\nDraconic  ",
+        "armor_proficiencies_text": "Light Armor, Medium Armor",
+        "weapon_proficiencies_text": "Longswords\nShortbows",
+        "tool_proficiencies_text": "Thieves' Tools\nNavigator's Tools",
         "physical_description_markdown": "Updated physical description from TypeScript.",
         "background_markdown": "Updated background from TypeScript.",
         "biography_markdown": "Updated biography from TypeScript.",
@@ -1688,6 +1697,10 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert save_payload["message"] == "Character details updated."
     assert save_payload["editor"]["state_revision"] == expected_revision + 1
     assert save_payload["character"]["state_record"]["revision"] == expected_revision + 1
+    assert save_payload["character"]["definition"]["proficiencies"]["languages"] == ["Common", "Elvish", "Draconic"]
+    assert save_payload["character"]["definition"]["proficiencies"]["armor"] == ["Light Armor", "Medium Armor"]
+    assert save_payload["character"]["definition"]["proficiencies"]["weapons"] == ["Longswords", "Shortbows"]
+    assert save_payload["character"]["definition"]["proficiencies"]["tools"] == ["Thieves' Tools", "Navigator's Tools"]
     assert save_payload["character"]["state_record"]["state"]["notes"]["physical_description_markdown"] == values["physical_description_markdown"]
     assert save_payload["character"]["state_record"]["state"]["notes"]["background_markdown"] == values["background_markdown"]
     assert save_payload["character"]["definition"]["profile"]["biography_markdown"] == values["biography_markdown"]
@@ -1699,7 +1712,14 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     )
     reference_values = {field["name"]: field["value"] for field in save_payload["editor"]["reference_fields"]}
     for field_name, field_value in values.items():
+        if field_name.endswith("_text"):
+            continue
         assert reference_values[field_name] == field_value
+    proficiency_values = {field["name"]: field["value"] for field in save_payload["editor"]["proficiency_fields"]}
+    assert proficiency_values["languages_text"] == "Common\nElvish\nDraconic"
+    assert proficiency_values["armor_proficiencies_text"] == "Light Armor\nMedium Armor"
+    assert proficiency_values["weapon_proficiencies_text"] == values["weapon_proficiencies_text"]
+    assert proficiency_values["tool_proficiencies_text"] == values["tool_proficiencies_text"]
 
     sqlite_state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
     assert sqlite_state is not None
@@ -1715,6 +1735,10 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         / "definition.yaml"
     )
     definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
+    assert definition["proficiencies"]["languages"] == ["Common", "Elvish", "Draconic"]
+    assert definition["proficiencies"]["armor"] == ["Light Armor", "Medium Armor"]
+    assert definition["proficiencies"]["weapons"] == ["Longswords", "Shortbows"]
+    assert definition["proficiencies"]["tools"] == ["Thieves' Tools", "Navigator's Tools"]
     assert definition["profile"]["biography_markdown"] == values["biography_markdown"]
     assert definition["profile"]["personality_markdown"] == values["personality_markdown"]
     assert definition["reference_notes"]["additional_notes_markdown"] == values["additional_notes_markdown"]

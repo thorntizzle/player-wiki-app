@@ -167,7 +167,7 @@ Do not implement these routes as part of the parity program unless a later archi
   - `POST /api/v1/campaigns/:campaignSlug/characters/create` (Xianxia native create; narrow DND-5E PHB Fighter pilot; full DND builder parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor`
-  - `PUT /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor` (reference fields only; feature/equipment/native derivation parity pending)
+  - `PUT /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor` (reference and proficiency fields only; feature/equipment/native derivation parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (context shell only; POST/save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (context shell only; POST/save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (context shell only; POST/save parity pending)
@@ -579,12 +579,13 @@ Do not implement these routes as part of the parity program unless a later archi
 - The Character Advanced Editor context route now serves `GET .../characters/:characterSlug/advanced-editor`,
   preserving Flask-compatible campaign/missing-character envelopes, auth and assigned-owner access
   checks, DND-5E support detection, unsupported non-DND payloads, edit-page links, state revision,
-  reference fields, and feature/equipment row shells. The `PUT .../advanced-editor` reference-field
-  slice now serves bearer-token writes for the existing reference fields, preserving fixture-role
-  write denial, unsupported non-DND validation, stale revision conflicts, copied-fixture `definition.yaml`
-  writes for profile/reference notes, SQLite notes persistence for state-backed reference fields, and
-  refreshed Advanced Editor payloads. Feature/equipment rows, full native edit derivation, broader state
-  merging, and complete Advanced Editor parity remain pending.
+  reference fields, proficiency fields, and feature/equipment row shells. The `PUT .../advanced-editor`
+  reference/proficiency-field slice now serves bearer-token writes for the existing reference and
+  proficiency fields, preserving fixture-role write denial, unsupported non-DND validation, stale
+  revision conflicts, copied-fixture `definition.yaml` writes for profile/reference notes/proficiencies,
+  SQLite notes persistence for state-backed reference fields, and refreshed Advanced Editor payloads.
+  Feature/equipment rows, full native edit derivation, broader state merging, and complete Advanced
+  Editor parity remain pending.
 - The Character advancement context shell family now serves `GET .../characters/:characterSlug/retraining`,
   `GET .../level-up`, and `GET .../progression-repair`, preserving Flask-compatible campaign/missing-character
   envelopes, auth and route-specific access failures, current fixture unsupported/empty readiness
