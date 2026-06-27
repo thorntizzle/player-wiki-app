@@ -953,6 +953,42 @@
       "notes": "Tracked Hono account settings write route with bearer API-token auth, Flask-compatible theme/chat-order validation, retired frontend_mode rejection, SQLite user_preferences updates, and refreshed preference payloads."
     },
     {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/custom-entries",
+      "route_family": "api_v1_systems",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/systems/custom-entries",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono custom campaign Systems entry create route with bearer-token DM/admin writes, custom source bootstrap, title/type/visibility/body validation, SQLite systems_entries and campaign_entry_overrides writes, audit rows, serialized entry payload, refreshed DM Content Systems payload, and missing-campaign JSON."
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/custom-entries/<entry_slug>",
+      "route_family": "api_v1_systems",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/systems/custom-entries/:entrySlug",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono custom campaign Systems entry update route with bearer-token DM/admin writes, custom-entry identity checks, preserved slug/key identity, validation parity, SQLite systems_entries and campaign_entry_overrides updates, audit rows, serialized entry payload, refreshed DM Content Systems payload, and missing-campaign JSON."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/custom-entries/<entry_slug>/archive",
+      "route_family": "api_v1_systems",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/systems/custom-entries/:entrySlug/archive",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono custom campaign Systems entry archive route with bearer-token DM/admin writes, custom-entry identity checks, override-based archive via is_enabled_override=false, audit rows, serialized archived entry payload, refreshed DM Content Systems payload, and missing-campaign JSON."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/custom-entries/<entry_slug>/restore",
+      "route_family": "api_v1_systems",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/systems/custom-entries/:entrySlug/restore",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono custom campaign Systems entry restore route with bearer-token DM/admin writes, custom-entry identity checks, override-based restore via clearing is_enabled_override, audit rows, serialized active entry payload, refreshed DM Content Systems payload, and missing-campaign JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/session/login",
       "route_family": "api_v1",

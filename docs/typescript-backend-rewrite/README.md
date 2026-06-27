@@ -62,6 +62,10 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources`
   - `PUT /api/v1/campaigns/:campaignSlug/systems/sources`
   - `PUT /api/v1/campaigns/:campaignSlug/systems/overrides/*`
+  - `POST /api/v1/campaigns/:campaignSlug/systems/custom-entries`
+  - `PUT /api/v1/campaigns/:campaignSlug/systems/custom-entries/:entrySlug`
+  - `POST /api/v1/campaigns/:campaignSlug/systems/custom-entries/:entrySlug/archive`
+  - `POST /api/v1/campaigns/:campaignSlug/systems/custom-entries/:entrySlug/restore`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources/:sourceId`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources/:sourceId/types/:entryType`
   - `GET /api/v1/campaigns/:campaignSlug/systems/entries/:entrySlug`
@@ -304,8 +308,8 @@ Route parity check command:
   API tokens, source policy rows, shared-core permission state, entry overrides, custom campaign
   entries, campaign item mechanics rows, sanitized import-run history without raw source paths, and
   missing-campaign JSON. This route is read-only and fixture/SQLite-backed; Systems source policy
-  and entry overrides are implemented as separate mutation slices, while custom entries and
-  item-mechanics import remain separate future slices.
+  and entry overrides are implemented as separate mutation slices, while item-mechanics import remains
+  a separate future slice.
 - The first Systems source-policy write route now serves `PUT .../systems/sources` for bearer-token
   DM/admin actors against `CPW_DB_PATH`, preserving fixture-role write denial, player/outsider
   forbiddance, update-row shape validation, boolean enablement validation, source-id validation,
@@ -319,6 +323,15 @@ Route parity check command:
   write denial, player/outsider forbiddance, Flask-compatible boolean coercion, private/admin and
   public-allowed visibility gates, `campaign_system_policies` and `campaign_entry_overrides`
   upserts, `auth_audit_log` entry-override events, serialized override/entry responses, and
+  missing-campaign JSON. Current validation covers a disposable fixture database only; production or
+  staging write readiness remains gated by migration, backup, copied-data rehearsal, and rollback
+  approval.
+- The custom campaign Systems entry write family now serves `POST .../systems/custom-entries`,
+  `PUT .../systems/custom-entries/:entrySlug`, and the archive/restore POST routes for bearer-token
+  DM/admin actors against `CPW_DB_PATH`, preserving custom source bootstrap, slug/key preservation,
+  title/type/visibility/body validation, item-only linked page validation, SQLite `systems_entries`
+  and `campaign_entry_overrides` writes, override-based archive/restore, `auth_audit_log` custom
+  entry events, serialized entry responses, refreshed DM Content Systems payloads, and
   missing-campaign JSON. Current validation covers a disposable fixture database only; production or
   staging write readiness remains gated by migration, backup, copied-data rehearsal, and rollback
   approval.

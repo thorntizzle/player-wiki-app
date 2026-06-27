@@ -2507,6 +2507,349 @@ if (
   );
 }
 
+const customSystemsEntryCreatePayload = {
+  title: "Scout Note",
+  slug_leaf: "scout-note",
+  entry_type: "rule",
+  visibility: "players",
+  provenance: "Table ruling",
+  search_metadata: "scouting",
+  body_markdown: "## Scout Note\n\nUse careful movement.",
+};
+
+const blockedCustomSystemsEntryCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/custom-entries",
+  {},
+  { method: "POST", body: customSystemsEntryCreatePayload },
+);
+if (
+  blockedCustomSystemsEntryCreate.status !== 401 ||
+  blockedCustomSystemsEntryCreate.payload?.error?.code !== "auth_required"
+) {
+  throw new Error(
+    `Expected unauthenticated custom systems entry create auth_required 401, got ${blockedCustomSystemsEntryCreate.status} ${blockedCustomSystemsEntryCreate.payload?.error?.code}`,
+  );
+}
+
+const fixtureCustomSystemsEntryCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/custom-entries",
+  { "X-CPW-Fixture-Role": "dm" },
+  { method: "POST", body: customSystemsEntryCreatePayload },
+);
+if (
+  fixtureCustomSystemsEntryCreate.status !== 403 ||
+  fixtureCustomSystemsEntryCreate.payload?.error?.message !== "Systems source updates require bearer API authentication."
+) {
+  throw new Error(`Expected fixture custom systems entry create bearer requirement, got ${JSON.stringify(fixtureCustomSystemsEntryCreate.payload)}`);
+}
+
+const playerCustomSystemsEntryCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/custom-entries",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: customSystemsEntryCreatePayload },
+);
+if (
+  playerCustomSystemsEntryCreate.status !== 403 ||
+  playerCustomSystemsEntryCreate.payload?.error?.message !== "You do not have permission to manage systems."
+) {
+  throw new Error(`Expected player custom systems entry create forbidden, got ${JSON.stringify(playerCustomSystemsEntryCreate.payload)}`);
+}
+
+const missingCampaignCustomSystemsEntryCreate = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/systems/custom-entries",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: customSystemsEntryCreatePayload },
+);
+if (
+  missingCampaignCustomSystemsEntryCreate.status !== 404 ||
+  missingCampaignCustomSystemsEntryCreate.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing custom systems entry campaign JSON 404, got ${missingCampaignCustomSystemsEntryCreate.status} ${missingCampaignCustomSystemsEntryCreate.payload?.error?.code}`,
+  );
+}
+
+const invalidCustomSystemsEntryCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/custom-entries",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { ...customSystemsEntryCreatePayload, title: "" } },
+);
+if (
+  invalidCustomSystemsEntryCreate.status !== 400 ||
+  invalidCustomSystemsEntryCreate.payload?.error?.message !== "Custom Systems entries need a title."
+) {
+  throw new Error(`Expected custom systems entry title validation, got ${JSON.stringify(invalidCustomSystemsEntryCreate.payload)}`);
+}
+
+const nonItemLinkedCustomSystemsEntryCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/custom-entries",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { ...customSystemsEntryCreatePayload, source_page_ref: "items/pagebound-crescent" } },
+);
+if (
+  nonItemLinkedCustomSystemsEntryCreate.status !== 400 ||
+  nonItemLinkedCustomSystemsEntryCreate.payload?.error?.message !== "Only item custom Systems entries can link item mechanics pages."
+) {
+  throw new Error(
+    `Expected custom systems entry linked page type validation, got ${JSON.stringify(nonItemLinkedCustomSystemsEntryCreate.payload)}`,
+  );
+}
+
+const createdCustomSystemsEntry = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/custom-entries",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: customSystemsEntryCreatePayload },
+);
+if (
+  createdCustomSystemsEntry.status !== 200 ||
+  createdCustomSystemsEntry.payload?.ok !== true ||
+  createdCustomSystemsEntry.payload?.entry?.entry_key !== "dnd-5e|custom|linden-pass|scout-note" ||
+  createdCustomSystemsEntry.payload?.entry?.slug !== "custom-linden-pass-scout-note" ||
+  createdCustomSystemsEntry.payload?.entry?.visibility !== "players" ||
+  createdCustomSystemsEntry.payload?.entry?.status_label !== "Active" ||
+  createdCustomSystemsEntry.payload?.entry?.is_archived !== false ||
+  createdCustomSystemsEntry.payload?.entry?.provenance !== "Table ruling" ||
+  createdCustomSystemsEntry.payload?.entry?.body_markdown !== "## Scout Note\n\nUse careful movement." ||
+  !String(createdCustomSystemsEntry.payload?.entry?.rendered_html || "").includes("<h2>Scout Note</h2>") ||
+  createdCustomSystemsEntry.payload?.systems?.custom_entry_count !== 1 ||
+  createdCustomSystemsEntry.payload?.systems?.custom_entry_source_rows?.[0]?.source_id !== "CUSTOM-LINDEN-PASS"
+) {
+  throw new Error(`Unexpected custom systems entry create payload: ${JSON.stringify(createdCustomSystemsEntry.payload)}`);
+}
+
+const duplicateCustomSystemsEntryCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/custom-entries",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: customSystemsEntryCreatePayload },
+);
+if (
+  duplicateCustomSystemsEntryCreate.status !== 400 ||
+  duplicateCustomSystemsEntryCreate.payload?.error?.message !== "That custom Systems entry slug is already in use."
+) {
+  throw new Error(`Expected custom systems entry duplicate slug validation, got ${JSON.stringify(duplicateCustomSystemsEntryCreate.payload)}`);
+}
+
+const inheritedVisibilityCustomSystemsEntryCreate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/custom-entries",
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: {
+      title: "Inherited Visibility",
+      slug_leaf: "inherited-visibility",
+      entry_type: "rule",
+      provenance: "Table ruling",
+      search_metadata: "",
+      body_markdown: "Default to the custom source visibility.",
+    },
+  },
+);
+if (
+  inheritedVisibilityCustomSystemsEntryCreate.status !== 200 ||
+  inheritedVisibilityCustomSystemsEntryCreate.payload?.entry?.slug !== "custom-linden-pass-inherited-visibility" ||
+  inheritedVisibilityCustomSystemsEntryCreate.payload?.entry?.visibility !== "players" ||
+  inheritedVisibilityCustomSystemsEntryCreate.payload?.entry?.override?.visibility_override !== "players" ||
+  inheritedVisibilityCustomSystemsEntryCreate.payload?.systems?.custom_entry_count !== 2
+) {
+  throw new Error(
+    `Unexpected inherited-visibility custom systems entry payload: ${JSON.stringify(inheritedVisibilityCustomSystemsEntryCreate.payload)}`,
+  );
+}
+
+const updatedCustomSystemsEntry = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/custom-entries/custom-linden-pass-scout-note",
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "PUT",
+    body: {
+      ...customSystemsEntryCreatePayload,
+      title: "Scout Note Revised",
+      visibility: "dm",
+      provenance: "Updated table ruling",
+      search_metadata: "scouting updated",
+      body_markdown: "## Scout Note Revised\n\nUse careful movement and report back.",
+    },
+  },
+);
+if (
+  updatedCustomSystemsEntry.status !== 200 ||
+  updatedCustomSystemsEntry.payload?.entry?.entry_key !== "dnd-5e|custom|linden-pass|scout-note" ||
+  updatedCustomSystemsEntry.payload?.entry?.slug !== "custom-linden-pass-scout-note" ||
+  updatedCustomSystemsEntry.payload?.entry?.title !== "Scout Note Revised" ||
+  updatedCustomSystemsEntry.payload?.entry?.visibility !== "dm" ||
+  updatedCustomSystemsEntry.payload?.entry?.override?.visibility_override !== "dm"
+) {
+  throw new Error(`Unexpected custom systems entry update payload: ${JSON.stringify(updatedCustomSystemsEntry.payload)}`);
+}
+
+const archivedCustomSystemsEntry = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/custom-entries/custom-linden-pass-scout-note/archive",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST" },
+);
+if (
+  archivedCustomSystemsEntry.status !== 200 ||
+  archivedCustomSystemsEntry.payload?.entry?.is_archived !== true ||
+  archivedCustomSystemsEntry.payload?.entry?.status_label !== "Archived" ||
+  archivedCustomSystemsEntry.payload?.entry?.override?.visibility_override !== "dm" ||
+  archivedCustomSystemsEntry.payload?.entry?.override?.is_enabled_override !== false
+) {
+  throw new Error(`Unexpected custom systems entry archive payload: ${JSON.stringify(archivedCustomSystemsEntry.payload)}`);
+}
+
+const restoredCustomSystemsEntry = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/custom-entries/custom-linden-pass-scout-note/restore",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST" },
+);
+if (
+  restoredCustomSystemsEntry.status !== 200 ||
+  restoredCustomSystemsEntry.payload?.entry?.is_archived !== false ||
+  restoredCustomSystemsEntry.payload?.entry?.status_label !== "Active" ||
+  restoredCustomSystemsEntry.payload?.entry?.override?.visibility_override !== "dm" ||
+  restoredCustomSystemsEntry.payload?.entry?.override?.is_enabled_override !== null
+) {
+  throw new Error(`Unexpected custom systems entry restore payload: ${JSON.stringify(restoredCustomSystemsEntry.payload)}`);
+}
+
+const createdLinkedItemCustomSystemsEntry = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/custom-entries",
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: {
+      title: "Pagebound Crescent",
+      slug_leaf: "pagebound-crescent-api",
+      entry_type: "item",
+      visibility: "players",
+      provenance: "",
+      search_metadata: "",
+      body_markdown: "",
+      source_page_ref: "items/pagebound-crescent",
+      item_mechanics_review_status: "approved",
+      item_mechanics: { bonus_weapon: 1 },
+    },
+  },
+);
+if (
+  createdLinkedItemCustomSystemsEntry.status !== 200 ||
+  createdLinkedItemCustomSystemsEntry.payload?.entry?.source_page_ref !== "items/pagebound-crescent" ||
+  createdLinkedItemCustomSystemsEntry.payload?.entry?.provenance !== "Published item page: Pagebound Crescent" ||
+  !String(createdLinkedItemCustomSystemsEntry.payload?.entry?.body_markdown || "").includes("magic longsword") ||
+  createdLinkedItemCustomSystemsEntry.payload?.entry?.item_mechanics?.review_status !== "approved" ||
+  createdLinkedItemCustomSystemsEntry.payload?.entry?.item_mechanics?.intake_mode !== "published_page" ||
+  !createdLinkedItemCustomSystemsEntry.payload?.entry?.item_mechanics?.modeled_fields?.includes("base_item") ||
+  !createdLinkedItemCustomSystemsEntry.payload?.entry?.item_mechanics?.modeled_fields?.includes("bonus_weapon") ||
+  createdLinkedItemCustomSystemsEntry.payload?.systems?.custom_entry_count !== 3
+) {
+  throw new Error(
+    `Unexpected linked item custom systems entry create payload: ${JSON.stringify(createdLinkedItemCustomSystemsEntry.payload)}`,
+  );
+}
+
+const customSystemsEntryDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const persistedCustomSource = customSystemsEntryDb
+  .prepare(
+    "SELECT license_class, public_visibility_allowed, requires_unofficial_notice FROM systems_sources WHERE library_slug = ? AND source_id = ?",
+  )
+  .get("DND-5E", "CUSTOM-LINDEN-PASS");
+const persistedCustomEnabledSource = customSystemsEntryDb
+  .prepare(
+    "SELECT is_enabled, default_visibility, updated_by_user_id FROM campaign_enabled_sources WHERE campaign_slug = ? AND source_id = ?",
+  )
+  .get("linden-pass", "CUSTOM-LINDEN-PASS");
+const persistedCustomEntry = customSystemsEntryDb
+  .prepare(
+    "SELECT title, metadata_json, body_json, rendered_html FROM systems_entries WHERE library_slug = ? AND entry_key = ?",
+  )
+  .get("DND-5E", "dnd-5e|custom|linden-pass|scout-note");
+const persistedCustomOverride = customSystemsEntryDb
+  .prepare(
+    "SELECT visibility_override, is_enabled_override, updated_by_user_id FROM campaign_entry_overrides WHERE campaign_slug = ? AND entry_key = ?",
+  )
+  .get("linden-pass", "dnd-5e|custom|linden-pass|scout-note");
+const customEntryAuditRows = customSystemsEntryDb
+  .prepare(
+    "SELECT actor_user_id, event_type, metadata_json FROM auth_audit_log WHERE campaign_slug = ? AND event_type LIKE 'campaign_systems_custom_entry_%' ORDER BY id ASC",
+  )
+  .all("linden-pass");
+customSystemsEntryDb.close();
+const parsedCustomEntryMetadata = JSON.parse(persistedCustomEntry?.metadata_json || "{}");
+const parsedCustomEntryBody = JSON.parse(persistedCustomEntry?.body_json || "{}");
+const parsedCustomEntryAudits = customEntryAuditRows.map((row) => ({
+  actor_user_id: row.actor_user_id,
+  event_type: row.event_type,
+  metadata: JSON.parse(row.metadata_json),
+}));
+const customEntryAuditCounts = parsedCustomEntryAudits.reduce((counts, row) => {
+  counts[row.event_type] = (counts[row.event_type] || 0) + 1;
+  return counts;
+}, {});
+if (
+  persistedCustomSource?.license_class !== "custom_campaign" ||
+  persistedCustomSource?.public_visibility_allowed !== 1 ||
+  persistedCustomSource?.requires_unofficial_notice !== 0 ||
+  persistedCustomEnabledSource?.is_enabled !== 1 ||
+  persistedCustomEnabledSource?.default_visibility !== "players" ||
+  persistedCustomEnabledSource?.updated_by_user_id !== 81 ||
+  persistedCustomEntry?.title !== "Scout Note Revised" ||
+  parsedCustomEntryMetadata?.custom_campaign_slug !== "linden-pass" ||
+  parsedCustomEntryMetadata?.provenance !== "Updated table ruling" ||
+  parsedCustomEntryBody?.markdown !== "## Scout Note Revised\n\nUse careful movement and report back." ||
+  !String(persistedCustomEntry?.rendered_html || "").includes("<h2>Scout Note Revised</h2>") ||
+  persistedCustomOverride?.visibility_override !== "dm" ||
+  persistedCustomOverride?.is_enabled_override !== null ||
+  persistedCustomOverride?.updated_by_user_id !== 81 ||
+  customEntryAuditCounts.campaign_systems_custom_entry_created !== 3 ||
+  customEntryAuditCounts.campaign_systems_custom_entry_updated !== 1 ||
+  customEntryAuditCounts.campaign_systems_custom_entry_archived !== 1 ||
+  customEntryAuditCounts.campaign_systems_custom_entry_restored !== 1 ||
+  parsedCustomEntryAudits[0]?.actor_user_id !== 81 ||
+  parsedCustomEntryAudits[0]?.metadata?.entry_key !== "dnd-5e|custom|linden-pass|scout-note" ||
+  parsedCustomEntryAudits[0]?.metadata?.entry_slug !== "custom-linden-pass-scout-note" ||
+  parsedCustomEntryAudits[0]?.metadata?.entry_type !== "rule" ||
+  parsedCustomEntryAudits[0]?.metadata?.source !== "api"
+) {
+  throw new Error(
+    `Unexpected custom systems entry database state: ${JSON.stringify({
+      persistedCustomSource,
+      persistedCustomEnabledSource,
+      persistedCustomEntry,
+      parsedCustomEntryMetadata,
+      parsedCustomEntryBody,
+      persistedCustomOverride,
+      parsedCustomEntryAudits,
+    })}`,
+  );
+}
+
+const customSystemsEntryCleanupDb = new Database(dbPath);
+customSystemsEntryCleanupDb
+  .prepare(
+    "DELETE FROM campaign_entry_overrides WHERE campaign_slug = ? AND entry_key IN (?, ?, ?)",
+  )
+  .run(
+    "linden-pass",
+    "dnd-5e|custom|linden-pass|scout-note",
+    "dnd-5e|custom|linden-pass|pagebound-crescent-api",
+    "dnd-5e|custom|linden-pass|inherited-visibility",
+  );
+customSystemsEntryCleanupDb
+  .prepare("DELETE FROM systems_entries WHERE library_slug = ? AND entry_key IN (?, ?, ?)")
+  .run(
+    "DND-5E",
+    "dnd-5e|custom|linden-pass|scout-note",
+    "dnd-5e|custom|linden-pass|pagebound-crescent-api",
+    "dnd-5e|custom|linden-pass|inherited-visibility",
+  );
+customSystemsEntryCleanupDb
+  .prepare("DELETE FROM campaign_enabled_sources WHERE campaign_slug = ? AND source_id = ?")
+  .run("linden-pass", "CUSTOM-LINDEN-PASS");
+customSystemsEntryCleanupDb
+  .prepare("DELETE FROM systems_sources WHERE library_slug = ? AND source_id = ?")
+  .run("DND-5E", "CUSTOM-LINDEN-PASS");
+customSystemsEntryCleanupDb.close();
+
 const blockedCombatState = await requestJson("/api/v1/campaigns/linden-pass/combat");
 if (blockedCombatState.status !== 401 || blockedCombatState.payload?.error?.code !== "auth_required") {
   throw new Error(

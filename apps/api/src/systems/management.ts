@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import Database from "better-sqlite3";
 
 import type { CampaignViewModel } from "../campaigns/view.js";
+import { slugify } from "../wiki/repository.js";
 import {
   entryTypeLabel,
   entryTypeSortKey,
@@ -88,6 +89,74 @@ const DND5E_IMPORT_ENTRY_TYPES = [
   "subclassfeature",
   "variantrule",
 ];
+
+const CAMPAIGN_ITEM_METADATA_KEYS = [
+  "ability_score_minimums",
+  "ac",
+  "armor_profile",
+  "attack_reminder_rules",
+  "attunement",
+  "base_item",
+  "bonus",
+  "bonus_ac",
+  "bonus_attack_rolls",
+  "bonus_damage_rolls",
+  "bonus_weapon",
+  "bonus_weapon_attack",
+  "bonus_weapon_damage",
+  "charges",
+  "damage",
+  "damage_type",
+  "defensive_rules",
+  "dmg1",
+  "dmg2",
+  "item_uses",
+  "properties",
+  "property",
+  "range",
+  "rarity",
+  "recharge",
+  "resource_template_bonuses",
+  "spell_support",
+  "stealth_disadvantage",
+  "strength",
+  "type",
+  "versatile_damage",
+  "weapon_category",
+  "weapon_profile",
+];
+
+const XIANXIA_CUSTOM_ENTRY_FACETS: Record<string, { key: string; label: string; support_state?: string }> = {
+  rule: { key: "rule", label: "Rule" },
+  attribute: { key: "attribute", label: "Attribute" },
+  effort: { key: "effort", label: "Effort" },
+  energy: { key: "energy", label: "Energy" },
+  yin_yang: { key: "yin_yang", label: "Yin/Yang" },
+  dao: { key: "dao", label: "Dao" },
+  realm: { key: "realm", label: "Realm" },
+  honor_rank: { key: "honor_rank", label: "Honor Rank" },
+  skill_rule: { key: "skill_rule", label: "Skill Rule" },
+  equipment: { key: "equipment", label: "Equipment" },
+  armor: { key: "armor", label: "Armor" },
+  martial_art: { key: "martial_art", label: "Martial Art" },
+  martial_art_rank: { key: "martial_art_rank", label: "Martial Art Rank" },
+  technique: { key: "technique", label: "Technique" },
+  maneuver: { key: "maneuver", label: "Maneuver" },
+  stance: { key: "stance", label: "Stance" },
+  aura: { key: "aura", label: "Aura" },
+  generic_technique: { key: "generic_technique", label: "Generic Technique" },
+  basic_action: { key: "basic_action", label: "Basic Action", support_state: "reference_only" },
+  condition: { key: "condition", label: "Condition", support_state: "reference_only" },
+  status: { key: "status", label: "Status", support_state: "reference_only" },
+  range_rule: { key: "range_rule", label: "Range Rule" },
+  timing_rule: { key: "timing_rule", label: "Timing Rule" },
+  critical_hit_rule: { key: "critical_hit_rule", label: "Critical Hit Rule" },
+  sneak_attack_rule: { key: "sneak_attack_rule", label: "Sneak Attack Rule" },
+  dying_rule: { key: "dying_rule", label: "Dying Rule" },
+  minion_tag: { key: "minion_tag", label: "Minion Tag" },
+  companion_rule: { key: "companion_rule", label: "Companion Rule" },
+  gm_approval_rule: { key: "gm_approval_rule", label: "GM Approval Rule" },
+};
 
 function canManageSystems(role: FixtureSystemsRole): boolean {
   return role === "dm" || role === "admin";
@@ -662,6 +731,1085 @@ function loadCampaignItemPageRows(
     }
     throw error;
   }
+}
+
+type SerializedCustomEntry = ReturnType<typeof serializeCustomEntry>;
+type CustomSystemsEntryMutationResult =
+  | { status: "ok"; entry: SerializedCustomEntry; systems: ReturnType<typeof buildDmContentSystemsPayload> }
+  | { status: "validation_error"; message: string };
+
+interface CampaignItemPageContentRow {
+  page_ref: string;
+  title: string;
+  metadata_json: string;
+  body_markdown: string;
+}
+
+function utcIsoTimestamp(): string {
+  return new Date().toISOString().replace("Z", "+00:00");
+}
+
+function customCampaignSourceId(campaignSlug: string): string {
+  const normalizedCampaignSlug = slugify(String(campaignSlug || "")).replace(/\//g, "-").toUpperCase();
+  return `CUSTOM-${normalizedCampaignSlug || "CAMPAIGN"}`;
+}
+
+function normalizeEntryType(value: unknown): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "");
+}
+
+function normalizeCustomSlugLeaf(value: unknown): string {
+  return slugify(String(value || ""))
+    .replace(/\//g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function escapeHtml(rawText: string): string {
+  return rawText
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function renderCustomEntryMarkdown(markdownText: string): string {
+  const blocks = escapeHtml(markdownText.trim())
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+  return blocks
+    .map((block) => {
+      const headingMatch = block.match(/^(#{1,6})\s+(.*)$/);
+      if (headingMatch) {
+        const depth = Math.min(headingMatch[1]!.length, 6);
+        return `<h${depth}>${headingMatch[2]!.trim()}</h${depth}>`;
+      }
+      return `<p>${block.replace(/\n/g, "<br />")}</p>`;
+    })
+    .join("");
+}
+
+function normalizeCampaignItemReviewStatus(value: unknown): string {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[-\s]+/g, "_");
+  if (normalized === "approved" || normalized === "approve" || normalized === "modeled") {
+    return "approved";
+  }
+  if (normalized === "reference" || normalized === "reference_only") {
+    return "reference_only";
+  }
+  if (normalized === "manual" || normalized === "manual_review" || normalized === "review") {
+    return "manual_review";
+  }
+  return "draft";
+}
+
+function hasMeaningfulValue(value: unknown): boolean {
+  if (value === null || value === undefined || value === "") {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  if (typeof value === "object") {
+    return Object.keys(value as Record<string, unknown>).length > 0;
+  }
+  return true;
+}
+
+function buildCampaignItemMechanicsMetadata(
+  title: string,
+  sourcePageRef: string,
+  reviewStatus: unknown,
+  explicitMechanics: unknown,
+  sourcePageMetadata: Record<string, unknown>,
+) {
+  const mechanics = asRecord(explicitMechanics);
+  const normalizedReview = normalizeCampaignItemReviewStatus(
+    reviewStatus || mechanics.review_status || mechanics.campaign_item_mechanics_review_status,
+  );
+  const combinedMechanics = { ...sourcePageMetadata, ...mechanics };
+  const modeledFields = CAMPAIGN_ITEM_METADATA_KEYS.filter((key) => hasMeaningfulValue(combinedMechanics[key]));
+  const flags = Array.isArray(mechanics.flags) ? mechanics.flags : [];
+  const fieldProvenance = asRecord(mechanics.field_provenance);
+  const supportState =
+    String(mechanics.support_state || "").trim() ||
+    (modeledFields.length > 0 ? "manual_review" : normalizedReview === "approved" ? "manual_review" : "reference_only");
+  const reviewPayload = {
+    version: "2026-06-25",
+    review_status: normalizedReview,
+    support_state: supportState,
+    modeled_fields: modeledFields,
+    flags,
+    field_provenance: fieldProvenance,
+    source_page_ref: sourcePageRef,
+    intake_mode: sourcePageRef ? "published_page" : "direct",
+  };
+  const metadata: Record<string, unknown> = {
+    ...sourcePageMetadata,
+    ...mechanics,
+    campaign_item: true,
+    campaign_item_mechanics_version: "2026-06-25",
+    campaign_item_mechanics_review_status: normalizedReview,
+    campaign_item_mechanics_support_state: supportState,
+    campaign_item_mechanics_flags: flags,
+    campaign_item_mechanics_field_provenance: fieldProvenance,
+    campaign_item_mechanics: reviewPayload,
+  };
+  if (sourcePageRef) {
+    metadata.linked_published_page_ref = sourcePageRef;
+    metadata.page_ref = sourcePageRef;
+  }
+  if (!metadata.title) {
+    metadata.title = title;
+  }
+  return metadata;
+}
+
+function normalizeIdentifier(value: unknown): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function stampXianxiaCustomEntryMetadata(
+  metadata: Record<string, unknown>,
+  body: Record<string, unknown>,
+  entryType: string,
+  slug: string,
+  title: string,
+) {
+  const facet = XIANXIA_CUSTOM_ENTRY_FACETS[entryType];
+  if (!facet) {
+    return;
+  }
+
+  metadata.xianxia_custom_entry = true;
+  metadata.xianxia_entry_facets = [facet.key];
+  metadata.xianxia_entry_facet_labels = [facet.label];
+  body.xianxia_custom_entry = true;
+  body.xianxia_entry_facets = [facet.key];
+
+  if (facet.support_state) {
+    metadata.support_state = facet.support_state;
+    metadata.xianxia_support_state = facet.support_state;
+    body.support_state = facet.support_state;
+    body.xianxia_support_state = facet.support_state;
+  }
+
+  if (facet.key !== "martial_art") {
+    return;
+  }
+
+  const martialArtKey = normalizeIdentifier(slug) || normalizeIdentifier(title);
+  metadata.catalog_role = "parent";
+  metadata.xianxia_catalog_role = "parent";
+  metadata.custom_martial_art = true;
+  metadata.xianxia_custom_martial_art = true;
+  metadata.martial_art_key = martialArtKey;
+  metadata.xianxia_martial_art_key = martialArtKey;
+  metadata.martial_art_slug = slug;
+  metadata.xianxia_martial_art_slug = slug;
+  metadata.rank_records_seeded = false;
+  metadata.rank_records_status = "gm_authored_custom_markdown";
+  metadata.rank_completion_status = "gm_authored_custom_markdown";
+  metadata.xianxia_rank_completion_status = "gm_authored_custom_markdown";
+  body.xianxia_martial_art = {
+    catalog_role: "parent",
+    custom_martial_art: true,
+    xianxia_custom_martial_art: true,
+    martial_art_key: martialArtKey,
+    xianxia_martial_art_key: martialArtKey,
+    martial_art_slug: slug,
+    xianxia_martial_art_slug: slug,
+    rank_records_seeded: false,
+    rank_records_status: "gm_authored_custom_markdown",
+    rank_completion_status: "gm_authored_custom_markdown",
+    rank_records: [],
+    xianxia_martial_art_rank_records: [],
+    missing_rank_records: [],
+    xianxia_martial_art_missing_rank_records: [],
+    parent_note: "GM-created custom Martial Art authored through the campaign custom Systems entry path.",
+  };
+}
+
+function loadEntryBySlug(database: SqliteDatabase, librarySlug: string, entrySlug: string): SystemsEntryRow | null {
+  return (
+    (database
+      .prepare(
+        `
+          SELECT
+            id,
+            library_slug,
+            source_id,
+            entry_key,
+            entry_type,
+            slug,
+            title,
+            source_page,
+            source_path,
+            search_text,
+            player_safe_default,
+            dm_heavy,
+            metadata_json,
+            body_json,
+            rendered_html,
+            created_at,
+            updated_at
+          FROM systems_entries
+          WHERE library_slug = ?
+            AND slug = ?
+        `,
+      )
+      .get(librarySlug, entrySlug) as SystemsEntryRow | undefined) || null
+  );
+}
+
+function loadCampaignEnabledSource(database: SqliteDatabase, campaignSlug: string, sourceId: string) {
+  return database
+    .prepare(
+      `
+        SELECT source_id
+        FROM campaign_enabled_sources
+        WHERE campaign_slug = ?
+          AND source_id = ?
+      `,
+    )
+    .get(campaignSlug, sourceId) as { source_id: string } | undefined;
+}
+
+function upsertCampaignSystemsPolicyForCustomEntry(
+  database: SqliteDatabase,
+  campaignSlug: string,
+  librarySlug: string,
+  actorUserId: number,
+  now: string,
+) {
+  database
+    .prepare(
+      `
+        INSERT INTO campaign_system_policies (
+          campaign_slug,
+          library_slug,
+          status,
+          allow_dm_shared_core_entry_edits,
+          proprietary_acknowledged_at,
+          proprietary_acknowledged_by_user_id,
+          created_at,
+          updated_at,
+          updated_by_user_id
+        )
+        VALUES (?, ?, 'active', 0, NULL, NULL, ?, ?, ?)
+        ON CONFLICT(campaign_slug) DO UPDATE SET
+          library_slug = excluded.library_slug,
+          status = excluded.status,
+          allow_dm_shared_core_entry_edits = campaign_system_policies.allow_dm_shared_core_entry_edits,
+          proprietary_acknowledged_at = campaign_system_policies.proprietary_acknowledged_at,
+          proprietary_acknowledged_by_user_id = campaign_system_policies.proprietary_acknowledged_by_user_id,
+          updated_at = excluded.updated_at,
+          updated_by_user_id = excluded.updated_by_user_id
+      `,
+    )
+    .run(campaignSlug, librarySlug, now, now, actorUserId);
+}
+
+function upsertCustomCampaignSource(
+  database: SqliteDatabase,
+  librarySlug: string,
+  sourceId: string,
+  title: string,
+  now: string,
+) {
+  database
+    .prepare(
+      `
+        INSERT INTO systems_sources (
+          library_slug,
+          source_id,
+          title,
+          license_class,
+          license_url,
+          attribution_text,
+          public_visibility_allowed,
+          requires_unofficial_notice,
+          status,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, 'custom_campaign', '', '', 1, 0, 'active', ?, ?)
+        ON CONFLICT(library_slug, source_id) DO UPDATE SET
+          title = excluded.title,
+          license_class = excluded.license_class,
+          license_url = excluded.license_url,
+          attribution_text = excluded.attribution_text,
+          public_visibility_allowed = excluded.public_visibility_allowed,
+          requires_unofficial_notice = excluded.requires_unofficial_notice,
+          status = excluded.status,
+          updated_at = excluded.updated_at
+      `,
+    )
+    .run(librarySlug, sourceId, title, now, now);
+}
+
+function insertCampaignEnabledSourceIfMissing(
+  database: SqliteDatabase,
+  campaign: CampaignViewModel,
+  librarySlug: string,
+  sourceId: string,
+  actorUserId: number,
+  now: string,
+) {
+  if (loadCampaignEnabledSource(database, campaign.slug, sourceId)) {
+    return;
+  }
+  database
+    .prepare(
+      `
+        INSERT INTO campaign_enabled_sources (
+          campaign_slug,
+          library_slug,
+          source_id,
+          is_enabled,
+          default_visibility,
+          updated_at,
+          updated_by_user_id
+        )
+        VALUES (?, ?, ?, 1, ?, ?, ?)
+      `,
+    )
+    .run(campaign.slug, librarySlug, sourceId, customEntryDefaultVisibility(campaign), now, actorUserId);
+}
+
+function upsertCustomSystemsEntryRow(
+  database: SqliteDatabase,
+  {
+    librarySlug,
+    sourceId,
+    entryKey,
+    entryType,
+    slug,
+    title,
+    provenance,
+    searchText,
+    visibility,
+    metadata,
+    body,
+    renderedHtml,
+    now,
+  }: {
+    librarySlug: string;
+    sourceId: string;
+    entryKey: string;
+    entryType: string;
+    slug: string;
+    title: string;
+    provenance: string;
+    searchText: string;
+    visibility: string;
+    metadata: Record<string, unknown>;
+    body: Record<string, unknown>;
+    renderedHtml: string;
+    now: string;
+  },
+) {
+  const existing = database
+    .prepare("SELECT created_at FROM systems_entries WHERE library_slug = ? AND entry_key = ?")
+    .get(librarySlug, entryKey) as { created_at?: string } | undefined;
+  database
+    .prepare(
+      `
+        INSERT INTO systems_entries (
+          library_slug,
+          source_id,
+          entry_key,
+          entry_type,
+          slug,
+          title,
+          source_page,
+          source_path,
+          search_text,
+          player_safe_default,
+          dm_heavy,
+          metadata_json,
+          body_json,
+          rendered_html,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(library_slug, entry_key) DO UPDATE SET
+          source_id = excluded.source_id,
+          entry_type = excluded.entry_type,
+          slug = excluded.slug,
+          title = excluded.title,
+          source_page = excluded.source_page,
+          source_path = excluded.source_path,
+          search_text = excluded.search_text,
+          player_safe_default = excluded.player_safe_default,
+          dm_heavy = excluded.dm_heavy,
+          metadata_json = excluded.metadata_json,
+          body_json = excluded.body_json,
+          rendered_html = excluded.rendered_html,
+          updated_at = excluded.updated_at
+      `,
+    )
+    .run(
+      librarySlug,
+      sourceId,
+      entryKey,
+      entryType,
+      slug,
+      title,
+      provenance,
+      searchText,
+      visibility === "public" || visibility === "players" ? 1 : 0,
+      visibility === "dm" || visibility === "private" ? 1 : 0,
+      JSON.stringify(metadata),
+      JSON.stringify(body),
+      renderedHtml,
+      existing?.created_at || now,
+      now,
+    );
+}
+
+function upsertCampaignEntryOverrideForCustomEntry(
+  database: SqliteDatabase,
+  campaignSlug: string,
+  librarySlug: string,
+  entryKey: string,
+  visibilityOverride: string | null,
+  isEnabledOverride: boolean | null,
+  actorUserId: number,
+  now: string,
+): SystemsEntryOverride {
+  database
+    .prepare(
+      `
+        INSERT INTO campaign_entry_overrides (
+          campaign_slug,
+          library_slug,
+          entry_key,
+          visibility_override,
+          is_enabled_override,
+          updated_at,
+          updated_by_user_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(campaign_slug, entry_key) DO UPDATE SET
+          library_slug = excluded.library_slug,
+          visibility_override = excluded.visibility_override,
+          is_enabled_override = excluded.is_enabled_override,
+          updated_at = excluded.updated_at,
+          updated_by_user_id = excluded.updated_by_user_id
+      `,
+    )
+    .run(
+      campaignSlug,
+      librarySlug,
+      entryKey,
+      visibilityOverride,
+      isEnabledOverride === null ? null : isEnabledOverride ? 1 : 0,
+      now,
+      actorUserId,
+    );
+  return {
+    entry_key: entryKey,
+    visibility_override: visibilityOverride,
+    is_enabled_override: isEnabledOverride,
+    updated_at: now,
+    updated_by_user_id: actorUserId,
+  };
+}
+
+function insertCustomEntryAuditEvent(
+  database: SqliteDatabase,
+  actorUserId: number,
+  campaignSlug: string,
+  eventType: string,
+  entry: SystemsEntryRow,
+  now: string,
+) {
+  database
+    .prepare(
+      `
+        INSERT INTO auth_audit_log (
+          actor_user_id,
+          target_user_id,
+          campaign_slug,
+          character_slug,
+          event_type,
+          metadata_json,
+          created_at
+        )
+        VALUES (?, NULL, ?, NULL, ?, ?, ?)
+      `,
+    )
+    .run(
+      actorUserId,
+      campaignSlug,
+      eventType,
+      JSON.stringify({
+        entry_key: entry.entry_key,
+        entry_slug: entry.slug,
+        entry_type: eventType.endsWith("_created") || eventType.endsWith("_updated") ? entry.entry_type : undefined,
+        source: "api",
+      }),
+      now,
+    );
+}
+
+function loadPublishedItemPage(
+  database: SqliteDatabase,
+  campaignSlug: string,
+  pageRef: string,
+): CampaignItemPageContentRow | null {
+  if (!tableExists(database, "campaign_pages")) {
+    return null;
+  }
+  return (
+    (database
+      .prepare(
+        `
+          SELECT page_ref, title, metadata_json, body_markdown
+          FROM campaign_pages
+          WHERE campaign_slug = ?
+            AND page_ref = ?
+            AND section = 'Items'
+            AND published != 0
+        `,
+      )
+      .get(campaignSlug, pageRef) as CampaignItemPageContentRow | undefined) || null
+  );
+}
+
+function customSourceState(
+  database: SqliteDatabase,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  librarySlug: string,
+  sourceId: string,
+): SystemsSourceState | null {
+  const seeds = parseSourceSeeds(campaignConfig);
+  const sourceRow = loadSourceRows(database, campaign.slug, librarySlug).find((row) => row.source_id === sourceId);
+  return sourceRow ? serializeSourceState(sourceRow, seeds.get(sourceRow.source_id), role) : null;
+}
+
+function existingCustomEntryContext(
+  database: SqliteDatabase,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  librarySlug: string,
+  entrySlug: string,
+  invalidMessage: string,
+) {
+  const entry = loadEntryBySlug(database, librarySlug, String(entrySlug || "").trim());
+  if (!entry) {
+    return { status: "validation_error" as const, message: invalidMessage };
+  }
+  const sourceState = customSourceState(database, campaign, campaignConfig, role, librarySlug, entry.source_id);
+  if (!sourceState || sourceState.license_class !== "custom_campaign" || !isCampaignCustomEntry(campaign.slug, parseMetadata(entry))) {
+    return { status: "validation_error" as const, message: invalidMessage };
+  }
+  return { status: "ok" as const, entry, sourceState };
+}
+
+function ensureCustomCampaignSource(
+  database: SqliteDatabase,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  librarySlug: string,
+  actorUserId: number,
+  now: string,
+) {
+  const library = loadLibrary(database, librarySlug);
+  if (!library) {
+    return { status: "validation_error" as const, message: "That campaign does not have a systems library configured." };
+  }
+  const sourceId = customCampaignSourceId(campaign.slug);
+  upsertCustomCampaignSource(
+    database,
+    librarySlug,
+    sourceId,
+    `${campaign.title || campaign.slug} Custom Systems`,
+    now,
+  );
+  upsertCampaignSystemsPolicyForCustomEntry(database, campaign.slug, librarySlug, actorUserId, now);
+  insertCampaignEnabledSourceIfMissing(database, campaign, librarySlug, sourceId, actorUserId, now);
+  const sourceState = customSourceState(database, campaign, campaignConfig, role, librarySlug, sourceId);
+  if (!sourceState) {
+    return { status: "validation_error" as const, message: "The custom Systems source is no longer available." };
+  }
+  return { status: "ok" as const, sourceId, sourceState };
+}
+
+function prepareCustomEntryWrite(
+  database: SqliteDatabase,
+  campaign: CampaignViewModel,
+  librarySlug: string,
+  sourceState: SystemsSourceState,
+  sourceId: string,
+  actorUserId: number,
+  role: FixtureSystemsRole,
+  payload: Record<string, unknown>,
+  existingEntry: SystemsEntryRow | null,
+) {
+  const normalizedTitle = String(payload.title || "").trim();
+  if (!normalizedTitle) {
+    return { status: "validation_error" as const, message: "Custom Systems entries need a title." };
+  }
+  if (normalizedTitle.length > 200) {
+    return { status: "validation_error" as const, message: "Custom Systems entry titles must stay under 200 characters." };
+  }
+
+  const normalizedEntryType = normalizeEntryType(payload.entry_type);
+  if (!normalizedEntryType) {
+    return { status: "validation_error" as const, message: "Choose an entry type before saving this custom Systems entry." };
+  }
+
+  const requestedVisibility =
+    normalizeVisibilityChoice(payload.visibility) ||
+    normalizeVisibilityChoice(sourceState.default_visibility) ||
+    customEntryDefaultVisibility(campaign);
+  if (requestedVisibility === "private" && !canSetPrivateVisibility(role)) {
+    return { status: "validation_error" as const, message: "Private visibility is reserved for app admins." };
+  }
+  if (requestedVisibility === "public" && !sourceState.public_visibility_allowed) {
+    return {
+      status: "validation_error" as const,
+      message: `${sourceState.title} cannot be made public because that source is marked as non-public.`,
+    };
+  }
+
+  let normalizedProvenance = String(payload.provenance || "").trim();
+  if (normalizedProvenance.length > 500) {
+    return { status: "validation_error" as const, message: "Custom Systems provenance must stay under 500 characters." };
+  }
+  const normalizedSearchMetadata = String(payload.search_metadata || "").trim();
+  if (normalizedSearchMetadata.length > 4000) {
+    return {
+      status: "validation_error" as const,
+      message: "Custom Systems searchable metadata must stay under 4000 characters.",
+    };
+  }
+
+  let normalizedBodyMarkdown = String(payload.body_markdown || "").trim();
+  let normalizedSourcePageRef = String(payload.source_page_ref || "").trim();
+  let sourcePageMetadata: Record<string, unknown> = {};
+  if (normalizedSourcePageRef) {
+    if (normalizedSourcePageRef.length > 500) {
+      return { status: "validation_error" as const, message: "Linked item page references must stay under 500 characters." };
+    }
+    if (normalizedEntryType !== "item") {
+      return { status: "validation_error" as const, message: "Only item custom Systems entries can link item mechanics pages." };
+    }
+    const linkedPage = loadPublishedItemPage(database, campaign.slug, normalizedSourcePageRef);
+    if (!linkedPage) {
+      return { status: "validation_error" as const, message: "Choose a valid published item page before saving item mechanics." };
+    }
+    normalizedSourcePageRef = String(linkedPage.page_ref || "").trim();
+    sourcePageMetadata = asRecord(parseJsonValue(linkedPage.metadata_json, {}));
+    if (!normalizedBodyMarkdown) {
+      normalizedBodyMarkdown = String(linkedPage.body_markdown || "").trim();
+    }
+    if (!normalizedProvenance) {
+      normalizedProvenance = `Published item page: ${String(linkedPage.title || "").trim() || normalizedSourcePageRef}`;
+    }
+  }
+
+  if (!normalizedBodyMarkdown) {
+    return { status: "validation_error" as const, message: "Custom Systems entries need a rendered body." };
+  }
+  if (normalizedBodyMarkdown.length > 100_000) {
+    return { status: "validation_error" as const, message: "Custom Systems entry bodies must stay under 100,000 characters." };
+  }
+
+  const normalizedSlugLeaf = existingEntry
+    ? ""
+    : normalizeCustomSlugLeaf(payload.slug_leaf || normalizedTitle);
+  if (!existingEntry && !normalizedSlugLeaf) {
+    return { status: "validation_error" as const, message: "Choose a URL slug or title before saving a custom Systems entry." };
+  }
+
+  const slug = existingEntry ? existingEntry.slug : `${sourceId.toLowerCase()}-${normalizedSlugLeaf}`;
+  const entryKey = existingEntry
+    ? existingEntry.entry_key
+    : `${librarySlug.toLowerCase()}|custom|${campaign.slug}|${normalizedSlugLeaf}`;
+  const renderedHtml = renderCustomEntryMarkdown(normalizedBodyMarkdown);
+  const searchText = [normalizedTitle, normalizedEntryType, sourceId, normalizedProvenance, normalizedSearchMetadata]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  const metadata: Record<string, unknown> = {
+    custom_campaign_slug: campaign.slug,
+    provenance: normalizedProvenance,
+    search_metadata: normalizedSearchMetadata,
+    body_format: "markdown",
+    body_markdown: normalizedBodyMarkdown,
+    updated_by_user_id: actorUserId,
+  };
+  const body: Record<string, unknown> = {
+    markdown: normalizedBodyMarkdown,
+  };
+
+  if (normalizedEntryType === "item") {
+    const itemMetadata = buildCampaignItemMechanicsMetadata(
+      normalizedTitle,
+      normalizedSourcePageRef,
+      payload.item_mechanics_review_status || payload.mechanics_review_status,
+      payload.item_mechanics,
+      sourcePageMetadata,
+    );
+    Object.assign(metadata, itemMetadata);
+    body.item_mechanics = asRecord(itemMetadata.campaign_item_mechanics);
+  }
+
+  if (librarySlug.trim().toLowerCase() === "xianxia") {
+    stampXianxiaCustomEntryMetadata(metadata, body, normalizedEntryType, slug, normalizedTitle);
+  }
+
+  return {
+    status: "ok" as const,
+    entryKey,
+    entryType: normalizedEntryType,
+    slug,
+    title: normalizedTitle,
+    provenance: normalizedProvenance,
+    searchText,
+    visibility: requestedVisibility,
+    metadata,
+    body,
+    renderedHtml,
+  };
+}
+
+function serializeMutatedCustomEntry(
+  database: SqliteDatabase,
+  campaign: CampaignViewModel,
+  role: FixtureSystemsRole,
+  systemsScopeVisibility: string,
+  entry: SystemsEntryRow,
+  override: SystemsEntryOverride,
+  sourceState: SystemsSourceState,
+): SerializedCustomEntry {
+  const refreshedEntry = loadEntryBySlug(database, entry.library_slug, entry.slug) || entry;
+  return serializeCustomEntry(campaign, role, systemsScopeVisibility, refreshedEntry, override, sourceState);
+}
+
+function buildCustomEntryMutationResponse(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  entry: SerializedCustomEntry,
+): CustomSystemsEntryMutationResult {
+  return {
+    status: "ok",
+    entry,
+    systems: buildDmContentSystemsPayload(dbPath, campaign, campaignConfig, role),
+  };
+}
+
+function customEntryMutationErrorMessage(error: unknown): string {
+  if (isNoSuchTableError(error)) {
+    return "Systems database is unavailable.";
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function createCustomSystemsEntry(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  actorUserId: number,
+  payload: Record<string, unknown>,
+): CustomSystemsEntryMutationResult {
+  if (!existsSync(dbPath)) {
+    return { status: "validation_error", message: "Systems database is unavailable." };
+  }
+  const librarySlug = String(campaign.systems_library_slug || "").trim();
+  if (!librarySlug) {
+    return { status: "validation_error", message: "That campaign does not have a systems library configured." };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const now = utcIsoTimestamp();
+    let serializedEntry: SerializedCustomEntry | null = null;
+    const writeChanges = database.transaction(() => {
+      const source = ensureCustomCampaignSource(database, campaign, campaignConfig, role, librarySlug, actorUserId, now);
+      if (source.status === "validation_error") {
+        throw new Error(source.message);
+      }
+      const prepared = prepareCustomEntryWrite(
+        database,
+        campaign,
+        librarySlug,
+        source.sourceState,
+        source.sourceId,
+        actorUserId,
+        role,
+        payload,
+        null,
+      );
+      if (prepared.status === "validation_error") {
+        throw new Error(prepared.message);
+      }
+      if (loadEntryBySlug(database, librarySlug, prepared.slug)) {
+        throw new Error("That custom Systems entry slug is already in use.");
+      }
+      upsertCustomSystemsEntryRow(database, {
+        librarySlug,
+        sourceId: source.sourceId,
+        entryKey: prepared.entryKey,
+        entryType: prepared.entryType,
+        slug: prepared.slug,
+        title: prepared.title,
+        provenance: prepared.provenance,
+        searchText: prepared.searchText,
+        visibility: prepared.visibility,
+        metadata: prepared.metadata,
+        body: prepared.body,
+        renderedHtml: prepared.renderedHtml,
+        now,
+      });
+      const entry = loadEntryBySlug(database, librarySlug, prepared.slug);
+      if (!entry) {
+        throw new Error("Failed to reload custom Systems entry.");
+      }
+      const override = upsertCampaignEntryOverrideForCustomEntry(
+        database,
+        campaign.slug,
+        librarySlug,
+        entry.entry_key,
+        prepared.visibility,
+        null,
+        actorUserId,
+        now,
+      );
+      insertCustomEntryAuditEvent(database, actorUserId, campaign.slug, "campaign_systems_custom_entry_created", entry, now);
+      const systemsScopeVisibility = loadEffectiveSystemsScopeVisibility(database, campaign);
+      serializedEntry = serializeMutatedCustomEntry(database, campaign, role, systemsScopeVisibility, entry, override, source.sourceState);
+    });
+    try {
+      writeChanges();
+    } catch (error) {
+      return { status: "validation_error", message: customEntryMutationErrorMessage(error) };
+    }
+    return buildCustomEntryMutationResponse(dbPath, campaign, campaignConfig, role, serializedEntry!);
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return { status: "validation_error", message: "Systems database is unavailable." };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCustomSystemsEntry(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  actorUserId: number,
+  entrySlug: string,
+  payload: Record<string, unknown>,
+): CustomSystemsEntryMutationResult {
+  if (!existsSync(dbPath)) {
+    return { status: "validation_error", message: "Systems database is unavailable." };
+  }
+  const librarySlug = String(campaign.systems_library_slug || "").trim();
+  if (!librarySlug) {
+    return { status: "validation_error", message: "That campaign does not have a systems library configured." };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const context = existingCustomEntryContext(
+      database,
+      campaign,
+      campaignConfig,
+      role,
+      librarySlug,
+      entrySlug,
+      "Choose a valid custom Systems entry before saving.",
+    );
+    if (context.status === "validation_error") {
+      return context;
+    }
+    const now = utcIsoTimestamp();
+    let serializedEntry: SerializedCustomEntry | null = null;
+    const writeChanges = database.transaction(() => {
+      upsertCampaignSystemsPolicyForCustomEntry(database, campaign.slug, librarySlug, actorUserId, now);
+      const prepared = prepareCustomEntryWrite(
+        database,
+        campaign,
+        librarySlug,
+        context.sourceState,
+        context.entry.source_id,
+        actorUserId,
+        role,
+        payload,
+        context.entry,
+      );
+      if (prepared.status === "validation_error") {
+        throw new Error(prepared.message);
+      }
+      const existingSlugEntry = loadEntryBySlug(database, librarySlug, prepared.slug);
+      if (existingSlugEntry && existingSlugEntry.entry_key !== prepared.entryKey) {
+        throw new Error("That custom Systems entry slug is already in use.");
+      }
+      const existingOverride = loadCampaignEntryOverrides(database, campaign.slug, librarySlug).get(context.entry.entry_key);
+      upsertCustomSystemsEntryRow(database, {
+        librarySlug,
+        sourceId: context.entry.source_id,
+        entryKey: prepared.entryKey,
+        entryType: prepared.entryType,
+        slug: prepared.slug,
+        title: prepared.title,
+        provenance: prepared.provenance,
+        searchText: prepared.searchText,
+        visibility: prepared.visibility,
+        metadata: prepared.metadata,
+        body: prepared.body,
+        renderedHtml: prepared.renderedHtml,
+        now,
+      });
+      const entry = loadEntryBySlug(database, librarySlug, prepared.slug);
+      if (!entry) {
+        throw new Error("Failed to reload custom Systems entry.");
+      }
+      const override = upsertCampaignEntryOverrideForCustomEntry(
+        database,
+        campaign.slug,
+        librarySlug,
+        entry.entry_key,
+        prepared.visibility,
+        existingOverride?.is_enabled_override ?? null,
+        actorUserId,
+        now,
+      );
+      insertCustomEntryAuditEvent(database, actorUserId, campaign.slug, "campaign_systems_custom_entry_updated", entry, now);
+      const systemsScopeVisibility = loadEffectiveSystemsScopeVisibility(database, campaign);
+      serializedEntry = serializeMutatedCustomEntry(database, campaign, role, systemsScopeVisibility, entry, override, context.sourceState);
+    });
+    try {
+      writeChanges();
+    } catch (error) {
+      return { status: "validation_error", message: customEntryMutationErrorMessage(error) };
+    }
+    return buildCustomEntryMutationResponse(dbPath, campaign, campaignConfig, role, serializedEntry!);
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return { status: "validation_error", message: "Systems database is unavailable." };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+function setCustomSystemsEntryArchivedState(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  actorUserId: number,
+  entrySlug: string,
+  archived: boolean,
+): CustomSystemsEntryMutationResult {
+  if (!existsSync(dbPath)) {
+    return { status: "validation_error", message: "Systems database is unavailable." };
+  }
+  const librarySlug = String(campaign.systems_library_slug || "").trim();
+  if (!librarySlug) {
+    return { status: "validation_error", message: "That campaign does not have a systems library configured." };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const invalidMessage = archived
+      ? "Choose a valid custom Systems entry before archiving."
+      : "Choose a valid custom Systems entry before restoring.";
+    const context = existingCustomEntryContext(database, campaign, campaignConfig, role, librarySlug, entrySlug, invalidMessage);
+    if (context.status === "validation_error") {
+      return context;
+    }
+    const now = utcIsoTimestamp();
+    let serializedEntry: SerializedCustomEntry | null = null;
+    const writeChanges = database.transaction(() => {
+      upsertCampaignSystemsPolicyForCustomEntry(database, campaign.slug, librarySlug, actorUserId, now);
+      const existingOverride = loadCampaignEntryOverrides(database, campaign.slug, librarySlug).get(context.entry.entry_key);
+      const override = upsertCampaignEntryOverrideForCustomEntry(
+        database,
+        campaign.slug,
+        librarySlug,
+        context.entry.entry_key,
+        existingOverride?.visibility_override ?? null,
+        archived ? false : null,
+        actorUserId,
+        now,
+      );
+      insertCustomEntryAuditEvent(
+        database,
+        actorUserId,
+        campaign.slug,
+        archived ? "campaign_systems_custom_entry_archived" : "campaign_systems_custom_entry_restored",
+        context.entry,
+        now,
+      );
+      const systemsScopeVisibility = loadEffectiveSystemsScopeVisibility(database, campaign);
+      serializedEntry = serializeMutatedCustomEntry(
+        database,
+        campaign,
+        role,
+        systemsScopeVisibility,
+        context.entry,
+        override,
+        context.sourceState,
+      );
+    });
+    writeChanges();
+    return buildCustomEntryMutationResponse(dbPath, campaign, campaignConfig, role, serializedEntry!);
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return { status: "validation_error", message: "Systems database is unavailable." };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function archiveCustomSystemsEntry(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  actorUserId: number,
+  entrySlug: string,
+): CustomSystemsEntryMutationResult {
+  return setCustomSystemsEntryArchivedState(dbPath, campaign, campaignConfig, role, actorUserId, entrySlug, true);
+}
+
+export function restoreCustomSystemsEntry(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  actorUserId: number,
+  entrySlug: string,
+): CustomSystemsEntryMutationResult {
+  return setCustomSystemsEntryArchivedState(dbPath, campaign, campaignConfig, role, actorUserId, entrySlug, false);
 }
 
 function serializeImportRun(row: SystemsImportRunRow) {
