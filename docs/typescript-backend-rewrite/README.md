@@ -57,6 +57,7 @@ Route parity check command:
   - `GET /api/v1/app`
   - `GET /api/v1/systems/import-runs`
   - `GET /api/v1/systems/import-runs/:importRunId`
+  - `POST /api/v1/systems/imports/dnd5e`
   - `GET /api/v1/campaigns/:campaignSlug/systems`
   - `GET /api/v1/campaigns/:campaignSlug/systems/search`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources`
@@ -344,6 +345,13 @@ Route parity check command:
   missing-campaign JSON. Current validation covers a disposable fixture database only; production or
   staging write readiness remains gated by migration, backup, copied-data rehearsal, and rollback
   approval.
+- The shared DND-5E Systems import route now serves `POST /api/v1/systems/imports/dnd5e` for bearer
+  API-token app-admin actors against `CPW_DB_PATH`, preserving fixture-role write denial, source and
+  entry-type validation, `.zip` archive validation through a small pure-JS dependency, unsafe archive
+  path rejection, mechanics-only media stripping, `systems_import_runs` persistence, and source-row
+  replacement for the requested source/type slice. Current validation covers a disposable fixture
+  database only; production or staging import readiness remains gated by migration, backup,
+  copied-data rehearsal, and rollback approval.
 - The DM Content statblock and custom condition API mutations now serve bearer-token DM/admin
   create/update/delete routes against `CPW_DB_PATH`, preserving Flask-compatible durable-actor
   requirements, markdown statblock upload validation and parser field extraction, condition

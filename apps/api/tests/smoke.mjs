@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
+import { zipSync } from "fflate";
 import { parse as parseYaml } from "yaml";
 
 const DEFAULT_PORT = 39873;
@@ -13752,6 +13753,237 @@ if (missingContentPages.status !== 404 || missingContentPages.payload?.error?.co
 const missingContentCharacters = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/content/characters");
 if (missingContentCharacters.status !== 404 || missingContentCharacters.payload?.error?.code !== "campaign_not_found") {
   throw new Error(`Expected missing content characters campaign JSON 404, got ${missingContentCharacters.status}`);
+}
+
+const systemsImportMonsterArchive = Buffer.from(
+  zipSync({
+    "data/bestiary/bestiary-mm.json": Buffer.from(
+      JSON.stringify({
+        monster: [
+          {
+            name: "Goblin",
+            source: "MM",
+            page: 166,
+            size: ["S"],
+            type: { type: "humanoid", tags: ["goblinoid"] },
+            alignment: ["N", "E"],
+            ac: [{ ac: 15, from: ["leather armor", "shield"] }],
+            hp: { average: 7, formula: "2d6" },
+            speed: { walk: 30 },
+            str: 8,
+            dex: 14,
+            con: 10,
+            int: 10,
+            wis: 8,
+            cha: 8,
+            action: [
+              {
+                name: "Scimitar",
+                entries: [
+                  "{@atk mw} {@hit 4} to hit, reach 5 ft., one target. {@h}5 ({@damage 1d6 + 2}) slashing damage.",
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ),
+  }),
+);
+const systemsImportPayload = {
+  source_ids: ["MM"],
+  entry_types: ["monster"],
+  archive: {
+    filename: "mm-import.zip",
+    data_base64: systemsImportMonsterArchive.toString("base64"),
+  },
+};
+
+const blockedDndImport = await requestJson(
+  "/api/v1/systems/imports/dnd5e",
+  {},
+  { method: "POST", body: systemsImportPayload },
+);
+if (blockedDndImport.status !== 401 || blockedDndImport.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated DND import auth_required 401, got ${blockedDndImport.status} ${blockedDndImport.payload?.error?.code}`,
+  );
+}
+
+const fixtureDndImport = await requestJson(
+  "/api/v1/systems/imports/dnd5e",
+  { "X-CPW-Fixture-Role": "admin" },
+  { method: "POST", body: systemsImportPayload },
+);
+if (
+  fixtureDndImport.status !== 403 ||
+  fixtureDndImport.payload?.error?.message !== "DND 5E Systems imports require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture DND import write denial, got ${fixtureDndImport.status} ${fixtureDndImport.payload?.error?.message}`,
+  );
+}
+
+const playerDndImport = await requestJson(
+  "/api/v1/systems/imports/dnd5e",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: systemsImportPayload },
+);
+if (playerDndImport.status !== 403 || playerDndImport.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player DND import forbidden 403, got ${playerDndImport.status} ${playerDndImport.payload?.error?.code}`,
+  );
+}
+
+const adminDndImport = await requestJson(
+  "/api/v1/systems/imports/dnd5e",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: systemsImportPayload },
+);
+const dndImportResult = adminDndImport.payload?.import_results?.[0];
+const dndImportRun = adminDndImport.payload?.import_runs?.[0];
+if (
+  adminDndImport.status !== 200 ||
+  adminDndImport.payload?.ok !== true ||
+  dndImportResult?.source_id !== "MM" ||
+  dndImportResult?.import_version !== "mm-import" ||
+  dndImportResult?.imported_count !== 1 ||
+  dndImportResult?.imported_by_type?.monster !== 1 ||
+  dndImportResult?.source_files?.[0] !== "data/bestiary/bestiary-mm.json" ||
+  dndImportRun?.status !== "completed" ||
+  dndImportRun?.source_path !== "api-upload:mm-import.zip" ||
+  dndImportRun?.started_by_user_id !== 77 ||
+  dndImportRun?.summary?.imported_count !== 1
+) {
+  throw new Error(`Unexpected app-admin DND import payload: ${JSON.stringify(adminDndImport.payload)}`);
+}
+
+const dndImportRunsAfterWrite = await requestJson("/api/v1/systems/import-runs?source_id=MM", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (
+  dndImportRunsAfterWrite.status !== 200 ||
+  dndImportRunsAfterWrite.payload?.import_runs?.[0]?.id !== dndImportRun.id ||
+  dndImportRunsAfterWrite.payload?.import_runs?.[0]?.summary?.source_files?.[0] !== "data/bestiary/bestiary-mm.json"
+) {
+  throw new Error(`Expected new DND import run first, got ${JSON.stringify(dndImportRunsAfterWrite.payload)}`);
+}
+
+const dmMmCategoryAfterImport = await requestJson("/api/v1/campaigns/linden-pass/systems/sources/MM/types/monster", {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  dmMmCategoryAfterImport.status !== 200 ||
+  dmMmCategoryAfterImport.payload?.entry_count !== 1 ||
+  dmMmCategoryAfterImport.payload?.entries?.[0]?.title !== "Goblin" ||
+  dmMmCategoryAfterImport.payload?.entries?.[0]?.source_page !== "166" ||
+  dmMmCategoryAfterImport.payload?.entries?.[0]?.slug !== "mm-monster-goblin" ||
+  dmMmCategoryAfterImport.payload?.entries?.[0]?.entry_key !== "dnd-5e|monster|mm|goblin"
+) {
+  throw new Error(`Unexpected MM category after DND import: ${JSON.stringify(dmMmCategoryAfterImport.payload)}`);
+}
+
+const unsafeDndImportArchive = Buffer.from(
+  zipSync({
+    "../data/bestiary/bestiary-mm.json": Buffer.from("{}"),
+  }),
+);
+const unsafeDndImport = await requestJson(
+  "/api/v1/systems/imports/dnd5e",
+  { Authorization: `Bearer ${liveApiToken}` },
+  {
+    method: "POST",
+    body: {
+      ...systemsImportPayload,
+      archive: {
+        filename: "unsafe-mm-import.zip",
+        data_base64: unsafeDndImportArchive.toString("base64"),
+      },
+    },
+  },
+);
+if (
+  unsafeDndImport.status !== 400 ||
+  unsafeDndImport.payload?.error?.code !== "validation_error" ||
+  !String(unsafeDndImport.payload?.error?.message || "").includes("parent-relative paths")
+) {
+  throw new Error(`Expected unsafe DND import validation error, got ${JSON.stringify(unsafeDndImport.payload)}`);
+}
+
+const absolutePathDndImportArchive = Buffer.from(
+  zipSync({
+    "/data/bestiary/bestiary-mm.json": Buffer.from("{}"),
+  }),
+);
+const absolutePathDndImport = await requestJson(
+  "/api/v1/systems/imports/dnd5e",
+  { Authorization: `Bearer ${liveApiToken}` },
+  {
+    method: "POST",
+    body: {
+      ...systemsImportPayload,
+      archive: {
+        filename: "absolute-mm-import.zip",
+        data_base64: absolutePathDndImportArchive.toString("base64"),
+      },
+    },
+  },
+);
+if (
+  absolutePathDndImport.status !== 400 ||
+  absolutePathDndImport.payload?.error?.code !== "validation_error" ||
+  !String(absolutePathDndImport.payload?.error?.message || "").includes("absolute or parent-relative paths")
+) {
+  throw new Error(`Expected absolute-path DND import validation error, got ${JSON.stringify(absolutePathDndImport.payload)}`);
+}
+
+const malformedDndImportArchive = Buffer.from(
+  zipSync({
+    "data/bestiary/bestiary-mm.json": Buffer.from("{not-json"),
+  }),
+);
+const malformedDndImport = await requestJson(
+  "/api/v1/systems/imports/dnd5e",
+  { Authorization: `Bearer ${liveApiToken}` },
+  {
+    method: "POST",
+    body: {
+      ...systemsImportPayload,
+      archive: {
+        filename: "broken-mm-import.zip",
+        data_base64: malformedDndImportArchive.toString("base64"),
+      },
+    },
+  },
+);
+if (malformedDndImport.status !== 400 || malformedDndImport.payload?.error?.code !== "validation_error") {
+  throw new Error(`Expected malformed DND import validation error, got ${JSON.stringify(malformedDndImport.payload)}`);
+}
+
+const dndImportRunsAfterFailure = await requestJson("/api/v1/systems/import-runs?source_id=MM", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+const failedDndImportRun = dndImportRunsAfterFailure.payload?.import_runs?.[0];
+if (
+  dndImportRunsAfterFailure.status !== 200 ||
+  failedDndImportRun?.status !== "failed" ||
+  failedDndImportRun?.import_version !== "broken-mm-import" ||
+  failedDndImportRun?.source_path !== "api-upload:broken-mm-import.zip" ||
+  failedDndImportRun?.started_by_user_id !== 77 ||
+  !String(failedDndImportRun?.summary?.error || "").trim()
+) {
+  throw new Error(`Expected persisted failed DND import run, got ${JSON.stringify(dndImportRunsAfterFailure.payload)}`);
+}
+
+const dmMmCategoryAfterFailedImport = await requestJson("/api/v1/campaigns/linden-pass/systems/sources/MM/types/monster", {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  dmMmCategoryAfterFailedImport.status !== 200 ||
+  dmMmCategoryAfterFailedImport.payload?.entry_count !== 1 ||
+  dmMmCategoryAfterFailedImport.payload?.entries?.[0]?.entry_key !== "dnd-5e|monster|mm|goblin"
+) {
+  throw new Error(`Expected failed DND import to preserve MM monster row, got ${JSON.stringify(dmMmCategoryAfterFailedImport.payload)}`);
 }
 
 ensureStopped();

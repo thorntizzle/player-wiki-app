@@ -82,6 +82,7 @@ import {
   startSession,
   updateSessionArticle,
 } from "./session/view.js";
+import { importDnd5eSystemsArchive } from "./systems/dndImport.js";
 import { getSystemsImportRun, listSystemsImportRuns } from "./systems/importRuns.js";
 import {
   archiveCustomSystemsEntry,
@@ -1266,6 +1267,44 @@ app.get(ROUTES.systemsImportRun, async (ctx) => {
   return ctx.json({
     ok: true,
     import_run: importRun,
+  });
+});
+
+app.post(ROUTES.systemsDnd5eImport, async (ctx) => {
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "invalid") {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (apiAuth.kind !== "authenticated") {
+    if (fixtureRole(ctx)) {
+      const error = forbidden("DND 5E Systems imports require bearer API authentication.");
+      return ctx.json({ ok: error.ok, error: error.error }, error.status);
+    }
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (!apiAuth.context.user.is_admin) {
+    const error = forbidden("You do not have permission to use the admin API.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = importDnd5eSystemsArchive(config.dbPath, jsonPayload.payload, apiAuth.context.user.id);
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    import_results: result.import_results,
+    import_runs: result.import_runs,
   });
 });
 

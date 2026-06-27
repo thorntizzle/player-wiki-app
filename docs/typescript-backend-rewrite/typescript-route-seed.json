@@ -152,6 +152,15 @@
       "notes": "Tracked Hono systems import-run detail route with Flask-compatible unauthenticated auth_required behavior, fixture-admin reads, bearer API-token app-admin SQLite reads through CPW_DB_PATH, and explicit missing-resource JSON."
     },
     {
+      "method": "POST",
+      "path": "/api/v1/systems/imports/dnd5e",
+      "route_family": "api_v1_systems",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/systems/imports/dnd5e",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono DND-5E Systems import route with bearer API-token app-admin access, fixture-role write denial, pure-JS ZIP validation through fflate, source and entry-type validation, systems_import_runs persistence, source-row replacement, media-field stripping, and explicit validation envelopes."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/systems",
       "route_family": "api_v1_systems",

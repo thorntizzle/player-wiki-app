@@ -1621,6 +1621,14 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "campaign_not_found",
     },
   },
+  {
+    method: "POST",
+    honoPath: "/api/v1/systems/imports/dnd5e",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/systems/imports/dnd5e",
+    seedPath: "/api/v1/systems/imports/dnd5e",
+    routeFamily: "api_v1_systems",
+  },
 ];
 
 export const ROUTES = {
@@ -1732,4 +1740,5 @@ export const ROUTES = {
   systemsCustomEntryArchive: IMPLEMENTED_ROUTES[107].honoPath,
   systemsCustomEntryRestore: IMPLEMENTED_ROUTES[108].honoPath,
   systemsItemMechanicsImport: IMPLEMENTED_ROUTES[109].honoPath,
+  systemsDnd5eImport: IMPLEMENTED_ROUTES[110].honoPath,
 } as const;

@@ -17,6 +17,7 @@ fixture database.
 - Implemented `PATCH /api/v1/me/settings` with Flask-compatible unauthenticated auth failure, bearer-token user preference writes, theme/chat-order validation, retired frontend-mode rejection, and refreshed preference payloads.
 - Implemented `GET /api/v1/systems/import-runs` with Flask-compatible unauthenticated auth failure and fixture-admin SQLite reads.
 - Implemented `GET /api/v1/systems/import-runs/:importRunId` with the same auth gate, fixture-admin SQLite detail reads, and explicit missing-resource JSON.
+- Implemented `POST /api/v1/systems/imports/dnd5e` with bearer API-token app-admin writes, fixture-role write denial, `.zip` archive validation through a small pure-JS dependency, unsafe archive path rejection, source and entry-type validation, source-row replacement, media-field stripping, import-run persistence, and explicit validation envelopes.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/systems` with Flask-compatible unauthenticated auth failure, fixture-role source cards, entry search, and rules-reference metadata search fields.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/systems/search` as the Flask-compatible search alias sharing the Systems landing payload contract.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/systems/sources` with Flask-compatible unauthenticated auth failure, fixture-role source filtering, campaign YAML source defaults, and SQLite library/source reads.
