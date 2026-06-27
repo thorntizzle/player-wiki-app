@@ -132,6 +132,7 @@ import {
   buildDndCharacterCreateContext,
   buildDndCreateCharacter,
   buildXianxiaCreateCharacter,
+  listXianxiaCultivationGenericTechniqueRows,
   listXianxiaCultivationMartialArtRows,
   listXianxiaCreateGenericTechniqueOptions,
   buildXianxiaManualImportCharacter,
@@ -6164,6 +6165,7 @@ app.post(ROUTES.characterCultivation, async (ctx) => {
   const configRecord = await getCampaignConfigFile(config, campaign.slug);
   const campaignConfig = configRecord?.config || {};
   const cultivationAction = applyCharacterCultivationAction(character.definition, jsonPayload.payload, {
+    genericTechniqueRows: listXianxiaCultivationGenericTechniqueRows(config.dbPath, campaign, campaignConfig),
     martialArtRows: listXianxiaCultivationMartialArtRows(config.dbPath, campaign, campaignConfig),
   });
   if (cultivationAction.status === "validation_error") {

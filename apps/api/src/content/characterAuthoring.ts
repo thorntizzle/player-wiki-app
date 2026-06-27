@@ -331,6 +331,7 @@ export type CharacterCultivationActionApplyResult =
 
 interface CharacterCultivationActionContext {
   martialArtRows?: SystemsEntryRow[];
+  genericTechniqueRows?: SystemsEntryRow[];
 }
 
 function normalizeSystemKey(value: unknown): string {
@@ -482,6 +483,9 @@ export function applyCharacterCultivationAction(
   }
   if (action === "advance_martial_art_rank") {
     return applyXianxiaMartialArtRankAction(definition, values, context.martialArtRows || []);
+  }
+  if (action === "learn_generic_technique") {
+    return applyXianxiaGenericTechniqueAction(definition, values, context.genericTechniqueRows || []);
   }
   return {
     status: "validation_error",
@@ -670,6 +674,27 @@ function applyXianxiaMartialArtRankAction(
     definition: result.definition,
     message: `Spent ${result.insightCost} Insight to advance ${result.martialArtName} to ${result.rankName}.`,
     anchor: "xianxia-cultivation-martial-arts",
+  };
+}
+
+function applyXianxiaGenericTechniqueAction(
+  definition: Record<string, unknown>,
+  values: Record<string, string>,
+  genericTechniqueRows: SystemsEntryRow[],
+): CharacterCultivationActionApplyResult {
+  const result = learnXianxiaGenericTechniqueDefinition(definition, {
+    genericTechniqueEntryKey: values.generic_technique_entry_key,
+    notes: collapseWhitespace(values.generic_technique_notes),
+    genericTechniqueRows,
+  });
+  if (result.status === "validation_error") {
+    return { status: "validation_error", message: result.message };
+  }
+  return {
+    status: "ok",
+    definition: result.definition,
+    message: `Spent ${result.insightCost} Insight to learn ${result.techniqueName}.`,
+    anchor: "xianxia-cultivation-techniques",
   };
 }
 
@@ -1330,6 +1355,111 @@ function advanceXianxiaMartialArtRankDefinition(
   xianxia.advancement_history = history;
   nextDefinition.xianxia = xianxia;
   return { status: "ok", definition: nextDefinition, insightCost, martialArtName, rankName };
+}
+
+function learnXianxiaGenericTechniqueDefinition(
+  definition: Record<string, unknown>,
+  payload: {
+    genericTechniqueEntryKey: unknown;
+    notes: string;
+    genericTechniqueRows: SystemsEntryRow[];
+  },
+):
+  | {
+      status: "ok";
+      definition: Record<string, unknown>;
+      techniqueName: string;
+      insightCost: number;
+    }
+  | { status: "validation_error"; message: string } {
+  const entryKey = String(payload.genericTechniqueEntryKey || "").trim();
+  if (!entryKey) {
+    return { status: "validation_error", message: "Choose a Generic Technique to learn." };
+  }
+  if (payload.genericTechniqueRows.length === 0) {
+    return { status: "validation_error", message: "Generic Technique catalog is unavailable." };
+  }
+
+  const row = payload.genericTechniqueRows.find((candidate) => String(candidate.entry_key || "").trim() === entryKey) || null;
+  const option = row ? buildXianxiaGenericTechniqueRecord(row) : null;
+  if (!option) {
+    return { status: "validation_error", message: "Choose an available Generic Technique to learn." };
+  }
+  const genericTechniqueKey = normalizeGenericTechniqueKey(option.generic_technique_key);
+  if (XIANXIA_DIRECT_ADVANCEMENT_GENERIC_TECHNIQUE_KEYS.has(genericTechniqueKey)) {
+    return {
+      status: "validation_error",
+      message: `Use the dedicated ${option.name} spend form for this Insight spend.`,
+    };
+  }
+  const insightCost = nonNegativeLooseInt(option.insight_cost, 0);
+  if (insightCost <= 0) {
+    return { status: "validation_error", message: `${option.name} does not have a positive Insight cost.` };
+  }
+
+  const knownMarkers = xianxiaKnownGenericTechniqueMarkers(definition);
+  if (xianxiaGenericTechniqueRecordIsKnown(option, knownMarkers)) {
+    return { status: "validation_error", message: `${option.name} is already learned.` };
+  }
+
+  const nextDefinition = deepCloneRecord(definition);
+  const xianxia = asRecord(nextDefinition.xianxia);
+  const insight = asRecord(xianxia.insight);
+  const available = nonNegativeLooseInt(insight.available, 0);
+  const spent = nonNegativeLooseInt(insight.spent, 0);
+  if (available < insightCost) {
+    return {
+      status: "validation_error",
+      message: `${option.name} needs ${insightCost} Insight to learn; only ${available} available.`,
+    };
+  }
+
+  const genericTechniques = asArray(xianxia.generic_techniques)
+    .map(asRecord)
+    .filter((record) => Object.keys(record).length > 0)
+    .map((record) => ({ ...record }));
+  const learnedRecord: Record<string, unknown> = {
+    name: option.name,
+    systems_ref: { ...option.systems_ref },
+    generic_technique_key: genericTechniqueKey,
+    insight_spent: insightCost,
+    support_state: String(option.support_state || "").trim(),
+    learnable_without_master: Boolean(option.learnable_without_master),
+    requires_master: Boolean(option.requires_master),
+  };
+  if (payload.notes) {
+    learnedRecord.notes = payload.notes;
+  }
+  genericTechniques.push(learnedRecord);
+
+  const history = asArray(xianxia.advancement_history)
+    .map(asRecord)
+    .filter((record) => Object.keys(record).length > 0)
+    .map((record) => ({ ...record }));
+  const historyRow: Record<string, unknown> = {
+    action: "generic_technique_learned",
+    amount: insightCost,
+    target: option.name,
+    generic_technique_key: genericTechniqueKey,
+    systems_ref: { ...option.systems_ref },
+    insight_cost: insightCost,
+  };
+  if (payload.notes) {
+    historyRow.notes = payload.notes;
+  }
+  history.push(historyRow);
+
+  xianxia.generic_techniques = genericTechniques;
+  xianxia.insight = { available: available - insightCost, spent: spent + insightCost };
+  xianxia.advancement_history = history;
+  nextDefinition.xianxia = xianxia;
+
+  return {
+    status: "ok",
+    definition: nextDefinition,
+    techniqueName: option.name,
+    insightCost,
+  };
 }
 
 function recordXianxiaGatheringInsightDefinition(
@@ -3276,7 +3406,10 @@ function xianxiaGenericTechniqueSortOrder(metadata: Record<string, unknown>, tec
   return Number.isFinite(parsed) ? Math.trunc(parsed) : 10000;
 }
 
-function buildXianxiaGenericTechniqueOption(row: SystemsEntryRow, selectedEntryKeys: Set<string>) {
+function buildXianxiaGenericTechniqueRecord(row: SystemsEntryRow) {
+  if (String(row.entry_type || "").trim().toLowerCase() !== "generic_technique") {
+    return null;
+  }
   const metadata = parseJsonRecord(row.metadata_json);
   const body = parseJsonRecord(row.body_json);
   const techniqueBody = asRecord(body.xianxia_generic_technique);
@@ -3284,20 +3417,13 @@ function buildXianxiaGenericTechniqueOption(row: SystemsEntryRow, selectedEntryK
     firstPresent(metadata.generic_technique_key, metadata.xianxia_generic_technique_key, techniqueBody.key),
   );
   const entryKey = String(row.entry_key || "").trim();
-  if (!entryKey || !genericTechniqueKey || XIANXIA_DIRECT_ADVANCEMENT_GENERIC_TECHNIQUE_KEYS.has(genericTechniqueKey)) {
+  if (!entryKey || !genericTechniqueKey) {
     return null;
   }
 
   const insightCost = Math.max(0, Number.parseInt(String(firstPresent(metadata.insight_cost, techniqueBody.insight_cost) || "0"), 10) || 0);
-  if (insightCost <= 0) {
-    return null;
-  }
   const name = String(row.title || "").trim() || "Generic Technique";
   const slug = String(row.slug || "").trim();
-  const selected = [entryKey, slug, genericTechniqueKey, name]
-    .map((value) => String(value || "").trim().toLowerCase())
-    .filter(Boolean)
-    .some((value) => selectedEntryKeys.has(value));
 
   return {
     name,
@@ -3328,37 +3454,107 @@ function buildXianxiaGenericTechniqueOption(row: SystemsEntryRow, selectedEntryK
     learnable_without_master: truthy(firstPresent(metadata.learnable_without_master, techniqueBody.learnable_without_master)),
     requires_master: truthy(firstPresent(metadata.requires_master, techniqueBody.requires_master)),
     sort_order: xianxiaGenericTechniqueSortOrder(metadata, techniqueBody),
+  };
+}
+
+function buildXianxiaGenericTechniqueOption(row: SystemsEntryRow, selectedEntryKeys: Set<string>) {
+  const option = buildXianxiaGenericTechniqueRecord(row);
+  if (!option || XIANXIA_DIRECT_ADVANCEMENT_GENERIC_TECHNIQUE_KEYS.has(option.generic_technique_key) || option.insight_cost <= 0) {
+    return null;
+  }
+  const selected = [option.entry_key, option.systems_ref.slug, option.generic_technique_key, option.name]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean)
+    .some((value) => selectedEntryKeys.has(value));
+
+  return {
+    ...option,
     selected,
   };
 }
 
-export function xianxiaKnownGenericTechniqueOptionKeys(definition: Record<string, unknown>): string[] {
-  const markers = new Set<string>();
+function xianxiaKnownGenericTechniqueMarkers(definition: Record<string, unknown>) {
+  const markers = {
+    entryKeys: new Set<string>(),
+    slugs: new Set<string>(),
+    keys: new Set<string>(),
+    names: new Set<string>(),
+  };
   for (const rawTechnique of asArray(asRecord(definition.xianxia).generic_techniques)) {
     const technique = asRecord(rawTechnique);
     const systemsRef = asRecord(technique.systems_ref);
-    for (const value of [
-      technique.entry_key,
-      systemsRef.entry_key,
-      technique.slug,
-      systemsRef.slug,
-      technique.name,
-      technique.title,
-      systemsRef.title,
-    ]) {
-      const normalized = String(value || "").trim().toLowerCase();
-      if (normalized) {
-        markers.add(normalized);
-      }
+    const entryKey = String(firstPresent(systemsRef.entry_key, technique.entry_key) || "").trim().toLowerCase();
+    if (entryKey) {
+      markers.entryKeys.add(entryKey);
+    }
+    const slug = String(firstPresent(systemsRef.slug, technique.slug) || "").trim().toLowerCase();
+    if (slug) {
+      markers.slugs.add(slug);
     }
     const genericTechniqueKey = normalizeGenericTechniqueKey(
       firstPresent(technique.generic_technique_key, technique.technique_key, systemsRef.slug),
     );
     if (genericTechniqueKey) {
-      markers.add(genericTechniqueKey);
+      markers.keys.add(genericTechniqueKey);
+    }
+    const name = String(firstPresent(technique.name, technique.title, systemsRef.title) || "").trim().toLowerCase();
+    if (name) {
+      markers.names.add(name);
     }
   }
-  return [...markers];
+  return markers;
+}
+
+function xianxiaGenericTechniqueRecordIsKnown(
+  option: NonNullable<ReturnType<typeof buildXianxiaGenericTechniqueRecord>>,
+  knownMarkers: ReturnType<typeof xianxiaKnownGenericTechniqueMarkers>,
+): boolean {
+  const entryKey = String(firstPresent(option.systems_ref.entry_key, option.entry_key) || "").trim().toLowerCase();
+  if (entryKey && knownMarkers.entryKeys.has(entryKey)) {
+    return true;
+  }
+  const slug = String(option.systems_ref.slug || "").trim().toLowerCase();
+  if (slug && knownMarkers.slugs.has(slug)) {
+    return true;
+  }
+  const genericTechniqueKey = normalizeGenericTechniqueKey(firstPresent(option.generic_technique_key, slug));
+  if (genericTechniqueKey && knownMarkers.keys.has(genericTechniqueKey)) {
+    return true;
+  }
+  const name = String(option.name || "").trim().toLowerCase();
+  return Boolean(name && knownMarkers.names.has(name));
+}
+
+export function xianxiaKnownGenericTechniqueOptionKeys(definition: Record<string, unknown>): string[] {
+  const markers = xianxiaKnownGenericTechniqueMarkers(definition);
+  return [
+    ...markers.entryKeys,
+    ...markers.slugs,
+    ...markers.keys,
+    ...markers.names,
+  ];
+}
+
+export function listXianxiaCultivationGenericTechniqueRows(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+): SystemsEntryRow[] {
+  if (!campaign.systems_library_slug || !existsSync(dbPath)) {
+    return [];
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    return loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "generic_technique").filter((row) => row.is_enabled_override !== 0);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("no such table")) {
+      return [];
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
 }
 
 export function listXianxiaManualImportMartialArtOptions(

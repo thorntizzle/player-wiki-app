@@ -409,6 +409,25 @@ def _seed_xianxia_generic_techniques(db_path: Path) -> None:
                 {"xianxia_martial_art": {"style": "Open hand"}},
             ),
             (
+                "XIA:generic_technique:cultivation",
+                "xia-generic-technique-cultivation",
+                "Cultivation",
+                "generic_technique",
+                {
+                    "generic_technique_catalog_order": 6,
+                    "generic_technique_key": "cultivation",
+                    "insight_cost": 1,
+                    "support_state": "supported",
+                },
+                {
+                    "xianxia_generic_technique": {
+                        "key": "cultivation",
+                        "insight_cost": 1,
+                        "resource_costs": ["1 Insight"],
+                    }
+                },
+            ),
+            (
                 "XIA:generic_technique:qi-blast",
                 "xia-generic-technique-qi-blast",
                 "Qi Blast",
@@ -427,6 +446,30 @@ def _seed_xianxia_generic_techniques(db_path: Path) -> None:
                         "range_tags": ["ranged"],
                         "effort_tags": ["magic"],
                         "reset_cadence": "scene",
+                    }
+                },
+            ),
+            (
+                "XIA:generic_technique:meteor-step",
+                "xia-generic-technique-meteor-step",
+                "Meteor Step",
+                "generic_technique",
+                {
+                    "generic_technique_catalog_order": 8,
+                    "generic_technique_key": "meteor_step",
+                    "insight_cost": 2,
+                    "support_state": "supported",
+                    "learnable_without_master": True,
+                },
+                {
+                    "xianxia_generic_technique": {
+                        "key": "meteor_step",
+                        "insight_cost": 2,
+                        "resource_costs": ["1 Qi"],
+                        "range_tags": ["movement"],
+                        "effort_tags": ["basic"],
+                        "learnable_without_master": True,
+                        "requires_master": False,
                     }
                 },
             ),
@@ -1967,7 +2010,19 @@ def test_typescript_character_cultivation_context_shell_and_supported_xianxia_co
     )
     option_keys = {option["generic_technique_key"] for option in cultivation["generic_technique_options"]}
     assert "qi_blast" not in option_keys
+    assert "cultivation" not in option_keys
+    assert "meteor_step" in option_keys
     assert "enhanced_flowing_dao" in option_keys
+    meteor_option = next(
+        option
+        for option in cultivation["generic_technique_options"]
+        if option["generic_technique_key"] == "meteor_step"
+    )
+    assert meteor_option["href"] == (
+        "/app-next/campaigns/linden-pass/systems/entries/xia-generic-technique-meteor-step"
+    )
+    assert meteor_option["shortfall"] == 2
+    assert meteor_option["learnable_without_master"] is True
     enhanced_option = next(
         option
         for option in cultivation["generic_technique_options"]
@@ -2715,6 +2770,152 @@ def test_typescript_character_cultivation_context_shell_and_supported_xianxia_co
         "energy_maximum_increases": {"jing": 1, "qi": 0, "shen": 0},
         "rank_ref": "systems:xia-cloud-palm:novice",
         "systems_ref": learned_art["systems_ref"],
+    }
+
+    missing_generic_technique_status, missing_generic_technique_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 18,
+            "cultivation_action": "learn_generic_technique",
+        },
+    )
+    assert missing_generic_technique_status == 400
+    assert missing_generic_technique_payload["error"]["code"] == "validation_error"
+    assert missing_generic_technique_payload["error"]["message"] == "Choose a Generic Technique to learn."
+
+    unknown_generic_technique_status, unknown_generic_technique_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 18,
+            "cultivation_action": "learn_generic_technique",
+            "generic_technique_entry_key": "XIA:generic_technique:unknown",
+        },
+    )
+    assert unknown_generic_technique_status == 400
+    assert unknown_generic_technique_payload["error"]["code"] == "validation_error"
+    assert unknown_generic_technique_payload["error"]["message"] == "Choose an available Generic Technique to learn."
+
+    duplicate_generic_technique_status, duplicate_generic_technique_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 18,
+            "cultivation_action": "learn_generic_technique",
+            "generic_technique_entry_key": "XIA:generic_technique:qi-blast",
+        },
+    )
+    assert duplicate_generic_technique_status == 400
+    assert duplicate_generic_technique_payload["error"]["code"] == "validation_error"
+    assert duplicate_generic_technique_payload["error"]["message"] == "Qi Blast is already learned."
+
+    direct_generic_technique_status, direct_generic_technique_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 18,
+            "cultivation_action": "learn_generic_technique",
+            "generic_technique_entry_key": "XIA:generic_technique:cultivation",
+        },
+    )
+    assert direct_generic_technique_status == 400
+    assert direct_generic_technique_payload["error"]["code"] == "validation_error"
+    assert (
+        direct_generic_technique_payload["error"]["message"]
+        == "Use the dedicated Cultivation spend form for this Insight spend."
+    )
+
+    insufficient_generic_technique_status, insufficient_generic_technique_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 18,
+            "cultivation_action": "learn_generic_technique",
+            "generic_technique_entry_key": "XIA:generic_technique:meteor-step",
+        },
+    )
+    assert insufficient_generic_technique_status == 400
+    assert insufficient_generic_technique_payload["error"]["code"] == "validation_error"
+    assert (
+        insufficient_generic_technique_payload["error"]["message"]
+        == "Meteor Step needs 2 Insight to learn; only 0 available."
+    )
+
+    restore_generic_technique_insight_status, restore_generic_technique_insight_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 18,
+            "action": "save_insight",
+            "values": {"insight_available": "2", "insight_spent": "8"},
+        },
+    )
+    assert restore_generic_technique_insight_status == 200
+    assert restore_generic_technique_insight_payload["character"]["state_record"]["revision"] == initial_revision + 19
+
+    generic_technique_status, generic_technique_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 19,
+            "action": "learn_generic_technique",
+            "values": {
+                "generic_technique_entry_key": "XIA:generic_technique:meteor-step",
+                "generic_technique_notes": "  Stepped   through\n falling\tlight.  ",
+            },
+        },
+    )
+    assert generic_technique_status == 200
+    assert generic_technique_payload["ok"] is True
+    assert generic_technique_payload["message"] == "Spent 2 Insight to learn Meteor Step."
+    assert generic_technique_payload["anchor"] == "xianxia-cultivation-techniques"
+    assert generic_technique_payload["character"]["state_record"]["revision"] == initial_revision + 20
+    generic_technique_xianxia = generic_technique_payload["character"]["definition"]["xianxia"]
+    assert generic_technique_xianxia["insight"] == {"available": 0, "spent": 10}
+    learned_technique = generic_technique_xianxia["generic_techniques"][-1]
+    assert learned_technique == {
+        "name": "Meteor Step",
+        "systems_ref": {
+            "library_slug": "Xianxia",
+            "source_id": "XIA",
+            "entry_key": "XIA:generic_technique:meteor-step",
+            "slug": "xia-generic-technique-meteor-step",
+            "title": "Meteor Step",
+            "entry_type": "generic_technique",
+        },
+        "generic_technique_key": "meteor_step",
+        "insight_spent": 2,
+        "support_state": "supported",
+        "learnable_without_master": True,
+        "requires_master": False,
+        "notes": "Stepped through falling light.",
+    }
+    refreshed_option_keys = {
+        option["generic_technique_key"]
+        for option in generic_technique_payload["cultivation"]["generic_technique_options"]
+    }
+    assert "meteor_step" not in refreshed_option_keys
+    assert generic_technique_payload["character"]["state_record"]["state"]["xianxia"]["energies"] == {
+        "jing": {"current": 1},
+        "qi": {"current": 1},
+        "shen": {"current": 1},
+    }
+    assert generic_technique_xianxia["advancement_history"][-1] == {
+        "action": "generic_technique_learned",
+        "amount": 2,
+        "target": "Meteor Step",
+        "generic_technique_key": "meteor_step",
+        "systems_ref": learned_technique["systems_ref"],
+        "insight_cost": 2,
+        "notes": "Stepped through falling light.",
     }
 
     cap_character_slug = "api-cultivation-cap"
