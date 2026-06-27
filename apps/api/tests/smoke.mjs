@@ -611,6 +611,11 @@ smokeDb
     "INSERT INTO systems_libraries (library_slug, title, system_code, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
   )
   .run("DND-5E", "DND 5E", "DND-5E", "active", "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+smokeDb
+  .prepare(
+    "INSERT INTO systems_libraries (library_slug, title, system_code, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+  .run("Xianxia", "Xianxia", "Xianxia", "active", "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 const insertSource = smokeDb.prepare(`
   INSERT INTO systems_sources (
     library_slug,
@@ -628,11 +633,17 @@ const insertSource = smokeDb.prepare(`
 insertSource.run("DND-5E", "PHB", "Player's Handbook", "proprietary_private", 0, 1, "active", "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertSource.run("DND-5E", "MM", "Monster Manual", "proprietary_private", 0, 1, "active", "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertSource.run("DND-5E", "XGE", "Xanathar's Guide to Everything", "proprietary_private", 0, 1, "active", "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+insertSource.run("Xianxia", "XIA", "Xianxia Arts", "proprietary_private", 0, 1, "active", "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 smokeDb
   .prepare(
     "INSERT INTO campaign_enabled_sources (campaign_slug, library_slug, source_id, is_enabled, default_visibility, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
   )
   .run("linden-pass", "DND-5E", "XGE", 0, "players", "2026-06-25T09:30:00+00:00", 42);
+smokeDb
+  .prepare(
+    "INSERT INTO campaign_enabled_sources (campaign_slug, library_slug, source_id, is_enabled, default_visibility, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run("linden-pass", "Xianxia", "XIA", 1, "dm", "2026-06-25T09:31:00+00:00", 42);
 const insertEntry = smokeDb.prepare(`
   INSERT INTO systems_entries (
     library_slug,
@@ -651,6 +662,32 @@ insertEntry.run("DND-5E", "PHB", "PHB:spell:mage-hand", "spell", "phb-spell-mage
 insertEntry.run("DND-5E", "PHB", "PHB:item:chain-mail", "item", "phb-item-chain-mail", "Chain Mail", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("DND-5E", "PHB", "PHB:item:profiled-blade", "item", "phb-item-profiled-blade", "Profiled Blade", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("DND-5E", "MM", "MM:monster:goblin", "monster", "mm-monster-goblin", "Goblin", 0, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+insertEntry.run("Xianxia", "XIA", "XIA:martial_art:cloud-palm", "martial_art", "xia-martial-art-cloud-palm", "Cloud Palm", 0, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+smokeDb
+  .prepare(
+    `
+      UPDATE systems_entries
+      SET
+        metadata_json = ?,
+        body_json = ?
+      WHERE library_slug = ?
+        AND entry_key = ?
+    `,
+  )
+  .run(
+    JSON.stringify({
+      martial_art_catalog_order: 5,
+      xianxia_martial_art_style: "Open hand",
+      xianxia_martial_art_rank_records: [
+        { rank_key: "initiate", rank_ref: "systems:xia-cloud-palm:initiate" },
+        { rank_key: "novice", rank_ref: "systems:xia-cloud-palm:novice" },
+        { rank_key: "master", rank_ref: "systems:xia-cloud-palm:master" },
+      ],
+    }),
+    JSON.stringify({ xianxia_martial_art: { style: "Open hand" } }),
+    "Xianxia",
+    "XIA:martial_art:cloud-palm",
+  );
 smokeDb
   .prepare(
     `
@@ -8436,6 +8473,57 @@ if (
   );
 }
 
+const xianxiaManualImportPath = "/api/v1/campaigns/linden-pass/characters/import/xianxia-manual";
+const anonymousXianxiaManualImportContext = await requestJson(xianxiaManualImportPath);
+if (
+  anonymousXianxiaManualImportContext.status !== 401 ||
+  anonymousXianxiaManualImportContext.payload?.error?.code !== "auth_required"
+) {
+  throw new Error(
+    `Expected anonymous Xianxia manual import context auth_required, got ${anonymousXianxiaManualImportContext.status} ${JSON.stringify(anonymousXianxiaManualImportContext.payload)}`,
+  );
+}
+
+const playerXianxiaManualImportContext = await requestJson(xianxiaManualImportPath, {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (
+  playerXianxiaManualImportContext.status !== 403 ||
+  playerXianxiaManualImportContext.payload?.error?.code !== "forbidden" ||
+  playerXianxiaManualImportContext.payload?.error?.message !== "You do not have permission to create characters in this campaign."
+) {
+  throw new Error(
+    `Expected player Xianxia manual import context forbidden, got ${playerXianxiaManualImportContext.status} ${JSON.stringify(playerXianxiaManualImportContext.payload)}`,
+  );
+}
+
+const dndXianxiaManualImportContext = await requestJson(xianxiaManualImportPath, {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  dndXianxiaManualImportContext.status !== 400 ||
+  dndXianxiaManualImportContext.payload?.error?.code !== "unsupported_campaign_system" ||
+  dndXianxiaManualImportContext.payload?.error?.message !==
+    "Manual Xianxia character import is only available for Xianxia campaigns."
+) {
+  throw new Error(
+    `Expected DND Xianxia manual import context unsupported, got ${dndXianxiaManualImportContext.status} ${JSON.stringify(dndXianxiaManualImportContext.payload)}`,
+  );
+}
+
+const missingCampaignXianxiaManualImportContext = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/characters/import/xianxia-manual",
+  { Authorization: `Bearer ${dmApiToken}` },
+);
+if (
+  missingCampaignXianxiaManualImportContext.status !== 404 ||
+  missingCampaignXianxiaManualImportContext.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing campaign Xianxia manual import context 404, got ${missingCampaignXianxiaManualImportContext.status} ${JSON.stringify(missingCampaignXianxiaManualImportContext.payload)}`,
+  );
+}
+
 const xianxiaContentConfigPatch = await requestJson(
   "/api/v1/campaigns/linden-pass/content/config",
   bearerContentManagerHeaders,
@@ -8447,6 +8535,45 @@ if (
   xianxiaContentConfigPatch.payload?.config_file?.config?.systems_library !== "Xianxia"
 ) {
   throw new Error(`Expected Xianxia content config before character state smoke, got ${JSON.stringify(xianxiaContentConfigPatch.payload)}`);
+}
+
+const xianxiaManualImportContext = await requestJson(
+  `${xianxiaManualImportPath}?name=Lin%20Mei&realm=Immortal&attribute_str=5&effort_magic=4&energy_jing_max=7&martial_art_1_slug=xia-martial-art-cloud-palm&martial_art_1_rank=master&martial_art_4_name=Loose%20Crescent&martial_art_4_rank=legendary`,
+  { Authorization: `Bearer ${dmApiToken}` },
+);
+const xianxiaImportContext = xianxiaManualImportContext.payload?.import_context;
+const cloudPalmOption = xianxiaImportContext?.martial_art_options?.find(
+  (option) => option?.slug === "xia-martial-art-cloud-palm",
+);
+if (
+  xianxiaManualImportContext.status !== 200 ||
+  xianxiaManualImportContext.payload?.ok !== true ||
+  xianxiaManualImportContext.payload?.campaign?.slug !== "linden-pass" ||
+  xianxiaManualImportContext.payload?.lane !== "xianxia" ||
+  xianxiaManualImportContext.payload?.links?.gen2_import_xianxia_url !==
+    "/app-next/campaigns/linden-pass/characters/import/xianxia-manual" ||
+  xianxiaImportContext?.values?.name !== "Lin Mei" ||
+  xianxiaImportContext?.values?.attribute_str !== "5" ||
+  xianxiaImportContext?.values?.martial_art_4_name !== "Loose Crescent" ||
+  xianxiaImportContext?.attribute_fields?.find((field) => field?.key === "str")?.value !== "5" ||
+  xianxiaImportContext?.effort_fields?.find((field) => field?.key === "magic")?.value !== "4" ||
+  xianxiaImportContext?.energy_fields?.find((field) => field?.key === "jing")?.max_value !== "7" ||
+  xianxiaImportContext?.martial_art_rows?.length !== 4 ||
+  xianxiaImportContext?.martial_art_rows?.[0]?.selected_slug !== "xia-martial-art-cloud-palm" ||
+  xianxiaImportContext?.martial_art_rows?.[3]?.name !== "Loose Crescent" ||
+  xianxiaImportContext?.realm_choices?.join("|") !== "Mortal|Immortal|Divine" ||
+  xianxiaImportContext?.honor_choices?.join("|") !== "Venerable|Majestic|Honorable|Disgraced|Demonic" ||
+  xianxiaImportContext?.martial_art_rank_choices?.map((rank) => rank.key).join("|") !==
+    "initiate|novice|apprentice|master|legendary" ||
+  cloudPalmOption?.title !== "Cloud Palm" ||
+  cloudPalmOption?.martial_art_style !== "Open hand" ||
+  cloudPalmOption?.available_rank_keys?.join("|") !== "initiate|novice|master" ||
+  cloudPalmOption?.rank_refs?.master !== "systems:xia-cloud-palm:master" ||
+  xianxiaImportContext?.preview !== null
+) {
+  throw new Error(
+    `Unexpected Xianxia manual import context payload: ${xianxiaManualImportContext.status} ${JSON.stringify(xianxiaManualImportContext.payload)}`,
+  );
 }
 
 const xianxiaCharacterSlug = "api-cultivator";

@@ -92,6 +92,12 @@ import {
   buildCampaignSystemsSourceListPayload,
   type FixtureSystemsRole,
 } from "./systems/sources.js";
+import {
+  buildCharacterAuthoringLinks,
+  buildXianxiaManualImportContext,
+  nativeCharacterCreateLane,
+  nativeCharacterCreateUnsupportedMessage,
+} from "./content/characterAuthoring.js";
 import { getCampaignConfigFile } from "./content/repository.js";
 import {
   buildCampaignContentPageRemovalSafety,
@@ -760,6 +766,11 @@ function flaskCampaignHref(campaignSlug: string, suffix = ""): string {
 
 function supportsCharacterControlsRoutes(_system: unknown): boolean {
   return true;
+}
+
+function requestQueryValues(ctx: Context): Record<string, string> {
+  const searchParams = new URL(ctx.req.url).searchParams;
+  return Object.fromEntries(Array.from(searchParams.entries()).map(([key, value]) => [key, value]));
 }
 
 function characterDefinitionName(record: CampaignCharacterFileRecord): string {
@@ -3749,6 +3760,58 @@ app.get(ROUTES.characterRoster, async (ctx) => {
         campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session"),
     }),
   );
+});
+
+app.get(ROUTES.characterXianxiaManualImportContext, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const canAuthorCharacters =
+    campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "characters") &&
+    (auth.role === "admin" ||
+      (auth.role === "dm" && campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session")));
+  if (!canAuthorCharacters) {
+    const error = forbidden("You do not have permission to create characters in this campaign.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const lane = nativeCharacterCreateLane(campaign.system);
+  if (!lane) {
+    const error = jsonError("unsupported_campaign_system", nativeCharacterCreateUnsupportedMessage(campaign.system), 400);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (lane !== "xianxia") {
+    const error = jsonError(
+      "unsupported_campaign_system",
+      "Manual Xianxia character import is only available for Xianxia campaigns.",
+      400,
+    );
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const configRecord = await getCampaignConfigFile(config, campaign.slug);
+  return ctx.json({
+    ok: true,
+    campaign,
+    lane,
+    links: buildCharacterAuthoringLinks(campaign),
+    import_context: buildXianxiaManualImportContext({
+      dbPath: config.dbPath,
+      campaign,
+      campaignConfig: configRecord?.config || {},
+      values: requestQueryValues(ctx),
+    }),
+  });
 });
 
 app.get(ROUTES.characterDetail, async (ctx) => {

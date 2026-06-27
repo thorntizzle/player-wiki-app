@@ -854,6 +854,15 @@
       "notes": "Tracked Hono Character detail read route with Flask-compatible missing-campaign and missing-character JSON, Characters-scope or assigned-owner Session-scope read access, character_state state_record serialization, safe CharacterPane presenter shells, permissions, controls metadata, protected portrait URLs from existing asset references, and Flask/Gen2 detail links."
     },
     {
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/import/xianxia-manual",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Xianxia manual import context GET route with Flask-compatible missing-campaign, auth_required, forbidden, and unsupported_campaign_system JSON, Xianxia-only native-create lane guard, query-value round trip into import_context.values, form field/choice rows, and enabled Systems martial_art option serialization."
+    },
+    {
       "method": "POST",
       "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment",
       "route_family": "api_v1_characters",
