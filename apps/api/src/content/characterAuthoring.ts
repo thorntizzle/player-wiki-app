@@ -149,6 +149,24 @@ const XIANXIA_DAO_DEFAULT_MAX = 3;
 const XIANXIA_DIRECT_ADVANCEMENT_GENERIC_TECHNIQUE_KEYS = new Set(["cultivation", "meditation", "conditioning", "training"]);
 const NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE =
   "This campaign can still use the character roster, read-mode sheets, session-mode sheets, and Controls. Native DND-5E builder, edit, level-up, repair, retraining, PDF-import, and spellcasting tools are not implemented for this campaign system.";
+const DND_SYSTEMS_OPTION_PREFIX = "systems:";
+const DND_PHB_SOURCE_ID = "PHB";
+const DND_SUPPORTED_NON_PHB_BASE_CLASSES = new Set(["TCE|artificer"]);
+const DND_SUPPORTED_SUBORDINATE_SOURCES = new Set(["TCE", "SCAG", "XGE", "EGW", "DMG"]);
+const DND_ABILITY_KEYS = ["str", "dex", "con", "int", "wis", "cha"] as const;
+const DND_ABILITY_LABELS: Record<(typeof DND_ABILITY_KEYS)[number], string> = {
+  str: "Strength",
+  dex: "Dexterity",
+  con: "Constitution",
+  int: "Intelligence",
+  wis: "Wisdom",
+  cha: "Charisma",
+};
+const DND_CREATE_LIMITATIONS = [
+  "Base classes come from enabled Systems rows inside the current native support lane: PHB base classes plus TCE Artificer.",
+  "Species and backgrounds come from enabled Systems rows in the current supported source matrix for this TypeScript parity slice.",
+  "This endpoint builds the Gen2 create context only; DND-5E character submit remains blocked in the TypeScript API for this slice.",
+];
 
 export interface XianxiaManualImportBuildResult {
   definition: Record<string, unknown>;
@@ -161,6 +179,20 @@ export interface XianxiaCreateBuildResult {
   definition: Record<string, unknown>;
   importMetadata: Record<string, unknown>;
   initialState: Record<string, unknown>;
+}
+
+export interface DndCreateContext {
+  lane: "dnd5e";
+  builder_ready: boolean;
+  values: Record<string, string>;
+  class_options: Array<Record<string, unknown>>;
+  species_options: Array<Record<string, unknown>>;
+  background_options: Array<Record<string, unknown>>;
+  subclass_options: Array<Record<string, unknown>>;
+  requires_subclass: boolean;
+  choice_sections: Array<Record<string, unknown>>;
+  preview: Record<string, unknown>;
+  limitations: string[];
 }
 
 function normalizeSystemKey(value: unknown): string {
@@ -226,6 +258,11 @@ function parseJsonRecord(rawValue: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function createContextInteger(value: unknown, fallback = 0): number {
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function sourceSeeds(campaignConfig: Record<string, unknown>): Map<string, { enabled: boolean }> {
@@ -354,6 +391,269 @@ function firstPresent(...values: unknown[]): unknown {
     }
   }
   return "";
+}
+
+function normalizeLookup(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function normalizeDndSourceId(value: unknown): string {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function dndBaseClassKey(sourceId: unknown, className: unknown): string {
+  const normalizedSourceId = normalizeDndSourceId(sourceId);
+  const normalizedClassName = normalizeLookup(className);
+  return normalizedSourceId && normalizedClassName ? `${normalizedSourceId}|${normalizedClassName}` : "";
+}
+
+function dndSupportsBaseClass(sourceId: unknown, className: unknown): boolean {
+  const normalizedSourceId = normalizeDndSourceId(sourceId);
+  if (normalizedSourceId === DND_PHB_SOURCE_ID) {
+    return true;
+  }
+  return DND_SUPPORTED_NON_PHB_BASE_CLASSES.has(dndBaseClassKey(normalizedSourceId, className));
+}
+
+function dndSupportsSubordinateSource(sourceId: unknown): boolean {
+  const normalizedSourceId = normalizeDndSourceId(sourceId);
+  return normalizedSourceId === DND_PHB_SOURCE_ID || DND_SUPPORTED_SUBORDINATE_SOURCES.has(normalizedSourceId);
+}
+
+function dndSupportsNativeClassEntry(row: SystemsEntryRow): boolean {
+  const metadata = parseJsonRecord(row.metadata_json);
+  if (!String(row.title || "").trim() || !metadata.hit_die) {
+    return false;
+  }
+  return dndSupportsBaseClass(row.source_id, row.title);
+}
+
+function dndSupportsNativeSubclassEntry(row: SystemsEntryRow, selectedClass: SystemsEntryRow | null): boolean {
+  if (!dndSupportsSubordinateSource(row.source_id)) {
+    return false;
+  }
+  const metadata = parseJsonRecord(row.metadata_json);
+  const className = String(firstPresent(metadata.class_name, selectedClass?.title) || "").trim();
+  const classSource = normalizeDndSourceId(firstPresent(metadata.class_source, selectedClass?.source_id));
+  if (!className || !classSource || !dndSupportsBaseClass(classSource, className)) {
+    return false;
+  }
+  if (!selectedClass) {
+    return true;
+  }
+  return normalizeLookup(selectedClass.title) === normalizeLookup(className) && normalizeDndSourceId(selectedClass.source_id) === classSource;
+}
+
+function dndEntryOption(row: SystemsEntryRow): Record<string, unknown> {
+  const metadata = parseJsonRecord(row.metadata_json);
+  const slug = String(row.slug || "").trim();
+  const pageRef = String(metadata.page_ref || "").trim();
+  const value = pageRef ? `page:${pageRef}` : slug ? `${DND_SYSTEMS_OPTION_PREFIX}${slug}` : "";
+  return {
+    slug,
+    value,
+    title: String(row.title || "").trim(),
+    source_id: String(row.source_id || "").trim(),
+    entry_key: String(row.entry_key || "").trim(),
+    page_ref: pageRef,
+    campaign_option: asRecord(metadata.campaign_option),
+    label: String(row.title || "").trim(),
+  };
+}
+
+function sanitizeDndEntrySelectionValue(rawValue: unknown, rows: SystemsEntryRow[]): string {
+  const value = String(rawValue ?? "").trim();
+  if (!value) {
+    return "";
+  }
+  for (const row of rows) {
+    const option = dndEntryOption(row);
+    const optionValue = String(option.value || "").trim();
+    if (!optionValue) {
+      continue;
+    }
+    for (const candidate of [option.value, option.slug, option.page_ref]) {
+      if (value === String(candidate || "").trim()) {
+        return optionValue;
+      }
+    }
+  }
+  return "";
+}
+
+function selectedDndEntry(rows: SystemsEntryRow[], value: unknown): SystemsEntryRow | null {
+  const selectedValue = String(value ?? "").trim();
+  if (!selectedValue) {
+    return null;
+  }
+  return (
+    rows.find((row) => {
+      const option = dndEntryOption(row);
+      return selectedValue === option.value || selectedValue === option.slug || selectedValue === option.page_ref;
+    }) || null
+  );
+}
+
+function dndClassRequiresSubclassAtLevelOne(selectedClass: SystemsEntryRow | null): boolean {
+  if (!selectedClass) {
+    return false;
+  }
+  const metadata = parseJsonRecord(selectedClass.metadata_json);
+  const subclassLevel = Number(firstPresent(metadata.subclass_level, metadata.subclassLevel, metadata.subclass_choice_level));
+  return Number.isFinite(subclassLevel) && subclassLevel === 1;
+}
+
+function dndAbilityScorePreview(values: Record<string, string>) {
+  return Object.fromEntries(DND_ABILITY_KEYS.map((key) => [key, createContextInteger(values[key], 10)]));
+}
+
+function dndCreatePreview({
+  selectedClass,
+  selectedSpecies,
+  selectedBackground,
+  values,
+}: {
+  selectedClass: SystemsEntryRow | null;
+  selectedSpecies: SystemsEntryRow | null;
+  selectedBackground: SystemsEntryRow | null;
+  values: Record<string, string>;
+}): Record<string, unknown> {
+  const classMetadata = selectedClass ? parseJsonRecord(selectedClass.metadata_json) : {};
+  const speciesMetadata = selectedSpecies ? parseJsonRecord(selectedSpecies.metadata_json) : {};
+  const classHitDie = createContextInteger(classMetadata.hit_die, 8);
+  const constitutionModifier = abilityModifier(createContextInteger(values.con, 10));
+  return {
+    class_level_text: selectedClass ? `${selectedClass.title} 1` : "",
+    max_hp: selectedClass ? Math.max(1, classHitDie + constitutionModifier) : "",
+    speed: firstPresent(speciesMetadata.speed, speciesMetadata.walk_speed, ""),
+    size: firstPresent(speciesMetadata.size, ""),
+    starting_currency: selectedBackground ? `${selectedBackground.title} starting package` : "",
+    saving_throws: asArray(classMetadata.saving_throw_proficiencies).map(String),
+    languages: asArray(speciesMetadata.languages).map(String),
+    features: [selectedClass?.title ? `${selectedClass.title} level 1 features` : "", selectedSpecies?.title || "", selectedBackground?.title || ""]
+      .map(String)
+      .filter(Boolean),
+    resources: [],
+    equipment: [],
+    attacks: [],
+    spells: [],
+    ability_scores: dndAbilityScorePreview(values),
+  };
+}
+
+function abilityModifier(score: number): number {
+  return Math.floor((score - 10) / 2);
+}
+
+function dndAbilityChoiceSection(values: Record<string, string>): Record<string, unknown> {
+  return {
+    title: "Ability Scores",
+    fields: DND_ABILITY_KEYS.map((key) => ({
+      name: key,
+      label: DND_ABILITY_LABELS[key],
+      selected: values[key] || "10",
+      help_text: "Enter the final level-1 score after species adjustments.",
+      options: Array.from({ length: 30 }, (_, index) => {
+        const value = String(index + 1);
+        return { value, label: value };
+      }),
+    })),
+  };
+}
+
+export function buildDndCharacterCreateContext({
+  dbPath,
+  campaign,
+  campaignConfig,
+  values,
+}: {
+  dbPath: string;
+  campaign: CampaignViewModel;
+  campaignConfig: Record<string, unknown>;
+  values: Record<string, unknown>;
+}): DndCreateContext {
+  const normalizedValues = normalizeCharacterAuthoringValues(values);
+  if (!campaign.systems_library_slug || !existsSync(dbPath)) {
+    return {
+      lane: "dnd5e",
+      builder_ready: false,
+      values: normalizedValues,
+      class_options: [],
+      species_options: [],
+      background_options: [],
+      subclass_options: [],
+      requires_subclass: false,
+      choice_sections: [],
+      preview: {},
+      limitations: DND_CREATE_LIMITATIONS,
+    };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const classRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "class")
+      .filter((row) => row.is_enabled_override !== 0)
+      .filter(dndSupportsNativeClassEntry);
+    const speciesRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "race")
+      .filter((row) => row.is_enabled_override !== 0)
+      .filter((row) => dndSupportsSubordinateSource(row.source_id));
+    const backgroundRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "background")
+      .filter((row) => row.is_enabled_override !== 0)
+      .filter((row) => dndSupportsSubordinateSource(row.source_id));
+
+    normalizedValues.class_slug = sanitizeDndEntrySelectionValue(normalizedValues.class_slug, classRows);
+    normalizedValues.species_slug = sanitizeDndEntrySelectionValue(normalizedValues.species_slug, speciesRows);
+    normalizedValues.background_slug = sanitizeDndEntrySelectionValue(normalizedValues.background_slug, backgroundRows);
+    for (const abilityKey of DND_ABILITY_KEYS) {
+      normalizedValues[abilityKey] = String(Math.min(30, Math.max(1, createContextInteger(normalizedValues[abilityKey], 10))));
+    }
+
+    const selectedClass = selectedDndEntry(classRows, normalizedValues.class_slug);
+    const subclassRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "subclass")
+      .filter((row) => row.is_enabled_override !== 0)
+      .filter((row) => dndSupportsNativeSubclassEntry(row, selectedClass));
+    normalizedValues.subclass_slug = sanitizeDndEntrySelectionValue(normalizedValues.subclass_slug, subclassRows);
+    const selectedSpecies = selectedDndEntry(speciesRows, normalizedValues.species_slug);
+    const selectedBackground = selectedDndEntry(backgroundRows, normalizedValues.background_slug);
+    const requiresSubclass = dndClassRequiresSubclassAtLevelOne(selectedClass);
+
+    return {
+      lane: "dnd5e",
+      builder_ready: Boolean(classRows.length && speciesRows.length && backgroundRows.length),
+      values: normalizedValues,
+      class_options: classRows.map(dndEntryOption),
+      species_options: speciesRows.map(dndEntryOption),
+      background_options: backgroundRows.map(dndEntryOption),
+      subclass_options: subclassRows.map(dndEntryOption),
+      requires_subclass: requiresSubclass,
+      choice_sections: [dndAbilityChoiceSection(normalizedValues)],
+      preview: dndCreatePreview({ selectedClass, selectedSpecies, selectedBackground, values: normalizedValues }),
+      limitations: DND_CREATE_LIMITATIONS,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("no such table")) {
+      return {
+        lane: "dnd5e",
+        builder_ready: false,
+        values: normalizedValues,
+        class_options: [],
+        species_options: [],
+        background_options: [],
+        subclass_options: [],
+        requires_subclass: false,
+        choice_sections: [],
+        preview: {},
+        limitations: DND_CREATE_LIMITATIONS,
+      };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
 }
 
 function martialArtRankRecords(metadata: Record<string, unknown>, body: Record<string, unknown>) {

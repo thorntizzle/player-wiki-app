@@ -122,6 +122,7 @@ import {
 } from "./systems/sources.js";
 import {
   buildCharacterAuthoringLinks,
+  buildDndCharacterCreateContext,
   buildXianxiaCreateCharacter,
   listXianxiaCreateGenericTechniqueOptions,
   buildXianxiaManualImportCharacter,
@@ -1033,22 +1034,6 @@ function buildCharacterCreateTools(campaign: CampaignViewModel, canAuthorCharact
     native_character_tools_supported: lane === "dnd5e",
     native_character_create_supported: Boolean(lane),
     character_create_lane: lane,
-  };
-}
-
-function buildDndCharacterCreateContext(values: Record<string, unknown>) {
-  return {
-    lane: "dnd5e",
-    builder_ready: false,
-    values: normalizeCharacterAuthoringValues(values),
-    class_options: [],
-    species_options: [],
-    background_options: [],
-    subclass_options: [],
-    requires_subclass: false,
-    choice_sections: [],
-    preview: {},
-    limitations: [],
   };
 }
 
@@ -5215,7 +5200,7 @@ app.get(ROUTES.characterCreateContext, async (ctx) => {
   }
 
   const values = requestQueryValues(ctx);
-  const configRecord = lane === "xianxia" ? await getCampaignConfigFile(config, campaign.slug) : null;
+  const configRecord = await getCampaignConfigFile(config, campaign.slug);
   const create =
     lane === "xianxia"
       ? buildXianxiaCharacterCreateContext({
@@ -5224,7 +5209,12 @@ app.get(ROUTES.characterCreateContext, async (ctx) => {
           campaignConfig: configRecord?.config || {},
           values,
         })
-      : buildDndCharacterCreateContext(values);
+      : buildDndCharacterCreateContext({
+          dbPath: config.dbPath,
+          campaign,
+          campaignConfig: configRecord?.config || {},
+          values,
+        });
 
   return ctx.json({
     ok: true,

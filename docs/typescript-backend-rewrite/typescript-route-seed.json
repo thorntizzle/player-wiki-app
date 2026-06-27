@@ -905,7 +905,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/create",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Character create context GET route with Flask-compatible missing-campaign, auth_required, forbidden, and unsupported_campaign_system JSON, manager-only character authoring access, DND-5E builder-disabled and Xianxia lane payload envelopes for the Gen2 create page, Xianxia field/default context, and enabled Systems martial_art and generic_technique option serialization."
+      "notes": "Tracked Hono Character create context GET route with Flask-compatible missing-campaign, auth_required, forbidden, and unsupported_campaign_system JSON, manager-only character authoring access, DND-5E builder-ready Gen2 context for enabled Systems class/species/background/subclass options, sanitized selected values, ability-score fields, preview basics, and support-limit notes, plus Xianxia lane payload envelopes, Xianxia field/default context, and enabled Systems martial_art and generic_technique option serialization."
     },
     {
       "method": "POST",

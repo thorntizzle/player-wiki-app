@@ -816,10 +816,53 @@ const insertEntry = smokeDb.prepare(`
 insertEntry.run("DND-5E", "PHB", "PHB:spell:mage-hand", "spell", "phb-spell-mage-hand", "Mage Hand", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("DND-5E", "PHB", "PHB:item:chain-mail", "item", "phb-item-chain-mail", "Chain Mail", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("DND-5E", "PHB", "PHB:item:profiled-blade", "item", "phb-item-profiled-blade", "Profiled Blade", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+insertEntry.run("DND-5E", "PHB", "PHB:class:fighter", "class", "phb-fighter", "Fighter", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+insertEntry.run("DND-5E", "PHB", "PHB:subclass:champion", "subclass", "phb-champion", "Champion", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+insertEntry.run("DND-5E", "PHB", "PHB:race:human", "race", "phb-human", "Human", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+insertEntry.run("DND-5E", "PHB", "PHB:background:soldier", "background", "phb-soldier", "Soldier", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("DND-5E", "MM", "MM:monster:goblin", "monster", "mm-monster-goblin", "Goblin", 0, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("Xianxia", "XIA", "XIA:martial_art:cloud-palm", "martial_art", "xia-martial-art-cloud-palm", "Cloud Palm", 0, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("Xianxia", "XIA", "XIA:martial_art:stone-root", "martial_art", "xia-martial-art-stone-root", "Stone Root", 0, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("Xianxia", "XIA", "XIA:generic_technique:qi-blast", "generic_technique", "xia-generic-technique-qi-blast", "Qi Blast", 0, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+smokeDb
+  .prepare(
+    `
+      UPDATE systems_entries
+      SET metadata_json = ?
+      WHERE library_slug = ?
+        AND entry_key = ?
+    `,
+  )
+  .run(
+    JSON.stringify({
+      hit_die: 10,
+      saving_throw_proficiencies: ["Strength", "Constitution"],
+      subclass_title: "Martial Archetype",
+      subclass_level: 3,
+    }),
+    "DND-5E",
+    "PHB:class:fighter",
+  );
+smokeDb
+  .prepare(
+    `
+      UPDATE systems_entries
+      SET metadata_json = ?
+      WHERE library_slug = ?
+        AND entry_key = ?
+    `,
+  )
+  .run(JSON.stringify({ class_name: "Fighter", class_source: "PHB" }), "DND-5E", "PHB:subclass:champion");
+smokeDb
+  .prepare(
+    `
+      UPDATE systems_entries
+      SET metadata_json = ?
+      WHERE library_slug = ?
+        AND entry_key = ?
+    `,
+  )
+  .run(JSON.stringify({ size: "Medium", speed: 30, languages: ["Common", "one extra language"] }), "DND-5E", "PHB:race:human");
 smokeDb
   .prepare(
     `
@@ -3728,7 +3771,7 @@ if (
 }
 const phbIndexSource = playerSystemsIndex.payload.sources[0];
 if (
-  phbIndexSource.entry_count !== 3 ||
+  phbIndexSource.entry_count !== 7 ||
   phbIndexSource.default_visibility !== "players" ||
   phbIndexSource.has_rules_reference_entries !== false ||
   phbIndexSource.rules_reference_search_scope !== "global"
@@ -3802,7 +3845,7 @@ if (playerSourceIds.join("|") !== "PHB") {
   throw new Error(`Expected player-visible systems sources to include only PHB, got ${JSON.stringify(playerSourceIds)}`);
 }
 const phbSource = playerSystemsSources.payload.sources[0];
-if (phbSource.entry_count !== 3 || phbSource.default_visibility !== "players" || phbSource.permissions?.can_manage !== false) {
+if (phbSource.entry_count !== 7 || phbSource.default_visibility !== "players" || phbSource.permissions?.can_manage !== false) {
   throw new Error(`Unexpected PHB source state for player: ${JSON.stringify(phbSource)}`);
 }
 
@@ -3848,16 +3891,16 @@ const playerPhbDetail = await requestJson("/api/v1/campaigns/linden-pass/systems
 if (playerPhbDetail.status !== 200 || playerPhbDetail.payload?.ok !== true) {
   throw new Error(`Expected player PHB source detail 200 ok, got ${playerPhbDetail.status}`);
 }
-if (playerPhbDetail.payload?.source?.source_id !== "PHB" || playerPhbDetail.payload?.source?.entry_count !== 3) {
+if (playerPhbDetail.payload?.source?.source_id !== "PHB" || playerPhbDetail.payload?.source?.entry_count !== 7) {
   throw new Error(`Unexpected player PHB source detail source state: ${JSON.stringify(playerPhbDetail.payload?.source)}`);
 }
 const phbEntryGroups = (playerPhbDetail.payload?.entry_groups || []).map((group) => `${group.entry_type}:${group.count}`);
-if (phbEntryGroups.join("|") !== "spell:1|item:2") {
-  throw new Error(`Expected PHB source detail groups spell/item, got ${JSON.stringify(playerPhbDetail.payload?.entry_groups)}`);
+if (phbEntryGroups.join("|") !== "class:1|subclass:1|spell:1|item:2|race:1|background:1") {
+  throw new Error(`Expected PHB source detail groups to include DND builder rows, got ${JSON.stringify(playerPhbDetail.payload?.entry_groups)}`);
 }
 if (
-  playerPhbDetail.payload?.entry_count !== 3 ||
-  playerPhbDetail.payload?.browsable_entry_count !== 3 ||
+  playerPhbDetail.payload?.entry_count !== 7 ||
+  playerPhbDetail.payload?.browsable_entry_count !== 7 ||
   playerPhbDetail.payload?.permissions?.can_manage_systems !== false
 ) {
   throw new Error(`Unexpected PHB source detail counts/permissions: ${JSON.stringify(playerPhbDetail.payload)}`);
@@ -3925,7 +3968,10 @@ if (
 ) {
   throw new Error(`Unexpected player PHB spell category entries: ${JSON.stringify(playerPhbSpellCategory.payload)}`);
 }
-if ((playerPhbSpellCategory.payload?.entry_groups || []).map((group) => `${group.entry_type}:${group.count}`).join("|") !== "spell:1|item:2") {
+if (
+  (playerPhbSpellCategory.payload?.entry_groups || []).map((group) => `${group.entry_type}:${group.count}`).join("|") !==
+  "class:1|subclass:1|spell:1|item:2|race:1|background:1"
+) {
   throw new Error(`Unexpected player PHB category groups: ${JSON.stringify(playerPhbSpellCategory.payload?.entry_groups)}`);
 }
 
@@ -11532,10 +11578,19 @@ if (
   dmCharacterCreateContext.payload?.links?.flask_create_url !== "/campaigns/linden-pass/characters/new" ||
   dmCharacterCreateContext.payload?.links?.gen2_create_url !== "/app-next/campaigns/linden-pass/characters/new" ||
   dmCharacterCreateContext.payload?.create?.lane !== "dnd5e" ||
-  dmCharacterCreateContext.payload?.create?.builder_ready !== false ||
+  dmCharacterCreateContext.payload?.create?.builder_ready !== true ||
   dmCharacterCreateContext.payload?.create?.values?.name !== "Smoke Knight" ||
-  !Array.isArray(dmCharacterCreateContext.payload?.create?.class_options) ||
-  !Array.isArray(dmCharacterCreateContext.payload?.create?.choice_sections)
+  dmCharacterCreateContext.payload?.create?.values?.class_slug !== "systems:phb-fighter" ||
+  dmCharacterCreateContext.payload?.create?.class_options?.[0]?.value !== "systems:phb-fighter" ||
+  dmCharacterCreateContext.payload?.create?.species_options?.[0]?.value !== "systems:phb-human" ||
+  dmCharacterCreateContext.payload?.create?.background_options?.[0]?.value !== "systems:phb-soldier" ||
+  dmCharacterCreateContext.payload?.create?.subclass_options?.[0]?.value !== "systems:phb-champion" ||
+  dmCharacterCreateContext.payload?.create?.requires_subclass !== false ||
+  dmCharacterCreateContext.payload?.create?.choice_sections?.[0]?.title !== "Ability Scores" ||
+  dmCharacterCreateContext.payload?.create?.preview?.class_level_text !== "Fighter 1" ||
+  dmCharacterCreateContext.payload?.create?.preview?.max_hp !== 10 ||
+  !Array.isArray(dmCharacterCreateContext.payload?.create?.limitations) ||
+  !dmCharacterCreateContext.payload?.create?.limitations?.[0]?.includes("PHB base classes")
 ) {
   throw new Error(
     `Unexpected DM DND character create context: ${dmCharacterCreateContext.status} ${JSON.stringify(dmCharacterCreateContext.payload)}`,

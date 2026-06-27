@@ -541,12 +541,13 @@ Route parity check command:
 - The Character create route pair now serves `GET .../characters/create` plus Xianxia-lane
   `POST .../characters/create`, preserving
   Flask-compatible campaign existence checks, authoring auth/permission failures, unsupported-system
-  errors, route-lane links/tools, DND-5E Gen2 payload shape with the builder disabled until the TS
-  level-one builder is ported, and Xianxia create fields/defaults plus enabled martial-art and
-  Generic Technique options. The POST lane writes native Xianxia records through the copied fixture
+  errors, route-lane links/tools, DND-5E Gen2 payload shape with builder-ready enabled Systems
+  class/species/background/subclass options, sanitized selected values, ability-score fields, preview
+  basics, and explicit support-limit notes, and Xianxia create fields/defaults plus enabled
+  martial-art and Generic Technique options. The POST lane writes native Xianxia records through the copied fixture
   content-character persistence path with `builder://xianxia-create` import metadata, initialized
   SQLite mutable state, duplicate-slug `character_exists` handling, and no mutable state in
-  `definition.yaml`. DND-5E submit remains outside this slice pending level-one builder parity.
+  `definition.yaml`. DND-5E submit remains outside this slice pending level-one builder write parity.
 - The Character detail read route now serves `GET .../characters/:characterSlug`, preserving
   Flask-compatible campaign/missing-character envelopes, Characters-scope or assigned-owner
   Session-scope access, SQLite `state_record` reads, CharacterPane-safe optional presentation
