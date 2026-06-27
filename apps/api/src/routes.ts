@@ -1366,6 +1366,51 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "content_character_not_found",
     },
   },
+  {
+    method: "POST",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls/assignment",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/controls/assignment",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
+  {
+    method: "DELETE",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls/assignment",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "DELETE",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/controls/assignment",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
+  {
+    method: "DELETE",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "DELETE",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/controls",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1462,4 +1507,6 @@ export const ROUTES = {
   characterSessionArtificerInfusions: IMPLEMENTED_ROUTES[90].honoPath,
   characterSessionXianxiaDaoImmolatingUseRequests: IMPLEMENTED_ROUTES[91].honoPath,
   characterSessionXianxiaDaoImmolatingUseRecords: IMPLEMENTED_ROUTES[92].honoPath,
+  characterControlsAssignment: IMPLEMENTED_ROUTES[93].honoPath,
+  characterControlsDelete: IMPLEMENTED_ROUTES[95].honoPath,
 } as const;

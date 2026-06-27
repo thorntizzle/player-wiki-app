@@ -103,6 +103,10 @@ fixture database.
 - Added fixture-backed content character write/delete endpoints with bearer-token DM/admin access:
   - `PUT /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
   - `DELETE /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
+- Added Character Controls JSON mutation endpoints:
+  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls/assignment`
+  - `DELETE /api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls/assignment`
+  - `DELETE /api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls`
 - Default campaign fixture directory is `tests/fixtures/sample_campaigns`.
 - `CPW_CAMPAIGNS_DIR` overrides the fixture directory.
 - Implemented endpoints return JSON-only payloads for the read-only slice, with explicit fixture-mode auth/permissions metadata on campaign detail.
@@ -554,6 +558,7 @@ fixture database.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/characters` list sorting/count and sampled character summary metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` detail payload definition/import metadata and missing-content-character 404.
   - validates content-character SQLite persistence for DND-5E create/delete and Xianxia create/update/delete, including actual `state_created`, `deleted_state`, and `deleted_assignment` response flags and Xianxia mutable-state clamping/preservation.
   - validates `PUT` and `DELETE /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` auth, fixture-write denial, player-forbidden behavior, definition validation, missing-campaign behavior, copied-fixture definition/import YAML writes, list/detail refresh, deleted-character payload flags, file removal, and missing-character delete 404.
+  - validates the Character Controls JSON assignment/clear/delete slice, including blocked DM assignment, successful app-admin assignment, assignment and audit SQLite rows, assignment clear and audit rows, blocked player delete, bad confirmation validation, successful DM checked delete, copied-fixture file removal, `character_state` and assignment cleanup, and `character_deleted` audit metadata.
   - validates character rest preview/apply auth, no-access forbidden, invalid-rest, stale-revision, DND long-rest, and Xianxia long-rest behavior against disposable copied fixture files and SQLite state.
   - validates character feature-state stale conflict, unsupported key validation, missing Arcane Armor feature validation, and assigned-player Arcane Armor toggle persistence against disposable copied fixture files and SQLite state.
   - validates Xianxia inventory equipped-state auth, fixture bearer requirement, stale conflict, non-Xianxia validation, unknown item validation, non-equippable validation, and DM equippable-item toggle persistence with top-level inventory mirror sync against disposable copied fixture files and SQLite state.

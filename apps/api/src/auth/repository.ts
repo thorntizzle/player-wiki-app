@@ -38,6 +38,16 @@ export interface ViewAsChoice {
   status: string;
 }
 
+export interface CharacterAssignment {
+  id: number;
+  user_id: number;
+  campaign_slug: string;
+  character_slug: string;
+  assignment_type: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ApiTokenAuthContext {
   authSource: "api_token";
   user: AuthUser;
@@ -85,6 +95,16 @@ interface MembershipRow {
   campaign_slug: string;
   role: string;
   status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface CharacterAssignmentRow {
+  id: number;
+  user_id: number;
+  campaign_slug: string;
+  character_slug: string;
+  assignment_type: string;
   created_at: string;
   updated_at: string;
 }
@@ -209,6 +229,18 @@ function serializeMembership(row: MembershipRow): AuthMembership {
     campaign_slug: String(row.campaign_slug),
     role: String(row.role),
     status: String(row.status),
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+  };
+}
+
+function serializeCharacterAssignment(row: CharacterAssignmentRow): CharacterAssignment {
+  return {
+    id: Number(row.id),
+    user_id: Number(row.user_id),
+    campaign_slug: String(row.campaign_slug),
+    character_slug: String(row.character_slug),
+    assignment_type: String(row.assignment_type || "owner"),
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
   };
@@ -424,4 +456,197 @@ export function apiTokenRoleForCampaign(authContext: ApiTokenAuthContext, campai
     return membership.role;
   }
   return null;
+}
+
+export function getActiveUserById(dbPath: string, userId: number): AuthUser | null {
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const row = database
+      .prepare("SELECT * FROM users WHERE id = ? AND status = 'active'")
+      .get(userId) as UserRow | undefined;
+    return row ? serializeUser(row) : null;
+  } finally {
+    database.close();
+  }
+}
+
+export function getUserById(dbPath: string, userId: number): AuthUser | null {
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const row = database
+      .prepare("SELECT * FROM users WHERE id = ?")
+      .get(userId) as UserRow | undefined;
+    return row ? serializeUser(row) : null;
+  } finally {
+    database.close();
+  }
+}
+
+export function hasActivePlayerMembership(dbPath: string, userId: number, campaignSlug: string): boolean {
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const row = database
+      .prepare(
+        `SELECT id
+         FROM campaign_memberships
+         WHERE user_id = ?
+           AND campaign_slug = ?
+           AND role = 'player'
+           AND status = 'active'
+         LIMIT 1`,
+      )
+      .get(userId, campaignSlug);
+    return Boolean(row);
+  } finally {
+    database.close();
+  }
+}
+
+export function listActivePlayerMembershipUsers(dbPath: string, campaignSlug: string): AuthUser[] {
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const rows = database
+      .prepare(
+        `SELECT users.*
+         FROM users
+         JOIN campaign_memberships ON campaign_memberships.user_id = users.id
+         WHERE campaign_memberships.campaign_slug = ?
+           AND campaign_memberships.role = 'player'
+           AND campaign_memberships.status = 'active'
+           AND users.status = 'active'
+         ORDER BY users.email ASC`,
+      )
+      .all(campaignSlug) as UserRow[];
+    return rows.map(serializeUser);
+  } finally {
+    database.close();
+  }
+}
+
+export function getCharacterAssignment(
+  dbPath: string,
+  campaignSlug: string,
+  characterSlug: string,
+): CharacterAssignment | null {
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const row = database
+      .prepare("SELECT * FROM character_assignments WHERE campaign_slug = ? AND character_slug = ?")
+      .get(campaignSlug, characterSlug) as CharacterAssignmentRow | undefined;
+    return row ? serializeCharacterAssignment(row) : null;
+  } finally {
+    database.close();
+  }
+}
+
+export function upsertCharacterAssignment(
+  dbPath: string,
+  userId: number,
+  campaignSlug: string,
+  characterSlug: string,
+): CharacterAssignment {
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const now = utcIsoTimestamp();
+    const writeAssignment = database.transaction(() => {
+      database
+        .prepare(
+          `INSERT INTO character_assignments (
+            user_id,
+            campaign_slug,
+            character_slug,
+            assignment_type,
+            created_at,
+            updated_at
+          ) VALUES (?, ?, ?, 'owner', ?, ?)
+          ON CONFLICT(campaign_slug, character_slug) DO UPDATE SET
+            user_id = excluded.user_id,
+            assignment_type = excluded.assignment_type,
+            updated_at = excluded.updated_at`,
+        )
+        .run(userId, campaignSlug, characterSlug, now, now);
+      return database
+        .prepare("SELECT * FROM character_assignments WHERE campaign_slug = ? AND character_slug = ?")
+        .get(campaignSlug, characterSlug) as CharacterAssignmentRow | undefined;
+    });
+    const row = writeAssignment();
+    if (!row) {
+      throw new Error("Character assignment was not readable after write.");
+    }
+    return serializeCharacterAssignment(row);
+  } finally {
+    database.close();
+  }
+}
+
+export function deleteCharacterAssignment(
+  dbPath: string,
+  campaignSlug: string,
+  characterSlug: string,
+): CharacterAssignment | null {
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const deleteAssignment = database.transaction(() => {
+      const row = database
+        .prepare("SELECT * FROM character_assignments WHERE campaign_slug = ? AND character_slug = ?")
+        .get(campaignSlug, characterSlug) as CharacterAssignmentRow | undefined;
+      if (!row) {
+        return null;
+      }
+      const result = database
+        .prepare("DELETE FROM character_assignments WHERE campaign_slug = ? AND character_slug = ?")
+        .run(campaignSlug, characterSlug);
+      return result.changes > 0 ? row : null;
+    });
+    const row = deleteAssignment();
+    return row ? serializeCharacterAssignment(row) : null;
+  } finally {
+    database.close();
+  }
+}
+
+export function insertAuthAuditLog(
+  dbPath: string,
+  {
+    actorUserId,
+    targetUserId,
+    campaignSlug,
+    characterSlug,
+    eventType,
+    metadata,
+  }: {
+    actorUserId: number | null;
+    targetUserId: number | null;
+    campaignSlug: string | null;
+    characterSlug: string | null;
+    eventType: string;
+    metadata: Record<string, unknown>;
+  },
+): void {
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    database
+      .prepare(
+        `INSERT INTO auth_audit_log (
+          actor_user_id,
+          target_user_id,
+          campaign_slug,
+          character_slug,
+          event_type,
+          metadata_json,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        actorUserId,
+        targetUserId,
+        campaignSlug,
+        characterSlug,
+        eventType,
+        JSON.stringify(metadata),
+        utcIsoTimestamp(),
+      );
+  } finally {
+    database.close();
+  }
 }

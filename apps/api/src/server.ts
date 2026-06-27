@@ -7,9 +7,19 @@ import { serve } from "@hono/node-server";
 
 import {
   apiTokenRoleForCampaign,
+  deleteCharacterAssignment,
+  getActiveUserById,
+  getCharacterAssignment,
+  getUserById,
+  hasActivePlayerMembership,
+  insertAuthAuditLog,
+  listActivePlayerMembershipUsers,
   readApiTokenAuthContext,
+  upsertCharacterAssignment,
   updateApiTokenAccountSettings,
   type AuthRouteRole,
+  type AuthUser,
+  type CharacterAssignment,
 } from "./auth/repository.js";
 import {
   buildApiTokenAccountSettingsPayload,
@@ -137,6 +147,7 @@ import {
   buildContentPageDetailPayload,
   buildContentPageListPayload,
 } from "./content/view.js";
+import type { CampaignCharacterFileRecord } from "./content/types.js";
 import { campaignWikiRepository, sectionSortKey, setWikiConfig, slugify } from "./wiki/repository.js";
 import {
   serializeCampaign,
@@ -346,7 +357,20 @@ type CampaignVisibilityWriteResolution =
   | { kind: "invalid" }
   | { kind: "forbidden"; message: string };
 
+type CharacterControlsWriteResolution =
+  | { kind: "authenticated"; role: FixtureSystemsRole; actorUserId: number }
+  | { kind: "missing" }
+  | { kind: "invalid" }
+  | { kind: "forbidden"; message: string };
+
 function roleResolutionError(result: Exclude<RoleResolution, { kind: "authenticated" }>) {
+  if (result.kind === "forbidden") {
+    return forbidden(result.message);
+  }
+  return authRequired();
+}
+
+function writeResolutionError(result: { kind: "missing" } | { kind: "invalid" } | { kind: "forbidden"; message: string }) {
   if (result.kind === "forbidden") {
     return forbidden(result.message);
   }
@@ -473,6 +497,50 @@ function resolveContentManagerBearerWrite(
 
   if (fixtureRole(ctx)) {
     return { kind: "forbidden", message: fixtureForbiddenMessage };
+  }
+  return { kind: "missing" };
+}
+
+function resolveCharacterControlsAssignmentWrite(
+  ctx: { req: { header: (name: string) => string | undefined } },
+): CharacterControlsWriteResolution {
+  const message = "You do not have permission to assign character owners.";
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "authenticated") {
+    if (apiAuth.context.user.is_admin) {
+      return { kind: "authenticated", role: "admin", actorUserId: apiAuth.context.user.id };
+    }
+    return { kind: "forbidden", message };
+  }
+  if (apiAuth.kind === "invalid") {
+    return { kind: "invalid" };
+  }
+
+  if (fixtureRole(ctx)) {
+    return { kind: "forbidden", message };
+  }
+  return { kind: "missing" };
+}
+
+function resolveCharacterControlsDeleteWrite(
+  ctx: { req: { header: (name: string) => string | undefined } },
+  campaignSlug: string,
+): CharacterControlsWriteResolution {
+  const message = "You do not have permission to delete this character.";
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "authenticated") {
+    const role = apiTokenRoleForCampaign(apiAuth.context, campaignSlug);
+    if (role === "admin" || role === "dm") {
+      return { kind: "authenticated", role: toFixtureSystemsRole(role), actorUserId: apiAuth.context.user.id };
+    }
+    return { kind: "forbidden", message };
+  }
+  if (apiAuth.kind === "invalid") {
+    return { kind: "invalid" };
+  }
+
+  if (fixtureRole(ctx)) {
+    return { kind: "forbidden", message };
   }
   return { kind: "missing" };
 }
@@ -652,6 +720,71 @@ function campaignHref(campaignSlug: string, suffix = ""): string {
 function flaskCampaignHref(campaignSlug: string, suffix = ""): string {
   const normalized = suffix.replace(/^\/+|\/+$/g, "");
   return normalized ? `/campaigns/${campaignSlug}/${normalized}` : `/campaigns/${campaignSlug}`;
+}
+
+function supportsCharacterControlsRoutes(_system: unknown): boolean {
+  return true;
+}
+
+function characterDefinitionName(record: CampaignCharacterFileRecord): string {
+  const name = record.definition.name;
+  return typeof name === "string" && name.trim() ? name.trim() : record.character_slug;
+}
+
+function serializeControlsAssignment(assignment: CharacterAssignment | null, assignedUser: AuthUser | null) {
+  if (!assignment) {
+    return null;
+  }
+  return {
+    user_id: assignment.user_id,
+    assignment_type: assignment.assignment_type,
+    display_name: assignedUser?.display_name || "Unknown user",
+    email: assignedUser?.email || null,
+    status: assignedUser?.status || "",
+    created_at: assignment.created_at,
+    updated_at: assignment.updated_at,
+  };
+}
+
+function buildCharacterControlsPayload(
+  campaignSlug: string,
+  record: CampaignCharacterFileRecord,
+  message: string,
+) {
+  const characterSlug = record.character_slug;
+  const assignment = getCharacterAssignment(config.dbPath, campaignSlug, characterSlug);
+  const assignedUser = assignment ? getUserById(config.dbPath, assignment.user_id) : null;
+  const playerChoices = listActivePlayerMembershipUsers(config.dbPath, campaignSlug).map((user) => ({
+    user_id: user.id,
+    label: `${user.display_name} (${user.email})`,
+    email: user.email,
+    display_name: user.display_name,
+    is_current: assignment?.user_id === user.id,
+  }));
+
+  return {
+    ok: true,
+    message,
+    character: {
+      character_slug: characterSlug,
+      updated_at: record.updated_at,
+      name: characterDefinitionName(record),
+      system: typeof record.definition.system === "string" ? record.definition.system : "",
+      definition: record.definition,
+      import_metadata: record.import_metadata,
+      controls: {
+        assignment: serializeControlsAssignment(assignment, assignedUser),
+        can_assign_owner: true,
+        player_choices: playerChoices,
+      },
+    },
+    links: {
+      gen2_character_url: campaignHref(campaignSlug, `characters/${characterSlug}`),
+      flask_character_url: flaskCampaignHref(campaignSlug, `characters/${characterSlug}`),
+      gen2_roster_url: campaignHref(campaignSlug, "characters"),
+      flask_roster_url: flaskCampaignHref(campaignSlug, "characters"),
+    },
+  };
 }
 
 function groupPagesBySection(pages: WikiPageRecord[]): Map<string, WikiPageRecord[]> {
@@ -3544,6 +3677,213 @@ app.delete(ROUTES.contentCharacterDelete, async (ctx) => {
   }
 
   return ctx.json(buildContentCharacterDeletePayload(result.deleted));
+});
+
+app.post(ROUTES.characterControlsAssignment, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign || !supportsCharacterControlsRoutes(campaign.system)) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCharacterControlsAssignmentWrite(ctx);
+  if (auth.kind !== "authenticated") {
+    const error = writeResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const rawTargetUserId = String(jsonPayload.payload.user_id ?? "").trim();
+  if (!/^[+-]?\d+$/.test(rawTargetUserId)) {
+    const error = validationError("Choose a valid player to assign.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  const targetUserId = Number(rawTargetUserId);
+  if (!Number.isSafeInteger(targetUserId)) {
+    const error = validationError("Choose a valid player to assign.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const targetUser = getActiveUserById(config.dbPath, targetUserId);
+  if (!targetUser) {
+    const error = validationError("Choose an active player account to assign.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!hasActivePlayerMembership(config.dbPath, targetUser.id, campaign.slug)) {
+    const error = validationError("Character owners must have an active player membership in that campaign.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const previous = getCharacterAssignment(config.dbPath, campaign.slug, characterSlug);
+  const assignment = upsertCharacterAssignment(config.dbPath, targetUser.id, campaign.slug, characterSlug);
+  insertAuthAuditLog(config.dbPath, {
+    actorUserId: auth.actorUserId,
+    targetUserId: targetUser.id,
+    campaignSlug: campaign.slug,
+    characterSlug,
+    eventType: "character_assignment_created",
+    metadata: {
+      previous_user_id: previous?.user_id ?? null,
+      assignment_type: assignment.assignment_type,
+      source: "gen2_character_controls",
+    },
+  });
+
+  return ctx.json(
+    buildCharacterControlsPayload(
+      campaign.slug,
+      character,
+      `Assigned ${characterSlug} to ${targetUser.email}.`,
+    ),
+  );
+});
+
+app.delete(ROUTES.characterControlsAssignment, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign || !supportsCharacterControlsRoutes(campaign.system)) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCharacterControlsAssignmentWrite(ctx);
+  if (auth.kind !== "authenticated") {
+    const error = writeResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const assignment = getCharacterAssignment(config.dbPath, campaign.slug, characterSlug);
+  if (!assignment) {
+    const error = validationError("That character does not currently have an assigned player.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const removedAssignment = deleteCharacterAssignment(config.dbPath, campaign.slug, characterSlug);
+  if (!removedAssignment) {
+    const error = validationError("That character assignment no longer exists.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  insertAuthAuditLog(config.dbPath, {
+    actorUserId: auth.actorUserId,
+    targetUserId: removedAssignment.user_id,
+    campaignSlug: campaign.slug,
+    characterSlug,
+    eventType: "character_assignment_removed",
+    metadata: {
+      assignment_type: removedAssignment.assignment_type,
+      source: "gen2_character_controls",
+    },
+  });
+
+  return ctx.json(buildCharacterControlsPayload(campaign.slug, character, `Cleared assignment for ${characterSlug}.`));
+});
+
+app.delete(ROUTES.characterControlsDelete, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign || !supportsCharacterControlsRoutes(campaign.system)) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCharacterControlsDeleteWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = writeResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const confirmation = String(jsonPayload.payload.confirm_character_slug || "").trim();
+  if (confirmation !== characterSlug) {
+    const error = validationError(`Type ${characterSlug} to confirm deletion.`);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const previousAssignment = getCharacterAssignment(config.dbPath, campaign.slug, characterSlug);
+  const result = await deleteCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (result.status === "not_found") {
+    const error = notFound("not_found", "That character no longer exists.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  insertAuthAuditLog(config.dbPath, {
+    actorUserId: auth.actorUserId,
+    targetUserId: previousAssignment?.user_id ?? null,
+    campaignSlug: campaign.slug,
+    characterSlug,
+    eventType: "character_deleted",
+    metadata: {
+      deleted_files: result.deleted.deleted_files,
+      deleted_state: result.deleted.deleted_state,
+      deleted_assignment: result.deleted.deleted_assignment,
+      deleted_assets: result.deleted.deleted_assets,
+      source: "gen2_character_controls",
+    },
+  });
+
+  return ctx.json({
+    ok: true,
+    message: `Deleted character ${characterDefinitionName(character)}.`,
+    deleted_character_slug: characterSlug,
+    deleted_character_name: characterDefinitionName(character),
+    links: {
+      gen2_roster_url: campaignHref(campaign.slug, "characters"),
+      flask_roster_url: flaskCampaignHref(campaign.slug, "characters"),
+    },
+  });
 });
 
 app.get(ROUTES.characterRestPreview, async (ctx) => {

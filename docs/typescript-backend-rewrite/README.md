@@ -125,6 +125,10 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
   - `PUT /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
   - `DELETE /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
+- Implemented Character Controls JSON mutation endpoints:
+  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls/assignment`
+  - `DELETE /api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls/assignment`
+  - `DELETE /api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls`
 - Campaign detail uses fixture-backed reads from `tests/fixtures/sample_campaigns` by default and supports
   `CPW_CAMPAIGNS_DIR` override.
 - The first tracked SQLite read path uses `better-sqlite3` against `CPW_DB_PATH` for
@@ -394,6 +398,17 @@ Route parity check command:
   definition `equipment_catalog` and SQLite `state.inventory.active_infusions` persistence,
   Enhanced Defense Armor Class/defensive-rule automation across infusion and equipment writes,
   and refreshed `character.state_record` payloads.
+- The Character Controls JSON route slice now serves
+  `POST .../characters/:characterSlug/controls/assignment`,
+  `DELETE .../characters/:characterSlug/controls/assignment`, and
+  `DELETE .../characters/:characterSlug/controls`. Assignment and clear are bearer API-token
+  app-admin-only, validate active player accounts and active campaign player memberships, write
+  `character_assignments`, and record `character_assignment_created` /
+  `character_assignment_removed` audit events with `gen2_character_controls` metadata. Checked
+  delete is bearer API-token campaign DM/admin-only, reuses content-character deletion for files,
+  `character_state`, portrait assets, and assignment cleanup, records `character_deleted` audit
+  events, and returns the Flask-compatible delete success message and roster links. Portrait
+  controls remain outside this slice.
 - The first Xianxia inventory equipment write now serves
   `PATCH .../characters/:characterSlug/session/xianxia-inventory/:itemId/equipped`. It preserves the
   bearer-only session-state write gate, shared revision conflicts, Xianxia-only validation, unknown

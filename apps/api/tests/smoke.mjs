@@ -7754,6 +7754,251 @@ if (
   );
 }
 
+const controlsTargetSlug = "tobin-slate";
+const controlsTargetPath = `/api/v1/campaigns/linden-pass/characters/${controlsTargetSlug}/controls`;
+const controlsAssignmentPath = `${controlsTargetPath}/assignment`;
+const controlsTargetDefinitionPath = path.join(campaignsDir, "linden-pass", "characters", controlsTargetSlug, "definition.yaml");
+const controlsTargetImportPath = path.join(campaignsDir, "linden-pass", "characters", controlsTargetSlug, "import.yaml");
+const dmAssignmentBlocked = await requestJson(
+  controlsAssignmentPath,
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { user_id: 79 } },
+);
+if (
+  dmAssignmentBlocked.status !== 403 ||
+  dmAssignmentBlocked.payload?.error?.code !== "forbidden" ||
+  dmAssignmentBlocked.payload?.error?.message !== "You do not have permission to assign character owners."
+) {
+  throw new Error(
+    `Expected DM Controls assignment to be forbidden, got ${dmAssignmentBlocked.status} ${JSON.stringify(dmAssignmentBlocked.payload)}`,
+  );
+}
+
+const invalidControlsAssignment = await requestJson(
+  controlsAssignmentPath,
+  bearerContentManagerHeaders,
+  { method: "POST", body: { user_id: "79.0" } },
+);
+if (
+  invalidControlsAssignment.status !== 400 ||
+  invalidControlsAssignment.payload?.error?.code !== "validation_error" ||
+  invalidControlsAssignment.payload?.error?.message !== "Choose a valid player to assign."
+) {
+  throw new Error(
+    `Expected invalid Controls assignment user id to fail, got ${invalidControlsAssignment.status} ${JSON.stringify(invalidControlsAssignment.payload)}`,
+  );
+}
+
+const nonMemberControlsAssignment = await requestJson(
+  controlsAssignmentPath,
+  bearerContentManagerHeaders,
+  { method: "POST", body: { user_id: 80 } },
+);
+if (
+  nonMemberControlsAssignment.status !== 400 ||
+  nonMemberControlsAssignment.payload?.error?.code !== "validation_error" ||
+  nonMemberControlsAssignment.payload?.error?.message !== "Character owners must have an active player membership in that campaign."
+) {
+  throw new Error(
+    `Expected non-member Controls assignment target to fail, got ${nonMemberControlsAssignment.status} ${JSON.stringify(nonMemberControlsAssignment.payload)}`,
+  );
+}
+
+const adminControlsAssignment = await requestJson(
+  controlsAssignmentPath,
+  bearerContentManagerHeaders,
+  { method: "POST", body: { user_id: "79" } },
+);
+if (
+  adminControlsAssignment.status !== 200 ||
+  adminControlsAssignment.payload?.ok !== true ||
+  adminControlsAssignment.payload?.message !== "Assigned tobin-slate to fixture-token-player@example.com." ||
+  adminControlsAssignment.payload?.character?.character_slug !== controlsTargetSlug ||
+  adminControlsAssignment.payload?.character?.controls?.assignment?.user_id !== 79 ||
+  adminControlsAssignment.payload?.character?.controls?.can_assign_owner !== true ||
+  !adminControlsAssignment.payload?.character?.controls?.player_choices?.some((choice) => choice.user_id === 79 && choice.is_current === true)
+) {
+  throw new Error(
+    `Unexpected admin Controls assignment payload: ${adminControlsAssignment.status} ${JSON.stringify(adminControlsAssignment.payload)}`,
+  );
+}
+
+let controlsAssertionDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+let controlsAssignmentRow = controlsAssertionDb
+  .prepare("SELECT user_id, assignment_type FROM character_assignments WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", controlsTargetSlug);
+let controlsAuditRows = controlsAssertionDb
+  .prepare(
+    "SELECT actor_user_id, target_user_id, event_type, metadata_json FROM auth_audit_log WHERE campaign_slug = ? AND character_slug = ? ORDER BY id ASC",
+  )
+  .all("linden-pass", controlsTargetSlug);
+controlsAssertionDb.close();
+if (
+  controlsAssignmentRow?.user_id !== 79 ||
+  controlsAssignmentRow?.assignment_type !== "owner" ||
+  controlsAuditRows.at(-1)?.actor_user_id !== 77 ||
+  controlsAuditRows.at(-1)?.target_user_id !== 79 ||
+  controlsAuditRows.at(-1)?.event_type !== "character_assignment_created" ||
+  JSON.parse(controlsAuditRows.at(-1)?.metadata_json || "{}").source !== "gen2_character_controls"
+) {
+  throw new Error(
+    `Unexpected Controls assignment database state: ${JSON.stringify({ controlsAssignmentRow, controlsAuditRows })}`,
+  );
+}
+
+const adminControlsClear = await requestJson(
+  controlsAssignmentPath,
+  bearerContentManagerHeaders,
+  { method: "DELETE" },
+);
+if (
+  adminControlsClear.status !== 200 ||
+  adminControlsClear.payload?.ok !== true ||
+  adminControlsClear.payload?.message !== "Cleared assignment for tobin-slate." ||
+  adminControlsClear.payload?.character?.controls?.assignment !== null
+) {
+  throw new Error(
+    `Unexpected admin Controls assignment clear payload: ${adminControlsClear.status} ${JSON.stringify(adminControlsClear.payload)}`,
+  );
+}
+controlsAssertionDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+controlsAssignmentRow = controlsAssertionDb
+  .prepare("SELECT user_id, assignment_type FROM character_assignments WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", controlsTargetSlug);
+controlsAuditRows = controlsAssertionDb
+  .prepare(
+    "SELECT actor_user_id, target_user_id, event_type, metadata_json FROM auth_audit_log WHERE campaign_slug = ? AND character_slug = ? ORDER BY id ASC",
+  )
+  .all("linden-pass", controlsTargetSlug);
+controlsAssertionDb.close();
+if (
+  controlsAssignmentRow ||
+  controlsAuditRows.at(-1)?.event_type !== "character_assignment_removed" ||
+  controlsAuditRows.at(-1)?.target_user_id !== 79 ||
+  JSON.parse(controlsAuditRows.at(-1)?.metadata_json || "{}").source !== "gen2_character_controls"
+) {
+  throw new Error(
+    `Unexpected Controls clear database state: ${JSON.stringify({ controlsAssignmentRow, controlsAuditRows })}`,
+  );
+}
+
+const emptyControlsClear = await requestJson(
+  controlsAssignmentPath,
+  bearerContentManagerHeaders,
+  { method: "DELETE" },
+);
+if (
+  emptyControlsClear.status !== 400 ||
+  emptyControlsClear.payload?.error?.code !== "validation_error" ||
+  emptyControlsClear.payload?.error?.message !== "That character does not currently have an assigned player."
+) {
+  throw new Error(
+    `Expected empty Controls assignment clear to fail, got ${emptyControlsClear.status} ${JSON.stringify(emptyControlsClear.payload)}`,
+  );
+}
+
+const playerControlsDeleteBlocked = await requestJson(
+  controlsTargetPath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "DELETE", body: { confirm_character_slug: controlsTargetSlug } },
+);
+if (
+  playerControlsDeleteBlocked.status !== 403 ||
+  playerControlsDeleteBlocked.payload?.error?.code !== "forbidden" ||
+  playerControlsDeleteBlocked.payload?.error?.message !== "You do not have permission to delete this character."
+) {
+  throw new Error(
+    `Expected player Controls delete to be forbidden, got ${playerControlsDeleteBlocked.status} ${JSON.stringify(playerControlsDeleteBlocked.payload)}`,
+  );
+}
+
+const badConfirmationControlsDelete = await requestJson(
+  controlsTargetPath,
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "DELETE", body: { confirm_character_slug: "wrong-slug" } },
+);
+if (
+  badConfirmationControlsDelete.status !== 400 ||
+  badConfirmationControlsDelete.payload?.error?.code !== "validation_error" ||
+  badConfirmationControlsDelete.payload?.error?.message !== "Type tobin-slate to confirm deletion."
+) {
+  throw new Error(
+    `Expected bad Controls delete confirmation validation_error, got ${badConfirmationControlsDelete.status} ${JSON.stringify(badConfirmationControlsDelete.payload)}`,
+  );
+}
+
+await requestJson(
+  controlsAssignmentPath,
+  bearerContentManagerHeaders,
+  { method: "POST", body: { user_id: 79 } },
+);
+controlsAssertionDb = new Database(dbPath);
+controlsAssertionDb
+  .prepare(
+    "INSERT OR REPLACE INTO character_state (campaign_slug, character_slug, revision, state_json, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    "linden-pass",
+    controlsTargetSlug,
+    1,
+    JSON.stringify({ vitals: { current_hp: 12, temp_hp: 0 } }),
+    "2026-06-25T12:00:00+00:00",
+    81,
+  );
+controlsAssertionDb.close();
+
+const dmControlsDelete = await requestJson(
+  controlsTargetPath,
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "DELETE", body: { confirm_character_slug: controlsTargetSlug } },
+);
+if (
+  dmControlsDelete.status !== 200 ||
+  dmControlsDelete.payload?.ok !== true ||
+  dmControlsDelete.payload?.message !== "Deleted character Tobin Slate." ||
+  dmControlsDelete.payload?.deleted_character_slug !== controlsTargetSlug ||
+  dmControlsDelete.payload?.deleted_character_name !== "Tobin Slate" ||
+  dmControlsDelete.payload?.links?.gen2_roster_url !== "/app-next/campaigns/linden-pass/characters" ||
+  dmControlsDelete.payload?.links?.flask_roster_url !== "/campaigns/linden-pass/characters"
+) {
+  throw new Error(
+    `Unexpected DM Controls delete payload: ${dmControlsDelete.status} ${JSON.stringify(dmControlsDelete.payload)}`,
+  );
+}
+if (existsSync(controlsTargetDefinitionPath) || existsSync(controlsTargetImportPath)) {
+  throw new Error("Expected Controls character DELETE to remove Tobin definition/import files from the copied fixture tree.");
+}
+controlsAssertionDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const remainingControlsState = controlsAssertionDb
+  .prepare("SELECT COUNT(*) AS count FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", controlsTargetSlug);
+const remainingControlsAssignment = controlsAssertionDb
+  .prepare("SELECT COUNT(*) AS count FROM character_assignments WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", controlsTargetSlug);
+const controlsDeleteAuditRow = controlsAssertionDb
+  .prepare(
+    "SELECT actor_user_id, target_user_id, event_type, metadata_json FROM auth_audit_log WHERE campaign_slug = ? AND character_slug = ? AND event_type = ? ORDER BY id DESC LIMIT 1",
+  )
+  .get("linden-pass", controlsTargetSlug, "character_deleted");
+controlsAssertionDb.close();
+if (
+  Number(remainingControlsState?.count) !== 0 ||
+  Number(remainingControlsAssignment?.count) !== 0 ||
+  controlsDeleteAuditRow?.actor_user_id !== 81 ||
+  controlsDeleteAuditRow?.target_user_id !== 79 ||
+  JSON.parse(controlsDeleteAuditRow?.metadata_json || "{}").deleted_state !== true ||
+  JSON.parse(controlsDeleteAuditRow?.metadata_json || "{}").deleted_assignment !== true ||
+  JSON.parse(controlsDeleteAuditRow?.metadata_json || "{}").source !== "gen2_character_controls"
+) {
+  throw new Error(
+    `Expected Controls character DELETE to remove SQLite state/assignment and audit deletion, got ${JSON.stringify({
+      remainingControlsState,
+      remainingControlsAssignment,
+      controlsDeleteAuditRow,
+    })}`,
+  );
+}
+
 const fixtureContentCharacterDelete = await requestJson(
   managedCharacterPath,
   contentManagerHeaders,

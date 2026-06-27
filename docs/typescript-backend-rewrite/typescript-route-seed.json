@@ -818,6 +818,33 @@
       "notes": "Tracked Hono DND Artificer infusion state route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflicts, Artificer/Infuse Item gating, known-infusion and active-capacity validation, duplicate active infusion and duplicate target validation, nonmagical target validation, Enhanced Defense armor/shield validation, synchronized definition equipment_catalog and SQLite state.inventory active_infusions persistence, Enhanced Defense Armor Class/defensive-rule automation across infusion and later equipment writes, refreshed character state payloads, and explicit missing-character JSON."
     },
     {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls/assignment",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Character Controls owner-assignment JSON route with bearer API-token app-admin-only access, active player user and active campaign player-membership validation, SQLite character_assignments upsert, auth_audit_log character_assignment_created events with gen2_character_controls metadata, refreshed compact character controls payloads, and explicit missing-character JSON."
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls/assignment",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Character Controls owner-clear JSON route with bearer API-token app-admin-only access, no-assignment and race-compatible validation errors, SQLite character_assignments deletion, auth_audit_log character_assignment_removed events with gen2_character_controls metadata, refreshed compact character controls payloads, and explicit missing-character JSON."
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Character Controls checked character-delete JSON route with bearer API-token campaign DM/admin access, confirmation validation, existing content-character deletion plus character_state and assignment cleanup, auth_audit_log character_deleted events with gen2_character_controls metadata, Flask-compatible delete success payload links, and explicit missing-character JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/me",
       "route_family": "api_v1",
