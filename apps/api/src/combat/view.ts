@@ -250,6 +250,10 @@ interface CombatRuntimeState {
   existingCharacterSlugs: Set<string>;
 }
 
+interface CombatReadOnlyOptions {
+  requestedCombatantId?: number | null;
+}
+
 type CombatMutationResult =
   | { status: "ok" }
   | { status: "validation_error"; message: string }
@@ -1463,13 +1467,18 @@ function selectCombatPayload(
   campaignSlug: string,
   tracker: CombatTrackerPayload,
   canManageCombat: boolean,
+  requestedCombatantId: number | null,
 ): Pick<
   CombatRuntimeState,
   "selectedCombatantId" | "selectedCombatant" | "selectedPlayerCharacter" | "playerCharacterTargets"
 > {
   const combatants = tracker.combatants;
+  const requestedCombatant =
+    canManageCombat && requestedCombatantId !== null
+      ? combatants.find((combatant) => combatant.id === requestedCombatantId) || null
+      : null;
   const selectedCombatant =
-    combatants.find((combatant) => combatant.is_current_turn === true) || combatants[0] || null;
+    requestedCombatant || combatants.find((combatant) => combatant.is_current_turn === true) || combatants[0] || null;
   const selectedCombatantId =
     typeof selectedCombatant?.id === "number" ? Number(selectedCombatant.id) : null;
   const playerCharacters = combatants.filter((combatant) => asString(combatant.character_slug));
@@ -1695,6 +1704,7 @@ function loadCombatRuntimeState(
   campaignSlug: string,
   canManageCombat: boolean,
   characterRecords: CampaignCharacterFileRecord[],
+  requestedCombatantId: number | null,
 ): CombatRuntimeState {
   if (!existsSync(dbPath)) {
     return emptyCombatRuntimeState();
@@ -1733,7 +1743,7 @@ function loadCombatRuntimeState(
       combatant_count: combatants.length,
       combatants,
     };
-    const selectedPayload = selectCombatPayload(campaignSlug, tracker, canManageCombat);
+    const selectedPayload = selectCombatPayload(campaignSlug, tracker, canManageCombat, requestedCombatantId);
     const selectedPlayerSlug = asString(selectedPayload.selectedPlayerCharacter?.character_slug);
     const selectedPlayerRecord = selectedPlayerSlug ? characterRecordsBySlug.get(selectedPlayerSlug) : undefined;
     return {
@@ -3720,6 +3730,7 @@ export async function buildCombatReadOnlyPayload(
   config: ApiConfig,
   campaign: CampaignViewModel,
   role: FixtureCombatRole,
+  options: CombatReadOnlyOptions = {},
 ): Promise<CombatReadOnlyPayload> {
   const canManageCombat = role === "dm" || role === "admin";
   const canAccessScopedPlayerTools = role === "player" || canManageCombat;
@@ -3727,8 +3738,9 @@ export async function buildCombatReadOnlyPayload(
   const combatSystemSupported = supportsCombatTracker(campaign.system);
   const characterRecords =
     combatSystemSupported ? (await listCampaignContentCharacters(config, campaign.slug)) || [] : [];
+  const requestedCombatantId = canManageCombat ? options.requestedCombatantId ?? null : null;
   const combatRuntime = combatSystemSupported
-    ? loadCombatRuntimeState(config.dbPath, campaign.slug, canManageCombat, characterRecords)
+    ? loadCombatRuntimeState(config.dbPath, campaign.slug, canManageCombat, characterRecords, requestedCombatantId)
     : emptyCombatRuntimeState();
   const availableCharacterChoices = combatSystemSupported
     ? listAvailableCharacterChoices(characterRecords, canManageCombat, combatRuntime.existingCharacterSlugs)
