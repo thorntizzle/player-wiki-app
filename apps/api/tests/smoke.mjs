@@ -1585,6 +1585,100 @@ if (
   throw new Error(`Expected persisted player preferences, got ${JSON.stringify(playerPreferenceRow)}`);
 }
 
+const blockedAdminDashboard = await requestJson("/api/v1/admin");
+if (blockedAdminDashboard.status !== 401 || blockedAdminDashboard.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated admin dashboard request to return auth_required 401, got ${blockedAdminDashboard.status} ${blockedAdminDashboard.payload?.error?.code}`,
+  );
+}
+
+const playerBearerAdminDashboard = await requestJson("/api/v1/admin", {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (playerBearerAdminDashboard.status !== 403 || playerBearerAdminDashboard.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player bearer admin dashboard request to return forbidden 403, got ${playerBearerAdminDashboard.status} ${playerBearerAdminDashboard.payload?.error?.code}`,
+  );
+}
+
+const fixtureAdminDashboard = await requestJson("/api/v1/admin?audit_event_type=user_created&audit_campaign_slug=linden-pass", {
+  "X-CPW-Fixture-Role": "admin",
+});
+const fixturePlayerCard = fixtureAdminDashboard.payload?.user_cards?.find(
+  (user) => user.email === "fixture-token-player@example.com",
+);
+if (
+  fixtureAdminDashboard.status !== 200 ||
+  fixtureAdminDashboard.payload?.ok !== true ||
+  fixtureAdminDashboard.payload?.campaign_choices?.[0]?.slug !== "linden-pass" ||
+  fixtureAdminDashboard.payload?.campaign_choices?.[0]?.title !== "Echoes of the Alloy Coast" ||
+  fixtureAdminDashboard.payload?.invite_form_defaults?.user_type !== "player" ||
+  fixtureAdminDashboard.payload?.activity_filters?.event_type !== "user_created" ||
+  fixtureAdminDashboard.payload?.activity_filters?.campaign_slug !== "linden-pass" ||
+  fixtureAdminDashboard.payload?.pagination?.page_size !== 10 ||
+  fixtureAdminDashboard.payload?.links?.gen2_admin_url !== "/app-next/admin" ||
+  fixtureAdminDashboard.payload?.links?.flask_admin_url !== "/admin" ||
+  fixturePlayerCard?.href !== "/app-next/admin/users/79" ||
+  !fixturePlayerCard?.assignment_summary?.includes("Echoes of the Alloy Coast | Arden March")
+) {
+  throw new Error(`Unexpected fixture admin dashboard payload: ${JSON.stringify(fixtureAdminDashboard.payload)}`);
+}
+
+const bearerAdminDashboard = await requestJson("/api/v1/admin", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (
+  bearerAdminDashboard.status !== 200 ||
+  bearerAdminDashboard.payload?.ok !== true ||
+  bearerAdminDashboard.payload?.admin_user?.email !== "fixture-token-user@example.com" ||
+  bearerAdminDashboard.payload?.user_cards?.length !== 5
+) {
+  throw new Error(`Unexpected bearer admin dashboard payload: ${JSON.stringify(bearerAdminDashboard.payload)}`);
+}
+
+const bearerAdminUserDetail = await requestJson(
+  "/api/v1/admin/users/79?edit_membership_campaign_slug=linden-pass&edit_assignment_campaign_slug=linden-pass&edit_assignment_character_slug=arden-march&audit_q=arden&audit_page=7",
+  { Authorization: `Bearer ${liveApiToken}` },
+);
+if (
+  bearerAdminUserDetail.status !== 200 ||
+  bearerAdminUserDetail.payload?.ok !== true ||
+  bearerAdminUserDetail.payload?.managed_user?.email !== "fixture-token-player@example.com" ||
+  bearerAdminUserDetail.payload?.memberships?.[0]?.campaign_title !== "Echoes of the Alloy Coast" ||
+  bearerAdminUserDetail.payload?.memberships?.[0]?.role !== "player" ||
+  bearerAdminUserDetail.payload?.assignments?.[0]?.character_label !== "Arden March" ||
+  bearerAdminUserDetail.payload?.membership_form_defaults?.campaign_slug !== "linden-pass" ||
+  bearerAdminUserDetail.payload?.membership_form_defaults?.role !== "player" ||
+  bearerAdminUserDetail.payload?.assignment_form_defaults?.character_ref !== "linden-pass::arden-march" ||
+  bearerAdminUserDetail.payload?.can_manage_account !== true ||
+  bearerAdminUserDetail.payload?.activity_filters?.query !== "arden" ||
+  bearerAdminUserDetail.payload?.pagination?.current_page !== 1 ||
+  bearerAdminUserDetail.payload?.export_url !== "/admin/users/79/activity/export.csv?audit_q=arden" ||
+  bearerAdminUserDetail.payload?.links?.gen2_user_url !== "/app-next/admin/users/79" ||
+  bearerAdminUserDetail.payload?.links?.flask_user_url !== "/admin/users/79"
+) {
+  throw new Error(`Unexpected bearer admin user detail payload: ${JSON.stringify(bearerAdminUserDetail.payload)}`);
+}
+
+const bearerAdminSelfDetail = await requestJson("/api/v1/admin/users/77", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (bearerAdminSelfDetail.status !== 200 || bearerAdminSelfDetail.payload?.can_manage_account !== false) {
+  throw new Error(`Expected admin self detail to be non-manageable, got ${JSON.stringify(bearerAdminSelfDetail.payload)}`);
+}
+
+const missingAdminUserDetail = await requestJson("/api/v1/admin/users/999999", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (
+  missingAdminUserDetail.status !== 404 ||
+  missingAdminUserDetail.payload?.error?.code !== "admin_user_not_found"
+) {
+  throw new Error(
+    `Expected missing admin user detail JSON 404, got ${missingAdminUserDetail.status} ${missingAdminUserDetail.payload?.error?.code}`,
+  );
+}
+
 const blockedImportRuns = await requestJson("/api/v1/systems/import-runs");
 if (blockedImportRuns.status !== 401 || blockedImportRuns.payload?.error?.code !== "auth_required") {
   throw new Error(

@@ -18,6 +18,8 @@ fixture database.
 - Implemented `GET /api/v1/systems/import-runs` with Flask-compatible unauthenticated auth failure and fixture-admin SQLite reads.
 - Implemented `GET /api/v1/systems/import-runs/:importRunId` with the same auth gate, fixture-admin SQLite detail reads, and explicit missing-resource JSON.
 - Implemented `POST /api/v1/systems/imports/dnd5e` with bearer API-token app-admin writes, fixture-role write denial, `.zip` archive validation through a small pure-JS dependency, unsafe archive path rejection, source and entry-type validation, source-row replacement, media-field stripping, import-run persistence, and explicit validation envelopes.
+- Implemented `GET /api/v1/admin` with app-admin-only fixture or bearer-token access, campaign choices, user-card summaries, invite defaults, audit filters, paginated audit rows, Flask CSV export links, and Gen2/Flask Admin links.
+- Implemented `GET /api/v1/admin/users/:userId` with app-admin-only fixture or bearer-token access, managed-user detail, membership and assignment rows, campaign and character choices, form defaults, audit filters, paginated audit rows, Flask CSV export links, Gen2/Flask Admin user links, and explicit missing-user JSON.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/systems` with Flask-compatible unauthenticated auth failure, fixture-role source cards, entry search, and rules-reference metadata search fields.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/systems/search` as the Flask-compatible search alias sharing the Systems landing payload contract.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/systems/sources` with Flask-compatible unauthenticated auth failure, fixture-role source filtering, campaign YAML source defaults, and SQLite library/source reads.

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
 
+import { buildAdminDashboardPayload, buildAdminUserDetailPayload } from "./admin/view.js";
 import {
   apiTokenRoleForCampaign,
   deleteCharacterAssignment,
@@ -401,7 +402,13 @@ function fixtureRole(ctx: { req: { header: (name: string) => string | undefined 
 }
 
 type RoleResolution =
-  | { kind: "authenticated"; role: FixtureSystemsRole; actorUserId?: number; actorDisplayName?: string }
+  | {
+      kind: "authenticated";
+      role: FixtureSystemsRole;
+      actorUserId?: number;
+      actorDisplayName?: string;
+      actorUser?: AuthUser;
+    }
   | { kind: "missing" }
   | { kind: "invalid" }
   | { kind: "forbidden"; message: string };
@@ -773,7 +780,13 @@ function resolveAppAdminAuth(ctx: { req: { header: (name: string) => string | un
   const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
   if (apiAuth.kind === "authenticated") {
     if (apiAuth.context.user.is_admin) {
-      return { kind: "authenticated", role: "admin" };
+      return {
+        kind: "authenticated",
+        role: "admin",
+        actorUserId: apiAuth.context.user.id,
+        actorDisplayName: apiAuth.context.user.display_name,
+        actorUser: apiAuth.context.user,
+      };
     }
     return { kind: "forbidden", message: "You do not have permission to use the admin API." };
   }
@@ -1217,6 +1230,38 @@ app.patch(ROUTES.meSettingsUpdate, async (ctx) => {
     user: apiAuth.context.user,
     preferences: result.preferences,
   });
+});
+
+app.get(ROUTES.adminDashboard, async (ctx) => {
+  const auth = resolveAppAdminAuth(ctx);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(await buildAdminDashboardPayload(config, auth.actorUser || null, requestQueryValues(ctx)));
+});
+
+app.get(ROUTES.adminUser, async (ctx) => {
+  const auth = resolveAppAdminAuth(ctx);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const userId = parsePositiveInteger(ctx.req.param("userId") || "");
+  if (userId === null) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const payload = await buildAdminUserDetailPayload(config, auth.actorUser || null, userId, requestQueryValues(ctx));
+  if (!payload) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json(payload);
 });
 
 app.get(ROUTES.systemsImportRuns, async (ctx) => {

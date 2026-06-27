@@ -1629,6 +1629,29 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
     seedPath: "/api/v1/systems/imports/dnd5e",
     routeFamily: "api_v1_systems",
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/admin",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/admin",
+    seedPath: "/api/v1/admin",
+    routeFamily: "api_v1_admin",
+  },
+  {
+    method: "GET",
+    honoPath: "/api/v1/admin/users/:userId",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/admin/users/<int:user_id>",
+    seedPath: "/api/v1/admin/users/<int:user_id>",
+    routeFamily: "api_v1_admin",
+    missingResource: {
+      method: "GET",
+      path: "/api/v1/admin/users/999999",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "admin_user_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1741,4 +1764,6 @@ export const ROUTES = {
   systemsCustomEntryRestore: IMPLEMENTED_ROUTES[108].honoPath,
   systemsItemMechanicsImport: IMPLEMENTED_ROUTES[109].honoPath,
   systemsDnd5eImport: IMPLEMENTED_ROUTES[110].honoPath,
+  adminDashboard: IMPLEMENTED_ROUTES[111].honoPath,
+  adminUser: IMPLEMENTED_ROUTES[112].honoPath,
 } as const;

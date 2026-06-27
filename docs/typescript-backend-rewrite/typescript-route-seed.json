@@ -962,6 +962,24 @@
       "notes": "Tracked Hono account settings write route with bearer API-token auth, Flask-compatible theme/chat-order validation, retired frontend_mode rejection, SQLite user_preferences updates, and refreshed preference payloads."
     },
     {
+      "method": "GET",
+      "path": "/api/v1/admin",
+      "route_family": "api_v1_admin",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/admin",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Admin dashboard read route with app-admin-only fixture or bearer-token access, campaign and user-card context, invite defaults, audit filters, paginated audit rows, Flask CSV export links, and Gen2/Flask admin links."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/users/<int:user_id>",
+      "route_family": "api_v1_admin",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/admin/users/:userId",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Admin user-detail read route with app-admin-only fixture or bearer-token access, managed-user context, memberships, assignments, campaign and character choices, form defaults, audit filters, paginated audit rows, Flask CSV export links, and explicit missing-user JSON."
+    },
+    {
       "method": "POST",
       "path": "/api/v1/campaigns/<campaign_slug>/systems/custom-entries",
       "route_family": "api_v1_systems",
