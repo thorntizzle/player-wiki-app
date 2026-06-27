@@ -41,6 +41,7 @@ const XIANXIA_EFFORT_LABELS: Record<(typeof XIANXIA_EFFORT_KEYS)[number], string
   magic: "Magic",
   ultimate: "Ultimate",
 };
+type XianxiaEffortKey = (typeof XIANXIA_EFFORT_KEYS)[number];
 const XIANXIA_ENERGY_KEYS = ["jing", "qi", "shen"] as const;
 const XIANXIA_ENERGY_LABELS: Record<(typeof XIANXIA_ENERGY_KEYS)[number], string> = {
   jing: "Jing",
@@ -54,6 +55,7 @@ const XIANXIA_YIN_YANG_LABELS: Record<(typeof XIANXIA_YIN_YANG_KEYS)[number], st
   yang: "Yang",
 };
 type XianxiaYinYangKey = (typeof XIANXIA_YIN_YANG_KEYS)[number];
+type XianxiaConditioningTarget = "hp" | "effort";
 const XIANXIA_CURRENCY_KEYS = ["coin", "supply", "spirit_stones"] as const;
 const XIANXIA_DEFINITION_FIELD_KEYS = [
   "schema_version",
@@ -465,6 +467,9 @@ export function applyCharacterCultivationAction(
   if (action === "spend_meditation_yin_yang") {
     return applyXianxiaMeditationYinYangAction(definition, values);
   }
+  if (action === "spend_conditioning") {
+    return applyXianxiaConditioningAction(definition, values);
+  }
   return {
     status: "validation_error",
     message: "Unsupported cultivation action. Refresh the page and try again.",
@@ -568,6 +573,31 @@ function applyXianxiaMeditationYinYangAction(
   };
 }
 
+function applyXianxiaConditioningAction(
+  definition: Record<string, unknown>,
+  values: Record<string, string>,
+): CharacterCultivationActionApplyResult {
+  const conditioningTarget = normalizeCultivationConditioningTarget(values.conditioning_target);
+  if (!conditioningTarget) {
+    return { status: "validation_error", message: "Choose HP or an Effort for Conditioning." };
+  }
+
+  const result = spendXianxiaConditioningDefinition(definition, {
+    conditioningTarget,
+    effortKey: values.effort_key,
+    notes: collapseWhitespace(values.conditioning_notes),
+  });
+  if (result.status === "validation_error") {
+    return { status: "validation_error", message: result.message };
+  }
+  return {
+    status: "ok",
+    definition: result.definition,
+    message: `Spent ${result.insightCost} Insight on Conditioning to increase ${result.targetName}.`,
+    anchor: "xianxia-cultivation-conditioning",
+  };
+}
+
 function normalizeCultivationValues(payload: Record<string, unknown>): Record<string, string> {
   const rawValues = asRecord(payload.values);
   const source = Object.keys(rawValues).length > 0 ? rawValues : payload;
@@ -588,6 +618,30 @@ function normalizeCultivationEnergyKey(value: unknown): XianxiaEnergyKey | "" {
     return normalized as XianxiaEnergyKey;
   }
   return "";
+}
+
+function normalizeCultivationConditioningTarget(value: unknown): XianxiaConditioningTarget | "" {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[-\s]+/g, "_");
+  if (normalized === "hp" || normalized === "effort") {
+    return normalized;
+  }
+  return "";
+}
+
+function normalizeCultivationEffortKey(value: unknown): XianxiaEffortKey | "" {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[-\s]+/g, "_");
+  if ((XIANXIA_EFFORT_KEYS as readonly string[]).includes(normalized)) {
+    return normalized as XianxiaEffortKey;
+  }
+  return "";
+}
+
+function xianxiaEffortLabel(value: unknown): string {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[-\s]+/g, "_");
+  if ((XIANXIA_EFFORT_KEYS as readonly string[]).includes(normalized)) {
+    return XIANXIA_EFFORT_LABELS[normalized as XianxiaEffortKey];
+  }
+  return normalized ? humanizeSlug(normalized) : "Effort";
 }
 
 function normalizeCultivationYinYangKey(value: unknown): XianxiaYinYangKey | "" {
@@ -792,6 +846,105 @@ function spendXianxiaMeditationYinYangDefinition(
     insightCost,
     yinYangName,
     newMaximum,
+  };
+}
+
+function spendXianxiaConditioningDefinition(
+  definition: Record<string, unknown>,
+  payload: { conditioningTarget: XianxiaConditioningTarget; effortKey: unknown; notes: string },
+):
+  | {
+      status: "ok";
+      definition: Record<string, unknown>;
+      insightCost: number;
+      targetName: string;
+      newValue: number;
+    }
+  | { status: "validation_error"; message: string } {
+  const nextDefinition = deepCloneRecord(definition);
+  const xianxia = asRecord(nextDefinition.xianxia);
+  const previousInsight = asRecord(xianxia.insight);
+  const previousAvailable = nonNegativeLooseInt(previousInsight.available, 0);
+  const previousSpent = nonNegativeLooseInt(previousInsight.spent, 0);
+  const insightCost = XIANXIA_CONDITIONING_INSIGHT_COST;
+  if (previousAvailable < insightCost) {
+    const targetName = payload.conditioningTarget === "hp" ? "HP" : xianxiaEffortLabel(payload.effortKey);
+    return {
+      status: "validation_error",
+      message: `Conditioning needs ${insightCost} Insight to increase ${targetName}; only ${previousAvailable} available.`,
+    };
+  }
+
+  const history = asArray(xianxia.advancement_history)
+    .map(asRecord)
+    .filter((record) => Object.keys(record).length > 0);
+  let targetName = "HP";
+  let newValue = 0;
+  let historyRow: Record<string, unknown>;
+
+  if (payload.conditioningTarget === "hp") {
+    const durability = asRecord(xianxia.durability);
+    const currentHpMaximum = nonNegativeLooseInt(durability.hp_max, 10);
+    if (currentHpMaximum >= XIANXIA_CONDITIONING_HP_MAXIMUM) {
+      return {
+        status: "validation_error",
+        message: `Conditioning cannot increase HP above ${XIANXIA_CONDITIONING_HP_MAXIMUM}.`,
+      };
+    }
+    const newHpMaximum = Math.min(
+      XIANXIA_CONDITIONING_HP_MAXIMUM,
+      currentHpMaximum + XIANXIA_CONDITIONING_HP_INCREASE,
+    );
+    const maximumIncrease = newHpMaximum - currentHpMaximum;
+    durability.hp_max = newHpMaximum;
+    xianxia.durability = durability;
+    newValue = newHpMaximum;
+    historyRow = {
+      action: "conditioning_hp_increase",
+      amount: insightCost,
+      target: "HP",
+      hp_maximum_increase: maximumIncrease,
+      new_hp_maximum: newHpMaximum,
+      hp_maximum_cap: XIANXIA_CONDITIONING_HP_MAXIMUM,
+    };
+  } else {
+    const effortKey = normalizeCultivationEffortKey(payload.effortKey);
+    if (!effortKey) {
+      return { status: "validation_error", message: "Choose a valid Effort for Conditioning." };
+    }
+    const efforts = asRecord(xianxia.efforts);
+    const currentScore = nonNegativeLooseInt(efforts[effortKey], 0);
+    const newScore = currentScore + XIANXIA_CONDITIONING_EFFORT_INCREASE;
+    efforts[effortKey] = newScore;
+    xianxia.efforts = efforts;
+    targetName = XIANXIA_EFFORT_LABELS[effortKey];
+    newValue = newScore;
+    historyRow = {
+      action: "conditioning_effort_increase",
+      amount: insightCost,
+      target: targetName,
+      effort_key: effortKey,
+      effort_point_increase: XIANXIA_CONDITIONING_EFFORT_INCREASE,
+      new_effort_score: newScore,
+    };
+  }
+
+  if (payload.notes) {
+    historyRow.notes = payload.notes;
+  }
+  history.push(historyRow);
+  xianxia.advancement_history = history;
+  xianxia.insight = {
+    available: previousAvailable - insightCost,
+    spent: previousSpent + insightCost,
+  };
+  nextDefinition.xianxia = xianxia;
+  return {
+    status: "ok",
+    definition: nextDefinition,
+    insightCost,
+    targetName,
+    newValue,
   };
 }
 

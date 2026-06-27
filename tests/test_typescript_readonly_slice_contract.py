@@ -2224,6 +2224,205 @@ def test_typescript_character_cultivation_context_shell_and_supported_xianxia_co
         == "Meditation needs 1 Insight to increase Yin; only 0 available."
     )
 
+    invalid_conditioning_target_status, invalid_conditioning_target_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 8,
+            "cultivation_action": "spend_conditioning",
+            "conditioning_target": "body",
+        },
+    )
+    assert invalid_conditioning_target_status == 400
+    assert invalid_conditioning_target_payload["error"]["code"] == "validation_error"
+    assert (
+        invalid_conditioning_target_payload["error"]["message"]
+        == "Choose HP or an Effort for Conditioning."
+    )
+
+    restore_conditioning_insight_status, restore_conditioning_insight_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 8,
+            "action": "save_insight",
+            "values": {"insight_available": "3", "insight_spent": "3"},
+        },
+    )
+    assert restore_conditioning_insight_status == 200
+    assert restore_conditioning_insight_payload["character"]["state_record"]["revision"] == initial_revision + 9
+
+    conditioning_hp_status, conditioning_hp_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 9,
+            "action": "spend_conditioning",
+            "values": {
+                "conditioning_target": " HP ",
+                "conditioning_notes": "  Stone-body   breathing\n beside\tthe falls.  ",
+            },
+        },
+    )
+    assert conditioning_hp_status == 200
+    assert conditioning_hp_payload["ok"] is True
+    assert conditioning_hp_payload["message"] == "Spent 1 Insight on Conditioning to increase HP."
+    assert conditioning_hp_payload["anchor"] == "xianxia-cultivation-conditioning"
+    assert conditioning_hp_payload["character"]["state_record"]["revision"] == initial_revision + 10
+    conditioning_hp_xianxia = conditioning_hp_payload["character"]["definition"]["xianxia"]
+    assert conditioning_hp_xianxia["insight"] == {"available": 2, "spent": 4}
+    assert conditioning_hp_xianxia["durability"]["hp_max"] == 20
+    assert conditioning_hp_xianxia["efforts"]["magic"] == 1
+    hp_context = conditioning_hp_payload["cultivation"]["conditioning"]["hp"]
+    assert hp_context["current"] == 10
+    assert hp_context["max"] == 20
+    assert hp_context["projected_max"] == 30
+    assert conditioning_hp_payload["character"]["state_record"]["state"]["vitals"]["current_hp"] == 10
+    assert conditioning_hp_payload["character"]["state_record"]["state"]["xianxia"]["vitals"]["current_hp"] == 10
+    assert conditioning_hp_xianxia["advancement_history"][-1] == {
+        "action": "conditioning_hp_increase",
+        "amount": 1,
+        "target": "HP",
+        "hp_maximum_increase": 10,
+        "new_hp_maximum": 20,
+        "hp_maximum_cap": 50,
+        "notes": "Stone-body breathing beside the falls.",
+    }
+
+    conditioning_effort_status, conditioning_effort_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 10,
+            "cultivation_action": "spend_conditioning",
+            "conditioning_target": "effort",
+            "effort_key": "Magic",
+            "conditioning_notes": "  Refined   spell-force\n output.  ",
+        },
+    )
+    assert conditioning_effort_status == 200
+    assert conditioning_effort_payload["ok"] is True
+    assert conditioning_effort_payload["message"] == "Spent 1 Insight on Conditioning to increase Magic."
+    assert conditioning_effort_payload["anchor"] == "xianxia-cultivation-conditioning"
+    assert conditioning_effort_payload["character"]["state_record"]["revision"] == initial_revision + 11
+    conditioning_effort_xianxia = conditioning_effort_payload["character"]["definition"]["xianxia"]
+    assert conditioning_effort_xianxia["insight"] == {"available": 1, "spent": 5}
+    assert conditioning_effort_xianxia["durability"]["hp_max"] == 20
+    assert conditioning_effort_xianxia["efforts"]["magic"] == 3
+    magic_context = next(
+        row for row in conditioning_effort_payload["cultivation"]["conditioning"]["efforts"] if row["key"] == "magic"
+    )
+    assert magic_context["score"] == 3
+    assert conditioning_effort_xianxia["advancement_history"][-1] == {
+        "action": "conditioning_effort_increase",
+        "amount": 1,
+        "target": "Magic",
+        "effort_key": "magic",
+        "effort_point_increase": 2,
+        "new_effort_score": 3,
+        "notes": "Refined spell-force output.",
+    }
+
+    invalid_conditioning_effort_status, invalid_conditioning_effort_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 11,
+            "cultivation_action": "spend_conditioning",
+            "conditioning_target": "effort",
+            "effort_key": "body",
+        },
+    )
+    assert invalid_conditioning_effort_status == 400
+    assert invalid_conditioning_effort_payload["error"]["code"] == "validation_error"
+    assert invalid_conditioning_effort_payload["error"]["message"] == "Choose a valid Effort for Conditioning."
+
+    zero_conditioning_insight_status, zero_conditioning_insight_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 11,
+            "action": "save_insight",
+            "values": {"insight_available": "0", "insight_spent": "5"},
+        },
+    )
+    assert zero_conditioning_insight_status == 200
+    assert zero_conditioning_insight_payload["character"]["state_record"]["revision"] == initial_revision + 12
+
+    insufficient_conditioning_status, insufficient_conditioning_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 12,
+            "cultivation_action": "spend_conditioning",
+            "conditioning_target": "effort",
+            "effort_key": "magic",
+        },
+    )
+    assert insufficient_conditioning_status == 400
+    assert insufficient_conditioning_payload["error"]["code"] == "validation_error"
+    assert (
+        insufficient_conditioning_payload["error"]["message"]
+        == "Conditioning needs 1 Insight to increase Magic; only 0 available."
+    )
+
+    insufficient_conditioning_precedes_invalid_effort_status, insufficient_conditioning_precedes_invalid_effort_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 12,
+            "cultivation_action": "spend_conditioning",
+            "conditioning_target": "effort",
+            "effort_key": "body",
+        },
+    )
+    assert insufficient_conditioning_precedes_invalid_effort_status == 400
+    assert insufficient_conditioning_precedes_invalid_effort_payload["error"]["code"] == "validation_error"
+    assert (
+        insufficient_conditioning_precedes_invalid_effort_payload["error"]["message"]
+        == "Conditioning needs 1 Insight to increase Body; only 0 available."
+    )
+
+    cap_character_slug = "api-cultivation-cap"
+    cap_body = deepcopy(xianxia_body)
+    cap_body["definition"]["name"] = "API Cultivation Cap"
+    cap_body["definition"]["xianxia"]["insight"] = {"available": 1, "spent": 0}
+    cap_body["definition"]["xianxia"]["durability"]["hp_max"] = 50
+    cap_create_status, _cap_create_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/characters/{cap_character_slug}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body=cap_body,
+    )
+    assert cap_create_status == 200
+    cap_status, cap_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{cap_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+    assert cap_status == 200
+    cap_revision = cap_payload["character"]["state_record"]["revision"]
+    hp_cap_status, hp_cap_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{cap_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": cap_revision,
+            "cultivation_action": "spend_conditioning",
+            "conditioning_target": "hp",
+        },
+    )
+    assert hp_cap_status == 400
+    assert hp_cap_payload["error"]["code"] == "validation_error"
+    assert hp_cap_payload["error"]["message"] == "Conditioning cannot increase HP above 50."
+
     zero_gathering_status, zero_gathering_payload = _to_json(
         f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
         headers=typescript_api_mutation_server["dm_headers"],
