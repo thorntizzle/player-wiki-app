@@ -493,6 +493,12 @@ export function applyCharacterCultivationAction(
   if (action === "reset_realm_ascension_stats") {
     return applyXianxiaRealmAscensionResetAction(definition, values);
   }
+  if (action === "apply_immortal_realm_rebuild") {
+    return applyXianxiaRealmAscensionRebuildAction(definition, values, "Mortal", "Immortal");
+  }
+  if (action === "apply_divine_realm_rebuild") {
+    return applyXianxiaRealmAscensionRebuildAction(definition, values, "Immortal", "Divine");
+  }
   return {
     status: "validation_error",
     message: "Unsupported cultivation action. Refresh the page and try again.",
@@ -740,6 +746,35 @@ function applyXianxiaRealmAscensionResetAction(
     status: "ok",
     definition: result.definition,
     message: `Reset Attributes and Efforts for ${result.currentRealm} to ${result.targetRealm} Realm ascension.`,
+    anchor: "xianxia-cultivation-realm-ascension",
+  };
+}
+
+function applyXianxiaRealmAscensionRebuildAction(
+  definition: Record<string, unknown>,
+  values: Record<string, string>,
+  expectedCurrentRealm: string,
+  expectedTargetRealm: string,
+): CharacterCultivationActionApplyResult {
+  const result = applyXianxiaRealmAscensionRebuildDefinition(definition, {
+    targetRealm: values.target_realm,
+    attributeScores: Object.fromEntries(
+      XIANXIA_ATTRIBUTE_KEYS.map((key) => [key, values[`realm_rebuild_attribute_${key}`]]),
+    ),
+    effortScores: Object.fromEntries(XIANXIA_EFFORT_KEYS.map((key) => [key, values[`realm_rebuild_effort_${key}`]])),
+    hpMaximumTrade: values.realm_ascension_trade_hp,
+    stanceMaximumTrade: values.realm_ascension_trade_stance,
+    notes: collapseWhitespace(values.realm_ascension_rebuild_notes),
+    expectedCurrentRealm,
+    expectedTargetRealm,
+  });
+  if (result.status === "validation_error") {
+    return { status: "validation_error", message: result.message };
+  }
+  return {
+    status: "ok",
+    definition: result.definition,
+    message: `Applied the ${result.targetRealm} rebuild budget for ${result.totalRebuildPoints} points and ${result.actionsPerTurn} actions.`,
     anchor: "xianxia-cultivation-realm-ascension",
   };
 }
@@ -1674,6 +1709,181 @@ function resetXianxiaRealmAscensionStatsDefinition(
   return { status: "ok", definition: nextDefinition, currentRealm, targetRealm };
 }
 
+function applyXianxiaRealmAscensionRebuildDefinition(
+  definition: Record<string, unknown>,
+  payload: {
+    targetRealm: unknown;
+    attributeScores: Record<string, unknown>;
+    effortScores: Record<string, unknown>;
+    hpMaximumTrade: unknown;
+    stanceMaximumTrade: unknown;
+    notes: string;
+    expectedCurrentRealm: string;
+    expectedTargetRealm: string;
+  },
+):
+  | {
+      status: "ok";
+      definition: Record<string, unknown>;
+      currentRealm: string;
+      targetRealm: string;
+      totalRebuildPoints: number;
+      actionsPerTurn: number;
+    }
+  | { status: "validation_error"; message: string } {
+  const nextDefinition = deepCloneRecord(definition);
+  const xianxia = asRecord(nextDefinition.xianxia);
+  const currentRealm = normalizeRealmLabel(xianxia.realm);
+  const target = xianxiaRealmAscensionTargetForCurrent(currentRealm);
+  if (!target) {
+    return {
+      status: "validation_error",
+      message: `${currentRealm} characters do not have a Realm rebuild target.`,
+    };
+  }
+
+  const targetRealmForCurrent = String(target.target_realm || "").trim();
+  if (currentRealm !== payload.expectedCurrentRealm || payload.expectedTargetRealm !== targetRealmForCurrent) {
+    return {
+      status: "validation_error",
+      message: `The ${payload.expectedTargetRealm} rebuild budget applies only to ${payload.expectedCurrentRealm} to ${payload.expectedTargetRealm} ascension.`,
+    };
+  }
+  if (normalizeRealmLabel(payload.targetRealm) !== payload.expectedTargetRealm) {
+    return {
+      status: "validation_error",
+      message: `Realm ascension must move from ${currentRealm} to ${payload.expectedTargetRealm}.`,
+    };
+  }
+
+  const history = xianxiaAdvancementHistory(xianxia);
+  const reviewIndex = latestRealmAscensionReviewIndex(history, currentRealm, payload.expectedTargetRealm);
+  if (reviewIndex === null) {
+    return {
+      status: "validation_error",
+      message: `Start a pending Realm ascension review before applying the ${payload.expectedTargetRealm} rebuild.`,
+    };
+  }
+  const resetIndex = latestRealmAscensionStatResetIndex(history, reviewIndex, payload.expectedTargetRealm);
+  if (resetIndex === null) {
+    return {
+      status: "validation_error",
+      message: `Reset Attributes and Efforts before applying the ${payload.expectedTargetRealm} rebuild budget.`,
+    };
+  }
+  if (hasRealmAscensionRebuildAfter(history, resetIndex, payload.expectedTargetRealm)) {
+    return {
+      status: "validation_error",
+      message: `The ${payload.expectedTargetRealm} rebuild budget has already been applied for this Realm ascension review.`,
+    };
+  }
+
+  const resetEvent = asRecord(history[resetIndex]);
+  const preAscensionState = asRecord(resetEvent.pre_ascension_state);
+  const preAscensionSummary = String(resetEvent.pre_ascension_summary || "").trim();
+  const rebuildBudget = nonNegativeLooseInt(target.rebuild_budget, 0);
+  const statCap = nonNegativeLooseInt(target.stat_cap, 0);
+  const actionsPerTurn = nonNegativeLooseInt(target.actions_per_turn, 0);
+  const durability = asRecord(xianxia.durability);
+  const hpMaximumBefore = nonNegativeLooseInt(durability.hp_max, 10);
+  const stanceMaximumBefore = nonNegativeLooseInt(durability.stance_max, 10);
+  const trade = validateRealmAscensionHpStanceTrade({
+    hpMaximumTrade: payload.hpMaximumTrade,
+    stanceMaximumTrade: payload.stanceMaximumTrade,
+    hpMaximumBefore,
+    stanceMaximumBefore,
+  });
+  const attributes = validateRealmRebuildScores(payload.attributeScores, {
+    keys: XIANXIA_ATTRIBUTE_KEYS,
+    labels: XIANXIA_ATTRIBUTE_LABELS,
+    statCap,
+    rebuildLabel: payload.expectedTargetRealm,
+  });
+  const efforts = validateRealmRebuildScores(payload.effortScores, {
+    keys: XIANXIA_EFFORT_KEYS,
+    labels: XIANXIA_EFFORT_LABELS,
+    statCap,
+    rebuildLabel: payload.expectedTargetRealm,
+  });
+  const totalRebuildPoints = attributes.total + efforts.total;
+  const requiredRebuildPoints = rebuildBudget + trade.hpStanceTradePoints;
+  const errors = [...trade.errors, ...attributes.errors, ...efforts.errors];
+  if (totalRebuildPoints !== requiredRebuildPoints) {
+    errors.push(
+      `${payload.expectedTargetRealm} rebuild must spend exactly ${requiredRebuildPoints} Attribute/Effort points; submitted ${totalRebuildPoints}.`,
+    );
+  }
+  if (errors.length > 0) {
+    return { status: "validation_error", message: errors.join("; ") };
+  }
+
+  const hpMaximumAfter = Math.max(0, hpMaximumBefore - trade.hpMaximumTrade);
+  const stanceMaximumAfter = Math.max(0, stanceMaximumBefore - trade.stanceMaximumTrade);
+  xianxia.durability = {
+    ...durability,
+    hp_max: hpMaximumAfter,
+    stance_max: stanceMaximumAfter,
+  };
+  xianxia.realm = payload.expectedTargetRealm;
+  xianxia.actions_per_turn = actionsPerTurn;
+  xianxia.attributes = attributes.scores;
+  xianxia.efforts = efforts.scores;
+  const postAscensionState = xianxiaRealmAscensionHistorySnapshot(xianxia);
+  const postAscensionSummary = xianxiaRealmAscensionHistorySnapshotSummary(postAscensionState);
+
+  const historyRow: Record<string, unknown> = {
+    action:
+      payload.expectedTargetRealm === "Immortal"
+        ? "realm_ascension_immortal_rebuild_applied"
+        : "realm_ascension_divine_rebuild_applied",
+    target: payload.expectedTargetRealm,
+    current_realm: currentRealm,
+    target_realm: payload.expectedTargetRealm,
+    status: "applied_pending_final_confirmation",
+    rebuild_budget: requiredRebuildPoints,
+    stat_cap: statCap,
+    actions_per_turn: actionsPerTurn,
+    attributes_after_total: attributes.total,
+    efforts_after_total: efforts.total,
+    total_rebuild_points: totalRebuildPoints,
+    post_ascension_summary: postAscensionSummary,
+    post_ascension_state: postAscensionState,
+  };
+  if (Object.keys(preAscensionState).length > 0) {
+    historyRow.pre_ascension_state = preAscensionState;
+  }
+  if (preAscensionSummary) {
+    historyRow.pre_ascension_summary = preAscensionSummary;
+  }
+  if (trade.hpStanceTradePoints > 0) {
+    Object.assign(historyRow, {
+      hp_stance_trade_points: trade.hpStanceTradePoints,
+      base_rebuild_budget: rebuildBudget,
+      hp_maximum_trade: trade.hpMaximumTrade,
+      stance_maximum_trade: trade.stanceMaximumTrade,
+      hp_maximum_before: hpMaximumBefore,
+      hp_maximum_after: hpMaximumAfter,
+      stance_maximum_before: stanceMaximumBefore,
+      stance_maximum_after: stanceMaximumAfter,
+    });
+  }
+  if (payload.notes) {
+    historyRow.notes = payload.notes;
+  }
+
+  history.push(historyRow);
+  xianxia.advancement_history = history;
+  nextDefinition.xianxia = xianxia;
+  return {
+    status: "ok",
+    definition: nextDefinition,
+    currentRealm,
+    targetRealm: payload.expectedTargetRealm,
+    totalRebuildPoints,
+    actionsPerTurn,
+  };
+}
+
 function recordXianxiaGatheringInsightDefinition(
   definition: Record<string, unknown>,
   payload: { amount: number; downtime: string; notes: string },
@@ -2209,8 +2419,7 @@ function buildXianxiaRealmAscensionContext(xianxia: Record<string, unknown>): Re
   const latestReview = latestRealmAscensionEvent(history, "realm_ascension_review_started");
   const latestReset = latestRealmAscensionEvent(history, "realm_ascension_attributes_efforts_reset");
   const latestRebuild = [...history].reverse().find((record) => XIANXIA_REALM_ASCENSION_REBUILD_ACTIONS.has(String(record.action || ""))) ?? null;
-  const pendingConfirmationRebuild =
-    latestRebuild && !truthy(latestRebuild.gm_confirmed) && !truthy(latestRebuild.confirmed) ? latestRebuild : null;
+  const pendingConfirmationRebuild = latestUnconfirmedRealmAscensionRebuild(history);
   const attributes = xianxiaStatSummary(xianxiaAttributeRows(xianxia));
   const efforts = xianxiaStatSummary(xianxiaEffortRows(xianxia));
   const statPrerequisite = xianxiaRealmStatPrerequisite(currentRealm, target, attributes.rows, efforts.rows);
@@ -2314,6 +2523,152 @@ function latestRealmAscensionReviewIndex(
 
 function hasRealmAscensionStatResetAfter(history: Array<Record<string, unknown>>, reviewIndex: number): boolean {
   return history.slice(reviewIndex + 1).some((record) => String(record.action || "").trim() === "realm_ascension_attributes_efforts_reset");
+}
+
+function latestRealmAscensionStatResetIndex(
+  history: Array<Record<string, unknown>>,
+  reviewIndex: number,
+  targetRealm: string,
+): number | null {
+  for (let index = history.length - 1; index > reviewIndex; index -= 1) {
+    const record = history[index];
+    if (String(record.action || "").trim() !== "realm_ascension_attributes_efforts_reset") {
+      continue;
+    }
+    if (String(record.status || "").trim() !== "pending_rebuild") {
+      continue;
+    }
+    if (normalizeRealmLabel(record.target_realm || record.target) !== targetRealm) {
+      continue;
+    }
+    return index;
+  }
+  return null;
+}
+
+function hasRealmAscensionRebuildAfter(
+  history: Array<Record<string, unknown>>,
+  resetIndex: number,
+  targetRealm: string,
+): boolean {
+  return history.slice(resetIndex + 1).some((record) => {
+    if (!XIANXIA_REALM_ASCENSION_REBUILD_ACTIONS.has(String(record.action || ""))) {
+      return false;
+    }
+    return normalizeRealmLabel(record.target_realm || record.target) === targetRealm;
+  });
+}
+
+function validateRealmRebuildScores<K extends string>(
+  values: Record<string, unknown>,
+  options: {
+    keys: readonly K[];
+    labels: Record<K, string>;
+    statCap: number;
+    rebuildLabel: string;
+  },
+): { scores: Record<K, number>; total: number; errors: string[] } {
+  const scores = {} as Record<K, number>;
+  const errors: string[] = [];
+  for (const key of options.keys) {
+    const label = options.labels[key] || key;
+    const rawValue = values[key];
+    const rawText = rawValue === null || rawValue === undefined ? "" : String(rawValue).trim();
+    if (!rawText) {
+      errors.push(`${label} is required for the ${options.rebuildLabel} rebuild.`);
+      scores[key] = 0;
+      continue;
+    }
+    if (!/^-?\d+$/.test(rawText)) {
+      errors.push(`${label} must be a whole number.`);
+      scores[key] = 0;
+      continue;
+    }
+    const score = Number.parseInt(rawText, 10);
+    if (score < 0) {
+      errors.push(`${label} cannot be negative.`);
+      scores[key] = 0;
+      continue;
+    }
+    if (score > options.statCap) {
+      errors.push(`${label} cannot exceed ${options.statCap} for the ${options.rebuildLabel} rebuild.`);
+    }
+    scores[key] = score;
+  }
+  let total = 0;
+  for (const key of options.keys) {
+    total += nonNegativeLooseInt(scores[key], 0);
+  }
+  return { scores, total, errors };
+}
+
+function validateRealmAscensionHpStanceTrade({
+  hpMaximumTrade,
+  stanceMaximumTrade,
+  hpMaximumBefore,
+  stanceMaximumBefore,
+}: {
+  hpMaximumTrade: unknown;
+  stanceMaximumTrade: unknown;
+  hpMaximumBefore: number;
+  stanceMaximumBefore: number;
+}): {
+  hpMaximumTrade: number;
+  stanceMaximumTrade: number;
+  hpStanceTradePoints: number;
+  errors: string[];
+} {
+  const errors: string[] = [];
+  const hpTrade = validateRealmTradeAmount(hpMaximumTrade, {
+    label: "HP maximum trade",
+    currentMaximum: hpMaximumBefore,
+    errors,
+  });
+  const stanceTrade = validateRealmTradeAmount(stanceMaximumTrade, {
+    label: "Stance maximum trade",
+    currentMaximum: stanceMaximumBefore,
+    errors,
+  });
+  return {
+    hpMaximumTrade: hpTrade,
+    stanceMaximumTrade: stanceTrade,
+    hpStanceTradePoints: Math.floor((hpTrade + stanceTrade) / XIANXIA_REALM_ASCENSION_TRADE_UNIT),
+    errors,
+  };
+}
+
+function validateRealmTradeAmount(
+  value: unknown,
+  {
+    label,
+    currentMaximum,
+    errors,
+  }: {
+    label: string;
+    currentMaximum: number;
+    errors: string[];
+  },
+): number {
+  const rawText = value === null || value === undefined ? "" : String(value).trim();
+  if (!rawText) {
+    return 0;
+  }
+  if (!/^-?\d+$/.test(rawText)) {
+    errors.push(`${label} must be a whole number.`);
+    return 0;
+  }
+  const amount = Number.parseInt(rawText, 10);
+  if (amount < 0) {
+    errors.push(`${label} cannot be negative.`);
+    return 0;
+  }
+  if (amount % XIANXIA_REALM_ASCENSION_TRADE_UNIT !== 0) {
+    errors.push(`${label} must be 0 or a multiple of ${XIANXIA_REALM_ASCENSION_TRADE_UNIT}.`);
+  }
+  if (amount > currentMaximum) {
+    errors.push(`${label} cannot exceed the current maximum of ${currentMaximum}.`);
+  }
+  return amount;
 }
 
 function xianxiaAdvancementHistory(xianxia: Record<string, unknown>): Array<Record<string, unknown>> {
@@ -2500,10 +2855,17 @@ function cleanStringList(value: unknown): string[] {
 function xianxiaRealmTradeContext(durability: Record<string, unknown>): Record<string, unknown> {
   const hpMax = nonNegativeLooseInt(durability.hp_max, 10);
   const stanceMax = nonNegativeLooseInt(durability.stance_max, 10);
+  const hpMaximumTrade =
+    Math.floor(Math.max(0, hpMax) / XIANXIA_REALM_ASCENSION_TRADE_UNIT) * XIANXIA_REALM_ASCENSION_TRADE_UNIT;
+  const stanceMaximumTrade =
+    Math.floor(Math.max(0, stanceMax) / XIANXIA_REALM_ASCENSION_TRADE_UNIT) * XIANXIA_REALM_ASCENSION_TRADE_UNIT;
   return {
     unit: XIANXIA_REALM_ASCENSION_TRADE_UNIT,
+    available: hpMaximumTrade + stanceMaximumTrade >= XIANXIA_REALM_ASCENSION_TRADE_UNIT,
     hp_max: hpMax,
     stance_max: stanceMax,
+    hp_maximum_trade: hpMaximumTrade,
+    stance_maximum_trade: stanceMaximumTrade,
     max_trade_points: Math.floor(Math.max(0, hpMax + stanceMax) / XIANXIA_REALM_ASCENSION_TRADE_UNIT),
   };
 }

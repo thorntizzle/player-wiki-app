@@ -3259,6 +3259,188 @@ def test_typescript_character_cultivation_context_shell_and_supported_xianxia_co
         == "Attributes and Efforts have already been reset for this Realm ascension review."
     )
 
+    invalid_realm_rebuild_status, invalid_realm_rebuild_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{realm_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": realm_revision + 2,
+            "cultivation_action": "apply_immortal_realm_rebuild",
+            "target_realm": "Immortal",
+            "realm_rebuild_attribute_str": "7",
+            "realm_rebuild_attribute_dex": "4",
+            "realm_rebuild_attribute_con": "2",
+            "realm_rebuild_attribute_int": "1",
+            "realm_rebuild_attribute_wis": "1",
+            "realm_rebuild_attribute_cha": "0",
+            "realm_rebuild_effort_basic": "1",
+            "realm_rebuild_effort_weapon": "1",
+            "realm_rebuild_effort_guns_explosive": "1",
+            "realm_rebuild_effort_magic": "0",
+            "realm_rebuild_effort_ultimate": "0",
+            "realm_ascension_trade_hp": "5",
+            "realm_ascension_trade_stance": "10",
+        },
+    )
+    assert invalid_realm_rebuild_status == 400
+    assert invalid_realm_rebuild_payload["error"]["code"] == "validation_error"
+    assert "HP maximum trade must be 0 or a multiple of 10." in invalid_realm_rebuild_payload["error"]["message"]
+    assert (
+        "Strength cannot exceed 6 for the Immortal rebuild."
+        in invalid_realm_rebuild_payload["error"]["message"]
+    )
+    assert (
+        "Immortal rebuild must spend exactly 16 Attribute/Effort points; submitted 18."
+        in invalid_realm_rebuild_payload["error"]["message"]
+    )
+
+    realm_rebuild_status, realm_rebuild_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{realm_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": realm_revision + 2,
+            "action": "apply_immortal_realm_rebuild",
+            "values": {
+                "target_realm": "Immortal",
+                "realm_rebuild_attribute_str": "6",
+                "realm_rebuild_attribute_dex": "4",
+                "realm_rebuild_attribute_con": "2",
+                "realm_rebuild_attribute_int": "1",
+                "realm_rebuild_attribute_wis": "1",
+                "realm_rebuild_attribute_cha": "0",
+                "realm_rebuild_effort_basic": "1",
+                "realm_rebuild_effort_weapon": "1",
+                "realm_rebuild_effort_guns_explosive": "1",
+                "realm_rebuild_effort_magic": "0",
+                "realm_rebuild_effort_ultimate": "0",
+                "realm_ascension_trade_hp": "10",
+                "realm_ascension_trade_stance": "10",
+                "realm_ascension_rebuild_notes": "  Rebuilt   after\n seclusion.  ",
+            },
+        },
+    )
+    assert realm_rebuild_status == 200
+    assert realm_rebuild_payload["ok"] is True
+    assert realm_rebuild_payload["message"] == "Applied the Immortal rebuild budget for 17 points and 3 actions."
+    assert realm_rebuild_payload["anchor"] == "xianxia-cultivation-realm-ascension"
+    assert realm_rebuild_payload["character"]["state_record"]["revision"] == realm_revision + 3
+    realm_rebuild_xianxia = realm_rebuild_payload["character"]["definition"]["xianxia"]
+    assert realm_rebuild_xianxia["realm"] == "Immortal"
+    assert realm_rebuild_xianxia["actions_per_turn"] == 3
+    assert realm_rebuild_xianxia["attributes"] == {
+        "str": 6,
+        "dex": 4,
+        "con": 2,
+        "int": 1,
+        "wis": 1,
+        "cha": 0,
+    }
+    assert realm_rebuild_xianxia["efforts"] == {
+        "basic": 1,
+        "weapon": 1,
+        "guns_explosive": 1,
+        "magic": 0,
+        "ultimate": 0,
+    }
+    assert realm_rebuild_xianxia["durability"]["hp_max"] == 22
+    assert realm_rebuild_xianxia["durability"]["stance_max"] == 24
+    assert realm_rebuild_xianxia["energies"] == realm_xianxia["energies"]
+    assert realm_rebuild_xianxia["yin_yang"] == realm_xianxia["yin_yang"]
+    assert realm_rebuild_xianxia["insight"] == realm_xianxia["insight"]
+    rebuild_history = realm_rebuild_xianxia["advancement_history"][-1]
+    assert rebuild_history["action"] == "realm_ascension_immortal_rebuild_applied"
+    assert rebuild_history["target"] == "Immortal"
+    assert rebuild_history["current_realm"] == "Mortal"
+    assert rebuild_history["target_realm"] == "Immortal"
+    assert rebuild_history["status"] == "applied_pending_final_confirmation"
+    assert rebuild_history["rebuild_budget"] == 17
+    assert rebuild_history["base_rebuild_budget"] == 15
+    assert rebuild_history["stat_cap"] == 6
+    assert rebuild_history["actions_per_turn"] == 3
+    assert rebuild_history["attributes_after_total"] == 14
+    assert rebuild_history["efforts_after_total"] == 3
+    assert rebuild_history["total_rebuild_points"] == 17
+    assert rebuild_history["hp_stance_trade_points"] == 2
+    assert rebuild_history["hp_maximum_trade"] == 10
+    assert rebuild_history["stance_maximum_trade"] == 10
+    assert rebuild_history["hp_maximum_before"] == 32
+    assert rebuild_history["hp_maximum_after"] == 22
+    assert rebuild_history["stance_maximum_before"] == 34
+    assert rebuild_history["stance_maximum_after"] == 24
+    assert rebuild_history["pre_ascension_summary"] == reset_history["pre_ascension_summary"]
+    assert rebuild_history["post_ascension_summary"] == (
+        "Immortal Realm, 3 actions; Attributes 14, Efforts 3; HP max 22, Stance max 24; "
+        "Insight 11 available/7 spent; Martial Arts 1; Generic Techniques 1"
+    )
+    assert rebuild_history["pre_ascension_state"]["realm"] == "Mortal"
+    assert rebuild_history["post_ascension_state"]["realm"] == "Immortal"
+    assert rebuild_history["notes"] == "Rebuilt after seclusion."
+    realm_rebuild_state = realm_rebuild_payload["character"]["state_record"]["state"]
+    assert realm_rebuild_state["vitals"] == {"current_hp": 21, "temp_hp": 4}
+    assert realm_rebuild_state["xianxia"]["vitals"] == {
+        "current_hp": 21,
+        "temp_hp": 4,
+        "current_stance": 18,
+        "temp_stance": 3,
+    }
+    assert realm_rebuild_state["xianxia"]["energies"] == {
+        "jing": {"current": 2},
+        "qi": {"current": 3},
+        "shen": {"current": 4},
+    }
+    assert realm_rebuild_state["xianxia"]["yin_yang"] == {"yin_current": 2, "yang_current": 3}
+    realm_rebuild_ascension = realm_rebuild_payload["cultivation"]["realm_ascension"]
+    assert realm_rebuild_ascension["can_confirm_rebuild"] is True
+    assert realm_rebuild_ascension["pending_confirmation_rebuild"]["target_realm"] == "Immortal"
+    assert realm_rebuild_ascension["can_start_review"] is False
+    assert realm_rebuild_ascension["confirmation_blocking_message"] == (
+        "Confirm the latest Realm rebuild before starting another Realm review."
+    )
+
+    duplicate_realm_rebuild_status, duplicate_realm_rebuild_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{realm_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": realm_revision + 3,
+            "cultivation_action": "apply_immortal_realm_rebuild",
+            "target_realm": "Immortal",
+            "realm_rebuild_attribute_str": "6",
+            "realm_rebuild_attribute_dex": "4",
+            "realm_rebuild_attribute_con": "2",
+            "realm_rebuild_attribute_int": "1",
+            "realm_rebuild_attribute_wis": "1",
+            "realm_rebuild_attribute_cha": "0",
+            "realm_rebuild_effort_basic": "1",
+            "realm_rebuild_effort_weapon": "1",
+            "realm_rebuild_effort_guns_explosive": "1",
+            "realm_rebuild_effort_magic": "0",
+            "realm_rebuild_effort_ultimate": "0",
+        },
+    )
+    assert duplicate_realm_rebuild_status == 400
+    assert duplicate_realm_rebuild_payload["error"]["code"] == "validation_error"
+    assert (
+        duplicate_realm_rebuild_payload["error"]["message"]
+        == "The Immortal rebuild budget applies only to Mortal to Immortal ascension."
+    )
+
+    realm_confirmation_status, realm_confirmation_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{realm_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": realm_revision + 3,
+            "cultivation_action": "confirm_realm_ascension",
+            "target_realm": "Immortal",
+            "realm_ascension_gm_confirmation_note": "Approved final ascension.",
+        },
+    )
+    assert realm_confirmation_status == 400
+    assert realm_confirmation_payload["error"]["code"] == "validation_error"
+    assert realm_confirmation_payload["error"]["message"] == "Unsupported cultivation action. Refresh the page and try again."
+
     cap_character_slug = "api-cultivation-cap"
     cap_body = deepcopy(xianxia_body)
     cap_body["definition"]["name"] = "API Cultivation Cap"
@@ -3409,6 +3591,64 @@ def test_typescript_character_cultivation_context_shell_and_supported_xianxia_co
     assert immortal_realm["can_reset_stats"] is False
     assert immortal_realm["can_apply_rebuild"] is True
     assert immortal_realm["can_apply_divine_rebuild"] is True
+    immortal_revision = immortal_payload["character"]["state_record"]["revision"]
+
+    divine_rebuild_status, divine_rebuild_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{immortal_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": immortal_revision,
+            "cultivation_action": "apply_divine_realm_rebuild",
+            "target_realm": "Divine",
+            "realm_rebuild_attribute_str": "12",
+            "realm_rebuild_attribute_dex": "4",
+            "realm_rebuild_attribute_con": "3",
+            "realm_rebuild_attribute_int": "1",
+            "realm_rebuild_attribute_wis": "0",
+            "realm_rebuild_attribute_cha": "0",
+            "realm_rebuild_effort_basic": "2",
+            "realm_rebuild_effort_weapon": "1",
+            "realm_rebuild_effort_guns_explosive": "0",
+            "realm_rebuild_effort_magic": "1",
+            "realm_rebuild_effort_ultimate": "1",
+            "realm_ascension_rebuild_notes": "Divine rebuild applied.",
+        },
+    )
+    assert divine_rebuild_status == 200
+    assert divine_rebuild_payload["ok"] is True
+    assert divine_rebuild_payload["message"] == "Applied the Divine rebuild budget for 25 points and 4 actions."
+    divine_rebuild_xianxia = divine_rebuild_payload["character"]["definition"]["xianxia"]
+    assert divine_rebuild_xianxia["realm"] == "Divine"
+    assert divine_rebuild_xianxia["actions_per_turn"] == 4
+    assert divine_rebuild_xianxia["attributes"] == {
+        "str": 12,
+        "dex": 4,
+        "con": 3,
+        "int": 1,
+        "wis": 0,
+        "cha": 0,
+    }
+    assert divine_rebuild_xianxia["efforts"] == {
+        "basic": 2,
+        "weapon": 1,
+        "guns_explosive": 0,
+        "magic": 1,
+        "ultimate": 1,
+    }
+    divine_rebuild_history = divine_rebuild_xianxia["advancement_history"][-1]
+    assert divine_rebuild_history["action"] == "realm_ascension_divine_rebuild_applied"
+    assert divine_rebuild_history["current_realm"] == "Immortal"
+    assert divine_rebuild_history["target_realm"] == "Divine"
+    assert divine_rebuild_history["status"] == "applied_pending_final_confirmation"
+    assert divine_rebuild_history["rebuild_budget"] == 25
+    assert divine_rebuild_history["stat_cap"] == 12
+    assert divine_rebuild_history["actions_per_turn"] == 4
+    assert divine_rebuild_history["attributes_after_total"] == 20
+    assert divine_rebuild_history["efforts_after_total"] == 5
+    assert divine_rebuild_history["total_rebuild_points"] == 25
+    assert divine_rebuild_history["notes"] == "Divine rebuild applied."
+    assert divine_rebuild_payload["cultivation"]["realm_ascension"]["can_confirm_rebuild"] is True
 
 
 def test_typescript_content_character_backup_restore_rehearsal_recovers_files_assets_and_sqlite(
