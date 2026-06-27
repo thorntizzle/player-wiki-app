@@ -124,6 +124,7 @@ import {
 import {
   advancedEditorUnsupportedMessage,
   applyCharacterAdvancedEditorReferenceUpdate,
+  applyCharacterCultivationAction,
   buildCharacterAdvancedEditorPayload,
   buildCharacterAdvancementShellPayload,
   buildCharacterAuthoringLinks,
@@ -135,6 +136,7 @@ import {
   buildXianxiaManualImportCharacter,
   buildXianxiaManualImportContext,
   characterAdvancedEditorIsSupported,
+  characterCultivationIsSupported,
   listXianxiaManualImportMartialArtOptions,
   nativeCharacterCreateLane,
   nativeCharacterCreateUnsupportedMessage,
@@ -172,6 +174,7 @@ import {
   previewCharacterRest,
   readCharacterStateSnapshot,
   updateCharacterAdvancedEditorReferenceState,
+  updateCharacterCultivationDefinitionState,
   updateCharacterSheetEdit,
   updateCharacterPortraitRevision,
   updateCharacterSessionArtificerInfusions,
@@ -6106,6 +6109,133 @@ app.get(ROUTES.characterCultivation, async (ctx) => {
     supported: cultivationPayload.supported,
     message: null,
     anchor: null,
+    unsupported_message: cultivationPayload.unsupported_message,
+    cultivation: cultivationPayload.cultivation,
+    links: cultivationPayload.links,
+  });
+});
+
+app.post(ROUTES.characterCultivation, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCharacterSessionBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character || String(character.definition.status || "").trim() !== "active") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const canManageSession =
+    (auth.role === "admin" || auth.role === "dm") &&
+    campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session");
+  if (!canManageSession) {
+    const error = forbidden("You do not have permission to manage cultivation for this character.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!characterCultivationIsSupported(campaign, character.definition)) {
+    const error = jsonError("unsupported_campaign_system", "Cultivation is only available for Xianxia character sheets.", 400);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const cultivationAction = applyCharacterCultivationAction(character.definition, jsonPayload.payload);
+  if (cultivationAction.status === "validation_error") {
+    const error = validationError(cultivationAction.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const stateResult = updateCharacterCultivationDefinitionState(
+    config,
+    campaign.slug,
+    characterSlug,
+    character.definition,
+    cultivationAction.definition,
+    jsonPayload.payload,
+    auth.actorUserId ?? 0,
+  );
+  if (stateResult.status === "state_conflict") {
+    const error = stateConflict(stateResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (stateResult.status === "validation_error") {
+    const error = validationError(stateResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (stateResult.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const writeResult = await writeCampaignCharacterDefinitionFile(
+    config,
+    campaign.slug,
+    characterSlug,
+    cultivationAction.definition,
+  );
+  if (writeResult.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (writeResult.status === "validation_error") {
+    const error = validationError(writeResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const configRecord = await getCampaignConfigFile(config, campaign.slug);
+  const cultivationPayload = buildCharacterCultivationShellPayload({
+    campaign,
+    characterSlug,
+    definition: writeResult.record.definition,
+    state: stateResult.state,
+    genericTechniqueOptions: listXianxiaCreateGenericTechniqueOptions(
+      config.dbPath,
+      campaign,
+      configRecord?.config || {},
+      xianxiaKnownGenericTechniqueOptionKeys(writeResult.record.definition),
+    ),
+  });
+
+  return ctx.json({
+    ok: true,
+    campaign,
+    character: {
+      definition: writeResult.record.definition,
+      import_metadata: writeResult.record.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: writeResult.record.character_slug,
+        revision: stateResult.revision,
+        state: stateResult.state,
+        updated_at: stateResult.updatedAt,
+        updated_by_user_id: auth.actorUserId ?? null,
+      },
+    },
+    lane: cultivationPayload.lane,
+    supported: cultivationPayload.supported,
+    message: cultivationAction.message,
+    anchor: cultivationAction.anchor,
     unsupported_message: cultivationPayload.unsupported_message,
     cultivation: cultivationPayload.cultivation,
     links: cultivationPayload.links,

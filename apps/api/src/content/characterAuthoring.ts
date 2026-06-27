@@ -314,6 +314,15 @@ export interface CharacterCultivationShellPayload {
   cultivation: Record<string, unknown> | null;
 }
 
+export type CharacterCultivationActionApplyResult =
+  | {
+      status: "ok";
+      definition: Record<string, unknown>;
+      message: string;
+      anchor: string;
+    }
+  | { status: "validation_error"; message: string };
+
 function normalizeSystemKey(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
@@ -348,7 +357,12 @@ export function characterCultivationIsSupported(
   campaign: Pick<CampaignViewModel, "system">,
   definition: Record<string, unknown>,
 ): boolean {
-  return nativeCharacterCreateLane(campaign.system) === "xianxia" && nativeCharacterCreateLane(definition.system) === "xianxia";
+  const xianxiaDefinition = asRecord(definition.xianxia);
+  return (
+    nativeCharacterCreateLane(campaign.system) === "xianxia" &&
+    nativeCharacterCreateLane(definition.system) === "xianxia" &&
+    Object.keys(xianxiaDefinition).length > 0
+  );
 }
 
 function characterAdvancementUnsupportedMessage(system: unknown): string {
@@ -429,6 +443,97 @@ export function buildCharacterCultivationShellPayload({
     links: buildCharacterCultivationLinks(campaign, characterSlug),
     cultivation: supported ? buildXianxiaCultivationContext(definition, state, genericTechniqueOptions, campaign.slug) : null,
   };
+}
+
+export function applyCharacterCultivationAction(
+  definition: Record<string, unknown>,
+  payload: Record<string, unknown>,
+): CharacterCultivationActionApplyResult {
+  const values = normalizeCultivationValues(payload);
+  const action = String(payload.action || values.cultivation_action || "save_insight").trim();
+  if (action !== "save_insight") {
+    return {
+      status: "validation_error",
+      message: "Unsupported cultivation action. Refresh the page and try again.",
+    };
+  }
+
+  let available: number;
+  let spent: number;
+  try {
+    available = normalizeCultivationInt(values.insight_available, "Insight available");
+    spent = normalizeCultivationInt(values.insight_spent, "Insight spent");
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid cultivation payload." };
+  }
+
+  const nextDefinition = updateXianxiaInsightDefinition(definition, available, spent);
+  return {
+    status: "ok",
+    definition: nextDefinition,
+    message: "Insight counters saved.",
+    anchor: "xianxia-cultivation-insight",
+  };
+}
+
+function normalizeCultivationValues(payload: Record<string, unknown>): Record<string, string> {
+  const rawValues = asRecord(payload.values);
+  const source = Object.keys(rawValues).length > 0 ? rawValues : payload;
+  const values: Record<string, string> = {};
+  for (const [key, value] of Object.entries(source)) {
+    const fieldName = String(key || "").trim();
+    if (!fieldName) {
+      continue;
+    }
+    values[fieldName] = value === null || value === undefined ? "" : String(value);
+  }
+  return values;
+}
+
+function normalizeCultivationInt(value: unknown, fieldLabel: string, fallback = 0): number {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return fallback;
+  }
+  if (!/^-?\d+$/.test(rawValue)) {
+    throw new Error(`${fieldLabel} must be a whole number.`);
+  }
+  const normalizedValue = Number.parseInt(rawValue, 10);
+  if (normalizedValue < 0) {
+    throw new Error(`${fieldLabel} must be zero or greater.`);
+  }
+  return normalizedValue;
+}
+
+function updateXianxiaInsightDefinition(
+  definition: Record<string, unknown>,
+  available: number,
+  spent: number,
+): Record<string, unknown> {
+  const nextDefinition = deepCloneRecord(definition);
+  const xianxia = asRecord(nextDefinition.xianxia);
+  const previousInsight = asRecord(xianxia.insight);
+  const previousAvailable = nonNegativeLooseInt(previousInsight.available, 0);
+  const previousSpent = nonNegativeLooseInt(previousInsight.spent, 0);
+  xianxia.insight = { available, spent };
+  if (available !== previousAvailable || spent !== previousSpent) {
+    const history = asArray(xianxia.advancement_history)
+      .map(asRecord)
+      .filter((record) => Object.keys(record).length > 0);
+    history.push({
+      action: "insight_counter_adjustment",
+      target: "Insight",
+      insight_available_before: previousAvailable,
+      insight_available_after: available,
+      insight_available_delta: available - previousAvailable,
+      insight_spent_before: previousSpent,
+      insight_spent_after: spent,
+      insight_spent_delta: spent - previousSpent,
+    });
+    xianxia.advancement_history = history;
+  }
+  nextDefinition.xianxia = xianxia;
+  return nextDefinition;
 }
 
 function buildXianxiaCultivationContext(
@@ -1320,6 +1425,10 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+function deepCloneRecord(value: unknown): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(asRecord(value))) as Record<string, unknown>;
 }
 
 function parseJsonRecord(rawValue: string): Record<string, unknown> {

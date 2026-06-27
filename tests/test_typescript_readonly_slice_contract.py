@@ -1934,6 +1934,94 @@ def test_typescript_character_cultivation_context_shell_and_supported_xianxia_co
         f"/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation"
     )
 
+    initial_revision = xianxia_payload["character"]["state_record"]["revision"]
+    save_status, save_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision,
+            "action": "save_insight",
+            "values": {"insight_available": "3", "insight_spent": "1"},
+        },
+    )
+    assert save_status == 200
+    assert save_payload["ok"] is True
+    assert save_payload["message"] == "Insight counters saved."
+    assert save_payload["anchor"] == "xianxia-cultivation-insight"
+    assert save_payload["supported"] is True
+    assert save_payload["lane"] == "xianxia"
+    assert save_payload["character"]["state_record"]["revision"] == initial_revision + 1
+    saved_xianxia = save_payload["character"]["definition"]["xianxia"]
+    assert saved_xianxia["insight"] == {"available": 3, "spent": 1}
+    assert save_payload["cultivation"]["insight"] == {"available": 3, "spent": 1}
+    history_row = saved_xianxia["advancement_history"][-1]
+    assert history_row == {
+        "action": "insight_counter_adjustment",
+        "target": "Insight",
+        "insight_available_before": 0,
+        "insight_available_after": 3,
+        "insight_available_delta": 3,
+        "insight_spent_before": 0,
+        "insight_spent_after": 1,
+        "insight_spent_delta": 1,
+    }
+
+    stale_status, stale_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision,
+            "cultivation_action": "save_insight",
+            "insight_available": "4",
+            "insight_spent": "1",
+        },
+    )
+    assert stale_status == 409
+    assert stale_payload["error"]["code"] == "state_conflict"
+    assert stale_payload["error"]["message"] == "This sheet changed in another session. Refresh and try again."
+
+    invalid_status, invalid_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 1,
+            "action": "save_insight",
+            "values": {"insight_available": "-1", "insight_spent": "1"},
+        },
+    )
+    assert invalid_status == 400
+    assert invalid_payload["error"]["code"] == "validation_error"
+    assert invalid_payload["error"]["message"] == "Insight available must be zero or greater."
+
+    unchanged_status, unchanged_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 1,
+            "action": "save_insight",
+            "values": {"insight_available": "3", "insight_spent": "1"},
+        },
+    )
+    assert unchanged_status == 200
+    assert unchanged_payload["character"]["state_record"]["revision"] == initial_revision + 2
+    assert unchanged_payload["character"]["definition"]["xianxia"]["advancement_history"] == saved_xianxia[
+        "advancement_history"
+    ]
+
+    unsupported_status, unsupported_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}{route_path}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={"expected_revision": payload["character"]["state_record"]["revision"], "action": "save_insight"},
+    )
+    assert unsupported_status == 400
+    assert unsupported_payload["error"]["code"] == "unsupported_campaign_system"
+    assert unsupported_payload["error"]["message"] == "Cultivation is only available for Xianxia character sheets."
+
     divine_character_slug = "api-cultivation-divine"
     divine_body = deepcopy(xianxia_body)
     divine_body["definition"]["name"] = "API Cultivation Divine"

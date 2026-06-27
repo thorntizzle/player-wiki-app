@@ -171,7 +171,8 @@ Do not implement these routes as part of the parity program unless a later archi
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (context shell only; POST/save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (context shell only; POST/save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (context shell only; POST/save parity pending)
-  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (supported Xianxia read context; POST/action parity pending)
+  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (supported Xianxia read context)
+  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (`save_insight` only; remaining action parity pending)
   - `PATCH /api/v1/campaigns/:campaignSlug/characters/:characterSlug/sheet-edit`
   - `GET /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual`
   - `POST /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual` (preview and confirmed local fixture/SQLite create)
@@ -590,6 +591,13 @@ Do not implement these routes as part of the parity program unless a later archi
   payloads, Advanced Editor/detail links, and route-specific `retraining`, `level_up`, and `repair`
   null contexts. The POST/save routes, ready-state native builder contexts, state merges, and definition
   YAML writes remain pending.
+- The first Character Cultivation write slice now serves
+  `POST .../characters/:characterSlug/cultivation` for the `save_insight` action. It preserves
+  bearer-token DM/admin management access, Xianxia-only validation, shared revision conflicts,
+  flat or nested JSON value parsing, non-negative whole-number Insight available/spent validation,
+  copied-fixture `definition.yaml` writes, SQLite state revision bumps and Xianxia state
+  reconciliation, `insight_counter_adjustment` history rows when values change, and refreshed
+  Cultivation payloads. Remaining Cultivation action parity remains pending.
 - The first Xianxia inventory equipment write now serves
   `PATCH .../characters/:characterSlug/session/xianxia-inventory/:itemId/equipped`. It preserves the
   bearer-only session-state write gate, shared revision conflicts, Xianxia-only validation, unknown
