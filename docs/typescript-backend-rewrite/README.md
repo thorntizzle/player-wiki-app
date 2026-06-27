@@ -128,6 +128,7 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/characters`
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
   - `GET /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual`
+  - `POST /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual` (preview-only)
 - Implemented Character Controls JSON mutation endpoints:
   - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls/assignment`
   - `DELETE /api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls/assignment`

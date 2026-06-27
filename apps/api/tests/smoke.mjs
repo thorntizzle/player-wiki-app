@@ -8524,6 +8524,52 @@ if (
   );
 }
 
+const anonymousXianxiaManualImportPost = await requestJson(
+  xianxiaManualImportPath,
+  {},
+  { method: "POST", body: { values: { name: "Cloud Dancer", realm: "Divine" } } },
+);
+if (
+  anonymousXianxiaManualImportPost.status !== 401 ||
+  anonymousXianxiaManualImportPost.payload?.error?.code !== "auth_required"
+) {
+  throw new Error(
+    `Expected anonymous Xianxia manual import POST auth_required, got ${anonymousXianxiaManualImportPost.status} ${JSON.stringify(anonymousXianxiaManualImportPost.payload)}`,
+  );
+}
+
+const playerXianxiaManualImportPost = await requestJson(
+  xianxiaManualImportPath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: { values: { name: "Cloud Dancer", realm: "Divine" } } },
+);
+if (
+  playerXianxiaManualImportPost.status !== 403 ||
+  playerXianxiaManualImportPost.payload?.error?.code !== "forbidden" ||
+  playerXianxiaManualImportPost.payload?.error?.message !==
+    "You do not have permission to create characters in this campaign."
+) {
+  throw new Error(
+    `Expected player Xianxia manual import POST forbidden, got ${playerXianxiaManualImportPost.status} ${JSON.stringify(playerXianxiaManualImportPost.payload)}`,
+  );
+}
+
+const dndXianxiaManualImportPost = await requestJson(
+  xianxiaManualImportPath,
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { values: { name: "Cloud Dancer", realm: "Divine" } } },
+);
+if (
+  dndXianxiaManualImportPost.status !== 400 ||
+  dndXianxiaManualImportPost.payload?.error?.code !== "unsupported_campaign_system" ||
+  dndXianxiaManualImportPost.payload?.error?.message !==
+    "Manual Xianxia character import is only available for Xianxia campaigns."
+) {
+  throw new Error(
+    `Expected DND Xianxia manual import POST unsupported, got ${dndXianxiaManualImportPost.status} ${JSON.stringify(dndXianxiaManualImportPost.payload)}`,
+  );
+}
+
 const xianxiaContentConfigPatch = await requestJson(
   "/api/v1/campaigns/linden-pass/content/config",
   bearerContentManagerHeaders,
@@ -8535,6 +8581,136 @@ if (
   xianxiaContentConfigPatch.payload?.config_file?.config?.systems_library !== "Xianxia"
 ) {
   throw new Error(`Expected Xianxia content config before character state smoke, got ${JSON.stringify(xianxiaContentConfigPatch.payload)}`);
+}
+
+const malformedXianxiaManualImportPost = await requestJson(
+  xianxiaManualImportPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: ["invalid", "payload"] },
+);
+if (
+  malformedXianxiaManualImportPost.status !== 400 ||
+  malformedXianxiaManualImportPost.payload?.error?.code !== "invalid_json"
+) {
+  throw new Error(
+    `Expected malformed Xianxia manual import POST invalid_json, got ${malformedXianxiaManualImportPost.status} ${JSON.stringify(malformedXianxiaManualImportPost.payload)}`,
+  );
+}
+
+const missingNameXianxiaManualImportPost = await requestJson(
+  xianxiaManualImportPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { values: { realm: "Divine" }, confirm_import: false } },
+);
+if (
+  missingNameXianxiaManualImportPost.status !== 400 ||
+  missingNameXianxiaManualImportPost.payload?.error?.code !== "validation_error"
+) {
+  throw new Error(
+    `Expected missing-name Xianxia manual import POST validation_error, got ${missingNameXianxiaManualImportPost.status} ${JSON.stringify(missingNameXianxiaManualImportPost.payload)}`,
+  );
+}
+
+const previewXianxiaManualImportPost = await requestJson(
+  xianxiaManualImportPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  {
+    method: "POST",
+    body: {
+      values: {
+        name: "Cloud Dancer",
+        realm: "Divine",
+        character_slug: "manual-cloud-dancer",
+        trained_skills_text: "Tea Ceremony\nQi Sense",
+        martial_art_1_name: "Cloud Palm",
+        martial_art_1_rank: "master",
+        inventory_text: "Spirit rice | 3 | consumable, treasure | Emergency cache",
+        current_hp: "12",
+        hp_max: "30",
+        current_stance: "3",
+        stance_max: "7",
+      },
+      confirm_import: false,
+    },
+  },
+);
+const previewImportContext = previewXianxiaManualImportPost.payload?.import_context;
+const previewImportPayloadCandidateSlug = "manual-cloud-dancer";
+if (
+  previewXianxiaManualImportPost.status !== 200 ||
+  previewXianxiaManualImportPost.payload?.ok !== true ||
+  previewXianxiaManualImportPost.payload?.message !==
+    "Review the imported sheet summary, then confirm to create the character." ||
+  previewXianxiaManualImportPost.payload?.campaign?.slug !== "linden-pass" ||
+  previewXianxiaManualImportPost.payload?.lane !== "xianxia" ||
+  previewImportContext?.preview?.name !== "Cloud Dancer" ||
+  previewImportContext?.preview?.slug !== previewImportPayloadCandidateSlug ||
+  previewImportContext?.preview?.realm !== "Divine" ||
+  previewImportContext?.preview?.actions_per_turn !== 4 ||
+  previewImportContext?.preview?.trained_skill_count !== 2 ||
+  previewImportContext?.preview?.martial_art_count !== 1 ||
+  previewImportContext?.preview?.inventory_count !== 1 ||
+  previewImportContext?.preview?.hp !== 30 ||
+  previewImportContext?.preview?.hp_max !== 30 ||
+  previewImportContext?.preview?.stance !== 7 ||
+  previewImportContext?.preview?.stance_max !== 7 ||
+  previewImportContext?.values?.name !== "Cloud Dancer" ||
+  previewImportContext?.values?.character_slug !== previewImportPayloadCandidateSlug ||
+  previewImportContext?.values?.martial_art_1_name !== "Cloud Palm" ||
+  previewImportContext?.values?.trained_skills_text !== "Tea Ceremony\nQi Sense"
+) {
+  throw new Error(
+    `Unexpected Xianxia manual import POST preview response: ${previewXianxiaManualImportPost.status} ${JSON.stringify(previewXianxiaManualImportPost.payload)}`,
+  );
+}
+
+const previewStateCheckDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const previewStateCount = previewStateCheckDb
+  .prepare("SELECT COUNT(*) AS count FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", previewImportPayloadCandidateSlug);
+previewStateCheckDb.close();
+if (Number(previewStateCount?.count) !== 0) {
+  throw new Error(
+    `Expected preview-only Xianxia manual import to avoid character_state inserts, got preview candidate state count=${JSON.stringify(previewStateCount)}`,
+  );
+}
+
+const previewCharacterDir = path.join(
+  campaignsDir,
+  "linden-pass",
+  "characters",
+  previewImportPayloadCandidateSlug,
+);
+if (
+  existsSync(path.join(previewCharacterDir, "definition.yaml")) ||
+  existsSync(path.join(previewCharacterDir, "import.yaml"))
+) {
+  throw new Error(
+    `Expected preview-only Xianxia manual import to avoid writing definition/import files, got files under ${previewCharacterDir}`,
+  );
+}
+
+const confirmUnsupportedXianxiaManualImportPost = await requestJson(
+  xianxiaManualImportPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  {
+    method: "POST",
+    body: {
+      values: {
+        name: "Cloud Dancer",
+        realm: "Divine",
+      },
+      confirm_import: true,
+    },
+  },
+);
+if (
+  confirmUnsupportedXianxiaManualImportPost.status !== 501 ||
+  confirmUnsupportedXianxiaManualImportPost.payload?.error?.code !== "unsupported_operation"
+) {
+  throw new Error(
+    `Expected confirm-on Xianxia manual import POST unsupported_operation, got ${confirmUnsupportedXianxiaManualImportPost.status} ${JSON.stringify(confirmUnsupportedXianxiaManualImportPost.payload)}`,
+  );
 }
 
 const xianxiaManualImportContext = await requestJson(

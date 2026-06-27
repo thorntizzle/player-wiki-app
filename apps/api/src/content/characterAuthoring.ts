@@ -52,6 +52,11 @@ const XIANXIA_MARTIAL_ART_IMPORT_RANKS = [
 const XIANXIA_MARTIAL_ART_IMPORT_RANK_LABELS = Object.fromEntries(
   XIANXIA_MARTIAL_ART_IMPORT_RANKS.map((rank) => [rank.key, rank.label]),
 ) as Record<string, string>;
+const XIANXIA_REALM_ACTIONS: Record<string, number> = {
+  mortal: 2,
+  immortal: 3,
+  divine: 4,
+};
 const NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE =
   "This campaign can still use the character roster, read-mode sheets, session-mode sheets, and Controls. Native DND-5E builder, edit, level-up, repair, retraining, PDF-import, and spellcasting tools are not implemented for this campaign system.";
 
@@ -350,6 +355,89 @@ function normalizeCharacterAuthoringValues(values: Record<string, unknown>): Rec
   );
 }
 
+function isPresent(value: unknown): boolean {
+  return String(value ?? "").trim().length > 0;
+}
+
+function coerceInt(value: string, fieldName: string): number {
+  const candidate = String(value ?? "").trim();
+  if (!candidate) {
+    return 0;
+  }
+  if (!/^[+-]?\d+$/.test(candidate)) {
+    throw new Error(`Invalid value for ${fieldName}.`);
+  }
+  return Number.parseInt(candidate, 10);
+}
+
+function normalizeRealm(value: string): string {
+  const canonical = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (canonical === "mortal" || canonical === "immortal" || canonical === "divine") {
+    return canonical[0].toUpperCase() + canonical.slice(1);
+  }
+  return "Mortal";
+}
+
+function collectIndexedRows(values: Record<string, string>, prefix: string): Array<Record<string, string>> {
+  const rowNumbers = new Set<number>();
+  for (const key of Object.keys(values)) {
+    const match = key.match(new RegExp(`^${prefix}_(\\d+)_(.+)$`));
+    if (match) {
+      rowNumbers.add(Number(match[1]));
+    }
+  }
+
+  return Array.from(rowNumbers)
+    .sort((left, right) => left - right)
+    .map((rowIndex) => {
+      const normalizedRow: Record<string, string> = {};
+      const sourceFieldPrefix = `${prefix}_${rowIndex}_`;
+      for (const [key, value] of Object.entries(values)) {
+        if (key.startsWith(sourceFieldPrefix)) {
+          normalizedRow[key.slice(sourceFieldPrefix.length)] = value;
+        }
+      }
+      return normalizedRow;
+    });
+}
+
+function extractValues(values: Record<string, string>, keys: string[]): string {
+  for (const key of keys) {
+    const value = values[key];
+    if (isPresent(value)) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function normalizeCharacterName(value: string): string {
+  return String(value || "").trim();
+}
+
+function slugifyText(value: string): string {
+  if (!value.trim()) {
+    return "";
+  }
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gi, "-")
+    .replace(/(^-|-$)+/g, "");
+}
+
+function normalizeCharacterSlug(value: string, fallbackSource: string): string {
+  return slugifyText(value) || slugifyText(fallbackSource);
+}
+
+function countTextRows(value: string): number {
+  return String(value || "")
+    .split(/\r?\n/)
+    .filter((row) => row.trim().length > 0).length;
+}
+
 function buildXianxiaManualImportMartialArtRows(values: Record<string, string>) {
   const rowNumbers = new Set<number>();
   for (const key of Object.keys(values)) {
@@ -417,5 +505,76 @@ export function buildXianxiaManualImportContext({
     })),
     martial_art_options: listXianxiaManualImportMartialArtOptions(dbPath, campaign, campaignConfig),
     preview: null,
+  };
+}
+
+export function buildXianxiaManualImportPayload(values: Record<string, string>): Record<string, unknown> {
+  const ignoredInputs = new Set(["active_stance", "active_aura"]);
+  const payload: Record<string, string> = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (!ignoredInputs.has(key)) {
+      payload[key] = value;
+    }
+  }
+  return {
+    ...payload,
+    energy_maxima: {
+      jing: values.energy_jing_max || "",
+      qi: values.energy_qi_max || "",
+      shen: values.energy_shen_max || "",
+    },
+    state: {
+      xianxia: {
+        currency: {
+          coin: values.coin || "",
+          supply: values.supply || "",
+          spirit_stones: values.spirit_stones || "",
+        },
+        notes: {
+          player_notes_markdown: values.player_notes_markdown || "",
+        },
+      },
+    },
+  };
+}
+
+export function buildXianxiaManualImportPreview(values: Record<string, string>) {
+  if (!normalizeCharacterName(values.name)) {
+    throw new Error("character name is required.");
+  }
+
+  const normalizedValues = normalizeCharacterAuthoringValues(values);
+  const realm = normalizeRealm(values.realm);
+  const name = normalizeCharacterName(values.name);
+  const slug = normalizeCharacterSlug(values.character_slug || values.slug || "", name);
+  const trainedSkills = collectIndexedRows(normalizedValues, "trained_skill");
+  const martialArts = collectIndexedRows(normalizedValues, "martial_art");
+  const inventoryItems = collectIndexedRows(normalizedValues, "manual_item");
+  const additionalInventoryRows = collectIndexedRows(normalizedValues, "inventory_item");
+
+  const trained_skill_count =
+    countTextRows(normalizedValues.trained_skills_text || "") +
+    trainedSkills.filter((row) => Object.values(row).some(isPresent)).length;
+  const martial_art_count = martialArts.filter((row) => Object.values(row).some(isPresent)).length;
+  const inventory_count =
+    countTextRows(normalizedValues.inventory_text || "") +
+    inventoryItems.filter((row) => Object.values(row).some(isPresent)).length +
+    additionalInventoryRows.filter((row) => Object.values(row).some(isPresent)).length;
+
+  const hp_max = coerceInt(extractValues(normalizedValues, ["hp_max", "durability_hp_max", "max_hp"]), "hp_max");
+  const stance_max = coerceInt(extractValues(normalizedValues, ["stance_max", "durability_stance_max"]), "stance_max");
+
+  return {
+    name,
+    slug,
+    realm,
+    actions_per_turn: XIANXIA_REALM_ACTIONS[realm.toLowerCase()],
+    trained_skill_count,
+    martial_art_count,
+    inventory_count,
+    hp: hp_max,
+    hp_max,
+    stance: stance_max,
+    stance_max,
   };
 }

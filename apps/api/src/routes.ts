@@ -1486,6 +1486,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "campaign_not_found",
     },
   },
+  {
+    method: "POST",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/import/xianxia-manual",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/import/xianxia-manual",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/characters/import/xianxia-manual",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1589,4 +1604,5 @@ export const ROUTES = {
   characterRoster: IMPLEMENTED_ROUTES[98].honoPath,
   characterDetail: IMPLEMENTED_ROUTES[99].honoPath,
   characterXianxiaManualImportContext: IMPLEMENTED_ROUTES[100].honoPath,
+  characterXianxiaManualImport: IMPLEMENTED_ROUTES[101].honoPath,
 } as const;

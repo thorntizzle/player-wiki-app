@@ -95,6 +95,7 @@ import {
 import {
   buildCharacterAuthoringLinks,
   buildXianxiaManualImportContext,
+  buildXianxiaManualImportPreview,
   nativeCharacterCreateLane,
   nativeCharacterCreateUnsupportedMessage,
 } from "./content/characterAuthoring.js";
@@ -3811,6 +3812,108 @@ app.get(ROUTES.characterXianxiaManualImportContext, async (ctx) => {
       campaignConfig: configRecord?.config || {},
       values: requestQueryValues(ctx),
     }),
+  });
+});
+
+app.post(ROUTES.characterXianxiaManualImport, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const canAuthorCharacters =
+    campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "characters") &&
+    (auth.role === "admin" ||
+      (auth.role === "dm" && campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session")));
+  if (!canAuthorCharacters) {
+    const error = forbidden("You do not have permission to create characters in this campaign.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const lane = nativeCharacterCreateLane(campaign.system);
+  if (!lane) {
+    const error = jsonError("unsupported_campaign_system", nativeCharacterCreateUnsupportedMessage(campaign.system), 400);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (lane !== "xianxia") {
+    const error = jsonError(
+      "unsupported_campaign_system",
+      "Manual Xianxia character import is only available for Xianxia campaigns.",
+      400,
+    );
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const configRecord = await getCampaignConfigFile(config, campaign.slug);
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = invalidJson(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const payload = jsonPayload.payload;
+  const { values: nestedValues, confirm_import, ...otherPayload } = payload;
+  const rawValues =
+    nestedValues !== null &&
+    nestedValues !== undefined &&
+    typeof nestedValues === "object" &&
+    !Array.isArray(nestedValues)
+      ? nestedValues
+      : otherPayload;
+  if (typeof rawValues !== "object" || rawValues === null || Array.isArray(rawValues)) {
+    const error = invalidJson("Request body must be a JSON object.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const values = Object.fromEntries(
+    Object.entries(rawValues).map(([key, value]) => [String(key), value === null || value === undefined ? "" : String(value)]),
+  ) as Record<string, string>;
+  const confirmImport = Boolean(confirm_import);
+  if (confirmImport) {
+    return ctx.json(
+      {
+        ok: false,
+        error: {
+          code: "unsupported_operation",
+          message: "Manual Xianxia character import confirmation is not supported yet.",
+        },
+      },
+      501,
+    );
+  }
+
+  let preview: Record<string, unknown>;
+  try {
+    preview = buildXianxiaManualImportPreview(values);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid import payload.";
+    const validation = validationError(message);
+    return ctx.json({ ok: validation.ok, error: validation.error }, validation.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    message: "Review the imported sheet summary, then confirm to create the character.",
+    campaign,
+    lane,
+    links: buildCharacterAuthoringLinks(campaign),
+    import_context: {
+      ...buildXianxiaManualImportContext({
+        dbPath: config.dbPath,
+        campaign,
+        campaignConfig: configRecord?.config || {},
+        values,
+      }),
+      preview,
+    },
   });
 });
 
