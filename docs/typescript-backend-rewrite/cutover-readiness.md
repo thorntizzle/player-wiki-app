@@ -1,0 +1,101 @@
+# TypeScript Backend Cutover Readiness
+
+Last updated: 2026-06-27
+
+Status: planning and validation-gap matrix for the TypeScript backend rewrite
+
+## Operating Boundary
+
+Flask remains the production authority. This document does not approve a PR, merge,
+deploy, live data write, Fly sync, or production cutover. It defines the remaining
+evidence needed before those user-approved steps can be considered.
+
+This lane intentionally owns documentation only. It should not edit active
+implementation files such as `apps/api/src/content/characterAuthoring.ts`,
+`apps/api/src/combat/view.ts`, `apps/api/src/server.ts`, or `apps/api/src/routes.ts`.
+
+The ignored `.local` directory is not present in this worktree, so the active local
+roadmap file `./.local/roadmaps/typescript-backend-rewrite-roadmap.md` was not
+available for this pass. The matrix below is derived from tracked docs and current
+contract evidence only.
+
+## Sources Reviewed
+
+- `docs/typescript-backend-rewrite/charter.md`
+- `docs/typescript-backend-rewrite/README.md`
+- `docs/typescript-backend-rewrite/content-character-staging-readiness.md`
+- `docs/typescript-backend-rewrite/route-snapshots.md`
+- `docs/typescript-backend-rewrite/parity-inventory.md`
+- `docs/typescript-backend-rewrite/sqlite-migration-spike.md`
+- `docs/typescript-backend-rewrite/read-only-compatibility-slice.md`
+- `docs/api-v1.md`
+- `docs/current-state/INDEX.md`
+- `docs/current-state/workspace-boundaries.md`
+- `docs/current-state/ops-deploy.md`
+- `docs/current-state/frontend-gen2.md`
+- `docs/current-state/admin-auth.md`
+
+## Gate Summary
+
+| Gate | Category | Current evidence | Remaining readiness gap | Proof required before PR/merge/deploy/cutover |
+| --- | --- | --- | --- | --- |
+| API route inventory stays in lockstep | Route parity | `route-snapshots.json`, `route-snapshots.md`, and `apps/api/tests/route-parity.mjs` exist; `/api/v1` snapshot lists 135 Flask API declarations. | Keep route seed, implemented manifest, and Flask snapshot synchronized as implementation lanes land. Deferred scratch routes must stay non-blocking unless explicitly promoted. | `scripts/route_snapshots.py --check` passes, `apps/api/tests/route-parity.mjs` passes, and any route-seed status changes are documented. |
+| Browser JSON compatibility endpoints | Route parity | `parity-inventory.md` identifies Gen2 calls to `/campaigns/<slug>/global-search`, `/global-search/preview`, `/session/wiki-lookup/search`, and `/session/wiki-lookup/preview`. | Either preserve these non-API compatibility routes in TypeScript or move Gen2 to explicit `/api/v1` replacements first. | Route-level decision plus tests proving Gen2 global search/session wiki lookup still work without Flask. |
+| Character create/edit parity | Route parity | Xianxia create and a narrow DND-5E PHB Fighter pilot are implemented; Advanced Editor supports reference/proficiency/stat-adjustment/recoverable-penalty/custom-feature/manual-equipment slices. | Full DND level-one builder write parity remains pending. Linked custom-feature page/choice/spell derivation, full native edit derivation, and complete Advanced Editor parity remain pending. | Golden Flask-vs-TypeScript tests for full native DND create/edit paths, including definition/import YAML, SQLite state reconciliation, linked derivation, and stale revision behavior. |
+| Character advancement parity | Route parity | Retraining, level-up, and progression-repair context shells and unsupported/current-shell POST responses exist. | Real save parity, ready-state native builder contexts, state merges, and definition YAML writes remain pending. | Golden tests for retraining, level-up, and progression repair on ready and repairable DND sheets, plus fixture SQLite/file assertions and Gen2 smoke coverage. |
+| Character detail/presenter parity | Route parity | Detail reads return raw definition/state, controls metadata, portrait references, and optional CharacterPane-safe shells. | Full Flask presenter derivation is outside the current detail-read slice. | Golden response fixture comparisons for DND and Xianxia presentation payloads consumed by Gen2 Character, Session Character, and Combat selected-PC panes. |
+| Missing-resource/error shape parity | Route parity | `route-snapshots.md` captures a first missing-resource matrix and notes many Flask `abort(404)` paths still return HTML. | Matrix must expand as additional cutover-critical route families are selected. Avoid accidentally normalizing Flask-compatible response shapes without an API-version decision. | Missing-resource parity tests per selected family, with explicit approval for any deliberate JSON-normalization break. |
+| Fixture-only write routes stay non-production | Data migration | README records many Hono writes validated only against disposable fixture databases or copied fixture campaign trees. | Fixture validation does not prove staging or production write safety for real SQLite/content volumes. | For each write family, copied-data or staging-volume backup, mutation, restore, and equivalence transcript recorded under this evidence folder. |
+| Content-character write/delete | Data migration | `content-character-staging-readiness.md` labels the family `copied-data rollback ready; staging snapshot required`; tests prove DND/Xianxia fixture parity and copied-data backup/restore. | Not yet staging-write enabled. Needs approved staging-volume snapshot with realistic files, portrait assets, `character_state`, and `character_assignments`. | Snapshot rehearsal transcript proving backup, mutation behavior, restore, and post-restore equivalence for DND-5E and Xianxia if both are present. |
+| Session/runtime writes | Data migration | Session messages, start/close, articles, logs, and image reads have disposable fixture DB validation. | Production/staging readiness remains gated by migration, backup, rollback rehearsal, and realistic closed/open session data. | Staging copy exercise for live session, DM session, audience-filtered chat, staged/revealed article images, log delete, revision polling, restore equivalence. |
+| Combat writes | Data migration | Combat tracker reads/writes, combatant CRUD, vitals/resources, NPC resources, conditions, and turn flow have disposable DB validation. | Needs real-volume rehearsal with player-character mirrors, source-backed NPC resources, revisions, and rollback. | Copied-data rehearsal covering player Combat, DM Status, DM Controls, selected-PC state writes, revisions, and restore equivalence. |
+| Systems and shared-source writes | Data migration | Source policy, overrides, custom entries, item mechanics import, and shared DND-5E import have disposable DB validation. | Production/staging readiness requires migration, backup, copied-data rehearsal, and rollback approval. | Rehearsal against realistic Systems library/policy rows, import history, custom entries, overrides, proprietary/public visibility gates, and backup/restore equivalence. |
+| DM Content writes | Data migration | Statblock and custom condition mutations have disposable DB validation. | Needs copied-data/staging rehearsal for real parser outputs, condition duplicates, actor/audit rows, and rollback. | Staging copy mutation/restore transcript plus smoke for DM Content statblocks/conditions and Combat source-backed seeding after restore. |
+| Published content config/pages/assets | Data migration | Content config, page, and asset writes have copied fixture validation; content pages include backlink blockers. | Broader character/session provenance blockers and live publication backup/sync/rollback gates remain. | Rehearsal on copied campaign content including config, page publish/edit/unpublish/delete, asset upload/delete, protected asset serving, and restore equivalence. |
+| Image and portrait behavior | Data migration | TypeScript portrait route deliberately preserves PNG/JPG/GIF/WEBP bytes and does not add `sharp`; Flask production has WebP conversion paths for browser publication/portrait-related workflows. | Need a cutover decision: preserve current Flask WebP conversion, migrate data/clients, or accept extension-preserving behavior for selected API routes. | Documented decision plus tests for media type, bytes, protected serving, old asset cleanup, and any data migration for existing PNG/WebP portrait assets. |
+| SQLite schema/migration layer | Data migration | Drizzle spike proves generate/migrate and runtime probes with `better-sqlite3` and `libsql`; parity inventory counts 34 unique current SQLite tables and migration guards. | Production migration posture is not locked until startup schema/migration behavior is integrated with the TypeScript deploy path. | Migration dry-run against a copied current DB, WAL/busy-timeout/index/additive migration checks, and rollback from failed/partial migration. |
+| Local Windows ops | Ops/deploy | Current contract uses `local.ps1`, workspace venv or bundled/runtime-specific tooling, and `.local/tmp` scratch boundaries. | TypeScript local run/check/test actions need a stable wrapper path that does not assume global Node/npm. | Documented commands and passing local smoke for install/build/start/test/check using repo-root wrappers or bundled runtime paths. |
+| Docker/Fly packaging | Ops/deploy | Flask Fly shape is one app, one `/data` volume, SQLite at `/data/player_wiki.sqlite3`, campaign content at `/data/campaigns`, and `/healthz`. Hono stack spike did not run Fly deploy. | TypeScript image, startup command, volume paths, schema initialization, frontend build integration, and sanitized `fly.toml` behavior need packaging proof. | Local production build plus container smoke, `/healthz`, `/app-next/` if frontend is bundled, representative asset content type, and no tracked private Fly identifiers. |
+| Backup, restore, rollback | Ops/deploy | Charter requires rollback to Flask until at least one full rehearsal and approved observation window. Ops docs preserve guarded backup/restore/sync behavior. | Need exact rollback runbook for last-known-good Flask image/commit, pre-cutover DB/content backup, Fly repoint/redeploy steps, and data-delta decisions for TS writes. | Rehearsed rollback transcript from copied/staging data, including restore, Flask health smoke, and decision tree for writes accepted by TypeScript before rollback. |
+| Full cutover workflow smoke | Rehearsal | Charter names the required user workflows across auth, Campaign Home/wiki/search/help, DM Content, Systems, Characters, Session, Combat, and ops. | No tracked full rehearsal transcript yet. | Browser/API smoke pass on copied or staging data covering every charter workflow, with failures classified and linked to follow-up lanes. |
+| Freeze and dual-maintenance | Rehearsal | Charter allows ongoing Flask work until hard freeze, but new Flask behavior must update current-state docs and parity inventory or be an approved exception. | Need a cutover-rehearsal freeze checklist and owner for parity-inventory drift review. | Final pre-rehearsal audit showing current-state docs, `docs/api-v1.md`, snapshots, and TypeScript parity inventory agree. |
+
+## Readiness Labels
+
+Use these labels consistently in follow-up evidence:
+
+- `route-parity complete`: TypeScript route behavior is covered by source snapshot checks, API/client contract checks, and golden Flask comparison where behavior is non-trivial.
+- `fixture-write validated`: TypeScript write behavior is proven only against disposable fixture SQLite or copied sanitized fixtures. This is not staging or production approval.
+- `copied-data rollback ready`: A write family has backup/mutate/restore equivalence on copied realistic-enough data, but has not touched staging/live routing.
+- `staging snapshot ready`: A user-approved staging-equivalent snapshot rehearsal has passed and the transcript is tracked.
+- `cutover rehearsal passed`: All charter workflows pass against copied or staging data, rollback is rehearsed, and Flask hard-freeze exceptions are resolved.
+
+## Parallel Lane Queue
+
+These lanes can proceed without conflicting with this docs-only readiness lane:
+
+| Lane | Owns | Avoids |
+| --- | --- | --- |
+| Route parity evidence lane | `apps/api/tests`, route snapshot fixtures, family-specific golden parity tests, and route-seed status updates. | Runtime handler edits unless the lane explicitly owns the affected `apps/api/src/**` module cluster. |
+| Character authoring parity lane | DND full create, Advanced Editor derivation, retraining, level-up, and progression-repair implementation/tests. | Ops/deploy files and unrelated Combat/Session handler clusters. |
+| Staging rehearsal harness lane | New rehearsal docs/scripts under `docs/typescript-backend-rewrite/` and disposable `.task-temp` harnesses for backup/mutate/restore transcripts. | Active runtime handler files; live data; `.local/roadmaps` unless explicitly requested. |
+| Ops packaging lane | TypeScript local run/build/check wrapper decisions, Docker/Fly packaging proof, `/healthz`, startup migration command shape, rollback runbook. | Route implementation files and live deploy/sync unless explicitly approved. |
+| Browser compatibility lane | Gen2 migration from browser JSON compatibility endpoints or TypeScript compatibility route tests for global search and session wiki lookup. | Character authoring runtime files unless the scope is expanded. |
+| Image/data policy lane | Portrait and publication image conversion decision, media-type tests, data migration notes for existing assets. | Live content volumes and production publication flows without explicit approval. |
+
+## Immediate Orchestrator Recommendations
+
+1. Queue character authoring parity next if the goal is route-semantic completeness: full DND create, Advanced Editor derivation, and advancement save parity are the clearest implementation blockers.
+2. Queue a staging rehearsal harness in parallel with implementation: it can collect backup/restore command scaffolding and transcript templates without touching active runtime files.
+3. Queue an ops packaging proof before any deploy discussion: TypeScript must prove local production build, container/Fly startup shape, mounted volume paths, and rollback instructions.
+4. Keep `deferred_scratch_proof` routes out of cutover scope unless a later architecture decision promotes session-cookie auth, generic upload, or generic notes APIs.
+5. Before a user-approved PR/merge/deploy/cutover step, run a final drift pass across `docs/current-state/INDEX.md`, `docs/api-v1.md`, `route-snapshots.json`, `typescript-route-seed.json`, and this matrix.
+
+## Non-Goals For This Lane
+
+- No production deploy.
+- No live SQLite or Fly volume sync.
+- No PR creation or merge.
+- No change to Flask production authority.
+- No edits to ignored roadmap files.
+- No runtime implementation changes.
