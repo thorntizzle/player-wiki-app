@@ -167,7 +167,7 @@ Do not implement these routes as part of the parity program unless a later archi
   - `POST /api/v1/campaigns/:campaignSlug/characters/create` (Xianxia native create; narrow DND-5E PHB Fighter pilot; full DND builder parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor`
-  - `PUT /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor` (reference, proficiency, stat-adjustment, recoverable-penalty, custom-feature, and manual-equipment fields with linked-page selector hydration plus `page_ref` validation/round-trip; linked feature/choice/spell derivation and full native derivation parity pending)
+  - `PUT /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor` (reference, proficiency, stat-adjustment, recoverable-penalty, custom-feature, and manual-equipment fields with linked-page selector hydration plus `page_ref` validation/round-trip; linked custom-feature defaults, campaign-feat Optional Feature choices, and linked additional-spell choices supported; spell support/manager replacement derivation and full native derivation parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (context shell only; real save parity pending)
   - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (unsupported/current-shell response only; real save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (context shell only; real save parity pending)
@@ -590,9 +590,11 @@ Do not implement these routes as part of the parity program unless a later archi
   `definition.yaml` and managed `import.yaml` writes for profile/reference notes/proficiencies/stat adjustments/recoverable penalties/custom features/manual equipment,
   SQLite notes persistence for state-backed reference fields, current-HP clamping for lowered max HP, SQLite inventory
   reconciliation for manual equipment rows, SQLite resource reconciliation for custom-feature trackers,
-  and refreshed Advanced Editor payloads. Linked custom-feature page/choice/spell derivation,
-  full native edit derivation, and complete Advanced Editor parity remain pending. Manual item
-  option derivation from linked manual pages is implemented in this slice.
+  and refreshed Advanced Editor payloads. Linked custom-feature page defaults, fresh `campaign_option`
+  storage, campaign feat `optionalfeature_progression` choice fields, and linked additional-spell choice fields
+  now cover the Harbor Drill-style linked feature slices, including generated child feature rows with native
+  edit parent/position metadata. Manual item option derivation from linked manual pages is implemented. Spell
+  support/manager replacement derivation, full native edit derivation, and complete Advanced Editor parity remain pending.
 - The Character advancement context shell family now serves `GET .../characters/:characterSlug/retraining`,
   `GET .../level-up`, and `GET .../progression-repair`, preserving Flask-compatible campaign/missing-character
   envelopes, auth and route-specific access failures, current fixture unsupported/empty readiness
