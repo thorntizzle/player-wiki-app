@@ -24,6 +24,7 @@ const dmApiToken = "fixture-dm-api-token";
 const playerApiToken = "fixture-player-api-token";
 const outsiderApiToken = "fixture-outsider-api-token";
 const hashToken = (rawToken) => createHash("sha256").update(rawToken, "utf8").digest("hex");
+const disposableApiToken = "fixture-disposable-api-token";
 
 const smokeDb = new Database(dbPath);
 smokeDb.exec(`
@@ -67,6 +68,16 @@ smokeDb.exec(`
     expires_at TEXT,
     revoked_at TEXT,
     created_by_user_id INTEGER
+  );
+
+  CREATE TABLE sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    session_token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    expires_at TEXT,
+    revoked_at TEXT
   );
 
   CREATE TABLE password_reset_tokens (
@@ -225,6 +236,21 @@ smokeDb
   );
 smokeDb
   .prepare(
+    "INSERT INTO users (id, email, display_name, is_admin, status, password_hash, auth_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    83,
+    "fixture-disposable-user@example.com",
+    "Fixture Disposable User",
+    0,
+    "active",
+    "hashed-password",
+    4,
+    "2026-06-25T08:28:00+00:00",
+    "2026-06-25T08:28:00+00:00",
+  );
+smokeDb
+  .prepare(
     "INSERT INTO user_preferences (user_id, theme_key, session_chat_order, frontend_mode, updated_at) VALUES (?, ?, ?, ?, ?)",
   )
   .run(77, "moonlit", "oldest_first", "flask", "2026-06-25T08:35:00+00:00");
@@ -270,6 +296,34 @@ smokeDb
     "2026-06-25T08:45:00+00:00",
     "2026-06-25T08:45:00+00:00",
     null,
+    null,
+    null,
+  );
+smokeDb
+  .prepare(
+    "INSERT INTO api_tokens (id, user_id, label, token_hash, created_at, last_used_at, expires_at, revoked_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    905,
+    83,
+    "Disposable Smoke Token",
+    hashToken(disposableApiToken),
+    "2026-06-25T08:58:00+00:00",
+    "2026-06-25T08:58:00+00:00",
+    null,
+    null,
+    77,
+  );
+smokeDb
+  .prepare(
+    "INSERT INTO sessions (id, user_id, session_token_hash, created_at, last_seen_at, expires_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    1101,
+    83,
+    hashToken("fixture-disposable-session"),
+    "2026-06-25T08:59:00+00:00",
+    "2026-06-25T08:59:00+00:00",
     null,
     null,
   );
@@ -1682,7 +1736,7 @@ if (
   bearerAdminDashboard.status !== 200 ||
   bearerAdminDashboard.payload?.ok !== true ||
   bearerAdminDashboard.payload?.admin_user?.email !== "fixture-token-user@example.com" ||
-  bearerAdminDashboard.payload?.user_cards?.length !== 6
+  bearerAdminDashboard.payload?.user_cards?.length !== 7
 ) {
   throw new Error(`Unexpected bearer admin dashboard payload: ${JSON.stringify(bearerAdminDashboard.payload)}`);
 }
@@ -2337,6 +2391,271 @@ if (
       resetTtlHours,
       passwordResetAuditRow,
       passwordResetAuditMetadata,
+    })}`,
+  );
+}
+
+const adminDisablePath = "/api/v1/admin/users/83/disable";
+const blockedAdminDisable = await requestJson(adminDisablePath, {}, { method: "POST", body: {} });
+if (blockedAdminDisable.status !== 401 || blockedAdminDisable.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated admin disable POST auth_required 401, got ${blockedAdminDisable.status} ${JSON.stringify(blockedAdminDisable.payload)}`,
+  );
+}
+
+const fixtureAdminDisable = await requestJson(
+  adminDisablePath,
+  { "X-CPW-Fixture-Role": "admin" },
+  { method: "POST", body: {} },
+);
+if (
+  fixtureAdminDisable.status !== 403 ||
+  fixtureAdminDisable.payload?.error?.message !== "Admin membership updates require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture admin disable denial, got ${fixtureAdminDisable.status} ${JSON.stringify(fixtureAdminDisable.payload)}`,
+  );
+}
+
+const playerAdminDisable = await requestJson(
+  adminDisablePath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: {} },
+);
+if (
+  playerAdminDisable.status !== 403 ||
+  playerAdminDisable.payload?.error?.message !== "You do not have permission to use the admin API."
+) {
+  throw new Error(
+    `Expected player admin disable forbidden, got ${playerAdminDisable.status} ${JSON.stringify(playerAdminDisable.payload)}`,
+  );
+}
+
+const missingUserAdminDisable = await requestJson(
+  "/api/v1/admin/users/999999/disable",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: {} },
+);
+if (
+  missingUserAdminDisable.status !== 404 ||
+  missingUserAdminDisable.payload?.error?.code !== "admin_user_not_found"
+) {
+  throw new Error(
+    `Expected missing-user admin disable not_found, got ${missingUserAdminDisable.status} ${JSON.stringify(missingUserAdminDisable.payload)}`,
+  );
+}
+
+const selfAdminDisable = await requestJson(
+  "/api/v1/admin/users/77/disable",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: {} },
+);
+if (
+  selfAdminDisable.status !== 400 ||
+  selfAdminDisable.payload?.error?.code !== "validation_error" ||
+  selfAdminDisable.payload?.error?.message !== "The admin screen will not disable the account you are currently using."
+) {
+  throw new Error(`Expected self-disable validation, got ${JSON.stringify(selfAdminDisable.payload)}`);
+}
+
+const adminDisable = await requestJson(
+  adminDisablePath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: {} },
+);
+if (
+  adminDisable.status !== 200 ||
+  adminDisable.payload?.ok !== true ||
+  adminDisable.payload?.managed_user?.email !== "fixture-disposable-user@example.com" ||
+  adminDisable.payload?.managed_user?.status !== "disabled" ||
+  adminDisable.payload?.message !== "Disabled user fixture-disposable-user@example.com."
+) {
+  throw new Error(`Unexpected admin disable payload: ${JSON.stringify(adminDisable.payload)}`);
+}
+
+const adminDisableAuditDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const disabledUserRow = adminDisableAuditDb
+  .prepare("SELECT status, auth_version, updated_at FROM users WHERE id = ?")
+  .get(83);
+const disabledSessionRow = adminDisableAuditDb
+  .prepare("SELECT revoked_at FROM sessions WHERE user_id = ? AND id = ?")
+  .get(83, 1101);
+const disabledApiTokenRow = adminDisableAuditDb
+  .prepare("SELECT revoked_at FROM api_tokens WHERE user_id = ? AND id = ?")
+  .get(83, 905);
+const disabledAuditRow = adminDisableAuditDb
+  .prepare(
+    "SELECT actor_user_id, target_user_id, campaign_slug, character_slug, event_type, metadata_json FROM auth_audit_log WHERE target_user_id = ? AND event_type = ? ORDER BY id DESC LIMIT 1",
+  )
+  .get(83, "user_disabled");
+adminDisableAuditDb.close();
+const disabledAuditMetadata = disabledAuditRow ? JSON.parse(disabledAuditRow.metadata_json) : {};
+if (
+  disabledUserRow?.status !== "disabled" ||
+  disabledUserRow?.auth_version !== 5 ||
+  disabledUserRow?.updated_at === "2026-06-25T08:28:00+00:00" ||
+  !disabledSessionRow?.revoked_at ||
+  !disabledApiTokenRow?.revoked_at ||
+  disabledAuditRow?.actor_user_id !== 77 ||
+  disabledAuditRow?.target_user_id !== 83 ||
+  disabledAuditRow?.campaign_slug !== null ||
+  disabledAuditRow?.character_slug !== null ||
+  disabledAuditRow?.event_type !== "user_disabled" ||
+  disabledAuditMetadata.source !== "admin_screen"
+) {
+  throw new Error(
+    `Unexpected admin disable database/audit state: ${JSON.stringify({
+      disabledUserRow,
+      disabledSessionRow,
+      disabledApiTokenRow,
+      disabledAuditRow,
+      disabledAuditMetadata,
+    })}`,
+  );
+}
+
+const adminEnablePath = "/api/v1/admin/users/83/enable";
+const blockedAdminEnable = await requestJson(adminEnablePath, {}, { method: "POST", body: {} });
+if (blockedAdminEnable.status !== 401 || blockedAdminEnable.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated admin enable POST auth_required 401, got ${blockedAdminEnable.status} ${JSON.stringify(blockedAdminEnable.payload)}`,
+  );
+}
+
+const fixtureAdminEnable = await requestJson(
+  adminEnablePath,
+  { "X-CPW-Fixture-Role": "admin" },
+  { method: "POST", body: {} },
+);
+if (
+  fixtureAdminEnable.status !== 403 ||
+  fixtureAdminEnable.payload?.error?.message !== "Admin membership updates require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture admin enable denial, got ${fixtureAdminEnable.status} ${JSON.stringify(fixtureAdminEnable.payload)}`,
+  );
+}
+
+const playerAdminEnable = await requestJson(
+  adminEnablePath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: {} },
+);
+if (
+  playerAdminEnable.status !== 403 ||
+  playerAdminEnable.payload?.error?.message !== "You do not have permission to use the admin API."
+) {
+  throw new Error(
+    `Expected player admin enable forbidden, got ${playerAdminEnable.status} ${JSON.stringify(playerAdminEnable.payload)}`,
+  );
+}
+
+const missingUserAdminEnable = await requestJson(
+  "/api/v1/admin/users/999999/enable",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: {} },
+);
+if (
+  missingUserAdminEnable.status !== 404 ||
+  missingUserAdminEnable.payload?.error?.code !== "admin_user_not_found"
+) {
+  throw new Error(
+    `Expected missing-user admin enable not_found, got ${missingUserAdminEnable.status} ${JSON.stringify(missingUserAdminEnable.payload)}`,
+  );
+}
+
+const activeUserAdminEnable = await requestJson(
+  "/api/v1/admin/users/79/enable",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: {} },
+);
+if (
+  activeUserAdminEnable.status !== 400 ||
+  activeUserAdminEnable.payload?.error?.code !== "validation_error" ||
+  activeUserAdminEnable.payload?.error?.message !== "Only disabled users can be re-enabled."
+) {
+  throw new Error(`Expected active-user enable validation, got ${JSON.stringify(activeUserAdminEnable.payload)}`);
+}
+
+const adminEnable = await requestJson(
+  adminEnablePath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: {} },
+);
+if (
+  adminEnable.status !== 200 ||
+  adminEnable.payload?.ok !== true ||
+  adminEnable.payload?.managed_user?.email !== "fixture-disposable-user@example.com" ||
+  adminEnable.payload?.managed_user?.status !== "active" ||
+  adminEnable.payload?.message !== "Re-enabled user fixture-disposable-user@example.com."
+) {
+  throw new Error(`Unexpected active admin enable payload: ${JSON.stringify(adminEnable.payload)}`);
+}
+
+const invitedAdminEnable = await requestJson(
+  "/api/v1/admin/users/82/enable",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: {} },
+);
+if (
+  invitedAdminEnable.status !== 200 ||
+  invitedAdminEnable.payload?.ok !== true ||
+  invitedAdminEnable.payload?.managed_user?.email !== "fixture-disabled-user@example.com" ||
+  invitedAdminEnable.payload?.managed_user?.status !== "invited" ||
+  invitedAdminEnable.payload?.message !==
+    "Re-enabled user fixture-disabled-user@example.com. The account is back in invited status."
+) {
+  throw new Error(`Unexpected invited admin enable payload: ${JSON.stringify(invitedAdminEnable.payload)}`);
+}
+
+const adminEnableAuditDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const enabledActiveUserRow = adminEnableAuditDb
+  .prepare("SELECT status, auth_version, updated_at FROM users WHERE id = ?")
+  .get(83);
+const enabledInvitedUserRow = adminEnableAuditDb
+  .prepare("SELECT status, auth_version, updated_at FROM users WHERE id = ?")
+  .get(82);
+const enabledAuditRows = adminEnableAuditDb
+  .prepare(
+    "SELECT actor_user_id, target_user_id, campaign_slug, character_slug, event_type, metadata_json FROM auth_audit_log WHERE event_type = ? AND target_user_id IN (?, ?) ORDER BY id ASC",
+  )
+  .all("user_enabled", 82, 83);
+adminEnableAuditDb.close();
+const parsedEnabledAuditRows = enabledAuditRows.map((row) => ({
+  actor_user_id: row.actor_user_id,
+  target_user_id: row.target_user_id,
+  campaign_slug: row.campaign_slug,
+  character_slug: row.character_slug,
+  event_type: row.event_type,
+  metadata: JSON.parse(row.metadata_json),
+}));
+const activeEnableAudit = parsedEnabledAuditRows.find((row) => row.target_user_id === 83);
+const invitedEnableAudit = parsedEnabledAuditRows.find((row) => row.target_user_id === 82);
+if (
+  enabledActiveUserRow?.status !== "active" ||
+  enabledActiveUserRow?.auth_version !== 6 ||
+  enabledActiveUserRow?.updated_at === disabledUserRow?.updated_at ||
+  enabledInvitedUserRow?.status !== "invited" ||
+  enabledInvitedUserRow?.auth_version !== 2 ||
+  enabledInvitedUserRow?.updated_at === "2026-06-25T08:27:00+00:00" ||
+  activeEnableAudit?.actor_user_id !== 77 ||
+  activeEnableAudit?.campaign_slug !== null ||
+  activeEnableAudit?.character_slug !== null ||
+  activeEnableAudit?.event_type !== "user_enabled" ||
+  activeEnableAudit?.metadata?.status !== "active" ||
+  activeEnableAudit?.metadata?.source !== "admin_screen" ||
+  invitedEnableAudit?.actor_user_id !== 77 ||
+  invitedEnableAudit?.campaign_slug !== null ||
+  invitedEnableAudit?.character_slug !== null ||
+  invitedEnableAudit?.event_type !== "user_enabled" ||
+  invitedEnableAudit?.metadata?.status !== "invited" ||
+  invitedEnableAudit?.metadata?.source !== "admin_screen"
+) {
+  throw new Error(
+    `Unexpected admin enable database/audit state: ${JSON.stringify({
+      enabledActiveUserRow,
+      enabledInvitedUserRow,
+      parsedEnabledAuditRows,
     })}`,
   );
 }

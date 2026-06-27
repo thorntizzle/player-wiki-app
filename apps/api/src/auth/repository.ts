@@ -85,6 +85,8 @@ interface UserRow {
   display_name: string;
   is_admin: number | string | boolean;
   status: string;
+  password_hash?: string | null;
+  auth_version?: number | string | null;
   created_at: string;
   updated_at: string;
 }
@@ -477,6 +479,85 @@ export function getUserById(dbPath: string, userId: number): AuthUser | null {
       .prepare("SELECT * FROM users WHERE id = ?")
       .get(userId) as UserRow | undefined;
     return row ? serializeUser(row) : null;
+  } finally {
+    database.close();
+  }
+}
+
+export function disableUser(dbPath: string, userId: number): AuthUser {
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const now = utcIsoTimestamp();
+    const writeUser = database.transaction(() => {
+      database
+        .prepare(
+          `UPDATE users
+           SET status = 'disabled',
+               auth_version = COALESCE(auth_version, 0) + 1,
+               updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(now, userId);
+      return database.prepare("SELECT * FROM users WHERE id = ?").get(userId) as UserRow | undefined;
+    });
+    const row = writeUser();
+    if (!row) {
+      throw new Error("User was not readable after disable.");
+    }
+    return serializeUser(row);
+  } finally {
+    database.close();
+  }
+}
+
+export function enableUser(dbPath: string, userId: number): AuthUser {
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const now = utcIsoTimestamp();
+    const writeUser = database.transaction(() => {
+      const current = database.prepare("SELECT * FROM users WHERE id = ?").get(userId) as UserRow | undefined;
+      if (!current) {
+        return undefined;
+      }
+      const enabledStatus = String(current.password_hash || "").trim() ? "active" : "invited";
+      database
+        .prepare(
+          `UPDATE users
+           SET status = ?,
+               auth_version = COALESCE(auth_version, 0) + 1,
+               updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(enabledStatus, now, userId);
+      return database.prepare("SELECT * FROM users WHERE id = ?").get(userId) as UserRow | undefined;
+    });
+    const row = writeUser();
+    if (!row) {
+      throw new Error("User was not readable after enable.");
+    }
+    return serializeUser(row);
+  } finally {
+    database.close();
+  }
+}
+
+export function revokeAllUserSessions(dbPath: string, userId: number): void {
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    database
+      .prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
+      .run(utcIsoTimestamp(), userId);
+  } finally {
+    database.close();
+  }
+}
+
+export function revokeAllUserApiTokens(dbPath: string, userId: number): void {
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    database
+      .prepare("UPDATE api_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
+      .run(utcIsoTimestamp(), userId);
   } finally {
     database.close();
   }

@@ -63,6 +63,8 @@ Route parity check command:
   - `POST /api/v1/admin/users/:userId/membership`
   - `DELETE /api/v1/admin/users/:userId/membership`
   - `POST /api/v1/admin/users/:userId/password-reset`
+  - `POST /api/v1/admin/users/:userId/disable`
+  - `POST /api/v1/admin/users/:userId/enable`
   - `GET /api/v1/campaigns/:campaignSlug/systems`
   - `GET /api/v1/campaigns/:campaignSlug/systems/search`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources`
@@ -310,9 +312,12 @@ Route parity check command:
   only, validating visible active characters plus active player memberships, refreshing Admin user
   detail payloads, and writing `character_assignment_*` audit events with `admin_screen` metadata.
   Password-reset issuance is bearer API-token app-admin only, validates active target users,
-  consumes prior unused reset tokens, inserts a SHA-256-hashed `password_reset_tokens` row with
-  reset TTL and actor id, writes `password_reset_issued` audit metadata, refreshes the Admin user
-  detail payload, and returns the one-shot reset URL only in the mutation response.
+  consumes prior unused reset tokens, persists SHA-256-hashed reset tokens with the configured
+  reset TTL, refreshes detail payloads, and writes `password_reset_issued` audit events. Account
+  disable/enable mutations are bearer API-token app-admin only, protect the acting admin account,
+  refresh detail payloads, increment `auth_version`, update account status, write `user_disabled`
+  and `user_enabled` audit events, revoke all target sessions and API tokens on disable, and restore
+  disabled accounts to `active` or `invited` based on password presence.
   Remaining Admin mutations stay on Flask until their own approved slices.
 - The Campaign Control read route now serves `GET .../control`, preserving Flask-compatible
   visibility-management auth for fixture or bearer-token DM/admin identities, default campaign

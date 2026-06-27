@@ -9,6 +9,8 @@ import { buildAdminDashboardPayload, buildAdminUserDetailPayload } from "./admin
 import {
   apiTokenRoleForCampaign,
   deleteCharacterAssignment,
+  disableUser,
+  enableUser,
   getActiveUserById,
   getCharacterAssignment,
   getMembership,
@@ -18,6 +20,8 @@ import {
   issuePasswordResetToken,
   listActivePlayerMembershipUsers,
   readApiTokenAuthContext,
+  revokeAllUserApiTokens,
+  revokeAllUserSessions,
   upsertCharacterAssignment,
   upsertMembership,
   updateApiTokenAccountSettings,
@@ -1599,6 +1603,93 @@ app.post(ROUTES.adminUserPasswordReset, async (ctx) => {
     ...payload,
     message: `Password reset URL: ${resetUrl}`,
     reset_url: resetUrl,
+  });
+});
+
+app.post(ROUTES.adminUserDisable, async (ctx) => {
+  const auth = resolveAppAdminBearerWrite(ctx);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const userId = parsePositiveInteger(ctx.req.param("userId") || "");
+  const targetUser = userId === null ? null : getUserById(config.dbPath, userId);
+  if (!targetUser) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (auth.actorUserId === targetUser.id) {
+    const error = validationError("The admin screen will not disable the account you are currently using.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const disabledUser = disableUser(config.dbPath, targetUser.id);
+  revokeAllUserSessions(config.dbPath, targetUser.id);
+  revokeAllUserApiTokens(config.dbPath, targetUser.id);
+  insertAuthAuditLog(config.dbPath, {
+    actorUserId: auth.actorUserId ?? null,
+    targetUserId: targetUser.id,
+    campaignSlug: null,
+    characterSlug: null,
+    eventType: "user_disabled",
+    metadata: { source: "admin_screen" },
+  });
+
+  const payload = await buildAdminUserDetailPayload(config, auth.actorUser || null, targetUser.id, requestQueryValues(ctx));
+  if (!payload) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({
+    ...payload,
+    message: `Disabled user ${disabledUser.email}.`,
+  });
+});
+
+app.post(ROUTES.adminUserEnable, async (ctx) => {
+  const auth = resolveAppAdminBearerWrite(ctx);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const userId = parsePositiveInteger(ctx.req.param("userId") || "");
+  const targetUser = userId === null ? null : getUserById(config.dbPath, userId);
+  if (!targetUser) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (targetUser.status !== "disabled") {
+    const error = validationError("Only disabled users can be re-enabled.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (auth.actorUserId === targetUser.id) {
+    const error = validationError("The admin screen will not re-enable the account you are currently using.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const enabledUser = enableUser(config.dbPath, targetUser.id);
+  insertAuthAuditLog(config.dbPath, {
+    actorUserId: auth.actorUserId ?? null,
+    targetUserId: targetUser.id,
+    campaignSlug: null,
+    characterSlug: null,
+    eventType: "user_enabled",
+    metadata: { status: enabledUser.status, source: "admin_screen" },
+  });
+
+  const payload = await buildAdminUserDetailPayload(config, auth.actorUser || null, targetUser.id, requestQueryValues(ctx));
+  if (!payload) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({
+    ...payload,
+    message:
+      enabledUser.status === "active"
+        ? `Re-enabled user ${enabledUser.email}.`
+        : `Re-enabled user ${enabledUser.email}. The account is back in invited status.`,
   });
 });
 
