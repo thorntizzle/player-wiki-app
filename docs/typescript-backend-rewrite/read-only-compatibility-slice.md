@@ -445,6 +445,10 @@ fixture database.
   - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-active-state` with bearer-only writes.
   - non-Xianxia validation envelopes and stale-revision conflict envelopes.
   - DM Xianxia active Stance/Aura manual state updates through `character_state`, including whitespace normalization, blank-value clearing, shared revision bumps, and `updated_by_user_id`.
+- Character session Xianxia Dao Immolating payload checks cover:
+  - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-requests` with bearer-only character-session writes.
+  - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-records` with DM/admin-only bearer writes.
+  - player forbidden, stale-revision conflict, prepared-record request defaulting/copying, approved unused-record validation, fixed 10 Insight spending, one-use field persistence, advancement-history append, YAML definition writes, shared revision bumps, and `updated_by_user_id`.
 - Character session currency payload checks cover:
   - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/currency` with bearer-only writes.
   - stale-revision conflict envelopes.

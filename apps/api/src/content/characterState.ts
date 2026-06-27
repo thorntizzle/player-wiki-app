@@ -72,6 +72,10 @@ export type CharacterSessionArtificerInfusionsUpdateResult = CharacterSessionEqu
 
 export type CharacterSessionXianxiaActiveStateUpdateResult = CharacterSessionVitalsUpdateResult;
 
+export type CharacterSessionXianxiaDaoImmolatingUseRequestResult = CharacterSessionEquipmentUpdateResult;
+
+export type CharacterSessionXianxiaDaoImmolatingUseRecordResult = CharacterSessionEquipmentUpdateResult;
+
 export type CharacterSessionCurrencyUpdateResult = CharacterSessionVitalsUpdateResult;
 
 export type CharacterSessionNotesUpdateResult = CharacterSessionVitalsUpdateResult;
@@ -100,6 +104,7 @@ export type CharacterRestPreviewResult =
 export type CharacterSessionRestApplyResult = CharacterSessionVitalsUpdateResult;
 
 const XIANXIA_SYSTEM_CODE = "xianxia";
+const XIANXIA_DAO_IMMOLATING_INSIGHT_COST = 10;
 const DND_CURRENCY_KEYS = ["cp", "sp", "ep", "gp", "pp"] as const;
 const XIANXIA_ENERGY_KEYS = ["jing", "qi", "shen"] as const;
 const XIANXIA_ENERGY_LABELS: Record<(typeof XIANXIA_ENERGY_KEYS)[number], string> = {
@@ -1813,6 +1818,224 @@ function applyXianxiaActiveStateUpdate(state: Record<string, unknown>, payload: 
     }
   }
   state.xianxia = xianxia;
+}
+
+function firstPayloadValue(payload: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const key of keys) {
+    if (Object.hasOwn(payload, key)) {
+      return payload[key];
+    }
+  }
+  return undefined;
+}
+
+function cleanCollapsedText(value: unknown): string {
+  return String(value || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+}
+
+function parseOptionalNonNegativeWholeNumber(value: unknown, fieldLabel: string): number | null {
+  const parsed = parseOptionalWholeNumber(value, fieldLabel);
+  if (parsed === null) {
+    return null;
+  }
+  if (parsed < 0) {
+    throw new Error(`${fieldLabel} must be 0 or greater.`);
+  }
+  return parsed;
+}
+
+function parseRequiredNonNegativeWholeNumber(value: unknown, fieldLabel: string): number {
+  const parsed = parseOptionalNonNegativeWholeNumber(value, fieldLabel);
+  if (parsed === null) {
+    throw new Error(`${fieldLabel} is required.`);
+  }
+  return parsed;
+}
+
+function copyRecordList(value: unknown): Record<string, unknown>[] {
+  return asArray(value)
+    .map(asRecord)
+    .filter((record) => Object.keys(record).length > 0)
+    .map((record) => ({ ...record }));
+}
+
+function daoImmolatingPreparedReference(
+  preparedRecords: Record<string, unknown>[],
+  preparedRecordIndex: number | null,
+): Record<string, unknown> | null {
+  if (preparedRecordIndex === null) {
+    return null;
+  }
+  if (preparedRecordIndex < 0 || preparedRecordIndex >= preparedRecords.length) {
+    return null;
+  }
+
+  const preparedRecord = preparedRecords[preparedRecordIndex] ?? {};
+  const preparedName = cleanCollapsedText(
+    preparedRecord.name || preparedRecord.title || preparedRecord.label || preparedRecord.technique_name,
+  );
+  const preparedNotes = cleanCollapsedText(
+    preparedRecord.notes ||
+      preparedRecord.prepared_notes ||
+      preparedRecord.preparation_notes ||
+      preparedRecord.description ||
+      preparedRecord.description_markdown ||
+      preparedRecord.text,
+  );
+  const reference: Record<string, unknown> = { prepared_record_index: preparedRecordIndex };
+  if (preparedName) {
+    reference.prepared_record_name = preparedName;
+  }
+  if (preparedNotes) {
+    reference.prepared_record_notes = preparedNotes;
+  }
+  return reference;
+}
+
+function approvalStatusKey(value: unknown): string {
+  const normalized = cleanCollapsedText(value).toLowerCase().replace(/[- ]+/g, "_");
+  return normalized === "denied" ? "rejected" : normalized;
+}
+
+function truthyRecordValue(value: unknown): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+function daoImmolatingUseRecordIsUsed(record: Record<string, unknown>): boolean {
+  for (const key of ["used", "one_use_used", "use_recorded", "spent"]) {
+    if (truthyRecordValue(record[key])) {
+      return true;
+    }
+  }
+  const status = cleanCollapsedText(record.one_use_status || record.use_status).toLowerCase().replace(/[- ]+/g, "_");
+  return ["used", "spent", "recorded", "expended"].includes(status);
+}
+
+function requestXianxiaDaoImmolatingUseDefinition(
+  definition: Record<string, unknown>,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const preparedRecordIndex = parseOptionalNonNegativeWholeNumber(
+    firstPayloadValue(payload, "prepared_record_index", "dao_immolating_prepared_index"),
+    "Prepared Dao Immolating Technique note",
+  );
+  const cleanNotes = cleanCollapsedText(firstPayloadValue(payload, "notes", "dao_immolating_request_notes"));
+  const nextDefinition = copyState(definition);
+  const xianxia = { ...definitionXianxia(nextDefinition) };
+  const daoImmolating = { ...asRecord(xianxia.dao_immolating_techniques) };
+  const preparedRecords = copyRecordList(daoImmolating.prepared);
+  const preparedReference = daoImmolatingPreparedReference(preparedRecords, preparedRecordIndex);
+  if (preparedRecordIndex !== null && preparedReference === null) {
+    throw new Error("Choose an existing prepared Dao Immolating Technique note.");
+  }
+
+  let cleanName = cleanCollapsedText(firstPayloadValue(payload, "request_name", "dao_immolating_request_name"));
+  if (!cleanName && preparedReference) {
+    cleanName = cleanCollapsedText(preparedReference.prepared_record_name);
+  }
+  if (!cleanName) {
+    throw new Error("Enter a Dao Immolating Technique request name.");
+  }
+
+  const requestRecord: Record<string, unknown> = {
+    name: cleanName,
+    request_type: "dao_immolating_use",
+    request_source: preparedReference ? "prepared_record" : "ad_hoc",
+    approval_required: true,
+    approval_status: "pending",
+  };
+  if (cleanNotes) {
+    requestRecord.notes = cleanNotes;
+  }
+  if (preparedReference) {
+    Object.assign(requestRecord, preparedReference);
+  }
+
+  daoImmolating.prepared = preparedRecords;
+  daoImmolating.use_history = [...copyRecordList(daoImmolating.use_history), requestRecord];
+  xianxia.dao_immolating_techniques = daoImmolating;
+  nextDefinition.xianxia = xianxia;
+  return nextDefinition;
+}
+
+function recordXianxiaDaoImmolatingUseDefinition(
+  definition: Record<string, unknown>,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const useRecordIndex = parseRequiredNonNegativeWholeNumber(
+    firstPayloadValue(payload, "use_record_index", "dao_immolating_use_index"),
+    "Dao Immolating Technique use",
+  );
+  const cleanNotes = cleanCollapsedText(firstPayloadValue(payload, "notes", "dao_immolating_use_notes"));
+  const nextDefinition = copyState(definition);
+  const xianxia = { ...definitionXianxia(nextDefinition) };
+  const daoImmolating = { ...asRecord(xianxia.dao_immolating_techniques) };
+  const useHistory = copyRecordList(daoImmolating.use_history);
+  if (useRecordIndex < 0 || useRecordIndex >= useHistory.length) {
+    throw new Error("Choose a recorded Dao Immolating Technique use.");
+  }
+
+  const targetRecord = { ...(useHistory[useRecordIndex] ?? {}) };
+  const requestName = cleanCollapsedText(targetRecord.name || targetRecord.title || "Dao Immolating Technique");
+  if (approvalStatusKey(targetRecord.approval_status || targetRecord.status) !== "approved") {
+    throw new Error("Only an approved Dao Immolating Technique use can spend Insight.");
+  }
+  if (daoImmolatingUseRecordIsUsed(targetRecord)) {
+    throw new Error(`${requestName} has already been recorded as used.`);
+  }
+
+  const insight = asRecord(xianxia.insight);
+  const available = nonNegativeInt(insight.available, 0);
+  const spent = nonNegativeInt(insight.spent, 0);
+  if (available < XIANXIA_DAO_IMMOLATING_INSIGHT_COST) {
+    throw new Error(
+      `Dao Immolating Technique use needs ${XIANXIA_DAO_IMMOLATING_INSIGHT_COST} Insight; only ${available} available.`,
+    );
+  }
+
+  targetRecord.insight_cost = XIANXIA_DAO_IMMOLATING_INSIGHT_COST;
+  targetRecord.insight_spent = XIANXIA_DAO_IMMOLATING_INSIGHT_COST;
+  targetRecord.one_use = true;
+  targetRecord.used = true;
+  targetRecord.one_use_status = "used";
+  if (cleanNotes) {
+    targetRecord.use_notes = cleanNotes;
+  }
+  useHistory[useRecordIndex] = targetRecord;
+
+  xianxia.insight = {
+    available: available - XIANXIA_DAO_IMMOLATING_INSIGHT_COST,
+    spent: spent + XIANXIA_DAO_IMMOLATING_INSIGHT_COST,
+  };
+  xianxia.dao_immolating_techniques = {
+    prepared: copyRecordList(daoImmolating.prepared),
+    use_history: useHistory,
+  };
+  const history = copyRecordList(xianxia.advancement_history);
+  const event: Record<string, unknown> = {
+    action: "dao_immolating_technique_used",
+    amount: XIANXIA_DAO_IMMOLATING_INSIGHT_COST,
+    target: requestName,
+    use_history_index: useRecordIndex,
+    insight_cost: XIANXIA_DAO_IMMOLATING_INSIGHT_COST,
+    one_use: true,
+    one_use_status: "used",
+  };
+  if (cleanNotes) {
+    event.notes = cleanNotes;
+  }
+  history.push(event);
+  xianxia.advancement_history = history;
+  nextDefinition.xianxia = xianxia;
+  return nextDefinition;
 }
 
 function findStateItemById(items: unknown, targetId: string, itemType: string): Record<string, unknown> {
@@ -3779,6 +4002,190 @@ export function updateCharacterSessionXianxiaActiveState(
       return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
     }
     return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCharacterSessionXianxiaDaoImmolatingUseRequest(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  updatedByUserId: number,
+): CharacterSessionXianxiaDaoImmolatingUseRequestResult {
+  let expectedRevision: number;
+  try {
+    expectedRevision = parseRequiredWholeNumber(payload.expected_revision, "Expected revision");
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid Dao Immolating use request payload." };
+  }
+
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+
+    let existingState = readCharacterState(database, campaignSlug, characterSlug);
+    const stateRowMissing = !existingState;
+    existingState ??= { revision: 1, state: buildInitialState(definition) };
+
+    if (!isXianxiaDefinition(definition)) {
+      return {
+        status: "validation_error",
+        message: "Dao Immolating use requests are only available for Xianxia character sheets.",
+      };
+    }
+
+    if (existingState.revision !== expectedRevision) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+
+    let nextDefinition: Record<string, unknown>;
+    let nextState: Record<string, unknown>;
+    try {
+      nextDefinition = requestXianxiaDaoImmolatingUseDefinition(definition, payload);
+      nextState = mergeXianxiaStateWithDefinition(nextDefinition, existingState.state);
+    } catch (error) {
+      return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid Dao Immolating use request payload." };
+    }
+
+    const now = utcIsoTimestamp();
+    if (stateRowMissing) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(campaignSlug, characterSlug, expectedRevision + 1, JSON.stringify(nextState), now, updatedByUserId);
+      return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now, definition: nextDefinition };
+    }
+
+    const result = database
+      .prepare(
+        `
+          UPDATE character_state
+          SET revision = revision + 1,
+              state_json = ?,
+              updated_at = ?,
+              updated_by_user_id = ?
+          WHERE campaign_slug = ?
+            AND character_slug = ?
+            AND revision = ?
+        `,
+      )
+      .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
+    if (result.changes <= 0) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+    return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now, definition: nextDefinition };
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCharacterSessionXianxiaDaoImmolatingUseRecord(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  updatedByUserId: number,
+): CharacterSessionXianxiaDaoImmolatingUseRecordResult {
+  let expectedRevision: number;
+  try {
+    expectedRevision = parseRequiredWholeNumber(payload.expected_revision, "Expected revision");
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid Dao Immolating use record payload." };
+  }
+
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+
+    let existingState = readCharacterState(database, campaignSlug, characterSlug);
+    const stateRowMissing = !existingState;
+    existingState ??= { revision: 1, state: buildInitialState(definition) };
+
+    if (!isXianxiaDefinition(definition)) {
+      return {
+        status: "validation_error",
+        message: "Dao Immolating use records are only available for Xianxia character sheets.",
+      };
+    }
+
+    if (existingState.revision !== expectedRevision) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+
+    let nextDefinition: Record<string, unknown>;
+    let nextState: Record<string, unknown>;
+    try {
+      nextDefinition = recordXianxiaDaoImmolatingUseDefinition(definition, payload);
+      nextState = mergeXianxiaStateWithDefinition(nextDefinition, existingState.state);
+    } catch (error) {
+      return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid Dao Immolating use record payload." };
+    }
+
+    const now = utcIsoTimestamp();
+    if (stateRowMissing) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(campaignSlug, characterSlug, expectedRevision + 1, JSON.stringify(nextState), now, updatedByUserId);
+      return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now, definition: nextDefinition };
+    }
+
+    const result = database
+      .prepare(
+        `
+          UPDATE character_state
+          SET revision = revision + 1,
+              state_json = ?,
+              updated_at = ?,
+              updated_by_user_id = ?
+          WHERE campaign_slug = ?
+            AND character_slug = ?
+            AND revision = ?
+        `,
+      )
+      .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
+    if (result.changes <= 0) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+    return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now, definition: nextDefinition };
   } finally {
     database.close();
   }

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7848,12 +7848,35 @@ const xianxiaDefinition = {
     trained_skills: ["Tea Ceremony"],
     necessary_weapons: ["Jian"],
     martial_arts: [{ name: "Heavenly Palm", current_rank: "Initiate" }],
+    insight: { available: 12, spent: 0 },
+    dao_immolating_techniques: {
+      prepared: [
+        {
+          name: "Ashen Bell",
+          notes: "Stored for a prepared request.",
+        },
+      ],
+      use_history: [
+        {
+          name: "River-Cleaving Spark",
+          approval_status: "approved",
+          approval_notes: "Approved for this duel.",
+        },
+      ],
+    },
   },
+};
+const staleXianxiaImportMetadata = {
+  source_path: "pdf://legacy/api-cultivator.pdf",
+  imported_at_utc: "2026-01-02T03:04:05+00:00",
+  parser_version: "legacy-xianxia-import",
+  import_status: "imported",
+  warnings: ["needs review"],
 };
 const xianxiaCreateResponse = await requestJson(
   xianxiaCharacterPath,
   bearerContentManagerHeaders,
-  { method: "PUT", body: { definition: xianxiaDefinition } },
+  { method: "PUT", body: { definition: xianxiaDefinition, import_metadata: staleXianxiaImportMetadata } },
 );
 if (
   xianxiaCreateResponse.status !== 200 ||
@@ -7972,6 +7995,13 @@ const xianxiaDefinitionPath = path.join(
   "characters",
   xianxiaCharacterSlug,
   "definition.yaml",
+);
+const xianxiaImportPath = path.join(
+  campaignsDir,
+  "linden-pass",
+  "characters",
+  xianxiaCharacterSlug,
+  "import.yaml",
 );
 const savedXianxiaDefinitionText = readFileSync(xianxiaDefinitionPath, "utf8");
 if (
@@ -8778,6 +8808,169 @@ if (
       xianxiaInventoryRemoveState,
     })}`,
   );
+}
+
+const xianxiaDaoRequestPath =
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/xianxia-dao-immolating-use-requests`;
+const xianxiaDaoRecordPath =
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}/session/xianxia-dao-immolating-use-records`;
+const forbiddenXianxiaDaoRecord = await requestJson(
+  xianxiaDaoRecordPath,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "POST", body: { expected_revision: editedXianxiaRevision + 10, use_record_index: 0 } },
+);
+if (forbiddenXianxiaDaoRecord.status !== 403 || forbiddenXianxiaDaoRecord.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected player Dao Immolating record forbidden, got ${forbiddenXianxiaDaoRecord.status} ${JSON.stringify(forbiddenXianxiaDaoRecord.payload)}`,
+  );
+}
+
+const staleXianxiaDaoRequest = await requestJson(
+  xianxiaDaoRequestPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "POST", body: { expected_revision: 999, request_name: "Stale Bell" } },
+);
+if (
+  staleXianxiaDaoRequest.status !== 409 ||
+  staleXianxiaDaoRequest.payload?.error?.code !== "state_conflict" ||
+  staleXianxiaDaoRequest.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale Dao Immolating request conflict, got ${staleXianxiaDaoRequest.status} ${JSON.stringify(staleXianxiaDaoRequest.payload)}`,
+  );
+}
+
+const xianxiaDaoRequest = await requestJson(
+  xianxiaDaoRequestPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  {
+    method: "POST",
+    body: {
+      expected_revision: editedXianxiaRevision + 10,
+      dao_immolating_prepared_index: 0,
+      dao_immolating_request_notes: "Player called on the prepared bell.",
+    },
+  },
+);
+const daoRequestHistory =
+  xianxiaDaoRequest.payload?.character?.definition?.xianxia?.dao_immolating_techniques?.use_history || [];
+const daoRequestRecord = daoRequestHistory[daoRequestHistory.length - 1];
+if (
+  xianxiaDaoRequest.status !== 200 ||
+  xianxiaDaoRequest.payload?.ok !== true ||
+  xianxiaDaoRequest.payload?.character?.state_record?.revision !== editedXianxiaRevision + 11 ||
+  daoRequestRecord?.name !== "Ashen Bell" ||
+  daoRequestRecord?.request_type !== "dao_immolating_use" ||
+  daoRequestRecord?.request_source !== "prepared_record" ||
+  daoRequestRecord?.approval_status !== "pending" ||
+  daoRequestRecord?.prepared_record_index !== 0 ||
+  daoRequestRecord?.prepared_record_name !== "Ashen Bell" ||
+  daoRequestRecord?.prepared_record_notes !== "Stored for a prepared request." ||
+  daoRequestRecord?.notes !== "Player called on the prepared bell."
+) {
+  throw new Error(`Unexpected Dao Immolating request payload: ${JSON.stringify(xianxiaDaoRequest.payload)}`);
+}
+
+const xianxiaDaoRequestAssertionDb = new Database(dbPath, { readonly: true });
+const xianxiaDaoRequestRow = xianxiaDaoRequestAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", xianxiaCharacterSlug);
+xianxiaDaoRequestAssertionDb.close();
+if (Number(xianxiaDaoRequestRow?.revision) !== editedXianxiaRevision + 11 || xianxiaDaoRequestRow?.updated_by_user_id !== 81) {
+  throw new Error(`Unexpected Dao Immolating request database row: ${JSON.stringify(xianxiaDaoRequestRow)}`);
+}
+const daoRequestYamlText = readFileSync(xianxiaDefinitionPath, "utf8");
+if (!daoRequestYamlText.includes("request_source: prepared_record") || !daoRequestYamlText.includes("prepared_record_name: Ashen Bell")) {
+  throw new Error("Expected Dao Immolating request to persist to definition.yaml.");
+}
+const daoRequestImportYamlText = readFileSync(xianxiaImportPath, "utf8");
+if (
+  !daoRequestImportYamlText.includes("parser_version: 2026-04-21.01") ||
+  !daoRequestImportYamlText.includes("import_status: managed") ||
+  !daoRequestImportYamlText.includes("warnings: []") ||
+  daoRequestImportYamlText.includes("legacy-xianxia-import") ||
+  daoRequestImportYamlText.includes("needs review")
+) {
+  throw new Error(`Expected Dao Immolating request to refresh managed import metadata, got ${daoRequestImportYamlText}`);
+}
+
+writeFileSync(
+  xianxiaImportPath,
+  [
+    "campaign_slug: linden-pass",
+    `character_slug: ${xianxiaCharacterSlug}`,
+    "source_path: pdf://legacy/api-cultivator.pdf",
+    "imported_at_utc: 2026-01-02T03:04:05+00:00",
+    "parser_version: stale-before-record",
+    "import_status: imported",
+    "warnings:",
+    "  - still stale",
+    "",
+  ].join("\n"),
+  "utf8",
+);
+
+const xianxiaDaoRecord = await requestJson(
+  xianxiaDaoRecordPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  {
+    method: "POST",
+    body: {
+      expected_revision: editedXianxiaRevision + 11,
+      dao_immolating_use_index: 0,
+      dao_immolating_use_notes: "Spent during the bridge duel.",
+    },
+  },
+);
+const xianxiaDaoDefinition = xianxiaDaoRecord.payload?.character?.definition?.xianxia || {};
+const xianxiaDaoRecordedUse = xianxiaDaoDefinition.dao_immolating_techniques?.use_history?.[0];
+if (
+  xianxiaDaoRecord.status !== 200 ||
+  xianxiaDaoRecord.payload?.ok !== true ||
+  xianxiaDaoRecord.payload?.character?.state_record?.revision !== editedXianxiaRevision + 12 ||
+  xianxiaDaoRecordedUse?.used !== true ||
+  xianxiaDaoRecordedUse?.one_use !== true ||
+  xianxiaDaoRecordedUse?.one_use_status !== "used" ||
+  xianxiaDaoRecordedUse?.insight_cost !== 10 ||
+  xianxiaDaoRecordedUse?.insight_spent !== 10 ||
+  xianxiaDaoRecordedUse?.use_notes !== "Spent during the bridge duel." ||
+  xianxiaDaoDefinition.insight?.available !== 2 ||
+  xianxiaDaoDefinition.insight?.spent !== 10 ||
+  xianxiaDaoDefinition.advancement_history?.at(-1)?.action !== "dao_immolating_technique_used" ||
+  xianxiaDaoDefinition.advancement_history?.at(-1)?.target !== "River-Cleaving Spark"
+) {
+  throw new Error(`Unexpected Dao Immolating record payload: ${JSON.stringify(xianxiaDaoRecord.payload)}`);
+}
+
+const xianxiaDaoRecordAssertionDb = new Database(dbPath, { readonly: true });
+const xianxiaDaoRecordRow = xianxiaDaoRecordAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", xianxiaCharacterSlug);
+xianxiaDaoRecordAssertionDb.close();
+if (Number(xianxiaDaoRecordRow?.revision) !== editedXianxiaRevision + 12 || xianxiaDaoRecordRow?.updated_by_user_id !== 81) {
+  throw new Error(`Unexpected Dao Immolating record database row: ${JSON.stringify(xianxiaDaoRecordRow)}`);
+}
+const daoRecordYamlText = readFileSync(xianxiaDefinitionPath, "utf8");
+if (!daoRecordYamlText.includes("one_use_status: used") || !daoRecordYamlText.includes("use_notes: Spent during the bridge duel.")) {
+  throw new Error("Expected Dao Immolating use record to persist to definition.yaml.");
+}
+const daoRecordImportYamlText = readFileSync(xianxiaImportPath, "utf8");
+if (
+  !daoRecordImportYamlText.includes("parser_version: 2026-04-21.01") ||
+  !daoRecordImportYamlText.includes("import_status: managed") ||
+  !daoRecordImportYamlText.includes("warnings: []") ||
+  daoRecordImportYamlText.includes("stale-before-record") ||
+  daoRecordImportYamlText.includes("still stale")
+) {
+  throw new Error(`Expected Dao Immolating use record to refresh managed import metadata, got ${daoRecordImportYamlText}`);
 }
 
 const xianxiaDeleteResponse = await requestJson(

@@ -692,6 +692,24 @@
       "notes": "Tracked Hono character session Xianxia active-state route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflict handling, Xianxia-only validation, active Stance/Aura whitespace-normalized manual state updates, blank active-state clearing, refreshed character state payloads, and validation_error non-Xianxia JSON."
     },
     {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-requests",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/xianxia-dao-immolating-use-requests",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono character session Dao Immolating use-request route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflict handling, Xianxia-only validation, request_name and legacy dao_immolating_request_name support, prepared-record defaulting/copying, pending use_history definition persistence, YAML definition/import writes, refreshed character state payloads, and validation_error non-Xianxia or invalid prepared-index JSON."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-records",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/xianxia-dao-immolating-use-records",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono character session Dao Immolating use-record route with bearer API-token DM/admin writes, shared character_state revision conflict handling, Xianxia-only validation, use_record_index and legacy dao_immolating_use_index support, approved-and-unused use_history validation, fixed 10 Insight spend, advancement_history event append, YAML definition/import writes, refreshed character state payloads, and forbidden player JSON."
+    },
+    {
       "method": "PATCH",
       "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/currency",
       "route_family": "api_v1_characters",

@@ -370,6 +370,16 @@ Route parity check command:
   session-state write gate, shared revision conflicts, unsupported-key validation, non-Armorer
   validation, SQLite-only `state.feature_states.arcane_armor.enabled` writes, and refreshed
   `character.state_record` payloads.
+- The Xianxia Dao Immolating definition-backed session pair now serves
+  `POST .../characters/:characterSlug/session/xianxia-dao-immolating-use-requests` and
+  `POST .../characters/:characterSlug/session/xianxia-dao-immolating-use-records`. The request
+  route preserves bearer-only character-session writes for app admins, campaign DMs, and assigned
+  players, shared revision conflicts, Xianxia-only validation, current and legacy JSON keys,
+  prepared-record defaulting/copying, pending `use_history` definition persistence, YAML
+  definition/import writes, and refreshed `character.state_record` payloads. The record route is
+  DM/admin-only, requires an approved unused use-history record, spends the fixed 10 Insight,
+  marks the one-use fields, appends an advancement-history event, writes definition/import YAML,
+  and returns the refreshed character payload.
 - The DND equipment-state write now serves
   `PATCH .../characters/:characterSlug/session/equipment/:itemId`. It preserves the bearer-only
   session-state write gate, shared revision conflicts, valid definition-backed inventory row

@@ -1336,6 +1336,36 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "content_character_not_found",
     },
   },
+  {
+    method: "POST",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/xianxia-dao-immolating-use-requests",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-requests",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-requests",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/session/xianxia-dao-immolating-use-requests",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
+  {
+    method: "POST",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/xianxia-dao-immolating-use-records",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-records",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-records",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/session/xianxia-dao-immolating-use-records",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1430,4 +1460,6 @@ export const ROUTES = {
   characterSessionXianxiaInventoryItem: IMPLEMENTED_ROUTES[88].honoPath,
   characterSessionEquipment: IMPLEMENTED_ROUTES[89].honoPath,
   characterSessionArtificerInfusions: IMPLEMENTED_ROUTES[90].honoPath,
+  characterSessionXianxiaDaoImmolatingUseRequests: IMPLEMENTED_ROUTES[91].honoPath,
+  characterSessionXianxiaDaoImmolatingUseRecords: IMPLEMENTED_ROUTES[92].honoPath,
 } as const;

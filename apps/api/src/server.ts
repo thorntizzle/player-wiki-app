@@ -116,6 +116,8 @@ import {
   updateCharacterSessionResource,
   updateCharacterSessionSpellSlots,
   updateCharacterSessionXianxiaActiveState,
+  updateCharacterSessionXianxiaDaoImmolatingUseRecord,
+  updateCharacterSessionXianxiaDaoImmolatingUseRequest,
   updateCharacterSessionXianxiaInventoryAdd,
   updateCharacterSessionXianxiaInventoryEquipped,
   updateCharacterSessionXianxiaInventoryItem,
@@ -149,6 +151,31 @@ const app = new Hono();
 
 const config = getApiConfig();
 setWikiConfig(config);
+
+function utcIsoTimestamp(value: Date = new Date()): string {
+  const normalized = new Date(value);
+  normalized.setMilliseconds(0);
+  return normalized.toISOString().replace(/\.\d{3}Z$/, "+00:00");
+}
+
+function buildManagedCharacterImportMetadata(
+  campaignSlug: string,
+  characterSlug: string,
+  currentImportMetadata: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    campaign_slug: campaignSlug,
+    character_slug: characterSlug,
+    source_path:
+      typeof currentImportMetadata.source_path === "string" && currentImportMetadata.source_path.trim().length > 0
+        ? currentImportMetadata.source_path.trim()
+        : `managed://${campaignSlug}/${characterSlug}`,
+    imported_at_utc: utcIsoTimestamp(),
+    parser_version: "2026-04-21.01",
+    import_status: "managed",
+    warnings: [],
+  };
+}
 
 function fixtureAuthBlock() {
   return {
@@ -4053,6 +4080,192 @@ app.patch(ROUTES.characterSessionXianxiaActiveState, async (ctx) => {
         state: result.state,
         updated_at: result.updatedAt,
         updated_by_user_id: auth.actorUserId ?? null,
+      },
+    },
+  });
+});
+
+app.post(ROUTES.characterSessionXianxiaDaoImmolatingUseRequests, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCharacterSessionBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!canEditCharacterSessionState(config, campaign.slug, characterSlug, auth.role, auth.actorUserId)) {
+    const error = forbidden("You do not have permission to request Dao Immolating use for this character.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = updateCharacterSessionXianxiaDaoImmolatingUseRequest(
+    config,
+    campaign.slug,
+    characterSlug,
+    character.definition,
+    jsonPayload.payload,
+    auth.actorUserId ?? 0,
+  );
+  if (result.status === "state_conflict") {
+    const error = stateConflict(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const writeResult = await writeCampaignContentCharacter(config, campaign.slug, characterSlug, {
+    definition: result.definition,
+    import_metadata: buildManagedCharacterImportMetadata(campaign.slug, characterSlug, character.import_metadata),
+  });
+  if (writeResult.status === "not_found") {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (writeResult.status === "validation_error") {
+    const error = validationError(writeResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const updatedCharacter = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!updatedCharacter) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    character: {
+      definition: updatedCharacter.definition,
+      import_metadata: updatedCharacter.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: characterSlug,
+        revision: result.revision,
+        state: result.state,
+        updated_at: result.updatedAt,
+        updated_by_user_id: auth.actorUserId ?? null,
+      },
+    },
+  });
+});
+
+app.post(ROUTES.characterSessionXianxiaDaoImmolatingUseRecords, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveSessionManagerBearerWrite(
+    ctx,
+    campaign.slug,
+    "Character session state writes require bearer API authentication.",
+  );
+  if (auth.kind === "error") {
+    return ctx.json({ ok: auth.error.ok, error: auth.error.error }, auth.error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = updateCharacterSessionXianxiaDaoImmolatingUseRecord(
+    config,
+    campaign.slug,
+    characterSlug,
+    character.definition,
+    jsonPayload.payload,
+    auth.actor.id,
+  );
+  if (result.status === "state_conflict") {
+    const error = stateConflict(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const writeResult = await writeCampaignContentCharacter(config, campaign.slug, characterSlug, {
+    definition: result.definition,
+    import_metadata: buildManagedCharacterImportMetadata(campaign.slug, characterSlug, character.import_metadata),
+  });
+  if (writeResult.status === "not_found") {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (writeResult.status === "validation_error") {
+    const error = validationError(writeResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const updatedCharacter = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!updatedCharacter) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    character: {
+      definition: updatedCharacter.definition,
+      import_metadata: updatedCharacter.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: characterSlug,
+        revision: result.revision,
+        state: result.state,
+        updated_at: result.updatedAt,
+        updated_by_user_id: auth.actor.id,
       },
     },
   });
