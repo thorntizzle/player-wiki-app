@@ -53,6 +53,15 @@
       "notes": "Tracked Hono DM Content read route with Flask-compatible unauthenticated auth_required behavior, fixture-role and bearer-token DM/admin access, SQLite statblock and condition reads, parser feedback summaries, lane counts for player wiki, staged session articles, and Systems sources, and explicit missing-campaign JSON."
     },
     {
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/dm-content/systems",
+      "route_family": "api_v1_dm_content",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/dm-content/systems",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono DM Content Systems management read route with Flask-compatible unauthenticated auth_required behavior, fixture-role and bearer-token DM/admin access, read-only SQLite source policy rows, shared-core permission state, entry overrides, custom campaign entries, sanitized import-run history, campaign item mechanics rows, and explicit missing-campaign JSON."
+    },
+    {
       "method": "POST",
       "path": "/api/v1/campaigns/<campaign_slug>/dm-content/statblocks",
       "route_family": "api_v1_dm_content",

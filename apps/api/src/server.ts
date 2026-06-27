@@ -83,6 +83,7 @@ import {
   updateSessionArticle,
 } from "./session/view.js";
 import { getSystemsImportRun, listSystemsImportRuns } from "./systems/importRuns.js";
+import { buildDmContentSystemsPayload } from "./systems/management.js";
 import {
   buildCombatSystemsMonsterSearchPayload,
   buildCampaignSystemsEntryDetailPayload,
@@ -2633,6 +2634,31 @@ app.get(ROUTES.dmContentState, async (ctx) => {
 
   const playerWikiPages = await campaignWikiRepository.listVisiblePages(campaign.slug);
   return ctx.json(buildDmContentPayload(config.dbPath, campaign, auth.role, playerWikiPages.length));
+});
+
+app.get(ROUTES.dmContentSystems, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (auth.role === "player") {
+    const error = forbidden("You do not have permission to manage systems.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  return ctx.json({
+    ok: true,
+    ...buildDmContentSystemsPayload(config.dbPath, campaign, campaignConfig?.config || {}, auth.role),
+  });
 });
 
 app.post(ROUTES.dmContentStatblockCreate, async (ctx) => {

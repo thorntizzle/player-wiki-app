@@ -1,6 +1,6 @@
 # TypeScript Backend Rewrite
 
-Last updated: 2026-06-26
+Last updated: 2026-06-27
 
 Status: active rewrite planning and implementation track
 
@@ -85,6 +85,7 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/control`
   - `PATCH /api/v1/campaigns/:campaignSlug/control/visibility`
   - `GET /api/v1/campaigns/:campaignSlug/dm-content`
+  - `GET /api/v1/campaigns/:campaignSlug/dm-content/systems`
   - `POST /api/v1/campaigns/:campaignSlug/dm-content/statblocks`
   - `PUT /api/v1/campaigns/:campaignSlug/dm-content/statblocks/:statblockId`
   - `DELETE /api/v1/campaigns/:campaignSlug/dm-content/statblocks/:statblockId`
@@ -296,6 +297,12 @@ Route parity check command:
   SQLite statblock and custom condition serialization, statblock parser feedback summaries, lane
   counts for Player Wiki pages, staged Session articles, and Systems sources, and missing-campaign
   JSON.
+- The DM Content Systems management read route now serves `GET .../dm-content/systems`, preserving
+  Flask-compatible unauthenticated `auth_required`, DM/admin-only access for fixture roles and bearer
+  API tokens, source policy rows, shared-core permission state, entry overrides, custom campaign
+  entries, campaign item mechanics rows, sanitized import-run history without raw source paths, and
+  missing-campaign JSON. This route is read-only and fixture/SQLite-backed; write routes for Systems
+  policy, custom entries, and item-mechanics import remain separate slices.
 - The DM Content statblock and custom condition API mutations now serve bearer-token DM/admin
   create/update/delete routes against `CPW_DB_PATH`, preserving Flask-compatible durable-actor
   requirements, markdown statblock upload validation and parser field extraction, condition

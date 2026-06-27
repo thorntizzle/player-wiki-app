@@ -200,7 +200,7 @@ export type CombatSystemsMonsterSearchResultPayload =
   | { status: "ok"; payload: CombatSystemsMonsterSearchPayload }
   | { status: "forbidden"; message: string };
 
-interface SystemsLibraryRow {
+export interface SystemsLibraryRow {
   library_slug: string;
   title: string;
   system_code: string;
@@ -209,7 +209,7 @@ interface SystemsLibraryRow {
   updated_at: string;
 }
 
-interface SystemsSourceRow {
+export interface SystemsSourceRow {
   source_id: string;
   title: string;
   library_slug: string;
@@ -222,7 +222,7 @@ interface SystemsSourceRow {
   entry_count: number;
 }
 
-interface SystemsEntryRow {
+export interface SystemsEntryRow {
   id: number;
   library_slug: string;
   source_id: string;
@@ -242,7 +242,7 @@ interface SystemsEntryRow {
   updated_at: string;
 }
 
-interface CampaignEntryOverrideRow {
+export interface CampaignEntryOverrideRow {
   entry_key: string;
   visibility_override: string | null;
   is_enabled_override: number | null;
@@ -250,7 +250,7 @@ interface CampaignEntryOverrideRow {
   updated_by_user_id: number | null;
 }
 
-interface CampaignSourceSeed {
+export interface CampaignSourceSeed {
   source_id: string;
   enabled?: boolean;
   default_visibility?: string;
@@ -265,7 +265,7 @@ const LICENSE_CLASS_LABELS: Record<string, string> = {
 };
 
 const VISIBILITY_VALUES = new Set(["public", "players", "dm", "private"]);
-const SYSTEMS_ENTRY_TYPE_LABELS: Record<string, string> = {
+export const SYSTEMS_ENTRY_TYPE_LABELS: Record<string, string> = {
   action: "Actions",
   background: "Backgrounds",
   book: "Book Chapters",
@@ -316,7 +316,7 @@ const SYSTEMS_ENTRY_TYPE_LABELS: Record<string, string> = {
   companion_rule: "Companion Rules",
   gm_approval_rule: "GM Approval Rules",
 };
-const SYSTEMS_ENTRY_TYPE_ORDER = [
+export const SYSTEMS_ENTRY_TYPE_ORDER = [
   "book",
   "class",
   "subclass",
@@ -407,12 +407,12 @@ function normalizeVisibility(value: unknown, fallback = "dm"): string {
   return VISIBILITY_VALUES.has(normalized) ? normalized : fallback;
 }
 
-function entryTypeLabel(entryType: string): string {
+export function entryTypeLabel(entryType: string): string {
   const normalized = String(entryType || "").trim().toLowerCase();
   return SYSTEMS_ENTRY_TYPE_LABELS[normalized] || titleCaseFallback(normalized.replace(/-/g, " "));
 }
 
-function entryTypeSortKey(entryType: string): [number, string] {
+export function entryTypeSortKey(entryType: string): [number, string] {
   const normalized = String(entryType || "").trim().toLowerCase();
   const index = SYSTEMS_ENTRY_TYPE_ORDER.indexOf(normalized as (typeof SYSTEMS_ENTRY_TYPE_ORDER)[number]);
   return [index >= 0 ? index : SYSTEMS_ENTRY_TYPE_ORDER.length, normalized];
@@ -425,7 +425,7 @@ function clampVisibilityForSource(source: SystemsSourceRow, visibility: string):
   return visibility;
 }
 
-function parseSourceSeeds(campaignConfig: Record<string, unknown>): Map<string, CampaignSourceSeed> {
+export function parseSourceSeeds(campaignConfig: Record<string, unknown>): Map<string, CampaignSourceSeed> {
   const seeds = new Map<string, CampaignSourceSeed>();
   const rawSources = campaignConfig.systems_sources;
   if (!Array.isArray(rawSources)) {
@@ -447,7 +447,7 @@ function parseSourceSeeds(campaignConfig: Record<string, unknown>): Map<string, 
   return seeds;
 }
 
-function serializeLibrary(row: SystemsLibraryRow | undefined): SystemsLibrary | null {
+export function serializeLibrary(row: SystemsLibraryRow | undefined): SystemsLibrary | null {
   if (!row) {
     return null;
   }
@@ -480,7 +480,7 @@ function canAccessSource(role: FixtureSystemsRole, isEnabled: boolean, visibilit
   return visibility === "public" || visibility === "players";
 }
 
-function serializeSourceState(
+export function serializeSourceState(
   row: SystemsSourceRow,
   seed: CampaignSourceSeed | undefined,
   role: FixtureSystemsRole,
@@ -550,11 +550,11 @@ function emptyIndexPayload(
   };
 }
 
-function isNoSuchTableError(error: unknown): boolean {
+export function isNoSuchTableError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("no such table");
 }
 
-function parseJsonValue(rawValue: string, fallback: unknown = {}): unknown {
+export function parseJsonValue(rawValue: string, fallback: unknown = {}): unknown {
   try {
     return JSON.parse(rawValue || "null") ?? fallback;
   } catch {
@@ -562,11 +562,11 @@ function parseJsonValue(rawValue: string, fallback: unknown = {}): unknown {
   }
 }
 
-function parseMetadata(row: SystemsEntryRow): Record<string, unknown> {
+export function parseMetadata(row: SystemsEntryRow): Record<string, unknown> {
   return asRecord(parseJsonValue(row.metadata_json, {}));
 }
 
-function serializeEntrySummary(row: SystemsEntryRow): SystemsEntrySummary {
+export function serializeEntrySummary(row: SystemsEntryRow): SystemsEntrySummary {
   return {
     id: Number(row.id),
     library_slug: String(row.library_slug),
@@ -843,7 +843,7 @@ function loadCampaignEntryOverride(
   }
 }
 
-function loadCampaignEntryOverrides(
+export function loadCampaignEntryOverrides(
   database: Database.Database,
   campaignSlug: string,
   librarySlug: string,
@@ -879,7 +879,7 @@ function loadCampaignEntryOverrides(
   return overrides;
 }
 
-function loadSourceRows(database: Database.Database, campaignSlug: string, librarySlug: string): SystemsSourceRow[] {
+export function loadSourceRows(database: Database.Database, campaignSlug: string, librarySlug: string): SystemsSourceRow[] {
   return database
     .prepare(
       `
@@ -948,7 +948,7 @@ function loadSourceRow(
     .get(campaignSlug, librarySlug, sourceId) as SystemsSourceRow | undefined;
 }
 
-function loadEntriesForSources(
+export function loadEntriesForSources(
   database: Database.Database,
   librarySlug: string,
   sourceIds: string[],

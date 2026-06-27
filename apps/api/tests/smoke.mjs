@@ -10832,6 +10832,278 @@ if (
   throw new Error(`Unexpected bearer DM Content payload: ${JSON.stringify(bearerDmContent.payload)}`);
 }
 
+const dmContentSystemsSetupDb = new Database(dbPath);
+dmContentSystemsSetupDb
+  .prepare(
+    `
+      INSERT INTO systems_sources (
+        library_slug,
+        source_id,
+        title,
+        license_class,
+        public_visibility_allowed,
+        requires_unofficial_notice,
+        status,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  )
+  .run(
+    "DND-5E",
+    "LINDEN",
+    "Linden Pass Custom",
+    "custom_campaign",
+    0,
+    1,
+    "active",
+    "2026-06-25T11:10:00+00:00",
+    "2026-06-25T11:10:00+00:00",
+  );
+dmContentSystemsSetupDb
+  .prepare(
+    "INSERT INTO campaign_enabled_sources (campaign_slug, library_slug, source_id, is_enabled, default_visibility, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run("linden-pass", "DND-5E", "LINDEN", 1, "players", "2026-06-25T11:11:00+00:00", 81);
+dmContentSystemsSetupDb
+  .prepare(
+    "INSERT INTO campaign_visibility_settings (campaign_slug, scope, visibility, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT(campaign_slug, scope) DO UPDATE SET visibility = excluded.visibility, updated_at = excluded.updated_at, updated_by_user_id = excluded.updated_by_user_id",
+  )
+  .run("linden-pass", "systems", "private", "2026-06-25T11:11:30+00:00", 81);
+const insertDmContentSystemsEntry = dmContentSystemsSetupDb.prepare(`
+  INSERT INTO systems_entries (
+    library_slug,
+    source_id,
+    entry_key,
+    entry_type,
+    slug,
+    title,
+    source_path,
+    search_text,
+    player_safe_default,
+    metadata_json,
+    body_json,
+    rendered_html,
+    created_at,
+    updated_at
+  )
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+insertDmContentSystemsEntry.run(
+  "DND-5E",
+  "LINDEN",
+  "dnd-5e|custom|linden-pass|pagebound-crescent",
+  "item",
+  "linden-pagebound-crescent",
+  "Pagebound Crescent",
+  "Published item page: Pagebound Crescent",
+  "pagebound crescent custom item",
+  1,
+  JSON.stringify({
+    custom_campaign_slug: "linden-pass",
+    provenance: "Published item page: Pagebound Crescent",
+    search_metadata: "pagebound crescent custom item",
+    linked_published_page_ref: "items/pagebound-crescent",
+    campaign_item_mechanics: {
+      version: "2026-06-25",
+      review_status: "approved",
+      support_state: "modeled",
+      modeled_fields: ["base_item", "bonus_weapon"],
+      flags: [],
+      field_provenance: { base_item: { source: "published_page_metadata" } },
+      source_page_ref: "items/pagebound-crescent",
+      intake_mode: "direct",
+    },
+  }),
+  JSON.stringify({ markdown: "## Mechanics\nA reviewed custom item." }),
+  "<p>A reviewed custom item.</p>",
+  "2026-06-25T11:12:00+00:00",
+  "2026-06-25T11:12:00+00:00",
+);
+insertDmContentSystemsEntry.run(
+  "DND-5E",
+  "LINDEN",
+  "dnd-5e|custom|linden-pass|harbor-spark",
+  "spell",
+  "linden-harbor-spark",
+  "Harbor Spark",
+  "Linden Pass table notes",
+  "harbor spark custom spell",
+  1,
+  JSON.stringify({
+    custom_campaign_slug: "linden-pass",
+    provenance: "Linden Pass table notes",
+    search_metadata: "harbor spark custom spell",
+  }),
+  JSON.stringify({ markdown: "## Effect\nA small controlled spark." }),
+  "<p>A small controlled spark.</p>",
+  "2026-06-25T11:13:00+00:00",
+  "2026-06-25T11:13:00+00:00",
+);
+insertDmContentSystemsEntry.run(
+  "DND-5E",
+  "LINDEN",
+  "dnd-5e|custom|linden-pass|private-whisper",
+  "spell",
+  "linden-private-whisper",
+  "Private Whisper",
+  "Linden Pass private notes",
+  "private whisper custom spell",
+  1,
+  JSON.stringify({
+    custom_campaign_slug: "linden-pass",
+    provenance: "Linden Pass private notes",
+    search_metadata: "private whisper custom spell",
+  }),
+  JSON.stringify({ markdown: "## Effect\nA hidden table note." }),
+  "<p>A hidden table note.</p>",
+  "2026-06-25T11:13:30+00:00",
+  "2026-06-25T11:13:30+00:00",
+);
+dmContentSystemsSetupDb
+  .prepare(
+    "INSERT INTO campaign_entry_overrides (campaign_slug, library_slug, entry_key, visibility_override, is_enabled_override, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    "linden-pass",
+    "DND-5E",
+    "dnd-5e|custom|linden-pass|harbor-spark",
+    "dm",
+    0,
+    "2026-06-25T11:14:00+00:00",
+    81,
+  );
+dmContentSystemsSetupDb
+  .prepare(
+    "INSERT INTO campaign_entry_overrides (campaign_slug, library_slug, entry_key, visibility_override, is_enabled_override, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    "linden-pass",
+    "DND-5E",
+    "dnd-5e|custom|linden-pass|private-whisper",
+    "private",
+    null,
+    "2026-06-25T11:14:30+00:00",
+    81,
+  );
+dmContentSystemsSetupDb.close();
+
+const blockedDmContentSystems = await requestJson("/api/v1/campaigns/linden-pass/dm-content/systems");
+if (
+  blockedDmContentSystems.status !== 401 ||
+  blockedDmContentSystems.payload?.error?.code !== "auth_required"
+) {
+  throw new Error(
+    `Expected unauthenticated DM Content Systems to return auth_required 401, got ${blockedDmContentSystems.status} ${blockedDmContentSystems.payload?.error?.code}`,
+  );
+}
+
+const playerDmContentSystems = await requestJson("/api/v1/campaigns/linden-pass/dm-content/systems", {
+  "X-CPW-Fixture-Role": "player",
+});
+if (playerDmContentSystems.status !== 403 || playerDmContentSystems.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected fixture player DM Content Systems forbidden 403, got ${playerDmContentSystems.status} ${playerDmContentSystems.payload?.error?.code}`,
+  );
+}
+
+const outsiderDmContentSystems = await requestJson("/api/v1/campaigns/linden-pass/dm-content/systems", {
+  Authorization: `Bearer ${outsiderApiToken}`,
+});
+if (outsiderDmContentSystems.status !== 403 || outsiderDmContentSystems.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected outsider DM Content Systems forbidden 403, got ${outsiderDmContentSystems.status} ${outsiderDmContentSystems.payload?.error?.code}`,
+  );
+}
+
+const missingDmContentSystemsCampaign = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/dm-content/systems",
+  {
+    "X-CPW-Fixture-Role": "dm",
+  },
+);
+if (
+  missingDmContentSystemsCampaign.status !== 404 ||
+  missingDmContentSystemsCampaign.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing DM Content Systems campaign JSON 404, got ${missingDmContentSystemsCampaign.status} ${missingDmContentSystemsCampaign.payload?.error?.code}`,
+  );
+}
+
+const dmContentSystems = await requestJson("/api/v1/campaigns/linden-pass/dm-content/systems", {
+  "X-CPW-Fixture-Role": "dm",
+});
+const dmSystemsPayload = dmContentSystems.payload || {};
+const dmSystemsSourceIds = (dmSystemsPayload.source_rows || []).map((source) => source.source_id);
+const customSourceState = (dmSystemsPayload.source_rows || []).find((source) => source.source_id === "LINDEN");
+const customSourceRow = (dmSystemsPayload.custom_entry_source_rows || []).find((source) => source.source_id === "LINDEN");
+const pageboundEntry = customSourceRow?.entries?.find((entry) => entry.slug === "linden-pagebound-crescent");
+const archivedHarborEntry = customSourceRow?.entries?.find((entry) => entry.slug === "linden-harbor-spark");
+const privateWhisperEntry = customSourceRow?.entries?.find((entry) => entry.slug === "linden-private-whisper");
+const pageboundItemRow = (dmSystemsPayload.campaign_item_page_rows || []).find(
+  (row) => row.page_ref === "items/pagebound-crescent",
+);
+const chainMailOverrideRow = (dmSystemsPayload.entry_override_rows || []).find(
+  (row) => row.entry_key === "PHB:item:chain-mail",
+);
+if (
+  dmContentSystems.status !== 200 ||
+  dmSystemsPayload.ok !== true ||
+  dmSystemsPayload.campaign?.slug !== "linden-pass" ||
+  dmSystemsPayload.systems_library !== "DND-5E" ||
+  dmSystemsPayload.library?.library_slug !== "DND-5E" ||
+  dmSystemsPayload.systems_scope_visibility_label !== "Private" ||
+  dmSystemsPayload.permissions?.can_manage_systems !== true ||
+  dmSystemsPayload.permissions?.can_import_shared_systems !== false ||
+  dmSystemsPayload.policy?.allow_dm_shared_core_entry_edits !== false ||
+  !dmSystemsSourceIds.includes("PHB") ||
+  !dmSystemsSourceIds.includes("LINDEN") ||
+  customSourceState?.permissions?.can_access !== false ||
+  customSourceRow?.entry_count !== 3 ||
+  customSourceRow?.active_entry_count !== 2 ||
+  customSourceRow?.archived_entry_count !== 1 ||
+  pageboundEntry?.item_mechanics?.review_status !== "approved" ||
+  pageboundEntry?.linked_published_page_ref !== "items/pagebound-crescent" ||
+  pageboundEntry?.href !== "" ||
+  archivedHarborEntry?.is_archived !== true ||
+  archivedHarborEntry?.href !== "" ||
+  privateWhisperEntry?.visibility !== "private" ||
+  privateWhisperEntry?.href !== "" ||
+  pageboundItemRow?.has_structured_item !== true ||
+  pageboundItemRow?.entry_slug !== "linden-pagebound-crescent" ||
+  pageboundItemRow?.item_mechanics?.support_state !== "modeled" ||
+  chainMailOverrideRow?.entry_title !== "Chain Mail" ||
+  chainMailOverrideRow?.visibility_label !== "Players" ||
+  !(dmSystemsPayload.import_run_rows || []).some((run) => run.source_id === "MM") ||
+  (dmSystemsPayload.import_run_rows || []).some((run) => Object.hasOwn(run, "source_path")) ||
+  !(dmSystemsPayload.import_source_choices || []).some((source) => source.source_id === "MM") ||
+  !(dmSystemsPayload.custom_entry_type_choices || []).some((choice) => choice.value === "spell") ||
+  !(dmSystemsPayload.import_entry_type_choices || []).some((choice) => choice.value === "monster") ||
+  dmSystemsPayload.links?.flask_systems_lane_url !== "/campaigns/linden-pass/dm-content/systems" ||
+  dmSystemsPayload.links?.flask_systems_control_url !== "/campaigns/linden-pass/systems/control-panel"
+) {
+  throw new Error(`Unexpected DM Content Systems payload: ${JSON.stringify(dmSystemsPayload)}`);
+}
+
+const bearerAdminDmContentSystems = await requestJson("/api/v1/campaigns/linden-pass/dm-content/systems", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+const adminPrivateWhisperEntry = (bearerAdminDmContentSystems.payload?.custom_entry_source_rows || [])
+  .find((source) => source.source_id === "LINDEN")
+  ?.entries?.find((entry) => entry.slug === "linden-private-whisper");
+const adminCustomSourceRow = (bearerAdminDmContentSystems.payload?.source_rows || []).find((source) => source.source_id === "LINDEN");
+if (
+  bearerAdminDmContentSystems.status !== 200 ||
+  bearerAdminDmContentSystems.payload?.permissions?.can_import_shared_systems !== true ||
+  adminCustomSourceRow?.permissions?.can_access !== true ||
+  !bearerAdminDmContentSystems.payload?.custom_entry_visibility_choices?.some((choice) => choice.value === "private") ||
+  adminPrivateWhisperEntry?.href !== "/campaigns/linden-pass/systems/entries/linden-private-whisper"
+) {
+  throw new Error(`Unexpected bearer admin DM Content Systems payload: ${JSON.stringify(bearerAdminDmContentSystems.payload)}`);
+}
+
 const fixtureStatblockCreate = await requestJson(
   "/api/v1/campaigns/linden-pass/dm-content/statblocks",
   { "X-CPW-Fixture-Role": "dm" },

@@ -1,6 +1,6 @@
 # Read-Only Compatibility Slice Evidence
 
-Last updated: 2026-06-26
+Last updated: 2026-06-27
 
 This document records the first implemented TypeScript compatibility surface. It began as a read-only
 fixture slice and now includes controlled SQLite write routes, validated only against a disposable
@@ -74,6 +74,8 @@ fixture database.
   - `PATCH /api/v1/campaigns/:campaignSlug/control/visibility`
 - Added DM Content read endpoint with fixture or bearer-token DM/admin access:
   - `GET /api/v1/campaigns/:campaignSlug/dm-content`
+- Added DM Content Systems management read endpoint with fixture or bearer-token DM/admin access:
+  - `GET /api/v1/campaigns/:campaignSlug/dm-content/systems`
 - Added DM Content statblock and custom condition write endpoints with bearer-token DM/admin access:
   - `POST /api/v1/campaigns/:campaignSlug/dm-content/statblocks`
   - `PUT /api/v1/campaigns/:campaignSlug/dm-content/statblocks/:statblockId`
@@ -282,6 +284,13 @@ fixture database.
   - statblocks include source filename, subsection, parsed combat fields, timestamps, actor ids, and the Flask-compatible parser feedback summary
   - subpage counts cover statblocks, conditions, visible Player Wiki pages, staged Session articles, and campaign Systems source-state rows
   - missing campaign DM Content reads return `campaign_not_found` JSON
+- DM Content Systems management response preserves the read API shell:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture or bearer-token player roles and bearer-token outsiders receive `forbidden`
+  - fixture or bearer-token DM/admin roles receive campaign metadata, source enablement rows, shared-core permission state, entry overrides, custom campaign entries, campaign item mechanics rows, sanitized import-run history, import/source/type choices, permissions, and Flask compatibility links
+  - import-run review rows intentionally omit raw `source_path` values
+  - missing optional SQLite tables degrade to empty arrays or default policy state
+  - missing campaign DM Content Systems reads return `campaign_not_found` JSON
 - DM Content statblock writes preserve the `/api/v1/campaigns/:campaignSlug/dm-content/statblocks...` mutation shells for a disposable fixture SQLite database:
   - unauthenticated requests return Flask-compatible `auth_required`
   - fixture-role write attempts are rejected because the mutation needs a durable bearer-token actor

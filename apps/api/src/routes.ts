@@ -1501,6 +1501,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "campaign_not_found",
     },
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/campaigns/:campaignSlug/dm-content/systems",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/dm-content/systems",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/dm-content/systems",
+    routeFamily: "api_v1_dm_content",
+    missingResource: {
+      method: "GET",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/dm-content/systems",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1605,4 +1620,5 @@ export const ROUTES = {
   characterDetail: IMPLEMENTED_ROUTES[99].honoPath,
   characterXianxiaManualImportContext: IMPLEMENTED_ROUTES[100].honoPath,
   characterXianxiaManualImport: IMPLEMENTED_ROUTES[101].honoPath,
+  dmContentSystems: IMPLEMENTED_ROUTES[102].honoPath,
 } as const;
