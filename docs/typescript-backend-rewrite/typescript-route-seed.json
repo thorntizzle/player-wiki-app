@@ -773,6 +773,15 @@
       "notes": "Tracked Hono character session personal route with bearer API-token writes, Flask-compatible characters-scope visibility precheck, shared character_state revision conflict handling, physical_description_markdown/background_markdown updates that clear omitted/null values to empty strings while preserving other notes fields, refreshed character state payloads, and explicit missing-character JSON."
     },
     {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/sheet-edit",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/sheet-edit",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono legacy Character-page sheet-edit batch route with bearer API-token writes, Flask-compatible Characters-scope visibility precheck, app-admin/campaign-DM/assigned-player edit gate, one shared character_state revision check, absolute-value vitals/resources/spell-slots/inventory/currency/notes/personal updates, delta/rest action rejection, batch-specific state_conflict message, refreshed character payloads, and explicit missing-character JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>",
       "route_family": "api_v1_characters",

@@ -1652,6 +1652,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "admin_user_not_found",
     },
   },
+  {
+    method: "PATCH",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/sheet-edit",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/sheet-edit",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/sheet-edit",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "PATCH",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/sheet-edit",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1766,4 +1781,5 @@ export const ROUTES = {
   systemsDnd5eImport: IMPLEMENTED_ROUTES[110].honoPath,
   adminDashboard: IMPLEMENTED_ROUTES[111].honoPath,
   adminUser: IMPLEMENTED_ROUTES[112].honoPath,
+  characterSheetEdit: IMPLEMENTED_ROUTES[113].honoPath,
 } as const;

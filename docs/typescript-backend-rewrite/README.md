@@ -138,6 +138,7 @@ Route parity check command:
   - `DELETE /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
   - `GET /api/v1/campaigns/:campaignSlug/characters`
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
+  - `PATCH /api/v1/campaigns/:campaignSlug/characters/:characterSlug/sheet-edit`
   - `GET /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual`
   - `POST /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual` (preview and confirmed local fixture/SQLite create)
 - Implemented Character Controls JSON mutation endpoints:
@@ -412,7 +413,8 @@ Route parity check command:
   `PATCH .../characters/:characterSlug/session/xianxia-active-state` and
   `PATCH .../characters/:characterSlug/session/currency` and
   `PATCH .../characters/:characterSlug/session/notes` plus
-  `PATCH .../characters/:characterSlug/session/personal` for bearer API-token app admins,
+  `PATCH .../characters/:characterSlug/session/personal` and the legacy Character-page
+  `PATCH .../characters/:characterSlug/sheet-edit` batch route for bearer API-token app admins,
   campaign DMs, and assigned players where the route's Flask-compatible scope gates allow it. They write only the shared SQLite `character_state`
   row, enforce the shared state revision, support DND HP/temp HP/Hit Dice, resource current/delta
   updates, spell-slot used/delta-used updates with optional slot-lane migration, DND inventory
@@ -421,7 +423,9 @@ Route parity check command:
   absolute currency denomination updates for DND `state.currency` plus Xianxia
   `state.xianxia.currency` with non-negative Xianxia clamping, plus player note text updates that
   preserve the rest of the notes object, and personal physical/background note updates that preserve
-  other note fields while clearing null/omitted values to empty strings, deny fixture-role writes, and return refreshed
+  other note fields while clearing null/omitted values to empty strings. The legacy sheet-edit batch
+  route accepts absolute-value Character-page sections only, rejects delta/rest-style actions, uses
+  one batch-wide revision check and conflict message, denies fixture-role writes, and returns refreshed
   `character.state_record` payloads. Current
   validation covers disposable copied fixture files and fixture SQLite only; further character
   session-state route families remain sliced separately.

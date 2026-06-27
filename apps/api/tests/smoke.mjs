@@ -13849,6 +13849,228 @@ if (missingContentCharacters.status !== 404 || missingContentCharacters.payload?
   throw new Error(`Expected missing content characters campaign JSON 404, got ${missingContentCharacters.status}`);
 }
 
+const sheetEditSetupDb = new Database(dbPath);
+sheetEditSetupDb
+  .prepare(
+    "INSERT INTO campaign_visibility_settings (campaign_slug, scope, visibility, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT(campaign_slug, scope) DO UPDATE SET visibility = excluded.visibility, updated_at = excluded.updated_at, updated_by_user_id = excluded.updated_by_user_id",
+  )
+  .run("linden-pass", "characters", "dm", "2026-06-25T16:20:00+00:00", 77);
+sheetEditSetupDb
+  .prepare(
+    "INSERT OR REPLACE INTO character_state (campaign_slug, character_slug, revision, state_json, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    "linden-pass",
+    "arden-march",
+    900,
+    JSON.stringify({
+      status: "active",
+      vitals: {
+        current_hp: 20,
+        temp_hp: 0,
+        death_saves: {
+          successes: 0,
+          failures: 0,
+        },
+      },
+      resources: [{ id: "sheet-edit-resource", label: "Sheet Edit Resource", current: 5, max: 7 }],
+      hit_dice: {
+        pools: [{ die_size: 8, total: 3, current: 2 }],
+      },
+      inventory: [{ id: "sheet-edit-item", name: "Sheet Edit Item", quantity: 2 }],
+      currency: { cp: 0, sp: 1, ep: 0, gp: 10, pp: 0 },
+      spell_slots: [{ level: 2, slot_lane_id: "sheet-edit-main", used: 0, max: 3 }],
+      attunement: {},
+      notes: {
+        player_notes_markdown: "",
+        physical_description_markdown: "Before physical.",
+        background_markdown: "Before background.",
+      },
+    }),
+    "2026-06-25T16:20:00+00:00",
+    77,
+  );
+sheetEditSetupDb.close();
+
+const sheetEditPath = "/api/v1/campaigns/linden-pass/characters/arden-march/sheet-edit";
+const blockedSheetEdit = await requestJson(
+  sheetEditPath,
+  {},
+  { method: "PATCH", body: { expected_revision: 900, notes: { player_notes_markdown: "No auth." } } },
+);
+if (blockedSheetEdit.status !== 401 || blockedSheetEdit.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated sheet-edit auth_required 401, got ${blockedSheetEdit.status} ${JSON.stringify(blockedSheetEdit.payload)}`,
+  );
+}
+
+const scopedOutSheetEdit = await requestJson(
+  sheetEditPath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "PATCH", body: { expected_revision: 900, notes: { player_notes_markdown: "No Characters scope." } } },
+);
+if (
+  scopedOutSheetEdit.status !== 403 ||
+  scopedOutSheetEdit.payload?.error?.code !== "forbidden" ||
+  scopedOutSheetEdit.payload?.error?.message !== "You do not have access to this campaign scope."
+) {
+  throw new Error(
+    `Expected sheet-edit Characters-scope forbidden, got ${scopedOutSheetEdit.status} ${JSON.stringify(scopedOutSheetEdit.payload)}`,
+  );
+}
+const sheetEditVisibilityDb = new Database(dbPath);
+sheetEditVisibilityDb
+  .prepare(
+    "INSERT INTO campaign_visibility_settings (campaign_slug, scope, visibility, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT(campaign_slug, scope) DO UPDATE SET visibility = excluded.visibility, updated_at = excluded.updated_at, updated_by_user_id = excluded.updated_by_user_id",
+  )
+  .run("linden-pass", "characters", "players", "2026-06-25T16:21:00+00:00", 77);
+sheetEditVisibilityDb.close();
+
+const sheetEditUpdate = await requestJson(
+  sheetEditPath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  {
+    method: "PATCH",
+    body: {
+      expected_revision: 900,
+      vitals: {
+        current_hp: 18,
+        temp_hp: 4,
+      },
+      resources: [
+        {
+          id: "sheet-edit-resource",
+          current: 3,
+        },
+      ],
+      spell_slots: [
+        {
+          level: 2,
+          slot_lane_id: "sheet-edit-main",
+          used: 2,
+        },
+      ],
+      inventory: [
+        {
+          id: "sheet-edit-item",
+          quantity: 9,
+        },
+      ],
+      currency: {
+        sp: 7,
+        gp: 125,
+      },
+      notes: {
+        player_notes_markdown: "Batch note test",
+      },
+      personal: {
+        physical_description_markdown: "Lean and weathered.",
+        background_markdown: "Raised around the salt docks.",
+      },
+    },
+  },
+);
+const sheetEditState = sheetEditUpdate.payload?.character?.state_record?.state;
+if (
+  sheetEditUpdate.status !== 200 ||
+  sheetEditUpdate.payload?.ok !== true ||
+  sheetEditUpdate.payload?.character?.state_record?.revision !== 901 ||
+  sheetEditUpdate.payload?.character?.state_record?.updated_by_user_id !== 79 ||
+  sheetEditState?.vitals?.current_hp !== 18 ||
+  sheetEditState?.vitals?.temp_hp !== 4 ||
+  sheetEditState?.resources?.find((item) => item.id === "sheet-edit-resource")?.current !== 3 ||
+  sheetEditState?.spell_slots?.find((item) => item.level === 2 && item.slot_lane_id === "sheet-edit-main")?.used !== 2 ||
+  sheetEditState?.inventory?.find((item) => item.id === "sheet-edit-item")?.quantity !== 9 ||
+  sheetEditState?.currency?.sp !== 7 ||
+  sheetEditState?.currency?.gp !== 125 ||
+  sheetEditState?.notes?.player_notes_markdown !== "Batch note test" ||
+  sheetEditState?.notes?.physical_description_markdown !== "Lean and weathered." ||
+  sheetEditState?.notes?.background_markdown !== "Raised around the salt docks."
+) {
+  throw new Error(`Unexpected sheet-edit update payload: ${JSON.stringify(sheetEditUpdate.payload)}`);
+}
+const sheetEditAssertionDb = new Database(dbPath);
+const sheetEditRow = sheetEditAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", "arden-march");
+sheetEditAssertionDb.close();
+if (Number(sheetEditRow?.revision) !== 901 || Number(sheetEditRow?.updated_by_user_id) !== 79) {
+  throw new Error(`Expected sheet-edit SQLite revision/update actor, got ${JSON.stringify(sheetEditRow)}`);
+}
+
+const staleSheetEditUpdate = await requestJson(
+  sheetEditPath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  {
+    method: "PATCH",
+    body: {
+      expected_revision: 900,
+      notes: {
+        player_notes_markdown: "This stale batch should conflict.",
+      },
+    },
+  },
+);
+if (
+  staleSheetEditUpdate.status !== 409 ||
+  staleSheetEditUpdate.payload?.error?.code !== "state_conflict" ||
+  staleSheetEditUpdate.payload?.error?.message !==
+    "This sheet changed before your batch save finished. Refresh and review the latest sheet before saving again. Session Character, Combat, or another tab may have changed nearby fields first; nothing was auto-merged."
+) {
+  throw new Error(`Expected sheet-edit stale conflict, got ${staleSheetEditUpdate.status} ${JSON.stringify(staleSheetEditUpdate.payload)}`);
+}
+
+const deltaSheetEditUpdate = await requestJson(
+  sheetEditPath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  {
+    method: "PATCH",
+    body: {
+      expected_revision: 901,
+      resources: [
+        {
+          id: "sheet-edit-resource",
+          delta: -1,
+        },
+      ],
+    },
+  },
+);
+if (
+  deltaSheetEditUpdate.status !== 400 ||
+  deltaSheetEditUpdate.payload?.error?.code !== "validation_error" ||
+  !String(deltaSheetEditUpdate.payload?.error?.message || "").includes("absolute current values")
+) {
+  throw new Error(`Expected sheet-edit delta validation_error, got ${JSON.stringify(deltaSheetEditUpdate.payload)}`);
+}
+
+const noOpSheetEditUpdate = await requestJson(
+  sheetEditPath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "PATCH", body: { expected_revision: 901 } },
+);
+if (
+  noOpSheetEditUpdate.status !== 400 ||
+  noOpSheetEditUpdate.payload?.error?.code !== "validation_error" ||
+  noOpSheetEditUpdate.payload?.error?.message !== "No Character-page sheet edits were provided."
+) {
+  throw new Error(`Expected sheet-edit no-op validation_error, got ${JSON.stringify(noOpSheetEditUpdate.payload)}`);
+}
+
+const missingCharacterSheetEditUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/characters/missing-character/sheet-edit",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "PATCH", body: { expected_revision: 1, notes: { player_notes_markdown: "Missing." } } },
+);
+if (
+  missingCharacterSheetEditUpdate.status !== 404 ||
+  missingCharacterSheetEditUpdate.payload?.error?.code !== "content_character_not_found"
+) {
+  throw new Error(
+    `Expected missing sheet-edit character JSON 404, got ${missingCharacterSheetEditUpdate.status} ${JSON.stringify(missingCharacterSheetEditUpdate.payload)}`,
+  );
+}
+
 const systemsImportMonsterArchive = Buffer.from(
   zipSync({
     "data/bestiary/bestiary-mm.json": Buffer.from(

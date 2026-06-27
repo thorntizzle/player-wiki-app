@@ -95,6 +95,8 @@ export type CharacterSessionFeatureStateUpdateResult = CharacterSessionVitalsUpd
 
 export type CharacterPortraitRevisionUpdateResult = CharacterSessionVitalsUpdateResult;
 
+export type CharacterSheetEditUpdateResult = CharacterSessionVitalsUpdateResult;
+
 export interface CharacterRestChangePayload {
   label: string;
   from_value: string;
@@ -126,6 +128,8 @@ const XIANXIA_ENERGY_LABELS: Record<(typeof XIANXIA_ENERGY_KEYS)[number], string
 const XIANXIA_CURRENCY_KEYS = ["coin", "supply", "spirit_stones"] as const;
 const VALID_HIT_DIE_FACES = new Set([4, 6, 8, 10, 12]);
 const CHARACTER_STATE_CONFLICT_MESSAGE = "This sheet changed in another session. Refresh and try again.";
+const CHARACTER_SHEET_EDIT_CONFLICT_MESSAGE =
+  "This sheet changed before your batch save finished. Refresh and review the latest sheet before saving again. Session Character, Combat, or another tab may have changed nearby fields first; nothing was auto-merged.";
 const CAMPAIGN_ITEMS_SECTION = "Items";
 const ARTIFICER_INFUSIONS_FEATURE_KEY = "artificerinfusions";
 const ENHANCED_DEFENSE_INFUSION_KEY = "enhanced-defense";
@@ -2610,6 +2614,155 @@ function applyPersonalDetailsUpdate(state: Record<string, unknown>, payload: Rec
   state.notes = notes;
 }
 
+function requireSheetEditRecord(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`Sheet edit ${label} must be an object.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requireSheetEditRows(value: unknown, label: string, rowLabel: string): Record<string, unknown>[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`Sheet edit ${label} must be a list.`);
+  }
+  return value.map((row) => {
+    if (typeof row !== "object" || row === null || Array.isArray(row)) {
+      throw new Error(`Each sheet edit ${rowLabel} row must be an object.`);
+    }
+    return row as Record<string, unknown>;
+  });
+}
+
+function validateNoSheetEditRestAction(payload: Record<string, unknown>): void {
+  for (const key of ["rest", "rest_type", "rest_action", "short_rest", "long_rest", "hit_dice", "hit_dice_current"]) {
+    if (Object.hasOwn(payload, key)) {
+      throw new Error("Sheet edit batches do not apply rest actions.");
+    }
+  }
+}
+
+function applySheetEditBatch(
+  state: Record<string, unknown>,
+  definition: Record<string, unknown>,
+  payload: Record<string, unknown>,
+): { state: Record<string, unknown>; appliedChanges: boolean } {
+  validateNoSheetEditRestAction(payload);
+  const nextState = copyState(state);
+  const isXianxia = normalizeSystemKey(definition.system) === XIANXIA_SYSTEM_CODE;
+  let appliedChanges = false;
+
+  if (payload.vitals !== null && payload.vitals !== undefined) {
+    const vitals = requireSheetEditRecord(payload.vitals, "vitals");
+    if (Object.hasOwn(vitals, "hp_delta") || Object.hasOwn(vitals, "temp_hp_delta") || Object.hasOwn(vitals, "clear_temp_hp")) {
+      throw new Error("Sheet edit vitals must use absolute current values, not delta actions.");
+    }
+    if (Object.hasOwn(vitals, "current_hp") || Object.hasOwn(vitals, "temp_hp")) {
+      applyVitalsUpdate(nextState, {
+        current_hp: vitals.current_hp,
+        temp_hp: vitals.temp_hp,
+      });
+      appliedChanges = true;
+    }
+  }
+
+  if (payload.resources !== null && payload.resources !== undefined) {
+    const rows = requireSheetEditRows(payload.resources, "resources", "resource");
+    for (const entry of rows) {
+      const resourceId = asString(entry.id);
+      if (!resourceId) {
+        throw new Error("Each sheet edit resource row needs an id.");
+      }
+      if (Object.hasOwn(entry, "delta")) {
+        throw new Error("Sheet edit resources must use absolute current values, not delta actions.");
+      }
+      if (!Object.hasOwn(entry, "current")) {
+        throw new Error(`Sheet edit resource '${resourceId}' is missing a current value.`);
+      }
+      applyResourceUpdate(nextState, resourceId, { current: entry.current });
+      appliedChanges = true;
+    }
+  }
+
+  if (payload.spell_slots !== null && payload.spell_slots !== undefined) {
+    const rows = requireSheetEditRows(payload.spell_slots, "spell slots", "spell slot");
+    for (const entry of rows) {
+      if (Object.hasOwn(entry, "delta_used")) {
+        throw new Error("Sheet edit spell slots must use absolute used values, not delta actions.");
+      }
+      if (!Object.hasOwn(entry, "level")) {
+        throw new Error("Each sheet edit spell slot row needs a level.");
+      }
+      if (!Object.hasOwn(entry, "used")) {
+        throw new Error("Each sheet edit spell slot row needs a used value.");
+      }
+      const level = parseRequiredWholeNumber(entry.level, "Spell slot level");
+      applySpellSlotsUpdate(nextState, level, { slot_lane_id: entry.slot_lane_id, used: entry.used });
+      appliedChanges = true;
+    }
+  }
+
+  if (payload.inventory !== null && payload.inventory !== undefined) {
+    const rows = requireSheetEditRows(payload.inventory, "inventory", "inventory");
+    for (const entry of rows) {
+      const itemId = asString(entry.id);
+      if (!itemId) {
+        throw new Error("Each sheet edit inventory row needs an id.");
+      }
+      if (Object.hasOwn(entry, "delta")) {
+        throw new Error("Sheet edit inventory must use absolute quantities, not delta actions.");
+      }
+      if (!Object.hasOwn(entry, "quantity")) {
+        throw new Error(`Sheet edit inventory row '${itemId}' is missing a quantity.`);
+      }
+      applyInventoryQuantityUpdate(nextState, itemId, { quantity: entry.quantity }, isXianxia);
+      appliedChanges = true;
+    }
+  }
+
+  if (payload.currency !== null && payload.currency !== undefined) {
+    const currency = requireSheetEditRecord(payload.currency, "currency");
+    if (Object.hasOwn(currency, "delta")) {
+      throw new Error("Sheet edit currency must use absolute coin values, not delta actions.");
+    }
+    const hasXianxiaCurrency = XIANXIA_CURRENCY_KEYS.some((key) => Object.hasOwn(currency, key));
+    const hasDndCurrency = DND_CURRENCY_KEYS.some((key) => Object.hasOwn(currency, key));
+    if (isXianxia && hasXianxiaCurrency) {
+      applyCurrencyUpdate(nextState, currency, true);
+      appliedChanges = true;
+    } else if (hasDndCurrency) {
+      applyCurrencyUpdate(nextState, currency, false);
+      appliedChanges = true;
+    }
+  }
+
+  if (payload.notes !== null && payload.notes !== undefined) {
+    const notes = requireSheetEditRecord(payload.notes, "notes");
+    if (Object.hasOwn(notes, "player_notes_markdown")) {
+      applyPlayerNotesUpdate(nextState, { player_notes_markdown: notes.player_notes_markdown });
+      appliedChanges = true;
+    }
+  }
+
+  if (payload.personal !== null && payload.personal !== undefined) {
+    const personal = requireSheetEditRecord(payload.personal, "personal details");
+    const notes = { ...asRecord(nextState.notes) };
+    const hasPhysical = Object.hasOwn(personal, "physical_description_markdown");
+    const hasBackground = Object.hasOwn(personal, "background_markdown");
+    if (hasPhysical || hasBackground) {
+      if (hasPhysical) {
+        notes.physical_description_markdown = normalizeSubmittedPersonalMarkdown(personal.physical_description_markdown);
+      }
+      if (hasBackground) {
+        notes.background_markdown = normalizeSubmittedPersonalMarkdown(personal.background_markdown);
+      }
+      nextState.notes = notes;
+      appliedChanges = true;
+    }
+  }
+
+  return { state: nextState, appliedChanges };
+}
+
 function normalizeFeatureStateKey(value: unknown): string {
   const normalized = String(value ?? "").split(/\s+/).join(" ").trim().replace(/[- ]+/g, "_").toLowerCase();
   if (normalized === "arcane_armor" || normalized === "arcanearmor") {
@@ -3245,6 +3398,94 @@ export function canEditCharacterSessionState(
       )
       .get(userId, campaignSlug, characterSlug) as { id?: number } | undefined;
     return Boolean(row?.id);
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCharacterSheetEdit(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  updatedByUserId: number,
+): CharacterSheetEditUpdateResult {
+  let expectedRevision: number;
+  try {
+    expectedRevision = parseRequiredWholeNumber(payload.expected_revision, "Expected revision");
+    validateNoSheetEditRestAction(payload);
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character sheet edit payload." };
+  }
+
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+
+    let existingState = readCharacterState(database, campaignSlug, characterSlug);
+    const stateRowMissing = !existingState;
+    existingState ??= { revision: 1, state: buildInitialState(definition) };
+
+    if (existingState.revision !== expectedRevision) {
+      return { status: "state_conflict", message: CHARACTER_SHEET_EDIT_CONFLICT_MESSAGE };
+    }
+
+    let nextState: Record<string, unknown>;
+    try {
+      const batch = applySheetEditBatch(existingState.state, definition, payload);
+      if (!batch.appliedChanges) {
+        return { status: "validation_error", message: "No Character-page sheet edits were provided." };
+      }
+      nextState = batch.state;
+    } catch (error) {
+      return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character sheet edit payload." };
+    }
+
+    const now = utcIsoTimestamp();
+    if (stateRowMissing) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(campaignSlug, characterSlug, expectedRevision + 1, JSON.stringify(nextState), now, updatedByUserId);
+      return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+    }
+
+    const result = database
+      .prepare(
+        `
+          UPDATE character_state
+          SET revision = revision + 1,
+              state_json = ?,
+              updated_at = ?,
+              updated_by_user_id = ?
+          WHERE campaign_slug = ?
+            AND character_slug = ?
+            AND revision = ?
+        `,
+      )
+      .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
+    if (result.changes <= 0) {
+      return { status: "state_conflict", message: CHARACTER_SHEET_EDIT_CONFLICT_MESSAGE };
+    }
+    return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
   } finally {
     database.close();
   }

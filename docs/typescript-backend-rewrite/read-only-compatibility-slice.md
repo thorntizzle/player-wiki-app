@@ -514,6 +514,10 @@ fixture database.
   - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/personal` with bearer-only writes and the Flask-compatible `characters` scope precheck.
   - stale-revision conflict envelopes.
   - DM physical/background personal text updates through `state.notes`, null/omitted clearing to empty strings, and preservation of player notes/session notes.
+- Character-page sheet-edit batch payload checks cover:
+  - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/sheet-edit` with bearer-only writes and the Flask-compatible `characters` scope precheck.
+  - assigned-player batch updates for DND vitals, resources, spell slots, inventory, currency, player notes, and personal notes in one shared `character_state` revision.
+  - stale-revision conflict envelopes with the batch-specific conflict message, delta-action validation, no-op validation, and missing-character JSON.
 - Character rest preview/apply payload checks cover:
   - `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>` as a read-only derivation behind the session-mode character access gate.
   - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>` with bearer-only writes and shared revision conflicts.
