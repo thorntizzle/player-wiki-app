@@ -167,7 +167,7 @@ Do not implement these routes as part of the parity program unless a later archi
   - `POST /api/v1/campaigns/:campaignSlug/characters/create` (Xianxia native create; narrow DND-5E PHB Fighter pilot; full DND builder parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor`
-  - `PUT /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor` (reference, proficiency, stat-adjustment, recoverable-penalty, custom-feature, and manual-equipment fields with `page_ref` round-trip only; linked feature/page derivation, page-linked manual item option derivation, and full native derivation parity pending)
+  - `PUT /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor` (reference, proficiency, stat-adjustment, recoverable-penalty, custom-feature, and manual-equipment fields with linked-page selector hydration plus `page_ref` validation/round-trip; linked feature/page derivation, page-linked manual item option derivation onto saved definitions, and full native derivation parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (context shell only; real save parity pending)
   - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (unsupported/current-shell response only; real save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (context shell only; real save parity pending)
