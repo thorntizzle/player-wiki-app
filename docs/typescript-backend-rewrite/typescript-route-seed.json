@@ -1008,6 +1008,24 @@
     },
     {
       "method": "POST",
+      "path": "/api/v1/admin/users/<int:user_id>/assignment",
+      "route_family": "api_v1_admin",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/admin/users/:userId/assignment",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Admin character-assignment create route with bearer-token app-admin writes, fixture-role write denial, Flask-compatible character reference validation, visible active character and active player membership checks, character_assignment_created audit rows, refreshed user detail payloads, success messages, and explicit missing-user JSON."
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/admin/users/<int:user_id>/assignment",
+      "route_family": "api_v1_admin",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/admin/users/:userId/assignment",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Admin character-assignment removal route with bearer-token app-admin writes, fixture-role write denial, Flask-compatible missing/wrong-owner assignment validation, character_assignment_removed audit rows, refreshed user detail payloads, success messages, and explicit missing-user JSON."
+    },
+    {
+      "method": "POST",
       "path": "/api/v1/campaigns/<campaign_slug>/systems/custom-entries",
       "route_family": "api_v1_systems",
       "status": "implemented_fixture_sqlite_write",

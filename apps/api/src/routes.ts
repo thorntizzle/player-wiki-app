@@ -1697,6 +1697,36 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "admin_user_not_found",
     },
   },
+  {
+    method: "POST",
+    honoPath: "/api/v1/admin/users/:userId/assignment",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/admin/users/<int:user_id>/assignment",
+    seedPath: "/api/v1/admin/users/<int:user_id>/assignment",
+    routeFamily: "api_v1_admin",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/admin/users/999999/assignment",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "admin_user_not_found",
+    },
+  },
+  {
+    method: "DELETE",
+    honoPath: "/api/v1/admin/users/:userId/assignment",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/admin/users/<int:user_id>/assignment",
+    seedPath: "/api/v1/admin/users/<int:user_id>/assignment",
+    routeFamily: "api_v1_admin",
+    missingResource: {
+      method: "DELETE",
+      path: "/api/v1/admin/users/999999/assignment",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "admin_user_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1814,4 +1844,6 @@ export const ROUTES = {
   characterSheetEdit: IMPLEMENTED_ROUTES[113].honoPath,
   adminUserMembership: IMPLEMENTED_ROUTES[114].honoPath,
   adminUserMembershipRemove: IMPLEMENTED_ROUTES[115].honoPath,
+  adminUserAssignment: IMPLEMENTED_ROUTES[116].honoPath,
+  adminUserAssignmentRemove: IMPLEMENTED_ROUTES[117].honoPath,
 } as const;

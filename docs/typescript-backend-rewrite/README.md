@@ -297,12 +297,17 @@ Route parity check command:
 - The Admin shell now serves `GET /api/v1/admin`, `GET /api/v1/admin/users/:userId`,
   `POST /api/v1/admin/users/:userId/membership`, and
   `DELETE /api/v1/admin/users/:userId/membership`,
+  `POST /api/v1/admin/users/:userId/assignment`, and
+  `DELETE /api/v1/admin/users/:userId/assignment`,
   preserving app-admin-only fixture or bearer-token access, campaign and character choices, user
   cards, membership and assignment summaries, audit filters, paginated audit rows, Flask CSV export
   links, Gen2/Flask Admin URLs, and explicit JSON missing-user handling. Membership mutations are
   bearer API-token app-admin writes against disposable fixture SQLite only, with fixture-role write
   denial, Flask-compatible validation/success messages, explicit select-then-insert/update
   membership persistence, refreshed detail payloads, and `auth_audit_log` membership events.
+  Assignment mutations are also bearer API-token app-admin writes against disposable fixture SQLite
+  only, validating visible active characters plus active player memberships, refreshing Admin user
+  detail payloads, and writing `character_assignment_*` audit events with `admin_screen` metadata.
   Remaining Admin mutations stay on Flask until their own approved slices.
 - The Campaign Control read route now serves `GET .../control`, preserving Flask-compatible
   visibility-management auth for fixture or bearer-token DM/admin identities, default campaign

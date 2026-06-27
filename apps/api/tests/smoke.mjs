@@ -1925,6 +1925,238 @@ if (
   );
 }
 
+const adminAssignmentPath = "/api/v1/admin/users/79/assignment";
+const blockedAdminAssignmentCreate = await requestJson(
+  adminAssignmentPath,
+  {},
+  { method: "POST", body: { character_ref: "linden-pass::selene-brook" } },
+);
+if (
+  blockedAdminAssignmentCreate.status !== 401 ||
+  blockedAdminAssignmentCreate.payload?.error?.code !== "auth_required"
+) {
+  throw new Error(
+    `Expected unauthenticated admin assignment POST auth_required 401, got ${blockedAdminAssignmentCreate.status} ${JSON.stringify(blockedAdminAssignmentCreate.payload)}`,
+  );
+}
+
+const fixtureAdminAssignmentCreate = await requestJson(
+  adminAssignmentPath,
+  { "X-CPW-Fixture-Role": "admin" },
+  { method: "POST", body: { character_ref: "linden-pass::selene-brook" } },
+);
+if (
+  fixtureAdminAssignmentCreate.status !== 403 ||
+  fixtureAdminAssignmentCreate.payload?.error?.message !== "Admin membership updates require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture admin assignment POST denial, got ${fixtureAdminAssignmentCreate.status} ${JSON.stringify(fixtureAdminAssignmentCreate.payload)}`,
+  );
+}
+
+const playerAdminAssignmentCreate = await requestJson(
+  adminAssignmentPath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: { character_ref: "linden-pass::selene-brook" } },
+);
+if (
+  playerAdminAssignmentCreate.status !== 403 ||
+  playerAdminAssignmentCreate.payload?.error?.message !== "You do not have permission to use the admin API."
+) {
+  throw new Error(
+    `Expected player admin assignment POST forbidden, got ${playerAdminAssignmentCreate.status} ${JSON.stringify(playerAdminAssignmentCreate.payload)}`,
+  );
+}
+
+const missingUserAdminAssignmentCreate = await requestJson(
+  "/api/v1/admin/users/999999/assignment",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { character_ref: "linden-pass::selene-brook" } },
+);
+if (
+  missingUserAdminAssignmentCreate.status !== 404 ||
+  missingUserAdminAssignmentCreate.payload?.error?.code !== "admin_user_not_found"
+) {
+  throw new Error(
+    `Expected missing admin assignment user JSON 404, got ${missingUserAdminAssignmentCreate.status} ${JSON.stringify(missingUserAdminAssignmentCreate.payload)}`,
+  );
+}
+
+const emptyBodyAdminAssignmentCreate = await requestJson(
+  adminAssignmentPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: "" },
+);
+if (
+  emptyBodyAdminAssignmentCreate.status !== 400 ||
+  emptyBodyAdminAssignmentCreate.payload?.error?.message !== "Choose a valid character."
+) {
+  throw new Error(
+    `Expected empty admin assignment POST to reach character validation, got ${JSON.stringify(emptyBodyAdminAssignmentCreate.payload)}`,
+  );
+}
+
+const invalidRefAdminAssignmentCreate = await requestJson(
+  adminAssignmentPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { character_ref: "linden-pass" } },
+);
+if (
+  invalidRefAdminAssignmentCreate.status !== 400 ||
+  invalidRefAdminAssignmentCreate.payload?.error?.message !== "Choose a valid character."
+) {
+  throw new Error(`Expected invalid assignment ref validation, got ${JSON.stringify(invalidRefAdminAssignmentCreate.payload)}`);
+}
+
+const missingCharacterAdminAssignmentCreate = await requestJson(
+  adminAssignmentPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { character_ref: "linden-pass::missing-character" } },
+);
+if (
+  missingCharacterAdminAssignmentCreate.status !== 400 ||
+  missingCharacterAdminAssignmentCreate.payload?.error?.message !== "Choose a valid visible character."
+) {
+  throw new Error(
+    `Expected missing visible character validation, got ${JSON.stringify(missingCharacterAdminAssignmentCreate.payload)}`,
+  );
+}
+
+const removedMembershipAdminAssignmentCreate = await requestJson(
+  "/api/v1/admin/users/78/assignment",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { campaign_slug: "linden-pass", character_slug: "selene-brook" } },
+);
+if (
+  removedMembershipAdminAssignmentCreate.status !== 400 ||
+  removedMembershipAdminAssignmentCreate.payload?.error?.message !==
+    "Character owners must have an active player membership in that campaign."
+) {
+  throw new Error(
+    `Expected removed-membership assignment validation, got ${JSON.stringify(removedMembershipAdminAssignmentCreate.payload)}`,
+  );
+}
+
+const adminAssignmentCreate = await requestJson(
+  adminAssignmentPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { character_ref: "linden-pass::selene-brook" } },
+);
+const createdAssignment = adminAssignmentCreate.payload?.assignments?.find(
+  (assignment) => assignment.campaign_slug === "linden-pass" && assignment.character_slug === "selene-brook",
+);
+if (
+  adminAssignmentCreate.status !== 200 ||
+  adminAssignmentCreate.payload?.ok !== true ||
+  adminAssignmentCreate.payload?.message !==
+    "Assigned Selene Brook in Echoes of the Alloy Coast to fixture-token-player@example.com." ||
+  createdAssignment?.user_id !== 79 ||
+  createdAssignment?.assignment_type !== "owner" ||
+  createdAssignment?.character_label !== "Selene Brook"
+) {
+  throw new Error(`Unexpected admin assignment create payload: ${JSON.stringify(adminAssignmentCreate.payload)}`);
+}
+
+const emptyBodyAdminAssignmentRemove = await requestJson(
+  adminAssignmentPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "DELETE", body: "" },
+);
+if (
+  emptyBodyAdminAssignmentRemove.status !== 400 ||
+  emptyBodyAdminAssignmentRemove.payload?.error?.message !== "Choose a valid character assignment to remove."
+) {
+  throw new Error(
+    `Expected empty admin assignment DELETE to reach remove validation, got ${JSON.stringify(emptyBodyAdminAssignmentRemove.payload)}`,
+  );
+}
+
+const wrongUserAdminAssignmentRemove = await requestJson(
+  "/api/v1/admin/users/78/assignment",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "DELETE", body: { campaign_slug: "linden-pass", character_slug: "selene-brook" } },
+);
+if (
+  wrongUserAdminAssignmentRemove.status !== 400 ||
+  wrongUserAdminAssignmentRemove.payload?.error?.message !== "Choose a valid character assignment to remove."
+) {
+  throw new Error(`Expected wrong-user assignment remove validation, got ${JSON.stringify(wrongUserAdminAssignmentRemove.payload)}`);
+}
+
+const adminAssignmentRemove = await requestJson(
+  adminAssignmentPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "DELETE", body: { campaign_slug: "linden-pass", character_slug: "selene-brook" } },
+);
+const removedAssignmentStillPresent = adminAssignmentRemove.payload?.assignments?.some(
+  (assignment) => assignment.campaign_slug === "linden-pass" && assignment.character_slug === "selene-brook",
+);
+if (
+  adminAssignmentRemove.status !== 200 ||
+  adminAssignmentRemove.payload?.ok !== true ||
+  adminAssignmentRemove.payload?.message !== "Cleared assignment for Selene Brook in Echoes of the Alloy Coast." ||
+  removedAssignmentStillPresent
+) {
+  throw new Error(`Unexpected admin assignment remove payload: ${JSON.stringify(adminAssignmentRemove.payload)}`);
+}
+
+const alreadyRemovedAdminAssignmentRemove = await requestJson(
+  adminAssignmentPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "DELETE", body: { campaign_slug: "linden-pass", character_slug: "selene-brook" } },
+);
+if (
+  alreadyRemovedAdminAssignmentRemove.status !== 400 ||
+  alreadyRemovedAdminAssignmentRemove.payload?.error?.message !== "Choose a valid character assignment to remove."
+) {
+  throw new Error(
+    `Expected already-removed assignment validation, got ${JSON.stringify(alreadyRemovedAdminAssignmentRemove.payload)}`,
+  );
+}
+
+const adminAssignmentAuditDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const adminAssignmentRow = adminAssignmentAuditDb
+  .prepare("SELECT user_id, assignment_type FROM character_assignments WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", "selene-brook");
+const adminAssignmentAuditRows = adminAssignmentAuditDb
+  .prepare(
+    "SELECT actor_user_id, target_user_id, campaign_slug, character_slug, event_type, metadata_json FROM auth_audit_log WHERE target_user_id = ? AND campaign_slug = ? AND character_slug = ? AND event_type LIKE 'character_assignment_%' ORDER BY id ASC",
+  )
+  .all(79, "linden-pass", "selene-brook");
+adminAssignmentAuditDb.close();
+const parsedAdminAssignmentAudits = adminAssignmentAuditRows.map((row) => ({
+  actor_user_id: row.actor_user_id,
+  target_user_id: row.target_user_id,
+  campaign_slug: row.campaign_slug,
+  character_slug: row.character_slug,
+  event_type: row.event_type,
+  metadata: JSON.parse(row.metadata_json),
+}));
+if (
+  adminAssignmentRow !== undefined ||
+  parsedAdminAssignmentAudits.length !== 2 ||
+  parsedAdminAssignmentAudits[0]?.event_type !== "character_assignment_created" ||
+  parsedAdminAssignmentAudits[0]?.metadata?.previous_user_id !== null ||
+  parsedAdminAssignmentAudits[0]?.metadata?.assignment_type !== "owner" ||
+  parsedAdminAssignmentAudits[1]?.event_type !== "character_assignment_removed" ||
+  parsedAdminAssignmentAudits[1]?.metadata?.assignment_type !== "owner" ||
+  parsedAdminAssignmentAudits.some(
+    (row) =>
+      row.actor_user_id !== 77 ||
+      row.target_user_id !== 79 ||
+      row.campaign_slug !== "linden-pass" ||
+      row.character_slug !== "selene-brook" ||
+      row.metadata?.source !== "admin_screen",
+  )
+) {
+  throw new Error(
+    `Unexpected admin assignment database/audit state: ${JSON.stringify({
+      adminAssignmentRow,
+      parsedAdminAssignmentAudits,
+    })}`,
+  );
+}
+
 const blockedImportRuns = await requestJson("/api/v1/systems/import-runs");
 if (blockedImportRuns.status !== 401 || blockedImportRuns.payload?.error?.code !== "auth_required") {
   throw new Error(

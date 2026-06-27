@@ -1408,6 +1408,144 @@ app.delete(ROUTES.adminUserMembershipRemove, async (ctx) => {
   });
 });
 
+app.post(ROUTES.adminUserAssignment, async (ctx) => {
+  const auth = resolveAppAdminBearerWrite(ctx);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const userId = parsePositiveInteger(ctx.req.param("userId") || "");
+  const targetUser = userId === null ? null : getUserById(config.dbPath, userId);
+  if (!targetUser) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readOptionalJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  let rawAssignment = String(jsonPayload.payload.character_ref || "").trim();
+  if (!rawAssignment) {
+    const campaignSlug = String(jsonPayload.payload.campaign_slug || "").trim();
+    const characterSlug = String(jsonPayload.payload.character_slug || "").trim();
+    if (campaignSlug && characterSlug) {
+      rawAssignment = `${campaignSlug}::${characterSlug}`;
+    }
+  }
+  if (!rawAssignment.includes("::")) {
+    const error = validationError("Choose a valid character.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const delimiterIndex = rawAssignment.indexOf("::");
+  const campaignSlug = rawAssignment.slice(0, delimiterIndex).trim();
+  const characterSlug = rawAssignment.slice(delimiterIndex + 2).trim();
+  const character = campaignSlug && characterSlug ? await getCampaignContentCharacter(config, campaignSlug, characterSlug) : null;
+  if (!character || String(character.definition.status || "").trim() !== "active") {
+    const error = validationError("Choose a valid visible character.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const membership = getMembership(config.dbPath, targetUser.id, campaignSlug, ["active"]);
+  if (!membership || membership.role !== "player") {
+    const error = validationError("Character owners must have an active player membership in that campaign.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  const campaignTitle = campaign?.title || campaignSlug;
+  const characterLabel = String(character.definition.name || "").trim() || characterSlug;
+  const previous = getCharacterAssignment(config.dbPath, campaignSlug, characterSlug);
+  const assignment = upsertCharacterAssignment(config.dbPath, targetUser.id, campaignSlug, characterSlug);
+  insertAuthAuditLog(config.dbPath, {
+    actorUserId: auth.actorUserId ?? null,
+    targetUserId: targetUser.id,
+    campaignSlug,
+    characterSlug,
+    eventType: "character_assignment_created",
+    metadata: {
+      previous_user_id: previous?.user_id ?? null,
+      assignment_type: assignment.assignment_type,
+      source: "admin_screen",
+    },
+  });
+
+  const payload = await buildAdminUserDetailPayload(config, auth.actorUser || null, targetUser.id, requestQueryValues(ctx));
+  if (!payload) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({
+    ...payload,
+    message: `Assigned ${characterLabel} in ${campaignTitle} to ${targetUser.email}.`,
+  });
+});
+
+app.delete(ROUTES.adminUserAssignmentRemove, async (ctx) => {
+  const auth = resolveAppAdminBearerWrite(ctx);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const userId = parsePositiveInteger(ctx.req.param("userId") || "");
+  const targetUser = userId === null ? null : getUserById(config.dbPath, userId);
+  if (!targetUser) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readOptionalJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignSlug = String(jsonPayload.payload.campaign_slug || "").trim();
+  const characterSlug = String(jsonPayload.payload.character_slug || "").trim();
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  const campaignTitle = campaign?.title || campaignSlug;
+  const character = campaignSlug && characterSlug ? await getCampaignContentCharacter(config, campaignSlug, characterSlug) : null;
+  const characterLabel = character ? String(character.definition.name || "").trim() || characterSlug : characterSlug;
+  const assignment = getCharacterAssignment(config.dbPath, campaignSlug, characterSlug);
+  if (!assignment || assignment.user_id !== targetUser.id) {
+    const error = validationError("Choose a valid character assignment to remove.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const removedAssignment = deleteCharacterAssignment(config.dbPath, campaignSlug, characterSlug);
+  if (!removedAssignment) {
+    const error = validationError("That character assignment no longer exists.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  insertAuthAuditLog(config.dbPath, {
+    actorUserId: auth.actorUserId ?? null,
+    targetUserId: targetUser.id,
+    campaignSlug,
+    characterSlug,
+    eventType: "character_assignment_removed",
+    metadata: {
+      assignment_type: removedAssignment.assignment_type,
+      source: "admin_screen",
+    },
+  });
+
+  const payload = await buildAdminUserDetailPayload(config, auth.actorUser || null, targetUser.id, requestQueryValues(ctx));
+  if (!payload) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({
+    ...payload,
+    message: `Cleared assignment for ${characterLabel} in ${campaignTitle}.`,
+  });
+});
+
 app.get(ROUTES.systemsImportRuns, async (ctx) => {
   const auth = resolveAppAdminAuth(ctx);
   if (auth.kind !== "authenticated") {
