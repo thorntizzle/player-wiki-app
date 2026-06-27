@@ -227,6 +227,29 @@ const ADVANCED_EDITOR_MIN_MANUAL_EQUIPMENT_ROWS = 3;
 const ADVANCED_EDITOR_MANUAL_EQUIPMENT_SOURCE_KIND = "manual_edit";
 const ADVANCED_EDITOR_MANUAL_EQUIPMENT_FIELD_PATTERN =
   /^manual_item_(id|name|page_ref|quantity|weight|notes)_([1-9]\d*)$/;
+const ADVANCED_EDITOR_MIN_CUSTOM_FEATURE_ROWS = 3;
+const ADVANCED_EDITOR_CUSTOM_FEATURE_CATEGORY = "custom_feature";
+const ADVANCED_EDITOR_CUSTOM_FEATURE_RESOURCE_PREFIX = "custom_feature";
+const ADVANCED_EDITOR_CUSTOM_FEATURE_FIELD_PATTERN =
+  /^custom_feature_(id|name|page_ref|activation_type|description|resource_max|resource_reset_on)_([1-9]\d*)$/;
+const ADVANCED_EDITOR_FEATURE_ACTIVATION_OPTIONS = [
+  { value: "passive", label: "Passive" },
+  { value: "action", label: "Action" },
+  { value: "bonus_action", label: "Bonus Action" },
+  { value: "reaction", label: "Reaction" },
+  { value: "special", label: "Special" },
+] as const;
+const ADVANCED_EDITOR_RESOURCE_RESET_OPTIONS = [
+  { value: "manual", label: "Manual" },
+  { value: "short_rest", label: "Short Rest" },
+  { value: "long_rest", label: "Long Rest" },
+] as const;
+const ADVANCED_EDITOR_FEATURE_ACTIVATION_VALUES = new Set<string>(
+  ADVANCED_EDITOR_FEATURE_ACTIVATION_OPTIONS.map((option) => option.value),
+);
+const ADVANCED_EDITOR_RESOURCE_RESET_VALUES = new Set<string>(
+  ADVANCED_EDITOR_RESOURCE_RESET_OPTIONS.map((option) => option.value),
+);
 const ADVANCED_EDITOR_PROFICIENCY_FIELDS: Array<{
   name: string;
   key: "languages" | "armor" | "weapons" | "tools";
@@ -404,7 +427,14 @@ export interface CharacterAdvancedEditorPayload {
     recoverable_penalty_rows: Array<Record<string, unknown>>;
     feature_rows: Array<Record<string, unknown>>;
     equipment_rows: Array<Record<string, unknown>>;
+    activation_options: Array<Record<string, unknown>>;
+    resource_reset_options: Array<Record<string, unknown>>;
     recoverable_penalty_target_options: Array<Record<string, unknown>>;
+    campaign_page_options: Array<Record<string, unknown>>;
+    equipment_page_options: Array<Record<string, unknown>>;
+    linked_feature_authoring_supported: boolean;
+    linked_feature_authoring_message: string;
+    existing_managed_equipment: Array<Record<string, unknown>>;
   } | null;
 }
 
@@ -416,6 +446,10 @@ export type CharacterAdvancedEditorReferenceUpdate =
       manualEquipmentReconcile: {
         enabled: boolean;
         removedItemIds: string[];
+        customFeatureResourceReconcile?: {
+          enabled: boolean;
+          removedResourceIds: string[];
+        };
       };
       values: Record<string, string>;
     }
@@ -3460,6 +3494,17 @@ function buildManualEquipmentRows(definition: Record<string, unknown>): Array<Re
   return rows;
 }
 
+function buildExistingManagedEquipmentRows(definition: Record<string, unknown>): Array<Record<string, unknown>> {
+  return asArray(definition.equipment_catalog)
+    .map((value) => asRecord(value))
+    .filter((item) => stringifyEditorValue(item.source_kind).trim() !== ADVANCED_EDITOR_MANUAL_EQUIPMENT_SOURCE_KIND)
+    .map((item) => ({
+      name: stringifyEditorValue(item.name).trim() || "Item",
+      quantity: createContextInteger(item.default_quantity, 0),
+      weight: stringifyEditorValue(item.weight).trim(),
+    }));
+}
+
 function maxEditorManualEquipmentRowIndex(values: Record<string, string>): number {
   let maxIndex = 0;
   for (const fieldName of Object.keys(values)) {
@@ -3579,6 +3624,267 @@ function parseEditorManualEquipmentItems(
   const nextIds = new Set(items.map((item) => stringifyEditorValue(item.id).trim()).filter(Boolean));
   const removedItemIds = [...existingById.keys()].filter((itemId) => !nextIds.has(itemId));
   return { status: "ok", items, removedItemIds };
+}
+
+function editorCustomFeatureEntries(definition: Record<string, unknown>): Array<Record<string, unknown>> {
+  return asArray(definition.features)
+    .map((value) => asRecord(value))
+    .filter((feature) => stringifyEditorValue(feature.category).trim() === ADVANCED_EDITOR_CUSTOM_FEATURE_CATEGORY);
+}
+
+function manualFeatureTrackerId(featureId: string): string {
+  return `${ADVANCED_EDITOR_CUSTOM_FEATURE_RESOURCE_PREFIX}:${featureId}`;
+}
+
+function resourceTemplateLookup(definition: Record<string, unknown>): Map<string, Record<string, unknown>> {
+  return new Map(
+    asArray(definition.resource_templates)
+      .map((value) => asRecord(value))
+      .map((template) => [stringifyEditorValue(template.id).trim(), template] as const)
+      .filter(([templateId]) => Boolean(templateId)),
+  );
+}
+
+function normalizeEditorFeatureActivationType(value: unknown): string {
+  const cleanValue = stringifyEditorValue(value).trim().toLowerCase();
+  return cleanValue || "passive";
+}
+
+function normalizeEditorFeatureResourceResetOn(value: unknown): string {
+  const cleanValue = stringifyEditorValue(value).trim().toLowerCase();
+  return cleanValue || "manual";
+}
+
+function buildCustomFeatureRows(definition: Record<string, unknown>): Array<Record<string, unknown>> {
+  const customFeatures = editorCustomFeatureEntries(definition);
+  const templates = resourceTemplateLookup(definition);
+  const rowCount = Math.max(
+    customFeatures.length + 1,
+    ADVANCED_EDITOR_MIN_CUSTOM_FEATURE_ROWS,
+  );
+  const rows: Array<Record<string, unknown>> = [];
+  for (let index = 1; index <= rowCount; index += 1) {
+    const feature = asRecord(customFeatures[index - 1]);
+    const tracker = templates.get(stringifyEditorValue(feature.tracker_ref).trim()) ?? {};
+    const resourceMax = tracker.max === null || tracker.max === undefined
+      ? ""
+      : stringifyEditorValue(tracker.max).trim();
+    rows.push({
+      index,
+      id: stringifyEditorValue(feature.id).trim(),
+      name: stringifyEditorValue(feature.name).trim(),
+      page_ref: extractEditorPageRefValue(feature.page_ref),
+      activation_type: normalizeEditorFeatureActivationType(feature.activation_type),
+      description_markdown: stringifyEditorValue(feature.description_markdown),
+      resource_max: resourceMax,
+      resource_reset_on: normalizeEditorFeatureResourceResetOn(tracker.reset_on),
+      spell_manager: { ...asRecord(feature.spell_manager) },
+      campaign_option: { ...asRecord(feature.campaign_option) },
+      choice_fields: [],
+    });
+  }
+  return rows;
+}
+
+function maxEditorCustomFeatureRowIndex(values: Record<string, string>): number {
+  let maxIndex = 0;
+  for (const fieldName of Object.keys(values)) {
+    const match = fieldName.match(ADVANCED_EDITOR_CUSTOM_FEATURE_FIELD_PATTERN);
+    if (!match) {
+      continue;
+    }
+    maxIndex = Math.max(maxIndex, Number.parseInt(match[2], 10));
+  }
+  return maxIndex;
+}
+
+function hasEditorCustomFeatureValues(values: Record<string, string>): boolean {
+  return Object.keys(values).some((fieldName) => ADVANCED_EDITOR_CUSTOM_FEATURE_FIELD_PATTERN.test(fieldName));
+}
+
+function parseEditorCustomFeatureResourceMax(
+  value: string,
+  label: string,
+): number | null | { status: "validation_error"; message: string } {
+  const rawValue = value.trim();
+  if (!rawValue) {
+    return null;
+  }
+  if (!/^[+-]?\d+$/.test(rawValue)) {
+    return { status: "validation_error", message: `The resource max for '${label}' must be a whole number.` };
+  }
+  const parsedValue = Number.parseInt(rawValue, 10);
+  if (parsedValue < 0) {
+    return { status: "validation_error", message: `The resource max for '${label}' cannot be negative.` };
+  }
+  return parsedValue;
+}
+
+function buildManualFeatureResourceTemplate({
+  trackerId,
+  featureName,
+  maxValue,
+  resetOn,
+  existingTemplate,
+  displayOrder,
+}: {
+  trackerId: string;
+  featureName: string;
+  maxValue: number;
+  resetOn: string;
+  existingTemplate: Record<string, unknown> | undefined;
+  displayOrder: number;
+}): Record<string, unknown> {
+  const cleanResetOn = normalizeEditorFeatureResourceResetOn(resetOn);
+  const templateInitial = createContextInteger(asRecord(existingTemplate).initial_current, maxValue);
+  return {
+    id: trackerId,
+    label: featureName,
+    category: ADVANCED_EDITOR_CUSTOM_FEATURE_CATEGORY,
+    initial_current: Math.min(templateInitial, maxValue),
+    max: maxValue,
+    reset_on: cleanResetOn,
+    reset_to: cleanResetOn === "short_rest" || cleanResetOn === "long_rest" ? "max" : "unchanged",
+    rest_behavior: cleanResetOn === "short_rest" || cleanResetOn === "long_rest"
+      ? "confirm_before_reset"
+      : "manual_only",
+    notes: stringifyEditorValue(asRecord(existingTemplate).notes).trim(),
+    display_order: displayOrder,
+  };
+}
+
+function parseEditorCustomFeatures(
+  values: Record<string, string>,
+  definition: Record<string, unknown>,
+): {
+  status: "ok";
+  features: Array<Record<string, unknown>>;
+  resourceTemplates: Array<Record<string, unknown>>;
+  removedResourceIds: string[];
+} | { status: "validation_error"; message: string } {
+  const existingFeatures = editorCustomFeatureEntries(definition);
+  const existingById = new Map(
+    existingFeatures
+      .map((feature) => [stringifyEditorValue(feature.id).trim(), feature] as const)
+      .filter(([featureId]) => Boolean(featureId)),
+  );
+  const templateById = resourceTemplateLookup(definition);
+  const usedIds = new Set([...existingById.keys()]);
+  const seenNames = new Set<string>();
+  const features: Array<Record<string, unknown>> = [];
+  const resourceTemplates: Array<Record<string, unknown>> = [];
+  const rowCount = Math.max(
+    maxEditorCustomFeatureRowIndex(values),
+    ADVANCED_EDITOR_MIN_CUSTOM_FEATURE_ROWS,
+  );
+
+  for (let index = 1; index <= rowCount; index += 1) {
+    const rawId = stringifyEditorValue(values[`custom_feature_id_${index}`]).trim();
+    const existing = rawId ? existingById.get(rawId) : undefined;
+    const rawName = stringifyEditorValue(values[`custom_feature_name_${index}`]).trim();
+    const pageRef = stringifyEditorValue(values[`custom_feature_page_ref_${index}`]).trim();
+    const activationType = normalizeEditorFeatureActivationType(values[`custom_feature_activation_type_${index}`]);
+    const descriptionMarkdown = stringifyEditorValue(values[`custom_feature_description_${index}`]);
+    const resourceMaxText = stringifyEditorValue(values[`custom_feature_resource_max_${index}`]).trim();
+    const hasContent = Boolean(rawName || pageRef || descriptionMarkdown.trim() || resourceMaxText);
+    if (!hasContent) {
+      continue;
+    }
+    if (pageRef) {
+      const existingPageRef = extractEditorPageRefValue(asRecord(existing).page_ref);
+      if (!existing || existingPageRef !== pageRef) {
+        return {
+          status: "validation_error",
+          message:
+            "Linked custom feature pages are not yet supported by the TypeScript Advanced Editor slice.",
+        };
+      }
+    }
+
+    const name = rawName || stringifyEditorValue(asRecord(existing).name).trim();
+    if (!name) {
+      return { status: "validation_error", message: "Each custom feature needs a name." };
+    }
+    if (!ADVANCED_EDITOR_FEATURE_ACTIVATION_VALUES.has(activationType)) {
+      return { status: "validation_error", message: "Choose a valid activation type for each custom feature." };
+    }
+
+    const parsedResourceMax = parseEditorCustomFeatureResourceMax(resourceMaxText, name);
+    if (typeof parsedResourceMax === "object" && parsedResourceMax !== null) {
+      return parsedResourceMax;
+    }
+    const resourceMax = parsedResourceMax ?? 0;
+    const resourceResetOn = normalizeEditorFeatureResourceResetOn(values[`custom_feature_resource_reset_on_${index}`]);
+    if (!ADVANCED_EDITOR_RESOURCE_RESET_VALUES.has(resourceResetOn)) {
+      return { status: "validation_error", message: "Choose a valid reset cadence for each custom feature." };
+    }
+
+    const normalizedName = slugifyText(name) || name.toLowerCase();
+    if (seenNames.has(normalizedName)) {
+      return { status: "validation_error", message: `Custom feature '${name}' is listed more than once.` };
+    }
+    seenNames.add(normalizedName);
+
+    const preservedId = rawId || stringifyEditorValue(asRecord(existing).id).trim();
+    if (preservedId) {
+      usedIds.delete(preservedId);
+    }
+    const featureId = preservedId || buildUniqueEditorId("custom-feature", name, usedIds);
+    usedIds.add(featureId);
+
+    const nextFeature = { ...asRecord(existing) };
+    delete nextFeature.campaign_option;
+    delete nextFeature.systems_ref;
+    delete nextFeature.page_ref;
+    delete nextFeature.spell_manager;
+    nextFeature.id = featureId;
+    nextFeature.name = name;
+    nextFeature.category = ADVANCED_EDITOR_CUSTOM_FEATURE_CATEGORY;
+    nextFeature.source = stringifyEditorValue(nextFeature.source).trim() || "Campaign";
+    nextFeature.description_markdown = descriptionMarkdown.trim();
+    nextFeature.activation_type = activationType;
+    nextFeature.tracker_ref = null;
+    if (pageRef) {
+      nextFeature.page_ref = pageRef;
+      const campaignOption = asRecord(asRecord(existing).campaign_option);
+      if (Object.keys(campaignOption).length > 0) {
+        nextFeature.campaign_option = campaignOption;
+      }
+      const systemsRef = asRecord(asRecord(existing).systems_ref);
+      if (Object.keys(systemsRef).length > 0) {
+        nextFeature.systems_ref = systemsRef;
+      }
+      const spellManager = asRecord(asRecord(existing).spell_manager);
+      if (Object.keys(spellManager).length > 0) {
+        nextFeature.spell_manager = spellManager;
+      }
+    }
+
+    if (resourceMax > 0) {
+      const trackerId = manualFeatureTrackerId(featureId);
+      nextFeature.tracker_ref = trackerId;
+      resourceTemplates.push(
+        buildManualFeatureResourceTemplate({
+          trackerId,
+          featureName: name,
+          maxValue: resourceMax,
+          resetOn: resourceResetOn,
+          existingTemplate: templateById.get(trackerId),
+          displayOrder: resourceTemplates.length,
+        }),
+      );
+    }
+    features.push(nextFeature);
+  }
+
+  const nextResourceIds = new Set(
+    resourceTemplates.map((template) => stringifyEditorValue(template.id).trim()).filter(Boolean),
+  );
+  const existingResourceIds = existingFeatures
+    .map((feature) => stringifyEditorValue(feature.tracker_ref || manualFeatureTrackerId(stringifyEditorValue(feature.id))).trim())
+    .filter(Boolean);
+  const removedResourceIds = existingResourceIds.filter((resourceId) => !nextResourceIds.has(resourceId));
+  return { status: "ok", features, resourceTemplates, removedResourceIds };
 }
 
 function adjustSpeedLabel(value: unknown, delta: number): string {
@@ -3740,17 +4046,7 @@ export function buildCharacterAdvancedEditorPayload({
   const manualStatAdjustments = normalizeEditorStatAdjustments(asRecord(definition.stats).manual_adjustments);
   const recoverablePenaltyRows = buildRecoverablePenaltyRows(asRecord(definition.stats).recoverable_penalties);
   const equipment = buildManualEquipmentRows(definition);
-  const features = asArray(definition.features).map((value, index) => {
-    const feature = asRecord(value);
-    return {
-      row_id: stringifyEditorValue(feature.id || feature.feature_key || feature.name || `feature-${index + 1}`),
-      name: stringifyEditorValue(feature.name || `Feature ${index + 1}`),
-      category: stringifyEditorValue(feature.category),
-      tracker_ref: stringifyEditorValue(feature.tracker_ref),
-      source: stringifyEditorValue(feature.source),
-      description_markdown: stringifyEditorValue(feature.description_markdown),
-    };
-  });
+  const features = buildCustomFeatureRows(definition);
 
   return {
     lane: "dnd5e",
@@ -3816,7 +4112,14 @@ export function buildCharacterAdvancedEditorPayload({
       ],
       feature_rows: features,
       equipment_rows: equipment,
+      activation_options: ADVANCED_EDITOR_FEATURE_ACTIVATION_OPTIONS.map((option) => ({ ...option })),
+      resource_reset_options: ADVANCED_EDITOR_RESOURCE_RESET_OPTIONS.map((option) => ({ ...option })),
       recoverable_penalty_target_options: ADVANCED_EDITOR_RECOVERABLE_PENALTY_TARGET_OPTIONS.map((option) => ({ ...option })),
+      campaign_page_options: [],
+      equipment_page_options: [],
+      linked_feature_authoring_supported: true,
+      linked_feature_authoring_message: "",
+      existing_managed_equipment: buildExistingManagedEquipmentRows(definition),
     },
   };
 }
@@ -3845,12 +4148,13 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
     (fieldName) =>
       !ADVANCED_EDITOR_SUPPORTED_FIELD_NAMES.has(fieldName) &&
       !ADVANCED_EDITOR_RECOVERABLE_PENALTY_FIELD_PATTERN.test(fieldName) &&
-      !ADVANCED_EDITOR_MANUAL_EQUIPMENT_FIELD_PATTERN.test(fieldName),
+      !ADVANCED_EDITOR_MANUAL_EQUIPMENT_FIELD_PATTERN.test(fieldName) &&
+      !ADVANCED_EDITOR_CUSTOM_FEATURE_FIELD_PATTERN.test(fieldName),
   );
   if (unsupportedFields.length > 0) {
     return {
       status: "validation_error",
-      message: `Unsupported Advanced Editor fields for the TypeScript reference/proficiency/stat-adjustment/recoverable-penalty/manual-equipment field slice: ${unsupportedFields.join(", ")}.`,
+      message: `Unsupported Advanced Editor fields for the TypeScript reference/proficiency/stat-adjustment/recoverable-penalty/custom-feature/manual-equipment field slice: ${unsupportedFields.join(", ")}.`,
     };
   }
 
@@ -3867,7 +4171,14 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
   const referenceNotes = { ...asRecord(nextDefinition.reference_notes) };
   const proficiencies = { ...asRecord(nextDefinition.proficiencies) };
   const stateNoteValues: Record<string, string> = {};
-  let manualEquipmentReconcile = { enabled: false, removedItemIds: [] as string[] };
+  let manualEquipmentReconcile: {
+    enabled: boolean;
+    removedItemIds: string[];
+    customFeatureResourceReconcile?: {
+      enabled: boolean;
+      removedResourceIds: string[];
+    };
+  } = { enabled: false, removedItemIds: [] };
   const strippedRecoverableStats = stripEditorRecoverableStatPenalties(asRecord(nextDefinition.stats));
   const parsedRecoverablePenalties = hasEditorRecoverablePenaltyValues(values)
     ? parseEditorRecoverablePenalties(values, strippedRecoverableStats.penalties)
@@ -3880,6 +4191,12 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
     : null;
   if (parsedManualEquipment?.status === "validation_error") {
     return parsedManualEquipment;
+  }
+  const parsedCustomFeatures = hasEditorCustomFeatureValues(values)
+    ? parseEditorCustomFeatures(values, nextDefinition)
+    : null;
+  if (parsedCustomFeatures?.status === "validation_error") {
+    return parsedCustomFeatures;
   }
 
   for (const [fieldName, value] of Object.entries(values)) {
@@ -3919,6 +4236,26 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
     manualEquipmentReconcile = {
       enabled: true,
       removedItemIds: parsedManualEquipment.removedItemIds,
+      customFeatureResourceReconcile: manualEquipmentReconcile.customFeatureResourceReconcile,
+    };
+  }
+  if (parsedCustomFeatures?.status === "ok") {
+    const existingManualTrackerIds = new Set(
+      editorCustomFeatureEntries(nextDefinition)
+        .map((feature) => stringifyEditorValue(feature.tracker_ref || manualFeatureTrackerId(stringifyEditorValue(feature.id))).trim())
+        .filter(Boolean),
+    );
+    const baseFeatures = asArray(nextDefinition.features)
+      .map((feature) => asRecord(feature))
+      .filter((feature) => stringifyEditorValue(feature.category).trim() !== ADVANCED_EDITOR_CUSTOM_FEATURE_CATEGORY);
+    nextDefinition.features = [...baseFeatures, ...parsedCustomFeatures.features];
+    const baseResourceTemplates = asArray(nextDefinition.resource_templates)
+      .map((template) => asRecord(template))
+      .filter((template) => !existingManualTrackerIds.has(stringifyEditorValue(template.id).trim()));
+    nextDefinition.resource_templates = [...baseResourceTemplates, ...parsedCustomFeatures.resourceTemplates];
+    manualEquipmentReconcile.customFeatureResourceReconcile = {
+      enabled: true,
+      removedResourceIds: parsedCustomFeatures.removedResourceIds,
     };
   }
   return {

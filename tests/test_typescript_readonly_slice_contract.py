@@ -1633,7 +1633,19 @@ def test_typescript_character_advanced_editor_context_matches_flask_shell(
     ]
     assert editor["reference_fields"][0]["label"] == flask_payload["editor"]["reference_fields"][0]["label"]
     assert editor["reference_fields"][1]["label"] == flask_payload["editor"]["reference_fields"][1]["label"]
-    assert editor["feature_rows"]
+    assert [row["index"] for row in editor["feature_rows"]] == [
+        row["index"] for row in flask_payload["editor"]["feature_rows"]
+    ]
+    assert editor["activation_options"] == flask_payload["editor"]["activation_options"]
+    assert editor["resource_reset_options"] == flask_payload["editor"]["resource_reset_options"]
+    for row, flask_row in zip(editor["feature_rows"], flask_payload["editor"]["feature_rows"]):
+        assert {
+            key: row.get(key)
+            for key in ("id", "name", "page_ref", "activation_type", "description_markdown", "resource_max", "resource_reset_on")
+        } == {
+            key: flask_row.get(key)
+            for key in ("id", "name", "page_ref", "activation_type", "description_markdown", "resource_max", "resource_reset_on")
+        }
     assert editor["equipment_rows"]
     assert [row["index"] for row in editor["equipment_rows"]] == [
         row["index"] for row in flask_payload["editor"]["equipment_rows"]
@@ -1683,18 +1695,21 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert unsupported_payload["error"]["code"] == "validation_error"
     assert "feature_rows" in unsupported_payload["error"]["message"]
 
-    unsupported_feature_status, unsupported_feature_payload = _to_json(
+    linked_feature_status, linked_feature_payload = _to_json(
         route_url,
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
         body={
             "expected_revision": expected_revision,
-            "values": {"custom_feature_name_1": "Feature rows are not in this TS slice."},
+            "values": {
+                "custom_feature_name_1": "Linked Storm Feature",
+                "custom_feature_page_ref_1": "boons/storm-feature",
+            },
         },
     )
-    assert unsupported_feature_status == 400
-    assert unsupported_feature_payload["error"]["code"] == "validation_error"
-    assert "custom_feature_name_1" in unsupported_feature_payload["error"]["message"]
+    assert linked_feature_status == 400
+    assert linked_feature_payload["error"]["code"] == "validation_error"
+    assert "Linked custom feature pages" in linked_feature_payload["error"]["message"]
 
     stale_status, stale_payload = _to_json(
         route_url,
@@ -2122,6 +2137,169 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         {"id": "", "name": "", "page_ref": "", "quantity": "", "weight": "", "notes": ""},
         {"id": "", "name": "", "page_ref": "", "quantity": "", "weight": "", "notes": ""},
         {"id": "", "name": "", "page_ref": "", "quantity": "", "weight": "", "notes": ""},
+    ]
+
+    custom_feature_values = {
+        "custom_feature_name_1": "Storm Blessing",
+        "custom_feature_activation_type_1": "bonus_action",
+        "custom_feature_description_1": "Call the storm once per rest.",
+        "custom_feature_resource_max_1": "3",
+        "custom_feature_resource_reset_on_1": "long_rest",
+    }
+    custom_feature_status, custom_feature_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={"expected_revision": expected_revision + 8, "values": custom_feature_values},
+    )
+    assert custom_feature_status == 200
+    assert custom_feature_payload["editor"]["state_revision"] == expected_revision + 9
+    custom_features = [
+        feature
+        for feature in custom_feature_payload["character"]["definition"]["features"]
+        if feature.get("category") == "custom_feature"
+    ]
+    assert len(custom_features) == 1
+    custom_feature = custom_features[0]
+    custom_feature_id = custom_feature["id"]
+    tracker_id = f"custom_feature:{custom_feature_id}"
+    assert custom_feature_id.startswith("custom-feature-storm-blessing")
+    assert custom_feature["name"] == "Storm Blessing"
+    assert custom_feature["activation_type"] == "bonus_action"
+    assert custom_feature["description_markdown"] == "Call the storm once per rest."
+    assert custom_feature["source"] == "Campaign"
+    assert custom_feature["tracker_ref"] == tracker_id
+    custom_templates = [
+        template
+        for template in custom_feature_payload["character"]["definition"]["resource_templates"]
+        if template.get("category") == "custom_feature"
+    ]
+    assert custom_templates == [
+        {
+            "id": tracker_id,
+            "label": "Storm Blessing",
+            "category": "custom_feature",
+            "initial_current": 3,
+            "max": 3,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "",
+            "display_order": 0,
+        }
+    ]
+    custom_resource_by_id = {
+        resource.get("id"): resource
+        for resource in custom_feature_payload["character"]["state_record"]["state"]["resources"]
+    }
+    assert custom_resource_by_id[tracker_id]["current"] == 3
+    assert custom_resource_by_id[tracker_id]["max"] == 3
+    assert custom_resource_by_id[tracker_id]["reset_on"] == "long_rest"
+    feature_rows = {
+        row["index"]: row for row in custom_feature_payload["editor"]["feature_rows"]
+    }
+    assert feature_rows[1]["id"] == custom_feature_id
+    assert feature_rows[1]["name"] == "Storm Blessing"
+    assert feature_rows[1]["activation_type"] == "bonus_action"
+    assert feature_rows[1]["description_markdown"] == "Call the storm once per rest."
+    assert feature_rows[1]["resource_max"] == "3"
+    assert feature_rows[1]["resource_reset_on"] == "long_rest"
+    assert [row["index"] for row in custom_feature_payload["editor"]["feature_rows"]] == [1, 2, 3]
+
+    sqlite_state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
+    assert sqlite_state is not None
+    assert sqlite_state["revision"] == expected_revision + 9
+    sqlite_resources = {resource.get("id"): resource for resource in sqlite_state["state"]["resources"]}
+    assert sqlite_resources[tracker_id]["current"] == 3
+    definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
+    definition_custom_features = [
+        feature for feature in definition["features"] if feature.get("category") == "custom_feature"
+    ]
+    assert len(definition_custom_features) == 1
+    assert definition_custom_features[0]["id"] == custom_feature_id
+    assert [
+        template for template in definition["resource_templates"] if template.get("category") == "custom_feature"
+    ][0]["id"] == tracker_id
+
+    update_custom_feature_values = {
+        "custom_feature_id_1": custom_feature_id,
+        "custom_feature_name_1": "Storm Blessing, Spent",
+        "custom_feature_activation_type_1": "reaction",
+        "custom_feature_description_1": "Spend the storm after the first strike.",
+        "custom_feature_resource_max_1": "1",
+        "custom_feature_resource_reset_on_1": "short_rest",
+    }
+    update_custom_feature_status, update_custom_feature_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={"expected_revision": expected_revision + 9, "values": update_custom_feature_values},
+    )
+    assert update_custom_feature_status == 200
+    assert update_custom_feature_payload["editor"]["state_revision"] == expected_revision + 10
+    updated_custom_features = [
+        feature
+        for feature in update_custom_feature_payload["character"]["definition"]["features"]
+        if feature.get("category") == "custom_feature"
+    ]
+    assert len(updated_custom_features) == 1
+    assert updated_custom_features[0]["id"] == custom_feature_id
+    assert updated_custom_features[0]["name"] == "Storm Blessing, Spent"
+    assert updated_custom_features[0]["activation_type"] == "reaction"
+    updated_template = [
+        template
+        for template in update_custom_feature_payload["character"]["definition"]["resource_templates"]
+        if template.get("id") == tracker_id
+    ][0]
+    assert updated_template["max"] == 1
+    assert updated_template["reset_on"] == "short_rest"
+    assert updated_template["reset_to"] == "max"
+    updated_resources = {
+        resource.get("id"): resource
+        for resource in update_custom_feature_payload["character"]["state_record"]["state"]["resources"]
+    }
+    assert updated_resources[tracker_id]["current"] == 1
+    assert updated_resources[tracker_id]["max"] == 1
+
+    clear_custom_feature_values = {
+        "custom_feature_id_1": custom_feature_id,
+        "custom_feature_name_1": "",
+        "custom_feature_page_ref_1": "",
+        "custom_feature_activation_type_1": "",
+        "custom_feature_description_1": "",
+        "custom_feature_resource_max_1": "",
+        "custom_feature_resource_reset_on_1": "",
+    }
+    clear_custom_feature_status, clear_custom_feature_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={"expected_revision": expected_revision + 10, "values": clear_custom_feature_values},
+    )
+    assert clear_custom_feature_status == 200
+    assert clear_custom_feature_payload["editor"]["state_revision"] == expected_revision + 11
+    assert all(
+        feature.get("category") != "custom_feature"
+        for feature in clear_custom_feature_payload["character"]["definition"]["features"]
+    )
+    assert all(
+        template.get("id") != tracker_id
+        for template in clear_custom_feature_payload["character"]["definition"]["resource_templates"]
+    )
+    assert all(
+        resource.get("id") != tracker_id
+        for resource in clear_custom_feature_payload["character"]["state_record"]["state"]["resources"]
+    )
+    assert [
+        {
+            key: row.get(key)
+            for key in ("id", "name", "page_ref", "activation_type", "description_markdown", "resource_max", "resource_reset_on")
+        }
+        for row in clear_custom_feature_payload["editor"]["feature_rows"]
+    ] == [
+        {"id": "", "name": "", "page_ref": "", "activation_type": "passive", "description_markdown": "", "resource_max": "", "resource_reset_on": "manual"},
+        {"id": "", "name": "", "page_ref": "", "activation_type": "passive", "description_markdown": "", "resource_max": "", "resource_reset_on": "manual"},
+        {"id": "", "name": "", "page_ref": "", "activation_type": "passive", "description_markdown": "", "resource_max": "", "resource_reset_on": "manual"},
     ]
 
 

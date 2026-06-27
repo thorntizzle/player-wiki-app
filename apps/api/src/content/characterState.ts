@@ -136,6 +136,8 @@ const CHARACTER_SHEET_EDIT_CONFLICT_MESSAGE =
   "This sheet changed before your batch save finished. Refresh and review the latest sheet before saving again. Session Character, Combat, or another tab may have changed nearby fields first; nothing was auto-merged.";
 const CAMPAIGN_ITEMS_SECTION = "Items";
 const ADVANCED_EDITOR_MANUAL_EQUIPMENT_SOURCE_KIND = "manual_edit";
+const ADVANCED_EDITOR_CUSTOM_FEATURE_CATEGORY = "custom_feature";
+const ADVANCED_EDITOR_CUSTOM_FEATURE_RESOURCE_PREFIX = "custom_feature";
 const ARTIFICER_INFUSIONS_FEATURE_KEY = "artificerinfusions";
 const ENHANCED_DEFENSE_INFUSION_KEY = "enhanced-defense";
 const KNOWN_ARTIFICER_INFUSION_TITLES = new Set([
@@ -1363,6 +1365,62 @@ function reconcileAdvancedEditorManualEquipmentState(
   }
   state.inventory = nextInventory;
   state.attunement = normalizeAttunementState(nextInventory);
+}
+
+function isAdvancedEditorCustomFeatureResource(resource: Record<string, unknown>): boolean {
+  const resourceId = asString(resource.id);
+  return (
+    asString(resource.category) === ADVANCED_EDITOR_CUSTOM_FEATURE_CATEGORY ||
+    resourceId.startsWith(`${ADVANCED_EDITOR_CUSTOM_FEATURE_RESOURCE_PREFIX}:`)
+  );
+}
+
+function reconcileAdvancedEditorCustomFeatureResourcesState(
+  state: Record<string, unknown>,
+  definition: Record<string, unknown>,
+  removedResourceIds: string[],
+): void {
+  const removed = new Set(removedResourceIds.map((resourceId) => asString(resourceId)).filter(Boolean));
+  const templateRows = buildResourceStates(definition)
+    .map((resource) => asRecord(resource))
+    .filter(isAdvancedEditorCustomFeatureResource);
+  const templateIds = new Set(templateRows.map((resource) => asString(resource.id)).filter(Boolean));
+  const existingById = new Map(
+    asArray(state.resources)
+      .map((resource) => asRecord(resource))
+      .map((resource) => [asString(resource.id), resource] as const)
+      .filter(([resourceId]) => Boolean(resourceId)),
+  );
+
+  const nextResources: unknown[] = [];
+  for (const rawResource of asArray(state.resources)) {
+    const resource = { ...asRecord(rawResource) };
+    const resourceId = asString(resource.id);
+    if (!resourceId || removed.has(resourceId) || templateIds.has(resourceId)) {
+      continue;
+    }
+    if (isAdvancedEditorCustomFeatureResource(resource)) {
+      continue;
+    }
+    nextResources.push(resource);
+  }
+
+  for (const template of templateRows) {
+    const resourceId = asString(template.id);
+    const existing = existingById.get(resourceId);
+    if (!existing) {
+      nextResources.push(template);
+      continue;
+    }
+    const maxValue = template.max === null || template.max === undefined
+      ? undefined
+      : nonNegativeInt(template.max, 0);
+    nextResources.push({
+      ...template,
+      current: clampInt(existing.current, nonNegativeInt(template.current, 0), maxValue),
+    });
+  }
+  state.resources = nextResources;
 }
 
 function normalizeAttunementState(inventory: unknown[]): Record<string, unknown> {
@@ -3620,6 +3678,19 @@ export function updateCharacterAdvancedEditorReferenceState(
         nextState,
         definition,
         asArray(manualEquipmentReconcile.removedItemIds).map((itemId) => asString(itemId)).filter(Boolean),
+      );
+    }
+    const customFeatureResourceReconcile = asRecord(
+      manualEquipmentReconcile.customFeatureResourceReconcile
+        ?? manualEquipmentReconcile.custom_feature_resource_reconcile,
+    );
+    if (customFeatureResourceReconcile.enabled === true) {
+      reconcileAdvancedEditorCustomFeatureResourcesState(
+        nextState,
+        definition,
+        asArray(customFeatureResourceReconcile.removedResourceIds ?? customFeatureResourceReconcile.removed_resource_ids)
+          .map((resourceId) => asString(resourceId))
+          .filter(Boolean),
       );
     }
     const vitals = { ...asRecord(nextState.vitals) };
