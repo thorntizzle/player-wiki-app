@@ -97,6 +97,7 @@ import {
   buildCampaignContentPageRemovalSafety,
   deleteCampaignContentAsset,
   deleteCampaignContentCharacter,
+  deleteCampaignContentCharacterPortrait,
   deleteCampaignContentPage,
   getCampaignContentAsset,
   getCampaignContentCharacter,
@@ -108,14 +109,17 @@ import {
   sanitizeContentCharacterSlug,
   sanitizeContentPageRef,
   updateCampaignConfigFile,
+  validateCampaignContentCharacterPortraitUpload,
   writeCampaignContentAsset,
   writeCampaignContentCharacter,
+  writeCampaignContentCharacterPortrait,
   writeCampaignContentPage,
 } from "./content/repository.js";
 import {
   applyCharacterSessionRest,
   canEditCharacterSessionState,
   previewCharacterRest,
+  updateCharacterPortraitRevision,
   updateCharacterSessionArtificerInfusions,
   updateCharacterSessionCurrency,
   updateCharacterSessionEquipment,
@@ -185,6 +189,35 @@ function buildManagedCharacterImportMetadata(
     parser_version: "2026-04-21.01",
     import_status: "managed",
     warnings: [],
+  };
+}
+
+function buildPreservedCharacterImportMetadata(
+  campaignSlug: string,
+  characterSlug: string,
+  currentImportMetadata: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...currentImportMetadata,
+    campaign_slug: campaignSlug,
+    character_slug: characterSlug,
+    source_path:
+      typeof currentImportMetadata.source_path === "string" && currentImportMetadata.source_path.trim().length > 0
+        ? currentImportMetadata.source_path.trim()
+        : `managed://${campaignSlug}/${characterSlug}`,
+    imported_at_utc:
+      typeof currentImportMetadata.imported_at_utc === "string" && currentImportMetadata.imported_at_utc.trim().length > 0
+        ? currentImportMetadata.imported_at_utc.trim()
+        : utcIsoTimestamp(),
+    parser_version:
+      typeof currentImportMetadata.parser_version === "string" && currentImportMetadata.parser_version.trim().length > 0
+        ? currentImportMetadata.parser_version.trim()
+        : "api-v1",
+    import_status:
+      typeof currentImportMetadata.import_status === "string" && currentImportMetadata.import_status.trim().length > 0
+        ? currentImportMetadata.import_status.trim()
+        : "managed",
+    warnings: Array.isArray(currentImportMetadata.warnings) ? currentImportMetadata.warnings : [],
   };
 }
 
@@ -5126,6 +5159,207 @@ app.patch(ROUTES.characterSessionArtificerInfusions, async (ctx) => {
         updated_at: result.updatedAt,
         updated_by_user_id: auth.actorUserId ?? null,
       },
+    },
+  });
+});
+
+app.put(ROUTES.characterPortraitUpdate, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCharacterSessionBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!canEditCharacterSessionState(config, campaign.slug, characterSlug, auth.role, auth.actorUserId)) {
+    const error = forbidden("You do not have permission to update this character from this view.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const preflight = validateCampaignContentCharacterPortraitUpload(jsonPayload.payload);
+  if (preflight.status === "validation_error") {
+    const error = validationError(preflight.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = updateCharacterPortraitRevision(
+    config,
+    campaign.slug,
+    characterSlug,
+    character.definition,
+    jsonPayload.payload,
+    auth.actorUserId ?? 0,
+  );
+  if (result.status === "state_conflict") {
+    const error = stateConflict(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const writeResult = await writeCampaignContentCharacterPortrait(
+    config,
+    campaign.slug,
+    characterSlug,
+    jsonPayload.payload,
+    buildPreservedCharacterImportMetadata(campaign.slug, characterSlug, character.import_metadata),
+  );
+  if (writeResult.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (writeResult.status === "validation_error") {
+    const error = validationError(writeResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    character: {
+      definition: writeResult.record.definition,
+      import_metadata: writeResult.record.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: characterSlug,
+        revision: result.revision,
+        state: result.state,
+        updated_at: result.updatedAt,
+        updated_by_user_id: auth.actorUserId ?? null,
+      },
+      portrait: writeResult.portrait,
+    },
+  });
+});
+
+app.delete(ROUTES.characterPortraitDelete, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCharacterSessionBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!canEditCharacterSessionState(config, campaign.slug, characterSlug, auth.role, auth.actorUserId)) {
+    const error = forbidden("You do not have permission to update this character from this view.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const profile =
+    typeof character.definition.profile === "object" &&
+    character.definition.profile !== null &&
+    !Array.isArray(character.definition.profile)
+      ? (character.definition.profile as Record<string, unknown>)
+      : {};
+  if (typeof profile.portrait_asset_ref !== "string" || !profile.portrait_asset_ref.trim()) {
+    const error = validationError("That character does not currently have a portrait.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const result = updateCharacterPortraitRevision(
+    config,
+    campaign.slug,
+    characterSlug,
+    character.definition,
+    jsonPayload.payload,
+    auth.actorUserId ?? 0,
+  );
+  if (result.status === "state_conflict") {
+    const error = stateConflict(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (result.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const writeResult = await deleteCampaignContentCharacterPortrait(
+    config,
+    campaign.slug,
+    characterSlug,
+    buildPreservedCharacterImportMetadata(campaign.slug, characterSlug, character.import_metadata),
+  );
+  if (writeResult.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (writeResult.status === "validation_error") {
+    const error = validationError(writeResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return ctx.json({
+    ok: true,
+    character: {
+      definition: writeResult.record.definition,
+      import_metadata: writeResult.record.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: characterSlug,
+        revision: result.revision,
+        state: result.state,
+        updated_at: result.updatedAt,
+        updated_by_user_id: auth.actorUserId ?? null,
+      },
+      portrait: null,
+      deleted_portrait: writeResult.deleted,
     },
   });
 });

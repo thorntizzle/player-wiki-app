@@ -6541,6 +6541,198 @@ dndStateAssertionDb
   .run(79, "linden-pass", managedCharacterSlug, "owner", assignmentTimestamp, assignmentTimestamp);
 dndStateAssertionDb.close();
 
+const portraitCharacterSlug = "api-portrait-scout";
+const portraitCharacterPath = `/api/v1/campaigns/linden-pass/content/characters/${portraitCharacterSlug}`;
+const portraitCharacterDefinition = structuredClone(contentCharacter.payload.character_file.definition);
+portraitCharacterDefinition.name = "API Portrait Scout";
+portraitCharacterDefinition.profile = {
+  ...(portraitCharacterDefinition.profile || {}),
+  biography_markdown: "A managed fixture character for portrait route smoke tests.",
+};
+const portraitCharacterImportMetadata = structuredClone(contentCharacter.payload.character_file.import_metadata);
+portraitCharacterImportMetadata.source_path = "api://campaigns/linden-pass/characters/api-portrait-scout";
+portraitCharacterImportMetadata.parser_version = "api-portrait-test";
+portraitCharacterImportMetadata.import_status = "managed";
+const portraitCharacterPut = await requestJson(
+  portraitCharacterPath,
+  bearerContentManagerHeaders,
+  {
+    method: "PUT",
+    body: {
+      definition: portraitCharacterDefinition,
+      import_metadata: portraitCharacterImportMetadata,
+    },
+  },
+);
+if (
+  portraitCharacterPut.status !== 200 ||
+  portraitCharacterPut.payload?.character_file?.character_slug !== portraitCharacterSlug ||
+  portraitCharacterPut.payload?.character_file?.state_created !== true
+) {
+  throw new Error(`Expected portrait smoke character PUT payload, got ${JSON.stringify(portraitCharacterPut.payload)}`);
+}
+
+const portraitPath = `/api/v1/campaigns/linden-pass/characters/${portraitCharacterSlug}/portrait`;
+const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x70, 0x6f, 0x72, 0x74]);
+const portraitUploadBody = {
+  expected_revision: 1,
+  portrait_file: {
+    filename: "Portrait.PNG",
+    media_type: "image/png",
+    data_base64: pngBytes.toString("base64"),
+  },
+  alt_text: "API portrait scout",
+  caption: "Preserved PNG bytes.",
+};
+
+const unauthorizedPortraitUpload = await requestJson(
+  portraitPath,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PUT", body: portraitUploadBody },
+);
+if (
+  unauthorizedPortraitUpload.status !== 403 ||
+  unauthorizedPortraitUpload.payload?.error?.message !== "You do not have permission to update this character from this view."
+) {
+  throw new Error(
+    `Expected unassigned player portrait PUT forbidden, got ${unauthorizedPortraitUpload.status} ${JSON.stringify(unauthorizedPortraitUpload.payload)}`,
+  );
+}
+
+const stalePortraitUpload = await requestJson(
+  portraitPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "PUT", body: { ...portraitUploadBody, expected_revision: 999 } },
+);
+if (
+  stalePortraitUpload.status !== 409 ||
+  stalePortraitUpload.payload?.error?.code !== "state_conflict" ||
+  stalePortraitUpload.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale portrait PUT conflict, got ${stalePortraitUpload.status} ${JSON.stringify(stalePortraitUpload.payload)}`,
+  );
+}
+
+const invalidPortraitUpload = await requestJson(
+  portraitPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  {
+    method: "PUT",
+    body: {
+      expected_revision: 1,
+      portrait_file: {
+        filename: "portrait.bmp",
+        data_base64: pngBytes.toString("base64"),
+      },
+    },
+  },
+);
+if (
+  invalidPortraitUpload.status !== 400 ||
+  invalidPortraitUpload.payload?.error?.code !== "validation_error" ||
+  invalidPortraitUpload.payload?.error?.message !== "Character portraits must be PNG, JPG, GIF, or WEBP files."
+) {
+  throw new Error(
+    `Expected invalid portrait extension validation_error, got ${invalidPortraitUpload.status} ${JSON.stringify(invalidPortraitUpload.payload)}`,
+  );
+}
+
+const portraitUpload = await requestJson(
+  portraitPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "PUT", body: portraitUploadBody },
+);
+const portraitAssetRef = `characters/${portraitCharacterSlug}/portrait.png`;
+const portraitAssetPath = path.join(campaignsDir, "linden-pass", "assets", "characters", portraitCharacterSlug, "portrait.png");
+const portraitDefinitionPath = path.join(campaignsDir, "linden-pass", "characters", portraitCharacterSlug, "definition.yaml");
+const portraitImportPath = path.join(campaignsDir, "linden-pass", "characters", portraitCharacterSlug, "import.yaml");
+if (
+  portraitUpload.status !== 200 ||
+  portraitUpload.payload?.ok !== true ||
+  portraitUpload.payload?.character?.definition?.profile?.portrait_asset_ref !== portraitAssetRef ||
+  portraitUpload.payload?.character?.definition?.profile?.portrait_alt !== "API portrait scout" ||
+  portraitUpload.payload?.character?.definition?.profile?.portrait_caption !== "Preserved PNG bytes." ||
+  portraitUpload.payload?.character?.portrait?.asset_ref !== portraitAssetRef ||
+  portraitUpload.payload?.character?.portrait?.media_type !== "image/png" ||
+  portraitUpload.payload?.character?.state_record?.revision !== 2
+) {
+  throw new Error(`Unexpected portrait PUT payload: ${JSON.stringify(portraitUpload.payload)}`);
+}
+if (!existsSync(portraitAssetPath) || !readFileSync(portraitAssetPath).equals(pngBytes)) {
+  throw new Error("Expected portrait PUT to preserve PNG bytes at the portrait.png asset path.");
+}
+if (
+  !readFileSync(portraitDefinitionPath, "utf8").includes(`portrait_asset_ref: ${portraitAssetRef}`) ||
+  !readFileSync(portraitImportPath, "utf8").includes("api-portrait-test")
+) {
+  throw new Error("Expected portrait PUT to persist definition/import YAML portrait metadata.");
+}
+const portraitUploadAssertionDb = new Database(dbPath, { readonly: true });
+const portraitStateAfterUpload = portraitUploadAssertionDb
+  .prepare("SELECT revision, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", portraitCharacterSlug);
+portraitUploadAssertionDb.close();
+if (portraitStateAfterUpload?.revision !== 2 || portraitStateAfterUpload?.updated_by_user_id !== 81) {
+  throw new Error(`Unexpected portrait upload state row: ${JSON.stringify(portraitStateAfterUpload)}`);
+}
+
+const portraitDelete = await requestJson(
+  portraitPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "DELETE", body: { expected_revision: 2 } },
+);
+if (
+  portraitDelete.status !== 200 ||
+  portraitDelete.payload?.ok !== true ||
+  portraitDelete.payload?.character?.definition?.profile?.portrait_asset_ref !== undefined ||
+  portraitDelete.payload?.character?.definition?.profile?.portrait_alt !== undefined ||
+  portraitDelete.payload?.character?.definition?.profile?.portrait_caption !== undefined ||
+  portraitDelete.payload?.character?.portrait !== null ||
+  portraitDelete.payload?.character?.deleted_portrait?.asset_ref !== portraitAssetRef ||
+  portraitDelete.payload?.character?.state_record?.revision !== 3
+) {
+  throw new Error(`Unexpected portrait DELETE payload: ${JSON.stringify(portraitDelete.payload)}`);
+}
+if (existsSync(portraitAssetPath) || readFileSync(portraitDefinitionPath, "utf8").includes("portrait_asset_ref")) {
+  throw new Error("Expected portrait DELETE to remove the portrait asset and profile fields.");
+}
+const portraitDeleteAssertionDb = new Database(dbPath, { readonly: true });
+const portraitStateAfterDelete = portraitDeleteAssertionDb
+  .prepare("SELECT revision, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", portraitCharacterSlug);
+portraitDeleteAssertionDb.close();
+if (portraitStateAfterDelete?.revision !== 3 || portraitStateAfterDelete?.updated_by_user_id !== 81) {
+  throw new Error(`Unexpected portrait delete state row: ${JSON.stringify(portraitStateAfterDelete)}`);
+}
+
+const absentPortraitDelete = await requestJson(
+  portraitPath,
+  {
+    Authorization: `Bearer ${dmApiToken}`,
+  },
+  { method: "DELETE", body: { expected_revision: 3 } },
+);
+if (
+  absentPortraitDelete.status !== 400 ||
+  absentPortraitDelete.payload?.error?.code !== "validation_error" ||
+  absentPortraitDelete.payload?.error?.message !== "That character does not currently have a portrait."
+) {
+  throw new Error(
+    `Expected absent portrait DELETE validation_error, got ${absentPortraitDelete.status} ${JSON.stringify(absentPortraitDelete.payload)}`,
+  );
+}
+
 const fixtureSessionResourceUpdate = await requestJson(
   `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/resources/sorcery-points`,
   {

@@ -9,8 +9,9 @@ import { deleteCharacterPersistence, persistCharacterStateForDefinition } from "
 import type {
   CampaignAssetFileRecord,
   CampaignCharacterFileRecord,
-  CampaignPageFileRecord,
   CampaignConfigRecord,
+  CampaignPageFileRecord,
+  CharacterPortraitPayload,
   ContentPage,
   ContentPageRemovalSafety,
   DeletedCharacterContent,
@@ -487,6 +488,16 @@ const ASSET_MEDIA_TYPE_BY_EXTENSION: Record<string, string> = {
   ".txt": "text/plain",
   ".webp": "image/webp",
 };
+
+const CHARACTER_PORTRAIT_MEDIA_TYPE_BY_EXTENSION: Record<string, string> = {
+  ".gif": "image/gif",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+};
+
+const MAX_CHARACTER_PORTRAIT_BYTES = 8 * 1024 * 1024;
 
 function guessAssetMediaType(filePath: string): string {
   return ASSET_MEDIA_TYPE_BY_EXTENSION[path.extname(filePath).toLowerCase()] || "application/octet-stream";
@@ -1714,6 +1725,266 @@ export async function deleteCampaignContentAsset(
   await fs.unlink(assetPath);
   await pruneEmptyParentDirs(path.dirname(assetPath), campaign.assetsDir);
   return { status: "ok", record };
+}
+
+function decodeCharacterPortraitFile(
+  value: unknown,
+): { status: "ok"; extension: string; media_type: string; data_blob: Buffer } | { status: "validation_error"; message: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { status: "validation_error", message: "portrait_file must be an object." };
+  }
+  const record = value as Record<string, unknown>;
+  const filename = asString(record.filename);
+  if (!filename) {
+    return { status: "validation_error", message: "Choose an image file before saving the portrait." };
+  }
+  const extension = path.extname(filename).toLowerCase();
+  const mediaType = CHARACTER_PORTRAIT_MEDIA_TYPE_BY_EXTENSION[extension];
+  if (!mediaType) {
+    return { status: "validation_error", message: "Character portraits must be PNG, JPG, GIF, or WEBP files." };
+  }
+  const rawData = asString(record.data_base64);
+  if (!rawData) {
+    return { status: "validation_error", message: "portrait_file data_base64 is required." };
+  }
+  let dataBlob: Buffer;
+  try {
+    dataBlob = Buffer.from(rawData, "base64");
+  } catch {
+    return { status: "validation_error", message: "portrait_file data_base64 must be valid base64." };
+  }
+  if (dataBlob.toString("base64").replace(/=+$/, "") !== rawData.replace(/\s/g, "").replace(/=+$/, "")) {
+    return { status: "validation_error", message: "portrait_file data_base64 must be valid base64." };
+  }
+  if (dataBlob.byteLength === 0) {
+    return { status: "validation_error", message: "Uploaded portrait files cannot be empty." };
+  }
+  if (dataBlob.byteLength > MAX_CHARACTER_PORTRAIT_BYTES) {
+    return { status: "validation_error", message: "Character portraits must stay under 8 MB." };
+  }
+  return { status: "ok", extension, media_type: mediaType, data_blob: dataBlob };
+}
+
+function normalizeCharacterPortraitText(
+  value: unknown,
+  fieldLabel: string,
+  maxLength: number,
+): { status: "ok"; value: string } | { status: "validation_error"; message: string } {
+  const normalized = asString(value);
+  if (normalized.length > maxLength) {
+    return { status: "validation_error", message: `${fieldLabel} must stay under ${maxLength} characters.` };
+  }
+  return { status: "ok", value: normalized };
+}
+
+export function validateCampaignContentCharacterPortraitUpload(
+  payload: unknown,
+): { status: "ok" } | { status: "validation_error"; message: string } {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { status: "validation_error", message: "Request body must be a JSON object." };
+  }
+  const payloadRecord = payload as Record<string, unknown>;
+  const portraitFile = decodeCharacterPortraitFile(payloadRecord.portrait_file);
+  if (portraitFile.status === "validation_error") {
+    return portraitFile;
+  }
+  const altText = normalizeCharacterPortraitText(payloadRecord.alt_text, "Portrait alt text", 200);
+  if (altText.status === "validation_error") {
+    return altText;
+  }
+  const caption = normalizeCharacterPortraitText(payloadRecord.caption, "Portrait captions", 300);
+  if (caption.status === "validation_error") {
+    return caption;
+  }
+  return { status: "ok" };
+}
+
+function characterPortraitPayload(
+  campaignSlug: string,
+  assetRef: string,
+  mediaType: string,
+  altText: string,
+  caption: string,
+): CharacterPortraitPayload {
+  return {
+    asset_ref: assetRef,
+    media_type: mediaType,
+    alt_text: altText,
+    caption,
+    url: `/campaigns/${campaignSlug}/assets/${assetRef}`,
+  };
+}
+
+function characterPortraitProfile(definition: Record<string, unknown>): Record<string, unknown> {
+  return asRecord(definition.profile);
+}
+
+export async function writeCampaignContentCharacterPortrait(
+  config: ApiConfig,
+  campaignSlug: string,
+  rawCharacterSlug: string,
+  payload: unknown,
+  importMetadata: Record<string, unknown>,
+): Promise<
+  | { status: "ok"; record: CampaignCharacterFileRecord; portrait: CharacterPortraitPayload }
+  | { status: "not_found" }
+  | { status: "validation_error"; message: string }
+> {
+  const campaign = await loadCampaignContentContext(config, campaignSlug, { requireContentDir: false });
+  if (!campaign) {
+    return { status: "not_found" };
+  }
+
+  const characterSlugResult = normalizeContentCharacterWriteSlug(rawCharacterSlug);
+  if (characterSlugResult.status === "validation_error") {
+    return characterSlugResult;
+  }
+  const characterSlug = characterSlugResult.character_slug;
+  const existingRecord = await getCampaignContentCharacter(config, campaignSlug, characterSlug);
+  if (!existingRecord) {
+    return { status: "not_found" };
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { status: "validation_error", message: "Request body must be a JSON object." };
+  }
+  const payloadRecord = payload as Record<string, unknown>;
+  const portraitFile = decodeCharacterPortraitFile(payloadRecord.portrait_file);
+  if (portraitFile.status === "validation_error") {
+    return portraitFile;
+  }
+  const altText = normalizeCharacterPortraitText(payloadRecord.alt_text, "Portrait alt text", 200);
+  if (altText.status === "validation_error") {
+    return altText;
+  }
+  const caption = normalizeCharacterPortraitText(payloadRecord.caption, "Portrait captions", 300);
+  if (caption.status === "validation_error") {
+    return caption;
+  }
+
+  const profile = characterPortraitProfile(existingRecord.definition);
+  const existingAssetRef = asString(profile.portrait_asset_ref);
+  const nextAssetRef = `characters/${characterSlug}/portrait${portraitFile.extension}`;
+  const assetPath = resolveSafeAssetPath(campaign.assetsDir, nextAssetRef);
+  if (!assetPath) {
+    return { status: "validation_error", message: "Resolved file path escapes the campaign directory." };
+  }
+
+  const writeResult = await writeCampaignContentCharacter(config, campaignSlug, characterSlug, {
+    definition: {
+      ...existingRecord.definition,
+      profile: {
+        ...profile,
+        portrait_asset_ref: nextAssetRef,
+        portrait_alt: altText.value,
+        portrait_caption: caption.value,
+      },
+    },
+    import_metadata: importMetadata,
+  });
+  if (writeResult.status !== "ok") {
+    return writeResult;
+  }
+
+  await fs.mkdir(path.dirname(assetPath), { recursive: true });
+  await fs.writeFile(assetPath, portraitFile.data_blob);
+  if (existingAssetRef && existingAssetRef !== nextAssetRef) {
+    const existingAssetPath = resolveSafeAssetPath(campaign.assetsDir, existingAssetRef);
+    if (existingAssetPath) {
+      try {
+        const existingStats = await fs.stat(existingAssetPath);
+        if (existingStats.isFile()) {
+          await fs.unlink(existingAssetPath);
+          await pruneEmptyParentDirs(path.dirname(existingAssetPath), campaign.assetsDir);
+        }
+      } catch {
+        // Replaced portrait assets may already be absent on fixture copies.
+      }
+    }
+  }
+
+  const updatedRecord = await getCampaignContentCharacter(config, campaignSlug, characterSlug);
+  if (!updatedRecord) {
+    return { status: "validation_error", message: "Character files were not readable after writing." };
+  }
+  return {
+    status: "ok",
+    record: updatedRecord,
+    portrait: characterPortraitPayload(campaignSlug, nextAssetRef, portraitFile.media_type, altText.value, caption.value),
+  };
+}
+
+export async function deleteCampaignContentCharacterPortrait(
+  config: ApiConfig,
+  campaignSlug: string,
+  rawCharacterSlug: string,
+  importMetadata: Record<string, unknown>,
+): Promise<
+  | { status: "ok"; record: CampaignCharacterFileRecord; deleted: CharacterPortraitPayload }
+  | { status: "not_found" }
+  | { status: "validation_error"; message: string }
+> {
+  const campaign = await loadCampaignContentContext(config, campaignSlug, { requireContentDir: false });
+  if (!campaign) {
+    return { status: "not_found" };
+  }
+
+  const characterSlugResult = normalizeContentCharacterWriteSlug(rawCharacterSlug);
+  if (characterSlugResult.status === "validation_error") {
+    return characterSlugResult;
+  }
+  const characterSlug = characterSlugResult.character_slug;
+  const existingRecord = await getCampaignContentCharacter(config, campaignSlug, characterSlug);
+  if (!existingRecord) {
+    return { status: "not_found" };
+  }
+
+  const profile = characterPortraitProfile(existingRecord.definition);
+  const existingAssetRef = asString(profile.portrait_asset_ref);
+  if (!existingAssetRef) {
+    return { status: "validation_error", message: "That character does not currently have a portrait." };
+  }
+  const existingMediaType =
+    ASSET_MEDIA_TYPE_BY_EXTENSION[path.posix.extname(existingAssetRef).toLowerCase()] || "application/octet-stream";
+  const existingAltText = asString(profile.portrait_alt);
+  const existingCaption = asString(profile.portrait_caption);
+  const nextProfile = { ...profile };
+  delete nextProfile.portrait_asset_ref;
+  delete nextProfile.portrait_alt;
+  delete nextProfile.portrait_caption;
+
+  const writeResult = await writeCampaignContentCharacter(config, campaignSlug, characterSlug, {
+    definition: {
+      ...existingRecord.definition,
+      profile: nextProfile,
+    },
+    import_metadata: importMetadata,
+  });
+  if (writeResult.status !== "ok") {
+    return writeResult;
+  }
+
+  const existingAssetPath = resolveSafeAssetPath(campaign.assetsDir, existingAssetRef);
+  if (existingAssetPath) {
+    try {
+      const existingStats = await fs.stat(existingAssetPath);
+      if (existingStats.isFile()) {
+        await fs.unlink(existingAssetPath);
+        await pruneEmptyParentDirs(path.dirname(existingAssetPath), campaign.assetsDir);
+      }
+    } catch {
+      // Missing file does not change the profile removal result.
+    }
+  }
+
+  const updatedRecord = await getCampaignContentCharacter(config, campaignSlug, characterSlug);
+  if (!updatedRecord) {
+    return { status: "validation_error", message: "Character files were not readable after writing." };
+  }
+  return {
+    status: "ok",
+    record: updatedRecord,
+    deleted: characterPortraitPayload(campaignSlug, existingAssetRef, existingMediaType, existingAltText, existingCaption),
+  };
 }
 
 export async function getCampaignContentCharacter(

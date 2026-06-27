@@ -818,6 +818,24 @@
       "notes": "Tracked Hono DND Artificer infusion state route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflicts, Artificer/Infuse Item gating, known-infusion and active-capacity validation, duplicate active infusion and duplicate target validation, nonmagical target validation, Enhanced Defense armor/shield validation, synchronized definition equipment_catalog and SQLite state.inventory active_infusions persistence, Enhanced Defense Armor Class/defensive-rule automation across infusion and later equipment writes, refreshed character state payloads, and explicit missing-character JSON."
     },
     {
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/portrait",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/portrait",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Character Portrait upload route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflicts, PNG/JPG/GIF/WEBP validation, deliberate TypeScript byte/extension preservation with no WebP conversion, copied-fixture portrait asset writes under characters/<characterSlug>/portrait.<ext>, replaced-asset cleanup, definition/import YAML profile persistence, compact portrait payloads, and explicit missing-character JSON."
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/portrait",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/portrait",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Character Portrait remove route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflicts, absent-portrait validation, copied-fixture portrait asset cleanup, definition/import YAML profile-field removal, compact deleted-portrait payloads, and explicit missing-character JSON."
+    },
+    {
       "method": "POST",
       "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment",
       "route_family": "api_v1_characters",

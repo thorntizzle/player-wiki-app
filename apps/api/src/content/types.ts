@@ -51,6 +51,14 @@ export interface CampaignCharacterFileRecord {
   state_created: boolean;
 }
 
+export interface CharacterPortraitPayload {
+  asset_ref: string;
+  media_type: string;
+  alt_text: string;
+  caption: string;
+  url: string;
+}
+
 export interface DeletedCharacterContent {
   character_slug: string;
   deleted_files: boolean;

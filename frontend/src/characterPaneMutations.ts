@@ -66,9 +66,12 @@ export function useCharacterPaneMutations({
         campaignSlug,
         selectedSlug,
       ]);
+      const nextCharacter = previousDetail?.character
+        ? { ...previousDetail.character, ...response.character }
+        : response.character;
       queryClient.setQueryData<CharacterDetailResponse>(["character-detail", campaignSlug, selectedSlug], {
         ok: true,
-        character: response.character,
+        character: nextCharacter,
         links: previousDetail?.links,
       });
     }

@@ -398,6 +398,17 @@ Route parity check command:
   definition `equipment_catalog` and SQLite `state.inventory.active_infusions` persistence,
   Enhanced Defense Armor Class/defensive-rule automation across infusion and equipment writes,
   and refreshed `character.state_record` payloads.
+- The Character Portrait JSON mutation pair now serves
+  `PUT .../characters/:characterSlug/portrait` and
+  `DELETE .../characters/:characterSlug/portrait`. It preserves bearer-only session-mode edit
+  access for app admins, campaign DMs, and assigned players, shared `character_state`
+  revision conflicts, copied-fixture definition/import YAML writes, old-asset cleanup, profile
+  field removal, absent-portrait validation, and refreshed `character.state_record` plus compact
+  `portrait` payloads. Deliberate TypeScript divergence while Flask remains production authority:
+  TS does not add `sharp` or convert portrait uploads; it preserves validated PNG/JPG/GIF/WEBP
+  bytes and writes `characters/<characterSlug>/portrait.<ext>`. Existing production Flask/WebP
+  behavior and broader vault PNG data migration remain outside this slice and require the normal
+  cutover decision path.
 - The Character Controls JSON route slice now serves
   `POST .../characters/:characterSlug/controls/assignment`,
   `DELETE .../characters/:characterSlug/controls/assignment`, and
@@ -407,8 +418,7 @@ Route parity check command:
   `character_assignment_removed` audit events with `gen2_character_controls` metadata. Checked
   delete is bearer API-token campaign DM/admin-only, reuses content-character deletion for files,
   `character_state`, portrait assets, and assignment cleanup, records `character_deleted` audit
-  events, and returns the Flask-compatible delete success message and roster links. Portrait
-  controls remain outside this slice.
+  events, and returns the Flask-compatible delete success message and roster links.
 - The first Xianxia inventory equipment write now serves
   `PATCH .../characters/:characterSlug/session/xianxia-inventory/:itemId/equipped`. It preserves the
   bearer-only session-state write gate, shared revision conflicts, Xianxia-only validation, unknown

@@ -486,6 +486,11 @@ fixture database.
   - stale-revision conflict envelopes.
   - unknown infusion validation, duplicate target validation, nonmagical target validation, and Enhanced Defense armor/shield validation.
   - assigned-player active infusion persistence through synchronized definition `equipment_catalog`, SQLite `state.inventory.active_infusions`, Enhanced Defense Armor Class/defensive-rule automation, shared revision bumps, and `updated_by_user_id`.
+- Character portrait payload checks cover:
+  - `PUT /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/portrait` and `DELETE /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/portrait` with bearer-only session-mode writes.
+  - unassigned-player forbidden, stale-revision conflict, invalid-extension validation, and absent-portrait delete validation.
+  - DM upload persistence through copied-fixture `definition.yaml`/`import.yaml`, shared `character_state` revision bumps, `updated_by_user_id`, compact portrait payloads, and exact PNG byte preservation at `characters/<characterSlug>/portrait.png`.
+  - DM delete removal of profile portrait fields plus copied-fixture asset cleanup without converting image bytes.
 - Character Xianxia inventory equipped-state payload checks cover:
   - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/equipped` with bearer-only writes.
   - unauthenticated, fixture-role bearer requirement, and stale-revision envelopes.
@@ -566,6 +571,7 @@ fixture database.
   - validates Xianxia inventory remove stale conflict, unknown-item validation, and DM item removal with top-level inventory mirror sync against disposable copied fixture files and SQLite state.
   - validates Xianxia inventory item update stale conflict, unknown-item validation, and DM item field updates with canonical type/nature/equippable normalization plus top-level inventory mirror sync against disposable copied fixture files and SQLite state.
   - validates DND Artificer infusion stale conflict, unknown infusion validation, duplicate target validation, magic-item rejection, Enhanced Defense target validation, assigned-player active-infusion persistence through copied fixture definition YAML plus SQLite state, and Enhanced Defense Armor Class/defensive-rule refresh across later equipment writes.
+  - validates Character Portrait JSON upload/delete auth, unassigned-player forbidden behavior, stale conflict, invalid-extension validation, PNG byte preservation, copied-fixture YAML profile/import persistence, asset cleanup, shared revision bumps, and absent-delete validation. This is a deliberate TypeScript rewrite divergence from current Flask production behavior: the TS route preserves PNG/JPG/GIF/WEBP bytes and extensions and does not perform WebP conversion pending separate cutover/data-migration approval.
   - verifies `GET /api/v1/campaigns/:campaignSlug/session` no-header read-only payload shape, role-aware fixture and bearer-token SQLite Session state reads, auth/forbidden bearer envelopes, token/revision headers behavior, unchanged-response short-circuit, and session missing-campaign 404.
   - verifies `POST /api/v1/campaigns/:campaignSlug/session/messages` auth, fixture-write denial, malformed JSON handling, validation messages, SQLite persistence, private-message visibility, recipient labels, revision bumps, and missing-campaign 404 against the disposable smoke-test database.
   - verifies `POST /api/v1/campaigns/:campaignSlug/session/start` and `.../session/close` auth, fixture-write denial, player-forbidden behavior, duplicate-start/empty-close validation, SQLite session persistence, revision bumps, refreshed Session reads/log summaries, and missing-campaign 404 against the disposable smoke-test database.
