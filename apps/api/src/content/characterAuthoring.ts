@@ -223,6 +223,10 @@ const ADVANCED_EDITOR_STATE_NOTE_FIELD_NAMES = new Set([
 const ADVANCED_EDITOR_MIN_RECOVERABLE_PENALTY_ROWS = 3;
 const ADVANCED_EDITOR_RECOVERABLE_PENALTY_FIELD_PATTERN =
   /^recoverable_penalty_(id|source|target|amount|notes)_([1-9]\d*)$/;
+const ADVANCED_EDITOR_MIN_MANUAL_EQUIPMENT_ROWS = 3;
+const ADVANCED_EDITOR_MANUAL_EQUIPMENT_SOURCE_KIND = "manual_edit";
+const ADVANCED_EDITOR_MANUAL_EQUIPMENT_FIELD_PATTERN =
+  /^manual_item_(id|name|page_ref|quantity|weight|notes)_([1-9]\d*)$/;
 const ADVANCED_EDITOR_PROFICIENCY_FIELDS: Array<{
   name: string;
   key: "languages" | "armor" | "weapons" | "tools";
@@ -409,6 +413,10 @@ export type CharacterAdvancedEditorReferenceUpdate =
       status: "ok";
       definition: Record<string, unknown>;
       stateNoteValues: Record<string, string>;
+      manualEquipmentReconcile: {
+        enabled: boolean;
+        removedItemIds: string[];
+      };
       values: Record<string, string>;
     }
   | { status: "validation_error"; message: string };
@@ -3412,6 +3420,167 @@ function hasEditorRecoverablePenaltyValues(values: Record<string, string>): bool
   return Object.keys(values).some((fieldName) => ADVANCED_EDITOR_RECOVERABLE_PENALTY_FIELD_PATTERN.test(fieldName));
 }
 
+function extractEditorPageRefValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  const record = asRecord(value);
+  return stringifyEditorValue(record.slug || record.page_ref || record.ref || record.path).trim();
+}
+
+function editorManualEquipmentEntries(definition: Record<string, unknown>): Array<Record<string, unknown>> {
+  return asArray(definition.equipment_catalog)
+    .map((value) => asRecord(value))
+    .filter((item) => stringifyEditorValue(item.source_kind).trim() === ADVANCED_EDITOR_MANUAL_EQUIPMENT_SOURCE_KIND);
+}
+
+function buildManualEquipmentRows(definition: Record<string, unknown>): Array<Record<string, unknown>> {
+  const manualItems = editorManualEquipmentEntries(definition);
+  const rowCount = Math.max(
+    manualItems.length + 1,
+    ADVANCED_EDITOR_MIN_MANUAL_EQUIPMENT_ROWS,
+  );
+  const rows: Array<Record<string, unknown>> = [];
+  for (let index = 1; index <= rowCount; index += 1) {
+    const item = asRecord(manualItems[index - 1]);
+    const quantity = item.default_quantity === null || item.default_quantity === undefined
+      ? ""
+      : stringifyEditorValue(item.default_quantity).trim();
+    rows.push({
+      index,
+      id: stringifyEditorValue(item.id).trim(),
+      name: stringifyEditorValue(item.name).trim(),
+      page_ref: extractEditorPageRefValue(item.page_ref),
+      quantity,
+      weight: stringifyEditorValue(item.weight).trim(),
+      notes: stringifyEditorValue(item.notes),
+      campaign_option: { ...asRecord(item.campaign_option) },
+    });
+  }
+  return rows;
+}
+
+function maxEditorManualEquipmentRowIndex(values: Record<string, string>): number {
+  let maxIndex = 0;
+  for (const fieldName of Object.keys(values)) {
+    const match = fieldName.match(ADVANCED_EDITOR_MANUAL_EQUIPMENT_FIELD_PATTERN);
+    if (!match) {
+      continue;
+    }
+    maxIndex = Math.max(maxIndex, Number.parseInt(match[2], 10));
+  }
+  return maxIndex;
+}
+
+function hasEditorManualEquipmentValues(values: Record<string, string>): boolean {
+  return Object.keys(values).some((fieldName) => ADVANCED_EDITOR_MANUAL_EQUIPMENT_FIELD_PATTERN.test(fieldName));
+}
+
+function parseEditorManualEquipmentQuantity(value: string): number | { status: "validation_error"; message: string } {
+  const rawValue = value.trim();
+  if (!rawValue) {
+    return 1;
+  }
+  if (!/^[+-]?\d+$/.test(rawValue)) {
+    return { status: "validation_error", message: "Custom equipment quantities must be whole numbers." };
+  }
+  const quantity = Number.parseInt(rawValue, 10);
+  if (quantity < 0) {
+    return { status: "validation_error", message: "Custom equipment quantities cannot be negative." };
+  }
+  return quantity;
+}
+
+function parseEditorManualEquipmentItems(
+  values: Record<string, string>,
+  definition: Record<string, unknown>,
+): {
+  status: "ok";
+  items: Array<Record<string, unknown>>;
+  removedItemIds: string[];
+} | { status: "validation_error"; message: string } {
+  const existingManualItems = editorManualEquipmentEntries(definition);
+  const existingById = new Map(
+    existingManualItems
+      .map((item) => [stringifyEditorValue(item.id).trim(), item] as const)
+      .filter(([itemId]) => Boolean(itemId)),
+  );
+  const usedIds = new Set([...existingById.keys()]);
+  const items: Array<Record<string, unknown>> = [];
+  const rowCount = Math.max(
+    maxEditorManualEquipmentRowIndex(values),
+    ADVANCED_EDITOR_MIN_MANUAL_EQUIPMENT_ROWS,
+  );
+  for (let index = 1; index <= rowCount; index += 1) {
+    const rawId = stringifyEditorValue(values[`manual_item_id_${index}`]).trim();
+    const existing = rawId ? existingById.get(rawId) : undefined;
+    const rawName = stringifyEditorValue(values[`manual_item_name_${index}`]).trim();
+    const pageRef = stringifyEditorValue(values[`manual_item_page_ref_${index}`]).trim();
+    const quantityText = stringifyEditorValue(values[`manual_item_quantity_${index}`]).trim();
+    const weight = stringifyEditorValue(values[`manual_item_weight_${index}`]).trim();
+    const notes = stringifyEditorValue(values[`manual_item_notes_${index}`]);
+    const hasContent = Boolean(rawId || rawName || pageRef || quantityText || weight || notes.trim());
+    if (!hasContent) {
+      continue;
+    }
+
+    if (pageRef) {
+      const existingPageRef = extractEditorPageRefValue(asRecord(existing).page_ref);
+      if (!existing || existingPageRef !== pageRef) {
+        return {
+          status: "validation_error",
+          message:
+            "Linked manual equipment pages are not yet supported by the TypeScript Advanced Editor slice.",
+        };
+      }
+    }
+
+    const name = rawName || stringifyEditorValue(asRecord(existing).name).trim();
+    if (!name) {
+      return { status: "validation_error", message: "Each custom equipment row needs an item name." };
+    }
+
+    const parsedQuantity = parseEditorManualEquipmentQuantity(quantityText);
+    if (typeof parsedQuantity !== "number") {
+      return parsedQuantity;
+    }
+
+    const preservedId = rawId || stringifyEditorValue(asRecord(existing).id).trim();
+    if (preservedId) {
+      usedIds.delete(preservedId);
+    }
+    const itemId = preservedId || buildUniqueEditorId("manual-item", name, usedIds);
+    usedIds.add(itemId);
+
+    const nextItem = { ...asRecord(existing) };
+    delete nextItem.campaign_option;
+    delete nextItem.systems_ref;
+    delete nextItem.page_ref;
+    nextItem.id = itemId;
+    nextItem.name = name;
+    nextItem.default_quantity = parsedQuantity;
+    nextItem.weight = weight;
+    nextItem.notes = notes.trim();
+    nextItem.source_kind = ADVANCED_EDITOR_MANUAL_EQUIPMENT_SOURCE_KIND;
+    if (pageRef) {
+      nextItem.page_ref = pageRef;
+      const existingCampaignOption = asRecord(asRecord(existing).campaign_option);
+      if (Object.keys(existingCampaignOption).length > 0) {
+        nextItem.campaign_option = existingCampaignOption;
+      }
+      const existingSystemsRef = asRecord(asRecord(existing).systems_ref);
+      if (Object.keys(existingSystemsRef).length > 0) {
+        nextItem.systems_ref = existingSystemsRef;
+      }
+    }
+    items.push(nextItem);
+  }
+
+  const nextIds = new Set(items.map((item) => stringifyEditorValue(item.id).trim()).filter(Boolean));
+  const removedItemIds = [...existingById.keys()].filter((itemId) => !nextIds.has(itemId));
+  return { status: "ok", items, removedItemIds };
+}
+
 function adjustSpeedLabel(value: unknown, delta: number): string {
   const cleanValue = stringifyEditorValue(value).trim();
   if (!cleanValue || delta === 0) {
@@ -3570,6 +3739,7 @@ export function buildCharacterAdvancedEditorPayload({
   const proficiencies = asRecord(definition.proficiencies);
   const manualStatAdjustments = normalizeEditorStatAdjustments(asRecord(definition.stats).manual_adjustments);
   const recoverablePenaltyRows = buildRecoverablePenaltyRows(asRecord(definition.stats).recoverable_penalties);
+  const equipment = buildManualEquipmentRows(definition);
   const features = asArray(definition.features).map((value, index) => {
     const feature = asRecord(value);
     return {
@@ -3579,17 +3749,6 @@ export function buildCharacterAdvancedEditorPayload({
       tracker_ref: stringifyEditorValue(feature.tracker_ref),
       source: stringifyEditorValue(feature.source),
       description_markdown: stringifyEditorValue(feature.description_markdown),
-    };
-  });
-  const equipment = asArray(definition.equipment_catalog).map((value, index) => {
-    const item = asRecord(value);
-    return {
-      row_id: stringifyEditorValue(item.id || item.item_id || item.name || `equipment-${index + 1}`),
-      name: stringifyEditorValue(item.name || `Equipment ${index + 1}`),
-      default_quantity: item.default_quantity ?? null,
-      weight: stringifyEditorValue(item.weight),
-      is_equipped: Boolean(item.is_equipped),
-      tags: asArray(item.tags).map((tag) => stringifyEditorValue(tag)).filter((tag) => tag.length > 0),
     };
   });
 
@@ -3685,12 +3844,13 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
   const unsupportedFields = Object.keys(values).filter(
     (fieldName) =>
       !ADVANCED_EDITOR_SUPPORTED_FIELD_NAMES.has(fieldName) &&
-      !ADVANCED_EDITOR_RECOVERABLE_PENALTY_FIELD_PATTERN.test(fieldName),
+      !ADVANCED_EDITOR_RECOVERABLE_PENALTY_FIELD_PATTERN.test(fieldName) &&
+      !ADVANCED_EDITOR_MANUAL_EQUIPMENT_FIELD_PATTERN.test(fieldName),
   );
   if (unsupportedFields.length > 0) {
     return {
       status: "validation_error",
-      message: `Unsupported Advanced Editor fields for the TypeScript reference/proficiency/stat-adjustment/recoverable-penalty field slice: ${unsupportedFields.join(", ")}.`,
+      message: `Unsupported Advanced Editor fields for the TypeScript reference/proficiency/stat-adjustment/recoverable-penalty/manual-equipment field slice: ${unsupportedFields.join(", ")}.`,
     };
   }
 
@@ -3707,12 +3867,19 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
   const referenceNotes = { ...asRecord(nextDefinition.reference_notes) };
   const proficiencies = { ...asRecord(nextDefinition.proficiencies) };
   const stateNoteValues: Record<string, string> = {};
+  let manualEquipmentReconcile = { enabled: false, removedItemIds: [] as string[] };
   const strippedRecoverableStats = stripEditorRecoverableStatPenalties(asRecord(nextDefinition.stats));
   const parsedRecoverablePenalties = hasEditorRecoverablePenaltyValues(values)
     ? parseEditorRecoverablePenalties(values, strippedRecoverableStats.penalties)
     : null;
   if (parsedRecoverablePenalties?.status === "validation_error") {
     return parsedRecoverablePenalties;
+  }
+  const parsedManualEquipment = hasEditorManualEquipmentValues(values)
+    ? parseEditorManualEquipmentItems(values, nextDefinition)
+    : null;
+  if (parsedManualEquipment?.status === "validation_error") {
+    return parsedManualEquipment;
   }
 
   for (const [fieldName, value] of Object.entries(values)) {
@@ -3744,10 +3911,21 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
         : normalizeEditorStatAdjustments(asRecord(nextDefinition.stats).manual_adjustments),
     );
   }
+  if (parsedManualEquipment?.status === "ok") {
+    const baseEquipment = asArray(nextDefinition.equipment_catalog)
+      .map((item) => asRecord(item))
+      .filter((item) => stringifyEditorValue(item.source_kind).trim() !== ADVANCED_EDITOR_MANUAL_EQUIPMENT_SOURCE_KIND);
+    nextDefinition.equipment_catalog = [...baseEquipment, ...parsedManualEquipment.items];
+    manualEquipmentReconcile = {
+      enabled: true,
+      removedItemIds: parsedManualEquipment.removedItemIds,
+    };
+  }
   return {
     status: "ok",
     definition: nextDefinition,
     stateNoteValues,
+    manualEquipmentReconcile,
     values,
   };
 }

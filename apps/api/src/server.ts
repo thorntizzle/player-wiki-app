@@ -5785,6 +5785,7 @@ app.put(ROUTES.characterAdvancedEditorUpdate, async (ctx) => {
     {
       expected_revision: jsonPayload.payload.expected_revision,
       state_note_values: referenceUpdate.stateNoteValues,
+      manualEquipmentReconcile: referenceUpdate.manualEquipmentReconcile,
     },
     auth.actorUserId ?? 0,
   );

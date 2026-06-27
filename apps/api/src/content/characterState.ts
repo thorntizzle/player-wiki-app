@@ -135,6 +135,7 @@ const CHARACTER_STATE_CONFLICT_MESSAGE = "This sheet changed in another session.
 const CHARACTER_SHEET_EDIT_CONFLICT_MESSAGE =
   "This sheet changed before your batch save finished. Refresh and review the latest sheet before saving again. Session Character, Combat, or another tab may have changed nearby fields first; nothing was auto-merged.";
 const CAMPAIGN_ITEMS_SECTION = "Items";
+const ADVANCED_EDITOR_MANUAL_EQUIPMENT_SOURCE_KIND = "manual_edit";
 const ARTIFICER_INFUSIONS_FEATURE_KEY = "artificerinfusions";
 const ENHANCED_DEFENSE_INFUSION_KEY = "enhanced-defense";
 const KNOWN_ARTIFICER_INFUSION_TITLES = new Set([
@@ -1281,9 +1282,87 @@ function buildInventoryState(definition: Record<string, unknown>): unknown[] {
   return inventory;
 }
 
+function buildInventoryStateItemFromDefinition(
+  item: Record<string, unknown>,
+  existingItem: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    ...existingItem,
+    id: item.id ?? null,
+    catalog_ref: item.id ?? null,
+    name: item.name ?? null,
+    quantity: asInt(item.default_quantity, 0),
+    weight: item.weight ?? null,
+    is_equipped: Boolean(item.is_equipped),
+    is_attuned: Boolean(item.is_attuned),
+    charges_current: item.charges_current ?? null,
+    charges_max: item.charges_max ?? null,
+    notes: item.notes ?? "",
+    tags: asArray(item.tags),
+  };
+  const weaponWieldMode = normalizeWeaponWieldModeValue(item.weapon_wield_mode);
+  if (weaponWieldMode) {
+    payload.weapon_wield_mode = weaponWieldMode;
+  } else {
+    delete payload.weapon_wield_mode;
+  }
+  const activeInfusions = normalizeActiveInfusions(item.active_infusions);
+  if (activeInfusions.length > 0) {
+    payload.active_infusions = activeInfusions;
+  } else {
+    delete payload.active_infusions;
+  }
+  return payload;
+}
+
+function manualEquipmentDefinitionItems(definition: Record<string, unknown>): Array<Record<string, unknown>> {
+  return asArray(definition.equipment_catalog)
+    .map((item) => asRecord(item))
+    .filter((item) => asString(item.source_kind) === ADVANCED_EDITOR_MANUAL_EQUIPMENT_SOURCE_KIND);
+}
+
 function inventoryItemRef(item: unknown): string {
   const payload = asRecord(item);
   return asString(payload.catalog_ref || payload.id);
+}
+
+function reconcileAdvancedEditorManualEquipmentState(
+  state: Record<string, unknown>,
+  definition: Record<string, unknown>,
+  removedItemIds: string[],
+): void {
+  const manualItems = manualEquipmentDefinitionItems(definition);
+  const manualById = new Map(
+    manualItems
+      .map((item) => [asString(item.id), item] as const)
+      .filter(([itemId]) => Boolean(itemId)),
+  );
+  const removed = new Set(removedItemIds.map((itemId) => asString(itemId)).filter(Boolean));
+  const nextInventory: unknown[] = [];
+  const seenManualIds = new Set<string>();
+  for (const rawItem of asArray(state.inventory)) {
+    const item = { ...asRecord(rawItem) };
+    const itemRef = inventoryItemRef(item);
+    if (removed.has(itemRef)) {
+      continue;
+    }
+    const manualItem = manualById.get(itemRef);
+    if (manualItem) {
+      nextInventory.push(buildInventoryStateItemFromDefinition(manualItem, item));
+      seenManualIds.add(itemRef);
+      continue;
+    }
+    nextInventory.push(item);
+  }
+  for (const item of manualItems) {
+    const itemId = asString(item.id);
+    if (!itemId || seenManualIds.has(itemId)) {
+      continue;
+    }
+    nextInventory.push(buildInventoryStateItemFromDefinition(item));
+  }
+  state.inventory = nextInventory;
+  state.attunement = normalizeAttunementState(nextInventory);
 }
 
 function normalizeAttunementState(inventory: unknown[]): Record<string, unknown> {
@@ -3511,6 +3590,7 @@ export function updateCharacterAdvancedEditorReferenceState(
   }
 
   const stateNoteValues = asRecord(payload.state_note_values);
+  const manualEquipmentReconcile = asRecord(payload.manualEquipmentReconcile ?? payload.manual_equipment_reconcile);
   const database = openDatabase(config);
   if (!database) {
     return { status: "validation_error", message: "Character state store is not available." };
@@ -3535,6 +3615,13 @@ export function updateCharacterAdvancedEditorReferenceState(
       notes[fieldName] = value === null || value === undefined ? "" : String(value);
     }
     nextState.notes = notes;
+    if (manualEquipmentReconcile.enabled === true) {
+      reconcileAdvancedEditorManualEquipmentState(
+        nextState,
+        definition,
+        asArray(manualEquipmentReconcile.removedItemIds).map((itemId) => asString(itemId)).filter(Boolean),
+      );
+    }
     const vitals = { ...asRecord(nextState.vitals) };
     if (Object.hasOwn(vitals, "current_hp")) {
       vitals.current_hp = clampInt(vitals.current_hp, 0, nonNegativeInt(definitionStats(definition).max_hp, 0));

@@ -1635,6 +1635,13 @@ def test_typescript_character_advanced_editor_context_matches_flask_shell(
     assert editor["reference_fields"][1]["label"] == flask_payload["editor"]["reference_fields"][1]["label"]
     assert editor["feature_rows"]
     assert editor["equipment_rows"]
+    assert [row["index"] for row in editor["equipment_rows"]] == [
+        row["index"] for row in flask_payload["editor"]["equipment_rows"]
+    ]
+    for row, flask_row in zip(editor["equipment_rows"], flask_payload["editor"]["equipment_rows"]):
+        assert {key: row.get(key) for key in ("id", "name", "page_ref", "quantity", "weight", "notes")} == {
+            key: flask_row.get(key) for key in ("id", "name", "page_ref", "quantity", "weight", "notes")
+        }
 
 
 def test_typescript_character_advanced_editor_reference_fields_save_fixture(
@@ -1675,6 +1682,19 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert unsupported_status == 400
     assert unsupported_payload["error"]["code"] == "validation_error"
     assert "feature_rows" in unsupported_payload["error"]["message"]
+
+    unsupported_feature_status, unsupported_feature_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={
+            "expected_revision": expected_revision,
+            "values": {"custom_feature_name_1": "Feature rows are not in this TS slice."},
+        },
+    )
+    assert unsupported_feature_status == 400
+    assert unsupported_feature_payload["error"]["code"] == "validation_error"
+    assert "custom_feature_name_1" in unsupported_feature_payload["error"]["message"]
 
     stale_status, stale_payload = _to_json(
         route_url,
@@ -1943,6 +1963,166 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert clear_penalty_stats["max_hp"] == base_stats["max_hp"]
     assert clear_penalty_stats["ability_scores"]["cha"] == base_cha
     assert clear_penalty_payload["character"]["state_record"]["state"]["vitals"]["current_hp"] == int(base_stats["max_hp"]) - 6
+
+    invalid_equipment_status, invalid_equipment_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={
+            "expected_revision": expected_revision + 5,
+            "values": {
+                "manual_item_name_1": "Broken Token",
+                "manual_item_quantity_1": "many",
+            },
+        },
+    )
+    assert invalid_equipment_status == 400
+    assert invalid_equipment_payload["error"]["code"] == "validation_error"
+    assert "whole numbers" in invalid_equipment_payload["error"]["message"]
+
+    linked_equipment_status, linked_equipment_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={
+            "expected_revision": expected_revision + 5,
+            "values": {
+                "manual_item_name_1": "Linked Token",
+                "manual_item_page_ref_1": "items/stormglass-compass",
+                "manual_item_quantity_1": "1",
+            },
+        },
+    )
+    assert linked_equipment_status == 400
+    assert linked_equipment_payload["error"]["code"] == "validation_error"
+    assert "Linked manual equipment pages" in linked_equipment_payload["error"]["message"]
+
+    equipment_values = {
+        "manual_item_name_1": "Storm Token",
+        "manual_item_quantity_1": "2",
+        "manual_item_weight_1": "light",
+        "manual_item_notes_1": "Stamped with blue wax.",
+    }
+    equipment_status, equipment_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={"expected_revision": expected_revision + 5, "values": equipment_values},
+    )
+    assert equipment_status == 200
+    assert equipment_payload["editor"]["state_revision"] == expected_revision + 6
+    manual_items = [
+        item
+        for item in equipment_payload["character"]["definition"]["equipment_catalog"]
+        if item.get("source_kind") == "manual_edit"
+    ]
+    assert len(manual_items) == 1
+    manual_item = manual_items[0]
+    manual_item_id = manual_item["id"]
+    assert manual_item_id.startswith("manual-item-storm-token")
+    assert manual_item["name"] == "Storm Token"
+    assert manual_item["default_quantity"] == 2
+    assert manual_item["weight"] == "light"
+    assert manual_item["notes"] == "Stamped with blue wax."
+    inventory_by_ref = {
+        item.get("catalog_ref"): item
+        for item in equipment_payload["character"]["state_record"]["state"]["inventory"]
+    }
+    assert inventory_by_ref[manual_item_id]["name"] == "Storm Token"
+    assert inventory_by_ref[manual_item_id]["quantity"] == 2
+    assert inventory_by_ref[manual_item_id]["weight"] == "light"
+    assert inventory_by_ref[manual_item_id]["notes"] == "Stamped with blue wax."
+    equipment_rows = {
+        row["index"]: row for row in equipment_payload["editor"]["equipment_rows"]
+    }
+    assert equipment_rows[1]["id"] == manual_item_id
+    assert equipment_rows[1]["name"] == "Storm Token"
+    assert equipment_rows[1]["quantity"] == "2"
+    assert equipment_rows[1]["weight"] == "light"
+    assert equipment_rows[1]["notes"] == "Stamped with blue wax."
+    assert [row["index"] for row in equipment_payload["editor"]["equipment_rows"]] == [1, 2, 3]
+
+    sqlite_state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
+    assert sqlite_state is not None
+    assert sqlite_state["revision"] == expected_revision + 6
+    sqlite_inventory = {
+        item.get("catalog_ref"): item for item in sqlite_state["state"]["inventory"]
+    }
+    assert sqlite_inventory[manual_item_id]["quantity"] == 2
+
+    definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
+    manual_definition_items = [
+        item for item in definition["equipment_catalog"] if item.get("source_kind") == "manual_edit"
+    ]
+    assert len(manual_definition_items) == 1
+    assert manual_definition_items[0]["id"] == manual_item_id
+    assert manual_definition_items[0]["default_quantity"] == 2
+
+    update_equipment_values = {
+        "manual_item_id_1": manual_item_id,
+        "manual_item_name_1": "Silver Storm Token",
+        "manual_item_quantity_1": "0",
+        "manual_item_weight_1": "1 lb.",
+        "manual_item_notes_1": "Spent but kept as proof.",
+    }
+    update_equipment_status, update_equipment_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={"expected_revision": expected_revision + 6, "values": update_equipment_values},
+    )
+    assert update_equipment_status == 200
+    assert update_equipment_payload["editor"]["state_revision"] == expected_revision + 7
+    updated_manual_items = [
+        item
+        for item in update_equipment_payload["character"]["definition"]["equipment_catalog"]
+        if item.get("source_kind") == "manual_edit"
+    ]
+    assert len(updated_manual_items) == 1
+    assert updated_manual_items[0]["id"] == manual_item_id
+    assert updated_manual_items[0]["name"] == "Silver Storm Token"
+    assert updated_manual_items[0]["default_quantity"] == 0
+    updated_inventory_by_ref = {
+        item.get("catalog_ref"): item
+        for item in update_equipment_payload["character"]["state_record"]["state"]["inventory"]
+    }
+    assert updated_inventory_by_ref[manual_item_id]["name"] == "Silver Storm Token"
+    assert updated_inventory_by_ref[manual_item_id]["quantity"] == 0
+    assert updated_inventory_by_ref[manual_item_id]["weight"] == "1 lb."
+    assert updated_inventory_by_ref[manual_item_id]["notes"] == "Spent but kept as proof."
+
+    clear_equipment_values = {
+        "manual_item_id_1": "",
+        "manual_item_name_1": "",
+        "manual_item_page_ref_1": "",
+        "manual_item_quantity_1": "",
+        "manual_item_weight_1": "",
+        "manual_item_notes_1": "",
+    }
+    clear_equipment_status, clear_equipment_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={"expected_revision": expected_revision + 7, "values": clear_equipment_values},
+    )
+    assert clear_equipment_status == 200
+    assert clear_equipment_payload["editor"]["state_revision"] == expected_revision + 8
+    assert all(
+        item.get("source_kind") != "manual_edit"
+        for item in clear_equipment_payload["character"]["definition"]["equipment_catalog"]
+    )
+    assert all(
+        item.get("catalog_ref") != manual_item_id
+        for item in clear_equipment_payload["character"]["state_record"]["state"]["inventory"]
+    )
+    assert [
+        {key: row.get(key) for key in ("id", "name", "page_ref", "quantity", "weight", "notes")}
+        for row in clear_equipment_payload["editor"]["equipment_rows"]
+    ] == [
+        {"id": "", "name": "", "page_ref": "", "quantity": "", "weight": "", "notes": ""},
+        {"id": "", "name": "", "page_ref": "", "quantity": "", "weight": "", "notes": ""},
+        {"id": "", "name": "", "page_ref": "", "quantity": "", "weight": "", "notes": ""},
+    ]
 
 
 def test_typescript_character_advancement_context_shells_match_flask_fixture(
