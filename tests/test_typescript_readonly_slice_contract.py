@@ -353,6 +353,7 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
             ("DND-5E", "PHB", "PHB:subclass:champion", "subclass", "phb-champion", "Champion", {"class_name": "Fighter", "class_source": "PHB"}),
             ("DND-5E", "PHB", "PHB:optionalfeature:archery", "optionalfeature", "phb-optionalfeature-archery", "Archery", {"feature_type": ["FS:F"]}),
             ("DND-5E", "PHB", "PHB:optionalfeature:defense", "optionalfeature", "phb-optionalfeature-defense", "Defense", {"feature_type": ["FS:F"]}),
+            ("DND-5E", "PHB", "PHB:optionalfeature:quickened-spell", "optionalfeature", "phb-optionalfeature-quickened-spell", "Quickened Spell", {"feature_type": ["MM"]}),
         ]
         connection.executemany(
             "INSERT INTO systems_entries (library_slug, source_id, entry_key, entry_type, slug, title, metadata_json, body_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -2399,6 +2400,26 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     )
     assert linked_feat_page_status == 200
     assert linked_feat_page_payload["ok"] is True
+
+    invalid_optionalfeature_values = {
+        "custom_feature_id_1": custom_feature_id,
+        "custom_feature_name_1": "",
+        "custom_feature_page_ref_1": "mechanics/harbor-drill",
+        "custom_feature_activation_type_1": "",
+        "custom_feature_description_1": "",
+        "custom_feature_resource_max_1": "",
+        "custom_feature_resource_reset_on_1": "",
+        "custom_feature_optionalfeature_1_1_1": "phb-optionalfeature-quickened-spell",
+    }
+    invalid_optionalfeature_status, invalid_optionalfeature_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={"expected_revision": expected_revision + 11, "values": invalid_optionalfeature_values},
+    )
+    assert invalid_optionalfeature_status == 400
+    assert invalid_optionalfeature_payload["error"]["code"] == "validation_error"
+    assert invalid_optionalfeature_payload["error"]["message"] == "Choose a valid option for Harbor Drill."
 
     linked_feature_values = {
         "custom_feature_id_1": custom_feature_id,

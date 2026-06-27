@@ -4304,6 +4304,14 @@ function buildSelectedEditorOptionalFeatureFeatures({
       if (!selectedSlug) {
         return { status: "validation_error", message: `Choose an option for ${parentTitle} ${sectionTitle}.` };
       }
+      const allowedValues = new Set(
+        asArray(section.options)
+          .map((option) => stringifyEditorValue(asRecord(option).value).trim())
+          .filter(Boolean),
+      );
+      if (!allowedValues.has(selectedSlug)) {
+        return { status: "validation_error", message: `Choose a valid option for ${parentTitle}.` };
+      }
       const selectedEntry = entriesBySlug.get(selectedSlug);
       if (!selectedEntry) {
         return { status: "validation_error", message: `Choose a valid option for ${parentTitle}.` };
