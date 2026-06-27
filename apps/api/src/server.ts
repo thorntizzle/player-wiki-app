@@ -132,6 +132,7 @@ import {
   buildDndCharacterCreateContext,
   buildDndCreateCharacter,
   buildXianxiaCreateCharacter,
+  type CharacterAdvancementRouteKind,
   listXianxiaCultivationGenericTechniqueRows,
   listXianxiaCultivationMartialArtRows,
   listXianxiaCreateGenericTechniqueOptions,
@@ -6043,6 +6044,90 @@ app.get(ROUTES.characterProgressionRepair, async (ctx) => {
     links: advancementPayload.links,
   });
 });
+
+async function handleCharacterAdvancementShellSubmit(
+  ctx: Context,
+  kind: CharacterAdvancementRouteKind,
+  forbiddenMessage: string,
+  fallbackMessage: string,
+) {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character || String(character.definition.status || "").trim() !== "active") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (kind === "progression_repair") {
+    const canManageSession =
+      (auth.role === "admin" || auth.role === "dm") &&
+      campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session");
+    if (!canManageSession) {
+      const error = forbidden(forbiddenMessage);
+      return ctx.json({ ok: error.ok, error: error.error }, error.status);
+    }
+  } else if (!canEditCharacterSessionState(config, campaign.slug, characterSlug, auth.role, auth.actorUserId)) {
+    const error = forbidden(forbiddenMessage);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const advancementPayload = buildCharacterAdvancementShellPayload({
+    campaign,
+    characterSlug,
+    definition: character.definition,
+    kind,
+  });
+  const message = advancementPayload.supported
+    ? `${fallbackMessage} save parity is not implemented in the TypeScript route shell yet.`
+    : advancementPayload.unsupported_message || fallbackMessage;
+  const error = jsonError("unsupported_campaign_system", message, 400);
+  return ctx.json({ ok: error.ok, error: error.error }, error.status);
+}
+
+app.post(ROUTES.characterRetrainingSubmit, async (ctx) =>
+  handleCharacterAdvancementShellSubmit(
+    ctx,
+    "retraining",
+    "You do not have permission to retrain this character.",
+    "This character is not ready for Gen2 retraining.",
+  ),
+);
+
+app.post(ROUTES.characterLevelUpSubmit, async (ctx) =>
+  handleCharacterAdvancementShellSubmit(
+    ctx,
+    "level_up",
+    "You do not have permission to level up this character.",
+    "This character is not ready for Gen2 level-up.",
+  ),
+);
+
+app.post(ROUTES.characterProgressionRepairSubmit, async (ctx) =>
+  handleCharacterAdvancementShellSubmit(
+    ctx,
+    "progression_repair",
+    "You do not have permission to repair progression for this character.",
+    "This character is not ready for Gen2 progression repair.",
+  ),
+);
 
 app.get(ROUTES.characterCultivation, async (ctx) => {
   const campaignSlug = ctx.req.param("campaignSlug") || "";

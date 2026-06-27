@@ -1976,6 +1976,51 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "content_character_not_found",
     },
   },
+  {
+    method: "POST",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/retraining",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/retraining",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/retraining",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
+  {
+    method: "POST",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/level-up",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/level-up",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/level-up",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
+  {
+    method: "POST",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/progression-repair",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -2112,4 +2157,7 @@ export const ROUTES = {
   campaignAsset: IMPLEMENTED_ROUTES[132].honoPath,
   characterAdvancedEditorUpdate: IMPLEMENTED_ROUTES[133].honoPath,
   characterCultivation: IMPLEMENTED_ROUTES[134].honoPath,
+  characterRetrainingSubmit: IMPLEMENTED_ROUTES[136].honoPath,
+  characterLevelUpSubmit: IMPLEMENTED_ROUTES[137].honoPath,
+  characterProgressionRepairSubmit: IMPLEMENTED_ROUTES[138].honoPath,
 } as const;

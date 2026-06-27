@@ -168,9 +168,12 @@ Do not implement these routes as part of the parity program unless a later archi
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor`
   - `PUT /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor` (reference, proficiency, stat-adjustment, recoverable-penalty, and unlinked manual-equipment fields only; custom feature rows, page-linked manual item derivation, and full native derivation parity pending)
-  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (context shell only; POST/save parity pending)
-  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (context shell only; POST/save parity pending)
-  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (context shell only; POST/save parity pending)
+  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (context shell only; real save parity pending)
+  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (unsupported/current-shell response only; real save parity pending)
+  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (context shell only; real save parity pending)
+  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (unsupported/current-shell response only; real save parity pending)
+  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (context shell only; real save parity pending)
+  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (unsupported/current-shell response only; real save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (supported Xianxia read context)
   - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (`save_insight`, `record_gathering_insight`, `spend_cultivation_energy`, `spend_meditation_yin_yang`, `spend_conditioning`, `spend_training`, `advance_martial_art_rank`, `learn_generic_technique`, `start_realm_ascension_review`, `reset_realm_ascension_stats`, `apply_immortal_realm_rebuild`, `apply_divine_realm_rebuild`, and `confirm_realm_ascension`)
   - `PATCH /api/v1/campaigns/:campaignSlug/characters/:characterSlug/sheet-edit`
@@ -592,8 +595,9 @@ Do not implement these routes as part of the parity program unless a later archi
   `GET .../level-up`, and `GET .../progression-repair`, preserving Flask-compatible campaign/missing-character
   envelopes, auth and route-specific access failures, current fixture unsupported/empty readiness
   payloads, Advanced Editor/detail links, and route-specific `retraining`, `level_up`, and `repair`
-  null contexts. The POST/save routes, ready-state native builder contexts, state merges, and definition
-  YAML writes remain pending.
+  null contexts. The matching `POST` routes now serve unsupported/current-shell parity for those same fixture
+  states, including route-specific access checks and `unsupported_campaign_system` responses, but real save
+  parity, ready-state native builder contexts, state merges, and definition YAML writes remain pending.
 - The first Character Cultivation write slices now serve
   `POST .../characters/:characterSlug/cultivation` for the `save_insight`, `record_gathering_insight`,
   `spend_cultivation_energy`, `spend_meditation_yin_yang`, `spend_conditioning`,

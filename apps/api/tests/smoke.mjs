@@ -9693,6 +9693,23 @@ if (
   throw new Error(`Unexpected DM level-up shell payload: ${JSON.stringify(dmCharacterLevelUp.payload)}`);
 }
 
+const dmCharacterLevelUpPost = await requestJson(
+  characterLevelUpPath,
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: { expected_revision: dmCharacterLevelUp.payload?.character?.state_record?.revision, values: {} },
+  },
+);
+if (
+  dmCharacterLevelUpPost.status !== 400 ||
+  dmCharacterLevelUpPost.payload?.error?.code !== "unsupported_campaign_system" ||
+  dmCharacterLevelUpPost.payload?.error?.message !==
+    "Level-up currently supports native in-app characters and imported character sheets only."
+) {
+  throw new Error(`Unexpected DM level-up POST shell payload: ${JSON.stringify(dmCharacterLevelUpPost.payload)}`);
+}
+
 const assignedPlayerCharacterLevelUp = await requestJson(characterLevelUpPath, {
   Authorization: `Bearer ${playerApiToken}`,
 });
@@ -9721,6 +9738,23 @@ if (
   dmCharacterRetraining.payload?.readiness?.linked_feature_authoring?.supported !== true
 ) {
   throw new Error(`Unexpected DM retraining shell payload: ${JSON.stringify(dmCharacterRetraining.payload)}`);
+}
+
+const dmCharacterRetrainingPost = await requestJson(
+  characterRetrainingPath,
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: { expected_revision: dmCharacterRetraining.payload?.character?.state_record?.revision, values: {} },
+  },
+);
+if (
+  dmCharacterRetrainingPost.status !== 400 ||
+  dmCharacterRetrainingPost.payload?.error?.code !== "unsupported_campaign_system" ||
+  dmCharacterRetrainingPost.payload?.error?.message !==
+    "This character does not currently have any supported structured retraining options."
+) {
+  throw new Error(`Unexpected DM retraining POST shell payload: ${JSON.stringify(dmCharacterRetrainingPost.payload)}`);
 }
 
 const assignedPlayerCharacterRetraining = await requestJson(characterRetrainingPath, {
@@ -9752,6 +9786,25 @@ if (
   throw new Error(`Unexpected DM progression-repair shell payload: ${JSON.stringify(dmCharacterProgressionRepair.payload)}`);
 }
 
+const dmCharacterProgressionRepairPost = await requestJson(
+  characterProgressionRepairPath,
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: { expected_revision: dmCharacterProgressionRepair.payload?.character?.state_record?.revision, values: {} },
+  },
+);
+if (
+  dmCharacterProgressionRepairPost.status !== 400 ||
+  dmCharacterProgressionRepairPost.payload?.error?.code !== "unsupported_campaign_system" ||
+  dmCharacterProgressionRepairPost.payload?.error?.message !==
+    "Level-up currently supports native in-app characters and imported character sheets only."
+) {
+  throw new Error(
+    `Unexpected DM progression-repair POST shell payload: ${JSON.stringify(dmCharacterProgressionRepairPost.payload)}`,
+  );
+}
+
 const blockedPlayerCharacterProgressionRepair = await requestJson(characterProgressionRepairPath, {
   Authorization: `Bearer ${playerApiToken}`,
 });
@@ -9762,6 +9815,24 @@ if (
 ) {
   throw new Error(
     `Expected player progression-repair forbidden, got ${blockedPlayerCharacterProgressionRepair.status} ${JSON.stringify(blockedPlayerCharacterProgressionRepair.payload)}`,
+  );
+}
+
+const blockedPlayerCharacterProgressionRepairPost = await requestJson(
+  characterProgressionRepairPath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  {
+    method: "POST",
+    body: { expected_revision: dmCharacterProgressionRepair.payload?.character?.state_record?.revision, values: {} },
+  },
+);
+if (
+  blockedPlayerCharacterProgressionRepairPost.status !== 403 ||
+  blockedPlayerCharacterProgressionRepairPost.payload?.error?.message !==
+    "You do not have permission to repair progression for this character."
+) {
+  throw new Error(
+    `Expected player progression-repair POST forbidden, got ${blockedPlayerCharacterProgressionRepairPost.status} ${JSON.stringify(blockedPlayerCharacterProgressionRepairPost.payload)}`,
   );
 }
 

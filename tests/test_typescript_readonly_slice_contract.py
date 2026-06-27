@@ -2172,6 +2172,24 @@ def test_typescript_character_advancement_context_shells_match_flask_fixture(
         ):
             assert payload["links"].get(link_key) == flask_payload["links"].get(link_key)
 
+        flask_post_response = client.post(
+            route_path,
+            headers=_api_headers(flask_dm_token),
+            json={"expected_revision": payload["character"]["state_record"]["revision"], "values": {}},
+        )
+        assert flask_post_response.status_code == 400
+        flask_post_payload = flask_post_response.get_json()
+
+        post_status, post_payload = _to_json(
+            f"{typescript_api_mutation_server['url']}{route_path}",
+            headers=typescript_api_mutation_server["dm_headers"],
+            method="POST",
+            body={"expected_revision": payload["character"]["state_record"]["revision"], "values": {}},
+        )
+        assert post_status == 400
+        assert post_payload["error"]["code"] == flask_post_payload["error"]["code"] == "unsupported_campaign_system"
+        assert post_payload["error"]["message"] == flask_post_payload["error"]["message"]
+
     xianxia_character_slug = "api-advancement-crane"
     flask_campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
     _write_campaign_system(flask_campaigns_dir, system="Xianxia", systems_library="Xianxia")
@@ -2235,6 +2253,24 @@ def test_typescript_character_advancement_context_shells_match_flask_fixture(
             "flask_roster_url",
         ):
             assert payload["links"].get(link_key) == flask_payload["links"].get(link_key)
+
+        flask_post_response = client.post(
+            route_path,
+            headers=_api_headers(flask_dm_token),
+            json={"expected_revision": payload["character"]["state_record"]["revision"], "values": {}},
+        )
+        assert flask_post_response.status_code == 400
+        flask_post_payload = flask_post_response.get_json()
+
+        post_status, post_payload = _to_json(
+            f"{typescript_api_mutation_server['url']}{route_path}",
+            headers=typescript_api_mutation_server["dm_headers"],
+            method="POST",
+            body={"expected_revision": payload["character"]["state_record"]["revision"], "values": {}},
+        )
+        assert post_status == 400
+        assert post_payload["error"]["code"] == flask_post_payload["error"]["code"] == "unsupported_campaign_system"
+        assert post_payload["error"]["message"] == flask_post_payload["error"]["message"]
 
 
 def test_typescript_character_cultivation_context_shell_and_supported_xianxia_context(
