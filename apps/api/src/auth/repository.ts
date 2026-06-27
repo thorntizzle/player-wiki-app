@@ -225,6 +225,10 @@ function serializeUser(row: UserRow): AuthUser {
   };
 }
 
+function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 function serializeMembership(row: MembershipRow): AuthMembership {
   return {
     id: Number(row.id),
@@ -479,6 +483,64 @@ export function getUserById(dbPath: string, userId: number): AuthUser | null {
       .prepare("SELECT * FROM users WHERE id = ?")
       .get(userId) as UserRow | undefined;
     return row ? serializeUser(row) : null;
+  } finally {
+    database.close();
+  }
+}
+
+export function getUserByEmail(dbPath: string, email: string): AuthUser | null {
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const row = database
+      .prepare("SELECT * FROM users WHERE email = ?")
+      .get(normalizeEmail(email)) as UserRow | undefined;
+    return row ? serializeUser(row) : null;
+  } finally {
+    database.close();
+  }
+}
+
+export function createUser(
+  dbPath: string,
+  {
+    email,
+    displayName,
+    isAdmin = false,
+    status = "invited",
+  }: {
+    email: string;
+    displayName: string;
+    isAdmin?: boolean;
+    status?: string;
+  },
+): AuthUser {
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const now = utcIsoTimestamp();
+    const writeUser = database.transaction(() => {
+      const result = database
+        .prepare(
+          `INSERT INTO users (
+            email,
+            display_name,
+            is_admin,
+            status,
+            password_hash,
+            auth_version,
+            created_at,
+            updated_at
+          ) VALUES (?, ?, ?, ?, NULL, 1, ?, ?)`,
+        )
+        .run(normalizeEmail(email), displayName.trim(), isAdmin ? 1 : 0, status, now, now);
+      return database.prepare("SELECT * FROM users WHERE id = ?").get(Number(result.lastInsertRowid)) as
+        | UserRow
+        | undefined;
+    });
+    const row = writeUser();
+    if (!row) {
+      throw new Error("User was not readable after create.");
+    }
+    return serializeUser(row);
   } finally {
     database.close();
   }

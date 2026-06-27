@@ -1820,6 +1820,285 @@ if (
   );
 }
 
+const adminCreateInvitePath = "/api/v1/admin/users/invite";
+const blockedAdminCreateInvite = await requestJson(
+  adminCreateInvitePath,
+  {},
+  { method: "POST", body: { email: "new-standard@example.com", display_name: "New Standard", user_type: "standard" } },
+);
+if (
+  blockedAdminCreateInvite.status !== 401 ||
+  blockedAdminCreateInvite.payload?.error?.code !== "auth_required"
+) {
+  throw new Error(
+    `Expected unauthenticated admin create-invite auth_required 401, got ${blockedAdminCreateInvite.status} ${JSON.stringify(blockedAdminCreateInvite.payload)}`,
+  );
+}
+
+const fixtureAdminCreateInvite = await requestJson(
+  adminCreateInvitePath,
+  { "X-CPW-Fixture-Role": "admin" },
+  { method: "POST", body: { email: "new-standard@example.com", display_name: "New Standard", user_type: "standard" } },
+);
+if (
+  fixtureAdminCreateInvite.status !== 403 ||
+  fixtureAdminCreateInvite.payload?.error?.message !== "Admin membership updates require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture admin create-invite denial, got ${fixtureAdminCreateInvite.status} ${JSON.stringify(fixtureAdminCreateInvite.payload)}`,
+  );
+}
+
+const playerAdminCreateInvite = await requestJson(
+  adminCreateInvitePath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: { email: "new-standard@example.com", display_name: "New Standard", user_type: "standard" } },
+);
+if (
+  playerAdminCreateInvite.status !== 403 ||
+  playerAdminCreateInvite.payload?.error?.message !== "You do not have permission to use the admin API."
+) {
+  throw new Error(
+    `Expected player admin create-invite forbidden, got ${playerAdminCreateInvite.status} ${JSON.stringify(playerAdminCreateInvite.payload)}`,
+  );
+}
+
+const invalidTypeAdminCreateInvite = await requestJson(
+  adminCreateInvitePath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { email: "bad-type@example.com", display_name: "Bad Type", user_type: "wizard" } },
+);
+if (
+  invalidTypeAdminCreateInvite.status !== 400 ||
+  invalidTypeAdminCreateInvite.payload?.error?.message !== "Choose a valid user type."
+) {
+  throw new Error(`Expected invalid create-invite user type validation, got ${JSON.stringify(invalidTypeAdminCreateInvite.payload)}`);
+}
+
+const missingCampaignAdminCreateInvite = await requestJson(
+  adminCreateInvitePath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { email: "no-campaign@example.com", display_name: "No Campaign", user_type: "player" } },
+);
+if (
+  missingCampaignAdminCreateInvite.status !== 400 ||
+  missingCampaignAdminCreateInvite.payload?.error?.message !== "Choose a valid campaign for DM or Player invites."
+) {
+  throw new Error(
+    `Expected missing create-invite campaign validation, got ${JSON.stringify(missingCampaignAdminCreateInvite.payload)}`,
+  );
+}
+
+const missingIdentityAdminCreateInvite = await requestJson(
+  adminCreateInvitePath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { email: "", display_name: "   ", user_type: "standard" } },
+);
+if (
+  missingIdentityAdminCreateInvite.status !== 400 ||
+  missingIdentityAdminCreateInvite.payload?.error?.message !== "Email and display name are required."
+) {
+  throw new Error(
+    `Expected missing create-invite identity validation, got ${JSON.stringify(missingIdentityAdminCreateInvite.payload)}`,
+  );
+}
+
+const duplicateAdminCreateInvite = await requestJson(
+  adminCreateInvitePath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  {
+    method: "POST",
+    body: {
+      email: " Fixture-Token-Player@Example.COM ",
+      display_name: "Duplicate Player",
+      user_type: "standard",
+    },
+  },
+);
+if (
+  duplicateAdminCreateInvite.status !== 400 ||
+  duplicateAdminCreateInvite.payload?.error?.message !== "User already exists: Fixture-Token-Player@Example.COM"
+) {
+  throw new Error(`Expected duplicate create-invite validation, got ${JSON.stringify(duplicateAdminCreateInvite.payload)}`);
+}
+
+const standardAdminCreateInvite = await requestJson(
+  adminCreateInvitePath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  {
+    method: "POST",
+    body: {
+      email: " New.Standard.Invite@Example.COM ",
+      display_name: "  New Standard Invite  ",
+      is_admin: "0",
+    },
+  },
+);
+const standardInviteUrl = String(standardAdminCreateInvite.payload?.invite_url || "");
+const expectedCreateInvitePrefix = `http://127.0.0.1:${port}/invite/`;
+const rawStandardInviteToken = standardInviteUrl.startsWith(expectedCreateInvitePrefix)
+  ? standardInviteUrl.slice(expectedCreateInvitePrefix.length)
+  : "";
+const standardInviteUserId = standardAdminCreateInvite.payload?.managed_user?.id;
+if (
+  standardAdminCreateInvite.status !== 201 ||
+  standardAdminCreateInvite.payload?.ok !== true ||
+  standardAdminCreateInvite.payload?.managed_user?.email !== "new.standard.invite@example.com" ||
+  standardAdminCreateInvite.payload?.managed_user?.display_name !== "New Standard Invite" ||
+  standardAdminCreateInvite.payload?.managed_user?.status !== "invited" ||
+  standardAdminCreateInvite.payload?.managed_user?.is_admin !== false ||
+  !rawStandardInviteToken ||
+  standardAdminCreateInvite.payload?.message !== `Invite URL: ${standardInviteUrl}`
+) {
+  throw new Error(`Unexpected standard create-invite payload: ${JSON.stringify(standardAdminCreateInvite.payload)}`);
+}
+
+const playerAdminCreateInviteResult = await requestJson(
+  adminCreateInvitePath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  {
+    method: "POST",
+    body: {
+      email: "new.player.invite@example.com",
+      display_name: "New Player Invite",
+      user_type: "player",
+      campaign_slug: "linden-pass",
+    },
+  },
+);
+const playerInviteUrl = String(playerAdminCreateInviteResult.payload?.invite_url || "");
+const rawPlayerInviteToken = playerInviteUrl.startsWith(expectedCreateInvitePrefix)
+  ? playerInviteUrl.slice(expectedCreateInvitePrefix.length)
+  : "";
+const playerInviteUserId = playerAdminCreateInviteResult.payload?.managed_user?.id;
+const createdPlayerMembership = playerAdminCreateInviteResult.payload?.memberships?.find(
+  (membership) => membership.campaign_slug === "linden-pass",
+);
+if (
+  playerAdminCreateInviteResult.status !== 201 ||
+  playerAdminCreateInviteResult.payload?.ok !== true ||
+  playerAdminCreateInviteResult.payload?.managed_user?.email !== "new.player.invite@example.com" ||
+  playerAdminCreateInviteResult.payload?.managed_user?.status !== "invited" ||
+  playerAdminCreateInviteResult.payload?.managed_user?.is_admin !== false ||
+  createdPlayerMembership?.role !== "player" ||
+  createdPlayerMembership?.status !== "active" ||
+  !rawPlayerInviteToken ||
+  playerAdminCreateInviteResult.payload?.message !== `Invite URL: ${playerInviteUrl}`
+) {
+  throw new Error(`Unexpected player create-invite payload: ${JSON.stringify(playerAdminCreateInviteResult.payload)}`);
+}
+
+const adminCreateInviteAuditDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const standardInviteUserRow = adminCreateInviteAuditDb
+  .prepare("SELECT email, display_name, is_admin, status, password_hash FROM users WHERE id = ?")
+  .get(standardInviteUserId);
+const standardInviteTokenRow = adminCreateInviteAuditDb
+  .prepare(
+    "SELECT user_id, token_hash, expires_at, used_at, created_by_user_id, created_at FROM invite_tokens WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+  )
+  .get(standardInviteUserId);
+const standardCreateInviteAuditRows = adminCreateInviteAuditDb
+  .prepare(
+    "SELECT actor_user_id, target_user_id, campaign_slug, character_slug, event_type, metadata_json FROM auth_audit_log WHERE target_user_id = ? ORDER BY id ASC",
+  )
+  .all(standardInviteUserId);
+const playerInviteUserRow = adminCreateInviteAuditDb
+  .prepare("SELECT email, display_name, is_admin, status, password_hash FROM users WHERE id = ?")
+  .get(playerInviteUserId);
+const playerInviteTokenRow = adminCreateInviteAuditDb
+  .prepare(
+    "SELECT user_id, token_hash, expires_at, used_at, created_by_user_id, created_at FROM invite_tokens WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+  )
+  .get(playerInviteUserId);
+const playerInviteMembershipRow = adminCreateInviteAuditDb
+  .prepare("SELECT role, status FROM campaign_memberships WHERE user_id = ? AND campaign_slug = ?")
+  .get(playerInviteUserId, "linden-pass");
+const playerCreateInviteAuditRows = adminCreateInviteAuditDb
+  .prepare(
+    "SELECT actor_user_id, target_user_id, campaign_slug, character_slug, event_type, metadata_json FROM auth_audit_log WHERE target_user_id = ? ORDER BY id ASC",
+  )
+  .all(playerInviteUserId);
+adminCreateInviteAuditDb.close();
+const parsedStandardCreateInviteAudits = standardCreateInviteAuditRows.map((row) => ({
+  ...row,
+  metadata: JSON.parse(row.metadata_json),
+}));
+const parsedPlayerCreateInviteAudits = playerCreateInviteAuditRows.map((row) => ({
+  ...row,
+  metadata: JSON.parse(row.metadata_json),
+}));
+const standardCreateInviteTtlHours =
+  (Date.parse(standardInviteTokenRow?.expires_at || "") - Date.parse(standardInviteTokenRow?.created_at || "")) /
+  (60 * 60 * 1000);
+const playerCreateInviteTtlHours =
+  (Date.parse(playerInviteTokenRow?.expires_at || "") - Date.parse(playerInviteTokenRow?.created_at || "")) /
+  (60 * 60 * 1000);
+const createInviteAuditMetadata = [
+  ...parsedStandardCreateInviteAudits.map((row) => row.metadata),
+  ...parsedPlayerCreateInviteAudits.map((row) => row.metadata),
+];
+if (
+  standardInviteUserRow?.email !== "new.standard.invite@example.com" ||
+  standardInviteUserRow?.display_name !== "New Standard Invite" ||
+  standardInviteUserRow?.is_admin !== 0 ||
+  standardInviteUserRow?.status !== "invited" ||
+  standardInviteUserRow?.password_hash !== null ||
+  standardInviteTokenRow?.user_id !== standardInviteUserId ||
+  standardInviteTokenRow?.token_hash !== hashToken(rawStandardInviteToken) ||
+  standardInviteTokenRow?.used_at !== null ||
+  standardInviteTokenRow?.created_by_user_id !== 77 ||
+  Math.abs(standardCreateInviteTtlHours - 72) > 0.01 ||
+  parsedStandardCreateInviteAudits.length !== 2 ||
+  parsedStandardCreateInviteAudits[0]?.event_type !== "user_created" ||
+  parsedStandardCreateInviteAudits[0]?.metadata?.is_admin !== false ||
+  parsedStandardCreateInviteAudits[0]?.metadata?.source !== "admin_screen" ||
+  parsedStandardCreateInviteAudits[1]?.event_type !== "user_invited" ||
+  parsedStandardCreateInviteAudits[1]?.metadata?.source !== "admin_screen" ||
+  playerInviteUserRow?.email !== "new.player.invite@example.com" ||
+  playerInviteUserRow?.display_name !== "New Player Invite" ||
+  playerInviteUserRow?.is_admin !== 0 ||
+  playerInviteUserRow?.status !== "invited" ||
+  playerInviteTokenRow?.user_id !== playerInviteUserId ||
+  playerInviteTokenRow?.token_hash !== hashToken(rawPlayerInviteToken) ||
+  playerInviteTokenRow?.used_at !== null ||
+  playerInviteTokenRow?.created_by_user_id !== 77 ||
+  Math.abs(playerCreateInviteTtlHours - 72) > 0.01 ||
+  playerInviteMembershipRow?.role !== "player" ||
+  playerInviteMembershipRow?.status !== "active" ||
+  parsedPlayerCreateInviteAudits.length !== 3 ||
+  parsedPlayerCreateInviteAudits[0]?.event_type !== "user_created" ||
+  parsedPlayerCreateInviteAudits[0]?.metadata?.is_admin !== false ||
+  parsedPlayerCreateInviteAudits[1]?.event_type !== "user_invited" ||
+  parsedPlayerCreateInviteAudits[2]?.event_type !== "membership_created" ||
+  parsedPlayerCreateInviteAudits[2]?.campaign_slug !== "linden-pass" ||
+  parsedPlayerCreateInviteAudits[2]?.metadata?.role !== "player" ||
+  parsedPlayerCreateInviteAudits[2]?.metadata?.status !== "active" ||
+  parsedPlayerCreateInviteAudits.some(
+    (row) => row.actor_user_id !== 77 || row.character_slug !== null || row.metadata?.source !== "admin_screen",
+  ) ||
+  createInviteAuditMetadata.some(
+    (metadata) =>
+      Object.hasOwn(metadata, "invite_url") ||
+      Object.hasOwn(metadata, "reset_url") ||
+      Object.hasOwn(metadata, "raw_token") ||
+      Object.hasOwn(metadata, "token"),
+  )
+) {
+  throw new Error(
+    `Unexpected admin create-invite database/audit state: ${JSON.stringify({
+      standardInviteUserRow,
+      standardInviteTokenRow,
+      standardCreateInviteTtlHours,
+      parsedStandardCreateInviteAudits,
+      playerInviteUserRow,
+      playerInviteTokenRow,
+      playerCreateInviteTtlHours,
+      playerInviteMembershipRow,
+      parsedPlayerCreateInviteAudits,
+    })}`,
+  );
+}
+
 const adminMembershipPath = "/api/v1/admin/users/78/membership";
 const blockedAdminMembershipCreate = await requestJson(
   adminMembershipPath,

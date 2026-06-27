@@ -59,6 +59,7 @@ Route parity check command:
   - `GET /api/v1/systems/import-runs/:importRunId`
   - `POST /api/v1/systems/imports/dnd5e`
   - `GET /api/v1/admin`
+  - `POST /api/v1/admin/users/invite`
   - `GET /api/v1/admin/users/:userId`
   - `POST /api/v1/admin/users/:userId/membership`
   - `DELETE /api/v1/admin/users/:userId/membership`
@@ -298,8 +299,8 @@ Route parity check command:
   for theme/chat-order choices, retired `frontend_mode` rejection, and refreshed preference payloads.
   Bearer API-token identity reads now update `api_tokens.last_used_at` when the stored timestamp is
   older than the configured session-touch interval.
-- The Admin shell now serves `GET /api/v1/admin`, `GET /api/v1/admin/users/:userId`,
-  `POST /api/v1/admin/users/:userId/membership`, and
+- The Admin shell now serves `GET /api/v1/admin`, `POST /api/v1/admin/users/invite`,
+  `GET /api/v1/admin/users/:userId`, `POST /api/v1/admin/users/:userId/membership`, and
   `DELETE /api/v1/admin/users/:userId/membership`,
   `POST /api/v1/admin/users/:userId/assignment`, and
   `DELETE /api/v1/admin/users/:userId/assignment`,
@@ -319,6 +320,11 @@ Route parity check command:
   refresh detail payloads, increment `auth_version`, update account status, write `user_disabled`
   and `user_enabled` audit events, revoke all target sessions and API tokens on disable, and restore
   disabled accounts to `active` or `invited` based on password presence.
+  Invite creation and resend-invite mutations are bearer API-token app-admin only, validate invite
+  type/campaign/user identity rules, persist invited accounts and optional active campaign
+  memberships, consume prior unused invite tokens, persist SHA-256-hashed invite tokens with the
+  configured invite TTL, refresh detail payloads, and write `user_created`, `user_invited`, and
+  optional `membership_created` audit events without raw token metadata.
   Remaining Admin mutations stay on Flask until their own approved slices.
 - The Campaign Control read route now serves `GET .../control`, preserving Flask-compatible
   visibility-management auth for fixture or bearer-token DM/admin identities, default campaign

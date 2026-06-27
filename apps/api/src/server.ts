@@ -8,12 +8,14 @@ import { serve } from "@hono/node-server";
 import { buildAdminDashboardPayload, buildAdminUserDetailPayload } from "./admin/view.js";
 import {
   apiTokenRoleForCampaign,
+  createUser,
   deleteCharacterAssignment,
   disableUser,
   enableUser,
   getActiveUserById,
   getCharacterAssignment,
   getMembership,
+  getUserByEmail,
   getUserById,
   hasActivePlayerMembership,
   insertAuthAuditLog,
@@ -1311,6 +1313,113 @@ app.get(ROUTES.adminUser, async (ctx) => {
   }
 
   return ctx.json(payload);
+});
+
+app.post(ROUTES.adminCreateInvite, async (ctx) => {
+  const auth = resolveAppAdminBearerWrite(ctx);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readOptionalJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const email = String(jsonPayload.payload.email || "").trim();
+  const displayName = String(jsonPayload.payload.display_name || "").trim();
+  let requestedUserType = String(jsonPayload.payload.user_type || "").trim().toLowerCase();
+  const campaignSlug = String(jsonPayload.payload.campaign_slug || "").trim();
+
+  if (!requestedUserType) {
+    const legacyIsAdmin = String(jsonPayload.payload.is_admin || "").trim();
+    if (legacyIsAdmin === "1") {
+      requestedUserType = "admin";
+    } else if (legacyIsAdmin === "0") {
+      requestedUserType = "standard";
+    }
+  }
+
+  if (!["admin", "dm", "player", "standard"].includes(requestedUserType)) {
+    const error = validationError("Choose a valid user type.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (
+    (requestedUserType === "dm" || requestedUserType === "player") &&
+    (!campaignSlug || !(await getCampaignBySlug(config, campaignSlug)))
+  ) {
+    const error = validationError("Choose a valid campaign for DM or Player invites.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (!email || !displayName) {
+    const error = validationError("Email and display name are required.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (getUserByEmail(config.dbPath, email)) {
+    const error = validationError(`User already exists: ${email}`);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const makeAdmin = requestedUserType === "admin";
+  const user = createUser(config.dbPath, {
+    email,
+    displayName,
+    isAdmin: makeAdmin,
+    status: "invited",
+  });
+  const inviteToken = issueInviteToken(config.dbPath, user.id, {
+    ttlHours: inviteTtlHours(),
+    createdByUserId: auth.actorUserId ?? null,
+  });
+
+  insertAuthAuditLog(config.dbPath, {
+    actorUserId: auth.actorUserId ?? null,
+    targetUserId: user.id,
+    campaignSlug: null,
+    characterSlug: null,
+    eventType: "user_created",
+    metadata: { is_admin: makeAdmin, source: "admin_screen" },
+  });
+  insertAuthAuditLog(config.dbPath, {
+    actorUserId: auth.actorUserId ?? null,
+    targetUserId: user.id,
+    campaignSlug: null,
+    characterSlug: null,
+    eventType: "user_invited",
+    metadata: { source: "admin_screen" },
+  });
+
+  if (requestedUserType === "dm" || requestedUserType === "player") {
+    const membership = upsertMembership(config.dbPath, user.id, campaignSlug, {
+      role: requestedUserType,
+      status: "active",
+    });
+    insertAuthAuditLog(config.dbPath, {
+      actorUserId: auth.actorUserId ?? null,
+      targetUserId: user.id,
+      campaignSlug,
+      characterSlug: null,
+      eventType: "membership_created",
+      metadata: { role: membership.role, status: membership.status, source: "admin_screen" },
+    });
+  }
+
+  const inviteUrl = buildLocalUrl(`/invite/${inviteToken}`);
+  const payload = await buildAdminUserDetailPayload(config, auth.actorUser || null, user.id, requestQueryValues(ctx));
+  if (!payload) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json(
+    {
+      ...payload,
+      message: `Invite URL: ${inviteUrl}`,
+      invite_url: inviteUrl,
+    },
+    201,
+  );
 });
 
 app.post(ROUTES.adminUserMembership, async (ctx) => {

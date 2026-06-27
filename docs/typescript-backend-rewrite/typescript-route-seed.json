@@ -1062,6 +1062,15 @@
     },
     {
       "method": "POST",
+      "path": "/api/v1/admin/users/invite",
+      "route_family": "api_v1_admin",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/admin/users/invite",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Admin create-invite route with bearer-token app-admin writes, fixture-role write denial, Flask-compatible invite type/campaign/identity/duplicate validation, invited user creation, optional active DM/player campaign membership creation, invite_tokens insertion with SHA-256 token hash and invite TTL, user_created/user_invited/membership_created audit rows without raw token metadata, refreshed user detail payloads, 201 status, and one-shot invite URL response."
+    },
+    {
+      "method": "POST",
       "path": "/api/v1/campaigns/<campaign_slug>/systems/custom-entries",
       "route_family": "api_v1_systems",
       "status": "implemented_fixture_sqlite_write",

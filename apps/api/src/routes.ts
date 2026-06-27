@@ -1787,6 +1787,14 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "admin_user_not_found",
     },
   },
+  {
+    method: "POST",
+    honoPath: "/api/v1/admin/users/invite",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/admin/users/invite",
+    seedPath: "/api/v1/admin/users/invite",
+    routeFamily: "api_v1_admin",
+  },
 ];
 
 export const ROUTES = {
@@ -1910,4 +1918,5 @@ export const ROUTES = {
   adminUserDisable: IMPLEMENTED_ROUTES[119].honoPath,
   adminUserEnable: IMPLEMENTED_ROUTES[120].honoPath,
   adminUserInvite: IMPLEMENTED_ROUTES[121].honoPath,
+  adminCreateInvite: IMPLEMENTED_ROUTES[122].honoPath,
 } as const;
