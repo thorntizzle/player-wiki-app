@@ -836,6 +836,15 @@
       "notes": "Tracked Hono Character Portrait remove route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflicts, absent-portrait validation, copied-fixture portrait asset cleanup, definition/import YAML profile-field removal, compact deleted-portrait payloads, and explicit missing-character JSON."
     },
     {
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Character roster read route with Flask-compatible missing-campaign JSON, membership/visibility access, assigned-player fallback visibility, q filtering against roster search_text, existing portrait references without conversion, character_state revision/vitals/Hit Dice/resource preview serialization, and Flask/Gen2 roster tool links."
+    },
+    {
       "method": "POST",
       "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment",
       "route_family": "api_v1_characters",

@@ -6199,6 +6199,19 @@ if (
   );
 }
 
+const xianxiaCharacterRosterTools = await requestJson("/api/v1/campaigns/linden-pass/characters", {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  xianxiaCharacterRosterTools.status !== 200 ||
+  xianxiaCharacterRosterTools.payload?.tools?.native_character_tools_supported !== false ||
+  xianxiaCharacterRosterTools.payload?.tools?.native_character_create_supported !== true ||
+  xianxiaCharacterRosterTools.payload?.tools?.character_create_lane !== "xianxia" ||
+  xianxiaCharacterRosterTools.payload?.tools?.can_import_xianxia_characters !== true
+) {
+  throw new Error(`Unexpected Xianxia character roster tools payload: ${JSON.stringify(xianxiaCharacterRosterTools.payload)}`);
+}
+
 const emptyContentConfigPatch = await requestJson(
   "/api/v1/campaigns/linden-pass/content/config",
   { Authorization: `Bearer ${dmApiToken}` },
@@ -6289,6 +6302,103 @@ const missingContentCharacter = await requestJson(
 if (missingContentCharacter.status !== 404 || missingContentCharacter.payload?.error?.code !== "content_character_not_found") {
   throw new Error(
     `Expected missing content character JSON 404, got ${missingContentCharacter.status} ${missingContentCharacter.payload?.error?.code}`,
+  );
+}
+
+const ardenDefinitionPathForRoster = path.join(campaignsDir, "linden-pass", "characters", "arden-march", "definition.yaml");
+const ardenRosterPortraitAssetRef = "npcs/captain-lyra-vale.png";
+const ardenDefinitionForRoster = readFileSync(ardenDefinitionPathForRoster, "utf8");
+if (!ardenDefinitionForRoster.includes("portrait_asset_ref:")) {
+  writeFileSync(
+    ardenDefinitionPathForRoster,
+    ardenDefinitionForRoster.replace(
+      "profile:\n",
+      `profile:\n  portrait_asset_ref: ${ardenRosterPortraitAssetRef}\n  portrait_alt: Arden smoke portrait\n  portrait_caption: Existing PNG asset.\n`,
+    ),
+  );
+}
+
+const blockedCharacterRoster = await requestJson("/api/v1/campaigns/linden-pass/characters");
+if (blockedCharacterRoster.status !== 401 || blockedCharacterRoster.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated character roster 401, got ${blockedCharacterRoster.status} ${blockedCharacterRoster.payload?.error?.code}`,
+  );
+}
+
+const dmCharacterRoster = await requestJson("/api/v1/campaigns/linden-pass/characters", {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+const ardenRosterCard = dmCharacterRoster.payload?.characters?.find((item) => item.slug === "arden-march");
+if (
+  dmCharacterRoster.status !== 200 ||
+  dmCharacterRoster.payload?.ok !== true ||
+  dmCharacterRoster.payload?.campaign?.slug !== "linden-pass" ||
+  dmCharacterRoster.payload?.result_count !== 3 ||
+  dmCharacterRoster.payload?.tools?.can_create_characters !== true ||
+  dmCharacterRoster.payload?.tools?.native_character_tools_supported !== true ||
+  dmCharacterRoster.payload?.tools?.native_character_create_supported !== true ||
+  dmCharacterRoster.payload?.tools?.character_create_lane !== "dnd5e" ||
+  dmCharacterRoster.payload?.links?.create_character_url !== "/app-next/campaigns/linden-pass/characters/new" ||
+  ardenRosterCard?.name !== "Arden March" ||
+  ardenRosterCard?.class_level_text !== "Sorcerer 5" ||
+  typeof ardenRosterCard?.current_hp !== "number" ||
+  ardenRosterCard?.max_hp !== 38 ||
+  ardenRosterCard?.hit_dice?.value !== "d6 4/5" ||
+  ardenRosterCard?.hit_dice?.full_value !== "5d6" ||
+  ardenRosterCard?.hit_dice?.regain_on_long_rest !== 2 ||
+  ardenRosterCard?.portrait?.asset_ref !== ardenRosterPortraitAssetRef ||
+  ardenRosterCard?.portrait?.url !== "/campaigns/linden-pass/characters/arden-march/portrait" ||
+  ardenRosterCard?.portrait?.media_type !== "image/png" ||
+  typeof ardenRosterCard?.revision !== "number" ||
+  ardenRosterCard.revision < 1 ||
+  ardenRosterCard?.href !== "/app-next/campaigns/linden-pass/characters/arden-march" ||
+  ardenRosterCard?.flask_href !== "/campaigns/linden-pass/characters/arden-march"
+) {
+  throw new Error(`Unexpected DM character roster payload: ${JSON.stringify(dmCharacterRoster.payload)}`);
+}
+
+const filteredCharacterRoster = await requestJson("/api/v1/campaigns/linden-pass/characters?q=scout", {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  filteredCharacterRoster.status !== 200 ||
+  filteredCharacterRoster.payload?.query !== "scout" ||
+  filteredCharacterRoster.payload?.result_count !== 1 ||
+  filteredCharacterRoster.payload?.characters?.[0]?.slug !== "selene-brook"
+) {
+  throw new Error(`Unexpected filtered character roster payload: ${JSON.stringify(filteredCharacterRoster.payload)}`);
+}
+
+const playerCharacterRoster = await requestJson("/api/v1/campaigns/linden-pass/characters", {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (
+  playerCharacterRoster.status !== 200 ||
+  playerCharacterRoster.payload?.result_count !== 1 ||
+  playerCharacterRoster.payload?.characters?.[0]?.slug !== "arden-march" ||
+  playerCharacterRoster.payload?.tools?.can_create_characters !== false
+) {
+  throw new Error(`Unexpected assigned-player character roster payload: ${JSON.stringify(playerCharacterRoster.payload)}`);
+}
+
+const outsiderCharacterRoster = await requestJson("/api/v1/campaigns/linden-pass/characters", {
+  Authorization: `Bearer ${outsiderApiToken}`,
+});
+if (outsiderCharacterRoster.status !== 403 || outsiderCharacterRoster.payload?.error?.code !== "forbidden") {
+  throw new Error(
+    `Expected unassigned outsider character roster forbidden, got ${outsiderCharacterRoster.status} ${JSON.stringify(outsiderCharacterRoster.payload)}`,
+  );
+}
+
+const missingCharacterRosterCampaign = await requestJson("/api/v1/campaigns/definitely-not-a-campaign/characters", {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  missingCharacterRosterCampaign.status !== 404 ||
+  missingCharacterRosterCampaign.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing character roster campaign JSON 404, got ${missingCharacterRosterCampaign.status} ${missingCharacterRosterCampaign.payload?.error?.code}`,
   );
 }
 

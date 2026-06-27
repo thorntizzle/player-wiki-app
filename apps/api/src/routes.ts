@@ -1441,6 +1441,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "content_character_not_found",
     },
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "GET",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/characters",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1541,4 +1556,5 @@ export const ROUTES = {
   characterSessionXianxiaDaoImmolatingUseRecords: IMPLEMENTED_ROUTES[94].honoPath,
   characterControlsAssignment: IMPLEMENTED_ROUTES[95].honoPath,
   characterControlsDelete: IMPLEMENTED_ROUTES[97].honoPath,
+  characterRoster: IMPLEMENTED_ROUTES[98].honoPath,
 } as const;

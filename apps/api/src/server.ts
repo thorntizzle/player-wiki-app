@@ -119,6 +119,7 @@ import {
   applyCharacterSessionRest,
   canEditCharacterSessionState,
   previewCharacterRest,
+  readCharacterStateSnapshot,
   updateCharacterPortraitRevision,
   updateCharacterSessionArtificerInfusions,
   updateCharacterSessionCurrency,
@@ -140,6 +141,7 @@ import {
 } from "./content/characterState.js";
 import {
   buildCampaignConfigPayload,
+  buildCharacterRosterPayload,
   buildContentAssetDeletePayload,
   buildContentAssetDetailPayload,
   buildContentAssetListPayload,
@@ -3632,6 +3634,66 @@ app.get(ROUTES.contentCharacter, async (ctx) => {
   }
 
   return ctx.json(buildContentCharacterDetailPayload(character));
+});
+
+app.get(ROUTES.characterRoster, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characters = await listCampaignContentCharacters(config, campaign.slug);
+  if (!characters) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const canAccessCharacterRoster = campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "characters");
+  const visibleCharacters = characters.filter((record) => String(record.definition.status || "").trim() === "active");
+  let rosterCharacters = visibleCharacters;
+  if (!canAccessCharacterRoster) {
+    rosterCharacters = visibleCharacters.filter((record) => {
+      if (!auth.actorUserId) {
+        return false;
+      }
+      const assignment = getCharacterAssignment(config.dbPath, campaign.slug, record.character_slug);
+      return assignment?.user_id === auth.actorUserId;
+    });
+    if (rosterCharacters.length === 0) {
+      const error = forbidden("You do not have access to campaign characters.");
+      return ctx.json({ ok: error.ok, error: error.error }, error.status);
+    }
+  }
+
+  const stateBySlug = new Map(
+    rosterCharacters.map((record) => [
+      record.character_slug,
+      readCharacterStateSnapshot(config, campaign.slug, record.character_slug, record.definition),
+    ]),
+  );
+  const assets = (await listCampaignContentAssets(config, campaign.slug)) ?? [];
+  const assetByRef = new Map(assets.map((asset) => [asset.asset_ref, asset]));
+  const query = (new URL(ctx.req.url).searchParams.get("q") || "").trim();
+  return ctx.json(
+    buildCharacterRosterPayload({
+      campaign,
+      records: rosterCharacters,
+      stateBySlug,
+      assetByRef,
+      query,
+      canManageSession:
+        (auth.role === "admin" || auth.role === "dm") &&
+        campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session"),
+    }),
+  );
 });
 
 app.put(ROUTES.contentCharacterUpdate, async (ctx) => {

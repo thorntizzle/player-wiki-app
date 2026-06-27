@@ -11,6 +11,11 @@ interface CharacterStateRow {
   state_json: string;
 }
 
+export interface CharacterStateSnapshot {
+  revision: number;
+  state: Record<string, unknown>;
+}
+
 interface ItemCatalogEntry {
   entryKey: string;
   pageRef: string;
@@ -534,6 +539,32 @@ function readCharacterState(
   return {
     revision: Number(row.revision) || 0,
     state: parseStateJson(row.state_json),
+  };
+}
+
+export function readCharacterStateSnapshot(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+): CharacterStateSnapshot {
+  if (existsSync(config.dbPath)) {
+    const database = new Database(config.dbPath, { fileMustExist: true, readonly: true });
+    try {
+      if (tableExists(database, "character_state")) {
+        const existingState = readCharacterState(database, campaignSlug, characterSlug);
+        if (existingState) {
+          return existingState;
+        }
+      }
+    } finally {
+      database.close();
+    }
+  }
+
+  return {
+    revision: 1,
+    state: buildInitialState(definition),
   };
 }
 

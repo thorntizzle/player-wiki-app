@@ -125,6 +125,7 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
   - `PUT /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
   - `DELETE /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
+  - `GET /api/v1/campaigns/:campaignSlug/characters`
 - Implemented Character Controls JSON mutation endpoints:
   - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls/assignment`
   - `DELETE /api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls/assignment`
@@ -419,6 +420,10 @@ Route parity check command:
   delete is bearer API-token campaign DM/admin-only, reuses content-character deletion for files,
   `character_state`, portrait assets, and assignment cleanup, records `character_deleted` audit
   events, and returns the Flask-compatible delete success message and roster links.
+- The Character roster read route now serves `GET .../characters`, preserving Flask-compatible
+  campaign existence checks, Characters-scope visibility, assigned-player fallback visibility,
+  `q` filtering against roster `search_text`, roster card fields consumed by Gen2, existing
+  portrait asset references without image conversion, and create/import link/tool flags.
 - The first Xianxia inventory equipment write now serves
   `PATCH .../characters/:characterSlug/session/xianxia-inventory/:itemId/equipped`. It preserves the
   bearer-only session-state write gate, shared revision conflicts, Xianxia-only validation, unknown
