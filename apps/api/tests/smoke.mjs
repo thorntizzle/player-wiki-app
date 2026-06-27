@@ -2712,6 +2712,147 @@ if (
   throw new Error(`Unexpected custom systems entry restore payload: ${JSON.stringify(restoredCustomSystemsEntry.payload)}`);
 }
 
+const itemMechanicsImportPayload = {
+  page_ref: "items/pagebound-crescent",
+  visibility: "dm",
+  item_mechanics_review_status: "approved",
+  item_mechanics: { bonus_weapon: 1 },
+};
+
+const blockedItemMechanicsImport = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/item-mechanics/import",
+  {},
+  { method: "POST", body: itemMechanicsImportPayload },
+);
+if (
+  blockedItemMechanicsImport.status !== 401 ||
+  blockedItemMechanicsImport.payload?.error?.code !== "auth_required"
+) {
+  throw new Error(
+    `Expected unauthenticated item mechanics import auth_required 401, got ${blockedItemMechanicsImport.status} ${blockedItemMechanicsImport.payload?.error?.code}`,
+  );
+}
+
+const fixtureItemMechanicsImport = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/item-mechanics/import",
+  { "X-CPW-Fixture-Role": "dm" },
+  { method: "POST", body: itemMechanicsImportPayload },
+);
+if (
+  fixtureItemMechanicsImport.status !== 403 ||
+  fixtureItemMechanicsImport.payload?.error?.message !== "Systems source updates require bearer API authentication."
+) {
+  throw new Error(`Expected fixture item mechanics import bearer requirement, got ${JSON.stringify(fixtureItemMechanicsImport.payload)}`);
+}
+
+const playerItemMechanicsImport = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/item-mechanics/import",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: itemMechanicsImportPayload },
+);
+if (
+  playerItemMechanicsImport.status !== 403 ||
+  playerItemMechanicsImport.payload?.error?.message !== "You do not have permission to manage systems."
+) {
+  throw new Error(`Expected player item mechanics import forbidden, got ${JSON.stringify(playerItemMechanicsImport.payload)}`);
+}
+
+const missingCampaignItemMechanicsImport = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/systems/item-mechanics/import",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: itemMechanicsImportPayload },
+);
+if (
+  missingCampaignItemMechanicsImport.status !== 404 ||
+  missingCampaignItemMechanicsImport.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing item mechanics campaign JSON 404, got ${missingCampaignItemMechanicsImport.status} ${missingCampaignItemMechanicsImport.payload?.error?.code}`,
+  );
+}
+
+const invalidItemMechanicsImport = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/item-mechanics/import",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { ...itemMechanicsImportPayload, page_ref: "items/not-here" } },
+);
+if (
+  invalidItemMechanicsImport.status !== 400 ||
+  invalidItemMechanicsImport.payload?.error?.message !== "Choose a valid published item page before importing item mechanics."
+) {
+  throw new Error(`Expected item mechanics import page validation, got ${JSON.stringify(invalidItemMechanicsImport.payload)}`);
+}
+
+const dmPrivateItemMechanicsImport = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/item-mechanics/import",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { ...itemMechanicsImportPayload, visibility: "private" } },
+);
+if (
+  dmPrivateItemMechanicsImport.status !== 400 ||
+  dmPrivateItemMechanicsImport.payload?.error?.message !== "Private visibility is reserved for app admins."
+) {
+  throw new Error(`Expected item mechanics import private visibility validation, got ${JSON.stringify(dmPrivateItemMechanicsImport.payload)}`);
+}
+
+const importedItemMechanics = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/item-mechanics/import",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: itemMechanicsImportPayload },
+);
+if (
+  importedItemMechanics.status !== 200 ||
+  importedItemMechanics.payload?.ok !== true ||
+  importedItemMechanics.payload?.entry?.entry_key !== "dnd-5e|custom|linden-pass|pagebound-crescent" ||
+  importedItemMechanics.payload?.entry?.slug !== "custom-linden-pass-pagebound-crescent" ||
+  importedItemMechanics.payload?.entry?.source_page_ref !== "items/pagebound-crescent" ||
+  importedItemMechanics.payload?.entry?.linked_published_page_ref !== "items/pagebound-crescent" ||
+  importedItemMechanics.payload?.entry?.provenance !== "Published item page: Pagebound Crescent" ||
+  importedItemMechanics.payload?.entry?.visibility !== "dm" ||
+  importedItemMechanics.payload?.entry?.override?.visibility_override !== "dm" ||
+  importedItemMechanics.payload?.entry?.item_mechanics?.review_status !== "approved" ||
+  importedItemMechanics.payload?.entry?.item_mechanics?.support_state !== "modeled" ||
+  !importedItemMechanics.payload?.entry?.item_mechanics?.modeled_fields?.includes("base_item") ||
+  !importedItemMechanics.payload?.entry?.item_mechanics?.modeled_fields?.includes("bonus_weapon") ||
+  importedItemMechanics.payload?.systems?.custom_entry_count !== 3
+) {
+  throw new Error(`Unexpected item mechanics import payload: ${JSON.stringify(importedItemMechanics.payload)}`);
+}
+const importedItemMechanicsPageRow = (importedItemMechanics.payload?.systems?.campaign_item_page_rows || []).find(
+  (row) => row.page_ref === "items/pagebound-crescent",
+);
+if (
+  importedItemMechanicsPageRow?.has_structured_item !== true ||
+  importedItemMechanicsPageRow?.entry_slug !== "custom-linden-pass-pagebound-crescent" ||
+  importedItemMechanicsPageRow?.item_mechanics?.support_state !== "modeled"
+) {
+  throw new Error(`Unexpected imported item mechanics page row: ${JSON.stringify(importedItemMechanicsPageRow)}`);
+}
+
+const refreshedItemMechanics = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/item-mechanics/import",
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: {
+      page_ref: "items/pagebound-crescent",
+      mechanics_review_status: "approved",
+      item_mechanics: { bonus_weapon: 2 },
+    },
+  },
+);
+if (
+  refreshedItemMechanics.status !== 200 ||
+  refreshedItemMechanics.payload?.entry?.entry_key !== "dnd-5e|custom|linden-pass|pagebound-crescent" ||
+  refreshedItemMechanics.payload?.entry?.slug !== "custom-linden-pass-pagebound-crescent" ||
+  refreshedItemMechanics.payload?.entry?.override?.visibility_override !== "dm" ||
+  refreshedItemMechanics.payload?.entry?.item_mechanics?.review_status !== "approved" ||
+  refreshedItemMechanics.payload?.entry?.item_mechanics?.support_state !== "modeled" ||
+  refreshedItemMechanics.payload?.systems?.custom_entry_count !== 3
+) {
+  throw new Error(`Unexpected item mechanics refresh payload: ${JSON.stringify(refreshedItemMechanics.payload)}`);
+}
+
 const createdLinkedItemCustomSystemsEntry = await requestJson(
   "/api/v1/campaigns/linden-pass/systems/custom-entries",
   { Authorization: `Bearer ${dmApiToken}` },
@@ -2740,7 +2881,8 @@ if (
   createdLinkedItemCustomSystemsEntry.payload?.entry?.item_mechanics?.intake_mode !== "published_page" ||
   !createdLinkedItemCustomSystemsEntry.payload?.entry?.item_mechanics?.modeled_fields?.includes("base_item") ||
   !createdLinkedItemCustomSystemsEntry.payload?.entry?.item_mechanics?.modeled_fields?.includes("bonus_weapon") ||
-  createdLinkedItemCustomSystemsEntry.payload?.systems?.custom_entry_count !== 3
+  createdLinkedItemCustomSystemsEntry.payload?.entry?.item_mechanics?.support_state !== "modeled" ||
+  createdLinkedItemCustomSystemsEntry.payload?.systems?.custom_entry_count !== 4
 ) {
   throw new Error(
     `Unexpected linked item custom systems entry create payload: ${JSON.stringify(createdLinkedItemCustomSystemsEntry.payload)}`,
@@ -2768,15 +2910,37 @@ const persistedCustomOverride = customSystemsEntryDb
     "SELECT visibility_override, is_enabled_override, updated_by_user_id FROM campaign_entry_overrides WHERE campaign_slug = ? AND entry_key = ?",
   )
   .get("linden-pass", "dnd-5e|custom|linden-pass|scout-note");
+const persistedImportedItemEntry = customSystemsEntryDb
+  .prepare(
+    "SELECT title, slug, source_path, metadata_json, body_json, rendered_html FROM systems_entries WHERE library_slug = ? AND entry_key = ?",
+  )
+  .get("DND-5E", "dnd-5e|custom|linden-pass|pagebound-crescent");
+const persistedImportedItemOverride = customSystemsEntryDb
+  .prepare(
+    "SELECT visibility_override, is_enabled_override, updated_by_user_id FROM campaign_entry_overrides WHERE campaign_slug = ? AND entry_key = ?",
+  )
+  .get("linden-pass", "dnd-5e|custom|linden-pass|pagebound-crescent");
 const customEntryAuditRows = customSystemsEntryDb
   .prepare(
     "SELECT actor_user_id, event_type, metadata_json FROM auth_audit_log WHERE campaign_slug = ? AND event_type LIKE 'campaign_systems_custom_entry_%' ORDER BY id ASC",
   )
   .all("linden-pass");
+const itemMechanicsImportAuditRows = customSystemsEntryDb
+  .prepare(
+    "SELECT actor_user_id, event_type, metadata_json FROM auth_audit_log WHERE campaign_slug = ? AND event_type = ? ORDER BY id ASC",
+  )
+  .all("linden-pass", "campaign_systems_item_mechanics_imported");
 customSystemsEntryDb.close();
 const parsedCustomEntryMetadata = JSON.parse(persistedCustomEntry?.metadata_json || "{}");
 const parsedCustomEntryBody = JSON.parse(persistedCustomEntry?.body_json || "{}");
+const parsedImportedItemMetadata = JSON.parse(persistedImportedItemEntry?.metadata_json || "{}");
+const parsedImportedItemBody = JSON.parse(persistedImportedItemEntry?.body_json || "{}");
 const parsedCustomEntryAudits = customEntryAuditRows.map((row) => ({
+  actor_user_id: row.actor_user_id,
+  event_type: row.event_type,
+  metadata: JSON.parse(row.metadata_json),
+}));
+const parsedItemMechanicsImportAudits = itemMechanicsImportAuditRows.map((row) => ({
   actor_user_id: row.actor_user_id,
   event_type: row.event_type,
   metadata: JSON.parse(row.metadata_json),
@@ -2800,10 +2964,30 @@ if (
   persistedCustomOverride?.visibility_override !== "dm" ||
   persistedCustomOverride?.is_enabled_override !== null ||
   persistedCustomOverride?.updated_by_user_id !== 81 ||
+  persistedImportedItemEntry?.title !== "Pagebound Crescent" ||
+  persistedImportedItemEntry?.slug !== "custom-linden-pass-pagebound-crescent" ||
+  persistedImportedItemEntry?.source_path !== "Published item page: Pagebound Crescent" ||
+  parsedImportedItemMetadata?.custom_campaign_slug !== "linden-pass" ||
+  parsedImportedItemMetadata?.linked_published_page_ref !== "items/pagebound-crescent" ||
+  parsedImportedItemMetadata?.campaign_item_mechanics_review_status !== "approved" ||
+  parsedImportedItemMetadata?.campaign_item_mechanics_support_state !== "modeled" ||
+  parsedImportedItemMetadata?.campaign_item_mechanics?.support_state !== "modeled" ||
+  parsedImportedItemMetadata?.bonus_weapon !== 2 ||
+  parsedImportedItemBody?.item_mechanics?.review_status !== "approved" ||
+  !String(persistedImportedItemEntry?.rendered_html || "").includes("magic longsword") ||
+  persistedImportedItemOverride?.visibility_override !== "dm" ||
+  persistedImportedItemOverride?.is_enabled_override !== null ||
+  persistedImportedItemOverride?.updated_by_user_id !== 81 ||
   customEntryAuditCounts.campaign_systems_custom_entry_created !== 3 ||
   customEntryAuditCounts.campaign_systems_custom_entry_updated !== 1 ||
   customEntryAuditCounts.campaign_systems_custom_entry_archived !== 1 ||
   customEntryAuditCounts.campaign_systems_custom_entry_restored !== 1 ||
+  parsedItemMechanicsImportAudits.length !== 2 ||
+  parsedItemMechanicsImportAudits[0]?.actor_user_id !== 81 ||
+  parsedItemMechanicsImportAudits[0]?.metadata?.entry_key !== "dnd-5e|custom|linden-pass|pagebound-crescent" ||
+  parsedItemMechanicsImportAudits[0]?.metadata?.entry_slug !== "custom-linden-pass-pagebound-crescent" ||
+  parsedItemMechanicsImportAudits[0]?.metadata?.page_ref !== "items/pagebound-crescent" ||
+  parsedItemMechanicsImportAudits[0]?.metadata?.source !== "api" ||
   parsedCustomEntryAudits[0]?.actor_user_id !== 81 ||
   parsedCustomEntryAudits[0]?.metadata?.entry_key !== "dnd-5e|custom|linden-pass|scout-note" ||
   parsedCustomEntryAudits[0]?.metadata?.entry_slug !== "custom-linden-pass-scout-note" ||
@@ -2818,7 +3002,12 @@ if (
       parsedCustomEntryMetadata,
       parsedCustomEntryBody,
       persistedCustomOverride,
+      persistedImportedItemEntry,
+      parsedImportedItemMetadata,
+      parsedImportedItemBody,
+      persistedImportedItemOverride,
       parsedCustomEntryAudits,
+      parsedItemMechanicsImportAudits,
     })}`,
   );
 }
@@ -2826,19 +3015,21 @@ if (
 const customSystemsEntryCleanupDb = new Database(dbPath);
 customSystemsEntryCleanupDb
   .prepare(
-    "DELETE FROM campaign_entry_overrides WHERE campaign_slug = ? AND entry_key IN (?, ?, ?)",
+    "DELETE FROM campaign_entry_overrides WHERE campaign_slug = ? AND entry_key IN (?, ?, ?, ?)",
   )
   .run(
     "linden-pass",
     "dnd-5e|custom|linden-pass|scout-note",
+    "dnd-5e|custom|linden-pass|pagebound-crescent",
     "dnd-5e|custom|linden-pass|pagebound-crescent-api",
     "dnd-5e|custom|linden-pass|inherited-visibility",
   );
 customSystemsEntryCleanupDb
-  .prepare("DELETE FROM systems_entries WHERE library_slug = ? AND entry_key IN (?, ?, ?)")
+  .prepare("DELETE FROM systems_entries WHERE library_slug = ? AND entry_key IN (?, ?, ?, ?)")
   .run(
     "DND-5E",
     "dnd-5e|custom|linden-pass|scout-note",
+    "dnd-5e|custom|linden-pass|pagebound-crescent",
     "dnd-5e|custom|linden-pass|pagebound-crescent-api",
     "dnd-5e|custom|linden-pass|inherited-visibility",
   );

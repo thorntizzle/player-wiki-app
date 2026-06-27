@@ -1606,6 +1606,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "campaign_not_found",
     },
   },
+  {
+    method: "POST",
+    honoPath: "/api/v1/campaigns/:campaignSlug/systems/item-mechanics/import",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/systems/item-mechanics/import",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/systems/item-mechanics/import",
+    routeFamily: "api_v1_systems",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/systems/item-mechanics/import",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1716,4 +1731,5 @@ export const ROUTES = {
   systemsCustomEntry: IMPLEMENTED_ROUTES[106].honoPath,
   systemsCustomEntryArchive: IMPLEMENTED_ROUTES[107].honoPath,
   systemsCustomEntryRestore: IMPLEMENTED_ROUTES[108].honoPath,
+  systemsItemMechanicsImport: IMPLEMENTED_ROUTES[109].honoPath,
 } as const;

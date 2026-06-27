@@ -989,6 +989,15 @@
       "notes": "Tracked Hono custom campaign Systems entry restore route with bearer-token DM/admin writes, custom-entry identity checks, override-based restore via clearing is_enabled_override, audit rows, serialized active entry payload, refreshed DM Content Systems payload, and missing-campaign JSON."
     },
     {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/item-mechanics/import",
+      "route_family": "api_v1_systems",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/systems/item-mechanics/import",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono campaign item mechanics import route with bearer-token DM/admin writes, published item-page validation, custom source bootstrap, linked custom item entry import/refresh, approved modeled review payloads, campaign_entry_overrides persistence, item-mechanics import audit rows, refreshed DM Content Systems payload, and missing-campaign JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/session/login",
       "route_family": "api_v1",

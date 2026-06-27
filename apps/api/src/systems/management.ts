@@ -741,6 +741,7 @@ type CustomSystemsEntryMutationResult =
 interface CampaignItemPageContentRow {
   page_ref: string;
   title: string;
+  source_ref: string;
   metadata_json: string;
   body_markdown: string;
 }
@@ -835,9 +836,29 @@ function buildCampaignItemMechanicsMetadata(
   const modeledFields = CAMPAIGN_ITEM_METADATA_KEYS.filter((key) => hasMeaningfulValue(combinedMechanics[key]));
   const flags = Array.isArray(mechanics.flags) ? mechanics.flags : [];
   const fieldProvenance = asRecord(mechanics.field_provenance);
-  const supportState =
-    String(mechanics.support_state || "").trim() ||
-    (modeledFields.length > 0 ? "manual_review" : normalizedReview === "approved" ? "manual_review" : "reference_only");
+  const explicitSupportState = String(mechanics.support_state || "").trim();
+  let supportState = explicitSupportState;
+  if (!supportState && normalizedReview === "reference_only") {
+    supportState = "reference_only";
+  }
+  if (!supportState && normalizedReview === "manual_review") {
+    supportState = "manual_review";
+  }
+  if (!supportState && normalizedReview !== "approved") {
+    supportState = modeledFields.length > 0 ? "manual_review" : "reference_only";
+  }
+  if (!supportState && modeledFields.length === 0) {
+    supportState = "reference_only";
+  }
+  if (
+    !supportState &&
+    flags.some((flag) => asRecord(flag).support_state === "needs_implementation")
+  ) {
+    supportState = "needs_implementation";
+  }
+  if (!supportState) {
+    supportState = "modeled";
+  }
   const reviewPayload = {
     version: "2026-06-25",
     review_status: normalizedReview,
@@ -1263,6 +1284,44 @@ function insertCustomEntryAuditEvent(
     );
 }
 
+function insertItemMechanicsImportAuditEvent(
+  database: SqliteDatabase,
+  actorUserId: number,
+  campaignSlug: string,
+  entry: SystemsEntryRow,
+  pageRef: string,
+  now: string,
+) {
+  database
+    .prepare(
+      `
+        INSERT INTO auth_audit_log (
+          actor_user_id,
+          target_user_id,
+          campaign_slug,
+          character_slug,
+          event_type,
+          metadata_json,
+          created_at
+        )
+        VALUES (?, NULL, ?, NULL, ?, ?, ?)
+      `,
+    )
+    .run(
+      actorUserId,
+      campaignSlug,
+      "campaign_systems_item_mechanics_imported",
+      JSON.stringify({
+        entry_key: entry.entry_key,
+        entry_slug: entry.slug,
+        entry_type: entry.entry_type,
+        page_ref: pageRef,
+        source: "api",
+      }),
+      now,
+    );
+}
+
 function loadPublishedItemPage(
   database: SqliteDatabase,
   campaignSlug: string,
@@ -1275,7 +1334,7 @@ function loadPublishedItemPage(
     (database
       .prepare(
         `
-          SELECT page_ref, title, metadata_json, body_markdown
+          SELECT page_ref, title, source_ref, metadata_json, body_markdown
           FROM campaign_pages
           WHERE campaign_slug = ?
             AND page_ref = ?
@@ -1285,6 +1344,31 @@ function loadPublishedItemPage(
       )
       .get(campaignSlug, pageRef) as CampaignItemPageContentRow | undefined) || null
   );
+}
+
+function loadCustomItemEntryByLinkedPage(
+  database: SqliteDatabase,
+  campaign: CampaignViewModel,
+  librarySlug: string,
+  pageRef: string,
+): SystemsEntryRow | null {
+  const customSourceIds = loadSourceRows(database, campaign.slug, librarySlug)
+    .filter((source) => source.license_class === "custom_campaign")
+    .map((source) => source.source_id);
+  for (const entry of loadEntriesForSources(database, librarySlug, customSourceIds)) {
+    if (entry.entry_type !== "item") {
+      continue;
+    }
+    const metadata = parseMetadata(entry);
+    if (!isCampaignCustomEntry(campaign.slug, metadata)) {
+      continue;
+    }
+    const linkedPageRef = String(metadata.linked_published_page_ref || metadata.page_ref || "").trim();
+    if (linkedPageRef === pageRef) {
+      return entry;
+    }
+  }
+  return null;
 }
 
 function customSourceState(
@@ -1596,6 +1680,143 @@ export function createCustomSystemsEntry(
         now,
       );
       insertCustomEntryAuditEvent(database, actorUserId, campaign.slug, "campaign_systems_custom_entry_created", entry, now);
+      const systemsScopeVisibility = loadEffectiveSystemsScopeVisibility(database, campaign);
+      serializedEntry = serializeMutatedCustomEntry(database, campaign, role, systemsScopeVisibility, entry, override, source.sourceState);
+    });
+    try {
+      writeChanges();
+    } catch (error) {
+      return { status: "validation_error", message: customEntryMutationErrorMessage(error) };
+    }
+    return buildCustomEntryMutationResponse(dbPath, campaign, campaignConfig, role, serializedEntry!);
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return { status: "validation_error", message: "Systems database is unavailable." };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function importCampaignItemMechanics(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  actorUserId: number,
+  payload: Record<string, unknown>,
+): CustomSystemsEntryMutationResult {
+  if (!existsSync(dbPath)) {
+    return { status: "validation_error", message: "Systems database is unavailable." };
+  }
+  const librarySlug = String(campaign.systems_library_slug || "").trim();
+  if (!librarySlug) {
+    return { status: "validation_error", message: "That campaign does not have a systems library configured." };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const rawPageRef = String(payload.page_ref || "").trim();
+    const page = loadPublishedItemPage(database, campaign.slug, rawPageRef);
+    if (!page) {
+      return { status: "validation_error", message: "Choose a valid published item page before importing item mechanics." };
+    }
+    const title = String(page.title || "").trim() || String(page.page_ref || "").trim();
+    if (!title) {
+      return { status: "validation_error", message: "Published item pages need a title before they can be imported." };
+    }
+    const bodyMarkdown = String(page.body_markdown || "").trim();
+    if (!bodyMarkdown) {
+      return { status: "validation_error", message: "Published item pages need a body before they can be imported." };
+    }
+
+    const normalizedPageRef = String(page.page_ref || rawPageRef || "").trim();
+    const slugLeaf = normalizeCustomSlugLeaf(title);
+    if (!slugLeaf) {
+      return { status: "validation_error", message: "Published item pages need a usable title before they can be imported." };
+    }
+
+    const now = utcIsoTimestamp();
+    let serializedEntry: SerializedCustomEntry | null = null;
+    const writeChanges = database.transaction(() => {
+      const source = ensureCustomCampaignSource(database, campaign, campaignConfig, role, librarySlug, actorUserId, now);
+      if (source.status === "validation_error") {
+        throw new Error(source.message);
+      }
+
+      let existingEntry = loadCustomItemEntryByLinkedPage(database, campaign, librarySlug, normalizedPageRef);
+      const slug = `${source.sourceId.toLowerCase()}-${slugLeaf}`;
+      const existingSlugEntry = loadEntryBySlug(database, librarySlug, slug);
+      if (!existingEntry && existingSlugEntry) {
+        if (!isCampaignCustomEntry(campaign.slug, parseMetadata(existingSlugEntry))) {
+          throw new Error("That imported item Systems slug is already in use.");
+        }
+        existingEntry = existingSlugEntry;
+      }
+
+      const existingOverride = existingEntry
+        ? loadCampaignEntryOverrides(database, campaign.slug, librarySlug).get(existingEntry.entry_key)
+        : undefined;
+      const requestedVisibility =
+        String(payload.visibility || "").trim() ||
+        existingOverride?.visibility_override ||
+        customEntryDefaultVisibility(campaign);
+      const pageSourceRef = String(page.source_ref || "").trim();
+      const prepared = prepareCustomEntryWrite(
+        database,
+        campaign,
+        librarySlug,
+        source.sourceState,
+        source.sourceId,
+        actorUserId,
+        role,
+        {
+          title,
+          entry_type: "item",
+          provenance: pageSourceRef || `Published item page: ${title}`,
+          visibility: requestedVisibility,
+          search_metadata: normalizedPageRef,
+          body_markdown: bodyMarkdown,
+          source_page_ref: normalizedPageRef,
+          item_mechanics_review_status: payload.item_mechanics_review_status || payload.mechanics_review_status || "",
+          item_mechanics: asRecord(payload.item_mechanics),
+        },
+        existingEntry,
+      );
+      if (prepared.status === "validation_error") {
+        throw new Error(prepared.message);
+      }
+      upsertCustomSystemsEntryRow(database, {
+        librarySlug,
+        sourceId: existingEntry?.source_id || source.sourceId,
+        entryKey: prepared.entryKey,
+        entryType: prepared.entryType,
+        slug: prepared.slug,
+        title: prepared.title,
+        provenance: prepared.provenance,
+        searchText: prepared.searchText,
+        visibility: prepared.visibility,
+        metadata: prepared.metadata,
+        body: prepared.body,
+        renderedHtml: prepared.renderedHtml,
+        now,
+      });
+      const entry = loadEntryBySlug(database, librarySlug, prepared.slug);
+      if (!entry) {
+        throw new Error("Failed to reload custom Systems entry.");
+      }
+      const override = upsertCampaignEntryOverrideForCustomEntry(
+        database,
+        campaign.slug,
+        librarySlug,
+        entry.entry_key,
+        prepared.visibility,
+        existingOverride?.is_enabled_override ?? null,
+        actorUserId,
+        now,
+      );
+      insertItemMechanicsImportAuditEvent(database, actorUserId, campaign.slug, entry, rawPageRef, now);
       const systemsScopeVisibility = loadEffectiveSystemsScopeVisibility(database, campaign);
       serializedEntry = serializeMutatedCustomEntry(database, campaign, role, systemsScopeVisibility, entry, override, source.sourceState);
     });

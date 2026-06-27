@@ -87,6 +87,7 @@ import {
   archiveCustomSystemsEntry,
   buildDmContentSystemsPayload,
   createCustomSystemsEntry,
+  importCampaignItemMechanics,
   restoreCustomSystemsEntry,
   updateCustomSystemsEntry,
 } from "./systems/management.js";
@@ -1416,6 +1417,42 @@ app.post(ROUTES.systemsCustomEntries, async (ctx) => {
 
   const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
   const result = createCustomSystemsEntry(
+    config.dbPath,
+    campaign,
+    campaignConfig?.config || {},
+    auth.role,
+    auth.actorUserId || 0,
+    jsonPayload.payload,
+  );
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({ ok: true, entry: result.entry, systems: result.systems });
+});
+
+app.post(ROUTES.systemsItemMechanicsImport, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveSystemsManagerBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  const result = importCampaignItemMechanics(
     config.dbPath,
     campaign,
     campaignConfig?.config || {},

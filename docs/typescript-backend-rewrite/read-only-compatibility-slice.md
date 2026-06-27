@@ -25,6 +25,7 @@ fixture database.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/systems/entries/:entrySlug` with Flask-compatible unauthenticated auth failure, fixture-role entry access checks, parsed entry metadata/body JSON, source state, campaign entry override serialization, Flask compatibility links, and explicit missing-entry JSON.
 - Implemented `PUT /api/v1/campaigns/:campaignSlug/systems/overrides/*` with bearer-token DM/admin writes, fixture-role write denial, slashy entry-key capture, Flask-compatible boolean and visibility validation, SQLite policy/entry-override upserts, audit rows, serialized override/entry responses, and explicit missing-campaign JSON.
 - Implemented the custom campaign Systems entry write family, covering `POST /api/v1/campaigns/:campaignSlug/systems/custom-entries`, `PUT /api/v1/campaigns/:campaignSlug/systems/custom-entries/:entrySlug`, `POST .../:entrySlug/archive`, and `POST .../:entrySlug/restore` with bearer-token DM/admin writes, fixture-role write denial, custom source bootstrap, slug/key preservation, item-only linked page validation, SQLite entry/override persistence, audit rows, serialized custom entry responses, refreshed DM Content Systems payloads, and explicit missing-campaign JSON.
+- Implemented `POST /api/v1/campaigns/:campaignSlug/systems/item-mechanics/import` with bearer-token DM/admin writes, fixture-role write denial, published item-page validation, custom source bootstrap, imported item slug/key reuse, linked page metadata, approved modeled review payloads, SQLite entry/override persistence, import audit rows, refreshed DM Content Systems payloads, and explicit missing-campaign JSON.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/combat` and `GET /api/v1/campaigns/:campaignSlug/combat/live-state` with Flask-compatible unauthenticated auth failure, fixture player/DM permission splits, read-only SQLite tracker/combatant state with empty fallback, live polling metadata, unchanged-response short-circuit behavior, DM/admin player-character and DM Content statblock setup choices, and custom condition names merged into condition options.
 - Implemented `GET /api/v1/campaigns/:campaignSlug/combat/systems-monsters/search` with Flask-compatible unauthenticated auth failure, fixture manager-only access, short-query guidance, and Systems monster metadata result formatting.
 - Implemented `POST /api/v1/campaigns/:campaignSlug/combat/combatants/:combatantId/set-current` with bearer API-token DM/admin access, fixture-role write denial, supported-combat validation, SQLite combatant existence validation, start-of-turn movement/action reset, tracker current-combatant update, revision bumps, refreshed Combat payloads, and validation-error missing-combatant JSON.
@@ -295,6 +296,12 @@ fixture database.
   - import-run review rows intentionally omit raw `source_path` values
   - missing optional SQLite tables degrade to empty arrays or default policy state
   - missing campaign DM Content Systems reads return `campaign_not_found` JSON
+- Campaign item mechanics import preserves the `/api/v1/campaigns/:campaignSlug/systems/item-mechanics/import` mutation shell for a disposable fixture SQLite database:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture-role write attempts are rejected because the mutation needs a durable bearer-token actor
+  - bearer-token players receive `forbidden`
+  - writes validate missing campaigns, valid published item pages, admin-only private visibility, and approved modeled item mechanics metadata
+  - successful writes upsert the campaign custom source, import or refresh the linked custom item row, preserve the existing override visibility on refresh, record item-mechanics import audit events, and return a refreshed DM Content Systems payload
 - Systems source-policy writes preserve the `/api/v1/campaigns/:campaignSlug/systems/sources` mutation shell for a disposable fixture SQLite database:
   - unauthenticated requests return Flask-compatible `auth_required`
   - fixture-role write attempts are rejected because the mutation needs a durable bearer-token actor

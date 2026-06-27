@@ -63,6 +63,7 @@ Route parity check command:
   - `PUT /api/v1/campaigns/:campaignSlug/systems/sources`
   - `PUT /api/v1/campaigns/:campaignSlug/systems/overrides/*`
   - `POST /api/v1/campaigns/:campaignSlug/systems/custom-entries`
+  - `POST /api/v1/campaigns/:campaignSlug/systems/item-mechanics/import`
   - `PUT /api/v1/campaigns/:campaignSlug/systems/custom-entries/:entrySlug`
   - `POST /api/v1/campaigns/:campaignSlug/systems/custom-entries/:entrySlug/archive`
   - `POST /api/v1/campaigns/:campaignSlug/systems/custom-entries/:entrySlug/restore`
@@ -308,8 +309,8 @@ Route parity check command:
   API tokens, source policy rows, shared-core permission state, entry overrides, custom campaign
   entries, campaign item mechanics rows, sanitized import-run history without raw source paths, and
   missing-campaign JSON. This route is read-only and fixture/SQLite-backed; Systems source policy
-  and entry overrides are implemented as separate mutation slices, while item-mechanics import remains
-  a separate future slice.
+  entry overrides, custom-entry writes, and item-mechanics import are implemented as separate mutation
+  slices.
 - The first Systems source-policy write route now serves `PUT .../systems/sources` for bearer-token
   DM/admin actors against `CPW_DB_PATH`, preserving fixture-role write denial, player/outsider
   forbiddance, update-row shape validation, boolean enablement validation, source-id validation,
@@ -332,6 +333,14 @@ Route parity check command:
   title/type/visibility/body validation, item-only linked page validation, SQLite `systems_entries`
   and `campaign_entry_overrides` writes, override-based archive/restore, `auth_audit_log` custom
   entry events, serialized entry responses, refreshed DM Content Systems payloads, and
+  missing-campaign JSON. Current validation covers a disposable fixture database only; production or
+  staging write readiness remains gated by migration, backup, copied-data rehearsal, and rollback
+  approval.
+- The campaign item mechanics import route now serves `POST .../systems/item-mechanics/import` for
+  bearer-token DM/admin actors against `CPW_DB_PATH`, preserving published item-page validation,
+  custom source bootstrap, imported item slug/key reuse, linked page metadata, approved modeled
+  review payloads, override preservation on refresh, `campaign_systems_item_mechanics_imported`
+  audit rows, serialized entry responses, refreshed DM Content Systems payloads, and
   missing-campaign JSON. Current validation covers a disposable fixture database only; production or
   staging write readiness remains gated by migration, backup, copied-data rehearsal, and rollback
   approval.
