@@ -150,6 +150,7 @@ Route parity check command:
   - `PUT /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
   - `DELETE /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
   - `GET /api/v1/campaigns/:campaignSlug/characters`
+  - `GET /api/v1/campaigns/:campaignSlug/characters/create`
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
   - `PATCH /api/v1/campaigns/:campaignSlug/characters/:characterSlug/sheet-edit`
   - `GET /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual`
@@ -536,6 +537,12 @@ Route parity check command:
   campaign existence checks, Characters-scope visibility, assigned-player fallback visibility,
   `q` filtering against roster `search_text`, roster card fields consumed by Gen2, existing
   portrait asset references without image conversion, and create/import link/tool flags.
+- The Character create context route now serves GET-only `GET .../characters/create`, preserving
+  Flask-compatible campaign existence checks, authoring auth/permission failures, unsupported-system
+  errors, route-lane links/tools, DND-5E Gen2 payload shape with the builder disabled until the TS
+  level-one builder is ported, and Xianxia create fields/defaults plus enabled martial-art and
+  Generic Technique options.
+  POST submit remains outside this slice.
 - The Character detail read route now serves `GET .../characters/:characterSlug`, preserving
   Flask-compatible campaign/missing-character envelopes, Characters-scope or assigned-owner
   Session-scope access, SQLite `state_record` reads, CharacterPane-safe optional presentation

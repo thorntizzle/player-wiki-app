@@ -122,8 +122,10 @@ import {
 } from "./systems/sources.js";
 import {
   buildCharacterAuthoringLinks,
+  listXianxiaCreateGenericTechniqueOptions,
   buildXianxiaManualImportCharacter,
   buildXianxiaManualImportContext,
+  listXianxiaManualImportMartialArtOptions,
   nativeCharacterCreateLane,
   nativeCharacterCreateUnsupportedMessage,
 } from "./content/characterAuthoring.js";
@@ -979,6 +981,167 @@ function supportsCharacterControlsRoutes(_system: unknown): boolean {
 function requestQueryValues(ctx: Context): Record<string, string> {
   const searchParams = new URL(ctx.req.url).searchParams;
   return Object.fromEntries(Array.from(searchParams.entries()).map(([key, value]) => [key, value]));
+}
+
+const XIANXIA_CREATE_ATTRIBUTE_KEYS = ["str", "dex", "con", "int", "wis", "cha"] as const;
+const XIANXIA_CREATE_ATTRIBUTE_LABELS: Record<(typeof XIANXIA_CREATE_ATTRIBUTE_KEYS)[number], string> = {
+  str: "Strength",
+  dex: "Dexterity",
+  con: "Constitution",
+  int: "Intelligence",
+  wis: "Wisdom",
+  cha: "Charisma",
+};
+const XIANXIA_CREATE_EFFORT_KEYS = ["basic", "weapon", "guns_explosive", "magic", "ultimate"] as const;
+const XIANXIA_CREATE_EFFORT_LABELS: Record<(typeof XIANXIA_CREATE_EFFORT_KEYS)[number], string> = {
+  basic: "Basic",
+  weapon: "Weapon",
+  guns_explosive: "Guns/Explosive",
+  magic: "Magic",
+  ultimate: "Ultimate",
+};
+const XIANXIA_CREATE_ENERGY_KEYS = ["jing", "qi", "shen"] as const;
+const XIANXIA_CREATE_ENERGY_LABELS: Record<(typeof XIANXIA_CREATE_ENERGY_KEYS)[number], string> = {
+  jing: "Jing",
+  qi: "Qi",
+  shen: "Shen",
+};
+const XIANXIA_CREATE_GM_GRANTED_GENERIC_TECHNIQUE_INPUT = "gm_granted_generic_technique_entry_keys";
+
+function normalizeCharacterAuthoringValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return String(value[0] ?? "");
+  }
+  return value === null || value === undefined ? "" : String(value);
+}
+
+function normalizeCharacterAuthoringValues(values: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(Object.entries(values).map(([key, value]) => [String(key), normalizeCharacterAuthoringValue(value)]));
+}
+
+function createContextInteger(value: unknown, fallback = 0): number {
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function buildCharacterCreateTools(campaign: CampaignViewModel, canAuthorCharacters: boolean) {
+  const lane = nativeCharacterCreateLane(campaign.system);
+  return {
+    can_create_characters: canAuthorCharacters && Boolean(lane),
+    can_import_xianxia_characters: canAuthorCharacters && lane === "xianxia",
+    native_character_tools_supported: lane === "dnd5e",
+    native_character_create_supported: Boolean(lane),
+    character_create_lane: lane,
+  };
+}
+
+function buildDndCharacterCreateContext(values: Record<string, unknown>) {
+  return {
+    lane: "dnd5e",
+    builder_ready: false,
+    values: normalizeCharacterAuthoringValues(values),
+    class_options: [],
+    species_options: [],
+    background_options: [],
+    subclass_options: [],
+    requires_subclass: false,
+    choice_sections: [],
+    preview: {},
+    limitations: [],
+  };
+}
+
+function buildXianxiaCharacterCreateContext({
+  dbPath,
+  campaign,
+  campaignConfig,
+  values,
+}: {
+  dbPath: string;
+  campaign: CampaignViewModel;
+  campaignConfig: Record<string, unknown>;
+  values: Record<string, unknown>;
+}) {
+  const normalizedValues = normalizeCharacterAuthoringValues(values);
+  const manualArmorBonus = Math.max(0, createContextInteger(normalizedValues.manual_armor_bonus, 0));
+  const constitution = Math.max(0, createContextInteger(normalizedValues.attribute_con, 0));
+  return {
+    lane: "xianxia",
+    values: normalizedValues,
+    attribute_fields: XIANXIA_CREATE_ATTRIBUTE_KEYS.map((key) => ({
+      key,
+      label: XIANXIA_CREATE_ATTRIBUTE_LABELS[key],
+      input_name: `attribute_${key}`,
+      value: normalizedValues[`attribute_${key}`] || "0",
+      max: 3,
+    })),
+    effort_fields: XIANXIA_CREATE_EFFORT_KEYS.map((key) => ({
+      key,
+      label: XIANXIA_CREATE_EFFORT_LABELS[key],
+      input_name: `effort_${key}`,
+      value: normalizedValues[`effort_${key}`] || "0",
+      max: 3,
+    })),
+    energy_fields: XIANXIA_CREATE_ENERGY_KEYS.map((key) => ({
+      key,
+      label: XIANXIA_CREATE_ENERGY_LABELS[key],
+      input_name: `energy_${key}`,
+      value: normalizedValues[`energy_${key}`] || "0",
+      max: 3,
+    })),
+    trained_skill_fields: [1, 2, 3].map((index) => ({
+      index,
+      label: `Trained Skill ${index}`,
+      input_name: `trained_skill_${index}`,
+      value: normalizedValues[`trained_skill_${index}`] || "",
+    })),
+    martial_art_fields: [1, 2, 3].map((index) => ({
+      index,
+      art_input_name: `martial_art_${index}_slug`,
+      rank_input_name: `martial_art_${index}_rank`,
+      selected_slug: normalizedValues[`martial_art_${index}_slug`] || "",
+      selected_rank: normalizedValues[`martial_art_${index}_rank`] || "",
+    })),
+    martial_art_options: listXianxiaManualImportMartialArtOptions(dbPath, campaign, campaignConfig),
+    martial_art_rank_choices: [
+      { key: "initiate", label: "Initiate" },
+      { key: "novice", label: "Novice" },
+    ],
+    manual_armor_field: {
+      input_name: "manual_armor_bonus",
+      value: normalizedValues.manual_armor_bonus || "0",
+      min: 0,
+    },
+    dao_field: {
+      input_name: "dao_current",
+      value: normalizedValues.dao_current || "0",
+      min: 0,
+      max: 3,
+    },
+    generic_technique_options: listXianxiaCreateGenericTechniqueOptions(
+      dbPath,
+      campaign,
+      campaignConfig,
+      [normalizedValues.gm_granted_generic_technique_entry_keys].filter(Boolean),
+    ),
+    gm_granted_generic_technique_input: XIANXIA_CREATE_GM_GRANTED_GENERIC_TECHNIQUE_INPUT,
+    defaults: {
+      realm: "Mortal",
+      actions_per_turn: 2,
+      honor: "Honorable",
+      reputation: "Unknown",
+      hp_max: 10,
+      stance_max: 10,
+      manual_armor_bonus: manualArmorBonus,
+      defense: 10 + manualArmorBonus + constitution,
+      yin_max: 1,
+      yang_max: 1,
+      dao_current: 0,
+      dao_max: 3,
+      insight_available: 0,
+      insight_spent: 0,
+    },
+  };
 }
 
 function resetTtlHours(): number {
@@ -5019,6 +5182,57 @@ app.get(ROUTES.characterRoster, async (ctx) => {
         campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session"),
     }),
   );
+});
+
+app.get(ROUTES.characterCreateContext, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const canAuthorCharacters =
+    campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "characters") &&
+    (auth.role === "admin" ||
+      (auth.role === "dm" && campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session")));
+  if (!canAuthorCharacters) {
+    const error = forbidden("You do not have permission to create characters in this campaign.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const lane = nativeCharacterCreateLane(campaign.system);
+  if (!lane) {
+    const error = jsonError("unsupported_campaign_system", nativeCharacterCreateUnsupportedMessage(campaign.system), 400);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const values = requestQueryValues(ctx);
+  const configRecord = lane === "xianxia" ? await getCampaignConfigFile(config, campaign.slug) : null;
+  const create =
+    lane === "xianxia"
+      ? buildXianxiaCharacterCreateContext({
+          dbPath: config.dbPath,
+          campaign,
+          campaignConfig: configRecord?.config || {},
+          values,
+        })
+      : buildDndCharacterCreateContext(values);
+
+  return ctx.json({
+    ok: true,
+    campaign,
+    lane,
+    tools: buildCharacterCreateTools(campaign, canAuthorCharacters),
+    links: buildCharacterAuthoringLinks(campaign),
+    create,
+  });
 });
 
 app.get(ROUTES.characterXianxiaManualImportContext, async (ctx) => {

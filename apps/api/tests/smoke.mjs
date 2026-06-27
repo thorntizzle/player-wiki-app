@@ -818,6 +818,7 @@ insertEntry.run("DND-5E", "PHB", "PHB:item:chain-mail", "item", "phb-item-chain-
 insertEntry.run("DND-5E", "PHB", "PHB:item:profiled-blade", "item", "phb-item-profiled-blade", "Profiled Blade", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("DND-5E", "MM", "MM:monster:goblin", "monster", "mm-monster-goblin", "Goblin", 0, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("Xianxia", "XIA", "XIA:martial_art:cloud-palm", "martial_art", "xia-martial-art-cloud-palm", "Cloud Palm", 0, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+insertEntry.run("Xianxia", "XIA", "XIA:generic_technique:qi-blast", "generic_technique", "xia-generic-technique-qi-blast", "Qi Blast", 0, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 smokeDb
   .prepare(
     `
@@ -842,6 +843,30 @@ smokeDb
     JSON.stringify({ xianxia_martial_art: { style: "Open hand" } }),
     "Xianxia",
     "XIA:martial_art:cloud-palm",
+  );
+smokeDb
+  .prepare(
+    `
+      UPDATE systems_entries
+      SET
+        metadata_json = ?,
+        body_json = ?
+      WHERE library_slug = ?
+        AND entry_key = ?
+    `,
+  )
+  .run(
+    JSON.stringify({
+      generic_technique_catalog_order: 7,
+      generic_technique_key: "qi_blast",
+      insight_cost: 1,
+      support_state: "supported",
+      learnable_without_master: true,
+      requires_master: false,
+    }),
+    JSON.stringify({ xianxia_generic_technique: { key: "qi_blast", insight_cost: 1 } }),
+    "Xianxia",
+    "XIA:generic_technique:qi-blast",
   );
 smokeDb
   .prepare(
@@ -11443,6 +11468,123 @@ if (
   );
 }
 
+const characterCreatePath = "/api/v1/campaigns/linden-pass/characters/create";
+const anonymousCharacterCreateContext = await requestJson(characterCreatePath);
+if (
+  anonymousCharacterCreateContext.status !== 401 ||
+  anonymousCharacterCreateContext.payload?.error?.code !== "auth_required"
+) {
+  throw new Error(
+    `Expected anonymous character create context auth_required, got ${anonymousCharacterCreateContext.status} ${JSON.stringify(anonymousCharacterCreateContext.payload)}`,
+  );
+}
+
+const playerCharacterCreateContext = await requestJson(characterCreatePath, {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (
+  playerCharacterCreateContext.status !== 403 ||
+  playerCharacterCreateContext.payload?.error?.code !== "forbidden" ||
+  playerCharacterCreateContext.payload?.error?.message !== "You do not have permission to create characters in this campaign."
+) {
+  throw new Error(
+    `Expected player character create context forbidden, got ${playerCharacterCreateContext.status} ${JSON.stringify(playerCharacterCreateContext.payload)}`,
+  );
+}
+
+const dmCharacterCreateContext = await requestJson(`${characterCreatePath}?name=Smoke%20Knight&class_slug=phb-fighter`, {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  dmCharacterCreateContext.status !== 200 ||
+  dmCharacterCreateContext.payload?.ok !== true ||
+  dmCharacterCreateContext.payload?.campaign?.slug !== "linden-pass" ||
+  dmCharacterCreateContext.payload?.lane !== "dnd5e" ||
+  dmCharacterCreateContext.payload?.tools?.can_create_characters !== true ||
+  dmCharacterCreateContext.payload?.tools?.native_character_create_supported !== true ||
+  dmCharacterCreateContext.payload?.tools?.character_create_lane !== "dnd5e" ||
+  dmCharacterCreateContext.payload?.links?.create_character_url !== "/app-next/campaigns/linden-pass/characters/new" ||
+  dmCharacterCreateContext.payload?.links?.flask_create_character_url !== "/campaigns/linden-pass/characters/new" ||
+  dmCharacterCreateContext.payload?.links?.flask_create_url !== "/campaigns/linden-pass/characters/new" ||
+  dmCharacterCreateContext.payload?.links?.gen2_create_url !== "/app-next/campaigns/linden-pass/characters/new" ||
+  dmCharacterCreateContext.payload?.create?.lane !== "dnd5e" ||
+  dmCharacterCreateContext.payload?.create?.builder_ready !== false ||
+  dmCharacterCreateContext.payload?.create?.values?.name !== "Smoke Knight" ||
+  !Array.isArray(dmCharacterCreateContext.payload?.create?.class_options) ||
+  !Array.isArray(dmCharacterCreateContext.payload?.create?.choice_sections)
+) {
+  throw new Error(
+    `Unexpected DM DND character create context: ${dmCharacterCreateContext.status} ${JSON.stringify(dmCharacterCreateContext.payload)}`,
+  );
+}
+
+const adminCharacterCreateContext = await requestJson(characterCreatePath, {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (
+  adminCharacterCreateContext.status !== 200 ||
+  adminCharacterCreateContext.payload?.ok !== true ||
+  adminCharacterCreateContext.payload?.create?.lane !== "dnd5e"
+) {
+  throw new Error(
+    `Expected admin DND character create context success, got ${adminCharacterCreateContext.status} ${JSON.stringify(adminCharacterCreateContext.payload)}`,
+  );
+}
+
+const missingCampaignCharacterCreateContext = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/characters/create",
+  { Authorization: `Bearer ${dmApiToken}` },
+);
+if (
+  missingCampaignCharacterCreateContext.status !== 404 ||
+  missingCampaignCharacterCreateContext.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing campaign character create context 404, got ${missingCampaignCharacterCreateContext.status} ${JSON.stringify(missingCampaignCharacterCreateContext.payload)}`,
+  );
+}
+
+const unsupportedCharacterCreateConfigPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/config",
+  bearerContentManagerHeaders,
+  { method: "PATCH", body: { config: { system: "Fate", systems_library: "Fate" } } },
+);
+if (
+  unsupportedCharacterCreateConfigPatch.status !== 200 ||
+  unsupportedCharacterCreateConfigPatch.payload?.config_file?.config?.system !== "Fate"
+) {
+  throw new Error(
+    `Expected unsupported-system setup before character create context, got ${unsupportedCharacterCreateConfigPatch.status} ${JSON.stringify(unsupportedCharacterCreateConfigPatch.payload)}`,
+  );
+}
+const unsupportedCharacterCreateContext = await requestJson(characterCreatePath, {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  unsupportedCharacterCreateContext.status !== 400 ||
+  unsupportedCharacterCreateContext.payload?.error?.code !== "unsupported_campaign_system" ||
+  unsupportedCharacterCreateContext.payload?.error?.message !==
+    "This campaign can still use the character roster, read-mode sheets, session-mode sheets, and Controls. Native DND-5E builder, edit, level-up, repair, retraining, PDF-import, and spellcasting tools are not implemented for this campaign system."
+) {
+  throw new Error(
+    `Expected unsupported character create context unsupported_campaign_system, got ${unsupportedCharacterCreateContext.status} ${JSON.stringify(unsupportedCharacterCreateContext.payload)}`,
+  );
+}
+const restoreDndCharacterCreateConfigPatch = await requestJson(
+  "/api/v1/campaigns/linden-pass/content/config",
+  bearerContentManagerHeaders,
+  { method: "PATCH", body: { config: { system: "DND 5E", systems_library: "DND5E" } } },
+);
+if (
+  restoreDndCharacterCreateConfigPatch.status !== 200 ||
+  restoreDndCharacterCreateConfigPatch.payload?.config_file?.config?.system !== "DND-5E" ||
+  restoreDndCharacterCreateConfigPatch.payload?.config_file?.config?.systems_library !== "DND-5E"
+) {
+  throw new Error(
+    `Expected DND restore before Xianxia manual import context, got ${restoreDndCharacterCreateConfigPatch.status} ${JSON.stringify(restoreDndCharacterCreateConfigPatch.payload)}`,
+  );
+}
+
 const xianxiaManualImportPath = "/api/v1/campaigns/linden-pass/characters/import/xianxia-manual";
 const anonymousXianxiaManualImportContext = await requestJson(xianxiaManualImportPath);
 if (
@@ -11551,6 +11693,63 @@ if (
   xianxiaContentConfigPatch.payload?.config_file?.config?.systems_library !== "Xianxia"
 ) {
   throw new Error(`Expected Xianxia content config before character state smoke, got ${JSON.stringify(xianxiaContentConfigPatch.payload)}`);
+}
+
+const xianxiaCharacterCreateContext = await requestJson(
+  `${characterCreatePath}?name=Lin%20Mei&attribute_con=2&effort_magic=3&energy_jing=2&trained_skill_2=Qi%20Sense&martial_art_1_slug=xia-martial-art-cloud-palm&martial_art_1_rank=novice&manual_armor_bonus=1&dao_current=2&gm_granted_generic_technique_entry_keys=XIA%3Ageneric_technique%3Aqi-blast`,
+  { Authorization: `Bearer ${dmApiToken}` },
+);
+const xianxiaCreate = xianxiaCharacterCreateContext.payload?.create;
+const createCloudPalmOption = xianxiaCreate?.martial_art_options?.find(
+  (option) => option?.slug === "xia-martial-art-cloud-palm",
+);
+const createQiBlastOption = xianxiaCreate?.generic_technique_options?.find(
+  (option) => option?.entry_key === "XIA:generic_technique:qi-blast",
+);
+if (
+  xianxiaCharacterCreateContext.status !== 200 ||
+  xianxiaCharacterCreateContext.payload?.ok !== true ||
+  xianxiaCharacterCreateContext.payload?.campaign?.slug !== "linden-pass" ||
+  xianxiaCharacterCreateContext.payload?.lane !== "xianxia" ||
+  xianxiaCharacterCreateContext.payload?.tools?.can_create_characters !== true ||
+  xianxiaCharacterCreateContext.payload?.tools?.can_import_xianxia_characters !== true ||
+  xianxiaCharacterCreateContext.payload?.tools?.character_create_lane !== "xianxia" ||
+  xianxiaCharacterCreateContext.payload?.links?.create_character_url !==
+    "/app-next/campaigns/linden-pass/characters/new" ||
+  xianxiaCharacterCreateContext.payload?.links?.import_xianxia_url !==
+    "/app-next/campaigns/linden-pass/characters/import/xianxia-manual" ||
+  xianxiaCharacterCreateContext.payload?.links?.flask_import_xianxia_url !==
+    "/campaigns/linden-pass/characters/import/xianxia-manual" ||
+  xianxiaCharacterCreateContext.payload?.links?.gen2_import_xianxia_url !==
+    "/app-next/campaigns/linden-pass/characters/import/xianxia-manual" ||
+  xianxiaCreate?.lane !== "xianxia" ||
+  xianxiaCreate?.values?.name !== "Lin Mei" ||
+  xianxiaCreate?.attribute_fields?.find((field) => field?.key === "con")?.value !== "2" ||
+  xianxiaCreate?.attribute_fields?.find((field) => field?.key === "con")?.max !== 3 ||
+  xianxiaCreate?.effort_fields?.find((field) => field?.key === "magic")?.value !== "3" ||
+  xianxiaCreate?.energy_fields?.find((field) => field?.key === "jing")?.input_name !== "energy_jing" ||
+  xianxiaCreate?.energy_fields?.find((field) => field?.key === "jing")?.value !== "2" ||
+  xianxiaCreate?.trained_skill_fields?.[1]?.value !== "Qi Sense" ||
+  xianxiaCreate?.martial_art_fields?.[0]?.selected_slug !== "xia-martial-art-cloud-palm" ||
+  xianxiaCreate?.martial_art_fields?.[0]?.selected_rank !== "novice" ||
+  xianxiaCreate?.martial_art_rank_choices?.map((rank) => rank.key).join("|") !== "initiate|novice" ||
+  createCloudPalmOption?.title !== "Cloud Palm" ||
+  createCloudPalmOption?.martial_art_style !== "Open hand" ||
+  xianxiaCreate?.manual_armor_field?.value !== "1" ||
+  xianxiaCreate?.dao_field?.value !== "2" ||
+  xianxiaCreate?.generic_technique_options?.length !== 1 ||
+  createQiBlastOption?.name !== "Qi Blast" ||
+  createQiBlastOption?.generic_technique_key !== "qi_blast" ||
+  createQiBlastOption?.insight_cost !== 1 ||
+  createQiBlastOption?.selected !== true ||
+  xianxiaCreate?.gm_granted_generic_technique_input !== "gm_granted_generic_technique_entry_keys" ||
+  xianxiaCreate?.defaults?.realm !== "Mortal" ||
+  xianxiaCreate?.defaults?.actions_per_turn !== 2 ||
+  xianxiaCreate?.defaults?.defense !== 13
+) {
+  throw new Error(
+    `Unexpected Xianxia character create context payload: ${xianxiaCharacterCreateContext.status} ${JSON.stringify(xianxiaCharacterCreateContext.payload)}`,
+  );
 }
 
 const malformedXianxiaManualImportPost = await requestJson(

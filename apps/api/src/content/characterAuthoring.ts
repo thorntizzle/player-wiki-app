@@ -135,6 +135,7 @@ const XIANXIA_MANUAL_IMPORTER_SOURCE_PATH = "importer://xianxia-manual";
 const XIANXIA_MANUAL_IMPORTER_SOURCE_TYPE = "xianxia_manual_importer";
 const XIANXIA_MANUAL_IMPORTER_VERSION = "2026-05-13.0";
 const XIANXIA_MANUAL_IMPORTER_IMPORTED_FROM = "Manual Xianxia character importer";
+const XIANXIA_DIRECT_ADVANCEMENT_GENERIC_TECHNIQUE_KEYS = new Set(["cultivation", "meditation", "conditioning", "training"]);
 const NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE =
   "This campaign can still use the character roster, read-mode sheets, session-mode sheets, and Controls. Native DND-5E builder, edit, level-up, repair, retraining, PDF-import, and spellcasting tools are not implemented for this campaign system.";
 
@@ -179,11 +180,14 @@ export function buildCharacterAuthoringLinks(campaign: CampaignViewModel) {
   const links: Record<string, string> = {
     flask_roster_url: flaskCampaignHref(campaignSlug, "characters"),
     gen2_roster_url: campaignHref(campaignSlug, "characters"),
+    flask_create_character_url: flaskCampaignHref(campaignSlug, "characters/new"),
+    create_character_url: campaignHref(campaignSlug, "characters/new"),
     flask_create_url: flaskCampaignHref(campaignSlug, "characters/new"),
     gen2_create_url: campaignHref(campaignSlug, "characters/new"),
   };
   if (nativeCharacterCreateLane(campaign.system) === "xianxia") {
     links.flask_import_xianxia_url = flaskCampaignHref(campaignSlug, "characters/import/xianxia-manual");
+    links.import_xianxia_url = campaignHref(campaignSlug, "characters/import/xianxia-manual");
     links.gen2_import_xianxia_url = campaignHref(campaignSlug, "characters/import/xianxia-manual");
   }
   return links;
@@ -267,10 +271,11 @@ function loadEnabledSourceIds(
     .map((row) => row.source_id);
 }
 
-function loadEnabledMartialArtRows(
+function loadEnabledSystemsEntryRows(
   database: SqliteDatabase,
   campaign: CampaignViewModel,
   campaignConfig: Record<string, unknown>,
+  entryType: string,
 ): SystemsEntryRow[] {
   const enabledSourceIds = loadEnabledSourceIds(database, campaign, campaignConfig);
   const librarySlug = campaign.systems_library_slug || "";
@@ -298,11 +303,19 @@ function loadEnabledMartialArtRows(
          AND campaign_entry_overrides.entry_key = systems_entries.entry_key
         WHERE systems_entries.library_slug = ?
           AND systems_entries.source_id IN (${placeholders})
-          AND LOWER(systems_entries.entry_type) = 'martial_art'
+          AND LOWER(systems_entries.entry_type) = ?
         ORDER BY LOWER(systems_entries.title), systems_entries.source_id
       `,
     )
-    .all(campaign.slug, librarySlug, ...enabledSourceIds) as SystemsEntryRow[];
+    .all(campaign.slug, librarySlug, ...enabledSourceIds, entryType.toLowerCase()) as SystemsEntryRow[];
+}
+
+function loadEnabledMartialArtRows(
+  database: SqliteDatabase,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+): SystemsEntryRow[] {
+  return loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "martial_art");
 }
 
 function normalizeRankKey(value: unknown): string {
@@ -311,6 +324,10 @@ function normalizeRankKey(value: unknown): string {
 
 function normalizeMartialArtOptionSlug(value: unknown): string {
   return String(value ?? "").trim().toLowerCase();
+}
+
+function normalizeGenericTechniqueKey(value: unknown): string {
+  return String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 
 function firstPresent(...values: unknown[]): unknown {
@@ -399,6 +416,58 @@ function buildXianxiaMartialArtOption(row: SystemsEntryRow, customSourceId: stri
   };
 }
 
+function xianxiaGenericTechniqueSortOrder(metadata: Record<string, unknown>, techniqueBody: Record<string, unknown>): number {
+  const parsed = Number(
+    firstPresent(metadata.generic_technique_catalog_order, metadata.catalog_order, techniqueBody.catalog_order),
+  );
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : 10000;
+}
+
+function buildXianxiaGenericTechniqueOption(row: SystemsEntryRow, selectedEntryKeys: Set<string>) {
+  const metadata = parseJsonRecord(row.metadata_json);
+  const body = parseJsonRecord(row.body_json);
+  const techniqueBody = asRecord(body.xianxia_generic_technique);
+  const genericTechniqueKey = normalizeGenericTechniqueKey(
+    firstPresent(metadata.generic_technique_key, metadata.xianxia_generic_technique_key, techniqueBody.key),
+  );
+  const entryKey = String(row.entry_key || "").trim();
+  if (!entryKey || !genericTechniqueKey || XIANXIA_DIRECT_ADVANCEMENT_GENERIC_TECHNIQUE_KEYS.has(genericTechniqueKey)) {
+    return null;
+  }
+
+  const insightCost = Math.max(0, Number.parseInt(String(firstPresent(metadata.insight_cost, techniqueBody.insight_cost) || "0"), 10) || 0);
+  if (insightCost <= 0) {
+    return null;
+  }
+
+  return {
+    name: String(row.title || "").trim() || "Generic Technique",
+    entry_key: entryKey,
+    systems_ref: {
+      library_slug: String(row.library_slug || "").trim(),
+      source_id: String(row.source_id || "").trim(),
+      entry_key: entryKey,
+      slug: String(row.slug || "").trim(),
+      title: String(row.title || "").trim(),
+      entry_type: String(row.entry_type || "").trim(),
+    },
+    generic_technique_key: genericTechniqueKey,
+    insight_cost: insightCost,
+    support_state: String(
+      firstPresent(
+        metadata.support_state,
+        metadata.xianxia_support_state,
+        techniqueBody.support_state,
+        techniqueBody.xianxia_support_state,
+      ) || "",
+    ).trim(),
+    learnable_without_master: truthy(firstPresent(metadata.learnable_without_master, techniqueBody.learnable_without_master)),
+    requires_master: truthy(firstPresent(metadata.requires_master, techniqueBody.requires_master)),
+    sort_order: xianxiaGenericTechniqueSortOrder(metadata, techniqueBody),
+    selected: selectedEntryKeys.has(entryKey.toLowerCase()),
+  };
+}
+
 export function listXianxiaManualImportMartialArtOptions(
   dbPath: string,
   campaign: CampaignViewModel,
@@ -423,6 +492,43 @@ export function listXianxiaManualImportMartialArtOptions(
           return titleComparison;
         }
         return left.source_id.toLowerCase().localeCompare(right.source_id.toLowerCase());
+      });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("no such table")) {
+      return [];
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function listXianxiaCreateGenericTechniqueOptions(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  selectedEntryKeys: string[] = [],
+) {
+  if (!campaign.systems_library_slug || !existsSync(dbPath)) {
+    return [];
+  }
+
+  const selected = new Set(selectedEntryKeys.map((entryKey) => String(entryKey || "").trim().toLowerCase()).filter(Boolean));
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    return loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "generic_technique")
+      .filter((row) => row.is_enabled_override !== 0)
+      .map((row) => buildXianxiaGenericTechniqueOption(row, selected))
+      .filter((option): option is NonNullable<typeof option> => option !== null)
+      .sort((left, right) => {
+        if (left.sort_order !== right.sort_order) {
+          return left.sort_order - right.sort_order;
+        }
+        const titleComparison = left.name.toLowerCase().localeCompare(right.name.toLowerCase());
+        if (titleComparison !== 0) {
+          return titleComparison;
+        }
+        return left.systems_ref.source_id.toLowerCase().localeCompare(right.systems_ref.source_id.toLowerCase());
       });
   } catch (error) {
     if (error instanceof Error && error.message.includes("no such table")) {
