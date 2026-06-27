@@ -11613,16 +11613,128 @@ if (
 const dndCharacterCreateSubmit = await requestJson(
   characterCreatePath,
   { Authorization: `Bearer ${dmApiToken}` },
-  { method: "POST", body: { values: { name: "Not Yet Built" } } },
+  {
+    method: "POST",
+    body: {
+      values: {
+        name: "Pilot Knight",
+        character_slug: "pilot-knight",
+        class_slug: "systems:phb-fighter",
+        species_slug: "systems:phb-human",
+        background_slug: "systems:phb-soldier",
+        str: "16",
+        dex: "12",
+        con: "14",
+        int: "10",
+        wis: "10",
+        cha: "10",
+      },
+    },
+  },
 );
 if (
-  dndCharacterCreateSubmit.status !== 400 ||
-  dndCharacterCreateSubmit.payload?.error?.code !== "validation_error" ||
-  dndCharacterCreateSubmit.payload?.error?.message !==
-    "DND-5E character creation submit is not implemented in the TypeScript API yet."
+  dndCharacterCreateSubmit.status !== 200 ||
+  dndCharacterCreateSubmit.payload?.ok !== true ||
+  dndCharacterCreateSubmit.payload?.character?.definition?.character_slug !== "pilot-knight" ||
+  dndCharacterCreateSubmit.payload?.character?.definition?.system !== "DND-5E" ||
+  dndCharacterCreateSubmit.payload?.character?.definition?.profile?.class_level_text !== "Fighter 1" ||
+  dndCharacterCreateSubmit.payload?.character?.definition?.profile?.classes?.[0]?.systems_ref?.entry_key !== "PHB:class:fighter" ||
+  dndCharacterCreateSubmit.payload?.character?.definition?.profile?.species_ref?.entry_key !== "PHB:race:human" ||
+  dndCharacterCreateSubmit.payload?.character?.definition?.profile?.background_ref?.entry_key !== "PHB:background:soldier" ||
+  dndCharacterCreateSubmit.payload?.character?.definition?.stats?.max_hp !== 12 ||
+  dndCharacterCreateSubmit.payload?.character?.definition?.stats?.armor_class !== 18 ||
+  dndCharacterCreateSubmit.payload?.character?.definition?.resource_templates?.[0]?.id !== "second-wind" ||
+  dndCharacterCreateSubmit.payload?.character?.definition?.source?.source_path !== "builder://dnd5e-create-pilot" ||
+  dndCharacterCreateSubmit.payload?.character?.import_metadata?.source_path !== "builder://dnd5e-create-pilot" ||
+  dndCharacterCreateSubmit.payload?.character?.state_record?.revision !== 1 ||
+  dndCharacterCreateSubmit.payload?.character?.state_record?.state?.vitals?.current_hp !== 12 ||
+  dndCharacterCreateSubmit.payload?.character?.state_record?.state?.hit_dice?.pools?.[0]?.faces !== 10 ||
+  dndCharacterCreateSubmit.payload?.character?.state_record?.state?.resources?.[0]?.id !== "second-wind" ||
+  dndCharacterCreateSubmit.payload?.character?.state_record?.state?.inventory?.[0]?.catalog_ref !== "chain-mail-1" ||
+  dndCharacterCreateSubmit.payload?.character?.state_record?.state?.currency?.gp !== 10
 ) {
   throw new Error(
-    `Expected DND character create submit validation_error, got ${dndCharacterCreateSubmit.status} ${JSON.stringify(dndCharacterCreateSubmit.payload)}`,
+    `Unexpected DND character create submit pilot payload: ${dndCharacterCreateSubmit.status} ${JSON.stringify(dndCharacterCreateSubmit.payload)}`,
+  );
+}
+const dndPilotStateDb = new Database(dbPath);
+const dndPilotState = dndPilotStateDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", "pilot-knight");
+dndPilotStateDb.close();
+const dndPilotStateJson = dndPilotState ? JSON.parse(dndPilotState.state_json) : null;
+if (
+  dndPilotState?.revision !== 1 ||
+  dndPilotState?.updated_by_user_id !== null ||
+  dndPilotStateJson?.vitals?.current_hp !== 12 ||
+  dndPilotStateJson?.hit_dice?.pools?.[0]?.current !== 1 ||
+  dndPilotStateJson?.resources?.[0]?.current !== 1 ||
+  dndPilotStateJson?.spell_slots?.length !== 0
+) {
+  throw new Error(`Unexpected DND pilot persisted state: ${JSON.stringify({ dndPilotState, dndPilotStateJson })}`);
+}
+const dndPilotDefinition = parseYaml(
+  readFileSync(path.join(campaignsDir, "linden-pass", "characters", "pilot-knight", "definition.yaml"), "utf8"),
+);
+const dndPilotImport = parseYaml(
+  readFileSync(path.join(campaignsDir, "linden-pass", "characters", "pilot-knight", "import.yaml"), "utf8"),
+);
+if (
+  dndPilotDefinition?.name !== "Pilot Knight" ||
+  dndPilotDefinition?.source?.source_path !== "builder://dnd5e-create-pilot" ||
+  dndPilotImport?.import_status !== "managed"
+) {
+  throw new Error(`Unexpected DND pilot files: ${JSON.stringify({ dndPilotDefinition, dndPilotImport })}`);
+}
+
+const duplicateDndCharacterCreateSubmit = await requestJson(
+  characterCreatePath,
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: {
+      values: {
+        name: "Pilot Knight",
+        character_slug: "pilot-knight",
+        class_slug: "systems:phb-fighter",
+        species_slug: "systems:phb-human",
+        background_slug: "systems:phb-soldier",
+      },
+    },
+  },
+);
+if (
+  duplicateDndCharacterCreateSubmit.status !== 409 ||
+  duplicateDndCharacterCreateSubmit.payload?.error?.code !== "character_exists"
+) {
+  throw new Error(
+    `Expected duplicate DND create POST character_exists, got ${duplicateDndCharacterCreateSubmit.status} ${JSON.stringify(duplicateDndCharacterCreateSubmit.payload)}`,
+  );
+}
+
+const outOfPilotDndCharacterCreateSubmit = await requestJson(
+  characterCreatePath,
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: {
+      values: {
+        name: "Subclass Pilot Rejected",
+        class_slug: "systems:phb-fighter",
+        species_slug: "systems:phb-human",
+        background_slug: "systems:phb-soldier",
+        subclass_slug: "systems:phb-champion",
+      },
+    },
+  },
+);
+if (
+  outOfPilotDndCharacterCreateSubmit.status !== 400 ||
+  outOfPilotDndCharacterCreateSubmit.payload?.error?.code !== "validation_error" ||
+  !outOfPilotDndCharacterCreateSubmit.payload?.error?.message.includes("does not support subclass choices")
+) {
+  throw new Error(
+    `Expected out-of-pilot DND create validation_error, got ${outOfPilotDndCharacterCreateSubmit.status} ${JSON.stringify(outOfPilotDndCharacterCreateSubmit.payload)}`,
   );
 }
 

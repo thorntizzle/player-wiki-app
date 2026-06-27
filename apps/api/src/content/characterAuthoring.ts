@@ -165,8 +165,15 @@ const DND_ABILITY_LABELS: Record<(typeof DND_ABILITY_KEYS)[number], string> = {
 const DND_CREATE_LIMITATIONS = [
   "Base classes come from enabled Systems rows inside the current native support lane: PHB base classes plus TCE Artificer.",
   "Species and backgrounds come from enabled Systems rows in the current supported source matrix for this TypeScript parity slice.",
-  "This endpoint builds the Gen2 create context only; DND-5E character submit remains blocked in the TypeScript API for this slice.",
+  "DND-5E submit is limited to the narrow PHB Fighter pilot lane in the TypeScript API; full level-one builder parity remains pending.",
 ];
+const DND_CHARACTER_CREATE_SOURCE_PATH = "builder://dnd5e-create-pilot";
+const DND_CHARACTER_CREATE_SOURCE_TYPE = "dnd5e_character_builder_pilot";
+const DND_CHARACTER_CREATE_VERSION = "2026-06-27.0";
+const DND_CHARACTER_CREATE_IMPORTED_FROM = "In-app DND-5E Character Creator pilot";
+const DND_PILOT_CLASS = "fighter";
+const DND_PILOT_SPECIES = "human";
+const DND_PILOT_BACKGROUND = "soldier";
 
 export interface XianxiaManualImportBuildResult {
   definition: Record<string, unknown>;
@@ -193,6 +200,12 @@ export interface DndCreateContext {
   choice_sections: Array<Record<string, unknown>>;
   preview: Record<string, unknown>;
   limitations: string[];
+}
+
+export interface DndCreateBuildResult {
+  definition: Record<string, unknown>;
+  importMetadata: Record<string, unknown>;
+  initialState?: Record<string, unknown>;
 }
 
 function normalizeSystemKey(value: unknown): string {
@@ -649,6 +662,335 @@ export function buildDndCharacterCreateContext({
         preview: {},
         limitations: DND_CREATE_LIMITATIONS,
       };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+function assertDndPilotEntry(row: SystemsEntryRow | null, expectedTitle: string, expectedType: string, fieldLabel: string): SystemsEntryRow {
+  if (!row) {
+    throw new Error(`${fieldLabel} is required for the DND-5E create pilot.`);
+  }
+  if (
+    normalizeDndSourceId(row.source_id) !== DND_PHB_SOURCE_ID ||
+    normalizeLookup(row.title) !== expectedTitle ||
+    String(row.entry_type || "") !== expectedType
+  ) {
+    throw new Error("DND-5E character creation submit currently supports only the PHB Fighter / Human / Soldier pilot lane.");
+  }
+  return row;
+}
+
+function dndSystemsRef(row: SystemsEntryRow): Record<string, unknown> {
+  const metadata = parseJsonRecord(row.metadata_json);
+  const ref: Record<string, unknown> = {
+    source_id: row.source_id,
+    entry_key: row.entry_key,
+    slug: row.slug,
+    title: row.title,
+    entry_type: row.entry_type,
+  };
+  if (Object.keys(metadata).length > 0) {
+    ref.metadata = metadata;
+  }
+  return ref;
+}
+
+function dndAbilityScores(values: Record<string, string>) {
+  return Object.fromEntries(
+    DND_ABILITY_KEYS.map((key) => {
+      const score = Math.min(30, Math.max(1, createContextInteger(values[key], 10)));
+      return [
+        key,
+        {
+          score,
+          modifier: abilityModifier(score),
+          save_bonus: abilityModifier(score) + (key === "str" || key === "con" ? 2 : 0),
+        },
+      ];
+    }),
+  );
+}
+
+function dndAbilityScoreValue(abilityScores: Record<string, unknown>, key: (typeof DND_ABILITY_KEYS)[number]): number {
+  return createContextInteger(asRecord(abilityScores[key]).score, 10);
+}
+
+function dndSkillBonus(abilityScores: Record<string, unknown>, abilityKey: (typeof DND_ABILITY_KEYS)[number], proficient: boolean): number {
+  return abilityModifier(dndAbilityScoreValue(abilityScores, abilityKey)) + (proficient ? 2 : 0);
+}
+
+function dndPilotEquipmentCatalog(): Array<Record<string, unknown>> {
+  return [
+    {
+      id: "chain-mail-1",
+      name: "Chain Mail",
+      default_quantity: 1,
+      weight: "55 lb.",
+      is_equipped: true,
+      supports_equipped_state: true,
+      tags: ["armor"],
+    },
+    {
+      id: "shield-1",
+      name: "Shield",
+      default_quantity: 1,
+      weight: "6 lb.",
+      is_equipped: true,
+      supports_equipped_state: true,
+      tags: ["shield", "armor"],
+    },
+    {
+      id: "longsword-1",
+      name: "Longsword",
+      default_quantity: 1,
+      weight: "3 lb.",
+      is_equipped: true,
+      supports_equipped_state: true,
+      weapon_wield_mode: "main-hand",
+      weapon_wield_modes: ["main-hand", "two-handed"],
+      tags: ["weapon", "martial weapon", "melee weapon"],
+    },
+    {
+      id: "light-crossbow-1",
+      name: "Light Crossbow",
+      default_quantity: 1,
+      weight: "5 lb.",
+      tags: ["weapon", "simple weapon", "ranged weapon"],
+    },
+    {
+      id: "crossbow-bolts-1",
+      name: "Crossbow Bolts",
+      default_quantity: 20,
+      weight: "1.5 lb.",
+      tags: ["ammunition"],
+    },
+    {
+      id: "explorers-pack-1",
+      name: "Explorer's Pack",
+      default_quantity: 1,
+      weight: "59 lb.",
+      tags: ["gear"],
+    },
+    {
+      id: "insignia-rank-1",
+      name: "Insignia of Rank",
+      default_quantity: 1,
+      weight: "light",
+      tags: ["background"],
+    },
+    {
+      id: "starting-coin-1",
+      name: "Starting Coin",
+      is_currency_only: true,
+      currency: { cp: 0, sp: 0, ep: 0, gp: 10, pp: 0 },
+    },
+  ];
+}
+
+function dndPilotAttacks(abilityScores: Record<string, unknown>): Array<Record<string, unknown>> {
+  const strengthModifier = abilityModifier(dndAbilityScoreValue(abilityScores, "str"));
+  const dexterityModifier = abilityModifier(dndAbilityScoreValue(abilityScores, "dex"));
+  return [
+    {
+      name: "Longsword",
+      category: "melee weapon",
+      attack_bonus: strengthModifier + 2,
+      damage: `1d8${strengthModifier >= 0 ? "+" : ""}${strengthModifier} slashing`,
+      notes: "Versatile (1d10). Pilot lane uses a shield-and-longsword starting package.",
+      equipment_ref: "longsword-1",
+    },
+    {
+      name: "Light Crossbow",
+      category: "ranged weapon",
+      attack_bonus: dexterityModifier + 2,
+      damage: `1d8${dexterityModifier >= 0 ? "+" : ""}${dexterityModifier} piercing`,
+      notes: "Ammunition, loading, range 80/320.",
+      equipment_ref: "light-crossbow-1",
+    },
+  ];
+}
+
+export function buildDndCreateCharacter({
+  dbPath,
+  campaign,
+  campaignConfig,
+  values,
+}: {
+  dbPath: string;
+  campaign: CampaignViewModel;
+  campaignConfig: Record<string, unknown>;
+  values: Record<string, unknown>;
+}): DndCreateBuildResult {
+  const name = normalizeCreateName(values.name);
+  if (!name) {
+    throw new Error("Character name is required.");
+  }
+  const characterSlug = normalizeCharacterSlug(cleanScalar(values.character_slug), name);
+  if (!characterSlug) {
+    throw new Error("Character slug is required.");
+  }
+  if (!campaign.systems_library_slug || !existsSync(dbPath)) {
+    throw new Error("DND-5E character creation requires an enabled Systems library.");
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const classRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "class")
+      .filter((row) => row.is_enabled_override !== 0)
+      .filter(dndSupportsNativeClassEntry);
+    const speciesRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "race")
+      .filter((row) => row.is_enabled_override !== 0)
+      .filter((row) => dndSupportsSubordinateSource(row.source_id));
+    const backgroundRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "background")
+      .filter((row) => row.is_enabled_override !== 0)
+      .filter((row) => dndSupportsSubordinateSource(row.source_id));
+
+    const normalizedValues = normalizeCharacterAuthoringValues(values);
+    normalizedValues.class_slug = sanitizeDndEntrySelectionValue(normalizedValues.class_slug, classRows);
+    normalizedValues.species_slug = sanitizeDndEntrySelectionValue(normalizedValues.species_slug, speciesRows);
+    normalizedValues.background_slug = sanitizeDndEntrySelectionValue(normalizedValues.background_slug, backgroundRows);
+    const selectedClass = assertDndPilotEntry(
+      selectedDndEntry(classRows, normalizedValues.class_slug),
+      DND_PILOT_CLASS,
+      "class",
+      "Class",
+    );
+    const selectedSpecies = assertDndPilotEntry(
+      selectedDndEntry(speciesRows, normalizedValues.species_slug),
+      DND_PILOT_SPECIES,
+      "race",
+      "Species",
+    );
+    const selectedBackground = assertDndPilotEntry(
+      selectedDndEntry(backgroundRows, normalizedValues.background_slug),
+      DND_PILOT_BACKGROUND,
+      "background",
+      "Background",
+    );
+    if (isPresent(normalizedValues.subclass_slug)) {
+      throw new Error("DND-5E character creation submit currently does not support subclass choices.");
+    }
+
+    const classMetadata = parseJsonRecord(selectedClass.metadata_json);
+    const speciesMetadata = parseJsonRecord(selectedSpecies.metadata_json);
+    const hitDie = createContextInteger(classMetadata.hit_die, 10);
+    const abilityScores = dndAbilityScores(normalizedValues);
+    const conModifier = abilityModifier(dndAbilityScoreValue(abilityScores, "con"));
+    const maxHp = Math.max(1, hitDie + conModifier);
+    const createdAt = new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
+    const speciesSpeed = createContextInteger(firstPresent(speciesMetadata.speed, speciesMetadata.walk_speed), 30);
+    const equipmentCatalog = dndPilotEquipmentCatalog();
+    const definition: Record<string, unknown> = {
+      campaign_slug: campaign.slug,
+      character_slug: characterSlug,
+      name,
+      status: "active",
+      system: "DND-5E",
+      profile: {
+        class_level_text: "Fighter 1",
+        classes: [
+          {
+            class_name: "Fighter",
+            level: 1,
+            hit_die_faces: hitDie,
+            systems_ref: dndSystemsRef(selectedClass),
+          },
+        ],
+        species: "Human",
+        species_ref: dndSystemsRef(selectedSpecies),
+        background: "Soldier",
+        background_ref: dndSystemsRef(selectedBackground),
+        alignment: "",
+        size: String(firstPresent(speciesMetadata.size, "Medium")),
+        experience_model: "Milestone",
+      },
+      stats: {
+        max_hp: maxHp,
+        armor_class: 18,
+        initiative_bonus: abilityModifier(dndAbilityScoreValue(abilityScores, "dex")),
+        speed: `${speciesSpeed} ft.`,
+        proficiency_bonus: 2,
+        passive_perception: 10 + dndSkillBonus(abilityScores, "wis", false),
+        passive_insight: 10 + dndSkillBonus(abilityScores, "wis", false),
+        passive_investigation: 10 + dndSkillBonus(abilityScores, "int", false),
+        ability_scores: abilityScores,
+      },
+      skills: [
+        { name: "Athletics", bonus: dndSkillBonus(abilityScores, "str", true), proficiency_level: "proficient" },
+        { name: "Intimidation", bonus: dndSkillBonus(abilityScores, "cha", true), proficiency_level: "proficient" },
+        { name: "Perception", bonus: dndSkillBonus(abilityScores, "wis", false), proficiency_level: "none" },
+      ],
+      proficiencies: {
+        armor: ["All armor", "Shields"],
+        weapons: ["Simple weapons", "Martial weapons"],
+        tools: ["One gaming set", "Vehicles (land)"],
+        languages: asArray(speciesMetadata.languages).map(String).filter(Boolean),
+        tool_expertise: [],
+      },
+      attacks: dndPilotAttacks(abilityScores),
+      features: [
+        {
+          id: "fighting-style-1",
+          name: "Fighting Style",
+          category: "class_feature",
+          source: "PHB",
+          description_markdown: "Pilot DND-5E character creation records the Fighter starting feature as reference text only.",
+        },
+        {
+          id: "second-wind-1",
+          name: "Second Wind",
+          category: "class_feature",
+          tracker_ref: "second-wind",
+          source: "PHB",
+          description_markdown: "You have one use of Second Wind. Full Fighter feature automation remains outside this pilot slice.",
+        },
+      ],
+      spellcasting: {},
+      equipment_catalog: equipmentCatalog,
+      reference_notes: {
+        additional_notes_markdown: "Created by the TypeScript DND-5E pilot lane. Full native builder parity remains pending.",
+        allies_and_organizations_markdown: "",
+        custom_sections: [],
+      },
+      resource_templates: [
+        {
+          id: "second-wind",
+          label: "Second Wind",
+          category: "class_feature",
+          max: 1,
+          initial_current: 1,
+          reset_on: "short_rest",
+          reset_to: "max",
+          rest_behavior: "restore_full",
+          display_order: 10,
+        },
+      ],
+      source: {
+        source_path: DND_CHARACTER_CREATE_SOURCE_PATH,
+        source_type: DND_CHARACTER_CREATE_SOURCE_TYPE,
+        imported_from: DND_CHARACTER_CREATE_IMPORTED_FROM,
+        imported_at: createdAt,
+        parse_warnings: [],
+      },
+    };
+    const importMetadata = {
+      campaign_slug: campaign.slug,
+      character_slug: characterSlug,
+      source_path: DND_CHARACTER_CREATE_SOURCE_PATH,
+      imported_at_utc: createdAt,
+      parser_version: DND_CHARACTER_CREATE_VERSION,
+      import_status: "managed",
+      warnings: [
+        "Created by the narrow TypeScript DND-5E pilot lane; full level-one builder parity remains pending.",
+      ],
+    };
+    return { definition, importMetadata };
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("no such table")) {
+      throw new Error("DND-5E character creation requires Systems source data.");
     }
     throw error;
   } finally {

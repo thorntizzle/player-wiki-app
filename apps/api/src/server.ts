@@ -123,6 +123,7 @@ import {
 import {
   buildCharacterAuthoringLinks,
   buildDndCharacterCreateContext,
+  buildDndCreateCharacter,
   buildXianxiaCreateCharacter,
   listXianxiaCreateGenericTechniqueOptions,
   buildXianxiaManualImportCharacter,
@@ -5254,10 +5255,6 @@ app.post(ROUTES.characterCreate, async (ctx) => {
     const error = jsonError("unsupported_campaign_system", nativeCharacterCreateUnsupportedMessage(campaign.system), 400);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
-  if (lane === "dnd5e") {
-    const error = validationError("DND-5E character creation submit is not implemented in the TypeScript API yet.");
-    return ctx.json({ ok: error.ok, error: error.error }, error.status);
-  }
 
   const jsonPayload = await readJsonObject(ctx);
   if (jsonPayload.status === "error") {
@@ -5273,21 +5270,30 @@ app.post(ROUTES.characterCreate, async (ctx) => {
       ? (payload.values as Record<string, unknown>)
       : payload;
   const configRecord = await getCampaignConfigFile(config, campaign.slug);
-  const createContext = buildXianxiaCharacterCreateContext({
-    dbPath: config.dbPath,
-    campaign,
-    campaignConfig: configRecord?.config || {},
-    values: rawValues,
-  });
 
   let createPayload;
   try {
-    createPayload = buildXianxiaCreateCharacter({
-      campaignSlug: campaign.slug,
-      values: rawValues,
-      martialArtOptions: createContext.martial_art_options,
-      genericTechniqueOptions: createContext.generic_technique_options,
-    });
+    if (lane === "dnd5e") {
+      createPayload = buildDndCreateCharacter({
+        dbPath: config.dbPath,
+        campaign,
+        campaignConfig: configRecord?.config || {},
+        values: rawValues,
+      });
+    } else {
+      const createContext = buildXianxiaCharacterCreateContext({
+        dbPath: config.dbPath,
+        campaign,
+        campaignConfig: configRecord?.config || {},
+        values: rawValues,
+      });
+      createPayload = buildXianxiaCreateCharacter({
+        campaignSlug: campaign.slug,
+        values: rawValues,
+        martialArtOptions: createContext.martial_art_options,
+        genericTechniqueOptions: createContext.generic_technique_options,
+      });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid character payload.";
     const validation = validationError(message);

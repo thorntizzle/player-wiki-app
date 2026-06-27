@@ -252,6 +252,44 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
               updated_by_user_id INTEGER,
               PRIMARY KEY (campaign_slug, character_slug)
             );
+
+            CREATE TABLE systems_sources (
+              library_slug TEXT NOT NULL,
+              source_id TEXT NOT NULL,
+              title TEXT NOT NULL,
+              PRIMARY KEY (library_slug, source_id)
+            );
+
+            CREATE TABLE campaign_enabled_sources (
+              campaign_slug TEXT NOT NULL,
+              library_slug TEXT NOT NULL,
+              source_id TEXT NOT NULL,
+              is_enabled INTEGER NOT NULL,
+              default_visibility TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              updated_by_user_id INTEGER,
+              PRIMARY KEY (campaign_slug, library_slug, source_id)
+            );
+
+            CREATE TABLE systems_entries (
+              library_slug TEXT NOT NULL,
+              source_id TEXT NOT NULL,
+              entry_key TEXT NOT NULL,
+              entry_type TEXT NOT NULL,
+              slug TEXT NOT NULL,
+              title TEXT NOT NULL,
+              metadata_json TEXT NOT NULL DEFAULT '{}',
+              body_json TEXT NOT NULL DEFAULT '{}',
+              PRIMARY KEY (library_slug, entry_key)
+            );
+
+            CREATE TABLE campaign_entry_overrides (
+              campaign_slug TEXT NOT NULL,
+              library_slug TEXT NOT NULL,
+              entry_key TEXT NOT NULL,
+              is_enabled_override INTEGER,
+              PRIMARY KEY (campaign_slug, library_slug, entry_key)
+            );
             """
         )
         connection.execute(
@@ -285,6 +323,27 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
         connection.execute(
             "INSERT INTO api_tokens (id, user_id, label, token_hash, created_at, last_used_at, expires_at, revoked_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (901, 77, "TypeScript Golden DM Token", _hash_token(TYPESCRIPT_DM_API_TOKEN), now, now, None, None, None),
+        )
+        connection.execute(
+            "INSERT INTO systems_sources (library_slug, source_id, title) VALUES (?, ?, ?)",
+            ("DND-5E", "PHB", "Player's Handbook"),
+        )
+        connection.execute(
+            "INSERT INTO campaign_enabled_sources (campaign_slug, library_slug, source_id, is_enabled, default_visibility, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("linden-pass", "DND-5E", "PHB", 1, "players", now, 77),
+        )
+        dnd_entries = [
+            ("DND-5E", "PHB", "PHB:class:fighter", "class", "phb-fighter", "Fighter", {"hit_die": 10, "saving_throw_proficiencies": ["Strength", "Constitution"]}),
+            ("DND-5E", "PHB", "PHB:race:human", "race", "phb-human", "Human", {"size": "Medium", "speed": 30, "languages": ["Common", "one extra language"]}),
+            ("DND-5E", "PHB", "PHB:background:soldier", "background", "phb-soldier", "Soldier", {}),
+            ("DND-5E", "PHB", "PHB:subclass:champion", "subclass", "phb-champion", "Champion", {"class_name": "Fighter", "class_source": "PHB"}),
+        ]
+        connection.executemany(
+            "INSERT INTO systems_entries (library_slug, source_id, entry_key, entry_type, slug, title, metadata_json, body_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (library_slug, source_id, entry_key, entry_type, slug, title, json.dumps(metadata), "{}")
+                for library_slug, source_id, entry_key, entry_type, slug, title, metadata in dnd_entries
+            ],
         )
         connection.commit()
     finally:
@@ -1257,6 +1316,98 @@ def test_typescript_content_character_dnd_persistence_matches_flask_golden(
     with app.app_context():
         assert AuthStore().get_character_assignment("linden-pass", character_slug) is None
     assert _sqlite_character_assignment_count(typescript_api_mutation_server["db_path"], character_slug) == 0
+
+
+def test_typescript_dnd_character_create_pilot_writes_definition_import_and_state(
+    typescript_api_mutation_server,
+):
+    character_slug = "api-dnd-pilot"
+    body = {
+        "values": {
+            "name": "API DND Pilot",
+            "character_slug": character_slug,
+            "class_slug": "systems:phb-fighter",
+            "species_slug": "systems:phb-human",
+            "background_slug": "systems:phb-soldier",
+            "str": "16",
+            "dex": "12",
+            "con": "14",
+            "int": "10",
+            "wis": "10",
+            "cha": "10",
+        }
+    }
+
+    status, payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body=body,
+    )
+
+    assert status == 200
+    definition = payload["character"]["definition"]
+    import_metadata = payload["character"]["import_metadata"]
+    state_record = payload["character"]["state_record"]
+    assert definition["character_slug"] == character_slug
+    assert definition["system"] == "DND-5E"
+    assert definition["profile"]["class_level_text"] == "Fighter 1"
+    assert definition["profile"]["classes"][0]["systems_ref"]["entry_key"] == "PHB:class:fighter"
+    assert definition["profile"]["species_ref"]["entry_key"] == "PHB:race:human"
+    assert definition["profile"]["background_ref"]["entry_key"] == "PHB:background:soldier"
+    assert definition["stats"]["max_hp"] == 12
+    assert definition["stats"]["armor_class"] == 18
+    assert definition["resource_templates"][0]["id"] == "second-wind"
+    assert definition["source"]["source_path"] == "builder://dnd5e-create-pilot"
+    assert import_metadata["source_path"] == "builder://dnd5e-create-pilot"
+    assert import_metadata["import_status"] == "managed"
+    assert state_record["revision"] == 1
+    assert state_record["state"]["vitals"]["current_hp"] == 12
+    assert state_record["state"]["hit_dice"]["pools"] == [{"faces": 10, "current": 1, "max": 1}]
+    assert state_record["state"]["resources"][0]["id"] == "second-wind"
+    assert state_record["state"]["inventory"][0]["catalog_ref"] == "chain-mail-1"
+    assert state_record["state"]["currency"]["gp"] == 10
+    assert state_record["state"]["spell_slots"] == []
+
+    state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
+    assert state is not None
+    assert state["revision"] == 1
+    assert state["state"]["vitals"]["current_hp"] == 12
+    assert state["state"]["hit_dice"]["pools"][0]["faces"] == 10
+
+    character_dir = typescript_api_mutation_server["campaigns_dir"] / "linden-pass" / "characters" / character_slug
+    written_definition = yaml.safe_load((character_dir / "definition.yaml").read_text(encoding="utf-8"))
+    written_import = yaml.safe_load((character_dir / "import.yaml").read_text(encoding="utf-8"))
+    assert written_definition["name"] == "API DND Pilot"
+    assert written_definition["source"]["source_path"] == "builder://dnd5e-create-pilot"
+    assert written_import["import_status"] == "managed"
+
+    duplicate_status, duplicate_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body=body,
+    )
+    assert duplicate_status == 409
+    assert duplicate_payload["error"]["code"] == "character_exists"
+
+    rejected_status, rejected_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "values": {
+                "name": "Rejected DND Pilot",
+                "class_slug": "systems:phb-fighter",
+                "species_slug": "systems:phb-human",
+                "background_slug": "systems:phb-soldier",
+                "subclass_slug": "systems:phb-champion",
+            }
+        },
+    )
+    assert rejected_status == 400
+    assert rejected_payload["error"]["code"] == "validation_error"
+    assert "does not support subclass choices" in rejected_payload["error"]["message"]
 
 
 def test_typescript_content_character_backup_restore_rehearsal_recovers_files_assets_and_sqlite(
