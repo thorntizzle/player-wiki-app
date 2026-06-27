@@ -986,6 +986,10 @@ function parsePositiveInteger(rawValue: string): number | null {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+function requestedCombatantFocusId(ctx: Context): number | null {
+  return parsePositiveInteger(ctx.req.query("combatant") || "");
+}
+
 function campaignHref(campaignSlug: string, suffix = ""): string {
   const normalized = suffix.replace(/^\/+|\/+$/g, "");
   return normalized ? `/app-next/campaigns/${campaignSlug}/${normalized}` : `/app-next/campaigns/${campaignSlug}`;
@@ -2828,7 +2832,9 @@ app.get(ROUTES.combatState, async (ctx) => {
   }
   const role = auth.role;
 
-  const payload = await buildCombatReadOnlyPayload(config, campaign, role);
+  const payload = await buildCombatReadOnlyPayload(config, campaign, role, {
+    requestedCombatantId: requestedCombatantFocusId(ctx),
+  });
   const requestedRevision = parseLiveRevisionHeader(ctx);
   const requestedViewToken = parseLiveViewTokenHeader(ctx);
   if (
@@ -2857,7 +2863,9 @@ app.get(ROUTES.combatLiveState, async (ctx) => {
   }
   const role = auth.role;
 
-  const payload = await buildCombatReadOnlyPayload(config, campaign, role);
+  const payload = await buildCombatReadOnlyPayload(config, campaign, role, {
+    requestedCombatantId: requestedCombatantFocusId(ctx),
+  });
   const requestedRevision = parseLiveRevisionHeader(ctx);
   const requestedViewToken = parseLiveViewTokenHeader(ctx);
   if (
@@ -2904,7 +2912,11 @@ app.post(ROUTES.combatAdvanceTurn, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  return ctx.json(await buildCombatReadOnlyPayload(config, campaign, auth.role));
+  return ctx.json(
+    await buildCombatReadOnlyPayload(config, campaign, auth.role, {
+      requestedCombatantId: requestedCombatantFocusId(ctx),
+    }),
+  );
 });
 
 app.post(ROUTES.combatClear, async (ctx) => {

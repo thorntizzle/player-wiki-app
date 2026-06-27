@@ -41,6 +41,14 @@ const COMBAT_SOURCE_LABELS: Record<string, string> = {
   systems_monster: "Systems",
 };
 
+const COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS: Record<string, string> = {
+  actions: "Actions",
+  bonus_actions: "Bonus Actions",
+  reactions: "Reactions",
+  attacks: "Attacks",
+  features: "Features",
+};
+
 const STATBLOCK_DEX_MODIFIER_PATTERN = /\bDEX\s+\d+\s+\(([+-]\d+)\)/i;
 const NPC_RESOURCE_TAG_PATTERN = /\{@[a-zA-Z0-9_-]+\s+([^}|]+)(?:\|[^}]*)?\}/g;
 const NPC_RESOURCE_MARKDOWN_DECORATION_PATTERN = /[*_`#>\[\]]+/g;
@@ -194,14 +202,56 @@ interface CharacterStateSnapshot {
 
 type PresentedCombatant = Record<string, unknown>;
 
+interface CombatCharacterWorkspaceFeature {
+  name: string;
+  href: string;
+  group_title: string;
+  metadata: string[];
+  description_html: string;
+}
+
+interface CombatCharacterWorkspaceAttack {
+  name: string;
+  attack_bonus: string;
+  damage: string;
+  range: string;
+  notes: string;
+}
+
+interface CombatCharacterWorkspaceHiddenAttack {
+  name: string;
+  href: string;
+}
+
+interface CombatCharacterWorkspaceFeatureGroup {
+  title: string;
+  features: CombatCharacterWorkspaceFeature[];
+}
+
+interface CombatCharacterWorkspaceSection {
+  slug: string;
+  label: string;
+  count: number;
+  features?: CombatCharacterWorkspaceFeature[];
+  attacks?: CombatCharacterWorkspaceAttack[];
+  hidden_attacks?: CombatCharacterWorkspaceHiddenAttack[];
+  feature_groups?: CombatCharacterWorkspaceFeatureGroup[];
+  empty_message: string;
+}
+
 interface CombatRuntimeState {
   liveRevision: number;
   tracker: CombatTrackerPayload;
   selectedCombatantId: number | null;
   selectedCombatant: PresentedCombatant | null;
   selectedPlayerCharacter: PresentedCombatant | null;
+  selectedPlayerCombatSections: CombatCharacterWorkspaceSection[];
   playerCharacterTargets: Record<string, unknown>[];
   existingCharacterSlugs: Set<string>;
+}
+
+interface CombatReadOnlyOptions {
+  requestedCombatantId?: number | null;
 }
 
 type CombatMutationResult =
@@ -223,7 +273,7 @@ export interface CombatReadOnlyPayload {
   selected_combatant_id: number | null;
   selected_combatant: PresentedCombatant | null;
   selected_player_character: PresentedCombatant | null;
-  selected_player_combat_sections: [];
+  selected_player_combat_sections: CombatCharacterWorkspaceSection[];
   player_character_targets: Record<string, unknown>[];
   available_character_choices: AvailableCharacterChoice[];
   available_statblock_choices: AvailableStatblockChoice[];
@@ -285,6 +335,10 @@ function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function asString(value: unknown): string {
@@ -643,6 +697,7 @@ function emptyCombatRuntimeState(): CombatRuntimeState {
     selectedCombatantId: null,
     selectedCombatant: null,
     selectedPlayerCharacter: null,
+    selectedPlayerCombatSections: [],
     playerCharacterTargets: [],
     existingCharacterSlugs: new Set(),
   };
@@ -695,6 +750,203 @@ function serializeCharacterChoice(record: CampaignCharacterFileRecord): Availabl
     subtitle: profileClassLevelText(profile).trim(),
     initiative_bonus: String(asNumber(stats.initiative_bonus)),
   };
+}
+
+function escapeHtml(rawText: string): string {
+  return rawText
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function renderPlainMarkdownParagraphs(markdownText: string): string {
+  const normalized = markdownText.replace(/\r\n/g, "\n").trim();
+  if (!normalized) {
+    return "";
+  }
+  return normalized
+    .split(/\n{2,}/)
+    .map((block) => `<p>${escapeHtml(block).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
+function titleCaseText(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+}
+
+function featureGroupTitle(feature: Record<string, unknown>): string {
+  return (
+    asString(feature.group_title) ||
+    asString(feature.group) ||
+    asString(feature.source) ||
+    titleCaseText(asString(feature.category)) ||
+    "Features"
+  );
+}
+
+function featureMetadata(feature: Record<string, unknown>): string[] {
+  const metadata = asArray(feature.metadata).map((item) => asString(item)).filter(Boolean);
+  const source = asString(feature.source);
+  if (source && !metadata.includes(source)) {
+    metadata.push(source);
+  }
+  return metadata;
+}
+
+function serializeCombatWorkspaceFeature(
+  feature: Record<string, unknown>,
+  groupTitle: string,
+): CombatCharacterWorkspaceFeature {
+  return {
+    name: asString(feature.name),
+    href: asString(feature.href),
+    group_title: groupTitle,
+    metadata: featureMetadata(feature),
+    description_html:
+      asString(feature.description_html) || renderPlainMarkdownParagraphs(asString(feature.description_markdown)),
+  };
+}
+
+function iterFeatureEntries(entries: unknown): Record<string, unknown>[] {
+  const flattened: Record<string, unknown>[] = [];
+  for (const item of asArray(entries)) {
+    const feature = asRecord(item);
+    if (Object.keys(feature).length === 0) {
+      continue;
+    }
+    flattened.push(feature);
+    flattened.push(...iterFeatureEntries(feature.children));
+  }
+  return flattened;
+}
+
+function characterFeatureEntries(record: CampaignCharacterFileRecord): Record<string, unknown>[] {
+  const definition = record.definition;
+  const groupedFeatures = asArray(definition.feature_groups).flatMap((group) => {
+    const groupRecord = asRecord(group);
+    const groupTitle = asString(groupRecord.title) || "Features";
+    return iterFeatureEntries(groupRecord.entries).map((feature) => ({
+      ...feature,
+      group_title: asString(feature.group_title) || groupTitle,
+    }));
+  });
+  const flatFeatures = asArray(definition.features).map(asRecord).filter((feature) => Object.keys(feature).length > 0);
+  return [...groupedFeatures, ...flatFeatures];
+}
+
+function combatFeatureIsAvailable(feature: Record<string, unknown>): boolean {
+  const availability = asRecord(feature.combat_availability);
+  return Object.keys(availability).length === 0 || asBoolean(availability.available ?? true);
+}
+
+function normalizeAttackName(value: string): string {
+  const match = value.match(/^Crossbow,\s*(Light|Heavy)$/i);
+  if (match) {
+    return `${match[1]} Crossbow`;
+  }
+  return value;
+}
+
+function serializeCombatWorkspaceAttack(attack: Record<string, unknown>): CombatCharacterWorkspaceAttack | null {
+  const name = normalizeAttackName(asString(attack.name));
+  if (!name) {
+    return null;
+  }
+  return {
+    name,
+    attack_bonus: payloadString(attack.attack_bonus) || payloadString(attack.to_hit),
+    damage: payloadString(attack.damage) || payloadString(attack.damage_label),
+    range: payloadString(attack.range) || payloadString(attack.range_label),
+    notes: payloadString(attack.notes) || payloadString(attack.description),
+  };
+}
+
+function buildCombatCharacterWorkspaceSections(record: CampaignCharacterFileRecord): CombatCharacterWorkspaceSection[] {
+  const actionFeatures: CombatCharacterWorkspaceFeature[] = [];
+  const bonusActionFeatures: CombatCharacterWorkspaceFeature[] = [];
+  const reactionFeatures: CombatCharacterWorkspaceFeature[] = [];
+  const featureGroups = new Map<string, CombatCharacterWorkspaceFeature[]>();
+
+  for (const feature of characterFeatureEntries(record)) {
+    if (!combatFeatureIsAvailable(feature)) {
+      continue;
+    }
+    const groupTitle = featureGroupTitle(feature);
+    const serialized = serializeCombatWorkspaceFeature(feature, groupTitle);
+    if (!serialized.name) {
+      continue;
+    }
+
+    const activationType = asString(feature.activation_type).toLowerCase();
+    if (activationType === "action") {
+      actionFeatures.push(serialized);
+    } else if (activationType === "bonus_action") {
+      bonusActionFeatures.push(serialized);
+    } else if (activationType === "reaction") {
+      reactionFeatures.push(serialized);
+    }
+
+    const existing = featureGroups.get(groupTitle) || [];
+    existing.push(serialized);
+    featureGroups.set(groupTitle, existing);
+  }
+
+  const attacks = asArray(record.definition.attacks)
+    .map((attack) => serializeCombatWorkspaceAttack(asRecord(attack)))
+    .filter((attack): attack is CombatCharacterWorkspaceAttack => attack !== null);
+  const hiddenAttacks = asArray(record.definition.hidden_attacks)
+    .map((item) => {
+      const attack = asRecord(item);
+      const name = Object.keys(attack).length > 0 ? asString(attack.name) : asString(item);
+      return name ? { name, href: asString(attack.href) } : null;
+    })
+    .filter((attack): attack is CombatCharacterWorkspaceHiddenAttack => attack !== null);
+  const featureGroupSummaries = [...featureGroups.entries()].map(([title, features]) => ({ title, features }));
+
+  const sections: CombatCharacterWorkspaceSection[] = [
+    {
+      slug: "actions",
+      label: COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS.actions,
+      count: actionFeatures.length,
+      features: actionFeatures,
+      empty_message: "No action-specific features are recorded on this sheet yet.",
+    },
+    {
+      slug: "bonus_actions",
+      label: COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS.bonus_actions,
+      count: bonusActionFeatures.length,
+      features: bonusActionFeatures,
+      empty_message: "No bonus-action features are recorded on this sheet yet.",
+    },
+    {
+      slug: "reactions",
+      label: COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS.reactions,
+      count: reactionFeatures.length,
+      features: reactionFeatures,
+      empty_message: "No reaction features are recorded on this sheet yet.",
+    },
+    {
+      slug: "attacks",
+      label: COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS.attacks,
+      count: attacks.length,
+      attacks,
+      hidden_attacks: hiddenAttacks,
+      empty_message: "No attacks are currently active on this sheet.",
+    },
+    {
+      slug: "features",
+      label: COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS.features,
+      count: featureGroupSummaries.reduce((total, group) => total + group.features.length, 0),
+      feature_groups: featureGroupSummaries,
+      empty_message: "No feature details are recorded on this sheet yet.",
+    },
+  ];
+
+  return sections.filter((section) => section.count > 0 || (section.hidden_attacks?.length ?? 0) > 0);
 }
 
 function parseStateJson(rawJson: string): Record<string, unknown> {
@@ -1215,13 +1467,18 @@ function selectCombatPayload(
   campaignSlug: string,
   tracker: CombatTrackerPayload,
   canManageCombat: boolean,
+  requestedCombatantId: number | null,
 ): Pick<
   CombatRuntimeState,
   "selectedCombatantId" | "selectedCombatant" | "selectedPlayerCharacter" | "playerCharacterTargets"
 > {
   const combatants = tracker.combatants;
+  const requestedCombatant =
+    canManageCombat && requestedCombatantId !== null
+      ? combatants.find((combatant) => combatant.id === requestedCombatantId) || null
+      : null;
   const selectedCombatant =
-    combatants.find((combatant) => combatant.is_current_turn === true) || combatants[0] || null;
+    requestedCombatant || combatants.find((combatant) => combatant.is_current_turn === true) || combatants[0] || null;
   const selectedCombatantId =
     typeof selectedCombatant?.id === "number" ? Number(selectedCombatant.id) : null;
   const playerCharacters = combatants.filter((combatant) => asString(combatant.character_slug));
@@ -1447,6 +1704,7 @@ function loadCombatRuntimeState(
   campaignSlug: string,
   canManageCombat: boolean,
   characterRecords: CampaignCharacterFileRecord[],
+  requestedCombatantId: number | null,
 ): CombatRuntimeState {
   if (!existsSync(dbPath)) {
     return emptyCombatRuntimeState();
@@ -1485,13 +1743,19 @@ function loadCombatRuntimeState(
       combatant_count: combatants.length,
       combatants,
     };
+    const selectedPayload = selectCombatPayload(campaignSlug, tracker, canManageCombat, requestedCombatantId);
+    const selectedPlayerSlug = asString(selectedPayload.selectedPlayerCharacter?.character_slug);
+    const selectedPlayerRecord = selectedPlayerSlug ? characterRecordsBySlug.get(selectedPlayerSlug) : undefined;
     return {
       liveRevision: trackerRow ? Math.max(1, Number(trackerRow.revision || 1)) : COMBAT_READONLY_REVISION,
       tracker,
       existingCharacterSlugs: new Set(
         combatantRows.map((row) => String(row.character_slug || "")).filter(Boolean),
       ),
-      ...selectCombatPayload(campaignSlug, tracker, canManageCombat),
+      ...selectedPayload,
+      selectedPlayerCombatSections: selectedPlayerRecord
+        ? buildCombatCharacterWorkspaceSections(selectedPlayerRecord)
+        : [],
     };
   } catch (error) {
     if (isNoSuchTableOrColumnError(error)) {
@@ -3466,6 +3730,7 @@ export async function buildCombatReadOnlyPayload(
   config: ApiConfig,
   campaign: CampaignViewModel,
   role: FixtureCombatRole,
+  options: CombatReadOnlyOptions = {},
 ): Promise<CombatReadOnlyPayload> {
   const canManageCombat = role === "dm" || role === "admin";
   const canAccessScopedPlayerTools = role === "player" || canManageCombat;
@@ -3473,8 +3738,9 @@ export async function buildCombatReadOnlyPayload(
   const combatSystemSupported = supportsCombatTracker(campaign.system);
   const characterRecords =
     combatSystemSupported ? (await listCampaignContentCharacters(config, campaign.slug)) || [] : [];
+  const requestedCombatantId = canManageCombat ? options.requestedCombatantId ?? null : null;
   const combatRuntime = combatSystemSupported
-    ? loadCombatRuntimeState(config.dbPath, campaign.slug, canManageCombat, characterRecords)
+    ? loadCombatRuntimeState(config.dbPath, campaign.slug, canManageCombat, characterRecords, requestedCombatantId)
     : emptyCombatRuntimeState();
   const availableCharacterChoices = combatSystemSupported
     ? listAvailableCharacterChoices(characterRecords, canManageCombat, combatRuntime.existingCharacterSlugs)
@@ -3496,7 +3762,7 @@ export async function buildCombatReadOnlyPayload(
     selected_combatant_id: combatRuntime.selectedCombatantId,
     selected_combatant: combatRuntime.selectedCombatant,
     selected_player_character: combatRuntime.selectedPlayerCharacter,
-    selected_player_combat_sections: [],
+    selected_player_combat_sections: combatRuntime.selectedPlayerCombatSections,
     player_character_targets: combatRuntime.playerCharacterTargets,
     available_character_choices: availableCharacterChoices,
     available_statblock_choices: dmContentChoices.availableStatblockChoices,
