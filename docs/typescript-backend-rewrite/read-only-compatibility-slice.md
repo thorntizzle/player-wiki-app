@@ -109,6 +109,8 @@ fixture database.
   - `DELETE /api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls`
 - Added the Character roster read endpoint:
   - `GET /api/v1/campaigns/:campaignSlug/characters`
+- Added the Character detail read endpoint:
+  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
 - Default campaign fixture directory is `tests/fixtures/sample_campaigns`.
 - `CPW_CAMPAIGNS_DIR` overrides the fixture directory.
 - Implemented endpoints return JSON-only payloads for the read-only slice, with explicit fixture-mode auth/permissions metadata on campaign detail.
@@ -435,6 +437,10 @@ fixture database.
   - `q` filtering against roster `search_text`.
   - Gen2 roster card fields, including slug, name, status, class/species/background, links, HP, Hit Dice, resource preview, existing portrait reference payloads without conversion, and SQLite state revision.
   - Flask/Gen2 roster tool and create/import link metadata.
+- Character detail payload checks cover:
+  - `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>` with Flask-compatible missing-campaign, unauthenticated, missing-character, and unassigned-player forbidden envelopes.
+  - Characters-scope DM reads and assigned-owner Session-scope reads when Characters scope is restrictive.
+  - `character.definition`, `import_metadata`, SQLite `state_record`, permissions, read-only controls metadata, protected portrait URL/media type, Flask/Gen2 links, and safe optional CharacterPane presentation shells.
 - Character session vitals payload checks cover:
   - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals` with bearer-only writes.
   - unauthenticated, fixture-role, unassigned-player, stale-revision, and missing-character error envelopes.
@@ -572,6 +578,7 @@ fixture database.
   - validates content-character SQLite persistence for DND-5E create/delete and Xianxia create/update/delete, including actual `state_created`, `deleted_state`, and `deleted_assignment` response flags and Xianxia mutable-state clamping/preservation.
   - validates `PUT` and `DELETE /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` auth, fixture-write denial, player-forbidden behavior, definition validation, missing-campaign behavior, copied-fixture definition/import YAML writes, list/detail refresh, deleted-character payload flags, file removal, and missing-character delete 404.
   - validates the Character roster read route, including unauthenticated auth_required behavior, DM full-roster payloads, `q` search filtering, assigned-player-only visibility, missing-campaign JSON, roster links/tools, and state-backed card fields.
+  - validates the Character detail read route, including unauthenticated auth_required behavior, DM and assigned-player success payloads, unassigned-player forbidden behavior, missing-character JSON, state metadata, controls metadata, protected portrait URL/media type, and safe CharacterPane optional shells.
   - validates the Character Controls JSON assignment/clear/delete slice, including blocked DM assignment, successful app-admin assignment, assignment and audit SQLite rows, assignment clear and audit rows, blocked player delete, bad confirmation validation, successful DM checked delete, copied-fixture file removal, `character_state` and assignment cleanup, and `character_deleted` audit metadata.
   - validates character rest preview/apply auth, no-access forbidden, invalid-rest, stale-revision, DND long-rest, and Xianxia long-rest behavior against disposable copied fixture files and SQLite state.
   - validates character feature-state stale conflict, unsupported key validation, missing Arcane Armor feature validation, and assigned-player Arcane Armor toggle persistence against disposable copied fixture files and SQLite state.

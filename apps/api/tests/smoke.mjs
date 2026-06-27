@@ -6402,6 +6402,80 @@ if (
   );
 }
 
+const blockedCharacterDetail = await requestJson("/api/v1/campaigns/linden-pass/characters/arden-march");
+if (blockedCharacterDetail.status !== 401 || blockedCharacterDetail.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated character detail 401, got ${blockedCharacterDetail.status} ${blockedCharacterDetail.payload?.error?.code}`,
+  );
+}
+
+const dmCharacterDetail = await requestJson("/api/v1/campaigns/linden-pass/characters/arden-march", {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  dmCharacterDetail.status !== 200 ||
+  dmCharacterDetail.payload?.ok !== true ||
+  dmCharacterDetail.payload?.character?.definition?.character_slug !== "arden-march" ||
+  typeof dmCharacterDetail.payload?.character?.state_record?.revision !== "number" ||
+  dmCharacterDetail.payload?.character?.state_record?.revision < 1 ||
+  typeof dmCharacterDetail.payload?.character?.state_record?.updated_at !== "string" ||
+  typeof dmCharacterDetail.payload?.character?.state_record?.updated_by_user_id !== "number" ||
+  typeof dmCharacterDetail.payload?.character?.state_record?.state?.vitals?.current_hp !== "number" ||
+  dmCharacterDetail.payload?.character?.permissions?.can_edit_session !== true ||
+  dmCharacterDetail.payload?.character?.permissions?.can_manage_session !== true ||
+  dmCharacterDetail.payload?.character?.permissions?.can_use_controls !== true ||
+  dmCharacterDetail.payload?.character?.permissions?.can_record_xianxia_dao_immolating_use !== true ||
+  dmCharacterDetail.payload?.character?.portrait?.asset_ref !== ardenRosterPortraitAssetRef ||
+  dmCharacterDetail.payload?.character?.portrait?.url !== "/campaigns/linden-pass/characters/arden-march/portrait" ||
+  dmCharacterDetail.payload?.character?.portrait?.media_type !== "image/png" ||
+  dmCharacterDetail.payload?.character?.controls?.available !== true ||
+  dmCharacterDetail.payload?.character?.controls?.assignment?.user_id !== 79 ||
+  dmCharacterDetail.payload?.links?.gen2_character_url !== "/app-next/campaigns/linden-pass/characters/arden-march" ||
+  dmCharacterDetail.payload?.links?.flask_character_url !== "/campaigns/linden-pass/characters/arden-march" ||
+  !Array.isArray(dmCharacterDetail.payload?.character?.overview_stat_rows) ||
+  !Array.isArray(dmCharacterDetail.payload?.character?.reference_sections) ||
+  !Array.isArray(dmCharacterDetail.payload?.character?.abilities) ||
+  !dmCharacterDetail.payload?.character?.equipment_state ||
+  !dmCharacterDetail.payload?.character?.arcane_armor_state
+) {
+  throw new Error(`Unexpected DM character detail payload: ${JSON.stringify(dmCharacterDetail.payload)}`);
+}
+
+const assignedPlayerCharacterDetail = await requestJson("/api/v1/campaigns/linden-pass/characters/arden-march", {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (
+  assignedPlayerCharacterDetail.status !== 200 ||
+  assignedPlayerCharacterDetail.payload?.ok !== true ||
+  assignedPlayerCharacterDetail.payload?.character?.permissions?.can_edit_session !== true ||
+  assignedPlayerCharacterDetail.payload?.character?.permissions?.can_manage_session !== false ||
+  assignedPlayerCharacterDetail.payload?.character?.controls?.current_user_is_owner !== true
+) {
+  throw new Error(`Unexpected assigned-player character detail payload: ${JSON.stringify(assignedPlayerCharacterDetail.payload)}`);
+}
+
+const unassignedPlayerCharacterDetail = await requestJson("/api/v1/campaigns/linden-pass/characters/selene-brook", {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (
+  unassignedPlayerCharacterDetail.status !== 403 ||
+  unassignedPlayerCharacterDetail.payload?.error?.code !== "forbidden" ||
+  unassignedPlayerCharacterDetail.payload?.error?.message !== "You do not have access to this character."
+) {
+  throw new Error(
+    `Expected unassigned player character detail forbidden, got ${unassignedPlayerCharacterDetail.status} ${JSON.stringify(unassignedPlayerCharacterDetail.payload)}`,
+  );
+}
+
+const missingCharacterDetail = await requestJson("/api/v1/campaigns/linden-pass/characters/missing-character", {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (missingCharacterDetail.status !== 404 || missingCharacterDetail.payload?.error?.code !== "content_character_not_found") {
+  throw new Error(
+    `Expected missing character detail JSON 404, got ${missingCharacterDetail.status} ${missingCharacterDetail.payload?.error?.code}`,
+  );
+}
+
 const managedCharacterSlug = "api-scout";
 const managedCharacterPath = `/api/v1/campaigns/linden-pass/content/characters/${managedCharacterSlug}`;
 const managedCharacterDefinition = structuredClone(contentCharacter.payload.character_file.definition);

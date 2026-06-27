@@ -378,6 +378,112 @@ function buildCharacterPortraitPayload(
   };
 }
 
+interface CharacterDetailPermissions {
+  can_edit_session: boolean;
+  can_manage_session: boolean;
+  can_use_controls: boolean;
+  can_record_xianxia_dao_immolating_use: boolean;
+}
+
+interface CharacterDetailControls {
+  available: boolean;
+  assignment?: Record<string, unknown> | null;
+  can_assign_owner: boolean;
+  can_delete_character: boolean;
+  current_user_is_owner: boolean;
+  player_choices: Array<Record<string, unknown>>;
+  links?: Record<string, string>;
+}
+
+function buildEmptyArcaneArmorState() {
+  return {
+    available: false,
+    feature_key: "",
+    label: "",
+    enabled: false,
+    status_label: "",
+    hands_free: false,
+    hands_label: "",
+    thunder_gauntlets_available: false,
+    defensive_field_available: false,
+  };
+}
+
+function buildEmptyEquipmentState() {
+  const arcaneArmorState = buildEmptyArcaneArmorState();
+  return {
+    rows: [],
+    attuned_count: 0,
+    equipped_count: 0,
+    max_attuned_items: 3,
+    equipment_item_refs: [],
+    attunable_item_refs: [],
+    at_attunement_limit: false,
+    over_attunement_limit: false,
+    arcane_armor_state: arcaneArmorState,
+  };
+}
+
+export function buildCharacterDetailPayload({
+  campaign,
+  record,
+  stateRecord,
+  assetByRef,
+  permissions,
+  controls,
+}: {
+  campaign: CampaignViewModel;
+  record: CampaignCharacterFileRecord;
+  stateRecord: CharacterStateSnapshot;
+  assetByRef: Map<string, CampaignAssetFileRecord>;
+  permissions: CharacterDetailPermissions;
+  controls: CharacterDetailControls | null;
+}) {
+  const equipmentState = buildEmptyEquipmentState();
+  const arcaneArmorState = equipmentState.arcane_armor_state;
+  return {
+    ok: true,
+    character: {
+      definition: record.definition,
+      import_metadata: record.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: record.character_slug,
+        revision: stateRecord.revision,
+        state: stateRecord.state,
+        updated_at: stateRecord.updated_at ?? null,
+        updated_by_user_id: stateRecord.updated_by_user_id ?? null,
+      },
+      permissions,
+      controls,
+      portrait: buildCharacterPortraitPayload(campaign.slug, record, assetByRef),
+      overview_stat_rows: [],
+      overview_stats: [],
+      player_notes_markdown: asString(asRecord(stateRecord.state.notes).player_notes_markdown),
+      player_notes_html: "",
+      physical_description_markdown: asString(asRecord(stateRecord.state.notes).physical_description_markdown),
+      physical_description_html: "",
+      personal_background_markdown: asString(asRecord(stateRecord.state.notes).personal_background_markdown),
+      personal_background_html: "",
+      reference_sections: [],
+      abilities: [],
+      skills: [],
+      proficiency_groups: [],
+      presented_inventory: [],
+      presented_spellcasting: {},
+      presented_xianxia: {},
+      equipment_state: equipmentState,
+      arcane_armor_state: arcaneArmorState,
+    },
+    links: {
+      gen2_roster_url: campaignHref(campaign.slug, "characters"),
+      flask_roster_url: flaskCampaignHref(campaign.slug, "characters"),
+      gen2_character_url: campaignHref(campaign.slug, `characters/${record.character_slug}`),
+      flask_character_url: flaskCampaignHref(campaign.slug, `characters/${record.character_slug}`),
+    },
+  };
+}
+
 export function buildCharacterRosterPayload({
   campaign,
   records,

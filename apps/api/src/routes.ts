@@ -1456,6 +1456,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "campaign_not_found",
     },
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "GET",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1557,4 +1572,5 @@ export const ROUTES = {
   characterControlsAssignment: IMPLEMENTED_ROUTES[95].honoPath,
   characterControlsDelete: IMPLEMENTED_ROUTES[97].honoPath,
   characterRoster: IMPLEMENTED_ROUTES[98].honoPath,
+  characterDetail: IMPLEMENTED_ROUTES[99].honoPath,
 } as const;

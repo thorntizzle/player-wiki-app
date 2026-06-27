@@ -126,6 +126,7 @@ Route parity check command:
   - `PUT /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
   - `DELETE /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
   - `GET /api/v1/campaigns/:campaignSlug/characters`
+  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
 - Implemented Character Controls JSON mutation endpoints:
   - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls/assignment`
   - `DELETE /api/v1/campaigns/:campaignSlug/characters/:characterSlug/controls/assignment`
@@ -424,6 +425,12 @@ Route parity check command:
   campaign existence checks, Characters-scope visibility, assigned-player fallback visibility,
   `q` filtering against roster `search_text`, roster card fields consumed by Gen2, existing
   portrait asset references without image conversion, and create/import link/tool flags.
+- The Character detail read route now serves `GET .../characters/:characterSlug`, preserving
+  Flask-compatible campaign/missing-character envelopes, Characters-scope or assigned-owner
+  Session-scope access, SQLite `state_record` reads, CharacterPane-safe optional presentation
+  shells, permissions, controls metadata, protected portrait URLs from existing asset references,
+  and Flask/Gen2 detail links. Full Flask presenter derivation remains outside this detail-read
+  slice.
 - The first Xianxia inventory equipment write now serves
   `PATCH .../characters/:characterSlug/session/xianxia-inventory/:itemId/equipped`. It preserves the
   bearer-only session-state write gate, shared revision conflicts, Xianxia-only validation, unknown

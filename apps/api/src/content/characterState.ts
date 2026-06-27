@@ -9,11 +9,15 @@ type SqliteDatabase = InstanceType<typeof Database>;
 interface CharacterStateRow {
   revision: number;
   state_json: string;
+  updated_at?: string | null;
+  updated_by_user_id?: number | null;
 }
 
 export interface CharacterStateSnapshot {
   revision: number;
   state: Record<string, unknown>;
+  updated_at?: string | null;
+  updated_by_user_id?: number | null;
 }
 
 interface ItemCatalogEntry {
@@ -522,11 +526,11 @@ function readCharacterState(
   database: SqliteDatabase,
   campaignSlug: string,
   characterSlug: string,
-): { revision: number; state: Record<string, unknown> } | null {
+): CharacterStateSnapshot | null {
   const row = database
     .prepare(
       `
-        SELECT revision, state_json
+        SELECT revision, state_json, updated_at, updated_by_user_id
         FROM character_state
         WHERE campaign_slug = ?
           AND character_slug = ?
@@ -539,6 +543,8 @@ function readCharacterState(
   return {
     revision: Number(row.revision) || 0,
     state: parseStateJson(row.state_json),
+    updated_at: row.updated_at ?? null,
+    updated_by_user_id: row.updated_by_user_id ?? null,
   };
 }
 
@@ -565,6 +571,8 @@ export function readCharacterStateSnapshot(
   return {
     revision: 1,
     state: buildInitialState(definition),
+    updated_at: null,
+    updated_by_user_id: null,
   };
 }
 

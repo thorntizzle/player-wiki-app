@@ -141,6 +141,7 @@ import {
 } from "./content/characterState.js";
 import {
   buildCampaignConfigPayload,
+  buildCharacterDetailPayload,
   buildCharacterRosterPayload,
   buildContentAssetDeletePayload,
   buildContentAssetDetailPayload,
@@ -820,6 +821,60 @@ function buildCharacterControlsPayload(
       flask_roster_url: flaskCampaignHref(campaignSlug, "characters"),
     },
   };
+}
+
+function buildCharacterReadControlsPayload(
+  campaign: CampaignViewModel,
+  record: CampaignCharacterFileRecord,
+  auth: Extract<RoleResolution, { kind: "authenticated" }>,
+) {
+  const campaignSlug = campaign.slug;
+  const characterSlug = record.character_slug;
+  const assignment = getCharacterAssignment(config.dbPath, campaignSlug, characterSlug);
+  const assignedUser = assignment ? getUserById(config.dbPath, assignment.user_id) : null;
+  const canAssignOwner = auth.role === "admin";
+  const canDeleteCharacter =
+    auth.role === "admin" ||
+    (auth.role === "dm" && campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "campaign"));
+  const playerChoices = canAssignOwner
+    ? listActivePlayerMembershipUsers(config.dbPath, campaignSlug).map((user) => ({
+        user_id: user.id,
+        label: `${user.display_name} (${user.email})`,
+        email: user.email,
+        display_name: user.display_name,
+        is_current: assignment?.user_id === user.id,
+      }))
+    : [];
+
+  return {
+    available: true,
+    assignment: serializeControlsAssignment(assignment, assignedUser),
+    can_assign_owner: canAssignOwner,
+    can_delete_character: canDeleteCharacter,
+    current_user_is_owner: Boolean(auth.actorUserId && assignment?.user_id === auth.actorUserId),
+    player_choices: playerChoices,
+    links: {
+      gen2_roster_url: campaignHref(campaignSlug, "characters"),
+      flask_controls_url: flaskCampaignHref(campaignSlug, `characters/${characterSlug}?page=controls`),
+    },
+  };
+}
+
+function canReadCharacterDetail(
+  campaign: CampaignViewModel,
+  characterSlug: string,
+  auth: Extract<RoleResolution, { kind: "authenticated" }>,
+): boolean {
+  if (campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "characters")) {
+    return true;
+  }
+  const hasSessionModeSurfaceAccess =
+    campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session") ||
+    campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "combat");
+  if (!hasSessionModeSurfaceAccess) {
+    return false;
+  }
+  return canEditCharacterSessionState(config, campaign.slug, characterSlug, auth.role, auth.actorUserId);
 }
 
 function groupPagesBySection(pages: WikiPageRecord[]): Map<string, WikiPageRecord[]> {
@@ -3692,6 +3747,63 @@ app.get(ROUTES.characterRoster, async (ctx) => {
       canManageSession:
         (auth.role === "admin" || auth.role === "dm") &&
         campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session"),
+    }),
+  );
+});
+
+app.get(ROUTES.characterDetail, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character || String(character.definition.status || "").trim() !== "active") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!canReadCharacterDetail(campaign, characterSlug, auth)) {
+    const error = forbidden("You do not have access to this character.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const stateRecord = readCharacterStateSnapshot(config, campaign.slug, character.character_slug, character.definition);
+  const assets = (await listCampaignContentAssets(config, campaign.slug)) ?? [];
+  const assetByRef = new Map(assets.map((asset) => [asset.asset_ref, asset]));
+  const canManageSession =
+    (auth.role === "admin" || auth.role === "dm") &&
+    campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session");
+  const canEditSession = canEditCharacterSessionState(config, campaign.slug, characterSlug, auth.role, auth.actorUserId);
+  const canUseControls = supportsCharacterControlsRoutes(campaign.system) && canEditSession;
+
+  return ctx.json(
+    buildCharacterDetailPayload({
+      campaign,
+      record: character,
+      stateRecord,
+      assetByRef,
+      permissions: {
+        can_edit_session: canEditSession,
+        can_manage_session: canManageSession,
+        can_use_controls: canUseControls,
+        can_record_xianxia_dao_immolating_use: canManageSession,
+      },
+      controls: canUseControls ? buildCharacterReadControlsPayload(campaign, character, auth) : null,
     }),
   );
 });
