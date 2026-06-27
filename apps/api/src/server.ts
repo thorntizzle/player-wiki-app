@@ -127,6 +127,7 @@ import {
   buildCharacterAdvancedEditorPayload,
   buildCharacterAdvancementShellPayload,
   buildCharacterAuthoringLinks,
+  buildCharacterCultivationShellPayload,
   buildDndCharacterCreateContext,
   buildDndCreateCharacter,
   buildXianxiaCreateCharacter,
@@ -6033,6 +6034,72 @@ app.get(ROUTES.characterProgressionRepair, async (ctx) => {
     readiness: advancementPayload.readiness,
     repair: advancementPayload.context,
     links: advancementPayload.links,
+  });
+});
+
+app.get(ROUTES.characterCultivation, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character || String(character.definition.status || "").trim() !== "active") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const canManageSession =
+    (auth.role === "admin" || auth.role === "dm") &&
+    campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session");
+  if (!canManageSession) {
+    const error = forbidden("You do not have permission to manage cultivation for this character.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const stateRecord = readCharacterStateSnapshot(config, campaign.slug, character.character_slug, character.definition);
+  const cultivationPayload = buildCharacterCultivationShellPayload({
+    campaign,
+    characterSlug,
+    definition: character.definition,
+  });
+
+  return ctx.json({
+    ok: true,
+    campaign,
+    character: {
+      definition: character.definition,
+      import_metadata: character.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: character.character_slug,
+        revision: stateRecord.revision,
+        state: stateRecord.state,
+        updated_at: stateRecord.updated_at ?? null,
+        updated_by_user_id: stateRecord.updated_by_user_id ?? null,
+      },
+    },
+    lane: cultivationPayload.lane,
+    supported: cultivationPayload.supported,
+    message: null,
+    anchor: null,
+    unsupported_message: cultivationPayload.unsupported_message,
+    cultivation: cultivationPayload.cultivation,
+    links: cultivationPayload.links,
   });
 });
 

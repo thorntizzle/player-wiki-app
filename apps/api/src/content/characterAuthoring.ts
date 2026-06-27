@@ -153,6 +153,10 @@ const XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE =
   "Xianxia advancement and cultivation use their own character lane. Use the Xianxia Cultivation page instead of DND-5E level-up, repair, or retraining routes; remaining unmodeled advancement workflows should be added there.";
 const ADVANCED_EDITOR_UNSUPPORTED_MESSAGE =
   "Advanced Editor is currently available only for DND-5E native character tools in Gen2.";
+const CULTIVATION_UNSUPPORTED_MESSAGE =
+  "Cultivation is only available for Xianxia character sheets.";
+const CULTIVATION_TYPESCRIPT_PENDING_MESSAGE =
+  "TypeScript Cultivation context for Xianxia character sheets is pending; use the Flask Cultivation route until this parity slice lands.";
 const ADVANCED_EDITOR_REFERENCE_FIELD_NAMES = new Set([
   "physical_description_markdown",
   "background_markdown",
@@ -257,6 +261,14 @@ export interface CharacterAdvancementShellPayload {
   context: Record<string, unknown> | null;
 }
 
+export interface CharacterCultivationShellPayload {
+  lane: "xianxia" | "unsupported";
+  supported: boolean;
+  unsupported_message: string;
+  links: Record<string, string>;
+  cultivation: Record<string, unknown> | null;
+}
+
 function normalizeSystemKey(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
@@ -285,6 +297,13 @@ export function characterAdvancedEditorIsSupported(
   definition: Record<string, unknown>,
 ): boolean {
   return nativeCharacterCreateLane(campaign.system) === "dnd5e" && nativeCharacterCreateLane(definition.system) === "dnd5e";
+}
+
+export function characterCultivationIsSupported(
+  campaign: Pick<CampaignViewModel, "system">,
+  definition: Record<string, unknown>,
+): boolean {
+  return nativeCharacterCreateLane(campaign.system) === "xianxia" && nativeCharacterCreateLane(definition.system) === "xianxia";
 }
 
 function characterAdvancementUnsupportedMessage(system: unknown): string {
@@ -330,6 +349,36 @@ export function buildCharacterAdvancedEditorLinks(campaign: CampaignViewModel, c
     character_url: campaignHref(campaign.slug, `characters/${characterSlug}`),
     gen2_character_url: campaignHref(campaign.slug, `characters/${characterSlug}`),
     flask_character_url: flaskCampaignHref(campaign.slug, `characters/${characterSlug}`),
+  };
+}
+
+export function buildCharacterCultivationLinks(campaign: CampaignViewModel, characterSlug: string) {
+  return {
+    ...buildCharacterAuthoringLinks(campaign),
+    character_url: campaignHref(campaign.slug, `characters/${characterSlug}`),
+    gen2_character_url: campaignHref(campaign.slug, `characters/${characterSlug}`),
+    flask_character_url: flaskCampaignHref(campaign.slug, `characters/${characterSlug}`),
+    cultivation_url: campaignHref(campaign.slug, `characters/${characterSlug}/cultivation`),
+    flask_cultivation_url: flaskCampaignHref(campaign.slug, `characters/${characterSlug}/cultivation`),
+  };
+}
+
+export function buildCharacterCultivationShellPayload({
+  campaign,
+  characterSlug,
+  definition,
+}: {
+  campaign: CampaignViewModel;
+  characterSlug: string;
+  definition: Record<string, unknown>;
+}): CharacterCultivationShellPayload {
+  const pendingXianxiaContext = characterCultivationIsSupported(campaign, definition);
+  return {
+    lane: "unsupported",
+    supported: false,
+    unsupported_message: pendingXianxiaContext ? CULTIVATION_TYPESCRIPT_PENDING_MESSAGE : CULTIVATION_UNSUPPORTED_MESSAGE,
+    links: buildCharacterCultivationLinks(campaign, characterSlug),
+    cultivation: null,
   };
 }
 

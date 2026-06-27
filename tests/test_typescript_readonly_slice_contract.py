@@ -1686,6 +1686,101 @@ def test_typescript_character_advancement_context_shells_match_flask_fixture(
             assert payload["links"].get(link_key) == flask_payload["links"].get(link_key)
 
 
+def test_typescript_character_cultivation_context_shell_matches_flask_unsupported_fixture(
+    typescript_api_mutation_server,
+    client,
+    app,
+    users,
+):
+    character_slug = "arden-march"
+    route_path = f"/api/v1/campaigns/linden-pass/characters/{character_slug}/cultivation"
+    flask_dm_token = _issue_api_token(app, users["dm"]["email"], label="dm-character-cultivation-shell-golden")
+
+    flask_response = client.get(route_path, headers=_api_headers(flask_dm_token))
+    assert flask_response.status_code == 200
+    flask_payload = flask_response.get_json()
+    assert flask_payload["ok"] is True
+
+    status, payload = _to_json(
+        f"{typescript_api_mutation_server['url']}{route_path}",
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["campaign"] == flask_payload["campaign"]
+    assert payload["character"]["definition"] == flask_payload["character"]["definition"]
+    assert payload["character"]["import_metadata"] == flask_payload["character"]["import_metadata"]
+    assert payload["supported"] == flask_payload["supported"] is False
+    assert payload["lane"] == flask_payload["lane"] == "unsupported"
+    assert payload["message"] == flask_payload["message"] is None
+    assert payload["anchor"] == flask_payload["anchor"] is None
+    assert payload["unsupported_message"] == flask_payload["unsupported_message"]
+    assert payload["cultivation"] == flask_payload["cultivation"] is None
+    for link_key in (
+        "character_url",
+        "flask_character_url",
+        "cultivation_url",
+        "flask_cultivation_url",
+        "flask_roster_url",
+    ):
+        assert payload["links"].get(link_key) == flask_payload["links"].get(link_key)
+
+    player_status, player_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}{route_path}",
+        headers=CONTENT_PLAYER_HEADERS,
+    )
+    assert player_status == 403
+    assert player_payload["error"]["code"] == "forbidden"
+    assert player_payload["error"]["message"] == "You do not have permission to manage cultivation for this character."
+
+    missing_status, missing_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/missing-character/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+    assert missing_status == 404
+    assert missing_payload["error"]["code"] == "content_character_not_found"
+
+    xianxia_character_slug = "api-cultivation-crane"
+    _write_campaign_system(typescript_api_mutation_server["campaigns_dir"], system="Xianxia", systems_library="Xianxia")
+    xianxia_body = {
+        "definition": {
+            "name": "API Cultivation Crane",
+            "status": "active",
+            "system": "xianxia",
+            "xianxia": {
+                "realm": "Mortal",
+                "energy_maxima": {"jing": 1, "qi": 1, "shen": 1},
+                "yin_yang": {"yin_max": 1, "yang_max": 1},
+                "durability": {"hp_max": 10, "stance_max": 10, "manual_armor_bonus": 0},
+                "trained_skills": ["Qi Sense"],
+                "martial_arts": [{"name": "Cloud Palm", "current_rank": "Initiate"}],
+            },
+        }
+    }
+    ts_create_status, _ts_create_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/characters/{xianxia_character_slug}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body=xianxia_body,
+    )
+    assert ts_create_status == 200
+
+    xianxia_status, xianxia_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+    assert xianxia_status == 200
+    assert xianxia_payload["ok"] is True
+    assert xianxia_payload["supported"] is False
+    assert xianxia_payload["lane"] == "unsupported"
+    assert xianxia_payload["cultivation"] is None
+    assert "pending" in xianxia_payload["unsupported_message"]
+    assert xianxia_payload["links"]["flask_cultivation_url"] == (
+        f"/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation"
+    )
+
+
 def test_typescript_content_character_backup_restore_rehearsal_recovers_files_assets_and_sqlite(
     tmp_path,
     typescript_api_mutation_server,

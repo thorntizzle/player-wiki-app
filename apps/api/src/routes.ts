@@ -1946,6 +1946,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "content_character_not_found",
     },
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/cultivation",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/cultivation",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "GET",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/cultivation",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -2081,4 +2096,5 @@ export const ROUTES = {
   characterProgressionRepair: IMPLEMENTED_ROUTES[131].honoPath,
   campaignAsset: IMPLEMENTED_ROUTES[132].honoPath,
   characterAdvancedEditorUpdate: IMPLEMENTED_ROUTES[133].honoPath,
+  characterCultivation: IMPLEMENTED_ROUTES[134].honoPath,
 } as const;
