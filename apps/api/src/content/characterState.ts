@@ -3535,6 +3535,11 @@ export function updateCharacterAdvancedEditorReferenceState(
       notes[fieldName] = value === null || value === undefined ? "" : String(value);
     }
     nextState.notes = notes;
+    const vitals = { ...asRecord(nextState.vitals) };
+    if (Object.hasOwn(vitals, "current_hp")) {
+      vitals.current_hp = clampInt(vitals.current_hp, 0, nonNegativeInt(definitionStats(definition).max_hp, 0));
+      nextState.vitals = vitals;
+    }
 
     const now = utcIsoTimestamp();
     if (stateRowMissing) {

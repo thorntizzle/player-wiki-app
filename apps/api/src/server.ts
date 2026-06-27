@@ -5781,7 +5781,7 @@ app.put(ROUTES.characterAdvancedEditorUpdate, async (ctx) => {
     config,
     campaign.slug,
     characterSlug,
-    character.definition,
+    referenceUpdate.definition,
     {
       expected_revision: jsonPayload.payload.expected_revision,
       state_note_values: referenceUpdate.stateNoteValues,

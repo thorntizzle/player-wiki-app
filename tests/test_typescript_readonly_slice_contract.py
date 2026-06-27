@@ -1624,6 +1624,10 @@ def test_typescript_character_advanced_editor_context_matches_flask_shell(
         editor["stat_adjustment_fields"][1]["help_text"]
         == flask_payload["editor"]["stat_adjustment_fields"][1]["help_text"]
     )
+    assert [row["index"] for row in editor["recoverable_penalty_rows"]] == [
+        row["index"] for row in flask_payload["editor"]["recoverable_penalty_rows"]
+    ]
+    assert editor["recoverable_penalty_target_options"] == flask_payload["editor"]["recoverable_penalty_target_options"]
     assert [field["name"] for field in editor["reference_fields"]] == [
         field["name"] for field in flask_payload["editor"]["reference_fields"]
     ]
@@ -1825,6 +1829,120 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert cleared_stats["passive_investigation"] == base_stats["passive_investigation"]
     cleared_stat_values = {field["name"]: field["value"] for field in clear_payload["editor"]["stat_adjustment_fields"]}
     assert cleared_stat_values == clear_stat_values
+
+    invalid_penalty_status, invalid_penalty_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={
+            "expected_revision": expected_revision + 2,
+            "values": {
+                "recoverable_penalty_target_1": "max_hp",
+                "recoverable_penalty_amount_1": "6",
+            },
+        },
+    )
+    assert invalid_penalty_status == 400
+    assert invalid_penalty_payload["error"]["code"] == "validation_error"
+    assert "source label" in invalid_penalty_payload["error"]["message"]
+
+    base_ability_scores = dict(base_stats["ability_scores"])
+    base_cha = dict(base_ability_scores["cha"])
+    base_cha_modifier = int(base_cha["modifier"])
+    penalized_cha_score = int(base_cha["score"]) - 2
+    penalized_cha_modifier = (penalized_cha_score - 10) // 2
+    recoverable_values = {
+        "recoverable_penalty_source_1": "Wight Drain",
+        "recoverable_penalty_target_1": "max_hp",
+        "recoverable_penalty_amount_1": "6",
+        "recoverable_penalty_notes_1": "Restored by stronger healing magic.",
+        "recoverable_penalty_source_2": "Mind Lash",
+        "recoverable_penalty_target_2": "ability_score:cha",
+        "recoverable_penalty_amount_2": "2",
+    }
+    recoverable_status, recoverable_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={"expected_revision": expected_revision + 2, "values": recoverable_values},
+    )
+    assert recoverable_status == 200
+    assert recoverable_payload["editor"]["state_revision"] == expected_revision + 3
+    recoverable_stats = recoverable_payload["character"]["definition"]["stats"]
+    penalties = list(recoverable_stats["recoverable_penalties"])
+    assert len(penalties) == 2
+    assert penalties[0]["id"].startswith("recoverable-penalty-wight-drain")
+    assert penalties[0]["kind"] == "max_hp"
+    assert penalties[0]["amount"] == 6
+    assert penalties[0]["source"] == "Wight Drain"
+    assert penalties[0]["notes"] == "Restored by stronger healing magic."
+    assert penalties[1]["id"].startswith("recoverable-penalty-mind-lash")
+    assert penalties[1]["kind"] == "ability_score"
+    assert penalties[1]["ability_key"] == "cha"
+    assert recoverable_stats["max_hp"] == int(base_stats["max_hp"]) - 6
+    assert recoverable_stats["ability_scores"]["cha"]["score"] == penalized_cha_score
+    assert recoverable_stats["ability_scores"]["cha"]["modifier"] == penalized_cha_modifier
+    assert recoverable_stats["ability_scores"]["cha"]["save_bonus"] == int(base_cha["save_bonus"]) + (
+        penalized_cha_modifier - base_cha_modifier
+    )
+    assert recoverable_payload["character"]["state_record"]["state"]["vitals"]["current_hp"] == int(base_stats["max_hp"]) - 6
+    penalty_values = {
+        f"recoverable_penalty_{key}_{row['index']}": row[key]
+        for row in recoverable_payload["editor"]["recoverable_penalty_rows"]
+        for key in ("id", "source", "target", "amount", "notes")
+        if row.get("source")
+    }
+    assert penalty_values["recoverable_penalty_source_1"] == "Wight Drain"
+    assert penalty_values["recoverable_penalty_target_1"] == "max_hp"
+    assert penalty_values["recoverable_penalty_amount_1"] == "6"
+    assert penalty_values["recoverable_penalty_target_2"] == "ability_score:cha"
+
+    reduce_penalty_values = {
+        "recoverable_penalty_id_1": penalties[0]["id"],
+        "recoverable_penalty_source_1": "Wight Drain",
+        "recoverable_penalty_target_1": "max_hp",
+        "recoverable_penalty_amount_1": "2",
+        "recoverable_penalty_notes_1": "Restored by stronger healing magic.",
+    }
+    reduce_status, reduce_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={"expected_revision": expected_revision + 3, "values": reduce_penalty_values},
+    )
+    assert reduce_status == 200
+    assert reduce_payload["editor"]["state_revision"] == expected_revision + 4
+    reduced_stats = reduce_payload["character"]["definition"]["stats"]
+    reduced_penalties = list(reduced_stats["recoverable_penalties"])
+    assert len(reduced_penalties) == 1
+    assert reduced_penalties[0]["id"] == penalties[0]["id"]
+    assert reduced_penalties[0]["amount"] == 2
+    assert reduced_stats["max_hp"] == int(base_stats["max_hp"]) - 2
+    assert reduced_stats["ability_scores"]["cha"] == base_cha
+    assert reduce_payload["character"]["state_record"]["state"]["vitals"]["current_hp"] == int(base_stats["max_hp"]) - 6
+
+    clear_penalty_status, clear_penalty_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={
+            "expected_revision": expected_revision + 4,
+            "values": {
+                "recoverable_penalty_id_1": "",
+                "recoverable_penalty_source_1": "",
+                "recoverable_penalty_target_1": "",
+                "recoverable_penalty_amount_1": "",
+                "recoverable_penalty_notes_1": "",
+            },
+        },
+    )
+    assert clear_penalty_status == 200
+    assert clear_penalty_payload["editor"]["state_revision"] == expected_revision + 5
+    clear_penalty_stats = clear_penalty_payload["character"]["definition"]["stats"]
+    assert "recoverable_penalties" not in clear_penalty_stats
+    assert clear_penalty_stats["max_hp"] == base_stats["max_hp"]
+    assert clear_penalty_stats["ability_scores"]["cha"] == base_cha
+    assert clear_penalty_payload["character"]["state_record"]["state"]["vitals"]["current_hp"] == int(base_stats["max_hp"]) - 6
 
 
 def test_typescript_character_advancement_context_shells_match_flask_fixture(

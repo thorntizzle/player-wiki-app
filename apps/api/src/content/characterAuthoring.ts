@@ -220,6 +220,9 @@ const ADVANCED_EDITOR_STATE_NOTE_FIELD_NAMES = new Set([
   "physical_description_markdown",
   "background_markdown",
 ]);
+const ADVANCED_EDITOR_MIN_RECOVERABLE_PENALTY_ROWS = 3;
+const ADVANCED_EDITOR_RECOVERABLE_PENALTY_FIELD_PATTERN =
+  /^recoverable_penalty_(id|source|target|amount|notes)_([1-9]\d*)$/;
 const ADVANCED_EDITOR_PROFICIENCY_FIELDS: Array<{
   name: string;
   key: "languages" | "armor" | "weapons" | "tools";
@@ -311,6 +314,15 @@ const ADVANCED_EDITOR_STAT_ADJUSTMENT_FIELDS: Array<{
 const ADVANCED_EDITOR_STAT_ADJUSTMENT_FIELD_NAMES = new Set(
   ADVANCED_EDITOR_STAT_ADJUSTMENT_FIELDS.map((field) => field.name),
 );
+const ADVANCED_EDITOR_RECOVERABLE_PENALTY_TARGET_OPTIONS = [
+  { value: "max_hp", label: "Max HP" },
+  { value: "ability_score:str", label: "Strength" },
+  { value: "ability_score:dex", label: "Dexterity" },
+  { value: "ability_score:con", label: "Constitution" },
+  { value: "ability_score:int", label: "Intelligence" },
+  { value: "ability_score:wis", label: "Wisdom" },
+  { value: "ability_score:cha", label: "Charisma" },
+];
 const ADVANCED_EDITOR_SUPPORTED_FIELD_NAMES = new Set([
   ...ADVANCED_EDITOR_REFERENCE_FIELD_NAMES,
   ...ADVANCED_EDITOR_PROFICIENCY_FIELD_NAMES,
@@ -385,8 +397,10 @@ export interface CharacterAdvancedEditorPayload {
     proficiency_fields: Array<Record<string, unknown>>;
     reference_fields: Array<Record<string, unknown>>;
     stat_adjustment_fields: Array<Record<string, unknown>>;
+    recoverable_penalty_rows: Array<Record<string, unknown>>;
     feature_rows: Array<Record<string, unknown>>;
     equipment_rows: Array<Record<string, unknown>>;
+    recoverable_penalty_target_options: Array<Record<string, unknown>>;
   } | null;
 }
 
@@ -3230,6 +3244,174 @@ function parseEditorStatAdjustments(values: Record<string, string>):
   return { status: "ok", adjustments };
 }
 
+function normalizeEditorRecoverablePenaltyTarget(penalty: Record<string, unknown>): string {
+  const kind = stringifyEditorValue(penalty.kind).trim();
+  if (kind === "max_hp") {
+    return "max_hp";
+  }
+  if (kind === "ability_score") {
+    const abilityKey = stringifyEditorValue(penalty.ability_key).trim().toLowerCase();
+    return DND_ABILITY_KEYS.includes(abilityKey as (typeof DND_ABILITY_KEYS)[number])
+      ? `ability_score:${abilityKey}`
+      : "";
+  }
+  return "";
+}
+
+function normalizeEditorRecoverablePenalties(value: unknown): Array<Record<string, unknown>> {
+  const penalties: Array<Record<string, unknown>> = [];
+  for (const rawPenalty of asArray(value)) {
+    const penalty = asRecord(rawPenalty);
+    const target = normalizeEditorRecoverablePenaltyTarget(penalty);
+    const amount = Number.parseInt(stringifyEditorValue(penalty.amount).trim(), 10);
+    if (!target || !Number.isFinite(amount) || amount <= 0) {
+      continue;
+    }
+    const normalized: Record<string, unknown> = {
+      id: stringifyEditorValue(penalty.id).trim(),
+      kind: target === "max_hp" ? "max_hp" : "ability_score",
+      amount,
+      source: stringifyEditorValue(penalty.source).split(/\s+/).filter(Boolean).join(" "),
+      notes: stringifyEditorValue(penalty.notes).trim(),
+    };
+    if (target.startsWith("ability_score:")) {
+      normalized.ability_key = target.split(":", 2)[1];
+    }
+    penalties.push(normalized);
+  }
+  return penalties;
+}
+
+function buildRecoverablePenaltyRows(value: unknown): Array<Record<string, unknown>> {
+  const penalties = normalizeEditorRecoverablePenalties(value);
+  const rowCount = Math.max(
+    penalties.length + 1,
+    ADVANCED_EDITOR_MIN_RECOVERABLE_PENALTY_ROWS,
+  );
+  const rows: Array<Record<string, unknown>> = [];
+  for (let index = 1; index <= rowCount; index += 1) {
+    const penalty = asRecord(penalties[index - 1]);
+    rows.push({
+      index,
+      id: stringifyEditorValue(penalty.id).trim(),
+      source: stringifyEditorValue(penalty.source).trim(),
+      target: normalizeEditorRecoverablePenaltyTarget(penalty),
+      amount: penalty.amount === null || penalty.amount === undefined ? "" : stringifyEditorValue(penalty.amount).trim(),
+      notes: stringifyEditorValue(penalty.notes),
+    });
+  }
+  return rows;
+}
+
+function parseEditorRecoverablePenaltyTarget(value: string):
+  | { status: "ok"; kind: "max_hp"; abilityKey: "" }
+  | { status: "ok"; kind: "ability_score"; abilityKey: (typeof DND_ABILITY_KEYS)[number] }
+  | { status: "validation_error"; message: string } {
+  const cleanValue = value.trim().toLowerCase();
+  if (cleanValue === "max_hp") {
+    return { status: "ok", kind: "max_hp", abilityKey: "" };
+  }
+  if (cleanValue.startsWith("ability_score:")) {
+    const abilityKey = cleanValue.split(":", 2)[1] || "";
+    if (DND_ABILITY_KEYS.includes(abilityKey as (typeof DND_ABILITY_KEYS)[number])) {
+      return { status: "ok", kind: "ability_score", abilityKey: abilityKey as (typeof DND_ABILITY_KEYS)[number] };
+    }
+  }
+  return { status: "validation_error", message: "Choose a valid recoverable-penalty target." };
+}
+
+function maxEditorRecoverablePenaltyRowIndex(values: Record<string, string>): number {
+  let maxIndex = 0;
+  for (const fieldName of Object.keys(values)) {
+    const match = fieldName.match(ADVANCED_EDITOR_RECOVERABLE_PENALTY_FIELD_PATTERN);
+    if (!match) {
+      continue;
+    }
+    maxIndex = Math.max(maxIndex, Number.parseInt(match[2], 10));
+  }
+  return maxIndex;
+}
+
+function buildUniqueEditorId(prefix: string, name: string, usedIds: Set<string>): string {
+  const base = slugifyText(name) || prefix;
+  let candidate = `${prefix}-${base}`;
+  let index = 2;
+  while (usedIds.has(candidate)) {
+    candidate = `${prefix}-${base}-${index}`;
+    index += 1;
+  }
+  return candidate;
+}
+
+function parseEditorRecoverablePenalties(
+  values: Record<string, string>,
+  existingPenalties: Array<Record<string, unknown>>,
+): { status: "ok"; penalties: Array<Record<string, unknown>> } | { status: "validation_error"; message: string } {
+  const usedIds = new Set(
+    existingPenalties.map((penalty) => stringifyEditorValue(penalty.id).trim()).filter(Boolean),
+  );
+  const penalties: Array<Record<string, unknown>> = [];
+  const rowCount = Math.max(
+    maxEditorRecoverablePenaltyRowIndex(values),
+    ADVANCED_EDITOR_MIN_RECOVERABLE_PENALTY_ROWS,
+  );
+  for (let index = 1; index <= rowCount; index += 1) {
+    const rawId = stringifyEditorValue(values[`recoverable_penalty_id_${index}`]).trim();
+    const source = stringifyEditorValue(values[`recoverable_penalty_source_${index}`]).trim();
+    const target = stringifyEditorValue(values[`recoverable_penalty_target_${index}`]).trim();
+    const amountText = stringifyEditorValue(values[`recoverable_penalty_amount_${index}`]).trim();
+    const notes = stringifyEditorValue(values[`recoverable_penalty_notes_${index}`]);
+    const hasContent = Boolean(rawId || source || target || amountText || notes.trim());
+    if (!hasContent) {
+      continue;
+    }
+    if (!source) {
+      return { status: "validation_error", message: "Each recoverable penalty needs a source label." };
+    }
+    if (!target) {
+      return { status: "validation_error", message: "Each recoverable penalty needs a target." };
+    }
+    if (!/^[-+]?\d+$/.test(amountText)) {
+      return {
+        status: "validation_error",
+        message: `The recoverable penalty amount for '${source}' must be a whole number.`,
+      };
+    }
+    const amount = Number.parseInt(amountText, 10);
+    if (amount < 0) {
+      return {
+        status: "validation_error",
+        message: `The recoverable penalty amount for '${source}' cannot be negative.`,
+      };
+    }
+    if (amount <= 0) {
+      return { status: "validation_error", message: "Each recoverable penalty needs a positive amount." };
+    }
+    const parsedTarget = parseEditorRecoverablePenaltyTarget(target);
+    if (parsedTarget.status === "validation_error") {
+      return parsedTarget;
+    }
+    const penaltyId = rawId || buildUniqueEditorId("recoverable-penalty", source, usedIds);
+    usedIds.add(penaltyId);
+    const penalty: Record<string, unknown> = {
+      id: penaltyId,
+      kind: parsedTarget.kind,
+      amount,
+      source,
+      notes: notes.trim(),
+    };
+    if (parsedTarget.abilityKey) {
+      penalty.ability_key = parsedTarget.abilityKey;
+    }
+    penalties.push(penalty);
+  }
+  return { status: "ok", penalties };
+}
+
+function hasEditorRecoverablePenaltyValues(values: Record<string, string>): boolean {
+  return Object.keys(values).some((fieldName) => ADVANCED_EDITOR_RECOVERABLE_PENALTY_FIELD_PATTERN.test(fieldName));
+}
+
 function adjustSpeedLabel(value: unknown, delta: number): string {
   const cleanValue = stringifyEditorValue(value).trim();
   if (!cleanValue || delta === 0) {
@@ -3241,6 +3423,21 @@ function adjustSpeedLabel(value: unknown, delta: number): string {
   }
   const updatedValue = Math.max(Number.parseInt(match[0], 10) + delta, 0);
   return `${cleanValue.slice(0, match.index)}${updatedValue}${cleanValue.slice(match.index + match[0].length)}`;
+}
+
+function adjustAbilityScorePayload(value: unknown, delta: number): Record<string, unknown> {
+  const payload = { ...asRecord(value) };
+  const currentScore = createContextInteger(payload.score);
+  const currentModifier = abilityModifier(currentScore);
+  const updatedScore = Math.max(currentScore + delta, 0);
+  const updatedModifier = abilityModifier(updatedScore);
+  const currentSaveBonus = Number.isFinite(Number(payload.save_bonus))
+    ? createContextInteger(payload.save_bonus)
+    : currentModifier;
+  payload.score = updatedScore;
+  payload.modifier = updatedModifier;
+  payload.save_bonus = currentSaveBonus + (updatedModifier - currentModifier);
+  return payload;
 }
 
 function applyEditorStatAdjustment(stats: Record<string, unknown>, key: string, value: number): void {
@@ -3259,6 +3456,61 @@ function applyEditorStatAdjustment(stats: Record<string, unknown>, key: string, 
   } else if (key === "passive_investigation") {
     stats.passive_investigation = Math.max(createContextInteger(stats.passive_investigation) + value, 0);
   }
+}
+
+function applyEditorRecoverableStatPenalties(
+  stats: Record<string, unknown>,
+  penalties: Array<Record<string, unknown>>,
+  options: { reverse?: boolean } = {},
+): Record<string, unknown> {
+  const nextStats = deepCloneRecord(stats);
+  if (penalties.length === 0) {
+    delete nextStats.recoverable_penalties;
+    return nextStats;
+  }
+
+  const direction = options.reverse ? 1 : -1;
+  const maxHpPenalty = penalties
+    .filter((penalty) => stringifyEditorValue(penalty.kind).trim() === "max_hp")
+    .reduce((total, penalty) => total + createContextInteger(penalty.amount), 0);
+  if (maxHpPenalty !== 0) {
+    nextStats.max_hp = Math.max(createContextInteger(nextStats.max_hp) + direction * maxHpPenalty, 0);
+  }
+
+  const abilityScores = deepCloneRecord(nextStats.ability_scores);
+  for (const penalty of penalties) {
+    if (stringifyEditorValue(penalty.kind).trim() !== "ability_score") {
+      continue;
+    }
+    const abilityKey = stringifyEditorValue(penalty.ability_key).trim().toLowerCase();
+    if (!DND_ABILITY_KEYS.includes(abilityKey as (typeof DND_ABILITY_KEYS)[number])) {
+      continue;
+    }
+    const delta = direction * createContextInteger(penalty.amount);
+    const existingPayload = abilityScores[abilityKey];
+    if (typeof existingPayload === "object" && existingPayload !== null && !Array.isArray(existingPayload)) {
+      abilityScores[abilityKey] = adjustAbilityScorePayload(existingPayload, delta);
+    } else {
+      abilityScores[abilityKey] = Math.max(createContextInteger(existingPayload) + delta, 0);
+    }
+  }
+  nextStats.ability_scores = abilityScores;
+  if (!options.reverse) {
+    nextStats.recoverable_penalties = penalties.map((penalty) => ({ ...penalty }));
+  }
+  return nextStats;
+}
+
+function stripEditorRecoverableStatPenalties(stats: Record<string, unknown>): {
+  stats: Record<string, unknown>;
+  penalties: Array<Record<string, unknown>>;
+} {
+  const existingPenalties = normalizeEditorRecoverablePenalties(stats.recoverable_penalties);
+  const strippedStats = existingPenalties.length > 0
+    ? applyEditorRecoverableStatPenalties(stats, existingPenalties, { reverse: true })
+    : deepCloneRecord(stats);
+  delete strippedStats.recoverable_penalties;
+  return { stats: strippedStats, penalties: existingPenalties };
 }
 
 function stripEditorManualStatAdjustments(stats: Record<string, unknown>): Record<string, unknown> {
@@ -3317,6 +3569,7 @@ export function buildCharacterAdvancedEditorPayload({
   const referenceNotes = asRecord(definition.reference_notes);
   const proficiencies = asRecord(definition.proficiencies);
   const manualStatAdjustments = normalizeEditorStatAdjustments(asRecord(definition.stats).manual_adjustments);
+  const recoverablePenaltyRows = buildRecoverablePenaltyRows(asRecord(definition.stats).recoverable_penalties);
   const features = asArray(definition.features).map((value, index) => {
     const feature = asRecord(value);
     return {
@@ -3363,6 +3616,7 @@ export function buildCharacterAdvancedEditorPayload({
           manualStatAdjustments[field.key] ?? "",
         ),
       ),
+      recoverable_penalty_rows: recoverablePenaltyRows,
       reference_fields: [
         buildReferenceField(
           "physical_description_markdown",
@@ -3403,6 +3657,7 @@ export function buildCharacterAdvancedEditorPayload({
       ],
       feature_rows: features,
       equipment_rows: equipment,
+      recoverable_penalty_target_options: ADVANCED_EDITOR_RECOVERABLE_PENALTY_TARGET_OPTIONS.map((option) => ({ ...option })),
     },
   };
 }
@@ -3427,11 +3682,15 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
     }
   }
 
-  const unsupportedFields = Object.keys(values).filter((fieldName) => !ADVANCED_EDITOR_SUPPORTED_FIELD_NAMES.has(fieldName));
+  const unsupportedFields = Object.keys(values).filter(
+    (fieldName) =>
+      !ADVANCED_EDITOR_SUPPORTED_FIELD_NAMES.has(fieldName) &&
+      !ADVANCED_EDITOR_RECOVERABLE_PENALTY_FIELD_PATTERN.test(fieldName),
+  );
   if (unsupportedFields.length > 0) {
     return {
       status: "validation_error",
-      message: `Unsupported Advanced Editor fields for the TypeScript reference/proficiency/stat-adjustment field slice: ${unsupportedFields.join(", ")}.`,
+      message: `Unsupported Advanced Editor fields for the TypeScript reference/proficiency/stat-adjustment/recoverable-penalty field slice: ${unsupportedFields.join(", ")}.`,
     };
   }
 
@@ -3448,6 +3707,13 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
   const referenceNotes = { ...asRecord(nextDefinition.reference_notes) };
   const proficiencies = { ...asRecord(nextDefinition.proficiencies) };
   const stateNoteValues: Record<string, string> = {};
+  const strippedRecoverableStats = stripEditorRecoverableStatPenalties(asRecord(nextDefinition.stats));
+  const parsedRecoverablePenalties = hasEditorRecoverablePenaltyValues(values)
+    ? parseEditorRecoverablePenalties(values, strippedRecoverableStats.penalties)
+    : null;
+  if (parsedRecoverablePenalties?.status === "validation_error") {
+    return parsedRecoverablePenalties;
+  }
 
   for (const [fieldName, value] of Object.entries(values)) {
     if (fieldName === "biography_markdown" || fieldName === "personality_markdown") {
@@ -3467,10 +3733,15 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
   nextDefinition.profile = profile;
   nextDefinition.reference_notes = referenceNotes;
   nextDefinition.proficiencies = proficiencies;
-  if (parsedStatAdjustments?.status === "ok") {
+  if (parsedRecoverablePenalties?.status === "ok" || parsedStatAdjustments?.status === "ok") {
+    const baseStats = parsedRecoverablePenalties?.status === "ok"
+      ? applyEditorRecoverableStatPenalties(strippedRecoverableStats.stats, parsedRecoverablePenalties.penalties)
+      : asRecord(nextDefinition.stats);
     nextDefinition.stats = applyEditorManualStatAdjustments(
-      stripEditorManualStatAdjustments(asRecord(nextDefinition.stats)),
-      parsedStatAdjustments.adjustments,
+      stripEditorManualStatAdjustments(baseStats),
+      parsedStatAdjustments?.status === "ok"
+        ? parsedStatAdjustments.adjustments
+        : normalizeEditorStatAdjustments(asRecord(nextDefinition.stats).manual_adjustments),
     );
   }
   return {
