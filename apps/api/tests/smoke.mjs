@@ -818,6 +818,7 @@ insertEntry.run("DND-5E", "PHB", "PHB:item:chain-mail", "item", "phb-item-chain-
 insertEntry.run("DND-5E", "PHB", "PHB:item:profiled-blade", "item", "phb-item-profiled-blade", "Profiled Blade", 1, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("DND-5E", "MM", "MM:monster:goblin", "monster", "mm-monster-goblin", "Goblin", 0, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("Xianxia", "XIA", "XIA:martial_art:cloud-palm", "martial_art", "xia-martial-art-cloud-palm", "Cloud Palm", 0, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
+insertEntry.run("Xianxia", "XIA", "XIA:martial_art:stone-root", "martial_art", "xia-martial-art-stone-root", "Stone Root", 0, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 insertEntry.run("Xianxia", "XIA", "XIA:generic_technique:qi-blast", "generic_technique", "xia-generic-technique-qi-blast", "Qi Blast", 0, "2026-06-25T09:00:00+00:00", "2026-06-25T09:00:00+00:00");
 smokeDb
   .prepare(
@@ -843,6 +844,29 @@ smokeDb
     JSON.stringify({ xianxia_martial_art: { style: "Open hand" } }),
     "Xianxia",
     "XIA:martial_art:cloud-palm",
+  );
+smokeDb
+  .prepare(
+    `
+      UPDATE systems_entries
+      SET
+        metadata_json = ?,
+        body_json = ?
+      WHERE library_slug = ?
+        AND entry_key = ?
+    `,
+  )
+  .run(
+    JSON.stringify({
+      martial_art_catalog_order: 6,
+      xianxia_martial_art_style: "Jian sword",
+      xianxia_martial_art_rank_records: [
+        { rank_key: "initiate", rank_ref: "systems:xia-stone-root:initiate" },
+      ],
+    }),
+    JSON.stringify({ xianxia_martial_art: { style: "Jian sword" } }),
+    "Xianxia",
+    "XIA:martial_art:stone-root",
   );
 smokeDb
   .prepare(
@@ -11531,6 +11555,65 @@ if (
   );
 }
 
+const dndCharacterCreateSubmit = await requestJson(
+  characterCreatePath,
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { values: { name: "Not Yet Built" } } },
+);
+if (
+  dndCharacterCreateSubmit.status !== 400 ||
+  dndCharacterCreateSubmit.payload?.error?.code !== "validation_error" ||
+  dndCharacterCreateSubmit.payload?.error?.message !==
+    "DND-5E character creation submit is not implemented in the TypeScript API yet."
+) {
+  throw new Error(
+    `Expected DND character create submit validation_error, got ${dndCharacterCreateSubmit.status} ${JSON.stringify(dndCharacterCreateSubmit.payload)}`,
+  );
+}
+
+const anonymousCharacterCreateSubmit = await requestJson(
+  characterCreatePath,
+  {},
+  { method: "POST", body: { values: { name: "Anonymous Create" } } },
+);
+if (
+  anonymousCharacterCreateSubmit.status !== 401 ||
+  anonymousCharacterCreateSubmit.payload?.error?.code !== "auth_required"
+) {
+  throw new Error(
+    `Expected anonymous character create POST auth_required, got ${anonymousCharacterCreateSubmit.status} ${JSON.stringify(anonymousCharacterCreateSubmit.payload)}`,
+  );
+}
+
+const playerCharacterCreateSubmit = await requestJson(
+  characterCreatePath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: { values: { name: "Player Create" } } },
+);
+if (
+  playerCharacterCreateSubmit.status !== 403 ||
+  playerCharacterCreateSubmit.payload?.error?.code !== "forbidden" ||
+  playerCharacterCreateSubmit.payload?.error?.message !== "You do not have permission to create characters in this campaign."
+) {
+  throw new Error(
+    `Expected player character create POST forbidden, got ${playerCharacterCreateSubmit.status} ${JSON.stringify(playerCharacterCreateSubmit.payload)}`,
+  );
+}
+
+const missingCampaignCharacterCreateSubmit = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/characters/create",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { values: { name: "Missing Campaign Create" } } },
+);
+if (
+  missingCampaignCharacterCreateSubmit.status !== 404 ||
+  missingCampaignCharacterCreateSubmit.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing campaign character create POST 404, got ${missingCampaignCharacterCreateSubmit.status} ${JSON.stringify(missingCampaignCharacterCreateSubmit.payload)}`,
+  );
+}
+
 const missingCampaignCharacterCreateContext = await requestJson(
   "/api/v1/campaigns/definitely-not-a-campaign/characters/create",
   { Authorization: `Bearer ${dmApiToken}` },
@@ -11568,6 +11651,21 @@ if (
 ) {
   throw new Error(
     `Expected unsupported character create context unsupported_campaign_system, got ${unsupportedCharacterCreateContext.status} ${JSON.stringify(unsupportedCharacterCreateContext.payload)}`,
+  );
+}
+const unsupportedCharacterCreateSubmit = await requestJson(
+  characterCreatePath,
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "POST", body: { values: { name: "Unsupported Create" } } },
+);
+if (
+  unsupportedCharacterCreateSubmit.status !== 400 ||
+  unsupportedCharacterCreateSubmit.payload?.error?.code !== "unsupported_campaign_system" ||
+  unsupportedCharacterCreateSubmit.payload?.error?.message !==
+    "This campaign can still use the character roster, read-mode sheets, session-mode sheets, and Controls. Native DND-5E builder, edit, level-up, repair, retraining, PDF-import, and spellcasting tools are not implemented for this campaign system."
+) {
+  throw new Error(
+    `Expected unsupported character create POST unsupported_campaign_system, got ${unsupportedCharacterCreateSubmit.status} ${JSON.stringify(unsupportedCharacterCreateSubmit.payload)}`,
   );
 }
 const restoreDndCharacterCreateConfigPatch = await requestJson(
@@ -11749,6 +11847,141 @@ if (
 ) {
   throw new Error(
     `Unexpected Xianxia character create context payload: ${xianxiaCharacterCreateContext.status} ${JSON.stringify(xianxiaCharacterCreateContext.payload)}`,
+  );
+}
+
+const malformedCharacterCreatePost = await requestJson(
+  characterCreatePath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: ["invalid", "payload"] },
+);
+if (
+  malformedCharacterCreatePost.status !== 400 ||
+  malformedCharacterCreatePost.payload?.error?.code !== "invalid_json"
+) {
+  throw new Error(
+    `Expected malformed character create POST invalid_json, got ${malformedCharacterCreatePost.status} ${JSON.stringify(malformedCharacterCreatePost.payload)}`,
+  );
+}
+
+const invalidXianxiaCharacterCreatePost = await requestJson(
+  characterCreatePath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  {
+    method: "POST",
+    body: {
+      values: {
+        name: "Bad Create Budget",
+        attribute_str: "2",
+        attribute_dex: "1",
+        attribute_con: "1",
+        attribute_int: "1",
+        attribute_wis: "0",
+        attribute_cha: "0",
+        effort_basic: "1",
+        effort_weapon: "1",
+        effort_guns_explosive: "1",
+        effort_magic: "1",
+        effort_ultimate: "1",
+        energy_jing: "1",
+        energy_qi: "1",
+        energy_shen: "1",
+      },
+    },
+  },
+);
+if (
+  invalidXianxiaCharacterCreatePost.status !== 400 ||
+  invalidXianxiaCharacterCreatePost.payload?.error?.code !== "validation_error" ||
+  invalidXianxiaCharacterCreatePost.payload?.error?.message !==
+    "Xianxia Attributes must spend exactly 6 creation points; submitted total is 5."
+) {
+  throw new Error(
+    `Expected invalid Xianxia create POST validation_error, got ${invalidXianxiaCharacterCreatePost.status} ${JSON.stringify(invalidXianxiaCharacterCreatePost.payload)}`,
+  );
+}
+
+const xianxiaNativeCreateValues = {
+  name: "Smoke Cultivator",
+  character_slug: "smoke-cultivator",
+  attributes: { str: "1", dex: "1", con: "2", int: "1", wis: "1", cha: "0" },
+  efforts: { basic: "1", weapon: "1", guns_explosive: "1", magic: "1", ultimate: "1" },
+  energy_maxima: { jing: "1", qi: "1", shen: "1" },
+  trained_skills: ["Fishing", "Calligraphy", "Tea Ceremony"],
+  martial_arts: [
+    { slug: "xia-martial-art-cloud-palm", rank_key: "novice" },
+    { systems_ref: { slug: "xia-martial-art-stone-root" }, current_rank_key: "initiate" },
+  ],
+  manual_armor_bonus: "1",
+  dao: { current: "2" },
+  gm_granted_generic_technique_entry_keys: ["XIA:generic_technique:qi-blast"],
+};
+const xianxiaCharacterCreatePost = await requestJson(
+  characterCreatePath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { values: xianxiaNativeCreateValues } },
+);
+if (
+  xianxiaCharacterCreatePost.status !== 200 ||
+  xianxiaCharacterCreatePost.payload?.ok !== true ||
+  xianxiaCharacterCreatePost.payload?.message !== "Smoke Cultivator created." ||
+  xianxiaCharacterCreatePost.payload?.character?.definition?.character_slug !== "smoke-cultivator" ||
+  xianxiaCharacterCreatePost.payload?.character?.definition?.system !== "Xianxia" ||
+  xianxiaCharacterCreatePost.payload?.character?.definition?.source?.source_path !== "builder://xianxia-create" ||
+  xianxiaCharacterCreatePost.payload?.character?.definition?.source?.source_type !== "xianxia_character_builder" ||
+  xianxiaCharacterCreatePost.payload?.character?.definition?.xianxia?.durability?.defense !== 13 ||
+  xianxiaCharacterCreatePost.payload?.character?.definition?.xianxia?.martial_arts?.map((art) => art.current_rank_key).join("|") !==
+    "novice|initiate" ||
+  xianxiaCharacterCreatePost.payload?.character?.definition?.xianxia?.martial_arts?.[0]?.learned_rank_refs?.join("|") !==
+    "systems:xia-cloud-palm:initiate|systems:xia-cloud-palm:novice" ||
+  xianxiaCharacterCreatePost.payload?.character?.definition?.xianxia?.martial_arts?.[1]?.learned_rank_refs?.join("|") !==
+    "systems:xia-stone-root:initiate" ||
+  xianxiaCharacterCreatePost.payload?.character?.definition?.xianxia?.generic_techniques?.[0]?.grant_source !==
+    "gm_granted_character_creation" ||
+  xianxiaCharacterCreatePost.payload?.character?.definition?.xianxia?.equipment?.necessary_weapons?.[0]?.name !== "Jian" ||
+  xianxiaCharacterCreatePost.payload?.character?.definition?.xianxia?.equipment?.necessary_tools?.map((tool) => tool.name).join("|") !==
+    "Fishing rod, spear, or net|Calligraphy brush|Tea set" ||
+  Object.hasOwn(xianxiaCharacterCreatePost.payload?.character?.definition?.xianxia || {}, "vitals") ||
+  Object.hasOwn(xianxiaCharacterCreatePost.payload?.character?.definition?.xianxia || {}, "currency") ||
+  xianxiaCharacterCreatePost.payload?.character?.state_record?.revision !== 1 ||
+  xianxiaCharacterCreatePost.payload?.character?.state_record?.state?.xianxia?.vitals?.current_hp !== 10 ||
+  xianxiaCharacterCreatePost.payload?.character?.state_record?.state?.xianxia?.vitals?.current_stance !== 10 ||
+  xianxiaCharacterCreatePost.payload?.character?.state_record?.state?.xianxia?.energies?.jing?.current !== 1 ||
+  xianxiaCharacterCreatePost.payload?.character?.state_record?.state?.xianxia?.dao?.current !== 2 ||
+  xianxiaCharacterCreatePost.payload?.character?.state_record?.state?.xianxia?.currency?.coin !== 0 ||
+  xianxiaCharacterCreatePost.payload?.character?.state_record?.state?.xianxia?.inventory?.enabled !== false ||
+  xianxiaCharacterCreatePost.payload?.links?.character_url !== "/app-next/campaigns/linden-pass/characters/smoke-cultivator" ||
+  xianxiaCharacterCreatePost.payload?.links?.flask_character_url !== "/campaigns/linden-pass/characters/smoke-cultivator"
+) {
+  throw new Error(
+    `Unexpected Xianxia character create POST response: ${xianxiaCharacterCreatePost.status} ${JSON.stringify(xianxiaCharacterCreatePost.payload)}`,
+  );
+}
+const nativeCreateCharacterDir = path.join(campaignsDir, "linden-pass", "characters", "smoke-cultivator");
+const nativeCreateDefinition = parseYaml(readFileSync(path.join(nativeCreateCharacterDir, "definition.yaml"), "utf8"));
+const nativeCreateImport = parseYaml(readFileSync(path.join(nativeCreateCharacterDir, "import.yaml"), "utf8"));
+if (
+  nativeCreateDefinition?.xianxia?.dao?.current !== undefined ||
+  nativeCreateDefinition?.xianxia?.vitals !== undefined ||
+  nativeCreateDefinition?.xianxia?.inventory !== undefined ||
+  nativeCreateImport?.source_path !== "builder://xianxia-create" ||
+  nativeCreateImport?.parser_version !== "2026-04-26.06"
+) {
+  throw new Error(
+    `Expected native Xianxia create to keep mutable fields out of definition.yaml, got ${JSON.stringify({ nativeCreateDefinition, nativeCreateImport })}`,
+  );
+}
+const duplicateXianxiaCharacterCreatePost = await requestJson(
+  characterCreatePath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { values: xianxiaNativeCreateValues } },
+);
+if (
+  duplicateXianxiaCharacterCreatePost.status !== 409 ||
+  duplicateXianxiaCharacterCreatePost.payload?.error?.code !== "character_exists"
+) {
+  throw new Error(
+    `Expected duplicate Xianxia create POST character_exists, got ${duplicateXianxiaCharacterCreatePost.status} ${JSON.stringify(duplicateXianxiaCharacterCreatePost.payload)}`,
   );
 }
 

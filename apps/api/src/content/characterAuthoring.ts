@@ -135,6 +135,17 @@ const XIANXIA_MANUAL_IMPORTER_SOURCE_PATH = "importer://xianxia-manual";
 const XIANXIA_MANUAL_IMPORTER_SOURCE_TYPE = "xianxia_manual_importer";
 const XIANXIA_MANUAL_IMPORTER_VERSION = "2026-05-13.0";
 const XIANXIA_MANUAL_IMPORTER_IMPORTED_FROM = "Manual Xianxia character importer";
+const XIANXIA_CHARACTER_CREATE_SOURCE_PATH = "builder://xianxia-create";
+const XIANXIA_CHARACTER_CREATE_SOURCE_TYPE = "xianxia_character_builder";
+const XIANXIA_CHARACTER_CREATE_VERSION = "2026-04-26.06";
+const XIANXIA_CHARACTER_CREATE_IMPORTED_FROM = "In-app Xianxia Character Creator";
+const XIANXIA_ATTRIBUTE_CREATION_POINTS = 6;
+const XIANXIA_ATTRIBUTE_MAX_AT_CREATION = 3;
+const XIANXIA_EFFORT_CREATION_POINTS = 5;
+const XIANXIA_EFFORT_MAX_AT_CREATION = 3;
+const XIANXIA_ENERGY_CREATION_POINTS = 3;
+const XIANXIA_TRAINED_SKILL_COUNT = 3;
+const XIANXIA_DAO_DEFAULT_MAX = 3;
 const XIANXIA_DIRECT_ADVANCEMENT_GENERIC_TECHNIQUE_KEYS = new Set(["cultivation", "meditation", "conditioning", "training"]);
 const NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE =
   "This campaign can still use the character roster, read-mode sheets, session-mode sheets, and Controls. Native DND-5E builder, edit, level-up, repair, retraining, PDF-import, and spellcasting tools are not implemented for this campaign system.";
@@ -144,6 +155,12 @@ export interface XianxiaManualImportBuildResult {
   importMetadata: Record<string, unknown>;
   initialState: Record<string, unknown>;
   preview: Record<string, unknown>;
+}
+
+export interface XianxiaCreateBuildResult {
+  definition: Record<string, unknown>;
+  importMetadata: Record<string, unknown>;
+  initialState: Record<string, unknown>;
 }
 
 function normalizeSystemKey(value: unknown): string {
@@ -540,9 +557,16 @@ export function listXianxiaCreateGenericTechniqueOptions(
   }
 }
 
+function normalizeCharacterAuthoringValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item ?? "").trim()).filter(Boolean).join(",");
+  }
+  return value === null || value === undefined ? "" : String(value);
+}
+
 function normalizeCharacterAuthoringValues(values: Record<string, unknown>): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(values).map(([key, value]) => [String(key), value === null || value === undefined ? "" : String(value)]),
+    Object.entries(values).map(([key, value]) => [String(key), normalizeCharacterAuthoringValue(value)]),
   );
 }
 
@@ -557,6 +581,14 @@ function coerceInt(value: string, fieldName: string): number {
   }
   if (!/^[+-]?\d+$/.test(candidate)) {
     throw new Error(`Invalid value for ${fieldName}.`);
+  }
+  return Number.parseInt(candidate, 10);
+}
+
+function parseStrictInt(value: unknown, fieldLabel: string): number {
+  const candidate = cleanScalar(value);
+  if (!/^[+-]?\d+$/.test(candidate)) {
+    throw new Error(`${fieldLabel} must be a whole number.`);
   }
   return Number.parseInt(candidate, 10);
 }
@@ -634,6 +666,10 @@ function normalizeCharacterName(value: string): string {
   return String(value || "").trim();
 }
 
+function normalizeCreateName(value: unknown): string {
+  return cleanScalar(value).split(/\s+/).filter(Boolean).join(" ");
+}
+
 function slugifyText(value: string): string {
   if (!value.trim()) {
     return "";
@@ -689,6 +725,39 @@ function parseTags(value: unknown): string[] {
     .split(/[,|]/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function cleanScalar(value: unknown): string {
+  if (Array.isArray(value)) {
+    return cleanScalar(value[0]);
+  }
+  return value === null || value === undefined ? "" : String(value).trim();
+}
+
+function scalarList(value: unknown): unknown[] {
+  if (value === null || value === undefined || value === "") {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>);
+  }
+  return [value];
+}
+
+function formatLabelList(values: string[]): string {
+  if (values.length === 0) {
+    return "";
+  }
+  if (values.length === 1) {
+    return values[0] ?? "";
+  }
+  if (values.length === 2) {
+    return `${values[0]} and ${values[1]}`;
+  }
+  return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
 }
 
 function normalizeToken(value: unknown): string {
@@ -1066,11 +1135,631 @@ function collectMartialArts(values: Record<string, string>, options: Array<Recor
     .filter((row): row is Record<string, unknown> => Boolean(row));
 }
 
+function nestedRecordValue(values: Record<string, unknown>, key: string): Record<string, unknown> {
+  return asRecord(values[key]);
+}
+
+function validateCreationIntMap({
+  values,
+  nestedKey,
+  prefix,
+  keys,
+  labels,
+  points,
+  max,
+  groupLabel,
+  unsupportedLabel,
+}: {
+  values: Record<string, unknown>;
+  nestedKey: string;
+  prefix: string;
+  keys: readonly string[];
+  labels: Record<string, string>;
+  points: number;
+  max: number;
+  groupLabel: string;
+  unsupportedLabel: string;
+}): Record<string, number> {
+  const errors: string[] = [];
+  const missingLabels: string[] = [];
+  const scores: Record<string, number> = {};
+  const nested = nestedRecordValue(values, nestedKey);
+  const unknownKeys = new Set<string>();
+  for (const key of Object.keys(values)) {
+    if (key.startsWith(prefix)) {
+      const unprefixed = key.slice(prefix.length);
+      if (!keys.includes(unprefixed)) {
+        unknownKeys.add(unprefixed);
+      }
+    }
+  }
+  for (const key of Object.keys(nested)) {
+    if (!keys.includes(key)) {
+      unknownKeys.add(key);
+    }
+  }
+  const unknown = [...unknownKeys].sort();
+  if (unknown.length > 0) {
+    errors.push(`Unsupported Xianxia ${unsupportedLabel}: ${unknown.join(", ")}.`);
+  }
+
+  for (const key of keys) {
+    const label = labels[key] || key;
+    const inputName = `${prefix}${key}`;
+    const rawValue = Object.hasOwn(values, inputName) ? values[inputName] : nested[key];
+    const cleaned = cleanScalar(rawValue);
+    if (cleaned === "") {
+      missingLabels.push(label);
+      continue;
+    }
+    let score: number;
+    try {
+      score = parseStrictInt(cleaned, label);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : `${label} must be a whole number.`);
+      continue;
+    }
+    if (score < 0) {
+      errors.push(`${label} cannot be negative.`);
+      continue;
+    }
+    if (score > max) {
+      errors.push(`${label} cannot exceed ${max} at character creation.`);
+    }
+    scores[key] = score;
+  }
+
+  if (missingLabels.length > 0) {
+    errors.push(`Missing Xianxia ${unsupportedLabel}: ${formatLabelList(missingLabels)}.`);
+  }
+  if (Object.keys(scores).length === keys.length) {
+    const total = Object.values(scores).reduce((sum, value) => sum + value, 0);
+    if (total !== points) {
+      errors.push(`Xianxia ${groupLabel} must spend exactly ${points} creation points; submitted total is ${total}.`);
+    }
+  }
+  if (errors.length > 0) {
+    throw new Error(errors.join(" "));
+  }
+  return Object.fromEntries(keys.map((key) => [key, scores[key] ?? 0]));
+}
+
+function validateXianxiaCreateAttributes(values: Record<string, unknown>): Record<string, number> {
+  return validateCreationIntMap({
+    values,
+    nestedKey: "attributes",
+    prefix: "attribute_",
+    keys: XIANXIA_ATTRIBUTE_KEYS,
+    labels: XIANXIA_ATTRIBUTE_LABELS,
+    points: XIANXIA_ATTRIBUTE_CREATION_POINTS,
+    max: XIANXIA_ATTRIBUTE_MAX_AT_CREATION,
+    groupLabel: "Attributes",
+    unsupportedLabel: "attributes",
+  });
+}
+
+function validateXianxiaCreateEfforts(values: Record<string, unknown>): Record<string, number> {
+  return validateCreationIntMap({
+    values,
+    nestedKey: "efforts",
+    prefix: "effort_",
+    keys: XIANXIA_EFFORT_KEYS,
+    labels: XIANXIA_EFFORT_LABELS,
+    points: XIANXIA_EFFORT_CREATION_POINTS,
+    max: XIANXIA_EFFORT_MAX_AT_CREATION,
+    groupLabel: "Efforts",
+    unsupportedLabel: "efforts",
+  });
+}
+
+function validateXianxiaCreateEnergies(values: Record<string, unknown>): Record<string, number> {
+  const errors: string[] = [];
+  const missingLabels: string[] = [];
+  const scores: Record<string, number> = {};
+  const nestedEnergies = nestedRecordValue(values, "energies");
+  const nestedEnergyMaxima = nestedRecordValue(values, "energy_maxima");
+  const unknownKeys = new Set<string>();
+  for (const key of Object.keys(values)) {
+    if (key.startsWith("energy_") && key !== "energy_maxima") {
+      const unprefixed = key.slice("energy_".length);
+      if (!XIANXIA_ENERGY_KEYS.includes(unprefixed as (typeof XIANXIA_ENERGY_KEYS)[number])) {
+        unknownKeys.add(unprefixed);
+      }
+    }
+  }
+  for (const key of [...Object.keys(nestedEnergies), ...Object.keys(nestedEnergyMaxima)]) {
+    if (!XIANXIA_ENERGY_KEYS.includes(key as (typeof XIANXIA_ENERGY_KEYS)[number])) {
+      unknownKeys.add(key);
+    }
+  }
+  const unknown = [...unknownKeys].sort();
+  if (unknown.length > 0) {
+    errors.push(`Unsupported Xianxia energies: ${unknown.join(", ")}.`);
+  }
+
+  for (const key of XIANXIA_ENERGY_KEYS) {
+    const label = key[0]!.toUpperCase() + key.slice(1);
+    let rawValue: unknown;
+    if (Object.hasOwn(values, `energy_${key}`)) {
+      rawValue = values[`energy_${key}`];
+    } else if (Object.hasOwn(nestedEnergyMaxima, key)) {
+      rawValue = nestedEnergyMaxima[key];
+    } else if (Object.hasOwn(nestedEnergies, key)) {
+      const nestedEnergy = asRecord(nestedEnergies[key]);
+      rawValue = Object.keys(nestedEnergy).length > 0 ? nestedEnergy.max : nestedEnergies[key];
+    }
+    const cleaned = cleanScalar(rawValue);
+    if (cleaned === "") {
+      missingLabels.push(label);
+      continue;
+    }
+    let score: number;
+    try {
+      score = parseStrictInt(cleaned, label);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : `${label} must be a whole number.`);
+      continue;
+    }
+    if (score < 0) {
+      errors.push(`${label} cannot be negative.`);
+      continue;
+    }
+    scores[key] = score;
+  }
+
+  if (missingLabels.length > 0) {
+    errors.push(`Missing Xianxia energies: ${formatLabelList(missingLabels)}.`);
+  }
+  if (Object.keys(scores).length === XIANXIA_ENERGY_KEYS.length) {
+    const total = Object.values(scores).reduce((sum, value) => sum + value, 0);
+    if (total !== XIANXIA_ENERGY_CREATION_POINTS) {
+      errors.push(
+        `Xianxia Energies must spend exactly ${XIANXIA_ENERGY_CREATION_POINTS} creation points across Jing, Qi, and Shen; submitted total is ${total}.`,
+      );
+    }
+  }
+  if (errors.length > 0) {
+    throw new Error(errors.join(" "));
+  }
+  return Object.fromEntries(XIANXIA_ENERGY_KEYS.map((key) => [key, scores[key] ?? 0]));
+}
+
+function validateXianxiaCreateManualArmorBonus(values: Record<string, unknown>): number {
+  const durability = nestedRecordValue(values, "durability");
+  const armor = nestedRecordValue(values, "armor");
+  const rawValue = Object.hasOwn(values, "manual_armor_bonus")
+    ? values.manual_armor_bonus
+    : Object.hasOwn(values, "armor_bonus")
+      ? values.armor_bonus
+      : Object.hasOwn(durability, "manual_armor_bonus")
+        ? durability.manual_armor_bonus
+        : Object.hasOwn(durability, "armor_bonus")
+          ? durability.armor_bonus
+          : Object.hasOwn(armor, "manual_armor_bonus")
+            ? armor.manual_armor_bonus
+            : Object.hasOwn(armor, "armor_bonus")
+              ? armor.armor_bonus
+              : "";
+  const cleaned = cleanScalar(rawValue);
+  if (!cleaned) {
+    return 0;
+  }
+  const manualArmorBonus = parseStrictInt(cleaned, "Manual armor bonus");
+  if (manualArmorBonus < 0) {
+    throw new Error("Manual armor bonus cannot be negative.");
+  }
+  return manualArmorBonus;
+}
+
+function validateXianxiaCreateDaoCurrent(values: Record<string, unknown>): number {
+  const dao = nestedRecordValue(values, "dao");
+  const rawValue = Object.hasOwn(values, "dao_current")
+    ? values.dao_current
+    : Object.hasOwn(dao, "current")
+      ? dao.current
+      : "";
+  const cleaned = cleanScalar(rawValue);
+  if (!cleaned) {
+    return 0;
+  }
+  const daoCurrent = parseStrictInt(cleaned, "Starting Dao");
+  if (daoCurrent < 0) {
+    throw new Error("Starting Dao cannot be negative.");
+  }
+  if (daoCurrent > XIANXIA_DAO_DEFAULT_MAX) {
+    throw new Error(`Starting Dao cannot exceed ${XIANXIA_DAO_DEFAULT_MAX} at character creation.`);
+  }
+  return daoCurrent;
+}
+
+function extractXianxiaCreateTrainedSkillValues(values: Record<string, unknown>): unknown[] {
+  const indexed = Object.entries(values)
+    .map(([key, value]) => {
+      const match = key.match(/^trained_skill_(\d+)$/);
+      return match ? ([Number(match[1]), value] as const) : null;
+    })
+    .filter((entry): entry is readonly [number, unknown] => entry !== null && entry[0] > 0)
+    .sort((left, right) => left[0] - right[0])
+    .map((entry) => entry[1]);
+  if (indexed.length > 0) {
+    return indexed;
+  }
+  if (Object.hasOwn(values, "trained_skills")) {
+    return scalarList(values.trained_skills);
+  }
+  const skills = nestedRecordValue(values, "skills");
+  if (Object.hasOwn(skills, "trained")) {
+    return scalarList(skills.trained);
+  }
+  return [];
+}
+
+function normalizeTrainedSkillName(value: unknown): string {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    value = record.name ?? record.label;
+  }
+  return cleanScalar(value).split(/\s+/).filter(Boolean).join(" ");
+}
+
+function validateXianxiaCreateTrainedSkills(values: Record<string, unknown>): string[] {
+  const trainedSkills = extractXianxiaCreateTrainedSkillValues(values).map(normalizeTrainedSkillName).filter(Boolean);
+  if (trainedSkills.length !== XIANXIA_TRAINED_SKILL_COUNT) {
+    throw new Error(
+      `Xianxia character creation requires exactly ${XIANXIA_TRAINED_SKILL_COUNT} trained skills; submitted ${trainedSkills.length}.`,
+    );
+  }
+  const seen = new Set<string>();
+  const duplicates: string[] = [];
+  for (const skill of trainedSkills) {
+    const marker = skill.toLowerCase();
+    if (seen.has(marker) && !duplicates.includes(skill)) {
+      duplicates.push(skill);
+    }
+    seen.add(marker);
+  }
+  if (duplicates.length > 0) {
+    throw new Error(`Xianxia trained skills must be distinct; duplicates: ${formatLabelList(duplicates)}.`);
+  }
+  return trainedSkills;
+}
+
+function normalizeCreateMartialArtRankKey(value: unknown): string {
+  return cleanScalar(value).toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function coerceCreateMartialArtValue(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { slug: value, rank_key: "" };
+  }
+  const record = value as Record<string, unknown>;
+  const systemsRef = asRecord(record.systems_ref);
+  return {
+    slug: record.slug ?? record.entry_slug ?? systemsRef.slug ?? systemsRef.entry_slug ?? record.systems_ref,
+    rank_key: record.rank_key ?? record.current_rank_key ?? record.starting_rank_key ?? record.rank ?? record.current_rank,
+  };
+}
+
+function extractXianxiaCreateMartialArtValues(values: Record<string, unknown>): Record<string, unknown>[] {
+  const indexed: Record<string, unknown>[] = [];
+  for (let index = 1; index <= 3; index += 1) {
+    const slugKey = `martial_art_${index}_slug`;
+    const rankKey = `martial_art_${index}_rank`;
+    const alternateSlugKey = `starting_martial_art_${index}_slug`;
+    const alternateRankKey = `starting_martial_art_${index}_rank`;
+    if (
+      Object.hasOwn(values, slugKey) ||
+      Object.hasOwn(values, rankKey) ||
+      Object.hasOwn(values, alternateSlugKey) ||
+      Object.hasOwn(values, alternateRankKey)
+    ) {
+      indexed.push({
+        slug: values[slugKey] ?? values[alternateSlugKey] ?? "",
+        rank_key: values[rankKey] ?? values[alternateRankKey] ?? "",
+      });
+    }
+  }
+  if (indexed.length > 0) {
+    return indexed;
+  }
+  if (Array.isArray(values.martial_arts)) {
+    return values.martial_arts.map(coerceCreateMartialArtValue);
+  }
+  if (typeof values.martial_arts === "object" && values.martial_arts !== null) {
+    return [coerceCreateMartialArtValue(values.martial_arts)];
+  }
+  return [];
+}
+
+function normalizeXianxiaCreateMartialArtValues(values: Record<string, unknown>): Array<{ slug: string; rank_key: string }> {
+  const normalized = extractXianxiaCreateMartialArtValues(values).map((record) => ({
+    slug: normalizeMartialArtOptionSlug(record.slug),
+    rank_key: normalizeCreateMartialArtRankKey(record.rank_key),
+  }));
+  while (normalized.length < 3) {
+    normalized.push({ slug: "", rank_key: "" });
+  }
+  return normalized.slice(0, 3);
+}
+
+function createMartialArtOptionMap(options: Array<Record<string, unknown>>): Map<string, Record<string, unknown>> {
+  const lookup = new Map<string, Record<string, unknown>>();
+  for (const option of options) {
+    const slug = normalizeMartialArtOptionSlug(option.slug);
+    if (slug) {
+      lookup.set(slug, option);
+    }
+  }
+  return lookup;
+}
+
+function buildXianxiaStartingMartialArtRecord(option: Record<string, unknown>, rankKey: string): Record<string, unknown> {
+  const learnedRanks = rankKey === "novice" ? ["initiate", "novice"] : ["initiate"];
+  const record: Record<string, unknown> = {
+    name: String(option.title || "").trim(),
+    systems_ref: martialArtSystemsRef(option),
+    current_rank: XIANXIA_MARTIAL_ART_IMPORT_RANK_LABELS[rankKey],
+    current_rank_key: rankKey,
+    learned_rank_refs: learnedRanks
+      .map((learnedRank) => {
+        const rankRefs = asRecord(option.rank_refs);
+        return String(rankRefs[learnedRank] || (option.slug ? `xianxia:${option.slug}:${learnedRank}` : "")).trim();
+      })
+      .filter(Boolean),
+    starting_package: true,
+  };
+  const rankStatus = String(option.rank_records_status || "").trim();
+  if (rankStatus) {
+    record.rank_records_status = rankStatus;
+  }
+  if (option.custom_martial_art === true) {
+    record.custom_martial_art = true;
+    record.xianxia_custom_martial_art = true;
+  }
+  return record;
+}
+
+function validateXianxiaCreateMartialArts(
+  values: Record<string, unknown>,
+  options: Array<Record<string, unknown>>,
+): { records: Record<string, unknown>[]; options: Record<string, unknown>[] } {
+  const optionsBySlug = createMartialArtOptionMap(options);
+  const selectedValues = normalizeXianxiaCreateMartialArtValues(values).filter((value) => value.slug || value.rank_key);
+  if (selectedValues.length === 0) {
+    throw new Error("Xianxia character creation requires a starting Martial Arts package: one Novice plus one Initiate, or three Initiates.");
+  }
+  if (optionsBySlug.size === 0) {
+    throw new Error("No enabled Xianxia Martial Art Systems entries are available for character creation.");
+  }
+
+  const errors: string[] = [];
+  const records: Record<string, unknown>[] = [];
+  const selectedOptions: Record<string, unknown>[] = [];
+  const seenSlugs = new Set<string>();
+  const duplicateTitles: string[] = [];
+  for (const value of selectedValues) {
+    if (!value.slug || !value.rank_key) {
+      errors.push("Each selected starting Martial Art needs both a Martial Art and a rank.");
+      continue;
+    }
+    const option = optionsBySlug.get(value.slug);
+    if (!option) {
+      errors.push(`Unsupported starting Martial Art: ${value.slug}.`);
+      continue;
+    }
+    if (value.rank_key !== "initiate" && value.rank_key !== "novice") {
+      errors.push("Starting Martial Art ranks must be Initiate or Novice.");
+      continue;
+    }
+    const optionSlug = String(option.slug || "");
+    if (seenSlugs.has(optionSlug)) {
+      duplicateTitles.push(String(option.title || ""));
+      continue;
+    }
+    seenSlugs.add(optionSlug);
+    const availableRanks = new Set(asArray(option.available_starting_rank_keys).map((rank) => String(rank)));
+    if (!availableRanks.has(value.rank_key)) {
+      errors.push(
+        `${option.title} does not have ${XIANXIA_MARTIAL_ART_IMPORT_RANK_LABELS[value.rank_key]} rank available in Systems metadata.`,
+      );
+      continue;
+    }
+    records.push(buildXianxiaStartingMartialArtRecord(option, value.rank_key));
+    selectedOptions.push({ ...option, current_rank_key: value.rank_key });
+  }
+  if (duplicateTitles.length > 0) {
+    errors.push(`Starting Martial Arts must be distinct; duplicates: ${formatLabelList(duplicateTitles)}.`);
+  }
+  const rankKeys = records.map((record) => String(record.current_rank_key || ""));
+  const legalNovicePackage = [...rankKeys].sort().join("|") === "initiate|novice";
+  const legalInitiatePackage = rankKeys.join("|") === "initiate|initiate|initiate";
+  if (records.length > 0 && !legalNovicePackage && !legalInitiatePackage) {
+    errors.push("Starting Martial Arts must be one Novice plus one Initiate, or three Initiates.");
+  }
+  if (errors.length > 0) {
+    throw new Error(errors.join(" "));
+  }
+  return { records, options: selectedOptions };
+}
+
+function normalizeGenericTechniqueEntryKeys(values: Record<string, unknown>): string[] {
+  let rawValues = values.gm_granted_generic_technique_entry_keys;
+  if (rawValues === null || rawValues === undefined) {
+    rawValues = values.gm_granted_generic_techniques;
+  }
+  return scalarList(rawValues)
+    .map((rawValue) => {
+      if (typeof rawValue === "object" && rawValue !== null && !Array.isArray(rawValue)) {
+        const record = rawValue as Record<string, unknown>;
+        const systemsRef = asRecord(record.systems_ref);
+        rawValue = record.entry_key ?? systemsRef.entry_key;
+      }
+      return cleanScalar(rawValue);
+    })
+    .filter(Boolean);
+}
+
+function genericTechniqueOptionMap(options: Array<Record<string, unknown>>): Map<string, Record<string, unknown>> {
+  const lookup = new Map<string, Record<string, unknown>>();
+  for (const option of options) {
+    const entryKey = String(option.entry_key || "").trim().toLowerCase();
+    if (entryKey) {
+      lookup.set(entryKey, option);
+    }
+  }
+  return lookup;
+}
+
+function buildXianxiaGmGrantedGenericTechniqueRecord(option: Record<string, unknown>): Record<string, unknown> {
+  return {
+    name: String(option.name || "").trim() || "Generic Technique",
+    systems_ref: asRecord(option.systems_ref),
+    generic_technique_key: String(option.generic_technique_key || "").trim(),
+    insight_spent: 0,
+    support_state: String(option.support_state || "").trim(),
+    learnable_without_master: Boolean(option.learnable_without_master),
+    requires_master: Boolean(option.requires_master),
+    character_creation_grant: true,
+    grant_source: "gm_granted_character_creation",
+  };
+}
+
+function validateXianxiaCreateGmGrantedGenericTechniques(
+  values: Record<string, unknown>,
+  options: Array<Record<string, unknown>>,
+): Record<string, unknown>[] {
+  const requestedEntryKeys = normalizeGenericTechniqueEntryKeys(values);
+  if (requestedEntryKeys.length === 0) {
+    return [];
+  }
+  const optionsByEntryKey = genericTechniqueOptionMap(options);
+  if (optionsByEntryKey.size === 0) {
+    throw new Error("No enabled Xianxia Generic Technique Systems entries are available for GM grants.");
+  }
+  const records: Record<string, unknown>[] = [];
+  const errors: string[] = [];
+  const seen = new Set<string>();
+  const duplicateTitles: string[] = [];
+  for (const rawEntryKey of requestedEntryKeys) {
+    const entryKey = rawEntryKey.trim().toLowerCase();
+    const option = optionsByEntryKey.get(entryKey);
+    if (!option) {
+      errors.push(`Unsupported GM-granted Generic Technique: ${rawEntryKey}.`);
+      continue;
+    }
+    if (seen.has(entryKey)) {
+      duplicateTitles.push(String(option.name || ""));
+      continue;
+    }
+    seen.add(entryKey);
+    records.push(buildXianxiaGmGrantedGenericTechniqueRecord(option));
+  }
+  if (duplicateTitles.length > 0) {
+    errors.push(`GM-granted Generic Techniques must be distinct; duplicates: ${formatLabelList(duplicateTitles)}.`);
+  }
+  if (errors.length > 0) {
+    throw new Error(errors.join(" "));
+  }
+  return records;
+}
+
+const MARTIAL_ART_STYLE_EQUIPMENT_HINTS: Array<[string[], "weapon" | "tool", string]> = [
+  [["jian sword"], "weapon", "Jian"],
+  [["bo and spear", "staff and spear"], "weapon", "Bo staff or spear"],
+  [["saber sword", "sabre sword"], "weapon", "Saber"],
+  [["dagger"], "weapon", "Daggers"],
+  [["sword martial art"], "weapon", "Sword"],
+  [["instrument"], "tool", "Musical instrument"],
+  [["puppet"], "tool", "Puppet"],
+];
+const TRAINED_SKILL_TOOL_HINTS: Array<[string[], string]> = [
+  [["fishing", "fish"], "Fishing rod, spear, or net"],
+  [["calligraphy", "scribe", "painting", "brushwork"], "Calligraphy brush"],
+  [["tea ceremony", "tea making", "tea-making"], "Tea set"],
+  [["medicine", "first aid", "healing", "herbalism", "herbalist"], "Medical kit or herbalism tools"],
+  [["alchemy"], "Alchemy tools"],
+  [["cooking", "cook", "culinary"], "Cooking tools"],
+  [["smithing", "smith", "metalwork"], "Smithing tools"],
+  [["carpentry", "woodcarving", "woodwork"], "Carpentry or woodcarving tools"],
+  [["weaving", "tailoring", "sewing"], "Weaver's tools or sewing kit"],
+  [["music", "musician", "instrument"], "Musical instrument"],
+  [["navigation", "navigator", "sailing"], "Navigator's tools"],
+  [["lockpicking", "lock picking", "thieves tools", "thieves' tools"], "Thieves' tools"],
+];
+
+function equipmentSearchText(value: unknown): string {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9']+/g, " ").trim();
+}
+
+function containsEquipmentPhrase(value: string, phrase: string): boolean {
+  return ` ${equipmentSearchText(value)} `.includes(` ${equipmentSearchText(phrase)} `);
+}
+
+function appendEquipmentRecord(
+  records: Array<Record<string, string>>,
+  seen: Set<string>,
+  name: string,
+  reason: string,
+): void {
+  const cleanedName = name.split(/\s+/).filter(Boolean).join(" ");
+  if (!cleanedName) {
+    return;
+  }
+  const marker = equipmentSearchText(cleanedName);
+  if (seen.has(marker)) {
+    return;
+  }
+  seen.add(marker);
+  records.push({ name: cleanedName, reason: reason.split(/\s+/).filter(Boolean).join(" ") });
+}
+
+function inferXianxiaRequiredEquipment(
+  martialArts: Array<Record<string, unknown>>,
+  trainedSkills: string[],
+): Record<string, Array<Record<string, string>>> {
+  const weapons: Array<Record<string, string>> = [];
+  const tools: Array<Record<string, string>> = [];
+  const seenWeapons = new Set<string>();
+  const seenTools = new Set<string>();
+  for (const martialArt of martialArts) {
+    const title = cleanScalar(martialArt.title || martialArt.name).split(/\s+/).filter(Boolean).join(" ");
+    const style = cleanScalar(martialArt.martial_art_style || martialArt.style || martialArt.xianxia_martial_art_style)
+      .split(/\s+/)
+      .filter(Boolean)
+      .join(" ");
+    if (!title || !style) {
+      continue;
+    }
+    const inferred = MARTIAL_ART_STYLE_EQUIPMENT_HINTS.find(([phrases]) =>
+      phrases.some((phrase) => containsEquipmentPhrase(style, phrase)),
+    );
+    if (!inferred) {
+      continue;
+    }
+    const [, category, name] = inferred;
+    appendEquipmentRecord(category === "weapon" ? weapons : tools, category === "weapon" ? seenWeapons : seenTools, name, `Required by ${title}`);
+  }
+  for (const skill of trainedSkills) {
+    const skillName = skill.split(/\s+/).filter(Boolean).join(" ");
+    if (!skillName) {
+      continue;
+    }
+    const inferred = TRAINED_SKILL_TOOL_HINTS.find(([phrases]) =>
+      phrases.some((phrase) => containsEquipmentPhrase(skillName, phrase)),
+    );
+    if (inferred) {
+      appendEquipmentRecord(tools, seenTools, inferred[1], `Required for ${skillName}`);
+    }
+  }
+  return { necessary_weapons: weapons, necessary_tools: tools };
+}
+
 function buildXianxiaInitialState(
   definition: Record<string, unknown>,
   inventory: Record<string, unknown>[],
   currency: Record<string, number>,
   playerNotesMarkdown: string,
+  options: { daoCurrent?: number } = {},
 ): Record<string, unknown> {
   const xianxia = asRecord(definition.xianxia);
   const durability = asRecord(xianxia.durability);
@@ -1095,7 +1784,7 @@ function buildXianxiaInitialState(
       yang_current: nonNegativeLooseInt(yinYang.yang_max, 1),
     },
     dao: {
-      current: 0,
+      current: Math.max(0, coerceLooseInt(options.daoCurrent, 0)),
     },
     currency,
     inventory: {
@@ -1283,6 +1972,122 @@ function validateXianxiaManualImportDefinition(definition: Record<string, unknow
   if (errors.length > 0) {
     throw new Error(errors.join(" "));
   }
+}
+
+export function buildXianxiaCreateCharacter({
+  campaignSlug,
+  values,
+  martialArtOptions,
+  genericTechniqueOptions,
+}: {
+  campaignSlug: string;
+  values: Record<string, unknown>;
+  martialArtOptions: Array<Record<string, unknown>>;
+  genericTechniqueOptions: Array<Record<string, unknown>>;
+}): XianxiaCreateBuildResult {
+  const name = normalizeCreateName(values.name);
+  if (!name) {
+    throw new Error("Character name is required.");
+  }
+  const characterSlug = normalizeCharacterSlug(cleanScalar(values.character_slug), name);
+  if (!characterSlug) {
+    throw new Error("Character slug is required.");
+  }
+
+  const attributes = validateXianxiaCreateAttributes(values);
+  const efforts = validateXianxiaCreateEfforts(values);
+  const energyScores = validateXianxiaCreateEnergies(values);
+  const manualArmorBonus = validateXianxiaCreateManualArmorBonus(values);
+  const trainedSkills = validateXianxiaCreateTrainedSkills(values);
+  const martialArtSelection = validateXianxiaCreateMartialArts(values, martialArtOptions);
+  const genericTechniques = validateXianxiaCreateGmGrantedGenericTechniques(values, genericTechniqueOptions);
+  const requiredEquipment = inferXianxiaRequiredEquipment(martialArtSelection.options, trainedSkills);
+  const daoCurrent = validateXianxiaCreateDaoCurrent(values);
+  const createdAt = new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
+  const energies = Object.fromEntries(XIANXIA_ENERGY_KEYS.map((key) => [key, { max: energyScores[key] ?? 0 }]));
+
+  const definition: Record<string, unknown> = {
+    campaign_slug: campaignSlug,
+    character_slug: characterSlug,
+    name,
+    status: "active",
+    system: "Xianxia",
+    profile: {
+      class_level_text: "Mortal Xianxia Character",
+      realm: "Mortal",
+      honor: "Honorable",
+      reputation: "Unknown",
+    },
+    stats: {},
+    skills: [],
+    proficiencies: { armor: [], weapons: [], tools: [], languages: [], tool_expertise: [] },
+    attacks: [],
+    features: [],
+    spellcasting: {},
+    equipment_catalog: [],
+    reference_notes: {
+      additional_notes_markdown: "",
+      allies_and_organizations_markdown: "",
+      custom_sections: [],
+    },
+    resource_templates: [],
+    source: {
+      source_path: XIANXIA_CHARACTER_CREATE_SOURCE_PATH,
+      source_type: XIANXIA_CHARACTER_CREATE_SOURCE_TYPE,
+      imported_from: XIANXIA_CHARACTER_CREATE_IMPORTED_FROM,
+      imported_at: createdAt,
+      parse_warnings: [],
+    },
+    xianxia: {
+      schema_version: 1,
+      realm: "Mortal",
+      actions_per_turn: 2,
+      honor: "Honorable",
+      reputation: "Unknown",
+      attributes,
+      efforts,
+      energies,
+      yin_yang: { yin_max: 1, yang_max: 1 },
+      dao: { max: XIANXIA_DAO_DEFAULT_MAX },
+      insight: {
+        available: 0,
+        spent: 0,
+      },
+      durability: {
+        hp_max: 10,
+        stance_max: 10,
+        manual_armor_bonus: manualArmorBonus,
+        defense: 10 + manualArmorBonus + coerceLooseInt(attributes.con, 0),
+      },
+      skills: { trained: trainedSkills },
+      equipment: requiredEquipment,
+      martial_arts: martialArtSelection.records,
+      generic_techniques: genericTechniques,
+      variants: [],
+      dao_immolating_techniques: { prepared: [], use_history: [] },
+      approval_requests: [],
+      companions: [],
+      advancement_history: [],
+    },
+  };
+  validateXianxiaManualImportDefinition(definition);
+  const initialState = buildXianxiaInitialState(
+    definition,
+    [],
+    { coin: 0, supply: 0, spirit_stones: 0 },
+    "",
+    { daoCurrent },
+  );
+  const importMetadata = {
+    campaign_slug: campaignSlug,
+    character_slug: characterSlug,
+    source_path: XIANXIA_CHARACTER_CREATE_SOURCE_PATH,
+    imported_at_utc: createdAt,
+    parser_version: XIANXIA_CHARACTER_CREATE_VERSION,
+    import_status: "clean",
+    warnings: [],
+  };
+  return { definition, importMetadata, initialState };
 }
 
 export function buildXianxiaManualImportCharacter({

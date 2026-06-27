@@ -122,6 +122,7 @@ import {
 } from "./systems/sources.js";
 import {
   buildCharacterAuthoringLinks,
+  buildXianxiaCreateCharacter,
   listXianxiaCreateGenericTechniqueOptions,
   buildXianxiaManualImportCharacter,
   buildXianxiaManualImportContext,
@@ -5232,6 +5233,119 @@ app.get(ROUTES.characterCreateContext, async (ctx) => {
     tools: buildCharacterCreateTools(campaign, canAuthorCharacters),
     links: buildCharacterAuthoringLinks(campaign),
     create,
+  });
+});
+
+app.post(ROUTES.characterCreate, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const canAuthorCharacters =
+    campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "characters") &&
+    (auth.role === "admin" ||
+      (auth.role === "dm" && campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session")));
+  if (!canAuthorCharacters) {
+    const error = forbidden("You do not have permission to create characters in this campaign.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const lane = nativeCharacterCreateLane(campaign.system);
+  if (!lane) {
+    const error = jsonError("unsupported_campaign_system", nativeCharacterCreateUnsupportedMessage(campaign.system), 400);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (lane === "dnd5e") {
+    const error = validationError("DND-5E character creation submit is not implemented in the TypeScript API yet.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = invalidJson(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  const payload = jsonPayload.payload;
+  const rawValues =
+    payload.values !== null &&
+    payload.values !== undefined &&
+    typeof payload.values === "object" &&
+    !Array.isArray(payload.values)
+      ? (payload.values as Record<string, unknown>)
+      : payload;
+  const configRecord = await getCampaignConfigFile(config, campaign.slug);
+  const createContext = buildXianxiaCharacterCreateContext({
+    dbPath: config.dbPath,
+    campaign,
+    campaignConfig: configRecord?.config || {},
+    values: rawValues,
+  });
+
+  let createPayload;
+  try {
+    createPayload = buildXianxiaCreateCharacter({
+      campaignSlug: campaign.slug,
+      values: rawValues,
+      martialArtOptions: createContext.martial_art_options,
+      genericTechniqueOptions: createContext.generic_technique_options,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid character payload.";
+    const validation = validationError(message);
+    return ctx.json({ ok: validation.ok, error: validation.error }, validation.status);
+  }
+
+  const createResult = await createCampaignContentCharacter(
+    config,
+    campaign.slug,
+    String(createPayload.definition.character_slug || ""),
+    createPayload.definition,
+    createPayload.importMetadata,
+    createPayload.initialState,
+  );
+  if (createResult.status === "not_found") {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (createResult.status === "validation_error") {
+    const error = validationError(createResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (createResult.status === "character_exists") {
+    const error = jsonError("character_exists", createResult.message, 409);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const stateRecord = readCharacterStateSnapshot(config, campaign.slug, createResult.record.character_slug, createResult.record.definition);
+  return ctx.json({
+    ok: true,
+    message: `${String(createResult.record.definition.name || createResult.record.character_slug)} created.`,
+    character: {
+      definition: createResult.record.definition,
+      import_metadata: createResult.record.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: createResult.record.character_slug,
+        revision: stateRecord.revision,
+        state: stateRecord.state,
+        updated_at: stateRecord.updated_at ?? null,
+        updated_by_user_id: stateRecord.updated_by_user_id ?? null,
+      },
+    },
+    links: {
+      ...buildCharacterAuthoringLinks(campaign),
+      character_url: `/app-next/campaigns/${campaign.slug}/characters/${createResult.record.character_slug}`,
+      flask_character_url: `/campaigns/${campaign.slug}/characters/${createResult.record.character_slug}`,
+    },
   });
 });
 

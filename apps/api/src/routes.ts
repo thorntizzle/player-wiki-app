@@ -1841,6 +1841,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "campaign_not_found",
     },
   },
+  {
+    method: "POST",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/create",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/create",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/create",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/characters/create",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1969,4 +1984,5 @@ export const ROUTES = {
   meViewAsUpdate: IMPLEMENTED_ROUTES[124].honoPath,
   meViewAsClear: IMPLEMENTED_ROUTES[125].honoPath,
   characterCreateContext: IMPLEMENTED_ROUTES[126].honoPath,
+  characterCreate: IMPLEMENTED_ROUTES[127].honoPath,
 } as const;

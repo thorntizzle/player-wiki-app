@@ -151,6 +151,7 @@ Route parity check command:
   - `DELETE /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
   - `GET /api/v1/campaigns/:campaignSlug/characters`
   - `GET /api/v1/campaigns/:campaignSlug/characters/create`
+  - `POST /api/v1/campaigns/:campaignSlug/characters/create` (Xianxia native create; DND-5E submit remains builder-parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
   - `PATCH /api/v1/campaigns/:campaignSlug/characters/:characterSlug/sheet-edit`
   - `GET /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual`
@@ -537,12 +538,15 @@ Route parity check command:
   campaign existence checks, Characters-scope visibility, assigned-player fallback visibility,
   `q` filtering against roster `search_text`, roster card fields consumed by Gen2, existing
   portrait asset references without image conversion, and create/import link/tool flags.
-- The Character create context route now serves GET-only `GET .../characters/create`, preserving
+- The Character create route pair now serves `GET .../characters/create` plus Xianxia-lane
+  `POST .../characters/create`, preserving
   Flask-compatible campaign existence checks, authoring auth/permission failures, unsupported-system
   errors, route-lane links/tools, DND-5E Gen2 payload shape with the builder disabled until the TS
   level-one builder is ported, and Xianxia create fields/defaults plus enabled martial-art and
-  Generic Technique options.
-  POST submit remains outside this slice.
+  Generic Technique options. The POST lane writes native Xianxia records through the copied fixture
+  content-character persistence path with `builder://xianxia-create` import metadata, initialized
+  SQLite mutable state, duplicate-slug `character_exists` handling, and no mutable state in
+  `definition.yaml`. DND-5E submit remains outside this slice pending level-one builder parity.
 - The Character detail read route now serves `GET .../characters/:characterSlug`, preserving
   Flask-compatible campaign/missing-character envelopes, Characters-scope or assigned-owner
   Session-scope access, SQLite `state_record` reads, CharacterPane-safe optional presentation

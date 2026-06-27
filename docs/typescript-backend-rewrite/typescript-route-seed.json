@@ -905,7 +905,16 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/create",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Character create context GET route with Flask-compatible missing-campaign, auth_required, forbidden, and unsupported_campaign_system JSON, manager-only character authoring access, GET-only DND-5E and Xianxia lane payload envelopes for the Gen2 create page, Xianxia field/default context, enabled Systems martial_art and generic_technique option serialization, and no POST submit behavior in this slice."
+      "notes": "Tracked Hono Character create context GET route with Flask-compatible missing-campaign, auth_required, forbidden, and unsupported_campaign_system JSON, manager-only character authoring access, DND-5E builder-disabled and Xianxia lane payload envelopes for the Gen2 create page, Xianxia field/default context, and enabled Systems martial_art and generic_technique option serialization."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/create",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/create",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Character create submit route with Flask-compatible missing-campaign, auth_required, forbidden, unsupported_campaign_system, invalid_json, validation_error, and character_exists envelopes, manager-only character authoring access, Xianxia-only native create writes through createCampaignContentCharacter with builder://xianxia-create metadata and initialized SQLite mutable state, and DND-5E submit returning validation_error until the level-one builder is ported."
     },
     {
       "method": "GET",
