@@ -2004,6 +2004,32 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert clear_penalty_stats["ability_scores"]["cha"] == base_cha
     assert clear_penalty_payload["character"]["state_record"]["state"]["vitals"]["current_hp"] == int(base_stats["max_hp"]) - 6
 
+    linked_item_page_status, linked_item_page_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/pages/items/stormglass-compass",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={
+            "metadata": {
+                "title": "Stormglass Compass",
+                "section": "Items",
+                "type": "item",
+                "summary": "A sample magic item whose title is used for search coverage.",
+                "published": True,
+                "reveal_after_session": 0,
+                "character_option": {
+                    "kind": "item",
+                    "item_name": "Storm Token",
+                    "quantity": 4,
+                    "weight": "2 lb.",
+                    "notes": "A compass bound to wind and weather.",
+                },
+            },
+            "body_markdown": "This brass compass glows pale blue when a storm front shifts closer to the coast.",
+        },
+    )
+    assert linked_item_page_status == 200
+    assert linked_item_page_payload["ok"] is True
+
     invalid_equipment_status, invalid_equipment_payload = _to_json(
         route_url,
         headers=typescript_api_mutation_server["dm_headers"],
@@ -2036,6 +2062,44 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert invalid_equipment_link_payload["error"]["code"] == "validation_error"
     assert invalid_equipment_link_payload["error"]["message"] == "Choose a valid linked campaign page."
 
+    derived_equipment_values = {
+        "manual_item_page_ref_1": "items/stormglass-compass",
+    }
+    derived_equipment_status, derived_equipment_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={"expected_revision": expected_revision + 5, "values": derived_equipment_values},
+    )
+    assert derived_equipment_status == 200
+    assert derived_equipment_payload["editor"]["state_revision"] == expected_revision + 6
+    derived_manual_items = [
+        item
+        for item in derived_equipment_payload["character"]["definition"]["equipment_catalog"]
+        if item.get("source_kind") == "manual_edit"
+    ]
+    assert len(derived_manual_items) == 1
+    derived_manual_item = derived_manual_items[0]
+    derived_manual_item_id = derived_manual_item["id"]
+    assert derived_manual_item_id.startswith("manual-item-")
+    assert derived_manual_item["name"] == "Storm Token"
+    assert derived_manual_item["page_ref"] == "items/stormglass-compass"
+    assert derived_manual_item["default_quantity"] == 4
+    assert derived_manual_item["weight"] == "2 lb."
+    assert derived_manual_item["notes"] == "A compass bound to wind and weather."
+    assert derived_manual_item["campaign_option"]["item_name"] == "Storm Token"
+    assert derived_manual_item["campaign_option"]["quantity"] == 4
+    assert derived_manual_item["campaign_option"]["weight"] == "2 lb."
+    assert derived_manual_item["campaign_option"]["notes"] == "A compass bound to wind and weather."
+    derived_inventory_by_ref = {
+        item.get("catalog_ref"): item
+        for item in derived_equipment_payload["character"]["state_record"]["state"]["inventory"]
+    }
+    assert derived_inventory_by_ref[derived_manual_item_id]["name"] == "Storm Token"
+    assert derived_inventory_by_ref[derived_manual_item_id]["quantity"] == 4
+    assert derived_inventory_by_ref[derived_manual_item_id]["weight"] == "2 lb."
+    assert derived_inventory_by_ref[derived_manual_item_id]["notes"] == "A compass bound to wind and weather."
+
     equipment_values = {
         "manual_item_name_1": "Storm Token",
         "manual_item_page_ref_1": "items/stormglass-compass",
@@ -2047,10 +2111,10 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         route_url,
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
-        body={"expected_revision": expected_revision + 5, "values": equipment_values},
+        body={"expected_revision": expected_revision + 6, "values": equipment_values},
     )
     assert equipment_status == 200
-    assert equipment_payload["editor"]["state_revision"] == expected_revision + 6
+    assert equipment_payload["editor"]["state_revision"] == expected_revision + 7
     manual_items = [
         item
         for item in equipment_payload["character"]["definition"]["equipment_catalog"]
@@ -2086,7 +2150,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
 
     sqlite_state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
     assert sqlite_state is not None
-    assert sqlite_state["revision"] == expected_revision + 6
+    assert sqlite_state["revision"] == expected_revision + 7
     sqlite_inventory = {
         item.get("catalog_ref"): item for item in sqlite_state["state"]["inventory"]
     }
@@ -2113,10 +2177,10 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         route_url,
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
-        body={"expected_revision": expected_revision + 6, "values": update_equipment_values},
+        body={"expected_revision": expected_revision + 7, "values": update_equipment_values},
     )
     assert update_equipment_status == 200
-    assert update_equipment_payload["editor"]["state_revision"] == expected_revision + 7
+    assert update_equipment_payload["editor"]["state_revision"] == expected_revision + 8
     updated_manual_items = [
         item
         for item in update_equipment_payload["character"]["definition"]["equipment_catalog"]
@@ -2148,10 +2212,10 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         route_url,
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
-        body={"expected_revision": expected_revision + 7, "values": clear_equipment_values},
+        body={"expected_revision": expected_revision + 8, "values": clear_equipment_values},
     )
     assert clear_equipment_status == 200
-    assert clear_equipment_payload["editor"]["state_revision"] == expected_revision + 8
+    assert clear_equipment_payload["editor"]["state_revision"] == expected_revision + 9
     assert all(
         item.get("source_kind") != "manual_edit"
         for item in clear_equipment_payload["character"]["definition"]["equipment_catalog"]
@@ -2181,10 +2245,10 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         route_url,
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
-        body={"expected_revision": expected_revision + 8, "values": custom_feature_values},
+        body={"expected_revision": expected_revision + 9, "values": custom_feature_values},
     )
     assert custom_feature_status == 200
-    assert custom_feature_payload["editor"]["state_revision"] == expected_revision + 9
+    assert custom_feature_payload["editor"]["state_revision"] == expected_revision + 10
     custom_features = [
         feature
         for feature in custom_feature_payload["character"]["definition"]["features"]
@@ -2245,7 +2309,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
 
     sqlite_state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
     assert sqlite_state is not None
-    assert sqlite_state["revision"] == expected_revision + 9
+    assert sqlite_state["revision"] == expected_revision + 10
     sqlite_resources = {resource.get("id"): resource for resource in sqlite_state["state"]["resources"]}
     assert sqlite_resources[tracker_id]["current"] == 3
     definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
@@ -2272,10 +2336,10 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         route_url,
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
-        body={"expected_revision": expected_revision + 9, "values": update_custom_feature_values},
+        body={"expected_revision": expected_revision + 10, "values": update_custom_feature_values},
     )
     assert update_custom_feature_status == 200
-    assert update_custom_feature_payload["editor"]["state_revision"] == expected_revision + 10
+    assert update_custom_feature_payload["editor"]["state_revision"] == expected_revision + 11
     updated_custom_features = [
         feature
         for feature in update_custom_feature_payload["character"]["definition"]["features"]
@@ -2306,7 +2370,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
         body={
-            "expected_revision": expected_revision + 10,
+            "expected_revision": expected_revision + 11,
             "values": {
                 "custom_feature_name_1": "Broken Storm Feature",
                 "custom_feature_page_ref_1": "items/stormglass-compass",
@@ -2331,10 +2395,10 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         route_url,
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
-        body={"expected_revision": expected_revision + 10, "values": clear_custom_feature_values},
+        body={"expected_revision": expected_revision + 11, "values": clear_custom_feature_values},
     )
     assert clear_custom_feature_status == 200
-    assert clear_custom_feature_payload["editor"]["state_revision"] == expected_revision + 11
+    assert clear_custom_feature_payload["editor"]["state_revision"] == expected_revision + 12
     assert all(
         feature.get("category") != "custom_feature"
         for feature in clear_custom_feature_payload["character"]["definition"]["features"]

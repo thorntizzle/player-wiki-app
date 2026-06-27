@@ -3663,10 +3663,14 @@ function buildAdvancedEditorCampaignPageCharacterOption(
   }
 
   const parsedQuantity = Number.parseInt(String(rawOption.quantity ?? "").trim(), 10);
-  normalized.item_name = stringifyEditorValue(rawOption.name).trim() || title;
+  const itemName = stringifyEditorValue(rawOption.item_name).trim()
+    || stringifyEditorValue(rawOption.name).trim()
+    || title;
+  normalized.item_name = itemName;
   normalized.quantity = Number.isFinite(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1;
   normalized.weight = stringifyEditorValue(rawOption.weight).trim();
   normalized.notes = stringifyEditorValue(rawOption.notes).trim() || summary;
+  normalized.display_name = normalized.display_name || itemName;
   return normalized;
 }
 
@@ -3858,30 +3862,47 @@ function parseEditorManualEquipmentItems(
     const rawName = stringifyEditorValue(values[`manual_item_name_${index}`]).trim();
     let pageRef = stringifyEditorValue(values[`manual_item_page_ref_${index}`]).trim();
     const quantityText = stringifyEditorValue(values[`manual_item_quantity_${index}`]).trim();
-    const weight = stringifyEditorValue(values[`manual_item_weight_${index}`]).trim();
-    const notes = stringifyEditorValue(values[`manual_item_notes_${index}`]);
-    const hasContent = Boolean(rawId || rawName || pageRef || quantityText || weight || notes.trim());
+    const weightText = stringifyEditorValue(values[`manual_item_weight_${index}`]).trim();
+    const notesText = stringifyEditorValue(values[`manual_item_notes_${index}`]);
+    const hasContent = Boolean(rawId || rawName || pageRef || quantityText || weightText || notesText.trim());
     if (!hasContent) {
       continue;
     }
 
-    const name = rawName || stringifyEditorValue(asRecord(existing).name).trim();
-    if (!name) {
-      return { status: "validation_error", message: "Each custom equipment row needs an item name." };
-    }
-
-    const parsedQuantity = parseEditorManualEquipmentQuantity(quantityText);
-    if (typeof parsedQuantity !== "number") {
-      return parsedQuantity;
-    }
+    let campaignOption: Record<string, unknown> = {};
     try {
       pageRef = normalizeSelectedAdvancedEditorCampaignPageRef(pageRef, campaignPageLookup);
+      campaignOption = asRecord(asRecord(campaignPageLookup[pageRef]).campaign_option);
+      const optionKind = stringifyEditorValue(campaignOption.kind).trim().toLowerCase();
+      if (!ADVANCED_EDITOR_LINKED_CAMPAIGN_PAGE_ALLOWED_KINDS_BY_FIELD_KIND.campaign_page_item.has(optionKind)) {
+        campaignOption = {};
+      }
     } catch (error) {
       return {
         status: "validation_error",
         message: error instanceof Error ? error.message : "Choose a valid linked campaign page.",
       };
     }
+
+    const name = rawName
+      || stringifyEditorValue(campaignOption.item_name).trim()
+      || stringifyEditorValue(campaignOption.display_name).trim()
+      || stringifyEditorValue(campaignOption.name).trim()
+      || stringifyEditorValue(asRecord(existing).name).trim()
+      || stringifyEditorValue(asRecord(campaignPageLookup[pageRef]).title).trim();
+    if (!name) {
+      return { status: "validation_error", message: "Each custom equipment row needs an item name." };
+    }
+
+    const parsedQuantity = parseEditorManualEquipmentQuantity(
+      String(quantityText || stringifyEditorValue(campaignOption.quantity)).trim(),
+    );
+    if (typeof parsedQuantity !== "number") {
+      return parsedQuantity;
+    }
+
+    const weight = String(weightText || stringifyEditorValue(campaignOption.weight)).trim();
+    const notes = String(notesText || stringifyEditorValue(campaignOption.notes)).trim();
 
     const preservedId = rawId || stringifyEditorValue(asRecord(existing).id).trim();
     if (preservedId) {
@@ -3898,13 +3919,17 @@ function parseEditorManualEquipmentItems(
     nextItem.name = name;
     nextItem.default_quantity = parsedQuantity;
     nextItem.weight = weight;
-    nextItem.notes = notes.trim();
+    nextItem.notes = notes;
     nextItem.source_kind = ADVANCED_EDITOR_MANUAL_EQUIPMENT_SOURCE_KIND;
     if (pageRef) {
       nextItem.page_ref = pageRef;
-      const existingCampaignOption = asRecord(asRecord(existing).campaign_option);
-      if (Object.keys(existingCampaignOption).length > 0) {
-        nextItem.campaign_option = existingCampaignOption;
+      if (Object.keys(campaignOption).length > 0) {
+        nextItem.campaign_option = JSON.parse(JSON.stringify(campaignOption));
+      } else {
+        const existingCampaignOption = asRecord(asRecord(existing).campaign_option);
+        if (Object.keys(existingCampaignOption).length > 0) {
+          nextItem.campaign_option = existingCampaignOption;
+        }
       }
       const existingSystemsRef = asRecord(asRecord(existing).systems_ref);
       if (Object.keys(existingSystemsRef).length > 0) {
