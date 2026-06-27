@@ -4934,6 +4934,7 @@ export function updateCharacterPortraitRevision(
 export function persistCharacterStateForDefinition(
   config: ApiConfig,
   definition: Record<string, unknown>,
+  initialState?: Record<string, unknown>,
 ): CharacterStatePersistenceResult {
   const identity = characterIdentity(definition);
   if (!identity) {
@@ -4965,7 +4966,14 @@ export function persistCharacterStateForDefinition(
             VALUES (?, ?, ?, ?, ?, ?)
           `,
         )
-        .run(identity.campaignSlug, identity.characterSlug, 1, JSON.stringify(buildInitialState(definition)), now, null);
+        .run(
+          identity.campaignSlug,
+          identity.characterSlug,
+          1,
+          JSON.stringify(initialState ?? buildInitialState(definition)),
+          now,
+          null,
+        );
       return { stateCreated: true };
     }
 

@@ -1479,6 +1479,95 @@ export async function writeCampaignContentCharacter(
   return { status: "ok", record };
 }
 
+export async function createCampaignContentCharacter(
+  config: ApiConfig,
+  campaignSlug: string,
+  rawCharacterSlug: string,
+  definitionPayload: Record<string, unknown>,
+  importMetadataPayload: Record<string, unknown>,
+  initialState?: Record<string, unknown>,
+): Promise<
+  | {
+      status: "ok";
+      record: CampaignCharacterFileRecord;
+    }
+  | {
+      status: "not_found";
+    }
+  | {
+      status: "character_exists";
+      message: string;
+    }
+  | {
+      status: "validation_error";
+      message: string;
+    }
+> {
+  const campaign = await loadCampaignContentContext(config, campaignSlug, { requireContentDir: false });
+  if (!campaign) {
+    return { status: "not_found" };
+  }
+
+  const characterSlugResult = normalizeContentCharacterWriteSlug(rawCharacterSlug);
+  if (characterSlugResult.status === "validation_error") {
+    return characterSlugResult;
+  }
+  const characterSlug = characterSlugResult.character_slug;
+  const characterDir = resolveSafeCharacterDir(campaign.charactersDir, characterSlug);
+  if (!characterDir) {
+    return { status: "validation_error", message: "Character slug must contain only letters, numbers, underscores, or hyphens." };
+  }
+
+  const definitionPath = path.join(characterDir, "definition.yaml");
+  const importPath = path.join(characterDir, "import.yaml");
+  const [definitionExists, importExists] = await Promise.all([
+    fs.access(definitionPath).then(() => true, () => false),
+    fs.access(importPath).then(() => true, () => false),
+  ]);
+  if (definitionExists || importExists) {
+    return {
+      status: "character_exists",
+      message: `A character with slug '${characterSlug}' already exists in this campaign.`,
+    };
+  }
+
+  const normalizedDefinition = normalizeCharacterDefinition(
+    {
+      ...definitionPayload,
+      campaign_slug: campaignSlug,
+      character_slug: characterSlug,
+      system: definitionPayload.system ?? campaign.system,
+    },
+    campaignSlug,
+    characterSlug,
+    campaign.system,
+  );
+  const normalizedImportMetadata = normalizeCharacterImportMetadata(
+    {
+      ...importMetadataPayload,
+      campaign_slug: campaignSlug,
+      character_slug: characterSlug,
+    },
+    campaignSlug,
+    characterSlug,
+  );
+
+  await fs.mkdir(characterDir, { recursive: true });
+  await Promise.all([
+    fs.writeFile(definitionPath, dumpYamlRecord(normalizedDefinition), "utf-8"),
+    fs.writeFile(importPath, dumpYamlRecord(normalizedImportMetadata), "utf-8"),
+  ]);
+
+  const statePersistence = persistCharacterStateForDefinition(config, normalizedDefinition, initialState);
+  const record = await toCharacterFileRecord(campaign, campaignSlug, characterSlug, {
+    stateCreated: statePersistence.stateCreated,
+  });
+  if (!record) {
+    return { status: "validation_error", message: "Character files were not readable after writing." };
+  }
+  return { status: "ok", record };
+}
+
 export async function deleteCampaignContentCharacter(
   config: ApiConfig,
   campaignSlug: string,

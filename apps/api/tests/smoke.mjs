@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
+import { parse as parseYaml } from "yaml";
 
 const DEFAULT_PORT = 39873;
 const port = Number(process.env.CPW_SMOKE_PORT || DEFAULT_PORT);
@@ -8611,25 +8612,74 @@ if (
   );
 }
 
+const invalidDaoXianxiaManualImportPost = await requestJson(
+  xianxiaManualImportPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  {
+    method: "POST",
+    body: { values: { name: "Bad Dao", character_slug: "manual-bad-dao", realm: "Mortal", dao_max: "2" }, confirm_import: true },
+  },
+);
+if (
+  invalidDaoXianxiaManualImportPost.status !== 400 ||
+  invalidDaoXianxiaManualImportPost.payload?.error?.code !== "validation_error" ||
+  !String(invalidDaoXianxiaManualImportPost.payload?.error?.message || "").includes("xianxia.dao.max must be 3")
+) {
+  throw new Error(
+    `Expected invalid-dao Xianxia manual import POST validation_error, got ${invalidDaoXianxiaManualImportPost.status} ${JSON.stringify(invalidDaoXianxiaManualImportPost.payload)}`,
+  );
+}
+
+const invalidArmorXianxiaManualImportPost = await requestJson(
+  xianxiaManualImportPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  {
+    method: "POST",
+    body: {
+      values: { name: "Bad Armor", character_slug: "manual-bad-armor", realm: "Mortal", manual_armor_bonus: "-1" },
+      confirm_import: true,
+    },
+  },
+);
+if (
+  invalidArmorXianxiaManualImportPost.status !== 400 ||
+  invalidArmorXianxiaManualImportPost.payload?.error?.code !== "validation_error" ||
+  !String(invalidArmorXianxiaManualImportPost.payload?.error?.message || "").includes(
+    "xianxia.durability.manual_armor_bonus cannot be negative",
+  )
+) {
+  throw new Error(
+    `Expected invalid-armor Xianxia manual import POST validation_error, got ${invalidArmorXianxiaManualImportPost.status} ${JSON.stringify(invalidArmorXianxiaManualImportPost.payload)}`,
+  );
+}
+
+const xianxiaManualImportValues = {
+  name: "Cloud Dancer",
+  realm: "Divine",
+  character_slug: "manual-cloud-dancer",
+  trained_skills_text: "Tea Ceremony\nQi Sense",
+  martial_art_1_slug: "xia-martial-art-cloud-palm",
+  martial_art_1_name: "Cloud Palm",
+  martial_art_1_rank: "master",
+  inventory_text: "Spirit rice | 3 | consumable, treasure | Emergency cache\nJade charm | 1 | ritual, fragile | Old keepsake",
+  player_notes_markdown: "Imported player notes.",
+  coin: "8",
+  supply: "2",
+  spirit_stones: "1",
+  current_hp: "12",
+  hp_max: "30",
+  current_stance: "3",
+  stance_max: "7",
+  energy_jing_max: "5",
+};
+
 const previewXianxiaManualImportPost = await requestJson(
   xianxiaManualImportPath,
   { Authorization: `Bearer ${liveApiToken}` },
   {
     method: "POST",
     body: {
-      values: {
-        name: "Cloud Dancer",
-        realm: "Divine",
-        character_slug: "manual-cloud-dancer",
-        trained_skills_text: "Tea Ceremony\nQi Sense",
-        martial_art_1_name: "Cloud Palm",
-        martial_art_1_rank: "master",
-        inventory_text: "Spirit rice | 3 | consumable, treasure | Emergency cache",
-        current_hp: "12",
-        hp_max: "30",
-        current_stance: "3",
-        stance_max: "7",
-      },
+      values: xianxiaManualImportValues,
       confirm_import: false,
     },
   },
@@ -8649,7 +8699,7 @@ if (
   previewImportContext?.preview?.actions_per_turn !== 4 ||
   previewImportContext?.preview?.trained_skill_count !== 2 ||
   previewImportContext?.preview?.martial_art_count !== 1 ||
-  previewImportContext?.preview?.inventory_count !== 1 ||
+  previewImportContext?.preview?.inventory_count !== 2 ||
   previewImportContext?.preview?.hp !== 30 ||
   previewImportContext?.preview?.hp_max !== 30 ||
   previewImportContext?.preview?.stance !== 7 ||
@@ -8690,26 +8740,121 @@ if (
   );
 }
 
-const confirmUnsupportedXianxiaManualImportPost = await requestJson(
+const confirmXianxiaManualImportPost = await requestJson(
   xianxiaManualImportPath,
   { Authorization: `Bearer ${liveApiToken}` },
   {
     method: "POST",
     body: {
-      values: {
-        name: "Cloud Dancer",
-        realm: "Divine",
-      },
+      values: xianxiaManualImportValues,
       confirm_import: true,
     },
   },
 );
 if (
-  confirmUnsupportedXianxiaManualImportPost.status !== 501 ||
-  confirmUnsupportedXianxiaManualImportPost.payload?.error?.code !== "unsupported_operation"
+  confirmXianxiaManualImportPost.status !== 200 ||
+  confirmXianxiaManualImportPost.payload?.ok !== true ||
+  confirmXianxiaManualImportPost.payload?.message !== "Cloud Dancer imported." ||
+  confirmXianxiaManualImportPost.payload?.character?.definition?.character_slug !== previewImportPayloadCandidateSlug ||
+  confirmXianxiaManualImportPost.payload?.character?.definition?.system !== "Xianxia" ||
+  confirmXianxiaManualImportPost.payload?.character?.definition?.source?.source_path !== "importer://xianxia-manual" ||
+  confirmXianxiaManualImportPost.payload?.character?.definition?.xianxia?.realm !== "Divine" ||
+  confirmXianxiaManualImportPost.payload?.character?.definition?.xianxia?.actions_per_turn !== 4 ||
+  confirmXianxiaManualImportPost.payload?.character?.definition?.xianxia?.skills?.trained?.length !== 2 ||
+  confirmXianxiaManualImportPost.payload?.character?.definition?.xianxia?.martial_arts?.[0]?.learned_rank_refs?.join("|") !==
+    "systems:xia-cloud-palm:initiate|systems:xia-cloud-palm:novice|xianxia:xia-martial-art-cloud-palm:apprentice|systems:xia-cloud-palm:master" ||
+  confirmXianxiaManualImportPost.payload?.character?.import_metadata?.source_path !== "importer://xianxia-manual" ||
+  confirmXianxiaManualImportPost.payload?.character?.state_record?.revision !== 1 ||
+  confirmXianxiaManualImportPost.payload?.character?.state_record?.state?.xianxia?.vitals?.current_hp !== 30 ||
+  confirmXianxiaManualImportPost.payload?.character?.state_record?.state?.xianxia?.vitals?.current_stance !== 7 ||
+  confirmXianxiaManualImportPost.payload?.character?.state_record?.state?.xianxia?.energies?.jing?.current !== 5 ||
+  confirmXianxiaManualImportPost.payload?.character?.state_record?.state?.xianxia?.currency?.coin !== 8 ||
+  confirmXianxiaManualImportPost.payload?.character?.state_record?.state?.xianxia?.currency?.supply !== 2 ||
+  confirmXianxiaManualImportPost.payload?.character?.state_record?.state?.xianxia?.currency?.spirit_stones !== 1 ||
+  confirmXianxiaManualImportPost.payload?.character?.state_record?.state?.xianxia?.inventory?.quantities?.[0]?.quantity !== 3 ||
+  confirmXianxiaManualImportPost.payload?.character?.state_record?.state?.xianxia?.inventory?.quantities?.[1]?.legacy_tags?.join("|") !==
+    "ritual|fragile" ||
+  Object.hasOwn(confirmXianxiaManualImportPost.payload?.character?.state_record?.state?.xianxia || {}, "active_stance") ||
+  Object.hasOwn(confirmXianxiaManualImportPost.payload?.character?.state_record?.state?.xianxia || {}, "active_aura") ||
+  confirmXianxiaManualImportPost.payload?.character?.state_record?.state?.xianxia?.notes?.player_notes_markdown !==
+    "Imported player notes." ||
+  confirmXianxiaManualImportPost.payload?.links?.character_url !==
+    `/app-next/campaigns/linden-pass/characters/${previewImportPayloadCandidateSlug}` ||
+  confirmXianxiaManualImportPost.payload?.links?.flask_character_url !==
+    `/campaigns/linden-pass/characters/${previewImportPayloadCandidateSlug}`
 ) {
   throw new Error(
-    `Expected confirm-on Xianxia manual import POST unsupported_operation, got ${confirmUnsupportedXianxiaManualImportPost.status} ${JSON.stringify(confirmUnsupportedXianxiaManualImportPost.payload)}`,
+    `Unexpected Xianxia manual import POST confirm response: ${confirmXianxiaManualImportPost.status} ${JSON.stringify(confirmXianxiaManualImportPost.payload)}`,
+  );
+}
+
+if (
+  !existsSync(path.join(previewCharacterDir, "definition.yaml")) ||
+  !existsSync(path.join(previewCharacterDir, "import.yaml"))
+) {
+  throw new Error(`Expected confirmed Xianxia manual import to write definition/import files under ${previewCharacterDir}`);
+}
+const importedXianxiaDefinition = parseYaml(readFileSync(path.join(previewCharacterDir, "definition.yaml"), "utf8"));
+const importedXianxiaMetadata = parseYaml(readFileSync(path.join(previewCharacterDir, "import.yaml"), "utf8"));
+if (
+  importedXianxiaDefinition?.character_slug !== previewImportPayloadCandidateSlug ||
+  importedXianxiaDefinition?.source?.source_type !== "xianxia_manual_importer" ||
+  importedXianxiaMetadata?.parser_version !== "2026-05-13.0" ||
+  importedXianxiaMetadata?.import_status !== "clean"
+) {
+  throw new Error(
+    `Expected confirmed Xianxia manual import to write normalized YAML metadata, got ${JSON.stringify({
+      importedXianxiaDefinition,
+      importedXianxiaMetadata,
+    })}`,
+  );
+}
+
+const confirmStateCheckDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const confirmStateRow = confirmStateCheckDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", previewImportPayloadCandidateSlug);
+confirmStateCheckDb.close();
+const confirmState = JSON.parse(confirmStateRow?.state_json || "{}");
+if (
+  !confirmStateRow ||
+  confirmStateRow.revision !== 1 ||
+  confirmStateRow.updated_by_user_id !== null ||
+  confirmState?.xianxia?.vitals?.current_hp !== 30 ||
+  confirmState?.xianxia?.vitals?.current_stance !== 7 ||
+  confirmState?.xianxia?.energies?.jing?.current !== 5 ||
+  confirmState?.xianxia?.inventory?.quantities?.[0]?.name !== "Spirit rice" ||
+  confirmState?.xianxia?.inventory?.quantities?.[1]?.legacy_tags?.join("|") !== "ritual|fragile" ||
+  Object.hasOwn(confirmState?.xianxia || {}, "active_stance") ||
+  Object.hasOwn(confirmState?.xianxia || {}, "active_aura") ||
+  confirmState?.xianxia?.currency?.coin !== 8 ||
+  confirmState?.notes?.player_notes_markdown !== "Imported player notes."
+) {
+  throw new Error(
+    `Expected confirmed Xianxia manual import to initialize SQLite state, got ${JSON.stringify({
+      confirmStateRow,
+      confirmState,
+    })}`,
+  );
+}
+
+const duplicateXianxiaManualImportPost = await requestJson(
+  xianxiaManualImportPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  {
+    method: "POST",
+    body: {
+      values: xianxiaManualImportValues,
+      confirm_import: true,
+    },
+  },
+);
+if (
+  duplicateXianxiaManualImportPost.status !== 409 ||
+  duplicateXianxiaManualImportPost.payload?.error?.code !== "character_exists"
+) {
+  throw new Error(
+    `Expected duplicate Xianxia manual import POST character_exists, got ${duplicateXianxiaManualImportPost.status} ${JSON.stringify(duplicateXianxiaManualImportPost.payload)}`,
   );
 }
 

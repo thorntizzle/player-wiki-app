@@ -866,10 +866,10 @@
       "method": "POST",
       "path": "/api/v1/campaigns/<campaign_slug>/characters/import/xianxia-manual",
       "route_family": "api_v1_characters",
-      "status": "implemented_fixture_sqlite_readonly",
+      "status": "implemented_fixture_sqlite_write",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Xianxia manual import preview POST route with Flask-compatible missing-campaign, auth_required, forbidden, and unsupported_campaign_system JSON, Xianxia-only native-create lane guard, JSON-object body parsing, wrapped-or-flat values extraction, bounded preview-only validation/summary, preview message/payload envelope, no definition/state writes, and confirm_import short-circuit to unsupported_operation 501. Full importer-normalized preview parity remains with the confirm/write slice."
+      "notes": "Tracked Hono Xianxia manual import POST route with Flask-compatible missing-campaign, auth_required, forbidden, and unsupported_campaign_system JSON, Xianxia-only native-create lane guard, JSON-object body parsing, wrapped-or-flat values extraction, importer-normalized preview validation/summary, preview message/payload envelope with no definition/state writes, confirmed local fixture definition/import YAML creation, initial SQLite state insertion, success links, and duplicate-slug character_exists 409 handling."
     },
     {
       "method": "POST",

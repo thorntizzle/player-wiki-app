@@ -42,6 +42,30 @@ const XIANXIA_EFFORT_LABELS: Record<(typeof XIANXIA_EFFORT_KEYS)[number], string
   ultimate: "Ultimate",
 };
 const XIANXIA_ENERGY_KEYS = ["jing", "qi", "shen"] as const;
+const XIANXIA_CURRENCY_KEYS = ["coin", "supply", "spirit_stones"] as const;
+const XIANXIA_DEFINITION_FIELD_KEYS = [
+  "schema_version",
+  "realm",
+  "actions_per_turn",
+  "honor",
+  "reputation",
+  "attributes",
+  "efforts",
+  "energies",
+  "yin_yang",
+  "dao",
+  "insight",
+  "durability",
+  "skills",
+  "equipment",
+  "martial_arts",
+  "generic_techniques",
+  "variants",
+  "dao_immolating_techniques",
+  "approval_requests",
+  "companions",
+  "advancement_history",
+] as const;
 const XIANXIA_MARTIAL_ART_IMPORT_RANKS = [
   { key: "initiate", label: "Initiate" },
   { key: "novice", label: "Novice" },
@@ -49,6 +73,7 @@ const XIANXIA_MARTIAL_ART_IMPORT_RANKS = [
   { key: "master", label: "Master" },
   { key: "legendary", label: "Legendary" },
 ] as const;
+const XIANXIA_MARTIAL_ART_RANK_ORDER = XIANXIA_MARTIAL_ART_IMPORT_RANKS.map((rank) => rank.key);
 const XIANXIA_MARTIAL_ART_IMPORT_RANK_LABELS = Object.fromEntries(
   XIANXIA_MARTIAL_ART_IMPORT_RANKS.map((rank) => [rank.key, rank.label]),
 ) as Record<string, string>;
@@ -57,8 +82,68 @@ const XIANXIA_REALM_ACTIONS: Record<string, number> = {
   immortal: 3,
   divine: 4,
 };
+const XIANXIA_ITEM_TYPE_DEFAULT = "Miscellaneous";
+const XIANXIA_ITEM_TYPE_ALIASES: Record<string, string> = {
+  weapon: "Weapon",
+  weapons: "Weapon",
+  blade: "Weapon",
+  blade_weapon: "Weapon",
+  armor: "Armor",
+  armour: "Armor",
+  armors: "Armor",
+  armours: "Armor",
+  artifact: "Artifact",
+  artifacts: "Artifact",
+  relic: "Artifact",
+  relics: "Artifact",
+  consumable: "Consumable",
+  consumables: "Consumable",
+  tool: "Miscellaneous",
+  tools: "Miscellaneous",
+  treasure: "Miscellaneous",
+  misc: "Miscellaneous",
+  miscellaneous: "Miscellaneous",
+  misc_item: "Miscellaneous",
+};
+const XIANXIA_ITEM_NATURE_ALIASES: Record<string, string> = {
+  mundane: "Mundane",
+  relic: "Relic",
+  relics: "Relic",
+  re_lic: "Relic",
+};
+const XIANXIA_INVENTORY_TAG_TYPE_ALIASES: Record<string, string> = {
+  weapon: "Weapon",
+  weapons: "Weapon",
+  blade: "Weapon",
+  blade_weapon: "Weapon",
+  armor: "Armor",
+  armour: "Armor",
+  armors: "Armor",
+  armours: "Armor",
+  artifact: "Artifact",
+  artifacts: "Artifact",
+  relic: "Artifact",
+  relics: "Artifact",
+  consumable: "Consumable",
+  consumables: "Consumable",
+  treasure: "Miscellaneous",
+  tool: "Miscellaneous",
+  tools: "Miscellaneous",
+  equipment: "Miscellaneous",
+};
+const XIANXIA_MANUAL_IMPORTER_SOURCE_PATH = "importer://xianxia-manual";
+const XIANXIA_MANUAL_IMPORTER_SOURCE_TYPE = "xianxia_manual_importer";
+const XIANXIA_MANUAL_IMPORTER_VERSION = "2026-05-13.0";
+const XIANXIA_MANUAL_IMPORTER_IMPORTED_FROM = "Manual Xianxia character importer";
 const NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE =
   "This campaign can still use the character roster, read-mode sheets, session-mode sheets, and Controls. Native DND-5E builder, edit, level-up, repair, retraining, PDF-import, and spellcasting tools are not implemented for this campaign system.";
+
+export interface XianxiaManualImportBuildResult {
+  definition: Record<string, unknown>;
+  importMetadata: Record<string, unknown>;
+  initialState: Record<string, unknown>;
+  preview: Record<string, unknown>;
+}
 
 function normalizeSystemKey(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -370,6 +455,22 @@ function coerceInt(value: string, fieldName: string): number {
   return Number.parseInt(candidate, 10);
 }
 
+function coerceLooseInt(value: unknown, defaultValue = 0): number {
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
+  const candidate = String(value ?? "").trim();
+  if (!candidate) {
+    return defaultValue;
+  }
+  const parsed = Number.parseInt(candidate, 10);
+  return Number.isFinite(parsed) ? parsed : defaultValue;
+}
+
+function nonNegativeLooseInt(value: unknown, defaultValue = 0): number {
+  return Math.max(0, coerceLooseInt(value, defaultValue));
+}
+
 function normalizeRealm(value: string): string {
   const canonical = String(value || "")
     .trim()
@@ -378,6 +479,16 @@ function normalizeRealm(value: string): string {
     return canonical[0].toUpperCase() + canonical.slice(1);
   }
   return "Mortal";
+}
+
+function normalizeHonor(value: string): string {
+  const canonical = String(value || "").trim().toLowerCase();
+  for (const honor of ["Venerable", "Majestic", "Honorable", "Disgraced", "Demonic"]) {
+    if (honor.toLowerCase() === canonical) {
+      return honor;
+    }
+  }
+  return "Honorable";
 }
 
 function collectIndexedRows(values: Record<string, string>, prefix: string): Array<Record<string, string>> {
@@ -436,6 +547,75 @@ function countTextRows(value: string): number {
   return String(value || "")
     .split(/\r?\n/)
     .filter((row) => row.trim().length > 0).length;
+}
+
+function splitTextLines(value: unknown): string[] {
+  return String(value ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+function splitPipeRow(value: string): string[] {
+  return value
+    .split("|")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+function lookupKey(value: unknown): string {
+  return String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function humanizeSlug(value: string): string {
+  return value
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function parseTags(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+  }
+  return String(value ?? "")
+    .split(/[,|]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeToken(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function parseBoolean(value: unknown): boolean | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on", "equipped", "enabled", "used", "recorded"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off", "disabled"].includes(normalized)) {
+    return false;
+  }
+  return undefined;
+}
+
+function appendNotesSection(baseNotes: string, title: string, lines: string[]): string {
+  const body = lines.map((line) => `- ${line}`).join("\n");
+  return [baseNotes.trim(), `## ${title}\n\n${body}`].filter(Boolean).join("\n\n");
 }
 
 function buildXianxiaManualImportMartialArtRows(values: Record<string, string>) {
@@ -535,6 +715,594 @@ export function buildXianxiaManualImportPayload(values: Record<string, string>):
         },
       },
     },
+  };
+}
+
+function xianxiaIntegerMap(values: Record<string, string>, keys: readonly string[], prefix: string): Record<string, number> {
+  return Object.fromEntries(keys.map((key) => [key, coerceLooseInt(values[`${prefix}${key}`], 0)]));
+}
+
+function parseSkillText(value: unknown): Array<Record<string, string> | string> {
+  return splitTextLines(value).map((line) => {
+    const parts = splitPipeRow(line);
+    if (parts.length <= 1) {
+      return parts[0] || "";
+    }
+    return { name: parts[0], notes: parts[1] };
+  });
+}
+
+function collectTrainedSkills(values: Record<string, string>): { trainedSkills: string[]; skillNotes: string[] } {
+  const rows: Array<Record<string, string> | string> = [
+    ...parseSkillText(values.trained_skills_text),
+    ...parseSkillText(values.skills_text),
+    ...collectIndexedRows(values, "trained_skill"),
+  ];
+  const seen = new Set<string>();
+  const trainedSkills: string[] = [];
+  const skillNotes: string[] = [];
+  for (const row of rows) {
+    if (typeof row === "string") {
+      const name = row.trim();
+      const key = name.toLowerCase();
+      if (name && !seen.has(key)) {
+        seen.add(key);
+        trainedSkills.push(name);
+      }
+      continue;
+    }
+    const name = String(row.name || row.label || row.skill || "").trim();
+    const key = name.toLowerCase();
+    if (name && !seen.has(key)) {
+      seen.add(key);
+      trainedSkills.push(name);
+    }
+    const notes = String(row.notes || row.note || row.description || row.source_notes || row.text || "").trim();
+    if (name && notes) {
+      skillNotes.push(`${name}: ${notes}`);
+    }
+  }
+  return { trainedSkills, skillNotes };
+}
+
+function parseInventoryText(value: unknown): Array<Record<string, unknown>> {
+  return splitTextLines(value).map((line) => {
+    const parts = splitPipeRow(line);
+    const row: Record<string, unknown> = { name: parts[0] || "" };
+    if (parts[1]) {
+      row.quantity = parts[1];
+    }
+    if (parts[2]) {
+      row.tags = parseTags(parts[2]);
+    }
+    if (parts[3]) {
+      row.notes = parts[3];
+    }
+    return row;
+  });
+}
+
+function normalizeInventoryItemType(rawType: unknown, defaultValue = XIANXIA_ITEM_TYPE_DEFAULT): string {
+  const normalized = normalizeToken(rawType);
+  return normalized ? (XIANXIA_ITEM_TYPE_ALIASES[normalized] ?? defaultValue) : defaultValue;
+}
+
+function normalizeInventoryItemNature(rawNature: unknown): string {
+  return XIANXIA_ITEM_NATURE_ALIASES[normalizeToken(rawNature)] ?? "Mundane";
+}
+
+function normalizeInventoryLegacyTags(
+  tags: string[],
+  itemType: unknown,
+): { itemType: string; tags: string[]; legacyTags: string[] } {
+  const explicitType = normalizeInventoryItemType(itemType, "");
+  const normalizedTags: string[] = [];
+  const legacyTags: string[] = [];
+  const inferredTypes = new Set<string>();
+  const nonMiscInferredTypes = new Set<string>();
+  for (const tag of tags) {
+    const normalizedTag = String(tag ?? "").trim();
+    if (!normalizedTag) {
+      continue;
+    }
+    normalizedTags.push(normalizedTag);
+    const mappedType = XIANXIA_INVENTORY_TAG_TYPE_ALIASES[normalizeToken(normalizedTag)];
+    if (mappedType) {
+      inferredTypes.add(mappedType);
+      if (mappedType !== XIANXIA_ITEM_TYPE_DEFAULT) {
+        nonMiscInferredTypes.add(mappedType);
+      }
+    } else {
+      legacyTags.push(normalizedTag);
+    }
+  }
+
+  if (explicitType) {
+    return { itemType: explicitType, tags: normalizedTags, legacyTags };
+  }
+  if (nonMiscInferredTypes.size === 1) {
+    return { itemType: [...nonMiscInferredTypes][0] ?? XIANXIA_ITEM_TYPE_DEFAULT, tags: normalizedTags, legacyTags };
+  }
+  if (nonMiscInferredTypes.size > 1) {
+    return { itemType: XIANXIA_ITEM_TYPE_DEFAULT, tags: normalizedTags, legacyTags };
+  }
+  if (inferredTypes.size === 1) {
+    return { itemType: [...inferredTypes][0] ?? XIANXIA_ITEM_TYPE_DEFAULT, tags: normalizedTags, legacyTags };
+  }
+  return { itemType: XIANXIA_ITEM_TYPE_DEFAULT, tags: normalizedTags, legacyTags };
+}
+
+function normalizeInventoryRows(values: Record<string, string>): Record<string, unknown>[] {
+  const rows: Record<string, unknown>[] = [
+    ...parseInventoryText(values.inventory_text),
+    ...collectIndexedRows(values, "manual_item"),
+    ...collectIndexedRows(values, "inventory_item"),
+  ];
+  return rows
+    .map<Record<string, unknown> | null>((row) => {
+      const name = String(row.name || row.label || "").trim();
+      const id = String(row.id || row.item_id || "").trim() || slugifyText(name);
+      if (!name && !id) {
+        return null;
+      }
+      const tags = parseTags(row.tags);
+      const tagNormalization = normalizeInventoryLegacyTags(tags, row.item_type || row.type);
+      const itemType = tagNormalization.itemType;
+      const itemNature = normalizeInventoryItemNature(row.item_nature || row.nature);
+      const explicitEquippable = parseBoolean(row.equippable);
+      const isEquipped = parseBoolean(row.is_equipped);
+      const normalized: Record<string, unknown> = {
+        id,
+        catalog_ref: String(row.catalog_ref || "").trim(),
+        name,
+        quantity: Math.max(0, coerceLooseInt(row.quantity, 1)),
+        notes: String(row.notes || row.note || "").trim(),
+        tags: tagNormalization.tags,
+        item_type: itemType,
+        item_nature: itemNature,
+        equippable: explicitEquippable ?? (itemType === "Weapon" || itemType === "Armor"),
+        is_equipped: isEquipped ?? false,
+      };
+      if (tagNormalization.legacyTags.length > 0) {
+        normalized.legacy_tags = tagNormalization.legacyTags;
+      }
+      return normalized;
+    })
+    .filter((row): row is Record<string, unknown> => Boolean(row));
+}
+
+function martialArtOptionLookup(options: Array<Record<string, unknown>>): Map<string, Record<string, unknown>> {
+  const lookup = new Map<string, Record<string, unknown>>();
+  for (const option of options) {
+    for (const key of [option.slug, option.title, option.entry_key]) {
+      const normalized = lookupKey(key);
+      if (normalized) {
+        lookup.set(normalized, option);
+      }
+    }
+  }
+  return lookup;
+}
+
+function matchMartialArtOption(row: Record<string, string>, lookup: Map<string, Record<string, unknown>>) {
+  for (const key of [row.systems_ref_slug, row.martial_art_slug, row.slug, row.entry_key, row.name]) {
+    const normalized = lookupKey(key);
+    if (normalized && lookup.has(normalized)) {
+      return lookup.get(normalized) || null;
+    }
+  }
+  return null;
+}
+
+function martialArtSystemsRef(option: Record<string, unknown>): Record<string, string> {
+  const ref: Record<string, string> = {};
+  for (const key of ["library_slug", "source_id", "entry_key", "slug", "title", "entry_type"]) {
+    const value = String(option[key] ?? "").trim();
+    if (value) {
+      ref[key] = value;
+    }
+  }
+  return ref;
+}
+
+function learnedRankRefsForOption(option: Record<string, unknown>, rankKey: string): string[] {
+  const normalizedRank = normalizeRankKey(rankKey);
+  const rankIndex = (XIANXIA_MARTIAL_ART_RANK_ORDER as readonly string[]).indexOf(normalizedRank);
+  if (rankIndex < 0) {
+    return [];
+  }
+  const rankRefs = asRecord(option.rank_refs);
+  const slug = String(option.slug || "").trim();
+  return XIANXIA_MARTIAL_ART_RANK_ORDER.slice(0, rankIndex + 1)
+    .map((rank) => String(rankRefs[rank] || (slug ? `xianxia:${slug}:${rank}` : "")).trim())
+    .filter(Boolean);
+}
+
+function collectMartialArts(values: Record<string, string>, options: Array<Record<string, unknown>>): Record<string, unknown>[] {
+  const lookup = martialArtOptionLookup(options);
+  return collectIndexedRows(values, "martial_art")
+    .map((row) => {
+      const selectedOption = matchMartialArtOption(row, lookup);
+      const name = String(row.name || row.label || row.title || selectedOption?.title || "").trim();
+      if (!name) {
+        return null;
+      }
+      const rankKey = normalizeRankKey(row.current_rank_key || row.current_rank || row.rank || row.rank_key || "");
+      const payload: Record<string, unknown> = {
+        name: selectedOption ? String(selectedOption.title || name).trim() : name,
+      };
+      if (selectedOption) {
+        payload.systems_ref = martialArtSystemsRef(selectedOption);
+        const rankStatus = String(selectedOption.rank_records_status || "").trim();
+        if (rankStatus) {
+          payload.rank_records_status = rankStatus;
+        }
+        if (selectedOption.custom_martial_art === true) {
+          payload.custom_martial_art = true;
+          payload.xianxia_custom_martial_art = true;
+        }
+      }
+      if (rankKey) {
+        payload.current_rank_key = rankKey;
+        payload.current_rank = XIANXIA_MARTIAL_ART_IMPORT_RANK_LABELS[rankKey] || humanizeSlug(rankKey);
+        if (selectedOption) {
+          payload.learned_rank_refs = learnedRankRefsForOption(selectedOption, rankKey);
+        }
+      }
+      for (const key of ["teacher", "breakthrough", "notes"]) {
+        const value = String(row[key] || "").trim();
+        if (value) {
+          payload[key] = value;
+        }
+      }
+      return payload;
+    })
+    .filter((row): row is Record<string, unknown> => Boolean(row));
+}
+
+function buildXianxiaInitialState(
+  definition: Record<string, unknown>,
+  inventory: Record<string, unknown>[],
+  currency: Record<string, number>,
+  playerNotesMarkdown: string,
+): Record<string, unknown> {
+  const xianxia = asRecord(definition.xianxia);
+  const durability = asRecord(xianxia.durability);
+  const energies = asRecord(xianxia.energies);
+  const yinYang = asRecord(xianxia.yin_yang);
+  const dao = asRecord(xianxia.dao);
+  const hpMax = nonNegativeLooseInt(durability.hp_max, 10);
+  const stanceMax = nonNegativeLooseInt(durability.stance_max, 10);
+  const xianxiaState = {
+    schema_version: 1,
+    vitals: {
+      current_hp: hpMax,
+      temp_hp: 0,
+      current_stance: stanceMax,
+      temp_stance: 0,
+    },
+    energies: Object.fromEntries(
+      XIANXIA_ENERGY_KEYS.map((key) => [key, { current: nonNegativeLooseInt(asRecord(energies[key]).max, 0) }]),
+    ),
+    yin_yang: {
+      yin_current: nonNegativeLooseInt(yinYang.yin_max, 1),
+      yang_current: nonNegativeLooseInt(yinYang.yang_max, 1),
+    },
+    dao: {
+      current: 0,
+    },
+    currency,
+    inventory: {
+      enabled: inventory.length > 0,
+      quantities: inventory,
+    },
+    notes: {
+      player_notes_markdown: playerNotesMarkdown,
+    },
+  };
+  return {
+    status: String(definition.status || "active"),
+    vitals: {
+      current_hp: hpMax,
+      temp_hp: 0,
+    },
+    resources: [],
+    inventory,
+    currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0, other: [] },
+    spell_slots: [],
+    attunement: { max_attuned_items: 3, attuned_item_refs: [] },
+    notes: {
+      player_notes_markdown: playerNotesMarkdown,
+      physical_description_markdown: "",
+      background_markdown: "",
+      session_notes: [],
+    },
+    xianxia: xianxiaState,
+  };
+}
+
+function buildPreviewFromXianxiaImport(definition: Record<string, unknown>, initialState: Record<string, unknown>) {
+  const xianxia = asRecord(definition.xianxia);
+  const xianxiaState = asRecord(initialState.xianxia);
+  const vitals = asRecord(xianxiaState.vitals);
+  const inventory = asRecord(xianxiaState.inventory);
+  return {
+    name: String(definition.name || ""),
+    slug: String(definition.character_slug || ""),
+    realm: xianxia.realm,
+    actions_per_turn: xianxia.actions_per_turn,
+    trained_skill_count: asArray(asRecord(xianxia.skills).trained).length,
+    martial_art_count: asArray(xianxia.martial_arts).length,
+    inventory_count: asArray(inventory.quantities).length,
+    hp: vitals.current_hp,
+    hp_max: asRecord(xianxia.durability).hp_max,
+    stance: vitals.current_stance,
+    stance_max: asRecord(xianxia.durability).stance_max,
+  };
+}
+
+function isWholeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value);
+}
+
+function requireExactInt(errors: string[], path: string, value: unknown, expected: number): void {
+  if (!isWholeNumber(value)) {
+    errors.push(`${path} must be a whole number.`);
+    return;
+  }
+  if (value !== expected) {
+    errors.push(`${path} must be ${expected}.`);
+  }
+}
+
+function requireNonNegativeInt(errors: string[], path: string, value: unknown): void {
+  if (!isWholeNumber(value)) {
+    errors.push(`${path} must be a whole number.`);
+    return;
+  }
+  if (value < 0) {
+    errors.push(`${path} cannot be negative.`);
+  }
+}
+
+function validateIntKeyMap(errors: string[], path: string, value: unknown, keys: readonly string[]): void {
+  const record = asRecord(value);
+  if (Object.keys(record).length === 0 && (typeof value !== "object" || value === null || Array.isArray(value))) {
+    errors.push(`${path} must be an object.`);
+    return;
+  }
+  for (const key of keys) {
+    requireNonNegativeInt(errors, `${path}.${key}`, record[key]);
+  }
+  const unknown = Object.keys(record).filter((key) => !keys.includes(key)).sort();
+  if (unknown.length > 0) {
+    errors.push(`${path} uses unsupported keys: ${unknown.join(", ")}.`);
+  }
+}
+
+function validateEnergyMaxima(errors: string[], value: unknown): void {
+  const energies = asRecord(value);
+  if (Object.keys(energies).length === 0 && (typeof value !== "object" || value === null || Array.isArray(value))) {
+    errors.push("xianxia.energies must be an object.");
+    return;
+  }
+  for (const key of XIANXIA_ENERGY_KEYS) {
+    const energy = asRecord(energies[key]);
+    if (Object.keys(energy).length === 0 && (typeof energies[key] !== "object" || energies[key] === null || Array.isArray(energies[key]))) {
+      errors.push(`xianxia.energies.${key} must be an object.`);
+      continue;
+    }
+    requireNonNegativeInt(errors, `xianxia.energies.${key}.max`, energy.max);
+    const unknown = Object.keys(energy).filter((energyKey) => energyKey !== "max").sort();
+    if (unknown.length > 0) {
+      errors.push(`xianxia.energies.${key} uses unsupported keys: ${unknown.join(", ")}.`);
+    }
+  }
+  const unknown = Object.keys(energies).filter((key) => !(XIANXIA_ENERGY_KEYS as readonly string[]).includes(key)).sort();
+  if (unknown.length > 0) {
+    errors.push(`xianxia.energies uses unsupported keys: ${unknown.join(", ")}.`);
+  }
+}
+
+function validateRecordList(errors: string[], path: string, value: unknown): void {
+  if (!Array.isArray(value)) {
+    errors.push(`${path} must be a list.`);
+    return;
+  }
+  value.forEach((item, index) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      errors.push(`${path}[${index}] must be an object.`);
+    }
+  });
+}
+
+function validateXianxiaManualImportDefinition(definition: Record<string, unknown>): void {
+  const errors: string[] = [];
+  const xianxia = asRecord(definition.xianxia);
+  const fieldKeys = Object.keys(xianxia);
+  if (fieldKeys.join("|") !== XIANXIA_DEFINITION_FIELD_KEYS.join("|")) {
+    errors.push(`xianxia must use the stable definition field order: ${XIANXIA_DEFINITION_FIELD_KEYS.join(", ")}.`);
+  }
+
+  requireExactInt(errors, "xianxia.schema_version", xianxia.schema_version, 1);
+  const realm = String(xianxia.realm || "");
+  if (!["Mortal", "Immortal", "Divine"].includes(realm)) {
+    errors.push("xianxia.realm must be one of: Mortal, Immortal, Divine.");
+  }
+  requireNonNegativeInt(errors, "xianxia.actions_per_turn", xianxia.actions_per_turn);
+  const expectedActions = XIANXIA_REALM_ACTIONS[realm.toLowerCase()];
+  if (expectedActions !== undefined && xianxia.actions_per_turn !== expectedActions) {
+    errors.push(`xianxia.actions_per_turn must match the ${realm} realm default of ${expectedActions}.`);
+  }
+  if (!["Venerable", "Majestic", "Honorable", "Disgraced", "Demonic"].includes(String(xianxia.honor || ""))) {
+    errors.push("xianxia.honor must be one of: Venerable, Majestic, Honorable, Disgraced, Demonic.");
+  }
+  if (!String(xianxia.reputation || "").trim()) {
+    errors.push("xianxia.reputation is required.");
+  }
+
+  validateIntKeyMap(errors, "xianxia.attributes", xianxia.attributes, XIANXIA_ATTRIBUTE_KEYS);
+  validateIntKeyMap(errors, "xianxia.efforts", xianxia.efforts, XIANXIA_EFFORT_KEYS);
+  validateEnergyMaxima(errors, xianxia.energies);
+  const yinYang = asRecord(xianxia.yin_yang);
+  requireNonNegativeInt(errors, "xianxia.yin_yang.yin_max", yinYang.yin_max);
+  requireNonNegativeInt(errors, "xianxia.yin_yang.yang_max", yinYang.yang_max);
+  const dao = asRecord(xianxia.dao);
+  requireExactInt(errors, "xianxia.dao.max", dao.max, 3);
+  const insight = asRecord(xianxia.insight);
+  requireNonNegativeInt(errors, "xianxia.insight.available", insight.available);
+  requireNonNegativeInt(errors, "xianxia.insight.spent", insight.spent);
+  const durability = asRecord(xianxia.durability);
+  for (const key of ["hp_max", "stance_max", "manual_armor_bonus", "defense"]) {
+    requireNonNegativeInt(errors, `xianxia.durability.${key}`, durability[key]);
+  }
+  const skills = asRecord(xianxia.skills);
+  if (!Array.isArray(skills.trained) || skills.trained.some((skill) => !String(skill || "").trim())) {
+    errors.push("xianxia.skills.trained must be a list of non-empty strings.");
+  }
+  const equipment = asRecord(xianxia.equipment);
+  validateRecordList(errors, "xianxia.equipment.necessary_weapons", equipment.necessary_weapons);
+  validateRecordList(errors, "xianxia.equipment.necessary_tools", equipment.necessary_tools);
+  for (const path of [
+    "martial_arts",
+    "generic_techniques",
+    "variants",
+    "approval_requests",
+    "companions",
+    "advancement_history",
+  ]) {
+    validateRecordList(errors, `xianxia.${path}`, xianxia[path]);
+  }
+
+  if (errors.length > 0) {
+    throw new Error(errors.join(" "));
+  }
+}
+
+export function buildXianxiaManualImportCharacter({
+  campaignSlug,
+  values,
+  martialArtOptions,
+}: {
+  campaignSlug: string;
+  values: Record<string, string>;
+  martialArtOptions: Array<Record<string, unknown>>;
+}): XianxiaManualImportBuildResult {
+  const importPayload = buildXianxiaManualImportPayload(values);
+  const normalizedValues = normalizeCharacterAuthoringValues(importPayload as Record<string, unknown>);
+  const name = normalizeCharacterName(values.name || values.character_name || values.title || "");
+  if (!name) {
+    throw new Error("character name is required.");
+  }
+  const characterSlug = normalizeCharacterSlug(values.character_slug || values.slug || "", name);
+  if (!characterSlug) {
+    throw new Error("character_slug is required.");
+  }
+
+  const realm = normalizeRealm(values.realm);
+  const honor = normalizeHonor(values.honor);
+  const attributes = xianxiaIntegerMap(normalizedValues, XIANXIA_ATTRIBUTE_KEYS, "attribute_");
+  const efforts = xianxiaIntegerMap(normalizedValues, XIANXIA_EFFORT_KEYS, "effort_");
+  const energies = Object.fromEntries(
+    XIANXIA_ENERGY_KEYS.map((key) => [key, { max: coerceLooseInt(values[`energy_${key}_max`], 0) }]),
+  );
+  const yinMax = coerceLooseInt(values.yin_max, 1);
+  const yangMax = coerceLooseInt(values.yang_max, 1);
+  const daoMax = coerceLooseInt(values.dao_max, 3);
+  const hpMax = coerceLooseInt(values.hp_max, 10);
+  const stanceMax = coerceLooseInt(values.stance_max, 10);
+  const manualArmorBonus = coerceLooseInt(values.manual_armor_bonus, 0);
+  const { trainedSkills, skillNotes } = collectTrainedSkills(values);
+  const martialArts = collectMartialArts(values, martialArtOptions);
+  const inventory = normalizeInventoryRows(values);
+  const currency = Object.fromEntries(
+    XIANXIA_CURRENCY_KEYS.map((key) => [key, nonNegativeLooseInt(values[key], 0)]),
+  ) as Record<string, number>;
+  const playerNotesMarkdown = String(values.player_notes_markdown || "").trim();
+  const additionalNotes = skillNotes.length > 0
+    ? appendNotesSection(String(values.additional_notes_markdown || ""), "Imported skill notes", skillNotes)
+    : String(values.additional_notes_markdown || "").trim();
+
+  const definition: Record<string, unknown> = {
+    campaign_slug: campaignSlug,
+    character_slug: characterSlug,
+    name,
+    status: values.status || "active",
+    system: "Xianxia",
+    profile: {
+      class_level_text: values.class_level_text || `${realm} Xianxia Character`,
+      realm,
+      honor,
+      reputation: values.reputation || "Unknown",
+    },
+    stats: {},
+    skills: [],
+    proficiencies: { armor: [], weapons: [], tools: [], languages: [], tool_expertise: [] },
+    attacks: [],
+    features: [],
+    spellcasting: {},
+    equipment_catalog: [],
+    reference_notes: {
+      additional_notes_markdown: additionalNotes,
+      allies_and_organizations_markdown: values.allies_and_organizations_markdown || "",
+      custom_sections: [],
+    },
+    resource_templates: [],
+    source: {
+      source_path: XIANXIA_MANUAL_IMPORTER_SOURCE_PATH,
+      source_type: XIANXIA_MANUAL_IMPORTER_SOURCE_TYPE,
+      imported_from: XIANXIA_MANUAL_IMPORTER_IMPORTED_FROM,
+      imported_at: new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00"),
+      parse_warnings: [],
+    },
+    xianxia: {
+      schema_version: 1,
+      realm,
+      actions_per_turn: XIANXIA_REALM_ACTIONS[realm.toLowerCase()],
+      honor,
+      reputation: values.reputation || "Unknown",
+      attributes,
+      efforts,
+      energies,
+      yin_yang: { yin_max: yinMax, yang_max: yangMax },
+      dao: { max: daoMax },
+      insight: {
+        available: coerceLooseInt(values.insight_available, 0),
+        spent: coerceLooseInt(values.insight_spent, 0),
+      },
+      durability: {
+        hp_max: hpMax,
+        stance_max: stanceMax,
+        manual_armor_bonus: manualArmorBonus,
+        defense: 10 + manualArmorBonus + coerceLooseInt(attributes.con, 0),
+      },
+      skills: { trained: trainedSkills },
+      equipment: { necessary_weapons: [], necessary_tools: [] },
+      martial_arts: martialArts,
+      generic_techniques: [],
+      variants: [],
+      dao_immolating_techniques: { prepared: [], use_history: [] },
+      approval_requests: [],
+      companions: [],
+      advancement_history: [],
+    },
+  };
+  validateXianxiaManualImportDefinition(definition);
+  const initialState = buildXianxiaInitialState(definition, inventory, currency, playerNotesMarkdown);
+  const importMetadata = {
+    campaign_slug: campaignSlug,
+    character_slug: characterSlug,
+    source_path: XIANXIA_MANUAL_IMPORTER_SOURCE_PATH,
+    imported_at_utc: new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00"),
+    parser_version: XIANXIA_MANUAL_IMPORTER_VERSION,
+    import_status: "clean",
+    warnings: [],
+  };
+  return {
+    definition,
+    importMetadata,
+    initialState,
+    preview: buildPreviewFromXianxiaImport(definition, initialState),
   };
 }
 

@@ -113,7 +113,7 @@ fixture database.
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
 - Added the Xianxia manual import context read endpoint:
   - `GET /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual`
-- Added the Xianxia manual import preview POST endpoint (read-only slice):
+- Added the Xianxia manual import preview/confirm POST endpoint:
   - `POST /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual`
 - Default campaign fixture directory is `tests/fixtures/sample_campaigns`.
 - `CPW_CAMPAIGNS_DIR` overrides the fixture directory.

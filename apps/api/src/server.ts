@@ -94,14 +94,15 @@ import {
 } from "./systems/sources.js";
 import {
   buildCharacterAuthoringLinks,
+  buildXianxiaManualImportCharacter,
   buildXianxiaManualImportContext,
-  buildXianxiaManualImportPreview,
   nativeCharacterCreateLane,
   nativeCharacterCreateUnsupportedMessage,
 } from "./content/characterAuthoring.js";
 import { getCampaignConfigFile } from "./content/repository.js";
 import {
   buildCampaignContentPageRemovalSafety,
+  createCampaignContentCharacter,
   deleteCampaignContentAsset,
   deleteCampaignContentCharacter,
   deleteCampaignContentCharacterPortrait,
@@ -3877,26 +3878,69 @@ app.post(ROUTES.characterXianxiaManualImport, async (ctx) => {
     Object.entries(rawValues).map(([key, value]) => [String(key), value === null || value === undefined ? "" : String(value)]),
   ) as Record<string, string>;
   const confirmImport = Boolean(confirm_import);
-  if (confirmImport) {
-    return ctx.json(
-      {
-        ok: false,
-        error: {
-          code: "unsupported_operation",
-          message: "Manual Xianxia character import confirmation is not supported yet.",
-        },
-      },
-      501,
-    );
-  }
-
-  let preview: Record<string, unknown>;
+  const importContext = buildXianxiaManualImportContext({
+    dbPath: config.dbPath,
+    campaign,
+    campaignConfig: configRecord?.config || {},
+    values,
+  });
+  let importResult;
   try {
-    preview = buildXianxiaManualImportPreview(values);
+    importResult = buildXianxiaManualImportCharacter({
+      campaignSlug: campaign.slug,
+      values,
+      martialArtOptions: importContext.martial_art_options,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid import payload.";
     const validation = validationError(message);
     return ctx.json({ ok: validation.ok, error: validation.error }, validation.status);
+  }
+
+  if (confirmImport) {
+    const createResult = await createCampaignContentCharacter(
+      config,
+      campaign.slug,
+      String(importResult.definition.character_slug || ""),
+      importResult.definition,
+      importResult.importMetadata,
+      importResult.initialState,
+    );
+    if (createResult.status === "not_found") {
+      const error = campaignNotFound(campaignSlug);
+      return ctx.json({ ok: error.ok, error: error.error }, error.status);
+    }
+    if (createResult.status === "validation_error") {
+      const error = validationError(createResult.message);
+      return ctx.json({ ok: error.ok, error: error.error }, error.status);
+    }
+    if (createResult.status === "character_exists") {
+      const error = jsonError("character_exists", createResult.message, 409);
+      return ctx.json({ ok: error.ok, error: error.error }, error.status);
+    }
+
+    const stateRecord = readCharacterStateSnapshot(config, campaign.slug, createResult.record.character_slug, createResult.record.definition);
+    return ctx.json({
+      ok: true,
+      message: `${String(createResult.record.definition.name || createResult.record.character_slug)} imported.`,
+      character: {
+        definition: createResult.record.definition,
+        import_metadata: createResult.record.import_metadata,
+        state_record: {
+          campaign_slug: campaign.slug,
+          character_slug: createResult.record.character_slug,
+          revision: stateRecord.revision,
+          state: stateRecord.state,
+          updated_at: stateRecord.updated_at ?? null,
+          updated_by_user_id: stateRecord.updated_by_user_id ?? null,
+        },
+      },
+      links: {
+        ...buildCharacterAuthoringLinks(campaign),
+        character_url: `/app-next/campaigns/${campaign.slug}/characters/${createResult.record.character_slug}`,
+        flask_character_url: `/campaigns/${campaign.slug}/characters/${createResult.record.character_slug}`,
+      },
+    });
   }
 
   return ctx.json({
@@ -3906,13 +3950,8 @@ app.post(ROUTES.characterXianxiaManualImport, async (ctx) => {
     lane,
     links: buildCharacterAuthoringLinks(campaign),
     import_context: {
-      ...buildXianxiaManualImportContext({
-        dbPath: config.dbPath,
-        campaign,
-        campaignConfig: configRecord?.config || {},
-        values,
-      }),
-      preview,
+      ...importContext,
+      preview: importResult.preview,
     },
   });
 });
