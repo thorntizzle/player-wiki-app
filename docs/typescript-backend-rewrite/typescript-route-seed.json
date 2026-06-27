@@ -950,7 +950,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Character Cultivation context read route with Flask-compatible missing-campaign, missing-character, auth_required, manager-only forbidden, current DND-5E fixture unsupported lane, supported Xianxia lane envelope, Insight/resource/action context, Martial Art advancement context, Realm Ascension read context, history rows, cultivation links, and fallback metadata. POST save_insight is implemented separately; remaining action parity remains deferred."
+      "notes": "Tracked Hono Character Cultivation context read route with Flask-compatible missing-campaign, missing-character, auth_required, manager-only forbidden, current DND-5E fixture unsupported lane, supported Xianxia lane envelope, Insight/resource/action context, Martial Art advancement context, Realm Ascension read context, history rows, cultivation links, and fallback metadata. POST save_insight and record_gathering_insight are implemented separately; remaining action parity remains deferred."
     },
     {
       "method": "POST",
@@ -959,7 +959,7 @@
       "status": "implemented_fixture_sqlite_write",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Character Cultivation save_insight write slice with bearer-token manager-only access, Xianxia-only validation, expected_revision stale-conflict checks, flat or nested JSON value parsing, non-negative whole-number Insight available/spent validation, copied-fixture definition.yaml writes, SQLite state revision bump/reconciliation, insight_counter_adjustment history append when values change, refreshed cultivation payloads, and unsupported non-Xianxia JSON. Remaining Cultivation POST actions remain deferred."
+      "notes": "Tracked Hono Character Cultivation save_insight and record_gathering_insight write slices with bearer-token manager-only access, Xianxia-only validation, expected_revision stale-conflict checks, flat or nested JSON value parsing, non-negative whole-number Insight available/spent validation, positive whole-number Gathering Insight validation, copied-fixture definition.yaml writes, SQLite state revision bump/reconciliation, insight_counter_adjustment history append when values change, gathering_insight history rows, refreshed cultivation payloads, and unsupported non-Xianxia JSON. Remaining Cultivation POST actions remain deferred."
     },
     {
       "method": "GET",

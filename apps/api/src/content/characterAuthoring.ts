@@ -450,21 +450,33 @@ export function applyCharacterCultivationAction(
   payload: Record<string, unknown>,
 ): CharacterCultivationActionApplyResult {
   const values = normalizeCultivationValues(payload);
-  const action = String(payload.action || values.cultivation_action || "save_insight").trim();
-  if (action !== "save_insight") {
-    return {
-      status: "validation_error",
-      message: "Unsupported cultivation action. Refresh the page and try again.",
-    };
+  const action = String(payload.action || payload.cultivation_action || values.cultivation_action || "save_insight").trim();
+  if (action === "save_insight") {
+    return applyXianxiaSaveInsightAction(definition, values);
   }
+  if (action === "record_gathering_insight") {
+    return applyXianxiaGatheringInsightAction(definition, values);
+  }
+  return {
+    status: "validation_error",
+    message: "Unsupported cultivation action. Refresh the page and try again.",
+  };
+}
 
+function applyXianxiaSaveInsightAction(
+  definition: Record<string, unknown>,
+  values: Record<string, string>,
+): CharacterCultivationActionApplyResult {
   let available: number;
   let spent: number;
   try {
     available = normalizeCultivationInt(values.insight_available, "Insight available");
     spent = normalizeCultivationInt(values.insight_spent, "Insight spent");
   } catch (error) {
-    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid cultivation payload." };
+    return {
+      status: "validation_error",
+      message: error instanceof Error ? error.message : "Invalid cultivation payload.",
+    };
   }
 
   const nextDefinition = updateXianxiaInsightDefinition(definition, available, spent);
@@ -473,6 +485,30 @@ export function applyCharacterCultivationAction(
     definition: nextDefinition,
     message: "Insight counters saved.",
     anchor: "xianxia-cultivation-insight",
+  };
+}
+
+function applyXianxiaGatheringInsightAction(
+  definition: Record<string, unknown>,
+  values: Record<string, string>,
+): CharacterCultivationActionApplyResult {
+  let amount: number;
+  try {
+    amount = normalizeCultivationPositiveInt(values.insight_gain_amount, "Gathered Insight");
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid cultivation payload." };
+  }
+
+  const nextDefinition = recordXianxiaGatheringInsightDefinition(definition, {
+    amount,
+    downtime: collapseWhitespace(values.gathering_insight_downtime),
+    notes: String(values.gathering_insight_notes || "").trim(),
+  });
+  return {
+    status: "ok",
+    definition: nextDefinition,
+    message: "Gathering Insight recorded.",
+    anchor: "xianxia-cultivation-gathering-insight",
   };
 }
 
@@ -505,6 +541,25 @@ function normalizeCultivationInt(value: unknown, fieldLabel: string, fallback = 
   return normalizedValue;
 }
 
+function normalizeCultivationPositiveInt(value: unknown, fieldLabel: string): number {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    throw new Error(`${fieldLabel} must be at least 1.`);
+  }
+  if (!/^-?\d+$/.test(rawValue)) {
+    throw new Error(`${fieldLabel} must be a whole number.`);
+  }
+  const normalizedValue = Number.parseInt(rawValue, 10);
+  if (normalizedValue <= 0) {
+    throw new Error(`${fieldLabel} must be at least 1.`);
+  }
+  return normalizedValue;
+}
+
+function collapseWhitespace(value: unknown): string {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
 function updateXianxiaInsightDefinition(
   definition: Record<string, unknown>,
   available: number,
@@ -532,6 +587,36 @@ function updateXianxiaInsightDefinition(
     });
     xianxia.advancement_history = history;
   }
+  nextDefinition.xianxia = xianxia;
+  return nextDefinition;
+}
+
+function recordXianxiaGatheringInsightDefinition(
+  definition: Record<string, unknown>,
+  payload: { amount: number; downtime: string; notes: string },
+): Record<string, unknown> {
+  const nextDefinition = deepCloneRecord(definition);
+  const xianxia = asRecord(nextDefinition.xianxia);
+  const previousInsight = asRecord(xianxia.insight);
+  const previousAvailable = nonNegativeLooseInt(previousInsight.available, 0);
+  const previousSpent = nonNegativeLooseInt(previousInsight.spent, 0);
+  xianxia.insight = { available: previousAvailable + payload.amount, spent: previousSpent };
+  const history = asArray(xianxia.advancement_history)
+    .map(asRecord)
+    .filter((record) => Object.keys(record).length > 0);
+  const historyRow: Record<string, unknown> = {
+    action: "gathering_insight",
+    amount: payload.amount,
+    target: "Insight",
+  };
+  if (payload.downtime) {
+    historyRow.downtime = payload.downtime;
+  }
+  if (payload.notes) {
+    historyRow.notes = payload.notes;
+  }
+  history.push(historyRow);
+  xianxia.advancement_history = history;
   nextDefinition.xianxia = xianxia;
   return nextDefinition;
 }

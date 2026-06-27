@@ -2012,6 +2012,64 @@ def test_typescript_character_cultivation_context_shell_and_supported_xianxia_co
         "advancement_history"
     ]
 
+    gathering_status, gathering_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 2,
+            "cultivation_action": "record_gathering_insight",
+            "values": {
+                "insight_gain_amount": "4",
+                "gathering_insight_downtime": " 3 days   between sessions ",
+                "gathering_insight_notes": " Meditated under storm clouds. ",
+            },
+        },
+    )
+    assert gathering_status == 200
+    assert gathering_payload["ok"] is True
+    assert gathering_payload["message"] == "Gathering Insight recorded."
+    assert gathering_payload["anchor"] == "xianxia-cultivation-gathering-insight"
+    assert gathering_payload["character"]["state_record"]["revision"] == initial_revision + 3
+    gathered_xianxia = gathering_payload["character"]["definition"]["xianxia"]
+    assert gathered_xianxia["insight"] == {"available": 7, "spent": 1}
+    assert gathering_payload["cultivation"]["insight"] == {"available": 7, "spent": 1}
+    assert gathered_xianxia["advancement_history"][-1] == {
+        "action": "gathering_insight",
+        "amount": 4,
+        "target": "Insight",
+        "downtime": "3 days between sessions",
+        "notes": "Meditated under storm clouds.",
+    }
+
+    zero_gathering_status, zero_gathering_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 3,
+            "action": "record_gathering_insight",
+            "values": {"insight_gain_amount": "0"},
+        },
+    )
+    assert zero_gathering_status == 400
+    assert zero_gathering_payload["error"]["code"] == "validation_error"
+    assert zero_gathering_payload["error"]["message"] == "Gathered Insight must be at least 1."
+
+    fractional_gathering_status, fractional_gathering_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 3,
+            "cultivation_action": "record_gathering_insight",
+            "insight_gain_amount": "1.5",
+        },
+    )
+    assert fractional_gathering_status == 400
+    assert fractional_gathering_payload["error"]["code"] == "validation_error"
+    assert fractional_gathering_payload["error"]["message"] == "Gathered Insight must be a whole number."
+
     unsupported_status, unsupported_payload = _to_json(
         f"{typescript_api_mutation_server['url']}{route_path}",
         headers=typescript_api_mutation_server["dm_headers"],
