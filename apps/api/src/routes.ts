@@ -1531,6 +1531,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "campaign_not_found",
     },
   },
+  {
+    method: "PUT",
+    honoPath: "/api/v1/campaigns/:campaignSlug/systems/overrides/*",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/systems/overrides/<path:entry_key>",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/systems/overrides/<path:entry_key>",
+    routeFamily: "api_v1_systems",
+    missingResource: {
+      method: "PUT",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/systems/overrides/PHB:spell:mage-hand",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1636,4 +1651,5 @@ export const ROUTES = {
   characterXianxiaManualImportContext: IMPLEMENTED_ROUTES[100].honoPath,
   characterXianxiaManualImport: IMPLEMENTED_ROUTES[101].honoPath,
   dmContentSystems: IMPLEMENTED_ROUTES[102].honoPath,
+  systemsEntryOverrideUpdate: IMPLEMENTED_ROUTES[104].honoPath,
 } as const;

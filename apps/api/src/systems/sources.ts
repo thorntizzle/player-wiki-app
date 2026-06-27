@@ -47,6 +47,10 @@ export type SystemsSourceUpdateResult =
   | { status: "ok"; sources: SystemsSourceState[] }
   | { status: "validation_error"; message: string };
 
+export type SystemsEntryOverrideUpdateResult =
+  | { status: "ok"; override: SystemsEntryOverride; entry: SystemsEntryRecord | null }
+  | { status: "validation_error"; message: string };
+
 export interface SystemsSourceCard extends SystemsSourceState {
   has_rules_reference_entries: boolean;
   rules_reference_search_scope: string;
@@ -634,6 +638,25 @@ function serializeEntryRecord(
   };
 }
 
+function coerceWriteBool(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number" && Number.isInteger(value) && (value === 0 || value === 1)) {
+    return Boolean(value);
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no", "off"].includes(normalized)) {
+      return false;
+    }
+  }
+  return undefined;
+}
+
 function coerceSortableInt(value: unknown, fallback: number): number {
   const parsed = Number.parseInt(String(value || "").trim(), 10);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -955,6 +978,40 @@ function loadCampaignSystemsPolicy(
     .get(campaignSlug) as CampaignSystemsPolicyRow | undefined;
 }
 
+function loadEntryByKey(
+  database: Database.Database,
+  librarySlug: string,
+  entryKey: string,
+): SystemsEntryRow | undefined {
+  return database
+    .prepare(
+      `
+        SELECT
+          id,
+          library_slug,
+          source_id,
+          entry_key,
+          entry_type,
+          slug,
+          title,
+          source_page,
+          source_path,
+          search_text,
+          player_safe_default,
+          dm_heavy,
+          metadata_json,
+          body_json,
+          rendered_html,
+          created_at,
+          updated_at
+        FROM systems_entries
+        WHERE library_slug = ?
+          AND entry_key = ?
+      `,
+    )
+    .get(librarySlug, entryKey) as SystemsEntryRow | undefined;
+}
+
 function upsertCampaignSystemsPolicy(
   database: Database.Database,
   {
@@ -1054,6 +1111,66 @@ function upsertCampaignEnabledSource(
     .run(campaignSlug, librarySlug, sourceId, isEnabled ? 1 : 0, defaultVisibility, now, actorUserId);
 }
 
+function upsertCampaignEntryOverride(
+  database: Database.Database,
+  {
+    campaignSlug,
+    librarySlug,
+    entryKey,
+    visibilityOverride,
+    isEnabledOverride,
+    actorUserId,
+    now,
+  }: {
+    campaignSlug: string;
+    librarySlug: string;
+    entryKey: string;
+    visibilityOverride: string | null;
+    isEnabledOverride: boolean | null;
+    actorUserId: number;
+    now: string;
+  },
+): SystemsEntryOverride {
+  database
+    .prepare(
+      `
+        INSERT INTO campaign_entry_overrides (
+          campaign_slug,
+          library_slug,
+          entry_key,
+          visibility_override,
+          is_enabled_override,
+          updated_at,
+          updated_by_user_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(campaign_slug, entry_key) DO UPDATE SET
+          library_slug = excluded.library_slug,
+          visibility_override = excluded.visibility_override,
+          is_enabled_override = excluded.is_enabled_override,
+          updated_at = excluded.updated_at,
+          updated_by_user_id = excluded.updated_by_user_id
+      `,
+    )
+    .run(
+      campaignSlug,
+      librarySlug,
+      entryKey,
+      visibilityOverride,
+      isEnabledOverride === null ? null : isEnabledOverride ? 1 : 0,
+      now,
+      actorUserId,
+    );
+
+  return {
+    entry_key: entryKey,
+    visibility_override: visibilityOverride,
+    is_enabled_override: isEnabledOverride,
+    updated_at: now,
+    updated_by_user_id: actorUserId,
+  };
+}
+
 function insertSystemsSourceAuditEvent(
   database: Database.Database,
   {
@@ -1098,6 +1215,50 @@ function insertSystemsSourceAuditEvent(
         source_id: sourceId,
         visibility,
         is_enabled: isEnabled,
+        source: "api",
+      }),
+      now,
+    );
+}
+
+function insertSystemsEntryOverrideAuditEvent(
+  database: Database.Database,
+  {
+    actorUserId,
+    campaignSlug,
+    entryKey,
+    visibility,
+    now,
+  }: {
+    actorUserId: number;
+    campaignSlug: string;
+    entryKey: string;
+    visibility: string;
+    now: string;
+  },
+) {
+  database
+    .prepare(
+      `
+        INSERT INTO auth_audit_log (
+          actor_user_id,
+          target_user_id,
+          campaign_slug,
+          character_slug,
+          event_type,
+          metadata_json,
+          created_at
+        )
+        VALUES (?, NULL, ?, NULL, ?, ?, ?)
+      `,
+    )
+    .run(
+      actorUserId,
+      campaignSlug,
+      "campaign_systems_entry_override_updated",
+      JSON.stringify({
+        entry_key: entryKey,
+        visibility,
         source: "api",
       }),
       now,
@@ -1252,6 +1413,132 @@ export function updateCampaignSystemsSources(
     return {
       status: "ok",
       sources: refreshedRows.map((row) => serializeSourceState(row, seeds.get(row.source_id), role)),
+    };
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return { status: "validation_error", message: "Systems database is unavailable." };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCampaignSystemsEntryOverride(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  actorUserId: number,
+  entryKey: string,
+  payload: Record<string, unknown>,
+): SystemsEntryOverrideUpdateResult {
+  if (!existsSync(dbPath)) {
+    return { status: "validation_error", message: "Systems database is unavailable." };
+  }
+
+  const librarySlug = String(campaign.systems_library_slug || "").trim();
+  if (!librarySlug) {
+    return { status: "validation_error", message: "That campaign does not have a systems library configured." };
+  }
+
+  const normalizedEntryKey = String(entryKey || "").trim();
+  if (!normalizedEntryKey) {
+    return { status: "validation_error", message: "Choose a valid systems entry before saving an override." };
+  }
+
+  const hasEnabledOverride = Object.hasOwn(payload, "is_enabled_override");
+  let isEnabledOverride: boolean | null = null;
+  if (hasEnabledOverride && payload.is_enabled_override !== null && payload.is_enabled_override !== undefined) {
+    const parsed = coerceWriteBool(payload.is_enabled_override);
+    if (parsed === undefined) {
+      return { status: "validation_error", message: "is_enabled_override must be true or false." };
+    }
+    isEnabledOverride = parsed;
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const library = serializeLibrary(
+      database
+        .prepare(
+          `
+            SELECT library_slug, title, system_code, status, created_at, updated_at
+            FROM systems_libraries
+            WHERE library_slug = ?
+          `,
+        )
+        .get(librarySlug) as SystemsLibraryRow | undefined,
+    );
+    if (!library) {
+      return { status: "validation_error", message: "That campaign does not have a systems library configured." };
+    }
+
+    const entry = loadEntryByKey(database, librarySlug, normalizedEntryKey);
+    if (!entry) {
+      return { status: "validation_error", message: "Choose a valid systems entry before saving an override." };
+    }
+
+    const seeds = parseSourceSeeds(campaignConfig);
+    const sourceRow = loadSourceRow(database, campaign.slug, librarySlug, entry.source_id);
+    if (!sourceRow) {
+      return { status: "validation_error", message: "That source is not available for this campaign." };
+    }
+    const sourceState = serializeSourceState(sourceRow, seeds.get(sourceRow.source_id), role);
+
+    let visibilityOverride: string | null = null;
+    if (payload.visibility_override !== null && payload.visibility_override !== undefined) {
+      const requestedVisibility = String(payload.visibility_override).trim().toLowerCase();
+      if (requestedVisibility) {
+        if (!VISIBILITY_VALUES.has(requestedVisibility)) {
+          return { status: "validation_error", message: `Choose a valid visibility for ${sourceRow.title}.` };
+        }
+        if (requestedVisibility === "private" && role !== "admin") {
+          return { status: "validation_error", message: "Private visibility is reserved for app admins." };
+        }
+        if (requestedVisibility === "public" && !Boolean(sourceRow.public_visibility_allowed)) {
+          return {
+            status: "validation_error",
+            message: `${sourceRow.title} cannot be made public because that source is marked as proprietary or otherwise non-public.`,
+          };
+        }
+        visibilityOverride = requestedVisibility;
+      }
+    }
+
+    const now = utcIsoTimestamp();
+    let override: SystemsEntryOverride | null = null;
+    const writeChanges = database.transaction(() => {
+      upsertCampaignSystemsPolicy(database, {
+        campaignSlug: campaign.slug,
+        librarySlug,
+        actorUserId,
+        now,
+        proprietaryAcknowledgedAt: null,
+      });
+      override = upsertCampaignEntryOverride(database, {
+        campaignSlug: campaign.slug,
+        librarySlug,
+        entryKey: entry.entry_key,
+        visibilityOverride,
+        isEnabledOverride,
+        actorUserId,
+        now,
+      });
+      insertSystemsEntryOverrideAuditEvent(database, {
+        actorUserId,
+        campaignSlug: campaign.slug,
+        entryKey: entry.entry_key,
+        visibility: visibilityOverride || "inherit",
+        now,
+      });
+    });
+    writeChanges();
+
+    return {
+      status: "ok",
+      override: override!,
+      entry: serializeEntryRecord(entry, sourceState, override),
     };
   } catch (error) {
     if (isNoSuchTableError(error)) {

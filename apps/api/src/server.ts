@@ -91,6 +91,7 @@ import {
   buildCampaignSystemsSourceCategoryPayload,
   buildCampaignSystemsSourceDetailPayload,
   buildCampaignSystemsSourceListPayload,
+  updateCampaignSystemsEntryOverride,
   updateCampaignSystemsSources,
   type FixtureSystemsRole,
 } from "./systems/sources.js";
@@ -1032,6 +1033,18 @@ function rawContentAssetRefFromWildcard(pathname: string, campaignSlug: string):
   return pathname.slice(prefix.length);
 }
 
+function systemsEntryOverrideKeyFromWildcard(pathname: string, campaignSlug: string): string {
+  const prefix = `/api/v1/campaigns/${campaignSlug}/systems/overrides/`;
+  if (!pathname.startsWith(prefix)) {
+    return "";
+  }
+  try {
+    return decodeURIComponent(pathname.slice(prefix.length));
+  } catch {
+    return pathname.slice(prefix.length);
+  }
+}
+
 function contentPageNotFound(campaignSlug: string, pageRef: string) {
   return jsonError(
     "content_page_not_found",
@@ -1336,6 +1349,43 @@ app.put(ROUTES.systemsSources, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
   return ctx.json({ ok: true, sources: result.sources });
+});
+
+app.put(ROUTES.systemsEntryOverrideUpdate, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveSystemsManagerBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  const result = updateCampaignSystemsEntryOverride(
+    config.dbPath,
+    campaign,
+    campaignConfig?.config || {},
+    auth.role,
+    auth.actorUserId || 0,
+    systemsEntryOverrideKeyFromWildcard(ctx.req.path, campaign.slug),
+    jsonPayload.payload,
+  );
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({ ok: true, override: result.override, entry: result.entry });
 });
 
 app.get(ROUTES.systemsSourceDetail, async (ctx) => {

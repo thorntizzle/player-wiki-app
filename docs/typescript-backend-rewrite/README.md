@@ -61,6 +61,7 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/systems/search`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources`
   - `PUT /api/v1/campaigns/:campaignSlug/systems/sources`
+  - `PUT /api/v1/campaigns/:campaignSlug/systems/overrides/*`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources/:sourceId`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources/:sourceId/types/:entryType`
   - `GET /api/v1/campaigns/:campaignSlug/systems/entries/:entrySlug`
@@ -302,8 +303,9 @@ Route parity check command:
   Flask-compatible unauthenticated `auth_required`, DM/admin-only access for fixture roles and bearer
   API tokens, source policy rows, shared-core permission state, entry overrides, custom campaign
   entries, campaign item mechanics rows, sanitized import-run history without raw source paths, and
-  missing-campaign JSON. This route is read-only and fixture/SQLite-backed; write routes for Systems
-  policy, custom entries, and item-mechanics import remain separate slices.
+  missing-campaign JSON. This route is read-only and fixture/SQLite-backed; Systems source policy
+  and entry overrides are implemented as separate mutation slices, while custom entries and
+  item-mechanics import remain separate future slices.
 - The first Systems source-policy write route now serves `PUT .../systems/sources` for bearer-token
   DM/admin actors against `CPW_DB_PATH`, preserving fixture-role write denial, player/outsider
   forbiddance, update-row shape validation, boolean enablement validation, source-id validation,
@@ -312,6 +314,14 @@ Route parity check command:
   source-update events, refreshed source rows, and missing-campaign JSON. Current validation covers a
   disposable fixture database only; production or staging write readiness remains gated by migration,
   backup, copied-data rehearsal, and rollback approval.
+- The bounded Systems entry override write route now serves `PUT .../systems/overrides/*` for
+  bearer-token DM/admin actors against `CPW_DB_PATH`, preserving slashy entry keys, fixture-role
+  write denial, player/outsider forbiddance, Flask-compatible boolean coercion, private/admin and
+  public-allowed visibility gates, `campaign_system_policies` and `campaign_entry_overrides`
+  upserts, `auth_audit_log` entry-override events, serialized override/entry responses, and
+  missing-campaign JSON. Current validation covers a disposable fixture database only; production or
+  staging write readiness remains gated by migration, backup, copied-data rehearsal, and rollback
+  approval.
 - The DM Content statblock and custom condition API mutations now serve bearer-token DM/admin
   create/update/delete routes against `CPW_DB_PATH`, preserving Flask-compatible durable-actor
   requirements, markdown statblock upload validation and parser field extraction, condition

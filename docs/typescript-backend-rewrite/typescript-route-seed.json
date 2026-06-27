@@ -188,6 +188,15 @@
       "notes": "Tracked Hono campaign Systems source-policy write route with bearer-token DM/admin access, local SQLite campaign_system_policies and campaign_enabled_sources writes, proprietary-source acknowledgement validation, private/public visibility validation, source-update audit rows, refreshed source response rows, and explicit missing-campaign JSON."
     },
     {
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/overrides/<path:entry_key>",
+      "route_family": "api_v1_systems",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/systems/overrides/*",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono campaign Systems entry override write route with bearer-token DM/admin access, fixture-role write denial, slashy entry-key capture, Flask-compatible boolean and visibility validation, local SQLite campaign_system_policies and campaign_entry_overrides upserts, entry-override audit rows, serialized entry response payloads, and explicit missing-campaign JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/systems/sources/<source_id>",
       "route_family": "api_v1_systems",

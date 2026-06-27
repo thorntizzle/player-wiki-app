@@ -2276,6 +2276,237 @@ if (
   );
 }
 
+const systemsEntryOverrideSeedDb = new Database(dbPath, { fileMustExist: true });
+systemsEntryOverrideSeedDb
+  .prepare(
+    `
+      INSERT INTO systems_entries (
+        library_slug,
+        source_id,
+        entry_key,
+        entry_type,
+        slug,
+        title,
+        player_safe_default,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  )
+  .run(
+    "DND-5E",
+    "PHB",
+    "PHB:spell:slashy/key",
+    "spell",
+    "phb-spell-slashy-key",
+    "Slashy Key",
+    1,
+    "2026-06-25T09:00:00+00:00",
+    "2026-06-25T09:00:00+00:00",
+  );
+systemsEntryOverrideSeedDb.close();
+
+const blockedSystemsEntryOverrideUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/overrides/PHB:spell:mage-hand",
+  {},
+  { method: "PUT", body: { visibility_override: "players" } },
+);
+if (
+  blockedSystemsEntryOverrideUpdate.status !== 401 ||
+  blockedSystemsEntryOverrideUpdate.payload?.error?.code !== "auth_required"
+) {
+  throw new Error(
+    `Expected unauthenticated systems entry override update auth_required 401, got ${blockedSystemsEntryOverrideUpdate.status} ${blockedSystemsEntryOverrideUpdate.payload?.error?.code}`,
+  );
+}
+
+const fixtureSystemsEntryOverrideUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/overrides/PHB:spell:mage-hand",
+  { "X-CPW-Fixture-Role": "dm" },
+  { method: "PUT", body: { visibility_override: "players" } },
+);
+if (
+  fixtureSystemsEntryOverrideUpdate.status !== 403 ||
+  fixtureSystemsEntryOverrideUpdate.payload?.error?.message !== "Systems source updates require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture systems entry override update bearer requirement, got ${JSON.stringify(fixtureSystemsEntryOverrideUpdate.payload)}`,
+  );
+}
+
+const playerSystemsEntryOverrideUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/overrides/PHB:spell:mage-hand",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "PUT", body: { visibility_override: "players" } },
+);
+if (
+  playerSystemsEntryOverrideUpdate.status !== 403 ||
+  playerSystemsEntryOverrideUpdate.payload?.error?.message !== "You do not have permission to manage systems."
+) {
+  throw new Error(`Expected player systems entry override update forbidden, got ${JSON.stringify(playerSystemsEntryOverrideUpdate.payload)}`);
+}
+
+const missingCampaignSystemsEntryOverrideUpdate = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/systems/overrides/PHB:spell:mage-hand",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { visibility_override: "players" } },
+);
+if (
+  missingCampaignSystemsEntryOverrideUpdate.status !== 404 ||
+  missingCampaignSystemsEntryOverrideUpdate.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing systems entry override campaign JSON 404, got ${missingCampaignSystemsEntryOverrideUpdate.status} ${missingCampaignSystemsEntryOverrideUpdate.payload?.error?.code}`,
+  );
+}
+
+const invalidEntrySystemsEntryOverrideUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/overrides/PHB:spell:nope",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { visibility_override: "players" } },
+);
+if (
+  invalidEntrySystemsEntryOverrideUpdate.status !== 400 ||
+  invalidEntrySystemsEntryOverrideUpdate.payload?.error?.message !== "Choose a valid systems entry before saving an override."
+) {
+  throw new Error(
+    `Expected invalid systems entry override validation, got ${JSON.stringify(invalidEntrySystemsEntryOverrideUpdate.payload)}`,
+  );
+}
+
+const invalidBooleanSystemsEntryOverrideUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/overrides/PHB:spell:mage-hand",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { is_enabled_override: "maybe" } },
+);
+if (
+  invalidBooleanSystemsEntryOverrideUpdate.status !== 400 ||
+  invalidBooleanSystemsEntryOverrideUpdate.payload?.error?.message !== "is_enabled_override must be true or false."
+) {
+  throw new Error(
+    `Expected invalid systems entry override boolean validation, got ${JSON.stringify(invalidBooleanSystemsEntryOverrideUpdate.payload)}`,
+  );
+}
+
+const dmPrivateSystemsEntryOverrideUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/overrides/PHB:spell:mage-hand",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { visibility_override: "private" } },
+);
+if (
+  dmPrivateSystemsEntryOverrideUpdate.status !== 400 ||
+  dmPrivateSystemsEntryOverrideUpdate.payload?.error?.message !== "Private visibility is reserved for app admins."
+) {
+  throw new Error(
+    `Expected DM private systems entry override validation, got ${JSON.stringify(dmPrivateSystemsEntryOverrideUpdate.payload)}`,
+  );
+}
+
+const publicProprietarySystemsEntryOverrideUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/overrides/PHB:spell:mage-hand",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "PUT", body: { visibility_override: "public" } },
+);
+if (
+  publicProprietarySystemsEntryOverrideUpdate.status !== 400 ||
+  !String(publicProprietarySystemsEntryOverrideUpdate.payload?.error?.message || "").includes("cannot be made public")
+) {
+  throw new Error(
+    `Expected proprietary public systems entry override validation, got ${JSON.stringify(publicProprietarySystemsEntryOverrideUpdate.payload)}`,
+  );
+}
+
+const slashySystemsEntryOverrideUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/overrides/PHB:spell:slashy/key",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { visibility_override: " players ", is_enabled_override: "off" } },
+);
+if (
+  slashySystemsEntryOverrideUpdate.status !== 200 ||
+  slashySystemsEntryOverrideUpdate.payload?.ok !== true ||
+  slashySystemsEntryOverrideUpdate.payload?.override?.entry_key !== "PHB:spell:slashy/key" ||
+  slashySystemsEntryOverrideUpdate.payload?.override?.visibility_override !== "players" ||
+  slashySystemsEntryOverrideUpdate.payload?.override?.is_enabled_override !== false ||
+  slashySystemsEntryOverrideUpdate.payload?.entry?.entry_key !== "PHB:spell:slashy/key" ||
+  slashySystemsEntryOverrideUpdate.payload?.entry?.override?.is_enabled_override !== false
+) {
+  throw new Error(`Unexpected slashy systems entry override update payload: ${JSON.stringify(slashySystemsEntryOverrideUpdate.payload)}`);
+}
+
+const booleanSystemsEntryOverrideUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/overrides/PHB:spell:slashy/key",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { visibility_override: "dm", is_enabled_override: true } },
+);
+if (
+  booleanSystemsEntryOverrideUpdate.status !== 200 ||
+  booleanSystemsEntryOverrideUpdate.payload?.override?.visibility_override !== "dm" ||
+  booleanSystemsEntryOverrideUpdate.payload?.override?.is_enabled_override !== true ||
+  booleanSystemsEntryOverrideUpdate.payload?.entry?.override?.is_enabled_override !== true
+) {
+  throw new Error(`Unexpected boolean systems entry override update payload: ${JSON.stringify(booleanSystemsEntryOverrideUpdate.payload)}`);
+}
+
+const clearSystemsEntryOverrideUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/overrides/PHB:spell:slashy/key",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { visibility_override: null, is_enabled_override: false } },
+);
+if (
+  clearSystemsEntryOverrideUpdate.status !== 200 ||
+  clearSystemsEntryOverrideUpdate.payload?.override?.visibility_override !== null ||
+  clearSystemsEntryOverrideUpdate.payload?.override?.is_enabled_override !== false ||
+  clearSystemsEntryOverrideUpdate.payload?.entry?.override?.visibility_override !== null ||
+  clearSystemsEntryOverrideUpdate.payload?.entry?.override?.is_enabled_override !== false
+) {
+  throw new Error(`Unexpected clear systems entry override update payload: ${JSON.stringify(clearSystemsEntryOverrideUpdate.payload)}`);
+}
+
+const systemsEntryOverrideDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const persistedSlashyOverride = systemsEntryOverrideDb
+  .prepare(
+    "SELECT library_slug, visibility_override, is_enabled_override, updated_by_user_id FROM campaign_entry_overrides WHERE campaign_slug = ? AND entry_key = ?",
+  )
+  .get("linden-pass", "PHB:spell:slashy/key");
+const systemsEntryOverridePolicyRow = systemsEntryOverrideDb
+  .prepare("SELECT library_slug, updated_by_user_id FROM campaign_system_policies WHERE campaign_slug = ?")
+  .get("linden-pass");
+const systemsEntryOverrideAuditRows = systemsEntryOverrideDb
+  .prepare(
+    "SELECT actor_user_id, event_type, metadata_json FROM auth_audit_log WHERE campaign_slug = ? AND event_type = ? ORDER BY id ASC",
+  )
+  .all("linden-pass", "campaign_systems_entry_override_updated");
+systemsEntryOverrideDb.close();
+const parsedSystemsEntryOverrideAudits = systemsEntryOverrideAuditRows.map((row) => ({
+  actor_user_id: row.actor_user_id,
+  event_type: row.event_type,
+  metadata: JSON.parse(row.metadata_json),
+}));
+if (
+  persistedSlashyOverride?.library_slug !== "DND-5E" ||
+  persistedSlashyOverride?.visibility_override !== null ||
+  persistedSlashyOverride?.is_enabled_override !== 0 ||
+  persistedSlashyOverride?.updated_by_user_id !== 81 ||
+  systemsEntryOverridePolicyRow?.library_slug !== "DND-5E" ||
+  systemsEntryOverridePolicyRow?.updated_by_user_id !== 81 ||
+  parsedSystemsEntryOverrideAudits.length !== 3 ||
+  parsedSystemsEntryOverrideAudits[0]?.actor_user_id !== 81 ||
+  parsedSystemsEntryOverrideAudits[0]?.metadata?.entry_key !== "PHB:spell:slashy/key" ||
+  parsedSystemsEntryOverrideAudits[0]?.metadata?.visibility !== "players" ||
+  parsedSystemsEntryOverrideAudits[0]?.metadata?.source !== "api" ||
+  parsedSystemsEntryOverrideAudits[1]?.metadata?.visibility !== "dm" ||
+  parsedSystemsEntryOverrideAudits[2]?.metadata?.visibility !== "inherit"
+) {
+  throw new Error(
+    `Unexpected systems entry override database state: ${JSON.stringify({
+      persistedSlashyOverride,
+      systemsEntryOverridePolicyRow,
+      parsedSystemsEntryOverrideAudits,
+    })}`,
+  );
+}
+
 const blockedCombatState = await requestJson("/api/v1/campaigns/linden-pass/combat");
 if (blockedCombatState.status !== 401 || blockedCombatState.payload?.error?.code !== "auth_required") {
   throw new Error(
