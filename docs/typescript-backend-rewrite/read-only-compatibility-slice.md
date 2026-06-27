@@ -147,8 +147,8 @@ fixture database.
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up`
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair`
 - Added the Character Cultivation context shell endpoint:
-  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation`
-  - This TypeScript slice verifies the manager-gated DND-5E unsupported shell against current fixtures and keeps Xianxia records in an explicit pending shell; supported Xianxia presenter context and POST/action parity remain pending.
+  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (supported Xianxia read context; POST/action parity pending)
+  - This TypeScript slice verifies the manager-gated DND-5E unsupported shell against current fixtures and returns a supported Xianxia read context with Insight/resources, Martial Art advancement, Generic Technique options, Realm Ascension read state, history rows, and links; POST/action parity remains pending.
 - Added the Xianxia manual import context read endpoint:
   - `GET /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual`
 - Added the Xianxia manual import preview/confirm POST endpoint:

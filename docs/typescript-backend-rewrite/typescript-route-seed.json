@@ -950,7 +950,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Character Cultivation context read shell with Flask-compatible missing-campaign, missing-character, auth_required, manager-only forbidden, current DND-5E fixture unsupported lane, explicit pending shell for Xianxia records until presenter parity lands, cultivation links, and cultivation:null. Supported Xianxia presenter context and POST/action parity remain deferred."
+      "notes": "Tracked Hono Character Cultivation context read route with Flask-compatible missing-campaign, missing-character, auth_required, manager-only forbidden, current DND-5E fixture unsupported lane, supported Xianxia lane envelope, Insight/resource/action context, Martial Art advancement context, Realm Ascension read context, history rows, cultivation links, and fallback metadata. POST/action parity remains deferred."
     },
     {
       "method": "GET",

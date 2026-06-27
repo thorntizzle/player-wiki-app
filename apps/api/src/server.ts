@@ -138,6 +138,7 @@ import {
   listXianxiaManualImportMartialArtOptions,
   nativeCharacterCreateLane,
   nativeCharacterCreateUnsupportedMessage,
+  xianxiaKnownGenericTechniqueOptionKeys,
 } from "./content/characterAuthoring.js";
 import { getCampaignConfigFile } from "./content/repository.js";
 import {
@@ -6072,10 +6073,18 @@ app.get(ROUTES.characterCultivation, async (ctx) => {
   }
 
   const stateRecord = readCharacterStateSnapshot(config, campaign.slug, character.character_slug, character.definition);
+  const configRecord = await getCampaignConfigFile(config, campaign.slug);
   const cultivationPayload = buildCharacterCultivationShellPayload({
     campaign,
     characterSlug,
     definition: character.definition,
+    state: stateRecord.state,
+    genericTechniqueOptions: listXianxiaCreateGenericTechniqueOptions(
+      config.dbPath,
+      campaign,
+      configRecord?.config || {},
+      xianxiaKnownGenericTechniqueOptionKeys(character.definition),
+    ),
   });
 
   return ctx.json({

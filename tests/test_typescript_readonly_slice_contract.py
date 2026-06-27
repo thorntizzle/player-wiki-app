@@ -364,6 +364,81 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
         connection.close()
 
 
+def _seed_xianxia_generic_techniques(db_path: Path) -> None:
+    now = "2026-06-25T09:00:00+00:00"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            "INSERT OR REPLACE INTO systems_sources (library_slug, source_id, title) VALUES (?, ?, ?)",
+            ("Xianxia", "XIA", "Xianxia Seed"),
+        )
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO campaign_enabled_sources (
+              campaign_slug, library_slug, source_id, is_enabled, default_visibility, updated_at, updated_by_user_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("linden-pass", "Xianxia", "XIA", 1, "players", now, 77),
+        )
+        entries = [
+            (
+                "XIA:generic_technique:qi-blast",
+                "xia-generic-technique-qi-blast",
+                "Qi Blast",
+                {
+                    "generic_technique_catalog_order": 7,
+                    "generic_technique_key": "qi_blast",
+                    "insight_cost": 1,
+                    "support_state": "supported",
+                },
+                {
+                    "xianxia_generic_technique": {
+                        "key": "qi_blast",
+                        "insight_cost": 1,
+                        "resource_costs": ["1 Qi"],
+                        "range_tags": ["ranged"],
+                        "effort_tags": ["magic"],
+                        "reset_cadence": "scene",
+                    }
+                },
+            ),
+            (
+                "XIA:generic_technique:enhanced-flowing-dao",
+                "xia-generic-technique-enhanced-flowing-dao",
+                "Enhanced Flowing Dao",
+                {
+                    "generic_technique_catalog_order": 9,
+                    "generic_technique_key": "enhanced_flowing_dao",
+                    "insight_cost": 2,
+                    "support_state": "supported",
+                },
+                {
+                    "xianxia_generic_technique": {
+                        "key": "enhanced_flowing_dao",
+                        "insight_cost": 2,
+                        "prerequisites": ["Any Dao 1"],
+                        "learnable_without_master": True,
+                        "requires_master": False,
+                    }
+                },
+            ),
+        ]
+        connection.executemany(
+            """
+            INSERT OR REPLACE INTO systems_entries (
+              library_slug, source_id, entry_key, entry_type, slug, title, metadata_json, body_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("Xianxia", "XIA", entry_key, "generic_technique", slug, title, json.dumps(metadata), json.dumps(body))
+                for entry_key, slug, title, metadata, body in entries
+            ],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
 @pytest.fixture()
 def typescript_api_mutation_server(tmp_path, typescript_node_bin):
     campaigns_dir = tmp_path / "typescript-campaigns"
@@ -1686,7 +1761,7 @@ def test_typescript_character_advancement_context_shells_match_flask_fixture(
             assert payload["links"].get(link_key) == flask_payload["links"].get(link_key)
 
 
-def test_typescript_character_cultivation_context_shell_matches_flask_unsupported_fixture(
+def test_typescript_character_cultivation_context_shell_and_supported_xianxia_context(
     typescript_api_mutation_server,
     client,
     app,
@@ -1743,6 +1818,7 @@ def test_typescript_character_cultivation_context_shell_matches_flask_unsupporte
 
     xianxia_character_slug = "api-cultivation-crane"
     _write_campaign_system(typescript_api_mutation_server["campaigns_dir"], system="Xianxia", systems_library="Xianxia")
+    _seed_xianxia_generic_techniques(typescript_api_mutation_server["db_path"])
     xianxia_body = {
         "definition": {
             "name": "API Cultivation Crane",
@@ -1750,11 +1826,42 @@ def test_typescript_character_cultivation_context_shell_matches_flask_unsupporte
             "system": "xianxia",
             "xianxia": {
                 "realm": "Mortal",
-                "energy_maxima": {"jing": 1, "qi": 1, "shen": 1},
+                "attributes": {
+                    "str": 1,
+                    "dex": 1,
+                    "con": 1,
+                    "int": 1,
+                    "wis": 1,
+                    "cha": 1,
+                },
+                "efforts": {
+                    "basic": 1,
+                    "weapon": 1,
+                    "guns_explosive": 1,
+                    "magic": 1,
+                    "ultimate": 1,
+                },
+                "insight": {"available": 0, "spent": 0},
+                "energies": {"jing": {"max": 1}, "qi": {"max": 1}, "shen": {"max": 1}},
                 "yin_yang": {"yin_max": 1, "yang_max": 1},
                 "durability": {"hp_max": 10, "stance_max": 10, "manual_armor_bonus": 0},
                 "trained_skills": ["Qi Sense"],
                 "martial_arts": [{"name": "Cloud Palm", "current_rank": "Initiate"}],
+                "generic_techniques": [
+                    {
+                        "name": "Qi Blast",
+                        "systems_ref": {
+                            "library_slug": "Xianxia",
+                            "source_id": "XIA",
+                            "entry_key": "XIA:generic_technique:qi-blast",
+                            "slug": "xia-generic-technique-qi-blast",
+                            "title": "Qi Blast",
+                            "entry_type": "generic_technique",
+                        },
+                        "generic_technique_key": "qi_blast",
+                        "insight_spent": 1,
+                    }
+                ],
             },
         }
     }
@@ -1772,13 +1879,126 @@ def test_typescript_character_cultivation_context_shell_matches_flask_unsupporte
     )
     assert xianxia_status == 200
     assert xianxia_payload["ok"] is True
-    assert xianxia_payload["supported"] is False
-    assert xianxia_payload["lane"] == "unsupported"
-    assert xianxia_payload["cultivation"] is None
-    assert "pending" in xianxia_payload["unsupported_message"]
+    assert xianxia_payload["supported"] is True
+    assert xianxia_payload["lane"] == "xianxia"
+    assert xianxia_payload["unsupported_message"] == ""
+    cultivation = xianxia_payload["cultivation"]
+    assert cultivation["insight"] == {"available": 0, "spent": 0}
+    assert [row["key"] for row in cultivation["energies"]] == ["jing", "qi", "shen"]
+    assert all(row["insight_cost"] == 1 for row in cultivation["energies"])
+    assert [row["key"] for row in cultivation["yin_yang"]] == ["yin", "yang"]
+    assert cultivation["conditioning"]["hp"]["cap"] == 50
+    assert cultivation["conditioning"]["hp"]["projected_max"] == 20
+    assert cultivation["training"]["stance"]["cap"] == 50
+    assert cultivation["training"]["stance"]["projected_max"] == 20
+    assert [row["key"] for row in cultivation["training"]["attributes"]] == [
+        "str",
+        "dex",
+        "con",
+        "int",
+        "wis",
+        "cha",
+    ]
+    assert [row["key"] for row in cultivation["conditioning"]["efforts"]] == [
+        "basic",
+        "weapon",
+        "guns_explosive",
+        "magic",
+        "ultimate",
+    ]
+    assert cultivation["martial_arts"][0]["name"] == "Cloud Palm"
+    assert cultivation["martial_arts"][0]["advancement"]["next_rank_key"] == "novice"
+    assert cultivation["martial_arts"][0]["advancement"]["shortfall"] == 1
+    assert cultivation["realm_ascension"]["current_realm"] == "Mortal"
+    assert cultivation["realm_ascension"]["target"]["target_realm"] == "Immortal"
+    assert cultivation["realm_ascension"]["can_start_review"] is False
+    assert cultivation["history"] == []
+    assert cultivation["generic_techniques"][0]["name"] == "Qi Blast"
+    assert cultivation["generic_techniques"][0]["href"] == (
+        "/app-next/campaigns/linden-pass/systems/entries/xia-generic-technique-qi-blast"
+    )
+    option_keys = {option["generic_technique_key"] for option in cultivation["generic_technique_options"]}
+    assert "qi_blast" not in option_keys
+    assert "enhanced_flowing_dao" in option_keys
+    enhanced_option = next(
+        option
+        for option in cultivation["generic_technique_options"]
+        if option["generic_technique_key"] == "enhanced_flowing_dao"
+    )
+    assert enhanced_option["href"] == (
+        "/app-next/campaigns/linden-pass/systems/entries/xia-generic-technique-enhanced-flowing-dao"
+    )
+    assert enhanced_option["shortfall"] == 2
+    assert enhanced_option["prerequisites"] == ["Any Dao 1"]
     assert xianxia_payload["links"]["flask_cultivation_url"] == (
         f"/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation"
     )
+
+    divine_character_slug = "api-cultivation-divine"
+    divine_body = deepcopy(xianxia_body)
+    divine_body["definition"]["name"] = "API Cultivation Divine"
+    divine_body["definition"]["xianxia"]["realm"] = "Divine"
+    divine_body["definition"]["xianxia"]["advancement_history"] = [
+        {"action": "realm_ascension_review_started", "current_realm": "Divine", "status": "pending_gm_review"},
+        {"action": "realm_ascension_attributes_efforts_reset", "current_realm": "Divine", "status": "pending_rebuild"},
+    ]
+    divine_create_status, _divine_create_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/characters/{divine_character_slug}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body=divine_body,
+    )
+    assert divine_create_status == 200
+
+    divine_status, divine_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{divine_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+    assert divine_status == 200
+    divine_realm = divine_payload["cultivation"]["realm_ascension"]
+    assert divine_realm["current_realm"] == "Divine"
+    assert divine_realm["available"] is False
+    assert divine_realm["can_apply_rebuild"] is False
+    assert divine_realm["can_apply_divine_rebuild"] is False
+
+    immortal_character_slug = "api-cultivation-immortal"
+    immortal_body = deepcopy(xianxia_body)
+    immortal_body["definition"]["name"] = "API Cultivation Immortal"
+    immortal_body["definition"]["xianxia"]["realm"] = "Immortal"
+    immortal_body["definition"]["xianxia"]["advancement_history"] = [
+        {
+            "action": "realm_ascension_review_started",
+            "current_realm": "Immortal",
+            "target_realm": "Divine",
+            "status": "pending_gm_review",
+        },
+        {
+            "action": "realm_ascension_attributes_efforts_reset",
+            "current_realm": "Immortal",
+            "target_realm": "Divine",
+            "status": "pending_rebuild",
+        },
+    ]
+    immortal_create_status, _immortal_create_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/characters/{immortal_character_slug}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body=immortal_body,
+    )
+    assert immortal_create_status == 200
+
+    immortal_status, immortal_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{immortal_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+    assert immortal_status == 200
+    immortal_realm = immortal_payload["cultivation"]["realm_ascension"]
+    assert immortal_realm["current_realm"] == "Immortal"
+    assert immortal_realm["available"] is True
+    assert immortal_realm["target"]["target_realm"] == "Divine"
+    assert immortal_realm["can_reset_stats"] is False
+    assert immortal_realm["can_apply_rebuild"] is True
+    assert immortal_realm["can_apply_divine_rebuild"] is True
 
 
 def test_typescript_content_character_backup_restore_rehearsal_recovers_files_assets_and_sqlite(
