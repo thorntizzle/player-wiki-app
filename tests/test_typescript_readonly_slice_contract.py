@@ -2130,6 +2130,100 @@ def test_typescript_character_cultivation_context_shell_and_supported_xianxia_co
         == "Cultivation needs 1 Insight to increase Qi; only 0 available."
     )
 
+    restore_insight_status, restore_insight_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 5,
+            "action": "save_insight",
+            "values": {"insight_available": "2", "insight_spent": "2"},
+        },
+    )
+    assert restore_insight_status == 200
+    assert restore_insight_payload["character"]["state_record"]["revision"] == initial_revision + 6
+
+    meditation_status, meditation_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 6,
+            "cultivation_action": "spend_meditation_yin_yang",
+            "yin_yang_key": " Yang ",
+            "meditation_notes": "  Balanced   breath\n at\tdawn.  ",
+        },
+    )
+    assert meditation_status == 200
+    assert meditation_payload["ok"] is True
+    assert meditation_payload["message"] == "Spent 1 Insight on Meditation to increase Yang."
+    assert meditation_payload["anchor"] == "xianxia-cultivation-meditation"
+    assert meditation_payload["character"]["state_record"]["revision"] == initial_revision + 7
+    meditation_xianxia = meditation_payload["character"]["definition"]["xianxia"]
+    assert meditation_xianxia["insight"] == {"available": 1, "spent": 3}
+    assert meditation_xianxia["yin_yang"] == {"yin_max": 1, "yang_max": 2}
+    assert meditation_payload["cultivation"]["insight"] == {"available": 1, "spent": 3}
+    yang_context = next(row for row in meditation_payload["cultivation"]["yin_yang"] if row["key"] == "yang")
+    assert yang_context["current"] == 1
+    assert yang_context["max"] == 2
+    assert meditation_payload["character"]["state_record"]["state"]["xianxia"]["yin_yang"] == {
+        "yin_current": 1,
+        "yang_current": 1,
+    }
+    assert meditation_xianxia["advancement_history"][-1] == {
+        "action": "meditation_yin_yang_increase",
+        "amount": 1,
+        "target": "Yang",
+        "yin_yang_key": "yang",
+        "yin_yang_maximum_increase": 1,
+        "new_yin_yang_maximum": 2,
+        "notes": "Balanced breath at dawn.",
+    }
+
+    invalid_meditation_status, invalid_meditation_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 7,
+            "cultivation_action": "spend_meditation_yin_yang",
+            "yin_yang_key": "moon",
+        },
+    )
+    assert invalid_meditation_status == 400
+    assert invalid_meditation_payload["error"]["code"] == "validation_error"
+    assert invalid_meditation_payload["error"]["message"] == "Choose Yin or Yang for Meditation."
+
+    zero_meditation_insight_status, zero_meditation_insight_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 7,
+            "action": "save_insight",
+            "values": {"insight_available": "0", "insight_spent": "3"},
+        },
+    )
+    assert zero_meditation_insight_status == 200
+    assert zero_meditation_insight_payload["character"]["state_record"]["revision"] == initial_revision + 8
+
+    insufficient_meditation_status, insufficient_meditation_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 8,
+            "cultivation_action": "spend_meditation_yin_yang",
+            "yin_yang_key": "yin",
+        },
+    )
+    assert insufficient_meditation_status == 400
+    assert insufficient_meditation_payload["error"]["code"] == "validation_error"
+    assert (
+        insufficient_meditation_payload["error"]["message"]
+        == "Meditation needs 1 Insight to increase Yin; only 0 available."
+    )
+
     zero_gathering_status, zero_gathering_payload = _to_json(
         f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
         headers=typescript_api_mutation_server["dm_headers"],

@@ -53,6 +53,7 @@ const XIANXIA_YIN_YANG_LABELS: Record<(typeof XIANXIA_YIN_YANG_KEYS)[number], st
   yin: "Yin",
   yang: "Yang",
 };
+type XianxiaYinYangKey = (typeof XIANXIA_YIN_YANG_KEYS)[number];
 const XIANXIA_CURRENCY_KEYS = ["coin", "supply", "spirit_stones"] as const;
 const XIANXIA_DEFINITION_FIELD_KEYS = [
   "schema_version",
@@ -461,6 +462,9 @@ export function applyCharacterCultivationAction(
   if (action === "spend_cultivation_energy") {
     return applyXianxiaCultivationEnergyAction(definition, values);
   }
+  if (action === "spend_meditation_yin_yang") {
+    return applyXianxiaMeditationYinYangAction(definition, values);
+  }
   return {
     status: "validation_error",
     message: "Unsupported cultivation action. Refresh the page and try again.",
@@ -540,6 +544,30 @@ function applyXianxiaCultivationEnergyAction(
   };
 }
 
+function applyXianxiaMeditationYinYangAction(
+  definition: Record<string, unknown>,
+  values: Record<string, string>,
+): CharacterCultivationActionApplyResult {
+  const yinYangKey = normalizeCultivationYinYangKey(values.yin_yang_key);
+  if (!yinYangKey) {
+    return { status: "validation_error", message: "Choose Yin or Yang for Meditation." };
+  }
+
+  const result = spendXianxiaMeditationYinYangDefinition(definition, {
+    yinYangKey,
+    notes: collapseWhitespace(values.meditation_notes),
+  });
+  if (result.status === "validation_error") {
+    return { status: "validation_error", message: result.message };
+  }
+  return {
+    status: "ok",
+    definition: result.definition,
+    message: `Spent ${result.insightCost} Insight on Meditation to increase ${result.yinYangName}.`,
+    anchor: "xianxia-cultivation-meditation",
+  };
+}
+
 function normalizeCultivationValues(payload: Record<string, unknown>): Record<string, string> {
   const rawValues = asRecord(payload.values);
   const source = Object.keys(rawValues).length > 0 ? rawValues : payload;
@@ -558,6 +586,14 @@ function normalizeCultivationEnergyKey(value: unknown): XianxiaEnergyKey | "" {
   const normalized = String(value || "").trim().toLowerCase().replace(/[-\s]+/g, "_");
   if ((XIANXIA_ENERGY_KEYS as readonly string[]).includes(normalized)) {
     return normalized as XianxiaEnergyKey;
+  }
+  return "";
+}
+
+function normalizeCultivationYinYangKey(value: unknown): XianxiaYinYangKey | "" {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[-\s]+/g, "_");
+  if ((XIANXIA_YIN_YANG_KEYS as readonly string[]).includes(normalized)) {
+    return normalized as XianxiaYinYangKey;
   }
   return "";
 }
@@ -689,6 +725,72 @@ function spendXianxiaCultivationEnergyDefinition(
     definition: nextDefinition,
     insightCost,
     energyName,
+    newMaximum,
+  };
+}
+
+function spendXianxiaMeditationYinYangDefinition(
+  definition: Record<string, unknown>,
+  payload: { yinYangKey: XianxiaYinYangKey; notes: string },
+):
+  | {
+      status: "ok";
+      definition: Record<string, unknown>;
+      insightCost: number;
+      yinYangName: string;
+      newMaximum: number;
+    }
+  | { status: "validation_error"; message: string } {
+  const nextDefinition = deepCloneRecord(definition);
+  const xianxia = asRecord(nextDefinition.xianxia);
+  const previousInsight = asRecord(xianxia.insight);
+  const previousAvailable = nonNegativeLooseInt(previousInsight.available, 0);
+  const previousSpent = nonNegativeLooseInt(previousInsight.spent, 0);
+  const insightCost = XIANXIA_MEDITATION_INSIGHT_COST;
+  const yinYangName = XIANXIA_YIN_YANG_LABELS[payload.yinYangKey];
+  if (previousAvailable < insightCost) {
+    return {
+      status: "validation_error",
+      message: `Meditation needs ${insightCost} Insight to increase ${yinYangName}; only ${previousAvailable} available.`,
+    };
+  }
+
+  const existingYinYang = asRecord(xianxia.yin_yang);
+  const yinYang: Record<string, number> = {};
+  for (const key of XIANXIA_YIN_YANG_KEYS) {
+    const maxKey = `${key}_max`;
+    const maximumIncrease = key === payload.yinYangKey ? 1 : 0;
+    yinYang[maxKey] = Math.max(1, coerceLooseInt(existingYinYang[maxKey], 1)) + maximumIncrease;
+  }
+  const newMaximum = yinYang[`${payload.yinYangKey}_max`] ?? 0;
+  xianxia.yin_yang = yinYang;
+  xianxia.insight = {
+    available: previousAvailable - insightCost,
+    spent: previousSpent + insightCost,
+  };
+
+  const history = asArray(xianxia.advancement_history)
+    .map(asRecord)
+    .filter((record) => Object.keys(record).length > 0);
+  const historyRow: Record<string, unknown> = {
+    action: "meditation_yin_yang_increase",
+    amount: insightCost,
+    target: yinYangName,
+    yin_yang_key: payload.yinYangKey,
+    yin_yang_maximum_increase: 1,
+    new_yin_yang_maximum: newMaximum,
+  };
+  if (payload.notes) {
+    historyRow.notes = payload.notes;
+  }
+  history.push(historyRow);
+  xianxia.advancement_history = history;
+  nextDefinition.xianxia = xianxia;
+  return {
+    status: "ok",
+    definition: nextDefinition,
+    insightCost,
+    yinYangName,
     newMaximum,
   };
 }
