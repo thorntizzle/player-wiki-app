@@ -60,6 +60,8 @@ Route parity check command:
   - `POST /api/v1/systems/imports/dnd5e`
   - `GET /api/v1/admin`
   - `GET /api/v1/admin/users/:userId`
+  - `POST /api/v1/admin/users/:userId/membership`
+  - `DELETE /api/v1/admin/users/:userId/membership`
   - `GET /api/v1/campaigns/:campaignSlug/systems`
   - `GET /api/v1/campaigns/:campaignSlug/systems/search`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources`
@@ -292,11 +294,16 @@ Route parity check command:
   for theme/chat-order choices, retired `frontend_mode` rejection, and refreshed preference payloads.
   Bearer API-token identity reads now update `api_tokens.last_used_at` when the stored timestamp is
   older than the configured session-touch interval.
-- The Admin read shell now serves `GET /api/v1/admin` and `GET /api/v1/admin/users/:userId`,
+- The Admin shell now serves `GET /api/v1/admin`, `GET /api/v1/admin/users/:userId`,
+  `POST /api/v1/admin/users/:userId/membership`, and
+  `DELETE /api/v1/admin/users/:userId/membership`,
   preserving app-admin-only fixture or bearer-token access, campaign and character choices, user
   cards, membership and assignment summaries, audit filters, paginated audit rows, Flask CSV export
-  links, Gen2/Flask Admin URLs, and explicit JSON missing-user handling. Admin mutations remain
-  unimplemented in Hono and stay on Flask until their own approved slices.
+  links, Gen2/Flask Admin URLs, and explicit JSON missing-user handling. Membership mutations are
+  bearer API-token app-admin writes against disposable fixture SQLite only, with fixture-role write
+  denial, Flask-compatible validation/success messages, explicit select-then-insert/update
+  membership persistence, refreshed detail payloads, and `auth_audit_log` membership events.
+  Remaining Admin mutations stay on Flask until their own approved slices.
 - The Campaign Control read route now serves `GET .../control`, preserving Flask-compatible
   visibility-management auth for fixture or bearer-token DM/admin identities, default campaign
   visibility rows, optional SQLite visibility overrides, admin-only Private choices, rules, notes,

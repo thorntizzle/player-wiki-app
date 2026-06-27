@@ -990,6 +990,24 @@
     },
     {
       "method": "POST",
+      "path": "/api/v1/admin/users/<int:user_id>/membership",
+      "route_family": "api_v1_admin",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/admin/users/:userId/membership",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Admin membership upsert route with bearer-token app-admin writes, fixture-role write denial, Flask-compatible campaign/role/status validation, explicit select-then-insert/update membership persistence, membership-created/removed/role-changed audit rows, refreshed user detail payloads, success messages, and explicit missing-user JSON."
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/admin/users/<int:user_id>/membership",
+      "route_family": "api_v1_admin",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/admin/users/:userId/membership",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Admin membership removal route with bearer-token app-admin writes, fixture-role write denial, Flask-compatible missing/already-removed validation, explicit select-then-update membership persistence, membership_removed audit rows, refreshed user detail payloads, success messages, and explicit missing-user JSON."
+    },
+    {
+      "method": "POST",
       "path": "/api/v1/campaigns/<campaign_slug>/systems/custom-entries",
       "route_family": "api_v1_systems",
       "status": "implemented_fixture_sqlite_write",

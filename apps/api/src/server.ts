@@ -11,12 +11,14 @@ import {
   deleteCharacterAssignment,
   getActiveUserById,
   getCharacterAssignment,
+  getMembership,
   getUserById,
   hasActivePlayerMembership,
   insertAuthAuditLog,
   listActivePlayerMembershipUsers,
   readApiTokenAuthContext,
   upsertCharacterAssignment,
+  upsertMembership,
   updateApiTokenAccountSettings,
   type AuthRouteRole,
   type AuthUser,
@@ -798,6 +800,30 @@ function resolveAppAdminAuth(ctx: { req: { header: (name: string) => string | un
   return fixtureRole(ctx) === "admin" ? { kind: "authenticated", role: "admin" } : { kind: "missing" };
 }
 
+function resolveAppAdminBearerWrite(ctx: { req: { header: (name: string) => string | undefined } }): RoleResolution {
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "authenticated") {
+    if (apiAuth.context.user.is_admin) {
+      return {
+        kind: "authenticated",
+        role: "admin",
+        actorUserId: apiAuth.context.user.id,
+        actorDisplayName: apiAuth.context.user.display_name,
+        actorUser: apiAuth.context.user,
+      };
+    }
+    return { kind: "forbidden", message: "You do not have permission to use the admin API." };
+  }
+  if (apiAuth.kind === "invalid") {
+    return { kind: "invalid" };
+  }
+
+  if (fixtureRole(ctx)) {
+    return { kind: "forbidden", message: "Admin membership updates require bearer API authentication." };
+  }
+  return { kind: "missing" };
+}
+
 function parsePositiveInteger(rawValue: string): number | null {
   const parsed = Number(rawValue.trim());
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
@@ -1263,6 +1289,123 @@ app.get(ROUTES.adminUser, async (ctx) => {
   }
 
   return ctx.json(payload);
+});
+
+app.post(ROUTES.adminUserMembership, async (ctx) => {
+  const auth = resolveAppAdminBearerWrite(ctx);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const userId = parsePositiveInteger(ctx.req.param("userId") || "");
+  if (userId === null || !getUserById(config.dbPath, userId)) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readOptionalJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignSlug = String(jsonPayload.payload.campaign_slug || "").trim();
+  const role = String(jsonPayload.payload.role || "").trim();
+  const status = String(jsonPayload.payload.status || "").trim();
+  if (!campaignSlug || !(await getCampaignBySlug(config, campaignSlug))) {
+    const error = validationError("Choose a valid campaign.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (!["dm", "player", "observer"].includes(role)) {
+    const error = validationError("Choose a valid campaign role.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (!["active", "invited", "removed"].includes(status)) {
+    const error = validationError("Choose a valid membership status.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const previous = getMembership(config.dbPath, userId, campaignSlug, null);
+  const membership = upsertMembership(config.dbPath, userId, campaignSlug, { role, status });
+  const eventType =
+    previous === null || previous.status === "removed"
+      ? "membership_created"
+      : membership.status === "removed"
+        ? "membership_removed"
+        : "membership_role_changed";
+  insertAuthAuditLog(config.dbPath, {
+    actorUserId: auth.actorUserId ?? null,
+    targetUserId: userId,
+    campaignSlug,
+    characterSlug: null,
+    eventType,
+    metadata: { role: membership.role, status: membership.status, source: "admin_screen" },
+  });
+
+  const payload = await buildAdminUserDetailPayload(config, auth.actorUser || null, userId, requestQueryValues(ctx));
+  if (!payload) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({
+    ...payload,
+    message: `Membership updated: ${campaignSlug} -> ${membership.role} (${membership.status})`,
+  });
+});
+
+app.delete(ROUTES.adminUserMembershipRemove, async (ctx) => {
+  const auth = resolveAppAdminBearerWrite(ctx);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const userId = parsePositiveInteger(ctx.req.param("userId") || "");
+  if (userId === null || !getUserById(config.dbPath, userId)) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readOptionalJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignSlug = String(jsonPayload.payload.campaign_slug || "").trim();
+  const membership = getMembership(config.dbPath, userId, campaignSlug, null);
+  if (!membership) {
+    const error = validationError("Choose a valid membership to remove.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (membership.status === "removed") {
+    const error = validationError("That membership is already removed.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const updatedMembership = upsertMembership(config.dbPath, userId, membership.campaign_slug, {
+    role: membership.role,
+    status: "removed",
+  });
+  insertAuthAuditLog(config.dbPath, {
+    actorUserId: auth.actorUserId ?? null,
+    targetUserId: userId,
+    campaignSlug: membership.campaign_slug,
+    characterSlug: null,
+    eventType: "membership_removed",
+    metadata: { role: updatedMembership.role, status: updatedMembership.status, source: "admin_screen" },
+  });
+
+  const payload = await buildAdminUserDetailPayload(config, auth.actorUser || null, userId, requestQueryValues(ctx));
+  if (!payload) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({
+    ...payload,
+    message: `Removed membership for ${membership.campaign_slug}.`,
+  });
 });
 
 app.get(ROUTES.systemsImportRuns, async (ctx) => {

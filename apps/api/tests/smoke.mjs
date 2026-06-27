@@ -1679,6 +1679,252 @@ if (
   );
 }
 
+const adminMembershipPath = "/api/v1/admin/users/78/membership";
+const blockedAdminMembershipCreate = await requestJson(
+  adminMembershipPath,
+  {},
+  { method: "POST", body: { campaign_slug: "linden-pass", role: "player", status: "active" } },
+);
+if (
+  blockedAdminMembershipCreate.status !== 401 ||
+  blockedAdminMembershipCreate.payload?.error?.code !== "auth_required"
+) {
+  throw new Error(
+    `Expected unauthenticated admin membership POST auth_required 401, got ${blockedAdminMembershipCreate.status} ${JSON.stringify(blockedAdminMembershipCreate.payload)}`,
+  );
+}
+
+const fixtureAdminMembershipCreate = await requestJson(
+  adminMembershipPath,
+  { "X-CPW-Fixture-Role": "admin" },
+  { method: "POST", body: { campaign_slug: "linden-pass", role: "player", status: "active" } },
+);
+if (
+  fixtureAdminMembershipCreate.status !== 403 ||
+  fixtureAdminMembershipCreate.payload?.error?.message !== "Admin membership updates require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture admin membership POST denial, got ${fixtureAdminMembershipCreate.status} ${JSON.stringify(fixtureAdminMembershipCreate.payload)}`,
+  );
+}
+
+const playerAdminMembershipCreate = await requestJson(
+  adminMembershipPath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: { campaign_slug: "linden-pass", role: "player", status: "active" } },
+);
+if (
+  playerAdminMembershipCreate.status !== 403 ||
+  playerAdminMembershipCreate.payload?.error?.message !== "You do not have permission to use the admin API."
+) {
+  throw new Error(
+    `Expected player admin membership POST forbidden, got ${playerAdminMembershipCreate.status} ${JSON.stringify(playerAdminMembershipCreate.payload)}`,
+  );
+}
+
+const missingUserAdminMembershipCreate = await requestJson(
+  "/api/v1/admin/users/999999/membership",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { campaign_slug: "linden-pass", role: "player", status: "active" } },
+);
+if (
+  missingUserAdminMembershipCreate.status !== 404 ||
+  missingUserAdminMembershipCreate.payload?.error?.code !== "admin_user_not_found"
+) {
+  throw new Error(
+    `Expected missing admin membership user JSON 404, got ${missingUserAdminMembershipCreate.status} ${JSON.stringify(missingUserAdminMembershipCreate.payload)}`,
+  );
+}
+
+const emptyBodyAdminMembershipCreate = await requestJson(
+  adminMembershipPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: "" },
+);
+if (
+  emptyBodyAdminMembershipCreate.status !== 400 ||
+  emptyBodyAdminMembershipCreate.payload?.error?.message !== "Choose a valid campaign."
+) {
+  throw new Error(
+    `Expected empty admin membership POST to reach campaign validation, got ${JSON.stringify(emptyBodyAdminMembershipCreate.payload)}`,
+  );
+}
+
+const invalidCampaignAdminMembershipCreate = await requestJson(
+  adminMembershipPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { campaign_slug: "missing-campaign", role: "player", status: "active" } },
+);
+if (
+  invalidCampaignAdminMembershipCreate.status !== 400 ||
+  invalidCampaignAdminMembershipCreate.payload?.error?.message !== "Choose a valid campaign."
+) {
+  throw new Error(
+    `Expected invalid campaign membership validation, got ${JSON.stringify(invalidCampaignAdminMembershipCreate.payload)}`,
+  );
+}
+
+const invalidRoleAdminMembershipCreate = await requestJson(
+  adminMembershipPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { campaign_slug: "linden-pass", role: "wizard", status: "active" } },
+);
+if (
+  invalidRoleAdminMembershipCreate.status !== 400 ||
+  invalidRoleAdminMembershipCreate.payload?.error?.message !== "Choose a valid campaign role."
+) {
+  throw new Error(`Expected invalid role membership validation, got ${JSON.stringify(invalidRoleAdminMembershipCreate.payload)}`);
+}
+
+const invalidStatusAdminMembershipCreate = await requestJson(
+  adminMembershipPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { campaign_slug: "linden-pass", role: "player", status: "pending" } },
+);
+if (
+  invalidStatusAdminMembershipCreate.status !== 400 ||
+  invalidStatusAdminMembershipCreate.payload?.error?.message !== "Choose a valid membership status."
+) {
+  throw new Error(`Expected invalid status membership validation, got ${JSON.stringify(invalidStatusAdminMembershipCreate.payload)}`);
+}
+
+const emptyBodyAdminMembershipRemove = await requestJson(
+  adminMembershipPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "DELETE", body: "" },
+);
+if (
+  emptyBodyAdminMembershipRemove.status !== 400 ||
+  emptyBodyAdminMembershipRemove.payload?.error?.message !== "Choose a valid membership to remove."
+) {
+  throw new Error(
+    `Expected empty admin membership DELETE to reach remove validation, got ${JSON.stringify(emptyBodyAdminMembershipRemove.payload)}`,
+  );
+}
+
+const missingAdminMembershipRemove = await requestJson(
+  adminMembershipPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "DELETE", body: { campaign_slug: "linden-pass" } },
+);
+if (
+  missingAdminMembershipRemove.status !== 400 ||
+  missingAdminMembershipRemove.payload?.error?.message !== "Choose a valid membership to remove."
+) {
+  throw new Error(`Expected missing membership remove validation, got ${JSON.stringify(missingAdminMembershipRemove.payload)}`);
+}
+
+const adminMembershipCreate = await requestJson(
+  adminMembershipPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { campaign_slug: "linden-pass", role: "observer", status: "invited" } },
+);
+const createdMembership = adminMembershipCreate.payload?.memberships?.find(
+  (membership) => membership.campaign_slug === "linden-pass",
+);
+if (
+  adminMembershipCreate.status !== 200 ||
+  adminMembershipCreate.payload?.ok !== true ||
+  adminMembershipCreate.payload?.message !== "Membership updated: linden-pass -> observer (invited)" ||
+  createdMembership?.role !== "observer" ||
+  createdMembership?.status !== "invited"
+) {
+  throw new Error(`Unexpected admin membership create payload: ${JSON.stringify(adminMembershipCreate.payload)}`);
+}
+
+const adminMembershipUpdate = await requestJson(
+  adminMembershipPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { campaign_slug: "linden-pass", role: "player", status: "active" } },
+);
+const updatedMembership = adminMembershipUpdate.payload?.memberships?.find(
+  (membership) => membership.campaign_slug === "linden-pass",
+);
+if (
+  adminMembershipUpdate.status !== 200 ||
+  adminMembershipUpdate.payload?.ok !== true ||
+  adminMembershipUpdate.payload?.message !== "Membership updated: linden-pass -> player (active)" ||
+  updatedMembership?.role !== "player" ||
+  updatedMembership?.status !== "active" ||
+  adminMembershipUpdate.payload?.membership_form_defaults?.campaign_slug !== "linden-pass"
+) {
+  throw new Error(`Unexpected admin membership update payload: ${JSON.stringify(adminMembershipUpdate.payload)}`);
+}
+
+const adminMembershipRemove = await requestJson(
+  adminMembershipPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "DELETE", body: { campaign_slug: "linden-pass" } },
+);
+const removedMembership = adminMembershipRemove.payload?.memberships?.find(
+  (membership) => membership.campaign_slug === "linden-pass",
+);
+if (
+  adminMembershipRemove.status !== 200 ||
+  adminMembershipRemove.payload?.ok !== true ||
+  adminMembershipRemove.payload?.message !== "Removed membership for linden-pass." ||
+  removedMembership?.role !== "player" ||
+  removedMembership?.status !== "removed"
+) {
+  throw new Error(`Unexpected admin membership remove payload: ${JSON.stringify(adminMembershipRemove.payload)}`);
+}
+
+const alreadyRemovedAdminMembershipRemove = await requestJson(
+  adminMembershipPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "DELETE", body: { campaign_slug: "linden-pass" } },
+);
+if (
+  alreadyRemovedAdminMembershipRemove.status !== 400 ||
+  alreadyRemovedAdminMembershipRemove.payload?.error?.message !== "That membership is already removed."
+) {
+  throw new Error(
+    `Expected already-removed membership validation, got ${JSON.stringify(alreadyRemovedAdminMembershipRemove.payload)}`,
+  );
+}
+
+const adminMembershipAuditDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const adminMembershipRow = adminMembershipAuditDb
+  .prepare("SELECT role, status FROM campaign_memberships WHERE user_id = ? AND campaign_slug = ?")
+  .get(78, "linden-pass");
+const adminMembershipAuditRows = adminMembershipAuditDb
+  .prepare(
+    "SELECT actor_user_id, target_user_id, campaign_slug, event_type, metadata_json FROM auth_audit_log WHERE target_user_id = ? AND campaign_slug = ? AND event_type LIKE 'membership_%' ORDER BY id ASC",
+  )
+  .all(78, "linden-pass");
+adminMembershipAuditDb.close();
+const parsedAdminMembershipAudits = adminMembershipAuditRows.map((row) => ({
+  actor_user_id: row.actor_user_id,
+  target_user_id: row.target_user_id,
+  campaign_slug: row.campaign_slug,
+  event_type: row.event_type,
+  metadata: JSON.parse(row.metadata_json),
+}));
+if (
+  adminMembershipRow?.role !== "player" ||
+  adminMembershipRow?.status !== "removed" ||
+  parsedAdminMembershipAudits.length !== 3 ||
+  parsedAdminMembershipAudits[0]?.event_type !== "membership_created" ||
+  parsedAdminMembershipAudits[0]?.metadata?.role !== "observer" ||
+  parsedAdminMembershipAudits[0]?.metadata?.status !== "invited" ||
+  parsedAdminMembershipAudits[1]?.event_type !== "membership_role_changed" ||
+  parsedAdminMembershipAudits[1]?.metadata?.role !== "player" ||
+  parsedAdminMembershipAudits[1]?.metadata?.status !== "active" ||
+  parsedAdminMembershipAudits[2]?.event_type !== "membership_removed" ||
+  parsedAdminMembershipAudits[2]?.metadata?.role !== "player" ||
+  parsedAdminMembershipAudits[2]?.metadata?.status !== "removed" ||
+  parsedAdminMembershipAudits.some(
+    (row) => row.actor_user_id !== 77 || row.target_user_id !== 78 || row.campaign_slug !== "linden-pass" || row.metadata?.source !== "admin_screen",
+  )
+) {
+  throw new Error(
+    `Unexpected admin membership database/audit state: ${JSON.stringify({
+      adminMembershipRow,
+      parsedAdminMembershipAudits,
+    })}`,
+  );
+}
+
 const blockedImportRuns = await requestJson("/api/v1/systems/import-runs");
 if (blockedImportRuns.status !== 401 || blockedImportRuns.payload?.error?.code !== "auth_required") {
   throw new Error(

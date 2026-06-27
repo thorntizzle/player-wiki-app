@@ -502,6 +502,85 @@ export function hasActivePlayerMembership(dbPath: string, userId: number, campai
   }
 }
 
+export function getMembership(
+  dbPath: string,
+  userId: number,
+  campaignSlug: string,
+  statuses: string[] | null = ["active"],
+): AuthMembership | null {
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const row = database
+      .prepare("SELECT * FROM campaign_memberships WHERE user_id = ? AND campaign_slug = ?")
+      .get(userId, campaignSlug) as MembershipRow | undefined;
+    if (!row) {
+      return null;
+    }
+    const membership = serializeMembership(row);
+    if (statuses !== null && !statuses.includes(membership.status)) {
+      return null;
+    }
+    return membership;
+  } finally {
+    database.close();
+  }
+}
+
+export function upsertMembership(
+  dbPath: string,
+  userId: number,
+  campaignSlug: string,
+  {
+    role,
+    status = "active",
+  }: {
+    role: string;
+    status?: string;
+  },
+): AuthMembership {
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const now = utcIsoTimestamp();
+    const writeMembership = database.transaction(() => {
+      const existing = database
+        .prepare("SELECT * FROM campaign_memberships WHERE user_id = ? AND campaign_slug = ?")
+        .get(userId, campaignSlug) as MembershipRow | undefined;
+      if (!existing) {
+        database
+          .prepare(
+            `INSERT INTO campaign_memberships (
+              user_id,
+              campaign_slug,
+              role,
+              status,
+              created_at,
+              updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run(userId, campaignSlug, role, status, now, now);
+      } else {
+        database
+          .prepare(
+            `UPDATE campaign_memberships
+             SET role = ?, status = ?, updated_at = ?
+             WHERE user_id = ? AND campaign_slug = ?`,
+          )
+          .run(role, status, now, userId, campaignSlug);
+      }
+      return database
+        .prepare("SELECT * FROM campaign_memberships WHERE user_id = ? AND campaign_slug = ?")
+        .get(userId, campaignSlug) as MembershipRow | undefined;
+    });
+    const row = writeMembership();
+    if (!row) {
+      throw new Error("Membership was not readable after write.");
+    }
+    return serializeMembership(row);
+  } finally {
+    database.close();
+  }
+}
+
 export function listActivePlayerMembershipUsers(dbPath: string, campaignSlug: string): AuthUser[] {
   const database = new Database(dbPath, { fileMustExist: true, readonly: true });
   try {
