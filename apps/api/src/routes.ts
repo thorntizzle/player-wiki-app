@@ -1856,6 +1856,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "campaign_not_found",
     },
   },
+  {
+    method: "GET",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/advanced-editor",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/advanced-editor",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "GET",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/advanced-editor",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1985,4 +2000,5 @@ export const ROUTES = {
   meViewAsClear: IMPLEMENTED_ROUTES[125].honoPath,
   characterCreateContext: IMPLEMENTED_ROUTES[126].honoPath,
   characterCreate: IMPLEMENTED_ROUTES[127].honoPath,
+  characterAdvancedEditor: IMPLEMENTED_ROUTES[128].honoPath,
 } as const;

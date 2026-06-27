@@ -121,6 +121,7 @@ import {
   type FixtureSystemsRole,
 } from "./systems/sources.js";
 import {
+  buildCharacterAdvancedEditorPayload,
   buildCharacterAuthoringLinks,
   buildDndCharacterCreateContext,
   buildDndCreateCharacter,
@@ -5592,6 +5593,70 @@ app.get(ROUTES.characterDetail, async (ctx) => {
       controls: canUseControls ? buildCharacterReadControlsPayload(campaign, character, auth) : null,
     }),
   );
+});
+
+app.get(ROUTES.characterAdvancedEditor, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character || String(character.definition.status || "").trim() !== "active") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!canReadCharacterDetail(campaign, characterSlug, auth)) {
+    const error = forbidden("You do not have access to this character.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const stateRecord = readCharacterStateSnapshot(config, campaign.slug, character.character_slug, character.definition);
+  const editorPayload = buildCharacterAdvancedEditorPayload({
+    campaign,
+    characterSlug,
+    definition: character.definition,
+    state: stateRecord.state,
+    stateRevision: stateRecord.revision,
+  });
+
+  return ctx.json({
+    ok: true,
+    message: null,
+    campaign,
+    character: {
+      definition: character.definition,
+      import_metadata: character.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: character.character_slug,
+        revision: stateRecord.revision,
+        state: stateRecord.state,
+        updated_at: stateRecord.updated_at ?? null,
+        updated_by_user_id: stateRecord.updated_by_user_id ?? null,
+      },
+    },
+    lane: editorPayload.lane,
+    supported: editorPayload.supported,
+    unsupported_message: editorPayload.unsupported_message,
+    links: editorPayload.links,
+    editor: editorPayload.editor,
+  });
 });
 
 app.put(ROUTES.contentCharacterUpdate, async (ctx) => {

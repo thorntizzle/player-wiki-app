@@ -9314,6 +9314,22 @@ if (
   throw new Error(`Unexpected Xianxia character roster tools payload: ${JSON.stringify(xianxiaCharacterRosterTools.payload)}`);
 }
 
+const unsupportedAdvancedEditor = await requestJson(
+  "/api/v1/campaigns/linden-pass/characters/arden-march/advanced-editor",
+  { Authorization: `Bearer ${dmApiToken}` },
+);
+if (
+  unsupportedAdvancedEditor.status !== 200 ||
+  unsupportedAdvancedEditor.payload?.ok !== true ||
+  unsupportedAdvancedEditor.payload?.supported !== false ||
+  unsupportedAdvancedEditor.payload?.lane !== "unsupported" ||
+  unsupportedAdvancedEditor.payload?.editor !== null ||
+  unsupportedAdvancedEditor.payload?.unsupported_message !==
+    "Advanced Editor is currently available only for DND-5E native character tools in Gen2."
+) {
+  throw new Error(`Unexpected unsupported advanced-editor payload: ${JSON.stringify(unsupportedAdvancedEditor.payload)}`);
+}
+
 const emptyContentConfigPatch = await requestJson(
   "/api/v1/campaigns/linden-pass/content/config",
   { Authorization: `Bearer ${dmApiToken}` },
@@ -9575,6 +9591,77 @@ const missingCharacterDetail = await requestJson("/api/v1/campaigns/linden-pass/
 if (missingCharacterDetail.status !== 404 || missingCharacterDetail.payload?.error?.code !== "content_character_not_found") {
   throw new Error(
     `Expected missing character detail JSON 404, got ${missingCharacterDetail.status} ${missingCharacterDetail.payload?.error?.code}`,
+  );
+}
+
+const characterAdvancedEditorPath = "/api/v1/campaigns/linden-pass/characters/arden-march/advanced-editor";
+const anonymousCharacterAdvancedEditor = await requestJson(characterAdvancedEditorPath);
+if (
+  anonymousCharacterAdvancedEditor.status !== 401 ||
+  anonymousCharacterAdvancedEditor.payload?.error?.code !== "auth_required"
+) {
+  throw new Error(
+    `Expected anonymous advanced-editor auth_required, got ${anonymousCharacterAdvancedEditor.status} ${JSON.stringify(anonymousCharacterAdvancedEditor.payload)}`,
+  );
+}
+
+const dmCharacterAdvancedEditor = await requestJson(characterAdvancedEditorPath, {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  dmCharacterAdvancedEditor.status !== 200 ||
+  dmCharacterAdvancedEditor.payload?.ok !== true ||
+  dmCharacterAdvancedEditor.payload?.supported !== true ||
+  dmCharacterAdvancedEditor.payload?.lane !== "dnd5e" ||
+  dmCharacterAdvancedEditor.payload?.links?.advanced_editor_url !== "/app-next/campaigns/linden-pass/characters/arden-march/edit" ||
+  dmCharacterAdvancedEditor.payload?.links?.flask_advanced_editor_url !== "/campaigns/linden-pass/characters/arden-march/edit" ||
+  dmCharacterAdvancedEditor.payload?.editor?.state_revision !== dmCharacterAdvancedEditor.payload?.character?.state_record?.revision ||
+  dmCharacterAdvancedEditor.payload?.editor?.reference_fields?.[0]?.name !== "physical_description_markdown" ||
+  dmCharacterAdvancedEditor.payload?.editor?.reference_fields?.[1]?.name !== "background_markdown" ||
+  !Array.isArray(dmCharacterAdvancedEditor.payload?.editor?.feature_rows) ||
+  dmCharacterAdvancedEditor.payload.editor.feature_rows.length === 0 ||
+  !Array.isArray(dmCharacterAdvancedEditor.payload?.editor?.equipment_rows) ||
+  dmCharacterAdvancedEditor.payload.editor.equipment_rows.length === 0
+) {
+  throw new Error(`Unexpected DM advanced-editor payload: ${JSON.stringify(dmCharacterAdvancedEditor.payload)}`);
+}
+
+const assignedPlayerCharacterAdvancedEditor = await requestJson(characterAdvancedEditorPath, {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (
+  assignedPlayerCharacterAdvancedEditor.status !== 200 ||
+  assignedPlayerCharacterAdvancedEditor.payload?.ok !== true ||
+  assignedPlayerCharacterAdvancedEditor.payload?.supported !== true
+) {
+  throw new Error(
+    `Unexpected assigned-player advanced-editor payload: ${assignedPlayerCharacterAdvancedEditor.status} ${JSON.stringify(assignedPlayerCharacterAdvancedEditor.payload)}`,
+  );
+}
+
+const unassignedPlayerCharacterAdvancedEditor = await requestJson(
+  "/api/v1/campaigns/linden-pass/characters/selene-brook/advanced-editor",
+  { Authorization: `Bearer ${playerApiToken}` },
+);
+if (
+  unassignedPlayerCharacterAdvancedEditor.status !== 403 ||
+  unassignedPlayerCharacterAdvancedEditor.payload?.error?.code !== "forbidden"
+) {
+  throw new Error(
+    `Expected unassigned player advanced-editor forbidden, got ${unassignedPlayerCharacterAdvancedEditor.status} ${JSON.stringify(unassignedPlayerCharacterAdvancedEditor.payload)}`,
+  );
+}
+
+const missingCharacterAdvancedEditor = await requestJson(
+  "/api/v1/campaigns/linden-pass/characters/missing-character/advanced-editor",
+  { Authorization: `Bearer ${dmApiToken}` },
+);
+if (
+  missingCharacterAdvancedEditor.status !== 404 ||
+  missingCharacterAdvancedEditor.payload?.error?.code !== "content_character_not_found"
+) {
+  throw new Error(
+    `Expected missing advanced-editor JSON 404, got ${missingCharacterAdvancedEditor.status} ${missingCharacterAdvancedEditor.payload?.error?.code}`,
   );
 }
 

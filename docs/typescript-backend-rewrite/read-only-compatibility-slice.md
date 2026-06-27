@@ -136,6 +136,8 @@ fixture database.
   - `POST /api/v1/campaigns/:campaignSlug/characters/create`
 - Added the Character detail read endpoint:
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
+- Added the Character Advanced Editor context read endpoint:
+  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor`
 - Added the Xianxia manual import context read endpoint:
   - `GET /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual`
 - Added the Xianxia manual import preview/confirm POST endpoint:
@@ -639,6 +641,7 @@ fixture database.
   - validates the Character roster read route, including unauthenticated auth_required behavior, DM full-roster payloads, `q` search filtering, assigned-player-only visibility, missing-campaign JSON, roster links/tools, and state-backed card fields.
   - validates the Character create route pair, including unauthenticated auth_required behavior, player forbidden behavior, DM/admin DND-5E builder-ready context shape, DND-5E pilot submit success/duplicate/out-of-pilot validation, missing-campaign JSON, unsupported-system JSON, Xianxia create field/default payloads, and Xianxia native create writes with initialized SQLite state and duplicate-slug `character_exists` after switching the copied fixture campaign to Xianxia.
   - validates the Character detail read route, including unauthenticated auth_required behavior, DM and assigned-player success payloads, unassigned-player forbidden behavior, missing-character JSON, state metadata, controls metadata, protected portrait URL/media type, and safe CharacterPane optional shells.
+  - validates the Character Advanced Editor context read route, including unauthenticated auth_required behavior, DM and assigned-player DND-5E success payloads, unassigned-player forbidden behavior, missing-character JSON, unsupported non-DND payloads, edit-page links, state revision, reference field names, and non-empty feature/equipment row shells. The PUT/save route remains pending.
   - validates the Character Controls JSON assignment/clear/delete slice, including blocked DM assignment, successful app-admin assignment, assignment and audit SQLite rows, assignment clear and audit rows, blocked player delete, bad confirmation validation, successful DM checked delete, copied-fixture file removal, `character_state` and assignment cleanup, and `character_deleted` audit metadata.
   - validates character rest preview/apply auth, no-access forbidden, invalid-rest, stale-revision, DND long-rest, and Xianxia long-rest behavior against disposable copied fixture files and SQLite state.
   - validates character feature-state stale conflict, unsupported key validation, missing Arcane Armor feature validation, and assigned-player Arcane Armor toggle persistence against disposable copied fixture files and SQLite state.

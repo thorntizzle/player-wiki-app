@@ -1410,6 +1410,55 @@ def test_typescript_dnd_character_create_pilot_writes_definition_import_and_stat
     assert "does not support subclass choices" in rejected_payload["error"]["message"]
 
 
+def test_typescript_character_advanced_editor_context_matches_flask_shell(
+    typescript_api_mutation_server,
+    client,
+    app,
+    users,
+):
+    character_slug = "arden-march"
+    flask_dm_token = _issue_api_token(app, users["dm"]["email"], label="dm-character-advanced-editor-golden")
+
+    flask_response = client.get(
+        f"/api/v1/campaigns/linden-pass/characters/{character_slug}/advanced-editor",
+        headers=_api_headers(flask_dm_token),
+    )
+    assert flask_response.status_code == 200
+    flask_payload = flask_response.get_json()
+    assert flask_payload["ok"] is True
+    assert flask_payload["supported"] is True
+    assert flask_payload["lane"] == "dnd5e"
+
+    status, payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{character_slug}/advanced-editor",
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["message"] is None
+    assert payload["campaign"] == flask_payload["campaign"]
+    assert payload["character"]["definition"] == flask_payload["character"]["definition"]
+    assert payload["character"]["import_metadata"] == flask_payload["character"]["import_metadata"]
+    assert payload["supported"] is True
+    assert payload["lane"] == "dnd5e"
+    assert payload["unsupported_message"] == ""
+    assert payload["links"]["advanced_editor_url"] == flask_payload["links"]["advanced_editor_url"]
+    assert payload["links"]["flask_advanced_editor_url"] == flask_payload["links"]["flask_advanced_editor_url"]
+    assert payload["links"]["character_url"] == flask_payload["links"]["character_url"]
+    assert payload["links"]["flask_character_url"] == flask_payload["links"]["flask_character_url"]
+
+    editor = payload["editor"]
+    assert editor["state_revision"] == payload["character"]["state_record"]["revision"]
+    assert [field["name"] for field in editor["reference_fields"]] == [
+        field["name"] for field in flask_payload["editor"]["reference_fields"]
+    ]
+    assert editor["reference_fields"][0]["label"] == flask_payload["editor"]["reference_fields"][0]["label"]
+    assert editor["reference_fields"][1]["label"] == flask_payload["editor"]["reference_fields"][1]["label"]
+    assert editor["feature_rows"]
+    assert editor["equipment_rows"]
+
+
 def test_typescript_content_character_backup_restore_rehearsal_recovers_files_assets_and_sqlite(
     tmp_path,
     typescript_api_mutation_server,

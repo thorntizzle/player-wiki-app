@@ -149,6 +149,8 @@ const XIANXIA_DAO_DEFAULT_MAX = 3;
 const XIANXIA_DIRECT_ADVANCEMENT_GENERIC_TECHNIQUE_KEYS = new Set(["cultivation", "meditation", "conditioning", "training"]);
 const NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE =
   "This campaign can still use the character roster, read-mode sheets, session-mode sheets, and Controls. Native DND-5E builder, edit, level-up, repair, retraining, PDF-import, and spellcasting tools are not implemented for this campaign system.";
+const ADVANCED_EDITOR_UNSUPPORTED_MESSAGE =
+  "Advanced Editor is currently available only for DND-5E native character tools in Gen2.";
 const DND_SYSTEMS_OPTION_PREFIX = "systems:";
 const DND_PHB_SOURCE_ID = "PHB";
 const DND_SUPPORTED_NON_PHB_BASE_CLASSES = new Set(["TCE|artificer"]);
@@ -208,6 +210,19 @@ export interface DndCreateBuildResult {
   initialState?: Record<string, unknown>;
 }
 
+export interface CharacterAdvancedEditorPayload {
+  lane: "dnd5e" | "unsupported";
+  supported: boolean;
+  unsupported_message: string;
+  links: Record<string, string>;
+  editor: {
+    state_revision: number;
+    reference_fields: Array<Record<string, unknown>>;
+    feature_rows: Array<Record<string, unknown>>;
+    equipment_rows: Array<Record<string, unknown>>;
+  } | null;
+}
+
 function normalizeSystemKey(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
@@ -253,6 +268,139 @@ export function buildCharacterAuthoringLinks(campaign: CampaignViewModel) {
     links.gen2_import_xianxia_url = campaignHref(campaignSlug, "characters/import/xianxia-manual");
   }
   return links;
+}
+
+export function buildCharacterAdvancedEditorLinks(campaign: CampaignViewModel, characterSlug: string) {
+  return {
+    ...buildCharacterAuthoringLinks(campaign),
+    advanced_editor_url: campaignHref(campaign.slug, `characters/${characterSlug}/edit`),
+    flask_advanced_editor_url: flaskCampaignHref(campaign.slug, `characters/${characterSlug}/edit`),
+    character_url: campaignHref(campaign.slug, `characters/${characterSlug}`),
+    gen2_character_url: campaignHref(campaign.slug, `characters/${characterSlug}`),
+    flask_character_url: flaskCampaignHref(campaign.slug, `characters/${characterSlug}`),
+  };
+}
+
+function stringifyEditorValue(value: unknown): string {
+  return value === null || value === undefined ? "" : String(value);
+}
+
+function buildReferenceField(
+  name: string,
+  label: string,
+  helpText: string,
+  value: unknown,
+): Record<string, unknown> {
+  return {
+    name,
+    label,
+    help_text: helpText,
+    value: stringifyEditorValue(value),
+  };
+}
+
+export function buildCharacterAdvancedEditorPayload({
+  campaign,
+  characterSlug,
+  definition,
+  state,
+  stateRevision,
+}: {
+  campaign: CampaignViewModel;
+  characterSlug: string;
+  definition: Record<string, unknown>;
+  state: Record<string, unknown>;
+  stateRevision: number;
+}): CharacterAdvancedEditorPayload {
+  const campaignLane = nativeCharacterCreateLane(campaign.system);
+  const characterLane = nativeCharacterCreateLane(definition.system);
+  const supported = campaignLane === "dnd5e" && characterLane === "dnd5e";
+  const links = buildCharacterAdvancedEditorLinks(campaign, characterSlug);
+  if (!supported) {
+    return {
+      lane: "unsupported",
+      supported: false,
+      unsupported_message: ADVANCED_EDITOR_UNSUPPORTED_MESSAGE,
+      links,
+      editor: null,
+    };
+  }
+
+  const stateNotes = asRecord(state.notes);
+  const profile = asRecord(definition.profile);
+  const referenceNotes = asRecord(definition.reference_notes);
+  const features = asArray(definition.features).map((value, index) => {
+    const feature = asRecord(value);
+    return {
+      row_id: stringifyEditorValue(feature.id || feature.feature_key || feature.name || `feature-${index + 1}`),
+      name: stringifyEditorValue(feature.name || `Feature ${index + 1}`),
+      category: stringifyEditorValue(feature.category),
+      tracker_ref: stringifyEditorValue(feature.tracker_ref),
+      source: stringifyEditorValue(feature.source),
+      description_markdown: stringifyEditorValue(feature.description_markdown),
+    };
+  });
+  const equipment = asArray(definition.equipment_catalog).map((value, index) => {
+    const item = asRecord(value);
+    return {
+      row_id: stringifyEditorValue(item.id || item.item_id || item.name || `equipment-${index + 1}`),
+      name: stringifyEditorValue(item.name || `Equipment ${index + 1}`),
+      default_quantity: item.default_quantity ?? null,
+      weight: stringifyEditorValue(item.weight),
+      is_equipped: Boolean(item.is_equipped),
+      tags: asArray(item.tags).map((tag) => stringifyEditorValue(tag)).filter((tag) => tag.length > 0),
+    };
+  });
+
+  return {
+    lane: "dnd5e",
+    supported: true,
+    unsupported_message: "",
+    links,
+    editor: {
+      state_revision: stateRevision,
+      reference_fields: [
+        buildReferenceField(
+          "physical_description_markdown",
+          "Physical Description",
+          "Markdown shown on the Personal page for durable appearance notes.",
+          stateNotes.physical_description_markdown,
+        ),
+        buildReferenceField(
+          "background_markdown",
+          "Background",
+          "Markdown shown on the Personal page for durable background notes.",
+          stateNotes.background_markdown ?? stateNotes.personal_background_markdown,
+        ),
+        buildReferenceField(
+          "biography_markdown",
+          "Biography",
+          "Markdown shown on the Notes page for reference-level character history.",
+          profile.biography_markdown,
+        ),
+        buildReferenceField(
+          "personality_markdown",
+          "Personality",
+          "Markdown shown on the Notes page for personality traits, ideals, bonds, flaws, or similar notes.",
+          profile.personality_markdown,
+        ),
+        buildReferenceField(
+          "additional_notes_markdown",
+          "Additional Notes",
+          "Markdown shown on the Notes page for other persistent reference material.",
+          referenceNotes.additional_notes_markdown,
+        ),
+        buildReferenceField(
+          "allies_and_organizations_markdown",
+          "Allies and Organizations",
+          "Markdown shown on the Notes page for friendly factions, patrons, allies, or affiliations.",
+          referenceNotes.allies_and_organizations_markdown,
+        ),
+      ],
+      feature_rows: features,
+      equipment_rows: equipment,
+    },
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

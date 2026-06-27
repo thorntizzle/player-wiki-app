@@ -153,6 +153,7 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/characters/create`
   - `POST /api/v1/campaigns/:campaignSlug/characters/create` (Xianxia native create; narrow DND-5E PHB Fighter pilot; full DND builder parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
+  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor` (context read only; PUT/save parity pending)
   - `PATCH /api/v1/campaigns/:campaignSlug/characters/:characterSlug/sheet-edit`
   - `GET /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual`
   - `POST /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual` (preview and confirmed local fixture/SQLite create)
@@ -556,6 +557,11 @@ Route parity check command:
   shells, permissions, controls metadata, protected portrait URLs from existing asset references,
   and Flask/Gen2 detail links. Full Flask presenter derivation remains outside this detail-read
   slice.
+- The Character Advanced Editor context route now serves `GET .../characters/:characterSlug/advanced-editor`,
+  preserving Flask-compatible campaign/missing-character envelopes, auth and assigned-owner access
+  checks, DND-5E support detection, unsupported non-DND payloads, edit-page links, state revision,
+  reference fields, and feature/equipment row shells. The `PUT .../advanced-editor` save route,
+  native edit derivation, state merging, and definition YAML writes remain pending.
 - The first Xianxia inventory equipment write now serves
   `PATCH .../characters/:characterSlug/session/xianxia-inventory/:itemId/equipped`. It preserves the
   bearer-only session-state write gate, shared revision conflicts, Xianxia-only validation, unknown

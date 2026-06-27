@@ -900,6 +900,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/advanced-editor",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Character Advanced Editor context read route with Flask-compatible missing-campaign, missing-character, auth_required, forbidden, supported DND-5E lane, unsupported non-DND lane, edit-page links, state_revision, reference_fields, feature_rows, and equipment_rows. PUT/save parity remains deferred."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/characters/create",
       "route_family": "api_v1_characters",
       "status": "implemented_fixture_sqlite_readonly",
