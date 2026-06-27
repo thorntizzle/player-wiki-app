@@ -5803,12 +5803,10 @@ app.put(ROUTES.characterAdvancedEditorUpdate, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const writeResult = await writeCampaignCharacterDefinitionFile(
-    config,
-    campaign.slug,
-    characterSlug,
-    referenceUpdate.definition,
-  );
+  const writeResult = await writeCampaignContentCharacter(config, campaign.slug, characterSlug, {
+    definition: referenceUpdate.definition,
+    import_metadata: buildManagedCharacterImportMetadata(campaign.slug, characterSlug, character.import_metadata),
+  });
   if (writeResult.status === "not_found") {
     const error = contentCharacterNotFound(campaign.slug, characterSlug);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);

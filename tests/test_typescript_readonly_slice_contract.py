@@ -1667,6 +1667,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert get_status == 200
     expected_revision = get_payload["editor"]["state_revision"]
     base_stats = dict(get_payload["character"]["definition"]["stats"])
+    original_import_metadata = dict(get_payload["character"]["import_metadata"])
     assert not base_stats.get("manual_adjustments")
 
     fixture_status, fixture_payload = _to_json(
@@ -1813,6 +1814,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         / character_slug
         / "definition.yaml"
     )
+    import_path = definition_path.parent / "import.yaml"
     definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
     assert definition["proficiencies"]["languages"] == ["Common", "Elvish", "Draconic"]
     assert definition["proficiencies"]["armor"] == ["Light Armor", "Medium Armor"]
@@ -1835,6 +1837,15 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert definition["profile"]["personality_markdown"] == values["personality_markdown"]
     assert definition["reference_notes"]["additional_notes_markdown"] == values["additional_notes_markdown"]
     assert definition["reference_notes"]["allies_and_organizations_markdown"] == values["allies_and_organizations_markdown"]
+    assert save_payload["character"]["import_metadata"]["source_path"] == original_import_metadata["source_path"]
+    assert save_payload["character"]["import_metadata"]["parser_version"] == "2026-04-21.01"
+    assert save_payload["character"]["import_metadata"]["import_status"] == "managed"
+    assert save_payload["character"]["import_metadata"]["warnings"] == []
+    assert save_payload["character"]["import_metadata"]["imported_at_utc"]
+    written_import = yaml.safe_load(import_path.read_text(encoding="utf-8"))
+    if hasattr(written_import.get("imported_at_utc"), "isoformat"):
+        written_import["imported_at_utc"] = written_import["imported_at_utc"].isoformat()
+    assert written_import == save_payload["character"]["import_metadata"]
 
     clear_stat_values = {
         "stat_adjustment_max_hp": "",

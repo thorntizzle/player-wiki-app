@@ -586,11 +586,11 @@ Do not implement these routes as part of the parity program unless a later archi
   The `PUT .../advanced-editor` reference/proficiency/stat-adjustment/recoverable-penalty/custom-feature/manual-equipment-field slice now serves
   bearer-token writes for the existing reference, proficiency, stat-adjustment, recoverable-penalty, unlinked custom-feature, and unlinked manual-equipment fields,
   preserving fixture-role write denial, unsupported non-DND validation, stale revision conflicts, copied-fixture
-  `definition.yaml` writes for profile/reference notes/proficiencies/stat adjustments/recoverable penalties/custom features/manual equipment,
+  `definition.yaml` and managed `import.yaml` writes for profile/reference notes/proficiencies/stat adjustments/recoverable penalties/custom features/manual equipment,
   SQLite notes persistence for state-backed reference fields, current-HP clamping for lowered max HP, SQLite inventory
   reconciliation for unlinked manual equipment rows, SQLite resource reconciliation for unlinked custom-feature trackers,
   and refreshed Advanced Editor payloads. Linked custom-feature page/choice/spell derivation,
-  page-linked manual item option derivation, full native edit derivation, `import.yaml` writes, and complete Advanced Editor
+  page-linked manual item option derivation, full native edit derivation, and complete Advanced Editor
   parity remain pending.
 - The Character advancement context shell family now serves `GET .../characters/:characterSlug/retraining`,
   `GET .../level-up`, and `GET .../progression-repair`, preserving Flask-compatible campaign/missing-character
