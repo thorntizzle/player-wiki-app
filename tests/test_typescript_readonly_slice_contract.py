@@ -2918,6 +2918,347 @@ def test_typescript_character_cultivation_context_shell_and_supported_xianxia_co
         "notes": "Stepped through falling light.",
     }
 
+    low_realm_slug = "api-cultivation-realm-low"
+    low_realm_body = deepcopy(xianxia_body)
+    low_realm_body["definition"]["name"] = "API Cultivation Realm Low"
+    low_realm_body["definition"]["xianxia"]["attributes"] = {
+        "str": 9,
+        "dex": 2,
+        "con": 1,
+        "int": 1,
+        "wis": 1,
+        "cha": 1,
+    }
+    low_realm_body["definition"]["xianxia"]["efforts"] = {
+        "basic": 8,
+        "weapon": 1,
+        "guns_explosive": 1,
+        "magic": 1,
+        "ultimate": 1,
+    }
+    low_realm_create_status, _low_realm_create_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/characters/{low_realm_slug}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body=low_realm_body,
+    )
+    assert low_realm_create_status == 200
+    low_realm_status, low_realm_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{low_realm_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+    assert low_realm_status == 200
+    low_realm_revision = low_realm_payload["character"]["state_record"]["revision"]
+    low_prerequisite_status, low_prerequisite_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{low_realm_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": low_realm_revision,
+            "cultivation_action": "start_realm_ascension_review",
+            "target_realm": "Immortal",
+            "realm_ascension_gm_review_note": "GM approved the review.",
+        },
+    )
+    assert low_prerequisite_status == 400
+    assert low_prerequisite_payload["error"]["code"] == "validation_error"
+    assert (
+        low_prerequisite_payload["error"]["message"]
+        == "Realm ascension prerequisite not met: raise at least one Attribute or Effort to 10 before ascending from Mortal to Immortal. Current highest Stat is Strength at 9."
+    )
+    assert _read_sqlite_character_state(
+        typescript_api_mutation_server["db_path"],
+        low_realm_slug,
+    )["revision"] == low_realm_revision
+
+    realm_slug = "api-cultivation-realm"
+    realm_body = deepcopy(xianxia_body)
+    realm_body["definition"]["name"] = "API Cultivation Realm"
+    realm_xianxia = realm_body["definition"]["xianxia"]
+    realm_xianxia["actions_per_turn"] = 2
+    realm_xianxia["attributes"] = {
+        "str": 10,
+        "dex": 2,
+        "con": 4,
+        "int": 1,
+        "wis": 3,
+        "cha": 1,
+    }
+    realm_xianxia["efforts"] = {
+        "basic": 4,
+        "weapon": 3,
+        "guns_explosive": 2,
+        "magic": 5,
+        "ultimate": 1,
+    }
+    realm_xianxia["energies"] = {"jing": {"max": 4}, "qi": {"max": 5}, "shen": {"max": 6}}
+    realm_xianxia["yin_yang"] = {"yin_max": 3, "yang_max": 4}
+    realm_xianxia["dao"] = {"max": 4}
+    realm_xianxia["insight"] = {"available": 11, "spent": 7}
+    realm_xianxia["durability"] = {
+        "hp_max": 32,
+        "stance_max": 34,
+        "manual_armor_bonus": 2,
+        "defense": 16,
+    }
+    realm_xianxia["skills"] = {"trained": ["Qi Sense", "Balance"]}
+    realm_xianxia["equipment"] = {
+        "necessary_weapons": [{"name": "Practice Staff"}],
+        "necessary_tools": [{"name": "Meditation Mat"}],
+    }
+    realm_xianxia["variants"] = [{"name": "Approved variant", "status": "approved"}]
+    realm_xianxia["dao_immolating_techniques"] = {
+        "prepared": [{"name": "Last Dawn"}],
+        "use_history": [{"name": "Old Flame", "approval_status": "pending"}],
+    }
+    realm_xianxia["approval_requests"] = [{"name": "Constraint", "status": "pending"}]
+    realm_xianxia["companions"] = [{"name": "Paper Crane"}]
+    realm_create_status, _realm_create_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/characters/{realm_slug}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body=realm_body,
+    )
+    assert realm_create_status == 200
+    realm_status, realm_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{realm_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+    assert realm_status == 200
+    realm_revision = realm_payload["character"]["state_record"]["revision"]
+    realm_state = deepcopy(realm_payload["character"]["state_record"]["state"])
+    realm_state["vitals"] = {"current_hp": 21, "temp_hp": 4}
+    realm_state["notes"]["player_notes_markdown"] = "Preserve this note."
+    realm_state["xianxia"]["vitals"] = {
+        "current_hp": 21,
+        "temp_hp": 4,
+        "current_stance": 18,
+        "temp_stance": 3,
+    }
+    realm_state["xianxia"]["energies"] = {
+        "jing": {"current": 2},
+        "qi": {"current": 3},
+        "shen": {"current": 4},
+    }
+    realm_state["xianxia"]["yin_yang"] = {"yin_current": 2, "yang_current": 3}
+    realm_state["xianxia"]["dao"] = {"current": 2}
+    realm_state["xianxia"]["active_stance"] = {"name": "Mountain Root"}
+    realm_state["xianxia"]["active_aura"] = {"name": "Quiet Moon"}
+    realm_state["xianxia"]["notes"] = {"player_notes_markdown": "Preserve this note."}
+    _write_sqlite_character_state(
+        typescript_api_mutation_server["db_path"],
+        realm_slug,
+        revision=realm_revision,
+        state=realm_state,
+    )
+
+    wrong_realm_review_status, wrong_realm_review_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{realm_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": realm_revision,
+            "cultivation_action": "start_realm_ascension_review",
+            "target_realm": "Divine",
+            "realm_ascension_gm_review_note": "Trying to skip Immortal.",
+        },
+    )
+    assert wrong_realm_review_status == 400
+    assert wrong_realm_review_payload["error"]["code"] == "validation_error"
+    assert (
+        wrong_realm_review_payload["error"]["message"]
+        == "Realm ascension must move from Mortal to Immortal."
+    )
+
+    blank_realm_review_status, blank_realm_review_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{realm_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": realm_revision,
+            "cultivation_action": "start_realm_ascension_review",
+            "target_realm": "Immortal",
+            "realm_ascension_gm_review_note": "   ",
+        },
+    )
+    assert blank_realm_review_status == 400
+    assert blank_realm_review_payload["error"]["code"] == "validation_error"
+    assert (
+        blank_realm_review_payload["error"]["message"]
+        == "Record a GM review note before starting Realm ascension review."
+    )
+
+    realm_review_status, realm_review_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{realm_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": realm_revision,
+            "action": "start_realm_ascension_review",
+            "values": {
+                "target_realm": "Immortal",
+                "realm_ascension_gm_review_note": "  GM   approved\n Mortal to\tImmortal review.  ",
+                "realm_ascension_seclusion_notes": "  One   year\n seclusion.  ",
+                "realm_ascension_hp_stance_trade_notes": "  Trade   later.  ",
+            },
+        },
+    )
+    assert realm_review_status == 200
+    assert realm_review_payload["ok"] is True
+    assert realm_review_payload["message"] == "Started Realm ascension review from Mortal to Immortal."
+    assert realm_review_payload["anchor"] == "xianxia-cultivation-realm-ascension"
+    assert realm_review_payload["character"]["state_record"]["revision"] == realm_revision + 1
+    realm_review_xianxia = realm_review_payload["character"]["definition"]["xianxia"]
+    assert realm_review_xianxia["attributes"] == realm_xianxia["attributes"]
+    assert realm_review_xianxia["efforts"] == realm_xianxia["efforts"]
+    assert realm_review_xianxia["advancement_history"][-1] == {
+        "action": "realm_ascension_review_started",
+        "target": "Immortal",
+        "current_realm": "Mortal",
+        "target_realm": "Immortal",
+        "status": "pending_gm_review",
+        "seclusion_time": "1 year",
+        "rebuild_budget": 15,
+        "stat_cap": 6,
+        "actions_per_turn": 3,
+        "stat_max_prerequisite": {
+            "required_score": 10,
+            "met": True,
+            "stat_kind": "Attribute",
+            "stat_key": "str",
+            "stat_label": "Strength",
+            "stat_score": 10,
+        },
+        "gm_review_note": "GM approved Mortal to Immortal review.",
+        "seclusion_notes": "One year seclusion.",
+        "hp_stance_trade_notes": "Trade later.",
+    }
+    assert realm_review_payload["cultivation"]["realm_ascension"]["can_reset_stats"] is True
+
+    stale_realm_reset_status, stale_realm_reset_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{realm_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": realm_revision,
+            "cultivation_action": "reset_realm_ascension_stats",
+            "target_realm": "Immortal",
+        },
+    )
+    assert stale_realm_reset_status == 409
+    assert stale_realm_reset_payload["error"]["code"] == "state_conflict"
+
+    realm_reset_status, realm_reset_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{realm_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": realm_revision + 1,
+            "cultivation_action": "reset_realm_ascension_stats",
+            "target_realm": "Immortal",
+            "realm_ascension_reset_notes": "  Reset   for\n rebuild.  ",
+        },
+    )
+    assert realm_reset_status == 200
+    assert realm_reset_payload["ok"] is True
+    assert (
+        realm_reset_payload["message"]
+        == "Reset Attributes and Efforts for Mortal to Immortal Realm ascension."
+    )
+    assert realm_reset_payload["anchor"] == "xianxia-cultivation-realm-ascension"
+    assert realm_reset_payload["character"]["state_record"]["revision"] == realm_revision + 2
+    realm_reset_xianxia = realm_reset_payload["character"]["definition"]["xianxia"]
+    assert realm_reset_xianxia["attributes"] == {
+        "str": 0,
+        "dex": 0,
+        "con": 0,
+        "int": 0,
+        "wis": 0,
+        "cha": 0,
+    }
+    assert realm_reset_xianxia["efforts"] == {
+        "basic": 0,
+        "weapon": 0,
+        "guns_explosive": 0,
+        "magic": 0,
+        "ultimate": 0,
+    }
+    assert realm_reset_xianxia["energies"] == realm_xianxia["energies"]
+    assert realm_reset_xianxia["yin_yang"] == realm_xianxia["yin_yang"]
+    assert realm_reset_xianxia["insight"] == realm_xianxia["insight"]
+    assert realm_reset_xianxia["martial_arts"] == realm_xianxia["martial_arts"]
+    assert realm_reset_xianxia["generic_techniques"] == realm_xianxia["generic_techniques"]
+    assert realm_reset_xianxia["variants"] == realm_xianxia["variants"]
+    assert realm_reset_xianxia["approval_requests"] == realm_xianxia["approval_requests"]
+    assert realm_reset_xianxia["companions"] == realm_xianxia["companions"]
+    reset_history = realm_reset_xianxia["advancement_history"][-1]
+    assert reset_history["action"] == "realm_ascension_attributes_efforts_reset"
+    assert reset_history["target"] == "Immortal"
+    assert reset_history["current_realm"] == "Mortal"
+    assert reset_history["target_realm"] == "Immortal"
+    assert reset_history["status"] == "pending_rebuild"
+    assert reset_history["attributes_before_total"] == 21
+    assert reset_history["attributes_after_total"] == 0
+    assert reset_history["efforts_before_total"] == 15
+    assert reset_history["efforts_after_total"] == 0
+    assert reset_history["reset_scope"] == "Attributes and Efforts"
+    assert reset_history["preserved_scope"] == (
+        "Energies, Yin/Yang, HP, Stance, Insight, Martial Arts, Generic Techniques, "
+        "variants, approval records, and notes"
+    )
+    assert (
+        reset_history["pre_ascension_summary"]
+        == "Mortal Realm, 2 actions; Attributes 21, Efforts 15; HP max 32, Stance max 34; Insight 11 available/7 spent; Martial Arts 1; Generic Techniques 1"
+    )
+    assert reset_history["notes"] == "Reset for rebuild."
+    pre_ascension_state = reset_history["pre_ascension_state"]
+    assert pre_ascension_state["attributes"] == realm_xianxia["attributes"]
+    assert pre_ascension_state["efforts"] == realm_xianxia["efforts"]
+    assert pre_ascension_state["energies"] == realm_xianxia["energies"]
+    assert pre_ascension_state["yin_yang"] == realm_xianxia["yin_yang"]
+    assert pre_ascension_state["insight"] == realm_xianxia["insight"]
+    assert pre_ascension_state["durability"]["hp_max"] == 32
+    assert pre_ascension_state["durability"]["stance_max"] == 34
+    assert pre_ascension_state["martial_arts"] == realm_xianxia["martial_arts"]
+    assert pre_ascension_state["generic_techniques"] == realm_xianxia["generic_techniques"]
+    realm_reset_state = realm_reset_payload["character"]["state_record"]["state"]
+    assert realm_reset_state["vitals"] == {"current_hp": 21, "temp_hp": 4}
+    assert realm_reset_state["notes"]["player_notes_markdown"] == "Preserve this note."
+    assert realm_reset_state["xianxia"]["vitals"] == {
+        "current_hp": 21,
+        "temp_hp": 4,
+        "current_stance": 18,
+        "temp_stance": 3,
+    }
+    assert realm_reset_state["xianxia"]["energies"] == {
+        "jing": {"current": 2},
+        "qi": {"current": 3},
+        "shen": {"current": 4},
+    }
+    assert realm_reset_state["xianxia"]["yin_yang"] == {"yin_current": 2, "yang_current": 3}
+    assert realm_reset_state["xianxia"]["dao"] == {"current": 2}
+    assert realm_reset_state["xianxia"]["active_stance"] == {"name": "Mountain Root"}
+    assert realm_reset_state["xianxia"]["active_aura"] == {"name": "Quiet Moon"}
+    assert realm_reset_state["xianxia"]["notes"] == {"player_notes_markdown": "Preserve this note."}
+    assert realm_reset_payload["cultivation"]["realm_ascension"]["can_apply_immortal_rebuild"] is True
+
+    duplicate_realm_reset_status, duplicate_realm_reset_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{realm_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": realm_revision + 2,
+            "cultivation_action": "reset_realm_ascension_stats",
+            "target_realm": "Immortal",
+        },
+    )
+    assert duplicate_realm_reset_status == 400
+    assert duplicate_realm_reset_payload["error"]["code"] == "validation_error"
+    assert (
+        duplicate_realm_reset_payload["error"]["message"]
+        == "Attributes and Efforts have already been reset for this Realm ascension review."
+    )
+
     cap_character_slug = "api-cultivation-cap"
     cap_body = deepcopy(xianxia_body)
     cap_body["definition"]["name"] = "API Cultivation Cap"

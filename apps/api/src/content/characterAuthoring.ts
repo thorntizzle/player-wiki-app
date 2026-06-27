@@ -487,6 +487,12 @@ export function applyCharacterCultivationAction(
   if (action === "learn_generic_technique") {
     return applyXianxiaGenericTechniqueAction(definition, values, context.genericTechniqueRows || []);
   }
+  if (action === "start_realm_ascension_review") {
+    return applyXianxiaRealmAscensionReviewAction(definition, values);
+  }
+  if (action === "reset_realm_ascension_stats") {
+    return applyXianxiaRealmAscensionResetAction(definition, values);
+  }
   return {
     status: "validation_error",
     message: "Unsupported cultivation action. Refresh the page and try again.",
@@ -695,6 +701,46 @@ function applyXianxiaGenericTechniqueAction(
     definition: result.definition,
     message: `Spent ${result.insightCost} Insight to learn ${result.techniqueName}.`,
     anchor: "xianxia-cultivation-techniques",
+  };
+}
+
+function applyXianxiaRealmAscensionReviewAction(
+  definition: Record<string, unknown>,
+  values: Record<string, string>,
+): CharacterCultivationActionApplyResult {
+  const result = startXianxiaRealmAscensionReviewDefinition(definition, {
+    targetRealm: values.target_realm,
+    gmReviewNote: collapseWhitespace(values.realm_ascension_gm_review_note),
+    seclusionNotes: collapseWhitespace(values.realm_ascension_seclusion_notes),
+    hpStanceTradeNotes: collapseWhitespace(values.realm_ascension_hp_stance_trade_notes),
+  });
+  if (result.status === "validation_error") {
+    return { status: "validation_error", message: result.message };
+  }
+  return {
+    status: "ok",
+    definition: result.definition,
+    message: `Started Realm ascension review from ${result.currentRealm} to ${result.targetRealm}.`,
+    anchor: "xianxia-cultivation-realm-ascension",
+  };
+}
+
+function applyXianxiaRealmAscensionResetAction(
+  definition: Record<string, unknown>,
+  values: Record<string, string>,
+): CharacterCultivationActionApplyResult {
+  const result = resetXianxiaRealmAscensionStatsDefinition(definition, {
+    targetRealm: values.target_realm,
+    notes: collapseWhitespace(values.realm_ascension_reset_notes),
+  });
+  if (result.status === "validation_error") {
+    return { status: "validation_error", message: result.message };
+  }
+  return {
+    status: "ok",
+    definition: result.definition,
+    message: `Reset Attributes and Efforts for ${result.currentRealm} to ${result.targetRealm} Realm ascension.`,
+    anchor: "xianxia-cultivation-realm-ascension",
   };
 }
 
@@ -1462,6 +1508,172 @@ function learnXianxiaGenericTechniqueDefinition(
   };
 }
 
+function startXianxiaRealmAscensionReviewDefinition(
+  definition: Record<string, unknown>,
+  payload: {
+    targetRealm: unknown;
+    gmReviewNote: string;
+    seclusionNotes: string;
+    hpStanceTradeNotes: string;
+  },
+):
+  | {
+      status: "ok";
+      definition: Record<string, unknown>;
+      currentRealm: string;
+      targetRealm: string;
+    }
+  | { status: "validation_error"; message: string } {
+  const nextDefinition = deepCloneRecord(definition);
+  const xianxia = asRecord(nextDefinition.xianxia);
+  const currentRealm = normalizeRealmLabel(xianxia.realm);
+  const target = xianxiaRealmAscensionTargetForCurrent(currentRealm);
+  if (!target) {
+    return {
+      status: "validation_error",
+      message: `${currentRealm} characters do not have a further Realm ascension target.`,
+    };
+  }
+
+  const targetRealm = String(target.target_realm || "").trim();
+  if (normalizeRealmLabel(payload.targetRealm) !== targetRealm) {
+    return {
+      status: "validation_error",
+      message: `Realm ascension must move from ${currentRealm} to ${targetRealm}.`,
+    };
+  }
+
+  const statPrerequisite = xianxiaRealmStatPrerequisite(currentRealm, target, xianxiaAttributeRows(xianxia), xianxiaEffortRows(xianxia));
+  if (!truthy(statPrerequisite.is_met)) {
+    return { status: "validation_error", message: String(statPrerequisite.failure_message || "") };
+  }
+
+  if (!payload.gmReviewNote) {
+    return {
+      status: "validation_error",
+      message: "Record a GM review note before starting Realm ascension review.",
+    };
+  }
+
+  const history = xianxiaAdvancementHistory(xianxia);
+  if (latestUnconfirmedRealmAscensionRebuild(history) !== null) {
+    return {
+      status: "validation_error",
+      message: "Confirm the latest Realm rebuild before starting another Realm review.",
+    };
+  }
+
+  const metBy = asRecord(statPrerequisite.met_by);
+  const historyRow: Record<string, unknown> = {
+    action: "realm_ascension_review_started",
+    target: targetRealm,
+    current_realm: currentRealm,
+    target_realm: targetRealm,
+    status: "pending_gm_review",
+    seclusion_time: String(target.seclusion_time || "").trim(),
+    rebuild_budget: nonNegativeLooseInt(target.rebuild_budget, 0),
+    stat_cap: nonNegativeLooseInt(target.stat_cap, 0),
+    actions_per_turn: nonNegativeLooseInt(target.actions_per_turn, 0),
+    stat_max_prerequisite: {
+      required_score: nonNegativeLooseInt(statPrerequisite.required_score, 0),
+      met: true,
+      stat_kind: String(metBy.kind || "").trim(),
+      stat_key: String(metBy.key || "").trim(),
+      stat_label: String(metBy.label || "").trim(),
+      stat_score: nonNegativeLooseInt(metBy.score, 0),
+    },
+    gm_review_note: payload.gmReviewNote,
+  };
+  if (payload.seclusionNotes) {
+    historyRow.seclusion_notes = payload.seclusionNotes;
+  }
+  if (payload.hpStanceTradeNotes) {
+    historyRow.hp_stance_trade_notes = payload.hpStanceTradeNotes;
+  }
+
+  history.push(historyRow);
+  xianxia.advancement_history = history;
+  nextDefinition.xianxia = xianxia;
+  return { status: "ok", definition: nextDefinition, currentRealm, targetRealm };
+}
+
+function resetXianxiaRealmAscensionStatsDefinition(
+  definition: Record<string, unknown>,
+  payload: { targetRealm: unknown; notes: string },
+):
+  | {
+      status: "ok";
+      definition: Record<string, unknown>;
+      currentRealm: string;
+      targetRealm: string;
+    }
+  | { status: "validation_error"; message: string } {
+  const nextDefinition = deepCloneRecord(definition);
+  const xianxia = asRecord(nextDefinition.xianxia);
+  const currentRealm = normalizeRealmLabel(xianxia.realm);
+  const target = xianxiaRealmAscensionTargetForCurrent(currentRealm);
+  if (!target) {
+    return {
+      status: "validation_error",
+      message: `${currentRealm} characters do not have a further Realm ascension target.`,
+    };
+  }
+
+  const targetRealm = String(target.target_realm || "").trim();
+  if (normalizeRealmLabel(payload.targetRealm) !== targetRealm) {
+    return {
+      status: "validation_error",
+      message: `Realm ascension must move from ${currentRealm} to ${targetRealm}.`,
+    };
+  }
+
+  const history = xianxiaAdvancementHistory(xianxia);
+  const reviewIndex = latestRealmAscensionReviewIndex(history, currentRealm, targetRealm);
+  if (reviewIndex === null) {
+    return {
+      status: "validation_error",
+      message: "Start a pending Realm ascension review before resetting Attributes and Efforts.",
+    };
+  }
+  if (hasRealmAscensionStatResetAfter(history, reviewIndex)) {
+    return {
+      status: "validation_error",
+      message: "Attributes and Efforts have already been reset for this Realm ascension review.",
+    };
+  }
+
+  const attributesBefore = xianxiaStatSummary(xianxiaAttributeRows(xianxia));
+  const effortsBefore = xianxiaStatSummary(xianxiaEffortRows(xianxia));
+  const preAscensionState = xianxiaRealmAscensionHistorySnapshot(xianxia);
+  const preAscensionSummary = xianxiaRealmAscensionHistorySnapshotSummary(preAscensionState);
+  xianxia.attributes = Object.fromEntries(XIANXIA_ATTRIBUTE_KEYS.map((key) => [key, 0]));
+  xianxia.efforts = Object.fromEntries(XIANXIA_EFFORT_KEYS.map((key) => [key, 0]));
+
+  const historyRow: Record<string, unknown> = {
+    action: "realm_ascension_attributes_efforts_reset",
+    target: targetRealm,
+    current_realm: currentRealm,
+    target_realm: targetRealm,
+    status: "pending_rebuild",
+    attributes_before_total: attributesBefore.total,
+    attributes_after_total: 0,
+    efforts_before_total: effortsBefore.total,
+    efforts_after_total: 0,
+    reset_scope: "Attributes and Efforts",
+    preserved_scope: "Energies, Yin/Yang, HP, Stance, Insight, Martial Arts, Generic Techniques, variants, approval records, and notes",
+    pre_ascension_summary: preAscensionSummary,
+    pre_ascension_state: preAscensionState,
+  };
+  if (payload.notes) {
+    historyRow.notes = payload.notes;
+  }
+
+  history.push(historyRow);
+  xianxia.advancement_history = history;
+  nextDefinition.xianxia = xianxia;
+  return { status: "ok", definition: nextDefinition, currentRealm, targetRealm };
+}
+
 function recordXianxiaGatheringInsightDefinition(
   definition: Record<string, unknown>,
   payload: { amount: number; downtime: string; notes: string },
@@ -1983,9 +2195,15 @@ function xianxiaMartialArtRankLabel(rankKey: string): string {
   return XIANXIA_MARTIAL_ART_IMPORT_RANK_LABELS[normalized] || humanizeSlug(normalized) || "Rank";
 }
 
+function xianxiaRealmAscensionTargetForCurrent(currentRealm: string): Record<string, unknown> | null {
+  const normalizedRealm = normalizeRealmLabel(currentRealm);
+  const target = asRecord(XIANXIA_REALM_ASCENSION_TARGETS[normalizedRealm]);
+  return Object.keys(target).length > 0 ? { current_realm: normalizedRealm, ...target } : null;
+}
+
 function buildXianxiaRealmAscensionContext(xianxia: Record<string, unknown>): Record<string, unknown> {
   const currentRealm = normalizeRealmLabel(xianxia.realm);
-  const target = asRecord(XIANXIA_REALM_ASCENSION_TARGETS[currentRealm]);
+  const target = asRecord(xianxiaRealmAscensionTargetForCurrent(currentRealm));
   const hasTarget = Object.keys(target).length > 0;
   const history = asArray(xianxia.advancement_history).map(asRecord).filter((record) => Object.keys(record).length > 0);
   const latestReview = latestRealmAscensionEvent(history, "realm_ascension_review_started");
@@ -2043,6 +2261,66 @@ function latestRealmAscensionRebuild(history: Array<Record<string, unknown>>, ta
       XIANXIA_REALM_ASCENSION_REBUILD_ACTIONS.has(String(record.action || "")) &&
       String(record.target_realm || "").trim() === targetRealm,
     ) ?? null;
+}
+
+function latestUnconfirmedRealmAscensionRebuild(history: Array<Record<string, unknown>>, targetRealm = ""): Record<string, unknown> | null {
+  const normalizedFilter = targetRealm ? normalizeRealmLabel(targetRealm) : "";
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const record = history[index];
+    if (!XIANXIA_REALM_ASCENSION_REBUILD_ACTIONS.has(String(record.action || ""))) {
+      continue;
+    }
+    if (String(record.status || "").trim() !== "applied_pending_final_confirmation") {
+      continue;
+    }
+    const recordTarget = normalizeRealmLabel(record.target_realm || record.target);
+    if (normalizedFilter && recordTarget !== normalizedFilter) {
+      continue;
+    }
+    const hasConfirmation = history.slice(index + 1).some((candidate) =>
+      String(candidate.action || "").trim() === "realm_ascension_gm_confirmation_recorded" &&
+      normalizeRealmLabel(candidate.target_realm || candidate.target) === recordTarget,
+    );
+    if (!hasConfirmation) {
+      return record;
+    }
+  }
+  return null;
+}
+
+function latestRealmAscensionReviewIndex(
+  history: Array<Record<string, unknown>>,
+  currentRealm: string,
+  targetRealm: string,
+): number | null {
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const record = history[index];
+    if (String(record.action || "").trim() !== "realm_ascension_review_started") {
+      continue;
+    }
+    if (String(record.status || "").trim() !== "pending_gm_review") {
+      continue;
+    }
+    if (normalizeRealmLabel(record.current_realm) !== currentRealm) {
+      continue;
+    }
+    if (normalizeRealmLabel(record.target_realm || record.target) !== targetRealm) {
+      continue;
+    }
+    return index;
+  }
+  return null;
+}
+
+function hasRealmAscensionStatResetAfter(history: Array<Record<string, unknown>>, reviewIndex: number): boolean {
+  return history.slice(reviewIndex + 1).some((record) => String(record.action || "").trim() === "realm_ascension_attributes_efforts_reset");
+}
+
+function xianxiaAdvancementHistory(xianxia: Record<string, unknown>): Array<Record<string, unknown>> {
+  return asArray(xianxia.advancement_history)
+    .map(asRecord)
+    .filter((record) => Object.keys(record).length > 0)
+    .map((record) => ({ ...record }));
 }
 
 function canResetRealmAscensionStats(
@@ -2107,19 +2385,18 @@ function xianxiaStatSummary(rows: Array<Record<string, unknown>>): {
 }
 
 function xianxiaRealmStatPrerequisite(
-  _currentRealm: string,
+  currentRealm: string,
   target: Record<string, unknown>,
   attributeRows: Array<Record<string, unknown>>,
   effortRows: Array<Record<string, unknown>>,
 ): Record<string, unknown> {
+  const normalizedRealm = normalizeRealmLabel(currentRealm);
+  const targetRealm = String(target.target_realm || "").trim();
   const requiredScore = nonNegativeLooseInt(target.stat_max_prerequisite, 0);
-  if (requiredScore <= 0) {
-    return { is_met: false, required_score: 0, failure_message: "No Realm ascension target is available." };
-  }
-  const candidates: Array<Record<string, unknown>> = [
-    ...attributeRows.map((row) => ({ ...row, kind: "attribute" })),
-    ...effortRows.map((row) => ({ ...row, kind: "effort" })),
-  ];
+  const candidates = ([
+    ...attributeRows.map((row) => ({ ...row, kind: "Attribute" })),
+    ...effortRows.map((row) => ({ ...row, kind: "Effort" })),
+  ] as Array<Record<string, unknown>>).filter((row) => String(row.key || "").trim().length > 0);
   const metBy = candidates.find((row) => nonNegativeLooseInt(row.score, 0) >= requiredScore) ?? null;
   const highest = candidates.reduce<Record<string, unknown> | null>((best, row) => {
     if (!best || nonNegativeLooseInt(row.score, 0) > nonNegativeLooseInt(best.score, 0)) {
@@ -2127,15 +2404,97 @@ function xianxiaRealmStatPrerequisite(
     }
     return best;
   }, null);
+  const highestLabel = String(highest?.label || "None");
+  const highestScore = nonNegativeLooseInt(highest?.score, 0);
+  const targetLabel = targetRealm || "the next Realm";
   return {
     is_met: metBy !== null,
     required_score: requiredScore,
     met_by: metBy,
     highest,
+    highest_label: highestLabel,
+    highest_score: highestScore,
+    requirement_text: `Requires at least one Attribute or Effort at ${requiredScore} before ascending from ${normalizedRealm} to ${targetLabel}.`,
     failure_message: metBy
       ? ""
-      : `Need one Stat at ${requiredScore}. Current highest Stat is ${String(highest?.label || "none")} at ${nonNegativeLooseInt(highest?.score, 0)}.`,
+      : `Realm ascension prerequisite not met: raise at least one Attribute or Effort to ${requiredScore} before ascending from ${normalizedRealm} to ${targetLabel}. Current highest Stat is ${highestLabel} at ${highestScore}.`,
   };
+}
+
+function xianxiaRealmAscensionHistorySnapshot(xianxia: Record<string, unknown>): Record<string, unknown> {
+  const attributes = Object.fromEntries(
+    XIANXIA_ATTRIBUTE_KEYS.map((key) => [key, nonNegativeLooseInt(asRecord(xianxia.attributes)[key], 0)]),
+  );
+  const efforts = Object.fromEntries(
+    XIANXIA_EFFORT_KEYS.map((key) => [key, nonNegativeLooseInt(asRecord(xianxia.efforts)[key], 0)]),
+  );
+  const energies = Object.fromEntries(
+    XIANXIA_ENERGY_KEYS.map((key) => [key, { max: nonNegativeLooseInt(asRecord(asRecord(xianxia.energies)[key]).max, 0) }]),
+  );
+  const yinYang = asRecord(xianxia.yin_yang);
+  const dao = asRecord(xianxia.dao);
+  const insight = asRecord(xianxia.insight);
+  const durability = asRecord(xianxia.durability);
+  const skills = asRecord(xianxia.skills);
+  const equipment = asRecord(xianxia.equipment);
+  const daoImmolating = asRecord(xianxia.dao_immolating_techniques);
+  return {
+    realm: normalizeRealmLabel(xianxia.realm),
+    actions_per_turn: nonNegativeLooseInt(xianxia.actions_per_turn, 0),
+    attributes,
+    attributes_total: Object.values(attributes).reduce((sum, value) => sum + nonNegativeLooseInt(value, 0), 0),
+    efforts,
+    efforts_total: Object.values(efforts).reduce((sum, value) => sum + nonNegativeLooseInt(value, 0), 0),
+    energies,
+    yin_yang: {
+      yin_max: nonNegativeLooseInt(yinYang.yin_max, 1),
+      yang_max: nonNegativeLooseInt(yinYang.yang_max, 1),
+    },
+    dao: { max: nonNegativeLooseInt(dao.max, XIANXIA_DAO_DEFAULT_MAX) },
+    insight: {
+      available: nonNegativeLooseInt(insight.available, 0),
+      spent: nonNegativeLooseInt(insight.spent, 0),
+    },
+    durability: {
+      hp_max: nonNegativeLooseInt(durability.hp_max, 10),
+      stance_max: nonNegativeLooseInt(durability.stance_max, 10),
+      manual_armor_bonus: nonNegativeLooseInt(durability.manual_armor_bonus, 0),
+      defense: nonNegativeLooseInt(durability.defense, 10),
+    },
+    skills: { trained: cleanStringList(asRecord(skills).trained) },
+    equipment: {
+      necessary_weapons: copyRecordList(equipment.necessary_weapons),
+      necessary_tools: copyRecordList(equipment.necessary_tools),
+    },
+    martial_arts: copyRecordList(xianxia.martial_arts),
+    generic_techniques: copyRecordList(xianxia.generic_techniques),
+    variants: copyRecordList(xianxia.variants),
+    dao_immolating_techniques: {
+      prepared: copyRecordList(daoImmolating.prepared),
+      use_history: copyRecordList(daoImmolating.use_history),
+    },
+    approval_requests: copyRecordList(xianxia.approval_requests),
+    companions: copyRecordList(xianxia.companions),
+  };
+}
+
+function xianxiaRealmAscensionHistorySnapshotSummary(snapshot: Record<string, unknown>): string {
+  const durability = asRecord(snapshot.durability);
+  const insight = asRecord(snapshot.insight);
+  return `${String(snapshot.realm || "Unknown")} Realm, ${nonNegativeLooseInt(snapshot.actions_per_turn, 0)} actions; Attributes ${nonNegativeLooseInt(snapshot.attributes_total, 0)}, Efforts ${nonNegativeLooseInt(snapshot.efforts_total, 0)}; HP max ${nonNegativeLooseInt(durability.hp_max, 0)}, Stance max ${nonNegativeLooseInt(durability.stance_max, 0)}; Insight ${nonNegativeLooseInt(insight.available, 0)} available/${nonNegativeLooseInt(insight.spent, 0)} spent; Martial Arts ${copyRecordList(snapshot.martial_arts).length}; Generic Techniques ${copyRecordList(snapshot.generic_techniques).length}`;
+}
+
+function copyRecordList(value: unknown): Array<Record<string, unknown>> {
+  const values = Array.isArray(value) ? value : value && typeof value === "object" ? [value] : [];
+  return values
+    .map(asRecord)
+    .filter((record) => Object.keys(record).length > 0)
+    .map((record) => JSON.parse(JSON.stringify(record)) as Record<string, unknown>);
+}
+
+function cleanStringList(value: unknown): string[] {
+  const values = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+  return values.map(collapseWhitespace).filter(Boolean);
 }
 
 function xianxiaRealmTradeContext(durability: Record<string, unknown>): Record<string, unknown> {

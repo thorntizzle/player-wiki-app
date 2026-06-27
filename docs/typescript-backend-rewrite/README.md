@@ -172,7 +172,7 @@ Do not implement these routes as part of the parity program unless a later archi
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (context shell only; POST/save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (context shell only; POST/save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (supported Xianxia read context)
-  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (`save_insight`, `record_gathering_insight`, `spend_cultivation_energy`, `spend_meditation_yin_yang`, `spend_conditioning`, `spend_training`, `advance_martial_art_rank`, and `learn_generic_technique` only; remaining Realm Ascension action parity pending)
+  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (`save_insight`, `record_gathering_insight`, `spend_cultivation_energy`, `spend_meditation_yin_yang`, `spend_conditioning`, `spend_training`, `advance_martial_art_rank`, `learn_generic_technique`, `start_realm_ascension_review`, and `reset_realm_ascension_stats` only; remaining Realm Ascension rebuild/confirmation action parity pending)
   - `PATCH /api/v1/campaigns/:campaignSlug/characters/:characterSlug/sheet-edit`
   - `GET /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual`
   - `POST /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual` (preview and confirmed local fixture/SQLite create)
@@ -594,7 +594,8 @@ Do not implement these routes as part of the parity program unless a later archi
 - The first Character Cultivation write slices now serve
   `POST .../characters/:characterSlug/cultivation` for the `save_insight`, `record_gathering_insight`,
   `spend_cultivation_energy`, `spend_meditation_yin_yang`, `spend_conditioning`,
-  `spend_training`, `advance_martial_art_rank`, and `learn_generic_technique` actions. They preserve
+  `spend_training`, `advance_martial_art_rank`, `learn_generic_technique`,
+  `start_realm_ascension_review`, and `reset_realm_ascension_stats` actions. They preserve
   bearer-token DM/admin management access, Xianxia-only validation, shared revision conflicts,
   flat or nested JSON value parsing, non-negative whole-number Insight available/spent validation,
   positive whole-number Gathering Insight validation, Cultivation Energy key and available-Insight
@@ -602,13 +603,15 @@ Do not implement these routes as part of the parity program unless a later archi
   Conditioning HP/Effort target validation, Training Stance/Attribute target validation,
   Martial Art selection/rank/structured metadata/Insight validation,
   Generic Technique selection/catalog/direct-spend/duplicate/Insight validation,
+  Realm Ascension target/prerequisite/review-note/reset sequencing validation,
   available-Insight validation, HP and Stance maximum cap validation,
   copied-fixture `definition.yaml` writes, SQLite state revision bumps and Xianxia state
   reconciliation without refilling current HP/Stance/Energy/Yin-Yang pools, `insight_counter_adjustment`,
   `gathering_insight`, `cultivation_energy_increase`, `meditation_yin_yang_increase`,
   `conditioning_hp_increase`, `conditioning_effort_increase`, `training_stance_increase`,
-  `training_attribute_increase`, `martial_art_rank_advance`, and `generic_technique_learned`
-  history rows, and refreshed Cultivation payloads. Remaining Realm Ascension action parity remains pending.
+  `training_attribute_increase`, `martial_art_rank_advance`, `generic_technique_learned`,
+  `realm_ascension_review_started`, and `realm_ascension_attributes_efforts_reset`
+  history rows, and refreshed Cultivation payloads. Remaining Realm Ascension rebuild/confirmation action parity remains pending.
 - The first Xianxia inventory equipment write now serves
   `PATCH .../characters/:characterSlug/session/xianxia-inventory/:itemId/equipped`. It preserves the
   bearer-only session-state write gate, shared revision conflicts, Xianxia-only validation, unknown
