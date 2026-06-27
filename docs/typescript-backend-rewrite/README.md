@@ -26,6 +26,18 @@ Route parity check command:
 & '<workspace>/.venv/Scripts/python.exe' .\scripts\route_snapshots.py --check
 ```
 
+### Deferred Scratch Candidates
+
+Option 1 on 2026-06-27 keeps the rewrite contract-only for cutover parity. The remaining `deferred_scratch_proof` route-seed entries are scratch/probe candidates, not current Flask parity targets and not initial-cutover blockers:
+
+- `GET /api/v1/session/login`
+- `POST /api/v1/session/login`
+- `GET /api/v1/session/me`
+- `POST /api/v1/upload`
+- `GET /api/v1/notes/<id>`
+
+Do not implement these routes as part of the parity program unless a later architecture/scope decision explicitly approves session-cookie auth, a generic upload API, or a generic note-resource API. Current Flask parity remains anchored to `route-snapshots.json`, `docs/api-v1.md`, current-state docs, and route-specific upload/note workflows.
+
 ### Stack Evidence
 
 - `stack-spike.md`: architecture decision record for the TypeScript backend stack evaluation and proof checklist.

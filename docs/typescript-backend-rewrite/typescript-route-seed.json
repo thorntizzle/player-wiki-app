@@ -4,7 +4,7 @@
   "notes": [
     "Seed routes are intentionally minimal and should be narrowed or expanded in lockstep with implemented TypeScript handlers.",
     "Routes with an implemented_* status must have a matching entry in apps/api/src/routes.ts and a matching current Python route snapshot; API-only replacements for Flask form routes must name the Flask source route in notes and use the manifest snapshot_method override.",
-    "Deferred scratch-proof routes are retained as future candidates only; they are not implemented by the tracked TypeScript API slice yet."
+    "Deferred scratch-proof routes are retained as future candidates only; they are not current Flask parity targets, not initial-cutover blockers, and must not be implemented without an explicit architecture/scope decision."
   ],
   "routes": [
     {
@@ -1200,21 +1200,24 @@
       "path": "/api/v1/session/login",
       "route_family": "api_v1",
       "status": "deferred_scratch_proof",
-      "notes": "Session cookie read route passed in earlier scratch probes but is not implemented in apps/api."
+      "cutover_scope": "future_candidate_nonparity",
+      "notes": "Session cookie read route passed in earlier scratch probes, but no current Flask route snapshot or exact test contract exists. Option 1 on 2026-06-27 keeps it outside contract-only cutover parity unless a later auth/session architecture decision approves it."
     },
     {
       "method": "POST",
       "path": "/api/v1/session/login",
       "route_family": "api_v1",
       "status": "deferred_scratch_proof",
-      "notes": "Session cookie write route passed in earlier scratch probes but is not implemented in apps/api."
+      "cutover_scope": "future_candidate_nonparity",
+      "notes": "Session cookie write route passed in earlier scratch probes, but no current Flask route snapshot or exact test contract exists. Option 1 on 2026-06-27 keeps it outside contract-only cutover parity unless a later auth/session architecture decision approves it."
     },
     {
       "method": "GET",
       "path": "/api/v1/session/me",
       "route_family": "api_v1",
       "status": "deferred_scratch_proof",
-      "notes": "Session cookie read route passed in earlier scratch probes but is not implemented in apps/api."
+      "cutover_scope": "future_candidate_nonparity",
+      "notes": "Session cookie read route passed in earlier scratch probes. Current Flask parity is GET /api/v1/me, already tracked separately; no current Flask /api/v1/session/me route snapshot or exact test contract exists. Option 1 on 2026-06-27 keeps it outside contract-only cutover parity unless a later auth/session architecture decision approves it."
     },
     {
       "method": "GET",
@@ -1229,14 +1232,16 @@
       "path": "/api/v1/upload",
       "route_family": "api_v1",
       "status": "deferred_scratch_proof",
-      "notes": "Multipart upload route passed in earlier scratch probes but is not implemented in apps/api."
+      "cutover_scope": "future_candidate_nonparity",
+      "notes": "Multipart upload route passed in earlier scratch probes, but no standalone current Flask route snapshot or exact test contract exists; current uploads remain route-specific workflows. Option 1 on 2026-06-27 keeps this outside contract-only cutover parity unless a later generic upload API decision approves it."
     },
     {
       "method": "GET",
       "path": "/api/v1/notes/<id>",
       "route_family": "api_v1",
       "status": "deferred_scratch_proof",
-      "notes": "SQLite-backed note route passed in earlier scratch probes but is not implemented in apps/api."
+      "cutover_scope": "future_candidate_nonparity",
+      "notes": "SQLite-backed generic note route passed in earlier scratch probes, but no current Flask route snapshot or exact test contract exists; current note behavior is character/session scoped. Option 1 on 2026-06-27 keeps this outside contract-only cutover parity unless a later generic note-resource decision approves it."
     }
   ]
 }
