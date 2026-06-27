@@ -382,6 +382,18 @@ smokeDb.exec(`
     UNIQUE (library_slug, source_id)
   );
 
+  CREATE TABLE campaign_system_policies (
+    campaign_slug TEXT PRIMARY KEY,
+    library_slug TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    allow_dm_shared_core_entry_edits INTEGER NOT NULL DEFAULT 0,
+    proprietary_acknowledged_at TEXT,
+    proprietary_acknowledged_by_user_id INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_user_id INTEGER
+  );
+
   CREATE TABLE campaign_enabled_sources (
     campaign_slug TEXT NOT NULL,
     library_slug TEXT NOT NULL,
@@ -2037,6 +2049,230 @@ const missingSystemsEntryDetail = await requestJson(
 if (missingSystemsEntryDetail.status !== 404 || missingSystemsEntryDetail.payload?.error?.code !== "systems_entry_not_found") {
   throw new Error(
     `Expected missing systems entry detail JSON 404, got ${missingSystemsEntryDetail.status} ${missingSystemsEntryDetail.payload?.error?.code}`,
+  );
+}
+
+const blockedSystemsSourceUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/sources",
+  {},
+  { method: "PUT", body: { updates: [] } },
+);
+if (blockedSystemsSourceUpdate.status !== 401 || blockedSystemsSourceUpdate.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated systems source update auth_required 401, got ${blockedSystemsSourceUpdate.status} ${blockedSystemsSourceUpdate.payload?.error?.code}`,
+  );
+}
+
+const fixtureSystemsSourceUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/sources",
+  { "X-CPW-Fixture-Role": "dm" },
+  { method: "PUT", body: { updates: [] } },
+);
+if (
+  fixtureSystemsSourceUpdate.status !== 403 ||
+  fixtureSystemsSourceUpdate.payload?.error?.message !== "Systems source updates require bearer API authentication."
+) {
+  throw new Error(`Expected fixture systems source update bearer requirement, got ${JSON.stringify(fixtureSystemsSourceUpdate.payload)}`);
+}
+
+const playerSystemsSourceUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/sources",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "PUT", body: { updates: [] } },
+);
+if (
+  playerSystemsSourceUpdate.status !== 403 ||
+  playerSystemsSourceUpdate.payload?.error?.message !== "You do not have permission to manage systems."
+) {
+  throw new Error(`Expected player systems source update forbidden, got ${JSON.stringify(playerSystemsSourceUpdate.payload)}`);
+}
+
+const missingCampaignSystemsSourceUpdate = await requestJson(
+  "/api/v1/campaigns/definitely-not-a-campaign/systems/sources",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { updates: [] } },
+);
+if (
+  missingCampaignSystemsSourceUpdate.status !== 404 ||
+  missingCampaignSystemsSourceUpdate.payload?.error?.code !== "campaign_not_found"
+) {
+  throw new Error(
+    `Expected missing systems source update campaign JSON 404, got ${missingCampaignSystemsSourceUpdate.status} ${missingCampaignSystemsSourceUpdate.payload?.error?.code}`,
+  );
+}
+
+const invalidSystemsSourceUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/sources",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { updates: [{ source_id: "NOPE", is_enabled: true, default_visibility: "players" }] } },
+);
+if (
+  invalidSystemsSourceUpdate.status !== 400 ||
+  invalidSystemsSourceUpdate.payload?.error?.message !== "Choose a valid systems source."
+) {
+  throw new Error(`Expected invalid systems source validation, got ${JSON.stringify(invalidSystemsSourceUpdate.payload)}`);
+}
+
+const nonObjectSystemsSourceUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/sources",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { updates: ["PHB"] } },
+);
+if (
+  nonObjectSystemsSourceUpdate.status !== 400 ||
+  nonObjectSystemsSourceUpdate.payload?.error?.message !== "Systems source updates must be objects."
+) {
+  throw new Error(`Expected non-object systems source update validation, got ${JSON.stringify(nonObjectSystemsSourceUpdate.payload)}`);
+}
+
+const invalidBooleanSystemsSourceUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/sources",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { updates: [{ source_id: "PHB", is_enabled: "maybe", default_visibility: "players" }] } },
+);
+if (
+  invalidBooleanSystemsSourceUpdate.status !== 400 ||
+  invalidBooleanSystemsSourceUpdate.payload?.error?.message !== "Source enablement must be true or false."
+) {
+  throw new Error(
+    `Expected invalid systems source enablement validation, got ${JSON.stringify(invalidBooleanSystemsSourceUpdate.payload)}`,
+  );
+}
+
+const invalidVisibilitySystemsSourceUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/sources",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { updates: [{ source_id: "PHB", is_enabled: true, default_visibility: "everybody" }] } },
+);
+if (
+  invalidVisibilitySystemsSourceUpdate.status !== 400 ||
+  !String(invalidVisibilitySystemsSourceUpdate.payload?.error?.message || "").startsWith("Choose a valid visibility for")
+) {
+  throw new Error(
+    `Expected invalid systems source visibility validation, got ${JSON.stringify(invalidVisibilitySystemsSourceUpdate.payload)}`,
+  );
+}
+
+const publicProprietarySystemsSourceUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/sources",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { updates: [{ source_id: "PHB", is_enabled: true, default_visibility: "public" }] } },
+);
+if (
+  publicProprietarySystemsSourceUpdate.status !== 400 ||
+  !String(publicProprietarySystemsSourceUpdate.payload?.error?.message || "").includes("cannot be made public")
+) {
+  throw new Error(`Expected proprietary public visibility validation, got ${JSON.stringify(publicProprietarySystemsSourceUpdate.payload)}`);
+}
+
+const dmPrivateSystemsSourceUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/sources",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { updates: [{ source_id: "PHB", is_enabled: true, default_visibility: "private" }] } },
+);
+if (
+  dmPrivateSystemsSourceUpdate.status !== 400 ||
+  dmPrivateSystemsSourceUpdate.payload?.error?.message !== "Private visibility is reserved for app admins."
+) {
+  throw new Error(`Expected DM private visibility validation, got ${JSON.stringify(dmPrivateSystemsSourceUpdate.payload)}`);
+}
+
+const proprietaryWithoutAckSystemsSourceUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/sources",
+  { Authorization: `Bearer ${dmApiToken}` },
+  { method: "PUT", body: { updates: [{ source_id: "XGE", is_enabled: true, default_visibility: "players" }] } },
+);
+if (
+  proprietaryWithoutAckSystemsSourceUpdate.status !== 400 ||
+  proprietaryWithoutAckSystemsSourceUpdate.payload?.error?.message !==
+    "Acknowledge the proprietary-source notice before enabling a protected systems source."
+) {
+  throw new Error(
+    `Expected proprietary acknowledgement validation, got ${JSON.stringify(proprietaryWithoutAckSystemsSourceUpdate.payload)}`,
+  );
+}
+
+const acknowledgedSystemsSourceUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/sources",
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "PUT",
+    body: {
+      acknowledge_proprietary: true,
+      updates: [{ source_id: "XGE", is_enabled: true, default_visibility: "players" }],
+    },
+  },
+);
+const acknowledgedXgeSource = (acknowledgedSystemsSourceUpdate.payload?.sources || []).find((source) => source.source_id === "XGE");
+if (
+  acknowledgedSystemsSourceUpdate.status !== 200 ||
+  acknowledgedSystemsSourceUpdate.payload?.ok !== true ||
+  acknowledgedXgeSource?.is_enabled !== true ||
+  acknowledgedXgeSource?.default_visibility !== "players"
+) {
+  throw new Error(`Unexpected acknowledged systems source update payload: ${JSON.stringify(acknowledgedSystemsSourceUpdate.payload)}`);
+}
+
+const adminPrivateSystemsSourceUpdate = await requestJson(
+  "/api/v1/campaigns/linden-pass/systems/sources",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "PUT", body: { updates: [{ source_id: "XGE", is_enabled: true, default_visibility: "private" }] } },
+);
+const adminPrivateXgeSource = (adminPrivateSystemsSourceUpdate.payload?.sources || []).find((source) => source.source_id === "XGE");
+if (
+  adminPrivateSystemsSourceUpdate.status !== 200 ||
+  adminPrivateSystemsSourceUpdate.payload?.ok !== true ||
+  adminPrivateXgeSource?.is_enabled !== true ||
+  adminPrivateXgeSource?.default_visibility !== "private"
+) {
+  throw new Error(`Unexpected admin private systems source update payload: ${JSON.stringify(adminPrivateSystemsSourceUpdate.payload)}`);
+}
+
+const systemsSourceUpdateDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const systemsPolicyRow = systemsSourceUpdateDb
+  .prepare(
+    "SELECT proprietary_acknowledged_at, proprietary_acknowledged_by_user_id, updated_by_user_id FROM campaign_system_policies WHERE campaign_slug = ?",
+  )
+  .get("linden-pass");
+const persistedXgeSource = systemsSourceUpdateDb
+  .prepare(
+    "SELECT is_enabled, default_visibility, updated_by_user_id FROM campaign_enabled_sources WHERE campaign_slug = ? AND source_id = ?",
+  )
+  .get("linden-pass", "XGE");
+const systemsSourceAuditRows = systemsSourceUpdateDb
+  .prepare(
+    "SELECT actor_user_id, event_type, metadata_json FROM auth_audit_log WHERE campaign_slug = ? AND event_type = ? ORDER BY id ASC",
+  )
+  .all("linden-pass", "campaign_systems_source_updated");
+systemsSourceUpdateDb.close();
+const parsedSystemsSourceAudits = systemsSourceAuditRows.map((row) => ({
+  actor_user_id: row.actor_user_id,
+  event_type: row.event_type,
+  metadata: JSON.parse(row.metadata_json),
+}));
+if (
+  !systemsPolicyRow?.proprietary_acknowledged_at ||
+  systemsPolicyRow.proprietary_acknowledged_by_user_id !== 81 ||
+  systemsPolicyRow.updated_by_user_id !== 77 ||
+  persistedXgeSource?.is_enabled !== 1 ||
+  persistedXgeSource?.default_visibility !== "private" ||
+  persistedXgeSource?.updated_by_user_id !== 77 ||
+  parsedSystemsSourceAudits.length !== 2 ||
+  parsedSystemsSourceAudits[0]?.actor_user_id !== 81 ||
+  parsedSystemsSourceAudits[0]?.metadata?.source_id !== "XGE" ||
+  parsedSystemsSourceAudits[0]?.metadata?.visibility !== "players" ||
+  parsedSystemsSourceAudits[0]?.metadata?.is_enabled !== true ||
+  parsedSystemsSourceAudits[1]?.actor_user_id !== 77 ||
+  parsedSystemsSourceAudits[1]?.metadata?.source_id !== "XGE" ||
+  parsedSystemsSourceAudits[1]?.metadata?.visibility !== "private" ||
+  parsedSystemsSourceAudits[1]?.metadata?.is_enabled !== true
+) {
+  throw new Error(
+    `Unexpected systems source update database state: ${JSON.stringify({
+      systemsPolicyRow,
+      persistedXgeSource,
+      parsedSystemsSourceAudits,
+    })}`,
   );
 }
 
@@ -6007,8 +6243,10 @@ if (
   throw new Error(`Expected persisted campaign visibility rows for changed scopes, got ${JSON.stringify(persistedVisibilityRows)}`);
 }
 const visibilityAuditRows = visibilityAssertionDb
-  .prepare("SELECT actor_user_id, campaign_slug, event_type, metadata_json FROM auth_audit_log ORDER BY id ASC")
-  .all();
+  .prepare(
+    "SELECT actor_user_id, campaign_slug, event_type, metadata_json FROM auth_audit_log WHERE event_type = ? ORDER BY id ASC",
+  )
+  .all("campaign_visibility_updated");
 visibilityAssertionDb.close();
 if (visibilityAuditRows.length !== 2) {
   throw new Error(`Expected two campaign visibility audit rows, got ${JSON.stringify(visibilityAuditRows)}`);

@@ -43,6 +43,10 @@ export interface SystemsSourceListPayload {
   };
 }
 
+export type SystemsSourceUpdateResult =
+  | { status: "ok"; sources: SystemsSourceState[] }
+  | { status: "validation_error"; message: string };
+
 export interface SystemsSourceCard extends SystemsSourceState {
   has_rules_reference_entries: boolean;
   rules_reference_search_scope: string;
@@ -250,6 +254,18 @@ export interface CampaignEntryOverrideRow {
   updated_by_user_id: number | null;
 }
 
+interface CampaignSystemsPolicyRow {
+  campaign_slug: string;
+  library_slug: string;
+  status: string;
+  allow_dm_shared_core_entry_edits: number | null;
+  proprietary_acknowledged_at: string | null;
+  proprietary_acknowledged_by_user_id: number | null;
+  created_at: string;
+  updated_at: string;
+  updated_by_user_id: number | null;
+}
+
 export interface CampaignSourceSeed {
   source_id: string;
   enabled?: boolean;
@@ -400,6 +416,10 @@ function asBoolean(value: unknown): boolean | undefined {
     }
   }
   return undefined;
+}
+
+function utcIsoTimestamp(date = new Date()): string {
+  return date.toISOString().replace("Z", "+00:00");
 }
 
 function normalizeVisibility(value: unknown, fallback = "dm"): string {
@@ -909,6 +929,338 @@ export function loadSourceRows(database: Database.Database, campaignSlug: string
       `,
     )
     .all(campaignSlug, librarySlug) as SystemsSourceRow[];
+}
+
+function loadCampaignSystemsPolicy(
+  database: Database.Database,
+  campaignSlug: string,
+): CampaignSystemsPolicyRow | undefined {
+  return database
+    .prepare(
+      `
+        SELECT
+          campaign_slug,
+          library_slug,
+          status,
+          allow_dm_shared_core_entry_edits,
+          proprietary_acknowledged_at,
+          proprietary_acknowledged_by_user_id,
+          created_at,
+          updated_at,
+          updated_by_user_id
+        FROM campaign_system_policies
+        WHERE campaign_slug = ?
+      `,
+    )
+    .get(campaignSlug) as CampaignSystemsPolicyRow | undefined;
+}
+
+function upsertCampaignSystemsPolicy(
+  database: Database.Database,
+  {
+    campaignSlug,
+    librarySlug,
+    actorUserId,
+    now,
+    proprietaryAcknowledgedAt,
+  }: {
+    campaignSlug: string;
+    librarySlug: string;
+    actorUserId: number;
+    now: string;
+    proprietaryAcknowledgedAt: string | null;
+  },
+) {
+  const existing = loadCampaignSystemsPolicy(database, campaignSlug);
+  database
+    .prepare(
+      `
+        INSERT INTO campaign_system_policies (
+          campaign_slug,
+          library_slug,
+          status,
+          allow_dm_shared_core_entry_edits,
+          proprietary_acknowledged_at,
+          proprietary_acknowledged_by_user_id,
+          created_at,
+          updated_at,
+          updated_by_user_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(campaign_slug) DO UPDATE SET
+          library_slug = excluded.library_slug,
+          status = excluded.status,
+          allow_dm_shared_core_entry_edits = excluded.allow_dm_shared_core_entry_edits,
+          proprietary_acknowledged_at = excluded.proprietary_acknowledged_at,
+          proprietary_acknowledged_by_user_id = excluded.proprietary_acknowledged_by_user_id,
+          updated_at = excluded.updated_at,
+          updated_by_user_id = excluded.updated_by_user_id
+      `,
+    )
+    .run(
+      campaignSlug,
+      librarySlug,
+      "active",
+      existing?.allow_dm_shared_core_entry_edits ? 1 : 0,
+      proprietaryAcknowledgedAt || existing?.proprietary_acknowledged_at || null,
+      proprietaryAcknowledgedAt ? actorUserId : existing?.proprietary_acknowledged_by_user_id || null,
+      existing?.created_at || now,
+      now,
+      actorUserId,
+    );
+}
+
+function upsertCampaignEnabledSource(
+  database: Database.Database,
+  {
+    campaignSlug,
+    librarySlug,
+    sourceId,
+    isEnabled,
+    defaultVisibility,
+    actorUserId,
+    now,
+  }: {
+    campaignSlug: string;
+    librarySlug: string;
+    sourceId: string;
+    isEnabled: boolean;
+    defaultVisibility: string;
+    actorUserId: number;
+    now: string;
+  },
+) {
+  database
+    .prepare(
+      `
+        INSERT INTO campaign_enabled_sources (
+          campaign_slug,
+          library_slug,
+          source_id,
+          is_enabled,
+          default_visibility,
+          updated_at,
+          updated_by_user_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(campaign_slug, source_id) DO UPDATE SET
+          library_slug = excluded.library_slug,
+          is_enabled = excluded.is_enabled,
+          default_visibility = excluded.default_visibility,
+          updated_at = excluded.updated_at,
+          updated_by_user_id = excluded.updated_by_user_id
+      `,
+    )
+    .run(campaignSlug, librarySlug, sourceId, isEnabled ? 1 : 0, defaultVisibility, now, actorUserId);
+}
+
+function insertSystemsSourceAuditEvent(
+  database: Database.Database,
+  {
+    actorUserId,
+    campaignSlug,
+    librarySlug,
+    sourceId,
+    visibility,
+    isEnabled,
+    now,
+  }: {
+    actorUserId: number;
+    campaignSlug: string;
+    librarySlug: string;
+    sourceId: string;
+    visibility: string;
+    isEnabled: boolean;
+    now: string;
+  },
+) {
+  database
+    .prepare(
+      `
+        INSERT INTO auth_audit_log (
+          actor_user_id,
+          target_user_id,
+          campaign_slug,
+          character_slug,
+          event_type,
+          metadata_json,
+          created_at
+        )
+        VALUES (?, NULL, ?, NULL, ?, ?, ?)
+      `,
+    )
+    .run(
+      actorUserId,
+      campaignSlug,
+      "campaign_systems_source_updated",
+      JSON.stringify({
+        library_slug: librarySlug,
+        source_id: sourceId,
+        visibility,
+        is_enabled: isEnabled,
+        source: "api",
+      }),
+      now,
+    );
+}
+
+export function updateCampaignSystemsSources(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+  role: FixtureSystemsRole,
+  actorUserId: number,
+  payload: Record<string, unknown>,
+): SystemsSourceUpdateResult {
+  if (!existsSync(dbPath)) {
+    return { status: "validation_error", message: "Systems database is unavailable." };
+  }
+
+  const librarySlug = String(campaign.systems_library_slug || "").trim();
+  if (!librarySlug) {
+    return { status: "validation_error", message: "That campaign does not have a systems library configured." };
+  }
+
+  const rawUpdates = payload.updates;
+  if (!Array.isArray(rawUpdates)) {
+    return { status: "validation_error", message: "updates must be an array." };
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const library = serializeLibrary(
+      database
+        .prepare(
+          `
+            SELECT library_slug, title, system_code, status, created_at, updated_at
+            FROM systems_libraries
+            WHERE library_slug = ?
+          `,
+        )
+        .get(librarySlug) as SystemsLibraryRow | undefined,
+    );
+    if (!library) {
+      return { status: "validation_error", message: "That campaign does not have a systems library configured." };
+    }
+
+    const seeds = parseSourceSeeds(campaignConfig);
+    const currentRows = loadSourceRows(database, campaign.slug, librarySlug);
+    const rowsBySourceId = new Map(currentRows.map((row) => [row.source_id, row]));
+    const statesBySourceId = new Map(
+      currentRows.map((row) => [row.source_id, serializeSourceState(row, seeds.get(row.source_id), role)]),
+    );
+    const policy = loadCampaignSystemsPolicy(database, campaign.slug);
+
+    const normalizedUpdates: Array<{
+      row: SystemsSourceRow;
+      state: SystemsSourceState;
+      sourceId: string;
+      isEnabled: boolean;
+      defaultVisibility: string;
+    }> = [];
+    let newlyEnabledProprietary = false;
+    for (const rawUpdate of rawUpdates) {
+      if (typeof rawUpdate !== "object" || rawUpdate === null || Array.isArray(rawUpdate)) {
+        return { status: "validation_error", message: "Systems source updates must be objects." };
+      }
+      const record = asRecord(rawUpdate);
+      const sourceId = String(record.source_id || "").trim();
+      const row = rowsBySourceId.get(sourceId);
+      const state = statesBySourceId.get(sourceId);
+      if (!row || !state) {
+        return { status: "validation_error", message: "Choose a valid systems source." };
+      }
+
+      if (typeof record.is_enabled !== "boolean") {
+        return { status: "validation_error", message: "Source enablement must be true or false." };
+      }
+      const isEnabled = record.is_enabled;
+      const requestedVisibility = normalizeVisibility(record.default_visibility, "");
+      if (!VISIBILITY_VALUES.has(requestedVisibility)) {
+        return { status: "validation_error", message: `Choose a valid visibility for ${row.title}.` };
+      }
+      if (requestedVisibility === "private" && role !== "admin") {
+        return { status: "validation_error", message: "Private visibility is reserved for app admins." };
+      }
+      if (requestedVisibility === "public" && !Boolean(row.public_visibility_allowed)) {
+        return {
+          status: "validation_error",
+          message: `${row.title} cannot be made public because that source is marked as proprietary or otherwise non-public.`,
+        };
+      }
+      const defaultVisibility = clampVisibilityForSource(row, requestedVisibility);
+      if (
+        isEnabled &&
+        !state.is_enabled &&
+        row.license_class === "proprietary_private" &&
+        !policy?.proprietary_acknowledged_at
+      ) {
+        newlyEnabledProprietary = true;
+      }
+      normalizedUpdates.push({
+        row,
+        state,
+        sourceId,
+        isEnabled,
+        defaultVisibility,
+      });
+    }
+
+    if (newlyEnabledProprietary && !asBoolean(payload.acknowledge_proprietary)) {
+      return {
+        status: "validation_error",
+        message: "Acknowledge the proprietary-source notice before enabling a protected systems source.",
+      };
+    }
+
+    const now = utcIsoTimestamp();
+    const changedUpdates = normalizedUpdates.filter(
+      (update) => update.state.is_enabled !== update.isEnabled || update.state.default_visibility !== update.defaultVisibility,
+    );
+    const writeChanges = database.transaction(() => {
+      upsertCampaignSystemsPolicy(database, {
+        campaignSlug: campaign.slug,
+        librarySlug,
+        actorUserId,
+        now,
+        proprietaryAcknowledgedAt: newlyEnabledProprietary ? now : null,
+      });
+      for (const update of changedUpdates) {
+        upsertCampaignEnabledSource(database, {
+          campaignSlug: campaign.slug,
+          librarySlug,
+          sourceId: update.sourceId,
+          isEnabled: update.isEnabled,
+          defaultVisibility: update.defaultVisibility,
+          actorUserId,
+          now,
+        });
+        insertSystemsSourceAuditEvent(database, {
+          actorUserId,
+          campaignSlug: campaign.slug,
+          librarySlug,
+          sourceId: update.sourceId,
+          visibility: update.defaultVisibility,
+          isEnabled: update.isEnabled,
+          now,
+        });
+      }
+    });
+    writeChanges();
+
+    const refreshedRows = loadSourceRows(database, campaign.slug, librarySlug);
+    return {
+      status: "ok",
+      sources: refreshedRows.map((row) => serializeSourceState(row, seeds.get(row.source_id), role)),
+    };
+  } catch (error) {
+    if (isNoSuchTableError(error)) {
+      return { status: "validation_error", message: "Systems database is unavailable." };
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
 }
 
 function loadSourceRow(

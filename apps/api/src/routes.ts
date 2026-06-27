@@ -1516,6 +1516,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "campaign_not_found",
     },
   },
+  {
+    method: "PUT",
+    honoPath: "/api/v1/campaigns/:campaignSlug/systems/sources",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/systems/sources",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/systems/sources",
+    routeFamily: "api_v1_systems",
+    missingResource: {
+      method: "PUT",
+      path: "/api/v1/campaigns/definitely-not-a-campaign/systems/sources",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {

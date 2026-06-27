@@ -76,6 +76,8 @@ fixture database.
   - `GET /api/v1/campaigns/:campaignSlug/dm-content`
 - Added DM Content Systems management read endpoint with fixture or bearer-token DM/admin access:
   - `GET /api/v1/campaigns/:campaignSlug/dm-content/systems`
+- Added Systems source-policy write endpoint with bearer-token DM/admin access:
+  - `PUT /api/v1/campaigns/:campaignSlug/systems/sources`
 - Added DM Content statblock and custom condition write endpoints with bearer-token DM/admin access:
   - `POST /api/v1/campaigns/:campaignSlug/dm-content/statblocks`
   - `PUT /api/v1/campaigns/:campaignSlug/dm-content/statblocks/:statblockId`
@@ -291,6 +293,13 @@ fixture database.
   - import-run review rows intentionally omit raw `source_path` values
   - missing optional SQLite tables degrade to empty arrays or default policy state
   - missing campaign DM Content Systems reads return `campaign_not_found` JSON
+- Systems source-policy writes preserve the `/api/v1/campaigns/:campaignSlug/systems/sources` mutation shell for a disposable fixture SQLite database:
+  - unauthenticated requests return Flask-compatible `auth_required`
+  - fixture-role write attempts are rejected because the mutation needs a durable bearer-token actor
+  - bearer-token players and users without active manager access receive `forbidden`
+  - writes validate update row shape, boolean enablement values, source ids, valid visibility values, admin-only private visibility, public-visibility allowance, and proprietary acknowledgement before enabling proprietary private sources
+  - successful writes upsert campaign source policy and source rows, record source-update audit events, and return refreshed source rows
+  - missing campaigns return `campaign_not_found` JSON
 - DM Content statblock writes preserve the `/api/v1/campaigns/:campaignSlug/dm-content/statblocks...` mutation shells for a disposable fixture SQLite database:
   - unauthenticated requests return Flask-compatible `auth_required`
   - fixture-role write attempts are rejected because the mutation needs a durable bearer-token actor

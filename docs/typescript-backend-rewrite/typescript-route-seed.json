@@ -179,6 +179,15 @@
       "notes": "Tracked Hono campaign Systems source-list route with Flask-compatible unauthenticated auth_required behavior, fixture-role and bearer API-token membership-derived filtering, and SQLite library/source reads through CPW_DB_PATH."
     },
     {
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/systems/sources",
+      "route_family": "api_v1_systems",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/systems/sources",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono campaign Systems source-policy write route with bearer-token DM/admin access, local SQLite campaign_system_policies and campaign_enabled_sources writes, proprietary-source acknowledgement validation, private/public visibility validation, source-update audit rows, refreshed source response rows, and explicit missing-campaign JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/systems/sources/<source_id>",
       "route_family": "api_v1_systems",

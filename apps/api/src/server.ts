@@ -91,6 +91,7 @@ import {
   buildCampaignSystemsSourceCategoryPayload,
   buildCampaignSystemsSourceDetailPayload,
   buildCampaignSystemsSourceListPayload,
+  updateCampaignSystemsSources,
   type FixtureSystemsRole,
 } from "./systems/sources.js";
 import {
@@ -608,6 +609,28 @@ function resolveDmContentBearerWrite(
 
   if (fixtureRole(ctx)) {
     return { kind: "forbidden", message: "DM Content writes require bearer API authentication." };
+  }
+  return { kind: "missing" };
+}
+
+function resolveSystemsManagerBearerWrite(
+  ctx: { req: { header: (name: string) => string | undefined } },
+  campaignSlug: string,
+): RoleResolution {
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "authenticated") {
+    const role = apiTokenRoleForCampaign(apiAuth.context, campaignSlug);
+    if (role === "admin" || role === "dm") {
+      return { kind: "authenticated", role: toFixtureSystemsRole(role), actorUserId: apiAuth.context.user.id };
+    }
+    return { kind: "forbidden", message: "You do not have permission to manage systems." };
+  }
+  if (apiAuth.kind === "invalid") {
+    return { kind: "invalid" };
+  }
+
+  if (fixtureRole(ctx)) {
+    return { kind: "forbidden", message: "Systems source updates require bearer API authentication." };
   }
   return { kind: "missing" };
 }
@@ -1278,6 +1301,41 @@ app.get(ROUTES.systemsSources, async (ctx) => {
     ok: true,
     ...buildCampaignSystemsSourceListPayload(config.dbPath, campaign, campaignConfig?.config || {}, role),
   });
+});
+
+app.put(ROUTES.systemsSources, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveSystemsManagerBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+  const result = updateCampaignSystemsSources(
+    config.dbPath,
+    campaign,
+    campaignConfig?.config || {},
+    auth.role,
+    auth.actorUserId || 0,
+    jsonPayload.payload,
+  );
+  if (result.status === "validation_error") {
+    const error = validationError(result.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({ ok: true, sources: result.sources });
 });
 
 app.get(ROUTES.systemsSourceDetail, async (ctx) => {
