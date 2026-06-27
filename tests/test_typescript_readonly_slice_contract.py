@@ -2042,6 +2042,94 @@ def test_typescript_character_cultivation_context_shell_and_supported_xianxia_co
         "notes": "Meditated under storm clouds.",
     }
 
+    energy_status, energy_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 3,
+            "action": "spend_cultivation_energy",
+            "values": {
+                "energy_key": " Qi ",
+                "cultivation_energy_notes": "  Opened   the\n inner\tbreath gate.  ",
+            },
+        },
+    )
+    assert energy_status == 200
+    assert energy_payload["ok"] is True
+    assert energy_payload["message"] == "Spent 1 Insight on Cultivation to increase Qi."
+    assert energy_payload["anchor"] == "xianxia-cultivation-energy"
+    assert energy_payload["character"]["state_record"]["revision"] == initial_revision + 4
+    energy_xianxia = energy_payload["character"]["definition"]["xianxia"]
+    assert energy_xianxia["insight"] == {"available": 6, "spent": 2}
+    assert energy_xianxia["energies"] == {
+        "jing": {"max": 1},
+        "qi": {"max": 2},
+        "shen": {"max": 1},
+    }
+    assert energy_payload["cultivation"]["insight"] == {"available": 6, "spent": 2}
+    qi_context = next(row for row in energy_payload["cultivation"]["energies"] if row["key"] == "qi")
+    assert qi_context["current"] == 1
+    assert qi_context["max"] == 2
+    assert energy_payload["character"]["state_record"]["state"]["xianxia"]["energies"] == {
+        "jing": {"current": 1},
+        "qi": {"current": 1},
+        "shen": {"current": 1},
+    }
+    assert energy_xianxia["advancement_history"][-1] == {
+        "action": "cultivation_energy_increase",
+        "amount": 1,
+        "target": "Qi",
+        "energy_key": "qi",
+        "energy_maximum_increase": 1,
+        "new_energy_maximum": 2,
+        "notes": "Opened the inner breath gate.",
+    }
+
+    invalid_energy_status, invalid_energy_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 4,
+            "cultivation_action": "spend_cultivation_energy",
+            "energy_key": "body",
+        },
+    )
+    assert invalid_energy_status == 400
+    assert invalid_energy_payload["error"]["code"] == "validation_error"
+    assert invalid_energy_payload["error"]["message"] == "Choose Jing, Qi, or Shen for Cultivation."
+
+    zero_insight_save_status, zero_insight_save_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 4,
+            "action": "save_insight",
+            "values": {"insight_available": "0", "insight_spent": "2"},
+        },
+    )
+    assert zero_insight_save_status == 200
+    assert zero_insight_save_payload["character"]["state_record"]["revision"] == initial_revision + 5
+
+    insufficient_energy_status, insufficient_energy_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 5,
+            "cultivation_action": "spend_cultivation_energy",
+            "energy_key": "qi",
+        },
+    )
+    assert insufficient_energy_status == 400
+    assert insufficient_energy_payload["error"]["code"] == "validation_error"
+    assert (
+        insufficient_energy_payload["error"]["message"]
+        == "Cultivation needs 1 Insight to increase Qi; only 0 available."
+    )
+
     zero_gathering_status, zero_gathering_payload = _to_json(
         f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
         headers=typescript_api_mutation_server["dm_headers"],

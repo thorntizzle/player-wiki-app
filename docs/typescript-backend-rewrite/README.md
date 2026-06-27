@@ -172,7 +172,7 @@ Do not implement these routes as part of the parity program unless a later archi
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (context shell only; POST/save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (context shell only; POST/save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (supported Xianxia read context)
-  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (`save_insight` and `record_gathering_insight` only; remaining action parity pending)
+  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (`save_insight`, `record_gathering_insight`, and `spend_cultivation_energy` only; remaining action parity pending)
   - `PATCH /api/v1/campaigns/:campaignSlug/characters/:characterSlug/sheet-edit`
   - `GET /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual`
   - `POST /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual` (preview and confirmed local fixture/SQLite create)
@@ -592,13 +592,16 @@ Do not implement these routes as part of the parity program unless a later archi
   null contexts. The POST/save routes, ready-state native builder contexts, state merges, and definition
   YAML writes remain pending.
 - The first Character Cultivation write slices now serve
-  `POST .../characters/:characterSlug/cultivation` for the `save_insight` and `record_gathering_insight` actions. They preserve
+  `POST .../characters/:characterSlug/cultivation` for the `save_insight`, `record_gathering_insight`,
+  and `spend_cultivation_energy` actions. They preserve
   bearer-token DM/admin management access, Xianxia-only validation, shared revision conflicts,
   flat or nested JSON value parsing, non-negative whole-number Insight available/spent validation,
-  positive whole-number Gathering Insight validation,
+  positive whole-number Gathering Insight validation, Cultivation Energy key and available-Insight
+  validation,
   copied-fixture `definition.yaml` writes, SQLite state revision bumps and Xianxia state
-  reconciliation, `insight_counter_adjustment` and `gathering_insight` history rows, and
-  refreshed Cultivation payloads. Remaining Cultivation action parity remains pending.
+  reconciliation, `insight_counter_adjustment`, `gathering_insight`, and
+  `cultivation_energy_increase` history rows, and refreshed Cultivation payloads. Remaining
+  Cultivation action parity remains pending.
 - The first Xianxia inventory equipment write now serves
   `PATCH .../characters/:characterSlug/session/xianxia-inventory/:itemId/equipped`. It preserves the
   bearer-only session-state write gate, shared revision conflicts, Xianxia-only validation, unknown

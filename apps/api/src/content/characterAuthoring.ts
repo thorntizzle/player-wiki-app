@@ -47,6 +47,7 @@ const XIANXIA_ENERGY_LABELS: Record<(typeof XIANXIA_ENERGY_KEYS)[number], string
   qi: "Qi",
   shen: "Shen",
 };
+type XianxiaEnergyKey = (typeof XIANXIA_ENERGY_KEYS)[number];
 const XIANXIA_YIN_YANG_KEYS = ["yin", "yang"] as const;
 const XIANXIA_YIN_YANG_LABELS: Record<(typeof XIANXIA_YIN_YANG_KEYS)[number], string> = {
   yin: "Yin",
@@ -457,6 +458,9 @@ export function applyCharacterCultivationAction(
   if (action === "record_gathering_insight") {
     return applyXianxiaGatheringInsightAction(definition, values);
   }
+  if (action === "spend_cultivation_energy") {
+    return applyXianxiaCultivationEnergyAction(definition, values);
+  }
   return {
     status: "validation_error",
     message: "Unsupported cultivation action. Refresh the page and try again.",
@@ -512,6 +516,30 @@ function applyXianxiaGatheringInsightAction(
   };
 }
 
+function applyXianxiaCultivationEnergyAction(
+  definition: Record<string, unknown>,
+  values: Record<string, string>,
+): CharacterCultivationActionApplyResult {
+  const energyKey = normalizeCultivationEnergyKey(values.energy_key);
+  if (!energyKey) {
+    return { status: "validation_error", message: "Choose Jing, Qi, or Shen for Cultivation." };
+  }
+
+  const result = spendXianxiaCultivationEnergyDefinition(definition, {
+    energyKey,
+    notes: collapseWhitespace(values.cultivation_energy_notes),
+  });
+  if (result.status === "validation_error") {
+    return { status: "validation_error", message: result.message };
+  }
+  return {
+    status: "ok",
+    definition: result.definition,
+    message: `Spent ${result.insightCost} Insight on Cultivation to increase ${result.energyName}.`,
+    anchor: "xianxia-cultivation-energy",
+  };
+}
+
 function normalizeCultivationValues(payload: Record<string, unknown>): Record<string, string> {
   const rawValues = asRecord(payload.values);
   const source = Object.keys(rawValues).length > 0 ? rawValues : payload;
@@ -524,6 +552,14 @@ function normalizeCultivationValues(payload: Record<string, unknown>): Record<st
     values[fieldName] = value === null || value === undefined ? "" : String(value);
   }
   return values;
+}
+
+function normalizeCultivationEnergyKey(value: unknown): XianxiaEnergyKey | "" {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[-\s]+/g, "_");
+  if ((XIANXIA_ENERGY_KEYS as readonly string[]).includes(normalized)) {
+    return normalized as XianxiaEnergyKey;
+  }
+  return "";
 }
 
 function normalizeCultivationInt(value: unknown, fieldLabel: string, fallback = 0): number {
@@ -589,6 +625,72 @@ function updateXianxiaInsightDefinition(
   }
   nextDefinition.xianxia = xianxia;
   return nextDefinition;
+}
+
+function spendXianxiaCultivationEnergyDefinition(
+  definition: Record<string, unknown>,
+  payload: { energyKey: XianxiaEnergyKey; notes: string },
+):
+  | {
+      status: "ok";
+      definition: Record<string, unknown>;
+      insightCost: number;
+      energyName: string;
+      newMaximum: number;
+    }
+  | { status: "validation_error"; message: string } {
+  const nextDefinition = deepCloneRecord(definition);
+  const xianxia = asRecord(nextDefinition.xianxia);
+  const previousInsight = asRecord(xianxia.insight);
+  const previousAvailable = nonNegativeLooseInt(previousInsight.available, 0);
+  const previousSpent = nonNegativeLooseInt(previousInsight.spent, 0);
+  const insightCost = XIANXIA_CULTIVATION_ENERGY_INSIGHT_COST;
+  const energyName = XIANXIA_ENERGY_LABELS[payload.energyKey];
+  if (previousAvailable < insightCost) {
+    return {
+      status: "validation_error",
+      message: `Cultivation needs ${insightCost} Insight to increase ${energyName}; only ${previousAvailable} available.`,
+    };
+  }
+
+  const existingEnergies = asRecord(xianxia.energies);
+  const energies: Record<string, Record<string, number>> = {};
+  for (const key of XIANXIA_ENERGY_KEYS) {
+    const energy = asRecord(existingEnergies[key]);
+    const maximumIncrease = key === payload.energyKey ? 1 : 0;
+    energies[key] = { max: nonNegativeLooseInt(energy.max, 0) + maximumIncrease };
+  }
+  const newMaximum = energies[payload.energyKey]?.max ?? 0;
+  xianxia.energies = energies;
+  xianxia.insight = {
+    available: previousAvailable - insightCost,
+    spent: previousSpent + insightCost,
+  };
+
+  const history = asArray(xianxia.advancement_history)
+    .map(asRecord)
+    .filter((record) => Object.keys(record).length > 0);
+  const historyRow: Record<string, unknown> = {
+    action: "cultivation_energy_increase",
+    amount: insightCost,
+    target: energyName,
+    energy_key: payload.energyKey,
+    energy_maximum_increase: 1,
+    new_energy_maximum: newMaximum,
+  };
+  if (payload.notes) {
+    historyRow.notes = payload.notes;
+  }
+  history.push(historyRow);
+  xianxia.advancement_history = history;
+  nextDefinition.xianxia = xianxia;
+  return {
+    status: "ok",
+    definition: nextDefinition,
+    insightCost,
+    energyName,
+    newMaximum,
+  };
 }
 
 function recordXianxiaGatheringInsightDefinition(
