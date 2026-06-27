@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -10,10 +11,55 @@ const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const tempRoot = mkdtempSync(path.join(tmpdir(), "cpw-combat-focus-query-"));
 const campaignsDir = path.join(tempRoot, "campaigns");
 const dbPath = path.join(tempRoot, "player_wiki.sqlite3");
+const dmApiToken = "fixture-combat-focus-dm-token";
+const playerApiToken = "fixture-combat-focus-player-token";
+const hashToken = (rawToken) => createHash("sha256").update(rawToken, "utf8").digest("hex");
 
 function seedCombatDatabase() {
   const database = new Database(dbPath);
   database.exec(`
+    CREATE TABLE users (
+      id INTEGER PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL,
+      is_admin INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL,
+      password_hash TEXT,
+      auth_version INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE user_preferences (
+      user_id INTEGER PRIMARY KEY,
+      theme_key TEXT NOT NULL DEFAULT 'parchment',
+      session_chat_order TEXT NOT NULL DEFAULT 'newest_first',
+      frontend_mode TEXT NOT NULL DEFAULT 'gen2',
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE campaign_memberships (
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      campaign_slug TEXT NOT NULL,
+      role TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE api_tokens (
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      label TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      last_used_at TEXT NOT NULL,
+      expires_at TEXT,
+      revoked_at TEXT,
+      created_by_user_id INTEGER
+    );
+
     CREATE TABLE character_state (
       campaign_slug TEXT NOT NULL,
       character_slug TEXT NOT NULL,
@@ -45,14 +91,18 @@ function seedCombatDatabase() {
       has_action INTEGER NOT NULL DEFAULT 1,
       has_bonus_action INTEGER NOT NULL DEFAULT 1,
       has_reaction INTEGER NOT NULL DEFAULT 1,
-      revision INTEGER NOT NULL DEFAULT 1
+      revision INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL DEFAULT '',
+      updated_by_user_id INTEGER
     );
 
     CREATE TABLE campaign_combat_trackers (
       campaign_slug TEXT PRIMARY KEY,
       round_number INTEGER NOT NULL,
       current_combatant_id INTEGER,
-      revision INTEGER NOT NULL
+      revision INTEGER NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT '',
+      updated_by_user_id INTEGER
     );
 
     CREATE TABLE campaign_combat_conditions (
@@ -82,6 +132,85 @@ function seedCombatDatabase() {
       source_label TEXT NOT NULL DEFAULT ''
     );
   `);
+
+  database
+    .prepare(
+      "INSERT INTO users (id, email, display_name, is_admin, status, password_hash, auth_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      77,
+      "fixture-combat-focus-dm@example.com",
+      "Fixture Combat DM",
+      0,
+      "active",
+      null,
+      1,
+      "2026-06-25T08:00:00+00:00",
+      "2026-06-25T08:00:00+00:00",
+    );
+  database
+    .prepare(
+      "INSERT INTO users (id, email, display_name, is_admin, status, password_hash, auth_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      79,
+      "fixture-combat-focus-player@example.com",
+      "Fixture Combat Player",
+      0,
+      "active",
+      null,
+      1,
+      "2026-06-25T08:01:00+00:00",
+      "2026-06-25T08:01:00+00:00",
+    );
+  database
+    .prepare(
+      "INSERT INTO campaign_memberships (id, user_id, campaign_slug, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(501, 77, "linden-pass", "dm", "active", "2026-06-25T08:10:00+00:00", "2026-06-25T08:10:00+00:00");
+  database
+    .prepare(
+      "INSERT INTO campaign_memberships (id, user_id, campaign_slug, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      502,
+      79,
+      "linden-pass",
+      "player",
+      "active",
+      "2026-06-25T08:16:00+00:00",
+      "2026-06-25T08:16:00+00:00",
+    );
+  database
+    .prepare(
+      "INSERT INTO api_tokens (id, user_id, label, token_hash, created_at, last_used_at, expires_at, revoked_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      901,
+      77,
+      "Combat Focus DM Token",
+      hashToken(dmApiToken),
+      "2026-06-25T08:40:00+00:00",
+      "2026-06-25T08:40:00+00:00",
+      null,
+      null,
+      null,
+    );
+  database
+    .prepare(
+      "INSERT INTO api_tokens (id, user_id, label, token_hash, created_at, last_used_at, expires_at, revoked_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      902,
+      79,
+      "Combat Focus Player Token",
+      hashToken(playerApiToken),
+      "2026-06-25T08:45:00+00:00",
+      "2026-06-25T08:45:00+00:00",
+      null,
+      null,
+      null,
+    );
 
   database
     .prepare(
@@ -176,11 +305,13 @@ function seedCombatDatabase() {
   database.close();
 }
 
-async function requestJson(app, path, role = "dm", headers = {}) {
+async function requestJson(app, path, role = "dm", headers = {}, method = "GET") {
+  const fixtureHeaders = role ? { "X-CPW-Fixture-Role": role } : {};
   const response = await app.fetch(
     new Request(`http://127.0.0.1${path}`, {
+      method,
       headers: {
-        "X-CPW-Fixture-Role": role,
+        ...fixtureHeaders,
         ...headers,
       },
     }),
@@ -240,6 +371,56 @@ try {
   assert.equal(playerQueryRemainsLocal.payload.selected_combatant_id, 501);
   assert.equal(playerQueryRemainsLocal.payload.selected_combatant?.name, "Clockwork Hound");
   assert.equal(playerQueryRemainsLocal.payload.selected_player_character, null);
+
+  const dmAdvanceNpcFocus = await requestJson(
+    app,
+    "/api/v1/campaigns/linden-pass/combat/advance-turn?combatant=501",
+    null,
+    { Authorization: `Bearer ${dmApiToken}` },
+    "POST",
+  );
+  assert.equal(dmAdvanceNpcFocus.status, 200);
+  assert.equal(dmAdvanceNpcFocus.payload.tracker?.round_number, 3);
+  assert.equal(dmAdvanceNpcFocus.payload.tracker?.current_turn_label, "Arden March");
+  assert.equal(dmAdvanceNpcFocus.payload.selected_combatant_id, 501);
+  assert.equal(dmAdvanceNpcFocus.payload.selected_combatant?.name, "Clockwork Hound");
+  assert.equal(dmAdvanceNpcFocus.payload.selected_combatant?.is_current_turn, false);
+
+  const dmAdvanceMissingFocus = await requestJson(
+    app,
+    "/api/v1/campaigns/linden-pass/combat/advance-turn",
+    null,
+    { Authorization: `Bearer ${dmApiToken}` },
+    "POST",
+  );
+  assert.equal(dmAdvanceMissingFocus.status, 200);
+  assert.equal(dmAdvanceMissingFocus.payload.tracker?.round_number, 4);
+  assert.equal(dmAdvanceMissingFocus.payload.tracker?.current_turn_label, "Clockwork Hound");
+  assert.equal(dmAdvanceMissingFocus.payload.selected_combatant_id, 501);
+  assert.equal(dmAdvanceMissingFocus.payload.selected_combatant?.is_current_turn, true);
+
+  const dmAdvanceInvalidFocus = await requestJson(
+    app,
+    "/api/v1/campaigns/linden-pass/combat/advance-turn?combatant=999999",
+    null,
+    { Authorization: `Bearer ${dmApiToken}` },
+    "POST",
+  );
+  assert.equal(dmAdvanceInvalidFocus.status, 200);
+  assert.equal(dmAdvanceInvalidFocus.payload.tracker?.round_number, 4);
+  assert.equal(dmAdvanceInvalidFocus.payload.tracker?.current_turn_label, "Arden March");
+  assert.equal(dmAdvanceInvalidFocus.payload.selected_combatant_id, 502);
+  assert.equal(dmAdvanceInvalidFocus.payload.selected_combatant?.is_current_turn, true);
+
+  const playerAdvanceWithFocus = await requestJson(
+    app,
+    "/api/v1/campaigns/linden-pass/combat/advance-turn?combatant=501",
+    null,
+    { Authorization: `Bearer ${playerApiToken}` },
+    "POST",
+  );
+  assert.equal(playerAdvanceWithFocus.status, 403);
+  assert.equal(playerAdvanceWithFocus.payload.error?.code, "forbidden");
 } finally {
   rmSync(tempRoot, { recursive: true, force: true });
 }
