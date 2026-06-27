@@ -229,6 +229,49 @@ function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function sqliteIdentifier(value: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+    throw new Error(`Unsafe SQLite identifier: ${value}`);
+  }
+  return `"${value}"`;
+}
+
+function tableExists(database: SqliteDatabase, tableName: string): boolean {
+  const row = database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(tableName);
+  return Boolean(row);
+}
+
+function columnExists(database: SqliteDatabase, tableName: string, columnName: string): boolean {
+  if (!tableExists(database, tableName)) {
+    return false;
+  }
+  const rows = database.prepare(`PRAGMA table_info(${sqliteIdentifier(tableName)})`).all() as Array<{ name: string }>;
+  return rows.some((row) => row.name === columnName);
+}
+
+function deleteRowsByUserIdIfPresent(database: SqliteDatabase, tableName: string, userId: number): void {
+  if (!columnExists(database, tableName, "user_id")) {
+    return;
+  }
+  database.prepare(`DELETE FROM ${sqliteIdentifier(tableName)} WHERE user_id = ?`).run(userId);
+}
+
+function nullUserReferenceIfPresent(
+  database: SqliteDatabase,
+  tableName: string,
+  columnName: string,
+  userId: number,
+): void {
+  if (!columnExists(database, tableName, columnName)) {
+    return;
+  }
+  database
+    .prepare(`UPDATE ${sqliteIdentifier(tableName)} SET ${sqliteIdentifier(columnName)} = NULL WHERE ${sqliteIdentifier(columnName)} = ?`)
+    .run(userId);
+}
+
 function serializeMembership(row: MembershipRow): AuthMembership {
   return {
     id: Number(row.id),
@@ -598,6 +641,73 @@ export function enableUser(dbPath: string, userId: number): AuthUser {
       throw new Error("User was not readable after enable.");
     }
     return serializeUser(row);
+  } finally {
+    database.close();
+  }
+}
+
+export function deleteUser(dbPath: string, userId: number): AuthUser | null {
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const deleteUserTransaction = database.transaction(() => {
+      const row = database.prepare("SELECT * FROM users WHERE id = ?").get(userId) as UserRow | undefined;
+      if (!row) {
+        return null;
+      }
+
+      for (const tableName of [
+        "campaign_memberships",
+        "character_assignments",
+        "invite_tokens",
+        "password_reset_tokens",
+        "sessions",
+        "api_tokens",
+      ]) {
+        deleteRowsByUserIdIfPresent(database, tableName, userId);
+      }
+
+      for (const [tableName, columnName] of [
+        ["invite_tokens", "created_by_user_id"],
+        ["password_reset_tokens", "created_by_user_id"],
+        ["api_tokens", "created_by_user_id"],
+        ["auth_audit_log", "actor_user_id"],
+        ["auth_audit_log", "target_user_id"],
+        ["campaign_visibility_settings", "updated_by_user_id"],
+        ["character_state", "updated_by_user_id"],
+        ["campaign_sessions", "started_by_user_id"],
+        ["campaign_sessions", "ended_by_user_id"],
+        ["campaign_session_states", "updated_by_user_id"],
+        ["campaign_session_articles", "created_by_user_id"],
+        ["campaign_session_articles", "revealed_by_user_id"],
+        ["campaign_session_messages", "author_user_id"],
+        ["campaign_dm_statblocks", "created_by_user_id"],
+        ["campaign_dm_statblocks", "updated_by_user_id"],
+        ["campaign_dm_condition_definitions", "created_by_user_id"],
+        ["campaign_dm_condition_definitions", "updated_by_user_id"],
+        ["campaign_combatants", "created_by_user_id"],
+        ["campaign_combatants", "updated_by_user_id"],
+        ["campaign_combat_trackers", "updated_by_user_id"],
+        ["campaign_combat_conditions", "created_by_user_id"],
+        ["campaign_combatant_resource_counters", "created_by_user_id"],
+        ["campaign_combatant_resource_counters", "updated_by_user_id"],
+        ["campaign_combatant_resource_notes", "created_by_user_id"],
+        ["systems_import_runs", "started_by_user_id"],
+        ["campaign_system_policies", "proprietary_acknowledged_by_user_id"],
+        ["campaign_system_policies", "updated_by_user_id"],
+        ["campaign_enabled_sources", "updated_by_user_id"],
+        ["campaign_entry_overrides", "updated_by_user_id"],
+      ] as const) {
+        nullUserReferenceIfPresent(database, tableName, columnName, userId);
+      }
+
+      const result = database.prepare("DELETE FROM users WHERE id = ?").run(userId);
+      if (result.changes !== 1) {
+        throw new Error("Failed to delete user.");
+      }
+      return row;
+    });
+    const row = deleteUserTransaction();
+    return row ? serializeUser(row) : null;
   } finally {
     database.close();
   }

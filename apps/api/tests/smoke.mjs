@@ -2975,6 +2975,244 @@ if (
   );
 }
 
+const deleteUserSetupDb = new Database(dbPath, { fileMustExist: true });
+deleteUserSetupDb
+  .prepare(
+    "INSERT INTO campaign_memberships (user_id, campaign_slug, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    83,
+    "linden-pass",
+    "player",
+    "active",
+    "2026-06-25T09:20:00+00:00",
+    "2026-06-25T09:20:00+00:00",
+  );
+deleteUserSetupDb
+  .prepare(
+    "INSERT INTO character_assignments (user_id, campaign_slug, character_slug, assignment_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    83,
+    "linden-pass",
+    "selene-brook",
+    "owner",
+    "2026-06-25T09:21:00+00:00",
+    "2026-06-25T09:21:00+00:00",
+  );
+deleteUserSetupDb
+  .prepare(
+    "INSERT INTO invite_tokens (user_id, token_hash, expires_at, used_at, created_by_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    83,
+    hashToken("fixture-delete-invite-token"),
+    "2026-06-28T09:00:00+00:00",
+    null,
+    77,
+    "2026-06-25T09:00:00+00:00",
+  );
+deleteUserSetupDb
+  .prepare(
+    "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, used_at, created_by_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    83,
+    hashToken("fixture-delete-reset-token"),
+    "2026-06-26T09:00:00+00:00",
+    null,
+    77,
+    "2026-06-25T09:00:00+00:00",
+  );
+deleteUserSetupDb
+  .prepare(
+    "INSERT INTO auth_audit_log (actor_user_id, target_user_id, campaign_slug, character_slug, event_type, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    83,
+    77,
+    null,
+    null,
+    "delete_actor_reference_probe",
+    JSON.stringify({ source: "smoke" }),
+    "2026-06-25T09:22:00+00:00",
+  );
+deleteUserSetupDb
+  .prepare(
+    "INSERT INTO auth_audit_log (actor_user_id, target_user_id, campaign_slug, character_slug, event_type, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    77,
+    83,
+    null,
+    null,
+    "delete_target_reference_probe",
+    JSON.stringify({ source: "smoke" }),
+    "2026-06-25T09:23:00+00:00",
+  );
+deleteUserSetupDb.close();
+
+const adminDeletePath = "/api/v1/admin/users/83";
+const blockedAdminDelete = await requestJson(adminDeletePath, {}, { method: "DELETE", body: {} });
+if (blockedAdminDelete.status !== 401 || blockedAdminDelete.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated admin delete auth_required 401, got ${blockedAdminDelete.status} ${JSON.stringify(blockedAdminDelete.payload)}`,
+  );
+}
+
+const fixtureAdminDelete = await requestJson(
+  adminDeletePath,
+  { "X-CPW-Fixture-Role": "admin" },
+  { method: "DELETE", body: { confirm_email: "fixture-disposable-user@example.com" } },
+);
+if (
+  fixtureAdminDelete.status !== 403 ||
+  fixtureAdminDelete.payload?.error?.message !== "Admin membership updates require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture admin delete denial, got ${fixtureAdminDelete.status} ${JSON.stringify(fixtureAdminDelete.payload)}`,
+  );
+}
+
+const playerAdminDelete = await requestJson(
+  adminDeletePath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "DELETE", body: { confirm_email: "fixture-disposable-user@example.com" } },
+);
+if (
+  playerAdminDelete.status !== 403 ||
+  playerAdminDelete.payload?.error?.message !== "You do not have permission to use the admin API."
+) {
+  throw new Error(
+    `Expected player admin delete forbidden, got ${playerAdminDelete.status} ${JSON.stringify(playerAdminDelete.payload)}`,
+  );
+}
+
+const missingUserAdminDelete = await requestJson(
+  "/api/v1/admin/users/999999",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "DELETE", body: { confirm_email: "missing@example.com" } },
+);
+if (
+  missingUserAdminDelete.status !== 404 ||
+  missingUserAdminDelete.payload?.error?.code !== "admin_user_not_found"
+) {
+  throw new Error(
+    `Expected missing-user admin delete not_found, got ${missingUserAdminDelete.status} ${JSON.stringify(missingUserAdminDelete.payload)}`,
+  );
+}
+
+const selfAdminDelete = await requestJson(
+  "/api/v1/admin/users/77",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "DELETE", body: { confirm_email: "fixture-token-user@example.com" } },
+);
+if (
+  selfAdminDelete.status !== 400 ||
+  selfAdminDelete.payload?.error?.code !== "validation_error" ||
+  selfAdminDelete.payload?.error?.message !==
+    "The admin screen will not delete the account you are currently using."
+) {
+  throw new Error(`Expected self-delete validation, got ${JSON.stringify(selfAdminDelete.payload)}`);
+}
+
+const missingConfirmationAdminDelete = await requestJson(
+  adminDeletePath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "DELETE", body: {} },
+);
+if (
+  missingConfirmationAdminDelete.status !== 400 ||
+  missingConfirmationAdminDelete.payload?.error?.code !== "validation_error" ||
+  missingConfirmationAdminDelete.payload?.error?.message !== "Type the user's email address to confirm deletion."
+) {
+  throw new Error(`Expected delete confirmation validation, got ${JSON.stringify(missingConfirmationAdminDelete.payload)}`);
+}
+
+const adminDelete = await requestJson(
+  adminDeletePath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "DELETE", body: { confirm_user_email: "Fixture-Disposable-User@Example.Com" } },
+);
+if (
+  adminDelete.status !== 200 ||
+  adminDelete.payload?.ok !== true ||
+  adminDelete.payload?.deleted_user?.email !== "fixture-disposable-user@example.com" ||
+  adminDelete.payload?.deleted_user?.status !== "active" ||
+  adminDelete.payload?.message !== "Deleted user fixture-disposable-user@example.com." ||
+  adminDelete.payload?.user_cards?.some((user) => user.email === "fixture-disposable-user@example.com")
+) {
+  throw new Error(`Unexpected admin delete payload: ${JSON.stringify(adminDelete.payload)}`);
+}
+
+const adminDeleteAuditDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const deletedUserRow = adminDeleteAuditDb.prepare("SELECT id FROM users WHERE id = ?").get(83);
+const deletedMembershipCount = adminDeleteAuditDb
+  .prepare("SELECT COUNT(*) AS count FROM campaign_memberships WHERE user_id = ?")
+  .get(83);
+const deletedAssignmentCount = adminDeleteAuditDb
+  .prepare("SELECT COUNT(*) AS count FROM character_assignments WHERE user_id = ?")
+  .get(83);
+const deletedInviteTokenCount = adminDeleteAuditDb
+  .prepare("SELECT COUNT(*) AS count FROM invite_tokens WHERE user_id = ?")
+  .get(83);
+const deletedResetTokenCount = adminDeleteAuditDb
+  .prepare("SELECT COUNT(*) AS count FROM password_reset_tokens WHERE user_id = ?")
+  .get(83);
+const deletedSessionCount = adminDeleteAuditDb.prepare("SELECT COUNT(*) AS count FROM sessions WHERE user_id = ?").get(83);
+const deletedApiTokenCount = adminDeleteAuditDb.prepare("SELECT COUNT(*) AS count FROM api_tokens WHERE user_id = ?").get(83);
+const actorReferenceAudit = adminDeleteAuditDb
+  .prepare("SELECT actor_user_id, target_user_id FROM auth_audit_log WHERE event_type = ?")
+  .get("delete_actor_reference_probe");
+const targetReferenceAudit = adminDeleteAuditDb
+  .prepare("SELECT actor_user_id, target_user_id FROM auth_audit_log WHERE event_type = ?")
+  .get("delete_target_reference_probe");
+const deletedAuditRow = adminDeleteAuditDb
+  .prepare(
+    "SELECT actor_user_id, target_user_id, campaign_slug, character_slug, event_type, metadata_json FROM auth_audit_log WHERE event_type = ? ORDER BY id DESC LIMIT 1",
+  )
+  .get("user_deleted");
+adminDeleteAuditDb.close();
+const deletedAuditMetadata = deletedAuditRow ? JSON.parse(deletedAuditRow.metadata_json) : {};
+if (
+  deletedUserRow !== undefined ||
+  deletedMembershipCount?.count !== 0 ||
+  deletedAssignmentCount?.count !== 0 ||
+  deletedInviteTokenCount?.count !== 0 ||
+  deletedResetTokenCount?.count !== 0 ||
+  deletedSessionCount?.count !== 0 ||
+  deletedApiTokenCount?.count !== 0 ||
+  actorReferenceAudit?.actor_user_id !== null ||
+  actorReferenceAudit?.target_user_id !== 77 ||
+  targetReferenceAudit?.actor_user_id !== 77 ||
+  targetReferenceAudit?.target_user_id !== null ||
+  deletedAuditRow?.actor_user_id !== 77 ||
+  deletedAuditRow?.target_user_id !== null ||
+  deletedAuditRow?.campaign_slug !== null ||
+  deletedAuditRow?.character_slug !== null ||
+  deletedAuditRow?.event_type !== "user_deleted" ||
+  deletedAuditMetadata.email !== "fixture-disposable-user@example.com" ||
+  deletedAuditMetadata.status !== "active" ||
+  deletedAuditMetadata.is_admin !== false ||
+  deletedAuditMetadata.source !== "admin_screen"
+) {
+  throw new Error(
+    `Unexpected admin delete database/audit state: ${JSON.stringify({
+      deletedUserRow,
+      deletedMembershipCount,
+      deletedAssignmentCount,
+      deletedInviteTokenCount,
+      deletedResetTokenCount,
+      deletedSessionCount,
+      deletedApiTokenCount,
+      actorReferenceAudit,
+      targetReferenceAudit,
+      deletedAuditRow,
+      deletedAuditMetadata,
+    })}`,
+  );
+}
+
 const adminInvitePath = "/api/v1/admin/users/82/invite";
 const blockedAdminInvite = await requestJson(adminInvitePath, {}, { method: "POST", body: {} });
 if (blockedAdminInvite.status !== 401 || blockedAdminInvite.payload?.error?.code !== "auth_required") {

@@ -67,6 +67,7 @@ Route parity check command:
   - `POST /api/v1/admin/users/:userId/disable`
   - `POST /api/v1/admin/users/:userId/enable`
   - `POST /api/v1/admin/users/:userId/invite`
+  - `DELETE /api/v1/admin/users/:userId`
   - `GET /api/v1/campaigns/:campaignSlug/systems`
   - `GET /api/v1/campaigns/:campaignSlug/systems/search`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources`
@@ -325,7 +326,10 @@ Route parity check command:
   memberships, consume prior unused invite tokens, persist SHA-256-hashed invite tokens with the
   configured invite TTL, refresh detail payloads, and write `user_created`, `user_invited`, and
   optional `membership_created` audit events without raw token metadata.
-  Remaining Admin mutations stay on Flask until their own approved slices.
+  User deletion is bearer API-token app-admin only, protects the acting admin account, requires
+  case-insensitive email confirmation, removes target memberships, assignments, invite/reset
+  tokens, sessions, and API tokens, nulls retained user references, refreshes dashboard payloads,
+  and writes `user_deleted` audit events with deleted-user metadata.
 - The Campaign Control read route now serves `GET .../control`, preserving Flask-compatible
   visibility-management auth for fixture or bearer-token DM/admin identities, default campaign
   visibility rows, optional SQLite visibility overrides, admin-only Private choices, rules, notes,

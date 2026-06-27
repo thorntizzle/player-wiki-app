@@ -10,6 +10,7 @@ import {
   apiTokenRoleForCampaign,
   createUser,
   deleteCharacterAssignment,
+  deleteUser,
   disableUser,
   enableUser,
   getActiveUserById,
@@ -1849,6 +1850,62 @@ app.post(ROUTES.adminUserEnable, async (ctx) => {
       enabledUser.status === "active"
         ? `Re-enabled user ${enabledUser.email}.`
         : `Re-enabled user ${enabledUser.email}. The account is back in invited status.`,
+  });
+});
+
+app.delete(ROUTES.adminUserDelete, async (ctx) => {
+  const auth = resolveAppAdminBearerWrite(ctx);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const userId = parsePositiveInteger(ctx.req.param("userId") || "");
+  const targetUser = userId === null ? null : getUserById(config.dbPath, userId);
+  if (!targetUser) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (auth.actorUserId === targetUser.id) {
+    const error = validationError("The admin screen will not delete the account you are currently using.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readOptionalJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const confirmEmail = String(jsonPayload.payload.confirm_email || jsonPayload.payload.confirm_user_email || "").trim();
+  if (confirmEmail.toLowerCase() !== targetUser.email.toLowerCase()) {
+    const error = validationError("Type the user's email address to confirm deletion.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const deletedUser = deleteUser(config.dbPath, targetUser.id);
+  if (!deletedUser) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  insertAuthAuditLog(config.dbPath, {
+    actorUserId: auth.actorUserId ?? null,
+    targetUserId: null,
+    campaignSlug: null,
+    characterSlug: null,
+    eventType: "user_deleted",
+    metadata: {
+      email: deletedUser.email,
+      status: deletedUser.status,
+      is_admin: deletedUser.is_admin,
+      source: "admin_screen",
+    },
+  });
+
+  return ctx.json({
+    ...(await buildAdminDashboardPayload(config, auth.actorUser || null, requestQueryValues(ctx))),
+    message: `Deleted user ${deletedUser.email}.`,
+    deleted_user: deletedUser,
   });
 });
 

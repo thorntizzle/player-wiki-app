@@ -1795,6 +1795,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
     seedPath: "/api/v1/admin/users/invite",
     routeFamily: "api_v1_admin",
   },
+  {
+    method: "DELETE",
+    honoPath: "/api/v1/admin/users/:userId",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/admin/users/<int:user_id>",
+    seedPath: "/api/v1/admin/users/<int:user_id>",
+    routeFamily: "api_v1_admin",
+    missingResource: {
+      method: "DELETE",
+      path: "/api/v1/admin/users/999999",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "admin_user_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1919,4 +1934,5 @@ export const ROUTES = {
   adminUserEnable: IMPLEMENTED_ROUTES[120].honoPath,
   adminUserInvite: IMPLEMENTED_ROUTES[121].honoPath,
   adminCreateInvite: IMPLEMENTED_ROUTES[122].honoPath,
+  adminUserDelete: IMPLEMENTED_ROUTES[123].honoPath,
 } as const;

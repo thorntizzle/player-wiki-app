@@ -1052,6 +1052,15 @@
       "notes": "Tracked Hono Admin user enable route with bearer-token app-admin writes, fixture-role write denial, missing-user JSON, disabled-user validation, self-enable validation ordering, active-or-invited restore based on password presence, auth_version updates, user_enabled audit rows with status/admin_screen metadata, refreshed user detail payloads, and status-specific success messages."
     },
     {
+      "method": "DELETE",
+      "path": "/api/v1/admin/users/<int:user_id>",
+      "route_family": "api_v1_admin",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/admin/users/:userId",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Admin user delete route with bearer-token app-admin writes, fixture-role write denial, missing-user JSON, self-delete validation, case-insensitive confirm-email validation, Flask-compatible user cleanup across memberships, assignments, tokens, sessions, and nullable user references, user_deleted audit rows with deleted-user/admin_screen metadata, refreshed dashboard payloads, and deleted-user response details."
+    },
+    {
       "method": "POST",
       "path": "/api/v1/admin/users/<int:user_id>/invite",
       "route_family": "api_v1_admin",
