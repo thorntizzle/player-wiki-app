@@ -351,6 +351,8 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
             ("DND-5E", "PHB", "PHB:race:human", "race", "phb-human", "Human", {"size": "Medium", "speed": 30, "languages": ["Common", "one extra language"]}),
             ("DND-5E", "PHB", "PHB:background:soldier", "background", "phb-soldier", "Soldier", {}),
             ("DND-5E", "PHB", "PHB:subclass:champion", "subclass", "phb-champion", "Champion", {"class_name": "Fighter", "class_source": "PHB"}),
+            ("DND-5E", "PHB", "PHB:optionalfeature:archery", "optionalfeature", "phb-optionalfeature-archery", "Archery", {"feature_type": ["FS:F"]}),
+            ("DND-5E", "PHB", "PHB:optionalfeature:defense", "optionalfeature", "phb-optionalfeature-defense", "Defense", {"feature_type": ["FS:F"]}),
         ]
         connection.executemany(
             "INSERT INTO systems_entries (library_slug, source_id, entry_key, entry_type, slug, title, metadata_json, body_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -2365,12 +2367,94 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert updated_resources[tracker_id]["current"] == 1
     assert updated_resources[tracker_id]["max"] == 1
 
+    linked_feat_page_status, linked_feat_page_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/pages/mechanics/harbor-drill",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={
+            "metadata": {
+                "title": "Harbor Drill",
+                "section": "Mechanics",
+                "subsection": "Feats",
+                "type": "mechanic",
+                "summary": "A harbor discipline that grants a fighting style.",
+                "published": True,
+                "reveal_after_session": 0,
+                "character_option": {
+                    "kind": "feat",
+                    "name": "Harbor Drill",
+                    "description_markdown": "Harbor veterans drill you into a practiced fighting style.",
+                    "activation_type": "passive",
+                    "optionalfeature_progression": [
+                        {
+                            "name": "Fighting Style",
+                            "featureType": ["FS:F"],
+                            "progression": {"1": 1},
+                        }
+                    ],
+                },
+            },
+            "body_markdown": "The harbor masters insist on repetition until every motion is clean.",
+        },
+    )
+    assert linked_feat_page_status == 200
+    assert linked_feat_page_payload["ok"] is True
+
+    linked_feature_values = {
+        "custom_feature_id_1": custom_feature_id,
+        "custom_feature_name_1": "",
+        "custom_feature_page_ref_1": "mechanics/harbor-drill",
+        "custom_feature_activation_type_1": "",
+        "custom_feature_description_1": "",
+        "custom_feature_resource_max_1": "",
+        "custom_feature_resource_reset_on_1": "",
+        "custom_feature_optionalfeature_1_1_1": "phb-optionalfeature-archery",
+    }
+    linked_feature_status, linked_feature_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={"expected_revision": expected_revision + 11, "values": linked_feature_values},
+    )
+    assert linked_feature_status == 200
+    assert linked_feature_payload["editor"]["state_revision"] == expected_revision + 12
+    linked_features = linked_feature_payload["character"]["definition"]["features"]
+    harbor_drill = next(
+        feature
+        for feature in linked_features
+        if feature.get("category") == "custom_feature" and feature.get("page_ref") == "mechanics/harbor-drill"
+    )
+    archery = next(
+        feature
+        for feature in linked_features
+        if (feature.get("systems_ref") or {}).get("slug") == "phb-optionalfeature-archery"
+    )
+    assert harbor_drill["id"] == custom_feature_id
+    assert harbor_drill["name"] == "Harbor Drill"
+    assert harbor_drill["description_markdown"] == "Harbor veterans drill you into a practiced fighting style."
+    assert harbor_drill["activation_type"] == "passive"
+    assert harbor_drill["campaign_option"]["optionalfeature_progression"][0]["featureType"] == ["FS:F"]
+    assert archery["name"] == "Archery"
+    assert archery["native_edit_parent_feature_id"] == custom_feature_id
+    assert archery["native_edit_optionalfeature_section_index"] == 1
+    assert archery["native_edit_optionalfeature_choice_index"] == 1
+    linked_feature_rows = {
+        row["index"]: row for row in linked_feature_payload["editor"]["feature_rows"]
+    }
+    assert linked_feature_rows[1]["name"] == "Harbor Drill"
+    assert linked_feature_rows[1]["choice_fields"][0]["name"] == "custom_feature_optionalfeature_1_1_1"
+    assert linked_feature_rows[1]["choice_fields"][0]["label"] == "Harbor Drill Fighting Style"
+    assert linked_feature_rows[1]["choice_fields"][0]["selected"] == "phb-optionalfeature-archery"
+    assert {
+        option["value"] for option in linked_feature_rows[1]["choice_fields"][0]["options"]
+    } == {"phb-optionalfeature-archery", "phb-optionalfeature-defense"}
+
     invalid_feature_link_status, invalid_feature_link_payload = _to_json(
         route_url,
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
         body={
-            "expected_revision": expected_revision + 11,
+            "expected_revision": expected_revision + 12,
             "values": {
                 "custom_feature_name_1": "Broken Storm Feature",
                 "custom_feature_page_ref_1": "items/stormglass-compass",
@@ -2395,12 +2479,16 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         route_url,
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
-        body={"expected_revision": expected_revision + 11, "values": clear_custom_feature_values},
+        body={"expected_revision": expected_revision + 12, "values": clear_custom_feature_values},
     )
     assert clear_custom_feature_status == 200
-    assert clear_custom_feature_payload["editor"]["state_revision"] == expected_revision + 12
+    assert clear_custom_feature_payload["editor"]["state_revision"] == expected_revision + 13
     assert all(
         feature.get("category") != "custom_feature"
+        for feature in clear_custom_feature_payload["character"]["definition"]["features"]
+    )
+    assert all(
+        feature.get("native_edit_parent_feature_id") != custom_feature_id
         for feature in clear_custom_feature_payload["character"]["definition"]["features"]
     )
     assert all(

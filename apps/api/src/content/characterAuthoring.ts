@@ -13,7 +13,7 @@ interface SystemsSourceAccessRow {
   configured_visibility: string | null;
 }
 
-interface SystemsEntryRow {
+export interface SystemsEntryRow {
   library_slug: string;
   source_id: string;
   entry_key: string;
@@ -243,6 +243,11 @@ const ADVANCED_EDITOR_CUSTOM_FEATURE_CATEGORY = "custom_feature";
 const ADVANCED_EDITOR_CUSTOM_FEATURE_RESOURCE_PREFIX = "custom_feature";
 const ADVANCED_EDITOR_CUSTOM_FEATURE_FIELD_PATTERN =
   /^custom_feature_(id|name|page_ref|activation_type|description|resource_max|resource_reset_on)_([1-9]\d*)$/;
+const ADVANCED_EDITOR_CUSTOM_FEATURE_OPTIONALFEATURE_FIELD_PATTERN =
+  /^custom_feature_optionalfeature_([1-9]\d*)_([1-9]\d*)_([1-9]\d*)$/;
+const NATIVE_EDIT_PARENT_FEATURE_ID_KEY = "native_edit_parent_feature_id";
+const NATIVE_EDIT_OPTIONALFEATURE_SECTION_KEY = "native_edit_optionalfeature_section_index";
+const NATIVE_EDIT_OPTIONALFEATURE_CHOICE_KEY = "native_edit_optionalfeature_choice_index";
 const ADVANCED_EDITOR_FEATURE_ACTIVATION_OPTIONS = [
   { value: "passive", label: "Passive" },
   { value: "action", label: "Action" },
@@ -3641,6 +3646,11 @@ function buildAdvancedEditorCampaignPageCharacterOption(
     } else if (rawOption.additionalSpells !== undefined) {
       normalized.additional_spells = JSON.parse(JSON.stringify(rawOption.additionalSpells));
     }
+    if (rawOption.optionalfeature_progression !== undefined) {
+      normalized.optionalfeature_progression = JSON.parse(JSON.stringify(rawOption.optionalfeature_progression));
+    } else if (rawOption.optionalfeatureProgression !== undefined) {
+      normalized.optionalfeature_progression = JSON.parse(JSON.stringify(rawOption.optionalfeatureProgression));
+    }
     if (rawOption.modeled_effects !== undefined) {
       normalized.modeled_effects = JSON.parse(JSON.stringify(rawOption.modeled_effects));
     } else if (rawOption.modeledEffects !== undefined) {
@@ -3950,6 +3960,34 @@ function editorCustomFeatureEntries(definition: Record<string, unknown>): Array<
     .filter((feature) => stringifyEditorValue(feature.category).trim() === ADVANCED_EDITOR_CUSTOM_FEATURE_CATEGORY);
 }
 
+function isNativeEditGeneratedOptionalFeature(feature: Record<string, unknown>): boolean {
+  return Boolean(stringifyEditorValue(feature[NATIVE_EDIT_PARENT_FEATURE_ID_KEY]).trim());
+}
+
+function nativeEditOptionalFeatureSelectionLookup(
+  definition: Record<string, unknown>,
+): Map<string, Map<string, string>> {
+  const selections = new Map<string, Map<string, string>>();
+  for (const feature of asArray(definition.features).map((value) => asRecord(value))) {
+    const parentFeatureId = stringifyEditorValue(feature[NATIVE_EDIT_PARENT_FEATURE_ID_KEY]).trim();
+    if (!parentFeatureId) {
+      continue;
+    }
+    const selectedSlug = stringifyEditorValue(asRecord(feature.systems_ref).slug).trim();
+    const sectionIndex = createContextInteger(feature[NATIVE_EDIT_OPTIONALFEATURE_SECTION_KEY]);
+    const choiceIndex = createContextInteger(feature[NATIVE_EDIT_OPTIONALFEATURE_CHOICE_KEY]);
+    if (!selectedSlug || sectionIndex <= 0 || choiceIndex <= 0) {
+      continue;
+    }
+    const key = `${sectionIndex}:${choiceIndex}`;
+    if (!selections.has(parentFeatureId)) {
+      selections.set(parentFeatureId, new Map());
+    }
+    selections.get(parentFeatureId)?.set(key, selectedSlug);
+  }
+  return selections;
+}
+
 function manualFeatureTrackerId(featureId: string): string {
   return `${ADVANCED_EDITOR_CUSTOM_FEATURE_RESOURCE_PREFIX}:${featureId}`;
 }
@@ -3973,9 +4011,157 @@ function normalizeEditorFeatureResourceResetOn(value: unknown): string {
   return cleanValue || "manual";
 }
 
-function buildCustomFeatureRows(definition: Record<string, unknown>): Array<Record<string, unknown>> {
+function optionalFeatureEntryRef(row: SystemsEntryRow): Record<string, unknown> {
+  return {
+    library_slug: row.library_slug,
+    source_id: row.source_id,
+    entry_key: row.entry_key,
+    entry_type: row.entry_type,
+    slug: row.slug,
+    title: row.title,
+  };
+}
+
+function normalizeLookupValue(value: unknown): string {
+  return stringifyEditorValue(value).trim().toLowerCase().replace(/[\s_]+/g, "-");
+}
+
+function optionalFeatureProgressionChoiceCount(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(Math.trunc(value), 0);
+  }
+  const record = asRecord(value);
+  let count = 0;
+  for (const rawValue of Object.values(record)) {
+    const parsed = Number.parseInt(String(rawValue ?? "").trim(), 10);
+    if (Number.isFinite(parsed)) {
+      count = Math.max(count, parsed);
+    }
+  }
+  return count;
+}
+
+function optionalFeatureSectionsForCampaignOption(
+  campaignOption: Record<string, unknown>,
+  optionalFeatureRows: SystemsEntryRow[],
+): Array<Record<string, unknown>> {
+  const sections: Array<Record<string, unknown>> = [];
+  for (const [sectionOffset, rawSection] of asArray(campaignOption.optionalfeature_progression).entries()) {
+    const section = asRecord(rawSection);
+    const featureTypes = new Set(
+      asArray(section.featureType ?? section.feature_type)
+        .map((value) => normalizeLookupValue(value))
+        .filter(Boolean),
+    );
+    if (featureTypes.size === 0) {
+      continue;
+    }
+    const choiceCount = optionalFeatureProgressionChoiceCount(section.progression);
+    if (choiceCount <= 0) {
+      continue;
+    }
+    const seenValues = new Set<string>();
+    const options = optionalFeatureRows
+      .slice()
+      .sort((left, right) => {
+        const leftTitle = normalizeLookupValue(left.title);
+        const rightTitle = normalizeLookupValue(right.title);
+        return leftTitle === rightTitle
+          ? stringifyEditorValue(left.slug).localeCompare(stringifyEditorValue(right.slug))
+          : leftTitle.localeCompare(rightTitle);
+      })
+      .flatMap((row) => {
+        const metadata = parseJsonRecord(row.metadata_json);
+        const entryFeatureTypes = new Set(
+          asArray(metadata.feature_type)
+            .map((value) => normalizeLookupValue(value))
+            .filter(Boolean),
+        );
+        if (entryFeatureTypes.size === 0 || ![...entryFeatureTypes].some((value) => featureTypes.has(value))) {
+          return [];
+        }
+        const value = stringifyEditorValue(row.slug).trim();
+        if (!value || seenValues.has(value)) {
+          return [];
+        }
+        seenValues.add(value);
+        return [{ value, label: stringifyEditorValue(row.title).trim() || value, title: stringifyEditorValue(row.title).trim() || value }];
+      });
+    if (options.length === 0) {
+      continue;
+    }
+    sections.push({
+      index: sectionOffset + 1,
+      title: stringifyEditorValue(section.name).trim() || "Optional Feature",
+      count: choiceCount,
+      options,
+    });
+  }
+  return sections;
+}
+
+function editorOptionalFeatureFieldName(rowIndex: number, sectionIndex: number, choiceIndex: number): string {
+  return `custom_feature_optionalfeature_${rowIndex}_${sectionIndex}_${choiceIndex}`;
+}
+
+function buildEditorOptionalFeatureFieldsForRow({
+  row,
+  values,
+  optionalFeatureRows,
+  selectedChoices,
+}: {
+  row: Record<string, unknown>;
+  values?: Record<string, string>;
+  optionalFeatureRows: SystemsEntryRow[];
+  selectedChoices?: Map<string, string>;
+}): Array<Record<string, unknown>> {
+  if (!stringifyEditorValue(row.page_ref).trim() || optionalFeatureRows.length === 0) {
+    return [];
+  }
+  const campaignOption = asRecord(row.campaign_option);
+  if (stringifyEditorValue(campaignOption.kind).trim().toLowerCase() !== "feat") {
+    return [];
+  }
+  const rowIndex = createContextInteger(row.index);
+  if (rowIndex <= 0) {
+    return [];
+  }
+  const featureTitle = stringifyEditorValue(row.name).trim() || stringifyEditorValue(campaignOption.title).trim() || "Linked Feature";
+  const fields: Array<Record<string, unknown>> = [];
+  for (const section of optionalFeatureSectionsForCampaignOption(campaignOption, optionalFeatureRows)) {
+    const sectionIndex = createContextInteger(section.index);
+    const choiceCount = Math.max(createContextInteger(section.count), 0);
+    const options = asArray(section.options).map((option) => asRecord(option));
+    if (sectionIndex <= 0 || choiceCount <= 0 || options.length === 0) {
+      continue;
+    }
+    const sectionTitle = stringifyEditorValue(section.title).trim() || "Optional Feature";
+    for (let choiceIndex = 1; choiceIndex <= choiceCount; choiceIndex += 1) {
+      const fieldName = editorOptionalFeatureFieldName(rowIndex, sectionIndex, choiceIndex);
+      const selected = stringifyEditorValue(values?.[fieldName]).trim()
+        || selectedChoices?.get(`${sectionIndex}:${choiceIndex}`)
+        || "";
+      fields.push({
+        name: fieldName,
+        label: `${featureTitle} ${sectionTitle}${choiceCount > 1 ? ` ${choiceIndex}` : ""}`,
+        help_text: `Choose the ${sectionTitle.toLowerCase()} granted by ${featureTitle}.`,
+        options,
+        selected,
+        group_key: fieldName,
+        kind: "feat_optionalfeature",
+      });
+    }
+  }
+  return fields;
+}
+
+function buildCustomFeatureRows(
+  definition: Record<string, unknown>,
+  options: { optionalFeatureRows?: SystemsEntryRow[]; values?: Record<string, string> } = {},
+): Array<Record<string, unknown>> {
   const customFeatures = editorCustomFeatureEntries(definition);
   const templates = resourceTemplateLookup(definition);
+  const optionalFeatureSelections = nativeEditOptionalFeatureSelectionLookup(definition);
   const rowCount = Math.max(
     customFeatures.length + 1,
     ADVANCED_EDITOR_MIN_CUSTOM_FEATURE_ROWS,
@@ -3987,7 +4173,7 @@ function buildCustomFeatureRows(definition: Record<string, unknown>): Array<Reco
     const resourceMax = tracker.max === null || tracker.max === undefined
       ? ""
       : stringifyEditorValue(tracker.max).trim();
-    rows.push({
+    const row: Record<string, unknown> = {
       index,
       id: stringifyEditorValue(feature.id).trim(),
       name: stringifyEditorValue(feature.name).trim(),
@@ -3999,7 +4185,14 @@ function buildCustomFeatureRows(definition: Record<string, unknown>): Array<Reco
       spell_manager: { ...asRecord(feature.spell_manager) },
       campaign_option: { ...asRecord(feature.campaign_option) },
       choice_fields: [],
+    };
+    row.choice_fields = buildEditorOptionalFeatureFieldsForRow({
+      row,
+      values: options.values,
+      optionalFeatureRows: options.optionalFeatureRows || [],
+      selectedChoices: optionalFeatureSelections.get(stringifyEditorValue(feature.id).trim()),
     });
+    rows.push(row);
   }
   return rows;
 }
@@ -4017,7 +4210,10 @@ function maxEditorCustomFeatureRowIndex(values: Record<string, string>): number 
 }
 
 function hasEditorCustomFeatureValues(values: Record<string, string>): boolean {
-  return Object.keys(values).some((fieldName) => ADVANCED_EDITOR_CUSTOM_FEATURE_FIELD_PATTERN.test(fieldName));
+  return Object.keys(values).some((fieldName) =>
+    ADVANCED_EDITOR_CUSTOM_FEATURE_FIELD_PATTERN.test(fieldName)
+    || ADVANCED_EDITOR_CUSTOM_FEATURE_OPTIONALFEATURE_FIELD_PATTERN.test(fieldName),
+  );
 }
 
 function parseEditorCustomFeatureResourceMax(
@@ -4071,10 +4267,71 @@ function buildManualFeatureResourceTemplate({
   };
 }
 
+function optionalFeatureRowBySlug(optionalFeatureRows: SystemsEntryRow[]): Map<string, SystemsEntryRow> {
+  return new Map(
+    optionalFeatureRows
+      .map((row) => [stringifyEditorValue(row.slug).trim(), row] as const)
+      .filter(([slug]) => Boolean(slug)),
+  );
+}
+
+function buildSelectedEditorOptionalFeatureFeatures({
+  rowIndex,
+  parentFeatureId,
+  campaignOption,
+  optionalFeatureRows,
+  values,
+}: {
+  rowIndex: number;
+  parentFeatureId: string;
+  campaignOption: Record<string, unknown>;
+  optionalFeatureRows: SystemsEntryRow[];
+  values: Record<string, string>;
+}): Array<Record<string, unknown>> | { status: "validation_error"; message: string } {
+  const selectedFeatures: Array<Record<string, unknown>> = [];
+  const entriesBySlug = optionalFeatureRowBySlug(optionalFeatureRows);
+  const parentTitle = stringifyEditorValue(campaignOption.title || campaignOption.feature_name || campaignOption.display_name).trim() || "Linked Feature";
+  for (const section of optionalFeatureSectionsForCampaignOption(campaignOption, optionalFeatureRows)) {
+    const sectionIndex = createContextInteger(section.index);
+    const choiceCount = Math.max(createContextInteger(section.count), 0);
+    const sectionTitle = stringifyEditorValue(section.title).trim() || "optional feature";
+    if (sectionIndex <= 0 || choiceCount <= 0) {
+      continue;
+    }
+    for (let choiceIndex = 1; choiceIndex <= choiceCount; choiceIndex += 1) {
+      const fieldName = editorOptionalFeatureFieldName(rowIndex, sectionIndex, choiceIndex);
+      const selectedSlug = stringifyEditorValue(values[fieldName]).trim();
+      if (!selectedSlug) {
+        return { status: "validation_error", message: `Choose an option for ${parentTitle} ${sectionTitle}.` };
+      }
+      const selectedEntry = entriesBySlug.get(selectedSlug);
+      if (!selectedEntry) {
+        return { status: "validation_error", message: `Choose a valid option for ${parentTitle}.` };
+      }
+      selectedFeatures.push({
+        id: `optionalfeature-${slugifyText(selectedEntry.title) || selectedSlug}-${selectedFeatures.length + 1}`,
+        name: stringifyEditorValue(selectedEntry.title).trim() || selectedSlug,
+        category: "class_feature",
+        source: selectedEntry.source_id,
+        source_kind: "native_progression",
+        description_markdown: "",
+        activation_type: "passive",
+        tracker_ref: null,
+        systems_ref: optionalFeatureEntryRef(selectedEntry),
+        [NATIVE_EDIT_PARENT_FEATURE_ID_KEY]: parentFeatureId,
+        [NATIVE_EDIT_OPTIONALFEATURE_SECTION_KEY]: sectionIndex,
+        [NATIVE_EDIT_OPTIONALFEATURE_CHOICE_KEY]: choiceIndex,
+      });
+    }
+  }
+  return selectedFeatures;
+}
+
 function parseEditorCustomFeatures(
   values: Record<string, string>,
   definition: Record<string, unknown>,
   campaignPageLookup: Record<string, Record<string, unknown>> = {},
+  optionalFeatureRows: SystemsEntryRow[] = [],
 ): {
   status: "ok";
   features: Array<Record<string, unknown>>;
@@ -4091,6 +4348,7 @@ function parseEditorCustomFeatures(
   const usedIds = new Set([...existingById.keys()]);
   const seenNames = new Set<string>();
   const features: Array<Record<string, unknown>> = [];
+  const generatedOptionalFeatureFeatures: Array<Record<string, unknown>> = [];
   const resourceTemplates: Array<Record<string, unknown>> = [];
   const rowCount = Math.max(
     maxEditorCustomFeatureRowIndex(values),
@@ -4102,22 +4360,20 @@ function parseEditorCustomFeatures(
     const existing = rawId ? existingById.get(rawId) : undefined;
     const rawName = stringifyEditorValue(values[`custom_feature_name_${index}`]).trim();
     let pageRef = stringifyEditorValue(values[`custom_feature_page_ref_${index}`]).trim();
-    const activationType = normalizeEditorFeatureActivationType(values[`custom_feature_activation_type_${index}`]);
     const descriptionMarkdown = stringifyEditorValue(values[`custom_feature_description_${index}`]);
     const resourceMaxText = stringifyEditorValue(values[`custom_feature_resource_max_${index}`]).trim();
     const hasContent = Boolean(rawName || pageRef || descriptionMarkdown.trim() || resourceMaxText);
     if (!hasContent) {
       continue;
     }
-    const name = rawName || stringifyEditorValue(asRecord(existing).name).trim();
-    if (!name) {
-      return { status: "validation_error", message: "Each custom feature needs a name." };
-    }
-    if (!ADVANCED_EDITOR_FEATURE_ACTIVATION_VALUES.has(activationType)) {
-      return { status: "validation_error", message: "Choose a valid activation type for each custom feature." };
-    }
+    let campaignOption: Record<string, unknown> = {};
     try {
       pageRef = normalizeSelectedAdvancedEditorCampaignPageRef(pageRef, campaignPageLookup);
+      campaignOption = asRecord(asRecord(campaignPageLookup[pageRef]).campaign_option);
+      const optionKind = stringifyEditorValue(campaignOption.kind).trim().toLowerCase();
+      if (!ADVANCED_EDITOR_LINKED_CAMPAIGN_PAGE_ALLOWED_KINDS_BY_FIELD_KIND.campaign_page_feature.has(optionKind)) {
+        campaignOption = {};
+      }
     } catch (error) {
       return {
         status: "validation_error",
@@ -4125,7 +4381,30 @@ function parseEditorCustomFeatures(
       };
     }
 
-    const parsedResourceMax = parseEditorCustomFeatureResourceMax(resourceMaxText, name);
+    const name = rawName
+      || stringifyEditorValue(campaignOption.feature_name).trim()
+      || stringifyEditorValue(campaignOption.display_name).trim()
+      || stringifyEditorValue(asRecord(existing).name).trim()
+      || stringifyEditorValue(asRecord(campaignPageLookup[pageRef]).title).trim();
+    if (!name) {
+      return { status: "validation_error", message: "Each custom feature needs a name." };
+    }
+    const description = stringifyEditorValue(
+      descriptionMarkdown.trim() ? descriptionMarkdown : campaignOption.description_markdown,
+    );
+    const selectedActivationType = normalizeEditorFeatureActivationType(
+      stringifyEditorValue(values[`custom_feature_activation_type_${index}`]).trim()
+        || campaignOption.activation_type
+        || asRecord(existing).activation_type,
+    );
+    if (!ADVANCED_EDITOR_FEATURE_ACTIVATION_VALUES.has(selectedActivationType)) {
+      return { status: "validation_error", message: "Choose a valid activation type for each custom feature." };
+    }
+
+    const parsedResourceMax = parseEditorCustomFeatureResourceMax(
+      resourceMaxText || stringifyEditorValue(asRecord(campaignOption.resource).max).trim(),
+      name,
+    );
     if (typeof parsedResourceMax === "object" && parsedResourceMax !== null) {
       return parsedResourceMax;
     }
@@ -4157,14 +4436,18 @@ function parseEditorCustomFeatures(
     nextFeature.name = name;
     nextFeature.category = ADVANCED_EDITOR_CUSTOM_FEATURE_CATEGORY;
     nextFeature.source = stringifyEditorValue(nextFeature.source).trim() || "Campaign";
-    nextFeature.description_markdown = descriptionMarkdown.trim();
-    nextFeature.activation_type = activationType;
+    nextFeature.description_markdown = description.trim();
+    nextFeature.activation_type = selectedActivationType;
     nextFeature.tracker_ref = null;
     if (pageRef) {
       nextFeature.page_ref = pageRef;
-      const campaignOption = asRecord(asRecord(existing).campaign_option);
       if (Object.keys(campaignOption).length > 0) {
-        nextFeature.campaign_option = campaignOption;
+        nextFeature.campaign_option = JSON.parse(JSON.stringify(campaignOption));
+      } else {
+        const existingCampaignOption = asRecord(asRecord(existing).campaign_option);
+        if (Object.keys(existingCampaignOption).length > 0) {
+          nextFeature.campaign_option = existingCampaignOption;
+        }
       }
       const systemsRef = asRecord(asRecord(existing).systems_ref);
       if (Object.keys(systemsRef).length > 0) {
@@ -4175,6 +4458,20 @@ function parseEditorCustomFeatures(
         nextFeature.spell_manager = spellManager;
       }
     }
+
+    const optionalFeatureSelection = Object.keys(campaignOption).length > 0
+      ? buildSelectedEditorOptionalFeatureFeatures({
+        rowIndex: index,
+        parentFeatureId: featureId,
+        campaignOption,
+        optionalFeatureRows,
+        values,
+      })
+      : [];
+    if (!Array.isArray(optionalFeatureSelection)) {
+      return optionalFeatureSelection;
+    }
+    generatedOptionalFeatureFeatures.push(...optionalFeatureSelection);
 
     if (resourceMax > 0) {
       const trackerId = manualFeatureTrackerId(featureId);
@@ -4200,7 +4497,7 @@ function parseEditorCustomFeatures(
     .map((feature) => stringifyEditorValue(feature.tracker_ref || manualFeatureTrackerId(stringifyEditorValue(feature.id))).trim())
     .filter(Boolean);
   const removedResourceIds = existingResourceIds.filter((resourceId) => !nextResourceIds.has(resourceId));
-  return { status: "ok", features, resourceTemplates, removedResourceIds };
+  return { status: "ok", features: [...features, ...generatedOptionalFeatureFeatures], resourceTemplates, removedResourceIds };
 }
 
 function adjustSpeedLabel(value: unknown, delta: number): string {
@@ -4337,6 +4634,7 @@ export function buildCharacterAdvancedEditorPayload({
   state,
   stateRevision,
   campaignPageRecords = [],
+  optionalFeatureRows = [],
 }: {
   campaign: CampaignViewModel;
   characterSlug: string;
@@ -4344,6 +4642,7 @@ export function buildCharacterAdvancedEditorPayload({
   state: Record<string, unknown>;
   stateRevision: number;
   campaignPageRecords?: CampaignPageFileRecord[];
+  optionalFeatureRows?: SystemsEntryRow[];
 }): CharacterAdvancedEditorPayload {
   const supported = characterAdvancedEditorIsSupported(campaign, definition);
   const links = buildCharacterAdvancedEditorLinks(campaign, characterSlug);
@@ -4364,7 +4663,7 @@ export function buildCharacterAdvancedEditorPayload({
   const manualStatAdjustments = normalizeEditorStatAdjustments(asRecord(definition.stats).manual_adjustments);
   const recoverablePenaltyRows = buildRecoverablePenaltyRows(asRecord(definition.stats).recoverable_penalties);
   const equipment = buildManualEquipmentRows(definition);
-  const features = buildCustomFeatureRows(definition);
+  const features = buildCustomFeatureRows(definition, { optionalFeatureRows });
   const featureLinkedPageRefs = new Set(
     features
       .map((feature) => extractEditorPageRefValue(feature.page_ref))
@@ -4464,6 +4763,7 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
   definition: Record<string, unknown>,
   payload: Record<string, unknown>,
   campaignPageRecords: CampaignPageFileRecord[] = [],
+  optionalFeatureRows: SystemsEntryRow[] = [],
 ): CharacterAdvancedEditorReferenceUpdate {
   const rawValues = asRecord(payload.values);
   const values: Record<string, string> = {};
@@ -4486,7 +4786,8 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
       !ADVANCED_EDITOR_SUPPORTED_FIELD_NAMES.has(fieldName) &&
       !ADVANCED_EDITOR_RECOVERABLE_PENALTY_FIELD_PATTERN.test(fieldName) &&
       !ADVANCED_EDITOR_MANUAL_EQUIPMENT_FIELD_PATTERN.test(fieldName) &&
-      !ADVANCED_EDITOR_CUSTOM_FEATURE_FIELD_PATTERN.test(fieldName),
+      !ADVANCED_EDITOR_CUSTOM_FEATURE_FIELD_PATTERN.test(fieldName) &&
+      !ADVANCED_EDITOR_CUSTOM_FEATURE_OPTIONALFEATURE_FIELD_PATTERN.test(fieldName),
   );
   if (unsupportedFields.length > 0) {
     return {
@@ -4548,7 +4849,7 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
     return parsedManualEquipment;
   }
   const parsedCustomFeatures = hasEditorCustomFeatureValues(values)
-    ? parseEditorCustomFeatures(values, nextDefinition, campaignFeaturePageLookup)
+    ? parseEditorCustomFeatures(values, nextDefinition, campaignFeaturePageLookup, optionalFeatureRows)
     : null;
   if (parsedCustomFeatures?.status === "validation_error") {
     return parsedCustomFeatures;
@@ -4602,7 +4903,10 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
     );
     const baseFeatures = asArray(nextDefinition.features)
       .map((feature) => asRecord(feature))
-      .filter((feature) => stringifyEditorValue(feature.category).trim() !== ADVANCED_EDITOR_CUSTOM_FEATURE_CATEGORY);
+      .filter((feature) =>
+        stringifyEditorValue(feature.category).trim() !== ADVANCED_EDITOR_CUSTOM_FEATURE_CATEGORY
+        && !isNativeEditGeneratedOptionalFeature(feature),
+      );
     nextDefinition.features = [...baseFeatures, ...parsedCustomFeatures.features];
     const baseResourceTemplates = asArray(nextDefinition.resource_templates)
       .map((template) => asRecord(template))
@@ -4924,6 +5228,27 @@ function loadEnabledMartialArtRows(
   campaignConfig: Record<string, unknown>,
 ): SystemsEntryRow[] {
   return loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "martial_art");
+}
+
+export function listAdvancedEditorOptionalFeatureRows({
+  dbPath,
+  campaign,
+  campaignConfig,
+}: {
+  dbPath: string;
+  campaign: CampaignViewModel;
+  campaignConfig: Record<string, unknown>;
+}): SystemsEntryRow[] {
+  if (!existsSync(dbPath)) {
+    return [];
+  }
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    return loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "optionalfeature")
+      .filter((row) => row.is_enabled_override !== 0);
+  } finally {
+    database.close();
+  }
 }
 
 function normalizeRankKey(value: unknown): string {

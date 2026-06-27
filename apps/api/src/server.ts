@@ -133,6 +133,7 @@ import {
   buildDndCreateCharacter,
   buildXianxiaCreateCharacter,
   type CharacterAdvancementRouteKind,
+  listAdvancedEditorOptionalFeatureRows,
   listXianxiaCultivationGenericTechniqueRows,
   listXianxiaCultivationMartialArtRows,
   listXianxiaCreateGenericTechniqueOptions,
@@ -5694,6 +5695,12 @@ app.get(ROUTES.characterAdvancedEditor, async (ctx) => {
 
   const stateRecord = readCharacterStateSnapshot(config, campaign.slug, character.character_slug, character.definition);
   const campaignPageRecords = await listCampaignContentPages(config, campaign.slug) ?? [];
+  const campaignConfig = (await getCampaignConfigFile(config, campaign.slug))?.config || {};
+  const optionalFeatureRows = listAdvancedEditorOptionalFeatureRows({
+    dbPath: config.dbPath,
+    campaign,
+    campaignConfig,
+  });
   const editorPayload = buildCharacterAdvancedEditorPayload({
     campaign,
     characterSlug,
@@ -5701,6 +5708,7 @@ app.get(ROUTES.characterAdvancedEditor, async (ctx) => {
     state: stateRecord.state,
     stateRevision: stateRecord.revision,
     campaignPageRecords,
+    optionalFeatureRows,
   });
 
   return ctx.json({
@@ -5775,10 +5783,17 @@ app.put(ROUTES.characterAdvancedEditorUpdate, async (ctx) => {
   }
 
   const campaignPageRecords = await listCampaignContentPages(config, campaign.slug) ?? [];
+  const campaignConfig = (await getCampaignConfigFile(config, campaign.slug))?.config || {};
+  const optionalFeatureRows = listAdvancedEditorOptionalFeatureRows({
+    dbPath: config.dbPath,
+    campaign,
+    campaignConfig,
+  });
   const referenceUpdate = applyCharacterAdvancedEditorReferenceUpdate(
     character.definition,
     jsonPayload.payload,
     campaignPageRecords,
+    optionalFeatureRows,
   );
   if (referenceUpdate.status === "validation_error") {
     const error = validationError(referenceUpdate.message);
@@ -5830,6 +5845,7 @@ app.put(ROUTES.characterAdvancedEditorUpdate, async (ctx) => {
     state: stateResult.state,
     stateRevision: stateResult.revision,
     campaignPageRecords,
+    optionalFeatureRows,
   });
 
   return ctx.json({
