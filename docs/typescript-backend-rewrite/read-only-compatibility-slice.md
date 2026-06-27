@@ -473,6 +473,11 @@ fixture database.
   - stale-revision conflict envelopes.
   - inventory-only row rejection and invalid weapon wield-mode validation.
   - assigned-player weapon wield-mode persistence through synchronized definition `equipment_catalog`, SQLite `state.inventory`, shared revision bumps, and `updated_by_user_id`.
+- Character DND Artificer infusion payload checks cover:
+  - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/artificer-infusions` with bearer-only writes.
+  - stale-revision conflict envelopes.
+  - unknown infusion validation, duplicate target validation, nonmagical target validation, and Enhanced Defense armor/shield validation.
+  - assigned-player active infusion persistence through synchronized definition `equipment_catalog`, SQLite `state.inventory.active_infusions`, Enhanced Defense Armor Class/defensive-rule automation, shared revision bumps, and `updated_by_user_id`.
 - Character Xianxia inventory equipped-state payload checks cover:
   - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/equipped` with bearer-only writes.
   - unauthenticated, fixture-role bearer requirement, and stale-revision envelopes.
@@ -551,6 +556,7 @@ fixture database.
   - validates Xianxia inventory add stale conflict, missing-name/catalog validation, duplicate explicit-id validation, non-equippable equipped-item validation, and DM item insertion with generated IDs, canonical type/nature fields, quantity coercion, equipped-state persistence, and top-level inventory mirror sync against disposable copied fixture files and SQLite state.
   - validates Xianxia inventory remove stale conflict, unknown-item validation, and DM item removal with top-level inventory mirror sync against disposable copied fixture files and SQLite state.
   - validates Xianxia inventory item update stale conflict, unknown-item validation, and DM item field updates with canonical type/nature/equippable normalization plus top-level inventory mirror sync against disposable copied fixture files and SQLite state.
+  - validates DND Artificer infusion stale conflict, unknown infusion validation, duplicate target validation, magic-item rejection, Enhanced Defense target validation, assigned-player active-infusion persistence through copied fixture definition YAML plus SQLite state, and Enhanced Defense Armor Class/defensive-rule refresh across later equipment writes.
   - verifies `GET /api/v1/campaigns/:campaignSlug/session` no-header read-only payload shape, role-aware fixture and bearer-token SQLite Session state reads, auth/forbidden bearer envelopes, token/revision headers behavior, unchanged-response short-circuit, and session missing-campaign 404.
   - verifies `POST /api/v1/campaigns/:campaignSlug/session/messages` auth, fixture-write denial, malformed JSON handling, validation messages, SQLite persistence, private-message visibility, recipient labels, revision bumps, and missing-campaign 404 against the disposable smoke-test database.
   - verifies `POST /api/v1/campaigns/:campaignSlug/session/start` and `.../session/close` auth, fixture-write denial, player-forbidden behavior, duplicate-start/empty-close validation, SQLite session persistence, revision bumps, refreshed Session reads/log summaries, and missing-campaign 404 against the disposable smoke-test database.

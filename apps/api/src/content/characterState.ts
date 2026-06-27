@@ -68,6 +68,8 @@ export type CharacterSessionEquipmentUpdateResult =
   | { status: "state_conflict"; message: string }
   | { status: "validation_error"; message: string };
 
+export type CharacterSessionArtificerInfusionsUpdateResult = CharacterSessionEquipmentUpdateResult;
+
 export type CharacterSessionXianxiaActiveStateUpdateResult = CharacterSessionVitalsUpdateResult;
 
 export type CharacterSessionCurrencyUpdateResult = CharacterSessionVitalsUpdateResult;
@@ -109,6 +111,40 @@ const XIANXIA_CURRENCY_KEYS = ["coin", "supply", "spirit_stones"] as const;
 const VALID_HIT_DIE_FACES = new Set([4, 6, 8, 10, 12]);
 const CHARACTER_STATE_CONFLICT_MESSAGE = "This sheet changed in another session. Refresh and try again.";
 const CAMPAIGN_ITEMS_SECTION = "Items";
+const ARTIFICER_INFUSIONS_FEATURE_KEY = "artificerinfusions";
+const ENHANCED_DEFENSE_INFUSION_KEY = "enhanced-defense";
+const KNOWN_ARTIFICER_INFUSION_TITLES = new Set([
+  "arcanepropulsionarmor",
+  "armorofmagicalstrength",
+  "bootsofthewindingpath",
+  "enhancedarcanefocus",
+  "enhanceddefense",
+  "enhancedweapon",
+  "helmofawareness",
+  "homunculusservant",
+  "mindsharpener",
+  "radiantweapon",
+  "repeatingshot",
+  "replicatemagicitem",
+  "repulsionshield",
+  "resistantarmor",
+  "returningweapon",
+  "spellrefuelingring",
+]);
+const ARTIFICER_INFUSION_KNOWN_CAPACITY_BY_LEVEL = [
+  [18, 12],
+  [14, 10],
+  [10, 8],
+  [6, 6],
+  [2, 4],
+] as const;
+const ARTIFICER_INFUSION_ACTIVE_CAPACITY_BY_LEVEL = [
+  [18, 6],
+  [14, 5],
+  [10, 4],
+  [6, 3],
+  [2, 2],
+] as const;
 const CAMPAIGN_ITEM_PAGE_SUPPORT_METADATA_KEYS = new Set([
   "ability_score_minimums",
   "attack_reminder_rules",
@@ -880,6 +916,8 @@ function describeEquipmentStateSupport(item: Record<string, unknown>, catalog: I
   supportsAttunement: boolean;
   supportsWeaponWieldMode: boolean;
   weaponWieldModes: string[];
+  isArmor: boolean;
+  isMagicItem: boolean;
 } {
   if (item.is_currency_only === true) {
     return {
@@ -887,6 +925,8 @@ function describeEquipmentStateSupport(item: Record<string, unknown>, catalog: I
       supportsAttunement: false,
       supportsWeaponWieldMode: false,
       weaponWieldModes: [],
+      isArmor: false,
+      isMagicItem: false,
     };
   }
   const metadata = itemSupportMetadata(item, catalog);
@@ -903,6 +943,8 @@ function describeEquipmentStateSupport(item: Record<string, unknown>, catalog: I
     supportsAttunement,
     supportsWeaponWieldMode: weaponWieldModes.length > 0,
     weaponWieldModes,
+    isArmor,
+    isMagicItem: magicItem,
   };
 }
 
@@ -951,6 +993,205 @@ function normalizeActiveInfusions(value: unknown): Record<string, unknown>[] {
     normalized.push(payload);
   }
   return normalized;
+}
+
+function itemHasActiveInfusion(item: Record<string, unknown>, infusionKey: string): boolean {
+  return normalizeActiveInfusions(item.active_infusions).some((entry) => asString(entry.infusion_key) === infusionKey);
+}
+
+function capacityForLevel(level: number, table: readonly (readonly [number, number])[]): number {
+  for (const [minimumLevel, capacity] of table) {
+    if (level >= minimumLevel) {
+      return capacity;
+    }
+  }
+  return 0;
+}
+
+function artificerLevelFromDefinition(definition: Record<string, unknown>): number {
+  const profile = asRecord(definition.profile);
+  let total = 0;
+  for (const rawClass of asArray(profile.classes)) {
+    const classRow = asRecord(rawClass);
+    const classRef = asRecord(classRow.class_ref || classRow.systems_ref);
+    const className = normalizeCatalogLookup(classRow.class_name);
+    const refTitle = normalizeCatalogLookup(classRef.title);
+    const refSlug = normalizeCatalogLookup(classRef.slug);
+    if (className !== "artificer" && refTitle !== "artificer" && !refSlug.includes("artificer")) {
+      continue;
+    }
+    total += Math.max(asInt(classRow.level, 0), 0);
+  }
+  if (total > 0) {
+    return total;
+  }
+
+  const classLevelText = asString(profile.class_level_text);
+  const match = classLevelText.match(/\bArtificer\s+(\d+)\b/i);
+  return match ? Math.max(asInt(match[1], 0), 0) : 0;
+}
+
+function artificerInfusionActiveCapacity(artificerLevel: number): number {
+  return capacityForLevel(artificerLevel, ARTIFICER_INFUSION_ACTIVE_CAPACITY_BY_LEVEL);
+}
+
+function artificerInfusionKey(value: unknown): string {
+  return slugifyValue(value);
+}
+
+function activeInfusionPayload(name: unknown, featureId: unknown): Record<string, unknown> {
+  const cleanName = asString(name);
+  const infusionKey = artificerInfusionKey(cleanName);
+  const payload: Record<string, unknown> = {
+    infusion_key: infusionKey,
+    name: cleanName,
+  };
+  const sourceFeatureId = asString(featureId);
+  if (sourceFeatureId) {
+    payload.source_feature_id = sourceFeatureId;
+  }
+  if (infusionKey === ENHANCED_DEFENSE_INFUSION_KEY) {
+    payload.effect_key = "enhanced_defense";
+  }
+  return payload;
+}
+
+function knownInfusionNamesFromSummary(value: unknown): string[] {
+  const text = asString(value);
+  if (!text) {
+    return [];
+  }
+  const match = text.match(/known infusions at artificer level\s+\d+\s*:\s*(.+?)(?:\n\n|\r\n\r\n|$)/is);
+  if (!match) {
+    return [];
+  }
+  return match[1]
+    .split(/\s+-\s+/)
+    .map((part) => part.trim().replace(/[ .]+$/g, ""))
+    .filter((part) => part.length > 0);
+}
+
+function baseInfusionName(value: unknown): string {
+  const cleanValue = asString(value);
+  return normalizeCatalogLookup(cleanValue).startsWith("replicatemagicitem") ? "Replicate Magic Item" : cleanValue;
+}
+
+function knownArtificerInfusions(definition: Record<string, unknown>): Record<string, unknown>[] {
+  const features = asArray(definition.features).map((rawFeature) => asRecord(rawFeature));
+  const parentIds = new Set<string>();
+  for (const feature of features) {
+    const featureId = asString(feature.id);
+    if (featureId && normalizeCatalogLookup(feature.name) === ARTIFICER_INFUSIONS_FEATURE_KEY) {
+      parentIds.add(featureId);
+    }
+  }
+
+  const known: Record<string, unknown>[] = [];
+  const seenKeys = new Set<string>();
+  const addKnown = (name: unknown, featureId: unknown = "") => {
+    const cleanName = asString(name);
+    const key = artificerInfusionKey(cleanName);
+    if (!cleanName || !key || seenKeys.has(key)) {
+      return;
+    }
+    seenKeys.add(key);
+    known.push(activeInfusionPayload(cleanName, featureId));
+  };
+
+  for (const feature of features) {
+    const featureName = asString(feature.name);
+    const normalizedName = normalizeCatalogLookup(featureName);
+    if (normalizedName === ARTIFICER_INFUSIONS_FEATURE_KEY) {
+      for (const summaryName of knownInfusionNamesFromSummary(feature.description_markdown)) {
+        addKnown(summaryName);
+      }
+      continue;
+    }
+
+    const parentId = asString(feature.native_edit_parent_feature_id || feature.parent_feature_id);
+    const baseName = normalizeCatalogLookup(baseInfusionName(featureName));
+    if (parentIds.has(parentId) || KNOWN_ARTIFICER_INFUSION_TITLES.has(baseName)) {
+      addKnown(featureName, feature.id);
+    }
+  }
+  return known;
+}
+
+function hasArtificerInfusionFeature(definition: Record<string, unknown>): boolean {
+  return asArray(definition.features).some(
+    (rawFeature) => normalizeCatalogLookup(asRecord(rawFeature).name) === ARTIFICER_INFUSIONS_FEATURE_KEY,
+  );
+}
+
+function enhancedDefenseArmorClassBonus(equipmentCatalog: Record<string, unknown>[], catalog: ItemCatalog): number {
+  return equipmentCatalog.some((item) => {
+    if (!itemHasActiveInfusion(item, ENHANCED_DEFENSE_INFUSION_KEY) || item.is_equipped !== true) {
+      return false;
+    }
+    return describeEquipmentStateSupport(item, catalog).isArmor;
+  })
+    ? 1
+    : 0;
+}
+
+function enhancedDefenseRule(item: Record<string, unknown>, catalog: ItemCatalog): Record<string, unknown> | null {
+  if (!itemHasActiveInfusion(item, ENHANCED_DEFENSE_INFUSION_KEY)) {
+    return null;
+  }
+  if (!describeEquipmentStateSupport(item, catalog).isArmor) {
+    return null;
+  }
+  const itemName = asString(item.name) || "Infused item";
+  const isEquipped = item.is_equipped === true;
+  return {
+    id: `artificer-infusion:enhanced-defense:${slugifyValue(itemName)}`,
+    title: "Enhanced Defense",
+    active: isEquipped,
+    condition: "Applies while the infused armor or shield is equipped.",
+    inactive_reason: isEquipped ? "" : "Equip the infused armor or shield to apply this Armor Class bonus.",
+    effects: [
+      {
+        kind: "armor_class",
+        label: itemName,
+        summary: `${itemName} grants a +1 bonus to Armor Class while infused by Enhanced Defense.`,
+      },
+    ],
+  };
+}
+
+function applyEnhancedDefenseAutomation(
+  definition: Record<string, unknown>,
+  previousEquipmentCatalog: Record<string, unknown>[],
+  equipmentCatalog: Record<string, unknown>[],
+  catalog: ItemCatalog,
+): Record<string, unknown> {
+  const stats = { ...asRecord(definition.stats) };
+  const previousBonus = enhancedDefenseArmorClassBonus(previousEquipmentCatalog, catalog);
+  const nextBonus = enhancedDefenseArmorClassBonus(equipmentCatalog, catalog);
+  if (hasSubmittedValue(stats.armor_class) && previousBonus !== nextBonus) {
+    stats.armor_class = asInt(stats.armor_class, 0) + (nextBonus - previousBonus);
+  }
+
+  const defensiveState = { ...asRecord(stats.defensive_state) };
+  const rules = asArray(defensiveState.rules)
+    .map((rawRule) => ({ ...asRecord(rawRule) }))
+    .filter((rule) => {
+      const id = asString(rule.id);
+      const title = asString(rule.title);
+      return title !== "Enhanced Defense" && !id.startsWith("artificer-infusion:enhanced-defense:");
+    });
+  for (const item of equipmentCatalog) {
+    const rule = enhancedDefenseRule(item, catalog);
+    if (rule) {
+      rules.push(rule);
+    }
+  }
+  stats.defensive_state = { ...defensiveState, rules };
+  return {
+    ...definition,
+    stats,
+    equipment_catalog: equipmentCatalog,
+  };
 }
 
 function buildInventoryState(definition: Record<string, unknown>): unknown[] {
@@ -2216,8 +2457,9 @@ function applyEquipmentStateUpdate(
   inventory[targetInventoryIndex] = applyStateFields(targetInventory);
 
   let foundDefinitionItem = false;
-  const equipmentCatalog = asArray(definition.equipment_catalog).map((rawItem) => {
-    const item = { ...asRecord(rawItem) };
+  const previousEquipmentCatalog = asArray(definition.equipment_catalog).map((rawItem) => ({ ...asRecord(rawItem) }));
+  const equipmentCatalog = previousEquipmentCatalog.map((rawItem) => {
+    const item = { ...rawItem };
     if (asString(item.id) !== normalizedItemId) {
       return item;
     }
@@ -2252,10 +2494,137 @@ function applyEquipmentStateUpdate(
         attuned_item_refs: nextAttunedRefs,
       },
     },
-    definition: {
-      ...definition,
-      equipment_catalog: equipmentCatalog,
+    definition: applyEnhancedDefenseAutomation(definition, previousEquipmentCatalog, equipmentCatalog, catalog),
+  };
+}
+
+function applyArtificerInfusionsUpdate(
+  state: Record<string, unknown>,
+  definition: Record<string, unknown>,
+  catalog: ItemCatalog,
+  payload: Record<string, unknown>,
+): { state: Record<string, unknown>; definition: Record<string, unknown> } {
+  if (normalizeSystemKey(definition.system) !== "dnd5e") {
+    throw new Error("Artificer infusions are only available for Artificer sheets with Infuse Item.");
+  }
+
+  const artificerLevel = artificerLevelFromDefinition(definition);
+  const activeCapacity = artificerInfusionActiveCapacity(artificerLevel);
+  const knownInfusions = knownArtificerInfusions(definition);
+  const knownByKey = new Map<string, Record<string, unknown>>();
+  for (const knownInfusion of knownInfusions) {
+    const infusionKey = asString(knownInfusion.infusion_key);
+    if (infusionKey) {
+      knownByKey.set(infusionKey, knownInfusion);
+    }
+  }
+  if (!activeCapacity && !hasArtificerInfusionFeature(definition)) {
+    throw new Error("Artificer infusions are only available for Artificer sheets with Infuse Item.");
+  }
+  if (knownByKey.size <= 0) {
+    throw new Error("This Artificer sheet does not have modeled known infusions yet.");
+  }
+
+  const definitionItemsByRef = buildDefinitionItemLookup(definition);
+  const inventory = asArray(state.inventory).map((rawItem) => ({ ...asRecord(rawItem) }));
+  const inventoryByRef = new Map<string, Record<string, unknown>>();
+  for (const item of inventory) {
+    const itemRef = inventoryItemRef(item);
+    if (itemRef) {
+      inventoryByRef.set(itemRef, item);
+    }
+  }
+
+  const nextActiveRows: { infusionKey: string; targetItemRef: string; payload: Record<string, unknown> }[] = [];
+  const seenInfusionKeys = new Set<string>();
+  const seenTargetRefs = new Set<string>();
+  for (const rawEntry of asArray(payload.active)) {
+    const entry = asRecord(rawEntry);
+    const infusionKey = asString(entry.infusion_key || entry.key);
+    const targetItemRef = asString(entry.target_item_ref || entry.item_ref);
+    if (!infusionKey || !targetItemRef) {
+      continue;
+    }
+
+    const knownEntry = knownByKey.get(infusionKey);
+    if (!knownEntry) {
+      throw new Error("Choose a known Artificer infusion.");
+    }
+    if (seenInfusionKeys.has(infusionKey)) {
+      throw new Error("Each known infusion can only be active once.");
+    }
+    if (seenTargetRefs.has(targetItemRef)) {
+      throw new Error("Each item can only hold one active infusion.");
+    }
+
+    const inventoryItem = inventoryByRef.get(targetItemRef);
+    const definitionItem = definitionItemsByRef.get(targetItemRef);
+    if (!inventoryItem || !definitionItem) {
+      throw new Error("Choose a valid inventory target for that infusion.");
+    }
+
+    const support = describeEquipmentStateSupport(equipmentSupportItem(inventoryItem, definitionItem), catalog);
+    if (support.isMagicItem) {
+      throw new Error("Artificer infusions can only target nonmagical items.");
+    }
+    if (infusionKey === ENHANCED_DEFENSE_INFUSION_KEY && !support.isArmor) {
+      throw new Error("Enhanced Defense can only target nonmagical armor or a shield.");
+    }
+
+    seenInfusionKeys.add(infusionKey);
+    seenTargetRefs.add(targetItemRef);
+    nextActiveRows.push({
+      infusionKey,
+      targetItemRef,
+      payload: activeInfusionPayload(knownEntry.name, knownEntry.source_feature_id),
+    });
+  }
+
+  if (nextActiveRows.length > activeCapacity) {
+    throw new Error(`This Artificer can keep ${activeCapacity} infusion${activeCapacity === 1 ? "" : "s"} active.`);
+  }
+
+  const activeByTarget = new Map<string, Record<string, unknown>[]>();
+  for (const row of nextActiveRows) {
+    const rows = activeByTarget.get(row.targetItemRef) || [];
+    rows.push({ ...row.payload });
+    activeByTarget.set(row.targetItemRef, rows);
+  }
+
+  const nextInventory = inventory.map((item) => {
+    const itemRef = inventoryItemRef(item);
+    if (!itemRef || !definitionItemsByRef.has(itemRef)) {
+      return item;
+    }
+    const activeInfusions = activeByTarget.get(itemRef) || [];
+    const nextItem = { ...item };
+    if (activeInfusions.length > 0) {
+      nextItem.active_infusions = activeInfusions.map((entry) => ({ ...entry }));
+    } else {
+      delete nextItem.active_infusions;
+    }
+    return nextItem;
+  });
+
+  const previousEquipmentCatalog = asArray(definition.equipment_catalog).map((rawItem) => ({ ...asRecord(rawItem) }));
+  const equipmentCatalog = previousEquipmentCatalog.map((rawItem) => {
+    const item = { ...asRecord(rawItem) };
+    const itemRef = asString(item.id);
+    const activeInfusions = activeByTarget.get(itemRef) || [];
+    if (activeInfusions.length > 0) {
+      item.active_infusions = activeInfusions.map((entry) => ({ ...entry }));
+    } else {
+      delete item.active_infusions;
+    }
+    return item;
+  });
+
+  return {
+    state: {
+      ...state,
+      inventory: nextInventory,
     },
+    definition: applyEnhancedDefenseAutomation(definition, previousEquipmentCatalog, equipmentCatalog, catalog),
   };
 }
 
@@ -3875,6 +4244,97 @@ export function updateCharacterSessionEquipment(
       nextDefinition = result.definition;
     } catch (error) {
       return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid character equipment payload." };
+    }
+
+    const now = utcIsoTimestamp();
+    if (stateRowMissing) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(campaignSlug, characterSlug, expectedRevision + 1, JSON.stringify(nextState), now, updatedByUserId);
+      return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now, definition: nextDefinition };
+    }
+
+    const updateResult = database
+      .prepare(
+        `
+          UPDATE character_state
+          SET revision = revision + 1,
+              state_json = ?,
+              updated_at = ?,
+              updated_by_user_id = ?
+          WHERE campaign_slug = ?
+            AND character_slug = ?
+            AND revision = ?
+        `,
+      )
+      .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
+    if (updateResult.changes <= 0) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+    return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now, definition: nextDefinition };
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCharacterSessionArtificerInfusions(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  updatedByUserId: number,
+): CharacterSessionArtificerInfusionsUpdateResult {
+  let expectedRevision: number;
+  try {
+    expectedRevision = parseRequiredWholeNumber(payload.expected_revision, "Expected revision");
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid Artificer infusion payload." };
+  }
+
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+
+    let existingState = readCharacterState(database, campaignSlug, characterSlug);
+    const stateRowMissing = !existingState;
+    existingState ??= { revision: 1, state: buildInitialState(definition) };
+
+    if (existingState.revision !== expectedRevision) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+
+    let nextState: Record<string, unknown>;
+    let nextDefinition: Record<string, unknown>;
+    try {
+      const result = applyArtificerInfusionsUpdate(
+        copyState(existingState.state),
+        definition,
+        loadItemCatalog(database, campaignSlug),
+        payload,
+      );
+      nextState = result.state;
+      nextDefinition = result.definition;
+    } catch (error) {
+      return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid Artificer infusion payload." };
     }
 
     const now = utcIsoTimestamp();

@@ -791,6 +791,15 @@
       "notes": "Tracked Hono DND equipment-state route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflicts, valid definition-backed inventory row validation, inventory-only row rejection, weapon wield-mode normalization and allowed-mode validation, attunement support and limit validation, synchronized definition equipment_catalog and SQLite state.inventory persistence, refreshed character state payloads, and explicit missing-character JSON."
     },
     {
+      "method": "PATCH",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/artificer-infusions",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/artificer-infusions",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono DND Artificer infusion state route with bearer API-token writes for app admin, campaign DM, or assigned player, shared character_state revision conflicts, Artificer/Infuse Item gating, known-infusion and active-capacity validation, duplicate active infusion and duplicate target validation, nonmagical target validation, Enhanced Defense armor/shield validation, synchronized definition equipment_catalog and SQLite state.inventory active_infusions persistence, Enhanced Defense Armor Class/defensive-rule automation across infusion and later equipment writes, refreshed character state payloads, and explicit missing-character JSON."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/me",
       "route_family": "api_v1",

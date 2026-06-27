@@ -376,6 +376,14 @@ Route parity check command:
   validation, inventory-only row rejection, weapon wield-mode normalization and allowed-mode
   validation, attunement support/limit validation, synchronized definition `equipment_catalog` and
   SQLite `state.inventory` persistence, and refreshed `character.state_record` payloads.
+- The DND Artificer infusion state write now serves
+  `PATCH .../characters/:characterSlug/session/artificer-infusions`. It preserves the bearer-only
+  session-state write gate, shared revision conflicts, DND Artificer/Infuse Item eligibility,
+  known-infusion validation, active-capacity validation, duplicate active infusion and target
+  validation, nonmagical target validation, Enhanced Defense armor/shield validation, synchronized
+  definition `equipment_catalog` and SQLite `state.inventory.active_infusions` persistence,
+  Enhanced Defense Armor Class/defensive-rule automation across infusion and equipment writes,
+  and refreshed `character.state_record` payloads.
 - The first Xianxia inventory equipment write now serves
   `PATCH .../characters/:characterSlug/session/xianxia-inventory/:itemId/equipped`. It preserves the
   bearer-only session-state write gate, shared revision conflicts, Xianxia-only validation, unknown

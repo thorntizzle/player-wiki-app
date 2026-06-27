@@ -1321,6 +1321,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "content_character_not_found",
     },
   },
+  {
+    method: "PATCH",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/session/artificer-infusions",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/artificer-infusions",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/artificer-infusions",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "PATCH",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/session/artificer-infusions",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1414,4 +1429,5 @@ export const ROUTES = {
   characterSessionXianxiaInventoryRemove: IMPLEMENTED_ROUTES[87].honoPath,
   characterSessionXianxiaInventoryItem: IMPLEMENTED_ROUTES[88].honoPath,
   characterSessionEquipment: IMPLEMENTED_ROUTES[89].honoPath,
+  characterSessionArtificerInfusions: IMPLEMENTED_ROUTES[90].honoPath,
 } as const;

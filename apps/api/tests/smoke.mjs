@@ -6306,9 +6306,61 @@ managedCharacterDefinition.features = [
     name: "Arcane Armor",
     description_markdown: "Smoke-test Armorer feature state support.",
   },
+  {
+    id: "artificer-infusions-smoke",
+    name: "Artificer Infusions",
+    category: "class_feature",
+    description_markdown: "You have invented numerous magical infusions.",
+  },
+  {
+    id: "enhanced-defense-smoke",
+    name: "Enhanced Defense",
+    category: "class_feature",
+    description_markdown: "A creature gains a +1 bonus to Armor Class while wearing the infused item.",
+    native_edit_parent_feature_id: "artificer-infusions-smoke",
+  },
+  {
+    id: "homunculus-servant-smoke",
+    name: "Homunculus Servant",
+    category: "class_feature",
+    description_markdown: "You learn intricate methods for creating a special homunculus.",
+    native_edit_parent_feature_id: "artificer-infusions-smoke",
+  },
 ];
 managedCharacterDefinition.equipment_catalog = [
   ...((Array.isArray(managedCharacterDefinition.equipment_catalog) ? managedCharacterDefinition.equipment_catalog : [])),
+  {
+    id: "scale-mail-infusions",
+    name: "Scale Mail",
+    default_quantity: 1,
+    weight: "45 lb.",
+    systems_ref: {
+      entry_type: "item",
+      slug: "phb-item-scale-mail",
+      title: "Scale Mail",
+      source_id: "PHB",
+    },
+    is_equipped: true,
+    is_attuned: false,
+  },
+  {
+    id: "backpack-infusions",
+    name: "Backpack",
+    default_quantity: 1,
+    weight: "5 lb.",
+    tags: [],
+    is_equipped: false,
+    is_attuned: false,
+  },
+  {
+    id: "magic-wand-infusions",
+    name: "Infusion Test Wand",
+    default_quantity: 1,
+    weight: "1 lb.",
+    is_magic_item: true,
+    is_equipped: false,
+    is_attuned: false,
+  },
   {
     id: "catalog-profiled-weapon-7",
     name: "Catalog Test Focus",
@@ -7411,12 +7463,270 @@ if (
   );
 }
 
+const artificerInfusionDefinition = structuredClone(campaignPageEquipmentStateUpdate.payload.character.definition);
+artificerInfusionDefinition.profile = {
+  ...(artificerInfusionDefinition.profile || {}),
+  class_level_text: "Artificer 6",
+  classes: [
+    {
+      row_id: "artificer-smoke-class",
+      class_name: "Artificer",
+      subclass_name: "Armorer",
+      level: 6,
+    },
+  ],
+};
+const artificerInfusionDefinitionPut = await requestJson(
+  managedCharacterPath,
+  bearerContentManagerHeaders,
+  {
+    method: "PUT",
+    body: {
+      definition: artificerInfusionDefinition,
+      import_metadata: campaignPageEquipmentStateUpdate.payload.character.import_metadata,
+    },
+  },
+);
+if (artificerInfusionDefinitionPut.status !== 200 || artificerInfusionDefinitionPut.payload?.ok !== true) {
+  throw new Error(`Expected Artificer fixture definition PUT 200, got ${artificerInfusionDefinitionPut.status} ${JSON.stringify(artificerInfusionDefinitionPut.payload)}`);
+}
+const preInfusionArmorClass = Number(
+  artificerInfusionDefinitionPut.payload?.character_file?.definition?.stats?.armor_class ??
+    artificerInfusionDefinition.stats?.armor_class ??
+    0,
+);
+
+const artificerInfusionsPath =
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/artificer-infusions`;
+const staleArtificerInfusionsUpdate = await requestJson(
+  artificerInfusionsPath,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 999, active: [] } },
+);
+if (
+  staleArtificerInfusionsUpdate.status !== 409 ||
+  staleArtificerInfusionsUpdate.payload?.error?.code !== "state_conflict" ||
+  staleArtificerInfusionsUpdate.payload?.error?.message !== "This sheet changed in another session. Refresh and try again."
+) {
+  throw new Error(
+    `Expected stale Artificer infusions PATCH conflict, got ${staleArtificerInfusionsUpdate.status} ${JSON.stringify(staleArtificerInfusionsUpdate.payload)}`,
+  );
+}
+
+const unknownArtificerInfusionUpdate = await requestJson(
+  artificerInfusionsPath,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 14, active: [{ infusion_key: "unknown-infusion", target_item_ref: "backpack-infusions" }] } },
+);
+if (
+  unknownArtificerInfusionUpdate.status !== 400 ||
+  unknownArtificerInfusionUpdate.payload?.error?.code !== "validation_error" ||
+  unknownArtificerInfusionUpdate.payload?.error?.message !== "Choose a known Artificer infusion."
+) {
+  throw new Error(
+    `Expected unknown Artificer infusion validation_error, got ${unknownArtificerInfusionUpdate.status} ${JSON.stringify(unknownArtificerInfusionUpdate.payload)}`,
+  );
+}
+
+const duplicateTargetArtificerInfusionUpdate = await requestJson(
+  artificerInfusionsPath,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_revision: 14,
+      active: [
+        { infusion_key: "homunculus-servant", target_item_ref: "backpack-infusions" },
+        { infusion_key: "enhanced-defense", target_item_ref: "backpack-infusions" },
+      ],
+    },
+  },
+);
+if (
+  duplicateTargetArtificerInfusionUpdate.status !== 400 ||
+  duplicateTargetArtificerInfusionUpdate.payload?.error?.code !== "validation_error" ||
+  duplicateTargetArtificerInfusionUpdate.payload?.error?.message !== "Each item can only hold one active infusion."
+) {
+  throw new Error(
+    `Expected duplicate Artificer infusion target validation_error, got ${duplicateTargetArtificerInfusionUpdate.status} ${JSON.stringify(duplicateTargetArtificerInfusionUpdate.payload)}`,
+  );
+}
+
+const magicTargetArtificerInfusionUpdate = await requestJson(
+  artificerInfusionsPath,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_revision: 14,
+      active: [{ infusion_key: "homunculus-servant", target_item_ref: "magic-wand-infusions" }],
+    },
+  },
+);
+if (
+  magicTargetArtificerInfusionUpdate.status !== 400 ||
+  magicTargetArtificerInfusionUpdate.payload?.error?.code !== "validation_error" ||
+  magicTargetArtificerInfusionUpdate.payload?.error?.message !== "Artificer infusions can only target nonmagical items."
+) {
+  throw new Error(
+    `Expected magic Artificer infusion target validation_error, got ${magicTargetArtificerInfusionUpdate.status} ${JSON.stringify(magicTargetArtificerInfusionUpdate.payload)}`,
+  );
+}
+
+const invalidEnhancedDefenseTargetUpdate = await requestJson(
+  artificerInfusionsPath,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_revision: 14,
+      active: [{ infusion_key: "enhanced-defense", target_item_ref: "backpack-infusions" }],
+    },
+  },
+);
+if (
+  invalidEnhancedDefenseTargetUpdate.status !== 400 ||
+  invalidEnhancedDefenseTargetUpdate.payload?.error?.code !== "validation_error" ||
+  invalidEnhancedDefenseTargetUpdate.payload?.error?.message !== "Enhanced Defense can only target nonmagical armor or a shield."
+) {
+  throw new Error(
+    `Expected Enhanced Defense target validation_error, got ${invalidEnhancedDefenseTargetUpdate.status} ${JSON.stringify(invalidEnhancedDefenseTargetUpdate.payload)}`,
+  );
+}
+
+const artificerInfusionsUpdate = await requestJson(
+  artificerInfusionsPath,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  {
+    method: "PATCH",
+    body: {
+      expected_revision: 14,
+      active: [
+        { infusion_key: "enhanced-defense", target_item_ref: "scale-mail-infusions" },
+        { infusion_key: "homunculus-servant", target_item_ref: "backpack-infusions" },
+      ],
+    },
+  },
+);
+const artificerInfusionInventory = artificerInfusionsUpdate.payload?.character?.state_record?.state?.inventory || [];
+const infusedScaleMail = artificerInfusionInventory.find((item) => item?.id === "scale-mail-infusions");
+const infusedBackpack = artificerInfusionInventory.find((item) => item?.id === "backpack-infusions");
+const enhancedDefenseRules =
+  artificerInfusionsUpdate.payload?.character?.definition?.stats?.defensive_state?.rules?.filter(
+    (rule) => rule?.title === "Enhanced Defense",
+  ) || [];
+if (
+  artificerInfusionsUpdate.status !== 200 ||
+  artificerInfusionsUpdate.payload?.ok !== true ||
+  artificerInfusionsUpdate.payload?.character?.state_record?.revision !== 15 ||
+  artificerInfusionsUpdate.payload?.character?.definition?.stats?.armor_class !== preInfusionArmorClass + 1 ||
+  enhancedDefenseRules.length !== 1 ||
+  enhancedDefenseRules[0]?.active !== true ||
+  infusedScaleMail?.active_infusions?.[0]?.infusion_key !== "enhanced-defense" ||
+  infusedScaleMail?.active_infusions?.[0]?.effect_key !== "enhanced_defense" ||
+  infusedBackpack?.active_infusions?.[0]?.infusion_key !== "homunculus-servant" ||
+  !readFileSync(managedCharacterDefinitionPath, "utf8").includes("active_infusions") ||
+  !readFileSync(managedCharacterDefinitionPath, "utf8").includes("enhanced-defense")
+) {
+  throw new Error(`Unexpected Artificer infusions PATCH payload: ${JSON.stringify(artificerInfusionsUpdate.payload)}`);
+}
+
+const artificerInfusionsAssertionDb = new Database(dbPath, { readonly: true });
+const managedStateAfterArtificerInfusions = artificerInfusionsAssertionDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", managedCharacterSlug);
+artificerInfusionsAssertionDb.close();
+const managedArtificerInfusionsState = JSON.parse(managedStateAfterArtificerInfusions?.state_json || "{}");
+const dbInfusedScaleMail = (managedArtificerInfusionsState.inventory || []).find((item) => item?.id === "scale-mail-infusions");
+const dbInfusedBackpack = (managedArtificerInfusionsState.inventory || []).find((item) => item?.id === "backpack-infusions");
+if (
+  managedStateAfterArtificerInfusions?.revision !== 15 ||
+  managedStateAfterArtificerInfusions?.updated_by_user_id !== 79 ||
+  dbInfusedScaleMail?.active_infusions?.[0]?.infusion_key !== "enhanced-defense" ||
+  dbInfusedBackpack?.active_infusions?.[0]?.infusion_key !== "homunculus-servant"
+) {
+  throw new Error(
+    `Unexpected Artificer infusions database row: ${JSON.stringify({
+      managedStateAfterArtificerInfusions,
+      managedArtificerInfusionsState,
+    })}`,
+  );
+}
+
+const unequipInfusedArmorUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/equipment/scale-mail-infusions`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 15, is_equipped: false } },
+);
+const unequippedEnhancedDefenseRules =
+  unequipInfusedArmorUpdate.payload?.character?.definition?.stats?.defensive_state?.rules?.filter(
+    (rule) => rule?.title === "Enhanced Defense",
+  ) || [];
+const unequippedInfusedScaleMail =
+  unequipInfusedArmorUpdate.payload?.character?.state_record?.state?.inventory?.find(
+    (item) => item?.id === "scale-mail-infusions",
+  );
+if (
+  unequipInfusedArmorUpdate.status !== 200 ||
+  unequipInfusedArmorUpdate.payload?.ok !== true ||
+  unequipInfusedArmorUpdate.payload?.character?.state_record?.revision !== 16 ||
+  unequipInfusedArmorUpdate.payload?.character?.definition?.stats?.armor_class !== preInfusionArmorClass ||
+  unequippedEnhancedDefenseRules.length !== 1 ||
+  unequippedEnhancedDefenseRules[0]?.active !== false ||
+  unequippedInfusedScaleMail?.is_equipped !== false ||
+  unequippedInfusedScaleMail?.active_infusions?.[0]?.infusion_key !== "enhanced-defense"
+) {
+  throw new Error(`Unexpected infused armor unequip payload: ${JSON.stringify(unequipInfusedArmorUpdate.payload)}`);
+}
+
+const reequipInfusedArmorUpdate = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/equipment/scale-mail-infusions`,
+  {
+    Authorization: `Bearer ${playerApiToken}`,
+  },
+  { method: "PATCH", body: { expected_revision: 16, is_equipped: true } },
+);
+const reequippedEnhancedDefenseRules =
+  reequipInfusedArmorUpdate.payload?.character?.definition?.stats?.defensive_state?.rules?.filter(
+    (rule) => rule?.title === "Enhanced Defense",
+  ) || [];
+const reequippedInfusedScaleMail =
+  reequipInfusedArmorUpdate.payload?.character?.state_record?.state?.inventory?.find(
+    (item) => item?.id === "scale-mail-infusions",
+  );
+if (
+  reequipInfusedArmorUpdate.status !== 200 ||
+  reequipInfusedArmorUpdate.payload?.ok !== true ||
+  reequipInfusedArmorUpdate.payload?.character?.state_record?.revision !== 17 ||
+  reequipInfusedArmorUpdate.payload?.character?.definition?.stats?.armor_class !== preInfusionArmorClass + 1 ||
+  reequippedEnhancedDefenseRules.length !== 1 ||
+  reequippedEnhancedDefenseRules[0]?.active !== true ||
+  reequippedInfusedScaleMail?.is_equipped !== true ||
+  reequippedInfusedScaleMail?.active_infusions?.[0]?.infusion_key !== "enhanced-defense"
+) {
+  throw new Error(`Unexpected infused armor re-equip payload: ${JSON.stringify(reequipInfusedArmorUpdate.payload)}`);
+}
+
 const nonXianxiaInventoryEquippedUpdate = await requestJson(
   `/api/v1/campaigns/linden-pass/characters/${managedCharacterSlug}/session/xianxia-inventory/jade-sword/equipped`,
   {
     Authorization: `Bearer ${playerApiToken}`,
   },
-  { method: "PATCH", body: { expected_revision: 14, is_equipped: true } },
+  { method: "PATCH", body: { expected_revision: 17, is_equipped: true } },
 );
 if (
   nonXianxiaInventoryEquippedUpdate.status !== 400 ||
