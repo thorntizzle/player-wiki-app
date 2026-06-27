@@ -329,6 +329,10 @@ export type CharacterCultivationActionApplyResult =
     }
   | { status: "validation_error"; message: string };
 
+interface CharacterCultivationActionContext {
+  martialArtRows?: SystemsEntryRow[];
+}
+
 function normalizeSystemKey(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
@@ -454,6 +458,7 @@ export function buildCharacterCultivationShellPayload({
 export function applyCharacterCultivationAction(
   definition: Record<string, unknown>,
   payload: Record<string, unknown>,
+  context: CharacterCultivationActionContext = {},
 ): CharacterCultivationActionApplyResult {
   const values = normalizeCultivationValues(payload);
   const action = String(payload.action || payload.cultivation_action || values.cultivation_action || "save_insight").trim();
@@ -474,6 +479,9 @@ export function applyCharacterCultivationAction(
   }
   if (action === "spend_training") {
     return applyXianxiaTrainingAction(definition, values);
+  }
+  if (action === "advance_martial_art_rank") {
+    return applyXianxiaMartialArtRankAction(definition, values, context.martialArtRows || []);
   }
   return {
     status: "validation_error",
@@ -625,6 +633,43 @@ function applyXianxiaTrainingAction(
     definition: result.definition,
     message: `Spent ${result.insightCost} Insight on Training to increase ${result.targetName}.`,
     anchor: "xianxia-cultivation-training",
+  };
+}
+
+function applyXianxiaMartialArtRankAction(
+  definition: Record<string, unknown>,
+  values: Record<string, string>,
+  martialArtRows: SystemsEntryRow[],
+): CharacterCultivationActionApplyResult {
+  const rawMartialArtIndex = String(values.martial_art_index || "").trim();
+  if (!rawMartialArtIndex) {
+    return { status: "validation_error", message: "Martial Art selection is required." };
+  }
+
+  let martialArtIndex: number;
+  try {
+    martialArtIndex = normalizeCultivationInt(rawMartialArtIndex, "Martial Art selection");
+  } catch (error) {
+    return {
+      status: "validation_error",
+      message: error instanceof Error ? error.message : "Invalid cultivation payload.",
+    };
+  }
+
+  const result = advanceXianxiaMartialArtRankDefinition(definition, {
+    martialArtIndex,
+    targetRankKey: values.target_rank_key,
+    legendaryQuestNote: collapseWhitespace(values.legendary_quest_note),
+    martialArtRows,
+  });
+  if (result.status === "validation_error") {
+    return { status: "validation_error", message: result.message };
+  }
+  return {
+    status: "ok",
+    definition: result.definition,
+    message: `Spent ${result.insightCost} Insight to advance ${result.martialArtName} to ${result.rankName}.`,
+    anchor: "xianxia-cultivation-martial-arts",
   };
 }
 
@@ -1101,6 +1146,192 @@ function spendXianxiaTrainingDefinition(
   };
 }
 
+function advanceXianxiaMartialArtRankDefinition(
+  definition: Record<string, unknown>,
+  payload: {
+    martialArtIndex: number;
+    targetRankKey: unknown;
+    legendaryQuestNote: string;
+    martialArtRows: SystemsEntryRow[];
+  },
+):
+  | {
+      status: "ok";
+      definition: Record<string, unknown>;
+      insightCost: number;
+      martialArtName: string;
+      rankName: string;
+    }
+  | { status: "validation_error"; message: string } {
+  const nextDefinition = deepCloneRecord(definition);
+  const xianxia = asRecord(nextDefinition.xianxia);
+  const martialArts = asArray(xianxia.martial_arts).map(asRecord).filter((record) => Object.keys(record).length > 0);
+  if (payload.martialArtIndex < 0 || payload.martialArtIndex >= martialArts.length) {
+    return { status: "validation_error", message: "Choose a recorded Martial Art to advance." };
+  }
+
+  const rankKey = normalizeRankKey(payload.targetRankKey);
+  if (!(XIANXIA_MARTIAL_ART_RANK_ORDER as readonly string[]).includes(rankKey)) {
+    return { status: "validation_error", message: "Choose a valid Martial Art rank to advance." };
+  }
+
+  const martialArt = { ...martialArts[payload.martialArtIndex] };
+  const systemsRef = asRecord(martialArt.systems_ref);
+  const systemsEntry = xianxiaMartialArtEntryForRecord(systemsRef, payload.martialArtRows);
+  const martialArtName = xianxiaMartialArtName(martialArt, systemsEntry);
+  const rankCatalog = xianxiaMartialArtRankCatalog(systemsEntry);
+  if (rankCatalog.length === 0) {
+    return { status: "validation_error", message: `${martialArtName} does not have structured rank metadata yet.` };
+  }
+
+  const targetRecord = martialArtRankRecordByKey(rankCatalog).get(rankKey);
+  if (!targetRecord || xianxiaRankRecordIsIncomplete(targetRecord)) {
+    return {
+      status: "validation_error",
+      message: `${martialArtName} does not have an available ${xianxiaMartialArtRankLabel(rankKey)} rank record.`,
+    };
+  }
+
+  let learnedRankRefs = xianxiaLearnedRankRefs(martialArt);
+  const learnedRankKeys = xianxiaLearnedRankKeys(martialArt, learnedRankRefs);
+  if (learnedRankKeys.has(rankKey)) {
+    return {
+      status: "validation_error",
+      message: `${martialArtName} already has ${xianxiaMartialArtRankLabel(rankKey)} recorded.`,
+    };
+  }
+  if (rankKey === "legendary") {
+    const missingPriorRanks = xianxiaMissingPriorRankKeys(rankCatalog, learnedRankKeys);
+    if (missingPriorRanks.length > 0) {
+      const missingRankNames = missingPriorRanks.map(xianxiaMartialArtRankLabel).join(", ");
+      return {
+        status: "validation_error",
+        message: `Record ${missingRankNames} for ${martialArtName} before Legendary.`,
+      };
+    }
+  }
+
+  const nextRank = xianxiaNextAvailableRank(rankCatalog, learnedRankKeys);
+  if (!nextRank) {
+    return { status: "validation_error", message: `${martialArtName} has no additional structured rank to advance.` };
+  }
+  const nextRankKey = normalizeRankKey(nextRank.rank_key);
+  if (nextRankKey !== rankKey) {
+    return {
+      status: "validation_error",
+      message: `Advance ${martialArtName} to ${xianxiaMartialArtRankLabel(nextRankKey)} before ${xianxiaMartialArtRankLabel(rankKey)}.`,
+    };
+  }
+
+  const insightCost = nonNegativeLooseInt(targetRecord.insight_cost, 0);
+  const rankName = xianxiaMartialArtRankLabel(rankKey);
+  if (insightCost <= 0) {
+    return {
+      status: "validation_error",
+      message: `${martialArtName} ${rankName} does not have a positive Insight cost.`,
+    };
+  }
+
+  const insight = asRecord(xianxia.insight);
+  const available = nonNegativeLooseInt(insight.available, 0);
+  const spent = nonNegativeLooseInt(insight.spent, 0);
+  if (available < insightCost) {
+    return {
+      status: "validation_error",
+      message: `${martialArtName} needs ${insightCost} Insight to advance to ${rankName}; only ${available} available.`,
+    };
+  }
+
+  const energyMaximumIncreases = xianxiaRankEnergyMaximumIncreases(targetRecord);
+  if (!Object.values(energyMaximumIncreases).some((increase) => increase > 0)) {
+    return {
+      status: "validation_error",
+      message: `${martialArtName} ${rankName} does not have rank-granted Jing, Qi, or Shen maximum increases.`,
+    };
+  }
+  const teacherBreakthroughRequirement = normalizeRankKey(targetRecord.teacher_breakthrough_requirement) || "none";
+  const teacherBreakthroughNote = collapseWhitespace(targetRecord.teacher_breakthrough_note);
+  const legendaryPrerequisiteNote = collapseWhitespace(targetRecord.legendary_prerequisite_note);
+  if (rankKey === "legendary" && !payload.legendaryQuestNote) {
+    return {
+      status: "validation_error",
+      message: `Record a quest or mythic-master note before advancing ${martialArtName} to Legendary.`,
+    };
+  }
+
+  const rankRef = String(targetRecord.rank_ref || "").trim();
+  learnedRankRefs = xianxiaEnsureRecordedLearnedRankRefs(learnedRankRefs, learnedRankKeys, rankCatalog);
+  if (rankRef && !learnedRankRefs.includes(rankRef)) {
+    learnedRankRefs.push(rankRef);
+  }
+
+  martialArt.current_rank_key = rankKey;
+  martialArt.current_rank = rankName;
+  martialArt.learned_rank_refs = learnedRankRefs;
+  const rankEnergyMaximumIncreases = asRecord(martialArt.rank_energy_maximum_increases);
+  rankEnergyMaximumIncreases[rankKey] = { ...energyMaximumIncreases };
+  martialArt.rank_energy_maximum_increases = rankEnergyMaximumIncreases;
+  if (teacherBreakthroughRequirement !== "none" || teacherBreakthroughNote) {
+    const rankTeacherBreakthroughNotes = asRecord(martialArt.rank_teacher_breakthrough_notes);
+    rankTeacherBreakthroughNotes[rankKey] = {
+      requirement: teacherBreakthroughRequirement,
+      note: teacherBreakthroughNote,
+    };
+    martialArt.rank_teacher_breakthrough_notes = rankTeacherBreakthroughNotes;
+  }
+  if (rankKey === "legendary") {
+    const rankLegendaryNotes = asRecord(martialArt.rank_legendary_prerequisite_notes);
+    const legendaryNote: Record<string, unknown> = {
+      requirement: "quest_or_mythic_master",
+      note: payload.legendaryQuestNote,
+    };
+    if (legendaryPrerequisiteNote) {
+      legendaryNote.prerequisite_note = legendaryPrerequisiteNote;
+    }
+    rankLegendaryNotes[rankKey] = legendaryNote;
+    martialArt.rank_legendary_prerequisite_notes = rankLegendaryNotes;
+  }
+  martialArt.insight_spent = nonNegativeLooseInt(martialArt.insight_spent, 0) + insightCost;
+  martialArts[payload.martialArtIndex] = martialArt;
+
+  xianxia.insight = { available: available - insightCost, spent: spent + insightCost };
+  xianxia.energies = applyXianxiaEnergyMaximumIncreases(xianxia.energies, energyMaximumIncreases);
+  xianxia.martial_arts = martialArts;
+  const history = asArray(xianxia.advancement_history)
+    .map(asRecord)
+    .filter((record) => Object.keys(record).length > 0);
+  const historyRow: Record<string, unknown> = {
+    action: "martial_art_rank_advance",
+    amount: insightCost,
+    target: martialArtName,
+    rank: rankName,
+    energy_maximum_increases: { ...energyMaximumIncreases },
+  };
+  if (rankRef) {
+    historyRow.rank_ref = rankRef;
+  }
+  if (Object.keys(systemsRef).length > 0) {
+    historyRow.systems_ref = systemsRef;
+  }
+  if (teacherBreakthroughRequirement !== "none") {
+    historyRow.teacher_breakthrough_requirement = teacherBreakthroughRequirement;
+  }
+  if (teacherBreakthroughNote) {
+    historyRow.teacher_breakthrough_note = teacherBreakthroughNote;
+  }
+  if (rankKey === "legendary") {
+    historyRow.legendary_prerequisite = "quest_or_mythic_master";
+    historyRow.legendary_quest_note = payload.legendaryQuestNote;
+    if (legendaryPrerequisiteNote) {
+      historyRow.legendary_prerequisite_note = legendaryPrerequisiteNote;
+    }
+  }
+  history.push(historyRow);
+  xianxia.advancement_history = history;
+  nextDefinition.xianxia = xianxia;
+  return { status: "ok", definition: nextDefinition, insightCost, martialArtName, rankName };
+}
+
 function recordXianxiaGatheringInsightDefinition(
   definition: Record<string, unknown>,
   payload: { amount: number; downtime: string; notes: string },
@@ -1418,6 +1649,208 @@ function xianxiaMartialArtAdvancementContext(art: Record<string, unknown>, insig
     requires_legendary_note: nextRankKey === "legendary",
     legendary_prerequisite_note: String(nextStep.legendary_prerequisite_note || "").trim(),
   };
+}
+
+function xianxiaMartialArtEntryForRecord(
+  systemsRef: Record<string, unknown>,
+  martialArtRows: SystemsEntryRow[],
+): SystemsEntryRow | null {
+  const entryKey = String(systemsRef.entry_key || "").trim();
+  if (entryKey) {
+    const entry = martialArtRows.find((row) => String(row.entry_key || "").trim() === entryKey);
+    if (entry) {
+      return entry;
+    }
+  }
+  const slug = String(systemsRef.slug || "").trim();
+  if (slug) {
+    return martialArtRows.find((row) => String(row.slug || "").trim() === slug) || null;
+  }
+  return null;
+}
+
+function xianxiaMartialArtName(martialArt: Record<string, unknown>, systemsEntry: SystemsEntryRow | null): string {
+  const systemsRef = asRecord(martialArt.systems_ref);
+  return (
+    String(martialArt.name || "").trim() ||
+    String(systemsRef.title || "").trim() ||
+    String(systemsEntry?.title || "").trim() ||
+    "Martial Art"
+  );
+}
+
+function xianxiaMartialArtRankCatalog(systemsEntry: SystemsEntryRow | null): Record<string, unknown>[] {
+  if (!systemsEntry) {
+    return [];
+  }
+  const metadata = parseJsonRecord(systemsEntry.metadata_json);
+  const body = parseJsonRecord(systemsEntry.body_json);
+  const martialArtBody = asRecord(body.xianxia_martial_art);
+  const presentRecords = xianxiaRankRecordList(
+    metadata.martial_art_rank_records ||
+      metadata.xianxia_martial_art_rank_records ||
+      martialArtBody.rank_records ||
+      martialArtBody.xianxia_martial_art_rank_records,
+  );
+  const missingRecords = xianxiaRankRecordList(
+    metadata.martial_art_missing_rank_records ||
+      metadata.xianxia_martial_art_missing_rank_records ||
+      martialArtBody.missing_rank_records ||
+      martialArtBody.xianxia_martial_art_missing_rank_records,
+  );
+  return [...presentRecords, ...missingRecords].sort(compareXianxiaRankRecords);
+}
+
+function xianxiaRankRecordList(values: unknown): Record<string, unknown>[] {
+  return asArray(values).map(asRecord).filter((record) => Object.keys(record).length > 0);
+}
+
+function compareXianxiaRankRecords(left: Record<string, unknown>, right: Record<string, unknown>): number {
+  const leftOrder = xianxiaRankRecordOrder(left);
+  const rightOrder = xianxiaRankRecordOrder(right);
+  if (leftOrder !== rightOrder) {
+    return leftOrder - rightOrder;
+  }
+  return String(left.rank_name || left.rank_key || "")
+    .toLowerCase()
+    .localeCompare(String(right.rank_name || right.rank_key || "").toLowerCase());
+}
+
+function xianxiaRankRecordOrder(record: Record<string, unknown>): number {
+  const parsed = Number.parseInt(String(record.rank_order ?? ""), 10);
+  if (Number.isFinite(parsed)) {
+    return parsed;
+  }
+  const rankKey = normalizeRankKey(record.rank_key);
+  const index = (XIANXIA_MARTIAL_ART_RANK_ORDER as readonly string[]).indexOf(rankKey);
+  return index >= 0 ? index : 10000;
+}
+
+function martialArtRankRecordByKey(rankCatalog: Record<string, unknown>[]): Map<string, Record<string, unknown>> {
+  const lookup = new Map<string, Record<string, unknown>>();
+  for (const record of rankCatalog) {
+    const rankKey = normalizeRankKey(record.rank_key);
+    if (rankKey) {
+      lookup.set(rankKey, record);
+    }
+  }
+  return lookup;
+}
+
+function xianxiaRankRecordIsIncomplete(record: Record<string, unknown>): boolean {
+  return (
+    truthy(record.is_incomplete_rank) ||
+    record.rank_available_in_seed === false ||
+    String(record.rank_completion_status || "").trim() === "missing_intentional_draft" ||
+    String(record.incomplete_rank_reason || "").trim() === "intentional_draft_content"
+  );
+}
+
+function xianxiaLearnedRankRefs(martialArt: Record<string, unknown>): string[] {
+  const refs: string[] = [];
+  for (const value of asArray(martialArt.learned_rank_refs)) {
+    const ref = String(value || "").trim();
+    if (ref && !refs.includes(ref)) {
+      refs.push(ref);
+    }
+  }
+  return refs;
+}
+
+function xianxiaLearnedRankKeys(martialArt: Record<string, unknown>, learnedRankRefs: string[]): Set<string> {
+  const learned = new Set<string>();
+  for (const ref of learnedRankRefs) {
+    const rankKey = normalizeRankKey(String(ref).split(":").pop() || "");
+    if (rankKey) {
+      learned.add(rankKey);
+    }
+  }
+  const currentRankKey = normalizeRankKey(martialArt.current_rank_key);
+  if (currentRankKey) {
+    learned.add(currentRankKey);
+  }
+  return learned;
+}
+
+function xianxiaNextAvailableRank(
+  rankCatalog: Record<string, unknown>[],
+  learnedRankKeys: Set<string>,
+): Record<string, unknown> | null {
+  for (const record of rankCatalog) {
+    const rankKey = normalizeRankKey(record.rank_key);
+    if (!rankKey || learnedRankKeys.has(rankKey)) {
+      continue;
+    }
+    if (xianxiaRankRecordIsIncomplete(record)) {
+      return null;
+    }
+    return record;
+  }
+  return null;
+}
+
+function xianxiaMissingPriorRankKeys(rankCatalog: Record<string, unknown>[], learnedRankKeys: Set<string>): string[] {
+  const availableRankKeys = new Set(
+    rankCatalog
+      .filter((record) => !xianxiaRankRecordIsIncomplete(record))
+      .map((record) => normalizeRankKey(record.rank_key))
+      .filter(Boolean),
+  );
+  const missing: string[] = [];
+  for (const rankKey of XIANXIA_MARTIAL_ART_RANK_ORDER) {
+    if (rankKey === "legendary") {
+      break;
+    }
+    if (availableRankKeys.has(rankKey) && !learnedRankKeys.has(rankKey)) {
+      missing.push(rankKey);
+    }
+  }
+  return missing;
+}
+
+function xianxiaEnsureRecordedLearnedRankRefs(
+  learnedRankRefs: string[],
+  learnedRankKeys: Set<string>,
+  rankCatalog: Record<string, unknown>[],
+): string[] {
+  const refs = [...learnedRankRefs];
+  for (const record of rankCatalog) {
+    const rankKey = normalizeRankKey(record.rank_key);
+    const rankRef = String(record.rank_ref || "").trim();
+    if (rankKey && learnedRankKeys.has(rankKey) && rankRef && !refs.includes(rankRef)) {
+      refs.push(rankRef);
+    }
+  }
+  return refs;
+}
+
+function xianxiaRankEnergyMaximumIncreases(record: Record<string, unknown>): Record<XianxiaEnergyKey, number> {
+  const rawIncreases = asRecord(record.energy_maximum_increases || record.xianxia_energy_maximum_increases);
+  return {
+    jing: nonNegativeLooseInt(rawIncreases.jing, 0),
+    qi: nonNegativeLooseInt(rawIncreases.qi, 0),
+    shen: nonNegativeLooseInt(rawIncreases.shen, 0),
+  };
+}
+
+function applyXianxiaEnergyMaximumIncreases(
+  rawEnergies: unknown,
+  increases: Record<XianxiaEnergyKey, number>,
+): Record<string, Record<string, number>> {
+  const energies = asRecord(rawEnergies);
+  const updated: Record<string, Record<string, number>> = {};
+  for (const key of XIANXIA_ENERGY_KEYS) {
+    const energy = asRecord(energies[key]);
+    updated[key] = {
+      max: nonNegativeLooseInt(energy.max, 0) + nonNegativeLooseInt(increases[key], 0),
+    };
+  }
+  return updated;
+}
+
+function xianxiaMartialArtRankLabel(rankKey: string): string {
+  const normalized = normalizeRankKey(rankKey);
+  return XIANXIA_MARTIAL_ART_IMPORT_RANK_LABELS[normalized] || humanizeSlug(normalized) || "Rank";
 }
 
 function buildXianxiaRealmAscensionContext(xianxia: Record<string, unknown>): Record<string, unknown> {
@@ -2953,6 +3386,28 @@ export function listXianxiaManualImportMartialArtOptions(
         }
         return left.source_id.toLowerCase().localeCompare(right.source_id.toLowerCase());
       });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("no such table")) {
+      return [];
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function listXianxiaCultivationMartialArtRows(
+  dbPath: string,
+  campaign: CampaignViewModel,
+  campaignConfig: Record<string, unknown>,
+): SystemsEntryRow[] {
+  if (!campaign.systems_library_slug || !existsSync(dbPath)) {
+    return [];
+  }
+
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    return loadEnabledMartialArtRows(database, campaign, campaignConfig).filter((row) => row.is_enabled_override !== 0);
   } catch (error) {
     if (error instanceof Error && error.message.includes("no such table")) {
       return [];

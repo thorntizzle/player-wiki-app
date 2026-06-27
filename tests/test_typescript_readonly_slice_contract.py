@@ -382,9 +382,37 @@ def _seed_xianxia_generic_techniques(db_path: Path) -> None:
         )
         entries = [
             (
+                "XIA:martial_art:cloud-palm",
+                "xia-martial-art-cloud-palm",
+                "Cloud Palm",
+                "martial_art",
+                {
+                    "martial_art_catalog_order": 5,
+                    "xianxia_martial_art_style": "Open hand",
+                    "xianxia_martial_art_rank_records": [
+                        {
+                            "rank_key": "initiate",
+                            "rank_order": 0,
+                            "rank_ref": "systems:xia-cloud-palm:initiate",
+                            "insight_cost": 0,
+                            "energy_maximum_increases": {"jing": 0, "qi": 0, "shen": 0},
+                        },
+                        {
+                            "rank_key": "novice",
+                            "rank_order": 1,
+                            "rank_ref": "systems:xia-cloud-palm:novice",
+                            "insight_cost": 1,
+                            "energy_maximum_increases": {"jing": 1, "qi": 0, "shen": 0},
+                        },
+                    ],
+                },
+                {"xianxia_martial_art": {"style": "Open hand"}},
+            ),
+            (
                 "XIA:generic_technique:qi-blast",
                 "xia-generic-technique-qi-blast",
                 "Qi Blast",
+                "generic_technique",
                 {
                     "generic_technique_catalog_order": 7,
                     "generic_technique_key": "qi_blast",
@@ -406,6 +434,7 @@ def _seed_xianxia_generic_techniques(db_path: Path) -> None:
                 "XIA:generic_technique:enhanced-flowing-dao",
                 "xia-generic-technique-enhanced-flowing-dao",
                 "Enhanced Flowing Dao",
+                "generic_technique",
                 {
                     "generic_technique_catalog_order": 9,
                     "generic_technique_key": "enhanced_flowing_dao",
@@ -430,8 +459,8 @@ def _seed_xianxia_generic_techniques(db_path: Path) -> None:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
-                ("Xianxia", "XIA", entry_key, "generic_technique", slug, title, json.dumps(metadata), json.dumps(body))
-                for entry_key, slug, title, metadata, body in entries
+                ("Xianxia", "XIA", entry_key, entry_type, slug, title, json.dumps(metadata), json.dumps(body))
+                for entry_key, slug, title, entry_type, metadata, body in entries
             ],
         )
         connection.commit()
@@ -1846,7 +1875,26 @@ def test_typescript_character_cultivation_context_shell_and_supported_xianxia_co
                 "yin_yang": {"yin_max": 1, "yang_max": 1},
                 "durability": {"hp_max": 10, "stance_max": 10, "manual_armor_bonus": 0},
                 "trained_skills": ["Qi Sense"],
-                "martial_arts": [{"name": "Cloud Palm", "current_rank": "Initiate"}],
+                "martial_arts": [
+                    {
+                        "name": "Cloud Palm",
+                        "systems_ref": {
+                            "library_slug": "Xianxia",
+                            "source_id": "XIA",
+                            "entry_key": "XIA:martial_art:cloud-palm",
+                            "slug": "xia-martial-art-cloud-palm",
+                            "title": "Cloud Palm",
+                            "entry_type": "martial_art",
+                        },
+                        "current_rank": "Initiate",
+                        "current_rank_key": "initiate",
+                        "rank_refs": {
+                            "initiate": "systems:xia-cloud-palm:initiate",
+                            "novice": "systems:xia-cloud-palm:novice",
+                        },
+                        "learned_rank_refs": ["systems:xia-cloud-palm:initiate"],
+                    }
+                ],
                 "generic_techniques": [
                     {
                         "name": "Qi Blast",
@@ -2554,6 +2602,120 @@ def test_typescript_character_cultivation_context_shell_and_supported_xianxia_co
         insufficient_training_precedes_invalid_attribute_payload["error"]["message"]
         == "Training needs 1 Insight to increase Body; only 0 available."
     )
+
+    missing_martial_art_status, missing_martial_art_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 16,
+            "cultivation_action": "advance_martial_art_rank",
+            "target_rank_key": "novice",
+        },
+    )
+    assert missing_martial_art_status == 400
+    assert missing_martial_art_payload["error"]["code"] == "validation_error"
+    assert missing_martial_art_payload["error"]["message"] == "Martial Art selection is required."
+
+    invalid_martial_art_rank_status, invalid_martial_art_rank_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 16,
+            "cultivation_action": "advance_martial_art_rank",
+            "martial_art_index": "0",
+            "target_rank_key": "dragon",
+        },
+    )
+    assert invalid_martial_art_rank_status == 400
+    assert invalid_martial_art_rank_payload["error"]["code"] == "validation_error"
+    assert invalid_martial_art_rank_payload["error"]["message"] == "Choose a valid Martial Art rank to advance."
+
+    insufficient_martial_art_status, insufficient_martial_art_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 16,
+            "cultivation_action": "advance_martial_art_rank",
+            "martial_art_index": "0",
+            "target_rank_key": "novice",
+        },
+    )
+    assert insufficient_martial_art_status == 400
+    assert insufficient_martial_art_payload["error"]["code"] == "validation_error"
+    assert (
+        insufficient_martial_art_payload["error"]["message"]
+        == "Cloud Palm needs 1 Insight to advance to Novice; only 0 available."
+    )
+
+    restore_martial_art_insight_status, restore_martial_art_insight_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 16,
+            "action": "save_insight",
+            "values": {"insight_available": "1", "insight_spent": "7"},
+        },
+    )
+    assert restore_martial_art_insight_status == 200
+    assert restore_martial_art_insight_payload["character"]["state_record"]["revision"] == initial_revision + 17
+
+    martial_art_status, martial_art_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 17,
+            "action": "advance_martial_art_rank",
+            "values": {
+                "martial_art_index": "0",
+                "target_rank_key": "novice",
+            },
+        },
+    )
+    assert martial_art_status == 200
+    assert martial_art_payload["ok"] is True
+    assert martial_art_payload["message"] == "Spent 1 Insight to advance Cloud Palm to Novice."
+    assert martial_art_payload["anchor"] == "xianxia-cultivation-martial-arts"
+    assert martial_art_payload["character"]["state_record"]["revision"] == initial_revision + 18
+    martial_art_xianxia = martial_art_payload["character"]["definition"]["xianxia"]
+    assert martial_art_xianxia["insight"] == {"available": 0, "spent": 8}
+    assert martial_art_xianxia["energies"] == {
+        "jing": {"max": 2},
+        "qi": {"max": 2},
+        "shen": {"max": 1},
+    }
+    learned_art = martial_art_xianxia["martial_arts"][0]
+    assert learned_art["current_rank_key"] == "novice"
+    assert learned_art["current_rank"] == "Novice"
+    assert learned_art["learned_rank_refs"] == [
+        "systems:xia-cloud-palm:initiate",
+        "systems:xia-cloud-palm:novice",
+    ]
+    assert learned_art["rank_energy_maximum_increases"] == {
+        "novice": {"jing": 1, "qi": 0, "shen": 0}
+    }
+    assert learned_art["insight_spent"] == 1
+    assert learned_art["systems_ref"]["entry_key"] == "XIA:martial_art:cloud-palm"
+    assert martial_art_payload["character"]["state_record"]["state"]["xianxia"]["energies"] == {
+        "jing": {"current": 1},
+        "qi": {"current": 1},
+        "shen": {"current": 1},
+    }
+    martial_art_context = martial_art_payload["cultivation"]["martial_arts"][0]
+    assert martial_art_context["current_rank_key"] == "novice"
+    assert martial_art_xianxia["advancement_history"][-1] == {
+        "action": "martial_art_rank_advance",
+        "amount": 1,
+        "target": "Cloud Palm",
+        "rank": "Novice",
+        "energy_maximum_increases": {"jing": 1, "qi": 0, "shen": 0},
+        "rank_ref": "systems:xia-cloud-palm:novice",
+        "systems_ref": learned_art["systems_ref"],
+    }
 
     cap_character_slug = "api-cultivation-cap"
     cap_body = deepcopy(xianxia_body)
