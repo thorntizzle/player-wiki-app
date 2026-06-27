@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 
 import Database from "better-sqlite3";
@@ -679,6 +679,47 @@ export function deleteCharacterAssignment(
     });
     const row = deleteAssignment();
     return row ? serializeCharacterAssignment(row) : null;
+  } finally {
+    database.close();
+  }
+}
+
+export function issuePasswordResetToken(
+  dbPath: string,
+  userId: number,
+  {
+    ttlHours,
+    createdByUserId,
+  }: {
+    ttlHours: number;
+    createdByUserId: number | null;
+  },
+): string {
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const rawToken = randomBytes(32).toString("base64url");
+    const nowDate = new Date();
+    const now = utcIsoTimestamp(nowDate);
+    const expiresAt = utcIsoTimestamp(new Date(nowDate.getTime() + ttlHours * 60 * 60 * 1000));
+    const writeToken = database.transaction(() => {
+      database
+        .prepare("UPDATE password_reset_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL")
+        .run(now, userId);
+      database
+        .prepare(
+          `INSERT INTO password_reset_tokens (
+            user_id,
+            token_hash,
+            expires_at,
+            used_at,
+            created_by_user_id,
+            created_at
+          ) VALUES (?, ?, ?, NULL, ?, ?)`,
+        )
+        .run(userId, hashToken(rawToken), expiresAt, createdByUserId, now);
+    });
+    writeToken();
+    return rawToken;
   } finally {
     database.close();
   }

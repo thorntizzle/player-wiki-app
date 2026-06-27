@@ -15,6 +15,7 @@ import {
   getUserById,
   hasActivePlayerMembership,
   insertAuthAuditLog,
+  issuePasswordResetToken,
   listActivePlayerMembershipUsers,
   readApiTokenAuthContext,
   upsertCharacterAssignment,
@@ -848,6 +849,17 @@ function requestQueryValues(ctx: Context): Record<string, string> {
   return Object.fromEntries(Array.from(searchParams.entries()).map(([key, value]) => [key, value]));
 }
 
+function resetTtlHours(): number {
+  const configured = Number(process.env.PLAYER_WIKI_RESET_TTL_HOURS || "");
+  return Number.isFinite(configured) && configured > 0 ? configured : 24;
+}
+
+function buildLocalUrl(pathValue: string): string {
+  const baseUrl = String(config.app.base_url || "").trim().replace(/\/+$/g, "");
+  const normalizedPath = pathValue.startsWith("/") ? pathValue : `/${pathValue}`;
+  return baseUrl ? `${baseUrl}${normalizedPath}` : normalizedPath;
+}
+
 function characterDefinitionName(record: CampaignCharacterFileRecord): string {
   const name = record.definition.name;
   return typeof name === "string" && name.trim() ? name.trim() : record.character_slug;
@@ -1543,6 +1555,50 @@ app.delete(ROUTES.adminUserAssignmentRemove, async (ctx) => {
   return ctx.json({
     ...payload,
     message: `Cleared assignment for ${characterLabel} in ${campaignTitle}.`,
+  });
+});
+
+app.post(ROUTES.adminUserPasswordReset, async (ctx) => {
+  const auth = resolveAppAdminBearerWrite(ctx);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const userId = parsePositiveInteger(ctx.req.param("userId") || "");
+  const targetUser = userId === null ? null : getUserById(config.dbPath, userId);
+  if (!targetUser) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (targetUser.status !== "active") {
+    const error = validationError("Password resets are only available for active users.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const resetToken = issuePasswordResetToken(config.dbPath, targetUser.id, {
+    ttlHours: resetTtlHours(),
+    createdByUserId: auth.actorUserId ?? null,
+  });
+  insertAuthAuditLog(config.dbPath, {
+    actorUserId: auth.actorUserId ?? null,
+    targetUserId: targetUser.id,
+    campaignSlug: null,
+    characterSlug: null,
+    eventType: "password_reset_issued",
+    metadata: { source: "admin_screen" },
+  });
+
+  const resetUrl = buildLocalUrl(`/reset/${resetToken}`);
+  const payload = await buildAdminUserDetailPayload(config, auth.actorUser || null, targetUser.id, requestQueryValues(ctx));
+  if (!payload) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({
+    ...payload,
+    message: `Password reset URL: ${resetUrl}`,
+    reset_url: resetUrl,
   });
 });
 

@@ -62,6 +62,7 @@ Route parity check command:
   - `GET /api/v1/admin/users/:userId`
   - `POST /api/v1/admin/users/:userId/membership`
   - `DELETE /api/v1/admin/users/:userId/membership`
+  - `POST /api/v1/admin/users/:userId/password-reset`
   - `GET /api/v1/campaigns/:campaignSlug/systems`
   - `GET /api/v1/campaigns/:campaignSlug/systems/search`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources`
@@ -308,6 +309,10 @@ Route parity check command:
   Assignment mutations are also bearer API-token app-admin writes against disposable fixture SQLite
   only, validating visible active characters plus active player memberships, refreshing Admin user
   detail payloads, and writing `character_assignment_*` audit events with `admin_screen` metadata.
+  Password-reset issuance is bearer API-token app-admin only, validates active target users,
+  consumes prior unused reset tokens, inserts a SHA-256-hashed `password_reset_tokens` row with
+  reset TTL and actor id, writes `password_reset_issued` audit metadata, refreshes the Admin user
+  detail payload, and returns the one-shot reset URL only in the mutation response.
   Remaining Admin mutations stay on Flask until their own approved slices.
 - The Campaign Control read route now serves `GET .../control`, preserving Flask-compatible
   visibility-management auth for fixture or bearer-token DM/admin identities, default campaign

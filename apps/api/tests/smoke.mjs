@@ -69,6 +69,16 @@ smokeDb.exec(`
     created_by_user_id INTEGER
   );
 
+  CREATE TABLE password_reset_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_by_user_id INTEGER,
+    created_at TEXT NOT NULL
+  );
+
   CREATE TABLE campaign_visibility_settings (
     campaign_slug TEXT NOT NULL,
     scope TEXT NOT NULL,
@@ -200,6 +210,21 @@ smokeDb
   );
 smokeDb
   .prepare(
+    "INSERT INTO users (id, email, display_name, is_admin, status, password_hash, auth_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    82,
+    "fixture-disabled-user@example.com",
+    "Fixture Disabled User",
+    0,
+    "disabled",
+    null,
+    1,
+    "2026-06-25T08:27:00+00:00",
+    "2026-06-25T08:27:00+00:00",
+  );
+smokeDb
+  .prepare(
     "INSERT INTO user_preferences (user_id, theme_key, session_chat_order, frontend_mode, updated_at) VALUES (?, ?, ?, ?, ?)",
   )
   .run(77, "moonlit", "oldest_first", "flask", "2026-06-25T08:35:00+00:00");
@@ -277,6 +302,32 @@ smokeDb
     null,
     null,
     null,
+  );
+smokeDb
+  .prepare(
+    "INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at, used_at, created_by_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    1001,
+    79,
+    hashToken("fixture-old-reset-token"),
+    "2026-06-26T08:00:00+00:00",
+    null,
+    77,
+    "2026-06-25T08:00:00+00:00",
+  );
+smokeDb
+  .prepare(
+    "INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at, used_at, created_by_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    1002,
+    79,
+    hashToken("fixture-used-reset-token"),
+    "2026-06-26T08:00:00+00:00",
+    "2026-06-25T08:10:00+00:00",
+    77,
+    "2026-06-25T08:05:00+00:00",
   );
 const ardenInitialState = {
   vitals: {
@@ -1631,7 +1682,7 @@ if (
   bearerAdminDashboard.status !== 200 ||
   bearerAdminDashboard.payload?.ok !== true ||
   bearerAdminDashboard.payload?.admin_user?.email !== "fixture-token-user@example.com" ||
-  bearerAdminDashboard.payload?.user_cards?.length !== 5
+  bearerAdminDashboard.payload?.user_cards?.length !== 6
 ) {
   throw new Error(`Unexpected bearer admin dashboard payload: ${JSON.stringify(bearerAdminDashboard.payload)}`);
 }
@@ -2153,6 +2204,139 @@ if (
     `Unexpected admin assignment database/audit state: ${JSON.stringify({
       adminAssignmentRow,
       parsedAdminAssignmentAudits,
+    })}`,
+  );
+}
+
+const adminPasswordResetPath = "/api/v1/admin/users/79/password-reset";
+const blockedAdminPasswordReset = await requestJson(adminPasswordResetPath, {}, { method: "POST", body: {} });
+if (
+  blockedAdminPasswordReset.status !== 401 ||
+  blockedAdminPasswordReset.payload?.error?.code !== "auth_required"
+) {
+  throw new Error(
+    `Expected unauthenticated admin password-reset POST auth_required 401, got ${blockedAdminPasswordReset.status} ${JSON.stringify(blockedAdminPasswordReset.payload)}`,
+  );
+}
+
+const fixtureAdminPasswordReset = await requestJson(
+  adminPasswordResetPath,
+  { "X-CPW-Fixture-Role": "admin" },
+  { method: "POST", body: {} },
+);
+if (
+  fixtureAdminPasswordReset.status !== 403 ||
+  fixtureAdminPasswordReset.payload?.error?.message !== "Admin membership updates require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture admin password-reset denial, got ${fixtureAdminPasswordReset.status} ${JSON.stringify(fixtureAdminPasswordReset.payload)}`,
+  );
+}
+
+const playerAdminPasswordReset = await requestJson(
+  adminPasswordResetPath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: {} },
+);
+if (
+  playerAdminPasswordReset.status !== 403 ||
+  playerAdminPasswordReset.payload?.error?.message !== "You do not have permission to use the admin API."
+) {
+  throw new Error(
+    `Expected player admin password-reset forbidden, got ${playerAdminPasswordReset.status} ${JSON.stringify(playerAdminPasswordReset.payload)}`,
+  );
+}
+
+const missingUserAdminPasswordReset = await requestJson(
+  "/api/v1/admin/users/999999/password-reset",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: {} },
+);
+if (
+  missingUserAdminPasswordReset.status !== 404 ||
+  missingUserAdminPasswordReset.payload?.error?.code !== "admin_user_not_found"
+) {
+  throw new Error(
+    `Expected missing-user admin password-reset not_found, got ${missingUserAdminPasswordReset.status} ${JSON.stringify(missingUserAdminPasswordReset.payload)}`,
+  );
+}
+
+const disabledUserAdminPasswordReset = await requestJson(
+  "/api/v1/admin/users/82/password-reset",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: {} },
+);
+if (
+  disabledUserAdminPasswordReset.status !== 400 ||
+  disabledUserAdminPasswordReset.payload?.error?.message !== "Password resets are only available for active users."
+) {
+  throw new Error(
+    `Expected disabled-user admin password-reset validation, got ${disabledUserAdminPasswordReset.status} ${JSON.stringify(disabledUserAdminPasswordReset.payload)}`,
+  );
+}
+
+const adminPasswordReset = await requestJson(
+  adminPasswordResetPath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: {} },
+);
+const resetUrl = String(adminPasswordReset.payload?.reset_url || "");
+const expectedResetPrefix = `http://127.0.0.1:${port}/reset/`;
+const rawResetToken = resetUrl.startsWith(expectedResetPrefix) ? resetUrl.slice(expectedResetPrefix.length) : "";
+if (
+  adminPasswordReset.status !== 200 ||
+  adminPasswordReset.payload?.ok !== true ||
+  adminPasswordReset.payload?.managed_user?.email !== "fixture-token-player@example.com" ||
+  !rawResetToken ||
+  adminPasswordReset.payload?.message !== `Password reset URL: ${resetUrl}`
+) {
+  throw new Error(`Unexpected admin password-reset payload: ${JSON.stringify(adminPasswordReset.payload)}`);
+}
+
+const adminPasswordResetAuditDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const oldResetRow = adminPasswordResetAuditDb
+  .prepare("SELECT used_at FROM password_reset_tokens WHERE id = ?")
+  .get(1001);
+const previouslyUsedResetRow = adminPasswordResetAuditDb
+  .prepare("SELECT used_at FROM password_reset_tokens WHERE id = ?")
+  .get(1002);
+const newResetRow = adminPasswordResetAuditDb
+  .prepare(
+    "SELECT user_id, token_hash, expires_at, used_at, created_by_user_id, created_at FROM password_reset_tokens WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+  )
+  .get(79);
+const passwordResetAuditRow = adminPasswordResetAuditDb
+  .prepare(
+    "SELECT actor_user_id, target_user_id, campaign_slug, character_slug, event_type, metadata_json FROM auth_audit_log WHERE target_user_id = ? AND event_type = ? ORDER BY id DESC LIMIT 1",
+  )
+  .get(79, "password_reset_issued");
+adminPasswordResetAuditDb.close();
+const passwordResetAuditMetadata = passwordResetAuditRow ? JSON.parse(passwordResetAuditRow.metadata_json) : {};
+const resetTtlHours =
+  (Date.parse(newResetRow?.expires_at || "") - Date.parse(newResetRow?.created_at || "")) / (60 * 60 * 1000);
+if (
+  !oldResetRow?.used_at ||
+  previouslyUsedResetRow?.used_at !== "2026-06-25T08:10:00+00:00" ||
+  newResetRow?.user_id !== 79 ||
+  newResetRow?.token_hash !== hashToken(rawResetToken) ||
+  newResetRow?.used_at !== null ||
+  newResetRow?.created_by_user_id !== 77 ||
+  Math.abs(resetTtlHours - 24) > 0.01 ||
+  passwordResetAuditRow?.actor_user_id !== 77 ||
+  passwordResetAuditRow?.target_user_id !== 79 ||
+  passwordResetAuditRow?.campaign_slug !== null ||
+  passwordResetAuditRow?.character_slug !== null ||
+  passwordResetAuditRow?.event_type !== "password_reset_issued" ||
+  passwordResetAuditMetadata.source !== "admin_screen"
+) {
+  throw new Error(
+    `Unexpected admin password-reset database/audit state: ${JSON.stringify({
+      oldResetRow,
+      previouslyUsedResetRow,
+      newResetRow,
+      resetTtlHours,
+      passwordResetAuditRow,
+      passwordResetAuditMetadata,
     })}`,
   );
 }

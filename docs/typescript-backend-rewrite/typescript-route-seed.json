@@ -1026,6 +1026,15 @@
     },
     {
       "method": "POST",
+      "path": "/api/v1/admin/users/<int:user_id>/password-reset",
+      "route_family": "api_v1_admin",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/admin/users/:userId/password-reset",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Admin password-reset issue route with bearer-token app-admin writes, fixture-role write denial, active-user validation, prior unused reset-token consumption, password_reset_tokens insertion with SHA-256 token hash and reset TTL, password_reset_issued audit rows with admin_screen metadata, refreshed user detail payloads, reset URL message, and explicit missing-user JSON."
+    },
+    {
+      "method": "POST",
       "path": "/api/v1/campaigns/<campaign_slug>/systems/custom-entries",
       "route_family": "api_v1_systems",
       "status": "implemented_fixture_sqlite_write",
