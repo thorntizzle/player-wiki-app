@@ -22,6 +22,7 @@ This directory is the fast reference layer for the current Campaign Player Wiki 
 - [Live Session](live-session.md): player Session, DM Session, Session Character, staged/revealed articles, logs, and polling behavior.
 - [Ops And Fly Deployment](ops-deploy.md): local wrapper usage, Fly deployment shape, SQLite volume boundaries, and verification expectations.
 - [Published Wiki And Publishing](published-wiki.md): player-facing wiki pages, section/grouping conventions, images, Campaign Home, and publication/removal guardrails.
+- [Workspace Boundaries And Worktrees](workspace-boundaries.md): app/vault/tooling split, vault bridge contract, and permanent worktree usage.
 - [Systems Wiki](systems.md): source policy, shared libraries, imports, RULES/book slices, custom entries, overrides, and search behavior.
 - [Characters Overview](characters-overview.md): shared character storage, route lanes, permissions, mutable state, save/revision rules, and cross-system conventions.
 - [Characters: DND-5E](characters-dnd5e.md): DND-5E native/imported support matrix, authoring lanes, read/session/combat behavior, spellcasting, equipment, and known limits.

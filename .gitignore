@@ -9,6 +9,8 @@
 __pycache__/
 **/__pycache__/
 *.pyc
+.env
+.env.local
 /.pytest-tmp*/
 /.tmp-*/
 /codex*/
