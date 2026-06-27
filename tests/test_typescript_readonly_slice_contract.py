@@ -2391,11 +2391,176 @@ def test_typescript_character_cultivation_context_shell_and_supported_xianxia_co
         == "Conditioning needs 1 Insight to increase Body; only 0 available."
     )
 
+    invalid_training_target_status, invalid_training_target_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 12,
+            "cultivation_action": "spend_training",
+            "training_target": "body",
+        },
+    )
+    assert invalid_training_target_status == 400
+    assert invalid_training_target_payload["error"]["code"] == "validation_error"
+    assert invalid_training_target_payload["error"]["message"] == "Choose Stance or an Attribute for Training."
+
+    restore_training_insight_status, restore_training_insight_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 12,
+            "action": "save_insight",
+            "values": {"insight_available": "3", "insight_spent": "5"},
+        },
+    )
+    assert restore_training_insight_status == 200
+    assert restore_training_insight_payload["character"]["state_record"]["revision"] == initial_revision + 13
+
+    training_stance_status, training_stance_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 13,
+            "action": "spend_training",
+            "values": {
+                "training_target": " Stance ",
+                "training_notes": "  Rooted   stance\n drills.  ",
+            },
+        },
+    )
+    assert training_stance_status == 200
+    assert training_stance_payload["ok"] is True
+    assert training_stance_payload["message"] == "Spent 1 Insight on Training to increase Stance."
+    assert training_stance_payload["anchor"] == "xianxia-cultivation-training"
+    assert training_stance_payload["character"]["state_record"]["revision"] == initial_revision + 14
+    training_stance_xianxia = training_stance_payload["character"]["definition"]["xianxia"]
+    assert training_stance_xianxia["insight"] == {"available": 2, "spent": 6}
+    assert training_stance_xianxia["durability"]["stance_max"] == 20
+    assert training_stance_xianxia["attributes"]["str"] == 1
+    stance_context = training_stance_payload["cultivation"]["training"]["stance"]
+    assert stance_context["current"] == 10
+    assert stance_context["max"] == 20
+    assert stance_context["projected_max"] == 30
+    assert training_stance_payload["character"]["state_record"]["state"]["xianxia"]["vitals"]["current_stance"] == 10
+    assert training_stance_xianxia["advancement_history"][-1] == {
+        "action": "training_stance_increase",
+        "amount": 1,
+        "target": "Stance",
+        "stance_maximum_increase": 10,
+        "new_stance_maximum": 20,
+        "stance_maximum_cap": 50,
+        "notes": "Rooted stance drills.",
+    }
+
+    training_attribute_status, training_attribute_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 14,
+            "cultivation_action": "spend_training",
+            "training_target": "attribute",
+            "attribute_key": "STR",
+            "training_notes": "  Iron   frame\n practice.  ",
+        },
+    )
+    assert training_attribute_status == 200
+    assert training_attribute_payload["ok"] is True
+    assert training_attribute_payload["message"] == "Spent 1 Insight on Training to increase Strength."
+    assert training_attribute_payload["anchor"] == "xianxia-cultivation-training"
+    assert training_attribute_payload["character"]["state_record"]["revision"] == initial_revision + 15
+    training_attribute_xianxia = training_attribute_payload["character"]["definition"]["xianxia"]
+    assert training_attribute_xianxia["insight"] == {"available": 1, "spent": 7}
+    assert training_attribute_xianxia["durability"]["stance_max"] == 20
+    assert training_attribute_xianxia["attributes"]["str"] == 3
+    strength_context = next(
+        row for row in training_attribute_payload["cultivation"]["training"]["attributes"] if row["key"] == "str"
+    )
+    assert strength_context["score"] == 3
+    assert training_attribute_payload["character"]["state_record"]["state"]["xianxia"]["vitals"]["current_stance"] == 10
+    assert training_attribute_xianxia["advancement_history"][-1] == {
+        "action": "training_attribute_increase",
+        "amount": 1,
+        "target": "Strength",
+        "attribute_key": "str",
+        "attribute_point_increase": 2,
+        "new_attribute_score": 3,
+        "notes": "Iron frame practice.",
+    }
+
+    invalid_training_attribute_status, invalid_training_attribute_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 15,
+            "cultivation_action": "spend_training",
+            "training_target": "attribute",
+            "attribute_key": "body",
+        },
+    )
+    assert invalid_training_attribute_status == 400
+    assert invalid_training_attribute_payload["error"]["code"] == "validation_error"
+    assert invalid_training_attribute_payload["error"]["message"] == "Choose a valid Attribute for Training."
+
+    zero_training_insight_status, zero_training_insight_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 15,
+            "action": "save_insight",
+            "values": {"insight_available": "0", "insight_spent": "7"},
+        },
+    )
+    assert zero_training_insight_status == 200
+    assert zero_training_insight_payload["character"]["state_record"]["revision"] == initial_revision + 16
+
+    insufficient_training_status, insufficient_training_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 16,
+            "cultivation_action": "spend_training",
+            "training_target": "attribute",
+            "attribute_key": "str",
+        },
+    )
+    assert insufficient_training_status == 400
+    assert insufficient_training_payload["error"]["code"] == "validation_error"
+    assert (
+        insufficient_training_payload["error"]["message"]
+        == "Training needs 1 Insight to increase Strength; only 0 available."
+    )
+
+    insufficient_training_precedes_invalid_attribute_status, insufficient_training_precedes_invalid_attribute_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": initial_revision + 16,
+            "cultivation_action": "spend_training",
+            "training_target": "attribute",
+            "attribute_key": "body",
+        },
+    )
+    assert insufficient_training_precedes_invalid_attribute_status == 400
+    assert insufficient_training_precedes_invalid_attribute_payload["error"]["code"] == "validation_error"
+    assert (
+        insufficient_training_precedes_invalid_attribute_payload["error"]["message"]
+        == "Training needs 1 Insight to increase Body; only 0 available."
+    )
+
     cap_character_slug = "api-cultivation-cap"
     cap_body = deepcopy(xianxia_body)
     cap_body["definition"]["name"] = "API Cultivation Cap"
     cap_body["definition"]["xianxia"]["insight"] = {"available": 1, "spent": 0}
     cap_body["definition"]["xianxia"]["durability"]["hp_max"] = 50
+    cap_body["definition"]["xianxia"]["durability"]["stance_max"] = 50
     cap_create_status, _cap_create_payload = _to_json(
         f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/characters/{cap_character_slug}",
         headers=typescript_api_mutation_server["dm_headers"],
@@ -2422,6 +2587,20 @@ def test_typescript_character_cultivation_context_shell_and_supported_xianxia_co
     assert hp_cap_status == 400
     assert hp_cap_payload["error"]["code"] == "validation_error"
     assert hp_cap_payload["error"]["message"] == "Conditioning cannot increase HP above 50."
+
+    stance_cap_status, stance_cap_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{cap_character_slug}/cultivation",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": cap_revision,
+            "cultivation_action": "spend_training",
+            "training_target": "stance",
+        },
+    )
+    assert stance_cap_status == 400
+    assert stance_cap_payload["error"]["code"] == "validation_error"
+    assert stance_cap_payload["error"]["message"] == "Training cannot increase Stance above 50."
 
     zero_gathering_status, zero_gathering_payload = _to_json(
         f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/cultivation",

@@ -33,6 +33,7 @@ const XIANXIA_ATTRIBUTE_LABELS: Record<(typeof XIANXIA_ATTRIBUTE_KEYS)[number], 
   wis: "Wisdom",
   cha: "Charisma",
 };
+type XianxiaAttributeKey = (typeof XIANXIA_ATTRIBUTE_KEYS)[number];
 const XIANXIA_EFFORT_KEYS = ["basic", "weapon", "guns_explosive", "magic", "ultimate"] as const;
 const XIANXIA_EFFORT_LABELS: Record<(typeof XIANXIA_EFFORT_KEYS)[number], string> = {
   basic: "Basic",
@@ -56,6 +57,7 @@ const XIANXIA_YIN_YANG_LABELS: Record<(typeof XIANXIA_YIN_YANG_KEYS)[number], st
 };
 type XianxiaYinYangKey = (typeof XIANXIA_YIN_YANG_KEYS)[number];
 type XianxiaConditioningTarget = "hp" | "effort";
+type XianxiaTrainingTarget = "stance" | "attribute";
 const XIANXIA_CURRENCY_KEYS = ["coin", "supply", "spirit_stones"] as const;
 const XIANXIA_DEFINITION_FIELD_KEYS = [
   "schema_version",
@@ -470,6 +472,9 @@ export function applyCharacterCultivationAction(
   if (action === "spend_conditioning") {
     return applyXianxiaConditioningAction(definition, values);
   }
+  if (action === "spend_training") {
+    return applyXianxiaTrainingAction(definition, values);
+  }
   return {
     status: "validation_error",
     message: "Unsupported cultivation action. Refresh the page and try again.",
@@ -598,6 +603,31 @@ function applyXianxiaConditioningAction(
   };
 }
 
+function applyXianxiaTrainingAction(
+  definition: Record<string, unknown>,
+  values: Record<string, string>,
+): CharacterCultivationActionApplyResult {
+  const trainingTarget = normalizeCultivationTrainingTarget(values.training_target);
+  if (!trainingTarget) {
+    return { status: "validation_error", message: "Choose Stance or an Attribute for Training." };
+  }
+
+  const result = spendXianxiaTrainingDefinition(definition, {
+    trainingTarget,
+    attributeKey: values.attribute_key,
+    notes: collapseWhitespace(values.training_notes),
+  });
+  if (result.status === "validation_error") {
+    return { status: "validation_error", message: result.message };
+  }
+  return {
+    status: "ok",
+    definition: result.definition,
+    message: `Spent ${result.insightCost} Insight on Training to increase ${result.targetName}.`,
+    anchor: "xianxia-cultivation-training",
+  };
+}
+
 function normalizeCultivationValues(payload: Record<string, unknown>): Record<string, string> {
   const rawValues = asRecord(payload.values);
   const source = Object.keys(rawValues).length > 0 ? rawValues : payload;
@@ -636,12 +666,36 @@ function normalizeCultivationEffortKey(value: unknown): XianxiaEffortKey | "" {
   return "";
 }
 
+function normalizeCultivationTrainingTarget(value: unknown): XianxiaTrainingTarget | "" {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[-\s]+/g, "_");
+  if (normalized === "stance" || normalized === "attribute") {
+    return normalized;
+  }
+  return "";
+}
+
+function normalizeCultivationAttributeKey(value: unknown): XianxiaAttributeKey | "" {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[-\s]+/g, "_");
+  if ((XIANXIA_ATTRIBUTE_KEYS as readonly string[]).includes(normalized)) {
+    return normalized as XianxiaAttributeKey;
+  }
+  return "";
+}
+
 function xianxiaEffortLabel(value: unknown): string {
   const normalized = String(value || "").trim().toLowerCase().replace(/[-\s]+/g, "_");
   if ((XIANXIA_EFFORT_KEYS as readonly string[]).includes(normalized)) {
     return XIANXIA_EFFORT_LABELS[normalized as XianxiaEffortKey];
   }
   return normalized ? humanizeSlug(normalized) : "Effort";
+}
+
+function xianxiaAttributeLabel(value: unknown): string {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[-\s]+/g, "_");
+  if ((XIANXIA_ATTRIBUTE_KEYS as readonly string[]).includes(normalized)) {
+    return XIANXIA_ATTRIBUTE_LABELS[normalized as XianxiaAttributeKey];
+  }
+  return normalized ? humanizeSlug(normalized) : "Attribute";
 }
 
 function normalizeCultivationYinYangKey(value: unknown): XianxiaYinYangKey | "" {
@@ -926,6 +980,105 @@ function spendXianxiaConditioningDefinition(
       effort_key: effortKey,
       effort_point_increase: XIANXIA_CONDITIONING_EFFORT_INCREASE,
       new_effort_score: newScore,
+    };
+  }
+
+  if (payload.notes) {
+    historyRow.notes = payload.notes;
+  }
+  history.push(historyRow);
+  xianxia.advancement_history = history;
+  xianxia.insight = {
+    available: previousAvailable - insightCost,
+    spent: previousSpent + insightCost,
+  };
+  nextDefinition.xianxia = xianxia;
+  return {
+    status: "ok",
+    definition: nextDefinition,
+    insightCost,
+    targetName,
+    newValue,
+  };
+}
+
+function spendXianxiaTrainingDefinition(
+  definition: Record<string, unknown>,
+  payload: { trainingTarget: XianxiaTrainingTarget; attributeKey: unknown; notes: string },
+):
+  | {
+      status: "ok";
+      definition: Record<string, unknown>;
+      insightCost: number;
+      targetName: string;
+      newValue: number;
+    }
+  | { status: "validation_error"; message: string } {
+  const nextDefinition = deepCloneRecord(definition);
+  const xianxia = asRecord(nextDefinition.xianxia);
+  const previousInsight = asRecord(xianxia.insight);
+  const previousAvailable = nonNegativeLooseInt(previousInsight.available, 0);
+  const previousSpent = nonNegativeLooseInt(previousInsight.spent, 0);
+  const insightCost = XIANXIA_TRAINING_INSIGHT_COST;
+  if (previousAvailable < insightCost) {
+    const targetName = payload.trainingTarget === "stance" ? "Stance" : xianxiaAttributeLabel(payload.attributeKey);
+    return {
+      status: "validation_error",
+      message: `Training needs ${insightCost} Insight to increase ${targetName}; only ${previousAvailable} available.`,
+    };
+  }
+
+  const history = asArray(xianxia.advancement_history)
+    .map(asRecord)
+    .filter((record) => Object.keys(record).length > 0);
+  let targetName = "Stance";
+  let newValue = 0;
+  let historyRow: Record<string, unknown>;
+
+  if (payload.trainingTarget === "stance") {
+    const durability = asRecord(xianxia.durability);
+    const currentStanceMaximum = nonNegativeLooseInt(durability.stance_max, 10);
+    if (currentStanceMaximum >= XIANXIA_TRAINING_STANCE_MAXIMUM) {
+      return {
+        status: "validation_error",
+        message: `Training cannot increase Stance above ${XIANXIA_TRAINING_STANCE_MAXIMUM}.`,
+      };
+    }
+    const newStanceMaximum = Math.min(
+      XIANXIA_TRAINING_STANCE_MAXIMUM,
+      currentStanceMaximum + XIANXIA_TRAINING_STANCE_INCREASE,
+    );
+    const maximumIncrease = newStanceMaximum - currentStanceMaximum;
+    durability.stance_max = newStanceMaximum;
+    xianxia.durability = durability;
+    newValue = newStanceMaximum;
+    historyRow = {
+      action: "training_stance_increase",
+      amount: insightCost,
+      target: "Stance",
+      stance_maximum_increase: maximumIncrease,
+      new_stance_maximum: newStanceMaximum,
+      stance_maximum_cap: XIANXIA_TRAINING_STANCE_MAXIMUM,
+    };
+  } else {
+    const attributeKey = normalizeCultivationAttributeKey(payload.attributeKey);
+    if (!attributeKey) {
+      return { status: "validation_error", message: "Choose a valid Attribute for Training." };
+    }
+    const attributes = asRecord(xianxia.attributes);
+    const currentScore = nonNegativeLooseInt(attributes[attributeKey], 0);
+    const newScore = currentScore + XIANXIA_TRAINING_ATTRIBUTE_INCREASE;
+    attributes[attributeKey] = newScore;
+    xianxia.attributes = attributes;
+    targetName = XIANXIA_ATTRIBUTE_LABELS[attributeKey];
+    newValue = newScore;
+    historyRow = {
+      action: "training_attribute_increase",
+      amount: insightCost,
+      target: targetName,
+      attribute_key: attributeKey,
+      attribute_point_increase: XIANXIA_TRAINING_ATTRIBUTE_INCREASE,
+      new_attribute_score: newScore,
     };
   }
 
