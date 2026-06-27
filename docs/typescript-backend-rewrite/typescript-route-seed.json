@@ -1053,6 +1053,15 @@
     },
     {
       "method": "POST",
+      "path": "/api/v1/admin/users/<int:user_id>/invite",
+      "route_family": "api_v1_admin",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/admin/users/:userId/invite",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Admin resend-invite route with bearer-token app-admin writes, fixture-role write denial, missing-user JSON, invited-target validation, prior unused invite-token consumption, invite_tokens insertion with SHA-256 token hash and invite TTL, user_invited audit rows with admin_screen metadata and no raw token data, refreshed user detail payloads, and one-shot invite URL response."
+    },
+    {
+      "method": "POST",
       "path": "/api/v1/campaigns/<campaign_slug>/systems/custom-entries",
       "route_family": "api_v1_systems",
       "status": "implemented_fixture_sqlite_write",

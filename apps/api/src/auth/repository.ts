@@ -806,6 +806,45 @@ export function issuePasswordResetToken(
   }
 }
 
+export function issueInviteToken(
+  dbPath: string,
+  userId: number,
+  {
+    ttlHours,
+    createdByUserId,
+  }: {
+    ttlHours: number;
+    createdByUserId: number | null;
+  },
+): string {
+  const database = new Database(dbPath, { fileMustExist: true });
+  try {
+    const rawToken = randomBytes(32).toString("base64url");
+    const nowDate = new Date();
+    const now = utcIsoTimestamp(nowDate);
+    const expiresAt = utcIsoTimestamp(new Date(nowDate.getTime() + ttlHours * 60 * 60 * 1000));
+    const writeToken = database.transaction(() => {
+      database.prepare("UPDATE invite_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL").run(now, userId);
+      database
+        .prepare(
+          `INSERT INTO invite_tokens (
+            user_id,
+            token_hash,
+            expires_at,
+            used_at,
+            created_by_user_id,
+            created_at
+          ) VALUES (?, ?, ?, NULL, ?, ?)`,
+        )
+        .run(userId, hashToken(rawToken), expiresAt, createdByUserId, now);
+    });
+    writeToken();
+    return rawToken;
+  } finally {
+    database.close();
+  }
+}
+
 export function insertAuthAuditLog(
   dbPath: string,
   {

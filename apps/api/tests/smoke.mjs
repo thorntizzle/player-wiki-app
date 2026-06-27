@@ -90,6 +90,16 @@ smokeDb.exec(`
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE invite_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_by_user_id INTEGER,
+    created_at TEXT NOT NULL
+  );
+
   CREATE TABLE campaign_visibility_settings (
     campaign_slug TEXT NOT NULL,
     scope TEXT NOT NULL,
@@ -379,6 +389,32 @@ smokeDb
     79,
     hashToken("fixture-used-reset-token"),
     "2026-06-26T08:00:00+00:00",
+    "2026-06-25T08:10:00+00:00",
+    77,
+    "2026-06-25T08:05:00+00:00",
+  );
+smokeDb
+  .prepare(
+    "INSERT INTO invite_tokens (id, user_id, token_hash, expires_at, used_at, created_by_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    2001,
+    82,
+    hashToken("fixture-old-invite-token"),
+    "2026-06-28T08:00:00+00:00",
+    null,
+    77,
+    "2026-06-25T08:00:00+00:00",
+  );
+smokeDb
+  .prepare(
+    "INSERT INTO invite_tokens (id, user_id, token_hash, expires_at, used_at, created_by_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run(
+    2002,
+    82,
+    hashToken("fixture-used-invite-token"),
+    "2026-06-28T08:00:00+00:00",
     "2026-06-25T08:10:00+00:00",
     77,
     "2026-06-25T08:05:00+00:00",
@@ -2656,6 +2692,134 @@ if (
       enabledActiveUserRow,
       enabledInvitedUserRow,
       parsedEnabledAuditRows,
+    })}`,
+  );
+}
+
+const adminInvitePath = "/api/v1/admin/users/82/invite";
+const blockedAdminInvite = await requestJson(adminInvitePath, {}, { method: "POST", body: {} });
+if (blockedAdminInvite.status !== 401 || blockedAdminInvite.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated admin invite POST auth_required 401, got ${blockedAdminInvite.status} ${JSON.stringify(blockedAdminInvite.payload)}`,
+  );
+}
+
+const fixtureAdminInvite = await requestJson(
+  adminInvitePath,
+  { "X-CPW-Fixture-Role": "admin" },
+  { method: "POST", body: {} },
+);
+if (
+  fixtureAdminInvite.status !== 403 ||
+  fixtureAdminInvite.payload?.error?.message !== "Admin membership updates require bearer API authentication."
+) {
+  throw new Error(
+    `Expected fixture admin invite denial, got ${fixtureAdminInvite.status} ${JSON.stringify(fixtureAdminInvite.payload)}`,
+  );
+}
+
+const playerAdminInvite = await requestJson(
+  adminInvitePath,
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: {} },
+);
+if (
+  playerAdminInvite.status !== 403 ||
+  playerAdminInvite.payload?.error?.message !== "You do not have permission to use the admin API."
+) {
+  throw new Error(
+    `Expected player admin invite forbidden, got ${playerAdminInvite.status} ${JSON.stringify(playerAdminInvite.payload)}`,
+  );
+}
+
+const missingUserAdminInvite = await requestJson(
+  "/api/v1/admin/users/999999/invite",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: {} },
+);
+if (
+  missingUserAdminInvite.status !== 404 ||
+  missingUserAdminInvite.payload?.error?.code !== "admin_user_not_found"
+) {
+  throw new Error(
+    `Expected missing-user admin invite not_found, got ${missingUserAdminInvite.status} ${JSON.stringify(missingUserAdminInvite.payload)}`,
+  );
+}
+
+const activeUserAdminInvite = await requestJson(
+  "/api/v1/admin/users/79/invite",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: {} },
+);
+if (
+  activeUserAdminInvite.status !== 400 ||
+  activeUserAdminInvite.payload?.error?.code !== "validation_error" ||
+  activeUserAdminInvite.payload?.error?.message !== "Invite links are only available for invited users."
+) {
+  throw new Error(`Expected active-user invite validation, got ${JSON.stringify(activeUserAdminInvite.payload)}`);
+}
+
+const adminInvite = await requestJson(
+  adminInvitePath,
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: {} },
+);
+const inviteUrl = String(adminInvite.payload?.invite_url || "");
+const expectedInvitePrefix = `http://127.0.0.1:${port}/invite/`;
+const rawInviteToken = inviteUrl.startsWith(expectedInvitePrefix) ? inviteUrl.slice(expectedInvitePrefix.length) : "";
+if (
+  adminInvite.status !== 200 ||
+  adminInvite.payload?.ok !== true ||
+  adminInvite.payload?.managed_user?.email !== "fixture-disabled-user@example.com" ||
+  adminInvite.payload?.managed_user?.status !== "invited" ||
+  !rawInviteToken ||
+  adminInvite.payload?.message !== `Invite URL: ${inviteUrl}`
+) {
+  throw new Error(`Unexpected admin invite payload: ${JSON.stringify(adminInvite.payload)}`);
+}
+
+const adminInviteAuditDb = new Database(dbPath, { fileMustExist: true, readonly: true });
+const oldInviteRow = adminInviteAuditDb.prepare("SELECT used_at FROM invite_tokens WHERE id = ?").get(2001);
+const previouslyUsedInviteRow = adminInviteAuditDb.prepare("SELECT used_at FROM invite_tokens WHERE id = ?").get(2002);
+const newInviteRow = adminInviteAuditDb
+  .prepare(
+    "SELECT user_id, token_hash, expires_at, used_at, created_by_user_id, created_at FROM invite_tokens WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+  )
+  .get(82);
+const inviteAuditRow = adminInviteAuditDb
+  .prepare(
+    "SELECT actor_user_id, target_user_id, campaign_slug, character_slug, event_type, metadata_json FROM auth_audit_log WHERE target_user_id = ? AND event_type = ? ORDER BY id DESC LIMIT 1",
+  )
+  .get(82, "user_invited");
+adminInviteAuditDb.close();
+const inviteAuditMetadata = inviteAuditRow ? JSON.parse(inviteAuditRow.metadata_json) : {};
+const inviteTtlHours =
+  (Date.parse(newInviteRow?.expires_at || "") - Date.parse(newInviteRow?.created_at || "")) / (60 * 60 * 1000);
+if (
+  !oldInviteRow?.used_at ||
+  previouslyUsedInviteRow?.used_at !== "2026-06-25T08:10:00+00:00" ||
+  newInviteRow?.user_id !== 82 ||
+  newInviteRow?.token_hash !== hashToken(rawInviteToken) ||
+  newInviteRow?.used_at !== null ||
+  newInviteRow?.created_by_user_id !== 77 ||
+  Math.abs(inviteTtlHours - 72) > 0.01 ||
+  inviteAuditRow?.actor_user_id !== 77 ||
+  inviteAuditRow?.target_user_id !== 82 ||
+  inviteAuditRow?.campaign_slug !== null ||
+  inviteAuditRow?.character_slug !== null ||
+  inviteAuditRow?.event_type !== "user_invited" ||
+  inviteAuditMetadata.source !== "admin_screen" ||
+  Object.hasOwn(inviteAuditMetadata, "invite_url") ||
+  Object.hasOwn(inviteAuditMetadata, "token")
+) {
+  throw new Error(
+    `Unexpected admin invite database/audit state: ${JSON.stringify({
+      oldInviteRow,
+      previouslyUsedInviteRow,
+      newInviteRow,
+      inviteTtlHours,
+      inviteAuditRow,
+      inviteAuditMetadata,
     })}`,
   );
 }

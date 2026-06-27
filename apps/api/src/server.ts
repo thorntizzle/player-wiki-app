@@ -17,6 +17,7 @@ import {
   getUserById,
   hasActivePlayerMembership,
   insertAuthAuditLog,
+  issueInviteToken,
   issuePasswordResetToken,
   listActivePlayerMembershipUsers,
   readApiTokenAuthContext,
@@ -858,6 +859,11 @@ function resetTtlHours(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : 24;
 }
 
+function inviteTtlHours(): number {
+  const configured = Number(process.env.PLAYER_WIKI_INVITE_TTL_HOURS || "");
+  return Number.isFinite(configured) && configured > 0 ? configured : 72;
+}
+
 function buildLocalUrl(pathValue: string): string {
   const baseUrl = String(config.app.base_url || "").trim().replace(/\/+$/g, "");
   const normalizedPath = pathValue.startsWith("/") ? pathValue : `/${pathValue}`;
@@ -1603,6 +1609,50 @@ app.post(ROUTES.adminUserPasswordReset, async (ctx) => {
     ...payload,
     message: `Password reset URL: ${resetUrl}`,
     reset_url: resetUrl,
+  });
+});
+
+app.post(ROUTES.adminUserInvite, async (ctx) => {
+  const auth = resolveAppAdminBearerWrite(ctx);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const userId = parsePositiveInteger(ctx.req.param("userId") || "");
+  const targetUser = userId === null ? null : getUserById(config.dbPath, userId);
+  if (!targetUser) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (targetUser.status !== "invited") {
+    const error = validationError("Invite links are only available for invited users.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const inviteToken = issueInviteToken(config.dbPath, targetUser.id, {
+    ttlHours: inviteTtlHours(),
+    createdByUserId: auth.actorUserId ?? null,
+  });
+  insertAuthAuditLog(config.dbPath, {
+    actorUserId: auth.actorUserId ?? null,
+    targetUserId: targetUser.id,
+    campaignSlug: null,
+    characterSlug: null,
+    eventType: "user_invited",
+    metadata: { source: "admin_screen" },
+  });
+
+  const inviteUrl = buildLocalUrl(`/invite/${inviteToken}`);
+  const payload = await buildAdminUserDetailPayload(config, auth.actorUser || null, targetUser.id, requestQueryValues(ctx));
+  if (!payload) {
+    const error = notFound("admin_user_not_found", "Could not find that admin user.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  return ctx.json({
+    ...payload,
+    message: `Invite URL: ${inviteUrl}`,
+    invite_url: inviteUrl,
   });
 });
 

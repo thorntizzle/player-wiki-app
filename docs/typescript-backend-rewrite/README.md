@@ -65,6 +65,7 @@ Route parity check command:
   - `POST /api/v1/admin/users/:userId/password-reset`
   - `POST /api/v1/admin/users/:userId/disable`
   - `POST /api/v1/admin/users/:userId/enable`
+  - `POST /api/v1/admin/users/:userId/invite`
   - `GET /api/v1/campaigns/:campaignSlug/systems`
   - `GET /api/v1/campaigns/:campaignSlug/systems/search`
   - `GET /api/v1/campaigns/:campaignSlug/systems/sources`

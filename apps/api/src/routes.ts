@@ -1772,6 +1772,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "admin_user_not_found",
     },
   },
+  {
+    method: "POST",
+    honoPath: "/api/v1/admin/users/:userId/invite",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/admin/users/<int:user_id>/invite",
+    seedPath: "/api/v1/admin/users/<int:user_id>/invite",
+    routeFamily: "api_v1_admin",
+    missingResource: {
+      method: "POST",
+      path: "/api/v1/admin/users/999999/invite",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "admin_user_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -1894,4 +1909,5 @@ export const ROUTES = {
   adminUserPasswordReset: IMPLEMENTED_ROUTES[118].honoPath,
   adminUserDisable: IMPLEMENTED_ROUTES[119].honoPath,
   adminUserEnable: IMPLEMENTED_ROUTES[120].honoPath,
+  adminUserInvite: IMPLEMENTED_ROUTES[121].honoPath,
 } as const;
