@@ -5693,12 +5693,14 @@ app.get(ROUTES.characterAdvancedEditor, async (ctx) => {
   }
 
   const stateRecord = readCharacterStateSnapshot(config, campaign.slug, character.character_slug, character.definition);
+  const campaignPageRecords = await listCampaignContentPages(config, campaign.slug) ?? [];
   const editorPayload = buildCharacterAdvancedEditorPayload({
     campaign,
     characterSlug,
     definition: character.definition,
     state: stateRecord.state,
     stateRevision: stateRecord.revision,
+    campaignPageRecords,
   });
 
   return ctx.json({
@@ -5772,7 +5774,12 @@ app.put(ROUTES.characterAdvancedEditorUpdate, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const referenceUpdate = applyCharacterAdvancedEditorReferenceUpdate(character.definition, jsonPayload.payload);
+  const campaignPageRecords = await listCampaignContentPages(config, campaign.slug) ?? [];
+  const referenceUpdate = applyCharacterAdvancedEditorReferenceUpdate(
+    character.definition,
+    jsonPayload.payload,
+    campaignPageRecords,
+  );
   if (referenceUpdate.status === "validation_error") {
     const error = validationError(referenceUpdate.message);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
@@ -5822,6 +5829,7 @@ app.put(ROUTES.characterAdvancedEditorUpdate, async (ctx) => {
     definition: writeResult.record.definition,
     state: stateResult.state,
     stateRevision: stateResult.revision,
+    campaignPageRecords,
   });
 
   return ctx.json({

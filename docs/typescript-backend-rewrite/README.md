@@ -582,15 +582,16 @@ Do not implement these routes as part of the parity program unless a later archi
 - The Character Advanced Editor context route now serves `GET .../characters/:characterSlug/advanced-editor`,
   preserving Flask-compatible campaign/missing-character envelopes, auth and assigned-owner access
   checks, DND-5E support detection, unsupported non-DND payloads, edit-page links, state revision,
-  reference fields, proficiency fields, stat-adjustment fields, recoverable-penalty rows, and feature/equipment row shells.
+  reference fields, proficiency fields, stat-adjustment fields, recoverable-penalty rows, feature/equipment row shells,
+  and hydrated linked campaign-page selector options for custom features and manual equipment.
   The `PUT .../advanced-editor` reference/proficiency/stat-adjustment/recoverable-penalty/custom-feature/manual-equipment-field slice now serves
-  bearer-token writes for the existing reference, proficiency, stat-adjustment, recoverable-penalty, custom-feature, and manual-equipment fields with `page_ref` round-trip,
+  bearer-token writes for the existing reference, proficiency, stat-adjustment, recoverable-penalty, custom-feature, and manual-equipment fields with `page_ref` validation and round-trip,
   preserving fixture-role write denial, unsupported non-DND validation, stale revision conflicts, copied-fixture
   `definition.yaml` and managed `import.yaml` writes for profile/reference notes/proficiencies/stat adjustments/recoverable penalties/custom features/manual equipment,
   SQLite notes persistence for state-backed reference fields, current-HP clamping for lowered max HP, SQLite inventory
   reconciliation for manual equipment rows, SQLite resource reconciliation for custom-feature trackers,
   and refreshed Advanced Editor payloads. Linked custom-feature page/choice/spell derivation,
-  page-linked manual item option derivation, full native edit derivation, and complete Advanced Editor
+  page-linked manual item option derivation onto saved definitions, full native edit derivation, and complete Advanced Editor
   parity remain pending.
 - The Character advancement context shell family now serves `GET .../characters/:characterSlug/retraining`,
   `GET .../level-up`, and `GET .../progression-repair`, preserving Flask-compatible campaign/missing-character

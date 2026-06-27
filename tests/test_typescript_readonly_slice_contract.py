@@ -1654,6 +1654,20 @@ def test_typescript_character_advanced_editor_context_matches_flask_shell(
         assert {key: row.get(key) for key in ("id", "name", "page_ref", "quantity", "weight", "notes")} == {
             key: flask_row.get(key) for key in ("id", "name", "page_ref", "quantity", "weight", "notes")
         }
+    assert [
+        {key: option.get(key) for key in ("value", "label", "title", "campaign_option")}
+        for option in editor["campaign_page_options"]
+    ] == [
+        {key: option.get(key) for key in ("value", "label", "title", "campaign_option")}
+        for option in flask_payload["editor"]["campaign_page_options"]
+    ]
+    assert [
+        {key: option.get(key) for key in ("value", "label", "title", "campaign_option")}
+        for option in editor["equipment_page_options"]
+    ] == [
+        {key: option.get(key) for key in ("value", "label", "title", "campaign_option")}
+        for option in flask_payload["editor"]["equipment_page_options"]
+    ]
 
 
 def test_typescript_character_advanced_editor_reference_fields_save_fixture(
@@ -2006,6 +2020,22 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert invalid_equipment_payload["error"]["code"] == "validation_error"
     assert "whole numbers" in invalid_equipment_payload["error"]["message"]
 
+    invalid_equipment_link_status, invalid_equipment_link_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={
+            "expected_revision": expected_revision + 5,
+            "values": {
+                "manual_item_name_1": "Broken Token",
+                "manual_item_page_ref_1": "mechanics/arcane-overload",
+            },
+        },
+    )
+    assert invalid_equipment_link_status == 400
+    assert invalid_equipment_link_payload["error"]["code"] == "validation_error"
+    assert invalid_equipment_link_payload["error"]["message"] == "Choose a valid linked campaign page."
+
     equipment_values = {
         "manual_item_name_1": "Storm Token",
         "manual_item_page_ref_1": "items/stormglass-compass",
@@ -2141,7 +2171,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
 
     custom_feature_values = {
         "custom_feature_name_1": "Storm Blessing",
-        "custom_feature_page_ref_1": "boons/storm-feature",
+        "custom_feature_page_ref_1": "mechanics/arcane-overload",
         "custom_feature_activation_type_1": "bonus_action",
         "custom_feature_description_1": "Call the storm once per rest.",
         "custom_feature_resource_max_1": "3",
@@ -2166,7 +2196,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     tracker_id = f"custom_feature:{custom_feature_id}"
     assert custom_feature_id.startswith("custom-feature-storm-blessing")
     assert custom_feature["name"] == "Storm Blessing"
-    assert custom_feature["page_ref"] == "boons/storm-feature"
+    assert custom_feature["page_ref"] == "mechanics/arcane-overload"
     assert custom_feature["activation_type"] == "bonus_action"
     assert custom_feature["description_markdown"] == "Call the storm once per rest."
     assert custom_feature["source"] == "Campaign"
@@ -2202,12 +2232,16 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     }
     assert feature_rows[1]["id"] == custom_feature_id
     assert feature_rows[1]["name"] == "Storm Blessing"
-    assert feature_rows[1]["page_ref"] == "boons/storm-feature"
+    assert feature_rows[1]["page_ref"] == "mechanics/arcane-overload"
     assert feature_rows[1]["activation_type"] == "bonus_action"
     assert feature_rows[1]["description_markdown"] == "Call the storm once per rest."
     assert feature_rows[1]["resource_max"] == "3"
     assert feature_rows[1]["resource_reset_on"] == "long_rest"
     assert [row["index"] for row in custom_feature_payload["editor"]["feature_rows"]] == [1, 2, 3]
+    assert any(
+        option["value"] == "mechanics/arcane-overload"
+        for option in custom_feature_payload["editor"]["campaign_page_options"]
+    )
 
     sqlite_state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
     assert sqlite_state is not None
@@ -2220,7 +2254,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     ]
     assert len(definition_custom_features) == 1
     assert definition_custom_features[0]["id"] == custom_feature_id
-    assert definition_custom_features[0]["page_ref"] == "boons/storm-feature"
+    assert definition_custom_features[0]["page_ref"] == "mechanics/arcane-overload"
     assert [
         template for template in definition["resource_templates"] if template.get("category") == "custom_feature"
     ][0]["id"] == tracker_id
@@ -2228,7 +2262,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     update_custom_feature_values = {
         "custom_feature_id_1": custom_feature_id,
         "custom_feature_name_1": "Storm Blessing, Spent",
-        "custom_feature_page_ref_1": "boons/storm-feature",
+        "custom_feature_page_ref_1": "mechanics/arcane-overload",
         "custom_feature_activation_type_1": "reaction",
         "custom_feature_description_1": "Spend the storm after the first strike.",
         "custom_feature_resource_max_1": "1",
@@ -2250,7 +2284,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert len(updated_custom_features) == 1
     assert updated_custom_features[0]["id"] == custom_feature_id
     assert updated_custom_features[0]["name"] == "Storm Blessing, Spent"
-    assert updated_custom_features[0]["page_ref"] == "boons/storm-feature"
+    assert updated_custom_features[0]["page_ref"] == "mechanics/arcane-overload"
     assert updated_custom_features[0]["activation_type"] == "reaction"
     updated_template = [
         template
@@ -2266,6 +2300,23 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     }
     assert updated_resources[tracker_id]["current"] == 1
     assert updated_resources[tracker_id]["max"] == 1
+
+    invalid_feature_link_status, invalid_feature_link_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={
+            "expected_revision": expected_revision + 10,
+            "values": {
+                "custom_feature_name_1": "Broken Storm Feature",
+                "custom_feature_page_ref_1": "items/stormglass-compass",
+                "custom_feature_activation_type_1": "passive",
+            },
+        },
+    )
+    assert invalid_feature_link_status == 400
+    assert invalid_feature_link_payload["error"]["code"] == "validation_error"
+    assert invalid_feature_link_payload["error"]["message"] == "Choose a valid linked campaign page."
 
     clear_custom_feature_values = {
         "custom_feature_id_1": custom_feature_id,

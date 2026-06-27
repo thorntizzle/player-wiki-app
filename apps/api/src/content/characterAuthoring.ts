@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import Database from "better-sqlite3";
 
 import type { CampaignViewModel } from "../campaigns/view.js";
+import type { CampaignPageFileRecord } from "./types.js";
 
 type SqliteDatabase = InstanceType<typeof Database>;
 
@@ -227,6 +228,16 @@ const ADVANCED_EDITOR_MIN_MANUAL_EQUIPMENT_ROWS = 3;
 const ADVANCED_EDITOR_MANUAL_EQUIPMENT_SOURCE_KIND = "manual_edit";
 const ADVANCED_EDITOR_MANUAL_EQUIPMENT_FIELD_PATTERN =
   /^manual_item_(id|name|page_ref|quantity|weight|notes)_([1-9]\d*)$/;
+const CAMPAIGN_MECHANICS_SECTION = "Mechanics";
+const CAMPAIGN_ITEMS_SECTION = "Items";
+const ADVANCED_EDITOR_LINKED_CAMPAIGN_PAGE_ALLOWED_KINDS_BY_FIELD_KIND = {
+  campaign_page_feature: new Set(["feature", "feat"]),
+  campaign_page_item: new Set(["item"]),
+} as const;
+const ADVANCED_EDITOR_LINKED_CAMPAIGN_PAGE_REQUIRED_SECTION_BY_FIELD_KIND = {
+  campaign_page_feature: CAMPAIGN_MECHANICS_SECTION,
+  campaign_page_item: CAMPAIGN_ITEMS_SECTION,
+} as const;
 const ADVANCED_EDITOR_MIN_CUSTOM_FEATURE_ROWS = 3;
 const ADVANCED_EDITOR_CUSTOM_FEATURE_CATEGORY = "custom_feature";
 const ADVANCED_EDITOR_CUSTOM_FEATURE_RESOURCE_PREFIX = "custom_feature";
@@ -3462,6 +3473,290 @@ function extractEditorPageRefValue(value: unknown): string {
   return stringifyEditorValue(record.slug || record.page_ref || record.ref || record.path).trim();
 }
 
+type AdvancedEditorLinkedCampaignPageFieldKind = keyof typeof ADVANCED_EDITOR_LINKED_CAMPAIGN_PAGE_REQUIRED_SECTION_BY_FIELD_KIND;
+
+function normalizeCampaignOptionStringList(value: unknown): string[] {
+  const rawItems = typeof value === "string"
+    ? value.replaceAll("\r", "").replaceAll("\n", ",").split(",")
+    : Array.isArray(value)
+      ? value
+      : [];
+  const results: string[] = [];
+  const seen = new Set<string>();
+  for (const rawItem of rawItems) {
+    if (typeof rawItem === "object" && rawItem !== null) {
+      continue;
+    }
+    const cleanItem = stringifyEditorValue(rawItem).trim();
+    const normalized = cleanItem.toLowerCase();
+    if (!cleanItem || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    results.push(cleanItem);
+  }
+  return results;
+}
+
+function normalizeAdvancedEditorCampaignOptionStatAdjustments(value: unknown): Record<string, number> {
+  const rawAdjustments = asRecord(value);
+  const adjustments: Record<string, number> = {};
+  for (const [key, rawValue] of Object.entries(rawAdjustments)) {
+    const parsed = Number.parseInt(String(rawValue ?? "").trim(), 10);
+    if (Number.isFinite(parsed) && parsed !== 0) {
+      adjustments[key] = parsed;
+    }
+  }
+  return adjustments;
+}
+
+function normalizeAdvancedEditorCampaignOptionSpellGrants(value: unknown): Array<Record<string, unknown>> {
+  const grants: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+  for (const rawGrant of asArray(value)) {
+    const grant = asRecord(rawGrant);
+    const spellValue = stringifyEditorValue(grant.value).trim();
+    if (!spellValue) {
+      continue;
+    }
+    const marker = JSON.stringify([
+      spellValue.toLowerCase(),
+      stringifyEditorValue(grant.mark).trim().toLowerCase(),
+      Boolean(grant.always_prepared),
+      Boolean(grant.ritual),
+    ]);
+    if (seen.has(marker)) {
+      continue;
+    }
+    seen.add(marker);
+    grants.push({
+      value: spellValue,
+      mark: stringifyEditorValue(grant.mark).trim(),
+      always_prepared: Boolean(grant.always_prepared),
+      ritual: Boolean(grant.ritual),
+    });
+  }
+  return grants;
+}
+
+function normalizeAdvancedEditorCampaignOptionResource(value: unknown): Record<string, unknown> | null {
+  const resource = asRecord(value);
+  if (Object.keys(resource).length === 0) {
+    return null;
+  }
+  const normalized: Record<string, unknown> = {};
+  const label = stringifyEditorValue(resource.label || resource.name).trim();
+  if (label) {
+    normalized.label = label;
+  }
+  const maxValue = Number.parseInt(String(resource.max ?? resource.maximum ?? "").trim(), 10);
+  if (Number.isFinite(maxValue) && maxValue >= 0) {
+    normalized.max = maxValue;
+  }
+  const resetOn = stringifyEditorValue(resource.reset_on || resource.resetOn).trim().toLowerCase();
+  if (resetOn) {
+    normalized.reset_on = ADVANCED_EDITOR_RESOURCE_RESET_VALUES.has(resetOn) ? resetOn : "manual";
+  }
+  return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
+function buildAdvancedEditorCampaignPageCharacterOption(
+  record: CampaignPageFileRecord,
+): Record<string, unknown> | null {
+  const rawOption = asRecord(asRecord(record.metadata).character_option);
+  if (Object.keys(rawOption).length === 0) {
+    return null;
+  }
+
+  const pageRef = stringifyEditorValue(record.page_ref).trim();
+  const title = stringifyEditorValue(record.page.title).trim() || pageRef;
+  const summary = stringifyEditorValue(record.page.summary).trim();
+  const defaultKind = stringifyEditorValue(record.page.section).trim() === CAMPAIGN_ITEMS_SECTION ? "item" : "feature";
+  const rawKind = stringifyEditorValue(rawOption.kind).trim().toLowerCase();
+  const kind = ["feature", "item", "feat", "species", "background"].includes(rawKind) ? rawKind : defaultKind;
+  const grants = asRecord(rawOption.grants);
+  const proficiencies = asRecord(rawOption.proficiencies);
+  const normalized: Record<string, unknown> = {
+    kind,
+    page_ref: pageRef,
+    title,
+    summary,
+    display_name: stringifyEditorValue(rawOption.name).trim() || title,
+    proficiencies: {
+      armor: normalizeCampaignOptionStringList(
+        "armor" in proficiencies ? proficiencies.armor : grants.armor ?? rawOption.armor,
+      ),
+      weapons: normalizeCampaignOptionStringList(
+        "weapons" in proficiencies ? proficiencies.weapons : grants.weapons ?? rawOption.weapons,
+      ),
+      tools: normalizeCampaignOptionStringList(
+        "tools" in proficiencies ? proficiencies.tools : grants.tools ?? rawOption.tools,
+      ),
+      languages: normalizeCampaignOptionStringList(
+        "languages" in proficiencies ? proficiencies.languages : grants.languages ?? rawOption.languages,
+      ),
+      skills: normalizeCampaignOptionStringList(
+        "skills" in proficiencies ? proficiencies.skills : grants.skills ?? rawOption.skills,
+      ),
+    },
+    stat_adjustments: normalizeAdvancedEditorCampaignOptionStatAdjustments(
+      "stat_adjustments" in grants ? grants.stat_adjustments : rawOption.stat_adjustments,
+    ),
+    spells: normalizeAdvancedEditorCampaignOptionSpellGrants(
+      "spells" in grants ? grants.spells : rawOption.spells,
+    ),
+  };
+
+  if (rawOption.base_rule_refs !== undefined) {
+    normalized.base_rule_refs = JSON.parse(JSON.stringify(rawOption.base_rule_refs));
+  }
+  if (rawOption.spell_support !== undefined) {
+    normalized.spell_support = JSON.parse(JSON.stringify(rawOption.spell_support));
+  } else if (rawOption.spellSupport !== undefined) {
+    normalized.spell_support = JSON.parse(JSON.stringify(rawOption.spellSupport));
+  }
+  if (rawOption.spell_manager !== undefined) {
+    normalized.spell_manager = JSON.parse(JSON.stringify(rawOption.spell_manager));
+  } else if (rawOption.spellManager !== undefined) {
+    normalized.spell_manager = JSON.parse(JSON.stringify(rawOption.spellManager));
+  }
+
+  if (kind === "feature" || kind === "feat" || kind === "species" || kind === "background") {
+    const activationType = stringifyEditorValue(rawOption.activation_type || "passive").trim().toLowerCase();
+    normalized.feature_name = stringifyEditorValue(rawOption.name).trim() || title;
+    normalized.description_markdown = stringifyEditorValue(
+      rawOption.description_markdown || rawOption.description || summary,
+    ).trim();
+    normalized.activation_type = ADVANCED_EDITOR_FEATURE_ACTIVATION_VALUES.has(activationType)
+      ? activationType
+      : "passive";
+    const resource = normalizeAdvancedEditorCampaignOptionResource(
+      "resource" in grants ? grants.resource : rawOption.resource,
+    );
+    if (resource) {
+      normalized.resource = resource;
+    }
+    if (rawOption.additional_spells !== undefined) {
+      normalized.additional_spells = JSON.parse(JSON.stringify(rawOption.additional_spells));
+    } else if (rawOption.additionalSpells !== undefined) {
+      normalized.additional_spells = JSON.parse(JSON.stringify(rawOption.additionalSpells));
+    }
+    if (rawOption.modeled_effects !== undefined) {
+      normalized.modeled_effects = JSON.parse(JSON.stringify(rawOption.modeled_effects));
+    } else if (rawOption.modeledEffects !== undefined) {
+      normalized.modeled_effects = JSON.parse(JSON.stringify(rawOption.modeledEffects));
+    }
+    if (kind === "feat") {
+      normalized.feat_name = stringifyEditorValue(rawOption.name).trim() || title;
+    } else if (kind === "species") {
+      normalized.species_name = stringifyEditorValue(rawOption.name).trim() || title;
+      if (rawOption.size !== undefined) {
+        normalized.size = JSON.parse(JSON.stringify(rawOption.size));
+      }
+      if (rawOption.speed !== undefined) {
+        normalized.speed = JSON.parse(JSON.stringify(rawOption.speed));
+      }
+    } else if (kind === "background") {
+      normalized.background_name = stringifyEditorValue(rawOption.name).trim() || title;
+    }
+    return normalized;
+  }
+
+  const parsedQuantity = Number.parseInt(String(rawOption.quantity ?? "").trim(), 10);
+  normalized.item_name = stringifyEditorValue(rawOption.name).trim() || title;
+  normalized.quantity = Number.isFinite(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1;
+  normalized.weight = stringifyEditorValue(rawOption.weight).trim();
+  normalized.notes = stringifyEditorValue(rawOption.notes).trim() || summary;
+  return normalized;
+}
+
+function advancedEditorCampaignPageOptionAllowedForLinkedField(
+  record: CampaignPageFileRecord,
+  fieldKind: AdvancedEditorLinkedCampaignPageFieldKind,
+  campaignOption: Record<string, unknown> | null,
+): boolean {
+  const requiredSection = ADVANCED_EDITOR_LINKED_CAMPAIGN_PAGE_REQUIRED_SECTION_BY_FIELD_KIND[fieldKind];
+  if (stringifyEditorValue(record.page.section).trim() !== requiredSection) {
+    return false;
+  }
+  const optionKind = stringifyEditorValue(asRecord(campaignOption).kind).trim().toLowerCase();
+  if (!optionKind) {
+    return true;
+  }
+  return ADVANCED_EDITOR_LINKED_CAMPAIGN_PAGE_ALLOWED_KINDS_BY_FIELD_KIND[fieldKind].has(optionKind);
+}
+
+function buildAdvancedEditorCampaignPageOptions(
+  campaignPageRecords: CampaignPageFileRecord[],
+  fieldKind: AdvancedEditorLinkedCampaignPageFieldKind,
+  includePageRefs: Set<string> = new Set(),
+): Array<Record<string, unknown>> {
+  const options: Array<Record<string, unknown>> = [];
+  for (const record of campaignPageRecords) {
+    const pageRef = extractEditorPageRefValue(record.page_ref);
+    if (!pageRef) {
+      continue;
+    }
+    const title = stringifyEditorValue(record.page.title).trim() || pageRef;
+    const section = stringifyEditorValue(record.page.section).trim();
+    const subsection = stringifyEditorValue(record.page.subsection).trim();
+    const campaignOption = buildAdvancedEditorCampaignPageCharacterOption(record);
+    if (
+      !includePageRefs.has(pageRef)
+      && !advancedEditorCampaignPageOptionAllowedForLinkedField(record, fieldKind, campaignOption)
+    ) {
+      continue;
+    }
+    const optionTitle = stringifyEditorValue(asRecord(campaignOption).display_name).trim() || title;
+    const labelParts = [optionTitle];
+    if (section) {
+      labelParts.push(subsection ? `${section} / ${subsection}` : section);
+    }
+    options.push({
+      value: pageRef,
+      label: labelParts.join(" | "),
+      title: optionTitle,
+      campaign_option: campaignOption ? JSON.parse(JSON.stringify(campaignOption)) : null,
+    });
+  }
+  return options;
+}
+
+function buildAdvancedEditorCampaignPageLookup(
+  campaignPageRecords: CampaignPageFileRecord[],
+  fieldKind: AdvancedEditorLinkedCampaignPageFieldKind,
+  includePageRefs: Set<string> = new Set(),
+): Record<string, Record<string, unknown>> {
+  const lookup: Record<string, Record<string, unknown>> = {};
+  for (const option of buildAdvancedEditorCampaignPageOptions(campaignPageRecords, fieldKind, includePageRefs)) {
+    const pageRef = stringifyEditorValue(option.value).trim();
+    if (!pageRef) {
+      continue;
+    }
+    lookup[pageRef] = {
+      page_ref: pageRef,
+      label: stringifyEditorValue(option.label).trim() || pageRef,
+      title: stringifyEditorValue(option.title).trim() || pageRef,
+      campaign_option: asRecord(option.campaign_option),
+    };
+  }
+  return lookup;
+}
+
+function normalizeSelectedAdvancedEditorCampaignPageRef(
+  rawValue: unknown,
+  campaignPageLookup: Record<string, Record<string, unknown>>,
+): string {
+  const pageRef = extractEditorPageRefValue(rawValue);
+  if (!pageRef) {
+    return "";
+  }
+  if (!campaignPageLookup[pageRef]) {
+    throw new Error("Choose a valid linked campaign page.");
+  }
+  return pageRef;
+}
+
 function editorManualEquipmentEntries(definition: Record<string, unknown>): Array<Record<string, unknown>> {
   return asArray(definition.equipment_catalog)
     .map((value) => asRecord(value))
@@ -3539,6 +3834,7 @@ function parseEditorManualEquipmentQuantity(value: string): number | { status: "
 function parseEditorManualEquipmentItems(
   values: Record<string, string>,
   definition: Record<string, unknown>,
+  campaignPageLookup: Record<string, Record<string, unknown>> = {},
 ): {
   status: "ok";
   items: Array<Record<string, unknown>>;
@@ -3560,7 +3856,7 @@ function parseEditorManualEquipmentItems(
     const rawId = stringifyEditorValue(values[`manual_item_id_${index}`]).trim();
     const existing = rawId ? existingById.get(rawId) : undefined;
     const rawName = stringifyEditorValue(values[`manual_item_name_${index}`]).trim();
-    const pageRef = stringifyEditorValue(values[`manual_item_page_ref_${index}`]).trim();
+    let pageRef = stringifyEditorValue(values[`manual_item_page_ref_${index}`]).trim();
     const quantityText = stringifyEditorValue(values[`manual_item_quantity_${index}`]).trim();
     const weight = stringifyEditorValue(values[`manual_item_weight_${index}`]).trim();
     const notes = stringifyEditorValue(values[`manual_item_notes_${index}`]);
@@ -3577,6 +3873,14 @@ function parseEditorManualEquipmentItems(
     const parsedQuantity = parseEditorManualEquipmentQuantity(quantityText);
     if (typeof parsedQuantity !== "number") {
       return parsedQuantity;
+    }
+    try {
+      pageRef = normalizeSelectedAdvancedEditorCampaignPageRef(pageRef, campaignPageLookup);
+    } catch (error) {
+      return {
+        status: "validation_error",
+        message: error instanceof Error ? error.message : "Choose a valid linked campaign page.",
+      };
     }
 
     const preservedId = rawId || stringifyEditorValue(asRecord(existing).id).trim();
@@ -3745,6 +4049,7 @@ function buildManualFeatureResourceTemplate({
 function parseEditorCustomFeatures(
   values: Record<string, string>,
   definition: Record<string, unknown>,
+  campaignPageLookup: Record<string, Record<string, unknown>> = {},
 ): {
   status: "ok";
   features: Array<Record<string, unknown>>;
@@ -3771,7 +4076,7 @@ function parseEditorCustomFeatures(
     const rawId = stringifyEditorValue(values[`custom_feature_id_${index}`]).trim();
     const existing = rawId ? existingById.get(rawId) : undefined;
     const rawName = stringifyEditorValue(values[`custom_feature_name_${index}`]).trim();
-    const pageRef = stringifyEditorValue(values[`custom_feature_page_ref_${index}`]).trim();
+    let pageRef = stringifyEditorValue(values[`custom_feature_page_ref_${index}`]).trim();
     const activationType = normalizeEditorFeatureActivationType(values[`custom_feature_activation_type_${index}`]);
     const descriptionMarkdown = stringifyEditorValue(values[`custom_feature_description_${index}`]);
     const resourceMaxText = stringifyEditorValue(values[`custom_feature_resource_max_${index}`]).trim();
@@ -3785,6 +4090,14 @@ function parseEditorCustomFeatures(
     }
     if (!ADVANCED_EDITOR_FEATURE_ACTIVATION_VALUES.has(activationType)) {
       return { status: "validation_error", message: "Choose a valid activation type for each custom feature." };
+    }
+    try {
+      pageRef = normalizeSelectedAdvancedEditorCampaignPageRef(pageRef, campaignPageLookup);
+    } catch (error) {
+      return {
+        status: "validation_error",
+        message: error instanceof Error ? error.message : "Choose a valid linked campaign page.",
+      };
     }
 
     const parsedResourceMax = parseEditorCustomFeatureResourceMax(resourceMaxText, name);
@@ -3998,12 +4311,14 @@ export function buildCharacterAdvancedEditorPayload({
   definition,
   state,
   stateRevision,
+  campaignPageRecords = [],
 }: {
   campaign: CampaignViewModel;
   characterSlug: string;
   definition: Record<string, unknown>;
   state: Record<string, unknown>;
   stateRevision: number;
+  campaignPageRecords?: CampaignPageFileRecord[];
 }): CharacterAdvancedEditorPayload {
   const supported = characterAdvancedEditorIsSupported(campaign, definition);
   const links = buildCharacterAdvancedEditorLinks(campaign, characterSlug);
@@ -4025,6 +4340,16 @@ export function buildCharacterAdvancedEditorPayload({
   const recoverablePenaltyRows = buildRecoverablePenaltyRows(asRecord(definition.stats).recoverable_penalties);
   const equipment = buildManualEquipmentRows(definition);
   const features = buildCustomFeatureRows(definition);
+  const featureLinkedPageRefs = new Set(
+    features
+      .map((feature) => extractEditorPageRefValue(feature.page_ref))
+      .filter(Boolean),
+  );
+  const equipmentLinkedPageRefs = new Set(
+    equipment
+      .map((item) => extractEditorPageRefValue(item.page_ref))
+      .filter(Boolean),
+  );
 
   return {
     lane: "dnd5e",
@@ -4093,8 +4418,16 @@ export function buildCharacterAdvancedEditorPayload({
       activation_options: ADVANCED_EDITOR_FEATURE_ACTIVATION_OPTIONS.map((option) => ({ ...option })),
       resource_reset_options: ADVANCED_EDITOR_RESOURCE_RESET_OPTIONS.map((option) => ({ ...option })),
       recoverable_penalty_target_options: ADVANCED_EDITOR_RECOVERABLE_PENALTY_TARGET_OPTIONS.map((option) => ({ ...option })),
-      campaign_page_options: [],
-      equipment_page_options: [],
+      campaign_page_options: buildAdvancedEditorCampaignPageOptions(
+        campaignPageRecords,
+        "campaign_page_feature",
+        featureLinkedPageRefs,
+      ),
+      equipment_page_options: buildAdvancedEditorCampaignPageOptions(
+        campaignPageRecords,
+        "campaign_page_item",
+        equipmentLinkedPageRefs,
+      ),
       linked_feature_authoring_supported: true,
       linked_feature_authoring_message: "",
       existing_managed_equipment: buildExistingManagedEquipmentRows(definition),
@@ -4105,6 +4438,7 @@ export function buildCharacterAdvancedEditorPayload({
 export function applyCharacterAdvancedEditorReferenceUpdate(
   definition: Record<string, unknown>,
   payload: Record<string, unknown>,
+  campaignPageRecords: CampaignPageFileRecord[] = [],
 ): CharacterAdvancedEditorReferenceUpdate {
   const rawValues = asRecord(payload.values);
   const values: Record<string, string> = {};
@@ -4145,6 +4479,24 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
   }
 
   const nextDefinition = JSON.parse(JSON.stringify(definition || {})) as Record<string, unknown>;
+  const campaignFeaturePageLookup = buildAdvancedEditorCampaignPageLookup(
+    campaignPageRecords,
+    "campaign_page_feature",
+    new Set(
+      editorCustomFeatureEntries(nextDefinition)
+        .map((feature) => extractEditorPageRefValue(feature.page_ref))
+        .filter(Boolean),
+    ),
+  );
+  const campaignItemPageLookup = buildAdvancedEditorCampaignPageLookup(
+    campaignPageRecords,
+    "campaign_page_item",
+    new Set(
+      editorManualEquipmentEntries(nextDefinition)
+        .map((item) => extractEditorPageRefValue(item.page_ref))
+        .filter(Boolean),
+    ),
+  );
   const profile = { ...asRecord(nextDefinition.profile) };
   const referenceNotes = { ...asRecord(nextDefinition.reference_notes) };
   const proficiencies = { ...asRecord(nextDefinition.proficiencies) };
@@ -4165,13 +4517,13 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
     return parsedRecoverablePenalties;
   }
   const parsedManualEquipment = hasEditorManualEquipmentValues(values)
-    ? parseEditorManualEquipmentItems(values, nextDefinition)
+    ? parseEditorManualEquipmentItems(values, nextDefinition, campaignItemPageLookup)
     : null;
   if (parsedManualEquipment?.status === "validation_error") {
     return parsedManualEquipment;
   }
   const parsedCustomFeatures = hasEditorCustomFeatureValues(values)
-    ? parseEditorCustomFeatures(values, nextDefinition)
+    ? parseEditorCustomFeatures(values, nextDefinition, campaignFeaturePageLookup)
     : null;
   if (parsedCustomFeatures?.status === "validation_error") {
     return parsedCustomFeatures;
