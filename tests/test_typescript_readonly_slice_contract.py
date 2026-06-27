@@ -1616,6 +1616,14 @@ def test_typescript_character_advanced_editor_context_matches_flask_shell(
     ]
     assert editor["proficiency_fields"][0]["label"] == flask_payload["editor"]["proficiency_fields"][0]["label"]
     assert editor["proficiency_fields"][1]["help_text"] == flask_payload["editor"]["proficiency_fields"][1]["help_text"]
+    assert [field["name"] for field in editor["stat_adjustment_fields"]] == [
+        field["name"] for field in flask_payload["editor"]["stat_adjustment_fields"]
+    ]
+    assert editor["stat_adjustment_fields"][0]["label"] == flask_payload["editor"]["stat_adjustment_fields"][0]["label"]
+    assert (
+        editor["stat_adjustment_fields"][1]["help_text"]
+        == flask_payload["editor"]["stat_adjustment_fields"][1]["help_text"]
+    )
     assert [field["name"] for field in editor["reference_fields"]] == [
         field["name"] for field in flask_payload["editor"]["reference_fields"]
     ]
@@ -1635,6 +1643,8 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     get_status, get_payload = _to_json(route_url, headers=typescript_api_mutation_server["dm_headers"])
     assert get_status == 200
     expected_revision = get_payload["editor"]["state_revision"]
+    base_stats = dict(get_payload["character"]["definition"]["stats"])
+    assert not base_stats.get("manual_adjustments")
 
     fixture_status, fixture_payload = _to_json(
         route_url,
@@ -1679,6 +1689,13 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         "armor_proficiencies_text": "Light Armor, Medium Armor",
         "weapon_proficiencies_text": "Longswords\nShortbows",
         "tool_proficiencies_text": "Thieves' Tools\nNavigator's Tools",
+        "stat_adjustment_max_hp": "4",
+        "stat_adjustment_armor_class": "1",
+        "stat_adjustment_initiative_bonus": "2",
+        "stat_adjustment_speed": "10",
+        "stat_adjustment_passive_perception": "3",
+        "stat_adjustment_passive_insight": "-1",
+        "stat_adjustment_passive_investigation": "2",
         "physical_description_markdown": "Updated physical description from TypeScript.",
         "background_markdown": "Updated background from TypeScript.",
         "biography_markdown": "Updated biography from TypeScript.",
@@ -1701,6 +1718,25 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert save_payload["character"]["definition"]["proficiencies"]["armor"] == ["Light Armor", "Medium Armor"]
     assert save_payload["character"]["definition"]["proficiencies"]["weapons"] == ["Longswords", "Shortbows"]
     assert save_payload["character"]["definition"]["proficiencies"]["tools"] == ["Thieves' Tools", "Navigator's Tools"]
+    assert save_payload["character"]["definition"]["stats"]["manual_adjustments"] == {
+        "max_hp": 4,
+        "armor_class": 1,
+        "initiative_bonus": 2,
+        "speed": 10,
+        "passive_perception": 3,
+        "passive_insight": -1,
+        "passive_investigation": 2,
+    }
+    assert save_payload["character"]["definition"]["stats"]["max_hp"] == int(base_stats["max_hp"]) + 4
+    assert save_payload["character"]["definition"]["stats"]["armor_class"] == int(base_stats["armor_class"]) + 1
+    assert save_payload["character"]["definition"]["stats"]["initiative_bonus"] == int(base_stats["initiative_bonus"]) + 2
+    assert save_payload["character"]["definition"]["stats"]["speed"] == "40 ft."
+    assert save_payload["character"]["definition"]["stats"]["passive_perception"] == int(base_stats["passive_perception"]) + 3
+    assert save_payload["character"]["definition"]["stats"]["passive_insight"] == int(base_stats["passive_insight"]) - 1
+    assert (
+        save_payload["character"]["definition"]["stats"]["passive_investigation"]
+        == int(base_stats["passive_investigation"]) + 2
+    )
     assert save_payload["character"]["state_record"]["state"]["notes"]["physical_description_markdown"] == values["physical_description_markdown"]
     assert save_payload["character"]["state_record"]["state"]["notes"]["background_markdown"] == values["background_markdown"]
     assert save_payload["character"]["definition"]["profile"]["biography_markdown"] == values["biography_markdown"]
@@ -1712,7 +1748,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     )
     reference_values = {field["name"]: field["value"] for field in save_payload["editor"]["reference_fields"]}
     for field_name, field_value in values.items():
-        if field_name.endswith("_text"):
+        if field_name.endswith("_text") or field_name.startswith("stat_adjustment_"):
             continue
         assert reference_values[field_name] == field_value
     proficiency_values = {field["name"]: field["value"] for field in save_payload["editor"]["proficiency_fields"]}
@@ -1720,6 +1756,10 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert proficiency_values["armor_proficiencies_text"] == "Light Armor\nMedium Armor"
     assert proficiency_values["weapon_proficiencies_text"] == values["weapon_proficiencies_text"]
     assert proficiency_values["tool_proficiencies_text"] == values["tool_proficiencies_text"]
+    stat_values = {field["name"]: field["value"] for field in save_payload["editor"]["stat_adjustment_fields"]}
+    for field_name, field_value in values.items():
+        if field_name.startswith("stat_adjustment_"):
+            assert stat_values[field_name] == field_value
 
     sqlite_state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
     assert sqlite_state is not None
@@ -1739,10 +1779,52 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert definition["proficiencies"]["armor"] == ["Light Armor", "Medium Armor"]
     assert definition["proficiencies"]["weapons"] == ["Longswords", "Shortbows"]
     assert definition["proficiencies"]["tools"] == ["Thieves' Tools", "Navigator's Tools"]
+    assert definition["stats"]["manual_adjustments"] == {
+        "max_hp": 4,
+        "armor_class": 1,
+        "initiative_bonus": 2,
+        "speed": 10,
+        "passive_perception": 3,
+        "passive_insight": -1,
+        "passive_investigation": 2,
+    }
+    assert definition["stats"]["max_hp"] == int(base_stats["max_hp"]) + 4
+    assert definition["stats"]["armor_class"] == int(base_stats["armor_class"]) + 1
+    assert definition["stats"]["initiative_bonus"] == int(base_stats["initiative_bonus"]) + 2
+    assert definition["stats"]["speed"] == "40 ft."
     assert definition["profile"]["biography_markdown"] == values["biography_markdown"]
     assert definition["profile"]["personality_markdown"] == values["personality_markdown"]
     assert definition["reference_notes"]["additional_notes_markdown"] == values["additional_notes_markdown"]
     assert definition["reference_notes"]["allies_and_organizations_markdown"] == values["allies_and_organizations_markdown"]
+
+    clear_stat_values = {
+        "stat_adjustment_max_hp": "",
+        "stat_adjustment_armor_class": "",
+        "stat_adjustment_initiative_bonus": "",
+        "stat_adjustment_speed": "",
+        "stat_adjustment_passive_perception": "",
+        "stat_adjustment_passive_insight": "",
+        "stat_adjustment_passive_investigation": "",
+    }
+    clear_status, clear_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={"expected_revision": expected_revision + 1, "values": clear_stat_values},
+    )
+    assert clear_status == 200
+    assert clear_payload["editor"]["state_revision"] == expected_revision + 2
+    cleared_stats = clear_payload["character"]["definition"]["stats"]
+    assert "manual_adjustments" not in cleared_stats
+    assert cleared_stats["max_hp"] == base_stats["max_hp"]
+    assert cleared_stats["armor_class"] == base_stats["armor_class"]
+    assert cleared_stats["initiative_bonus"] == base_stats["initiative_bonus"]
+    assert cleared_stats["speed"] == base_stats["speed"]
+    assert cleared_stats["passive_perception"] == base_stats["passive_perception"]
+    assert cleared_stats["passive_insight"] == base_stats["passive_insight"]
+    assert cleared_stats["passive_investigation"] == base_stats["passive_investigation"]
+    cleared_stat_values = {field["name"]: field["value"] for field in clear_payload["editor"]["stat_adjustment_fields"]}
+    assert cleared_stat_values == clear_stat_values
 
 
 def test_typescript_character_advancement_context_shells_match_flask_fixture(

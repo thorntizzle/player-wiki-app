@@ -252,9 +252,69 @@ const ADVANCED_EDITOR_PROFICIENCY_FIELDS: Array<{
   },
 ];
 const ADVANCED_EDITOR_PROFICIENCY_FIELD_NAMES = new Set(ADVANCED_EDITOR_PROFICIENCY_FIELDS.map((field) => field.name));
+const ADVANCED_EDITOR_STAT_ADJUSTMENT_FIELDS: Array<{
+  name: string;
+  key:
+    | "max_hp"
+    | "armor_class"
+    | "initiative_bonus"
+    | "speed"
+    | "passive_perception"
+    | "passive_insight"
+    | "passive_investigation";
+  label: string;
+  helpText: string;
+}> = [
+  {
+    name: "stat_adjustment_max_hp",
+    key: "max_hp",
+    label: "Max HP Adjustment",
+    helpText: "Apply a persistent bonus or penalty to max HP.",
+  },
+  {
+    name: "stat_adjustment_armor_class",
+    key: "armor_class",
+    label: "Armor Class Adjustment",
+    helpText: "Apply a persistent bonus or penalty to Armor Class.",
+  },
+  {
+    name: "stat_adjustment_initiative_bonus",
+    key: "initiative_bonus",
+    label: "Initiative Adjustment",
+    helpText: "Apply a persistent bonus or penalty to initiative.",
+  },
+  {
+    name: "stat_adjustment_speed",
+    key: "speed",
+    label: "Speed Adjustment (ft.)",
+    helpText: "Apply a persistent speed change in feet.",
+  },
+  {
+    name: "stat_adjustment_passive_perception",
+    key: "passive_perception",
+    label: "Passive Perception Adjustment",
+    helpText: "Apply a persistent bonus or penalty to passive Perception.",
+  },
+  {
+    name: "stat_adjustment_passive_insight",
+    key: "passive_insight",
+    label: "Passive Insight Adjustment",
+    helpText: "Apply a persistent bonus or penalty to passive Insight.",
+  },
+  {
+    name: "stat_adjustment_passive_investigation",
+    key: "passive_investigation",
+    label: "Passive Investigation Adjustment",
+    helpText: "Apply a persistent bonus or penalty to passive Investigation.",
+  },
+];
+const ADVANCED_EDITOR_STAT_ADJUSTMENT_FIELD_NAMES = new Set(
+  ADVANCED_EDITOR_STAT_ADJUSTMENT_FIELDS.map((field) => field.name),
+);
 const ADVANCED_EDITOR_SUPPORTED_FIELD_NAMES = new Set([
   ...ADVANCED_EDITOR_REFERENCE_FIELD_NAMES,
   ...ADVANCED_EDITOR_PROFICIENCY_FIELD_NAMES,
+  ...ADVANCED_EDITOR_STAT_ADJUSTMENT_FIELD_NAMES,
 ]);
 const DND_SYSTEMS_OPTION_PREFIX = "systems:";
 const DND_PHB_SOURCE_ID = "PHB";
@@ -324,6 +384,7 @@ export interface CharacterAdvancedEditorPayload {
     state_revision: number;
     proficiency_fields: Array<Record<string, unknown>>;
     reference_fields: Array<Record<string, unknown>>;
+    stat_adjustment_fields: Array<Record<string, unknown>>;
     feature_rows: Array<Record<string, unknown>>;
     equipment_rows: Array<Record<string, unknown>>;
   } | null;
@@ -3137,6 +3198,95 @@ function parseEditorMultilineValues(value: unknown): string[] {
   return values;
 }
 
+function normalizeEditorStatAdjustments(value: unknown): Record<string, number> {
+  const rawAdjustments = asRecord(value);
+  const adjustments: Record<string, number> = {};
+  for (const field of ADVANCED_EDITOR_STAT_ADJUSTMENT_FIELDS) {
+    const parsed = Number.parseInt(String(rawAdjustments[field.key] ?? "0").trim() || "0", 10);
+    if (Number.isFinite(parsed) && parsed !== 0) {
+      adjustments[field.key] = parsed;
+    }
+  }
+  return adjustments;
+}
+
+function parseEditorStatAdjustments(values: Record<string, string>):
+  | { status: "ok"; adjustments: Record<string, number> }
+  | { status: "validation_error"; message: string } {
+  const adjustments: Record<string, number> = {};
+  for (const field of ADVANCED_EDITOR_STAT_ADJUSTMENT_FIELDS) {
+    const rawValue = String(values[field.name] ?? "").trim();
+    if (!rawValue) {
+      continue;
+    }
+    if (!/^[-+]?\d+$/.test(rawValue)) {
+      return { status: "validation_error", message: `The ${field.label.toLowerCase()} must be a whole number.` };
+    }
+    const parsed = Number.parseInt(rawValue, 10);
+    if (parsed !== 0) {
+      adjustments[field.key] = parsed;
+    }
+  }
+  return { status: "ok", adjustments };
+}
+
+function adjustSpeedLabel(value: unknown, delta: number): string {
+  const cleanValue = stringifyEditorValue(value).trim();
+  if (!cleanValue || delta === 0) {
+    return cleanValue;
+  }
+  const match = cleanValue.match(/-?\d+/);
+  if (!match || match.index === undefined) {
+    return cleanValue;
+  }
+  const updatedValue = Math.max(Number.parseInt(match[0], 10) + delta, 0);
+  return `${cleanValue.slice(0, match.index)}${updatedValue}${cleanValue.slice(match.index + match[0].length)}`;
+}
+
+function applyEditorStatAdjustment(stats: Record<string, unknown>, key: string, value: number): void {
+  if (key === "max_hp") {
+    stats.max_hp = Math.max(createContextInteger(stats.max_hp) + value, 1);
+  } else if (key === "armor_class") {
+    stats.armor_class = Math.max(createContextInteger(stats.armor_class) + value, 0);
+  } else if (key === "initiative_bonus") {
+    stats.initiative_bonus = createContextInteger(stats.initiative_bonus) + value;
+  } else if (key === "speed") {
+    stats.speed = adjustSpeedLabel(stats.speed, value);
+  } else if (key === "passive_perception") {
+    stats.passive_perception = Math.max(createContextInteger(stats.passive_perception) + value, 0);
+  } else if (key === "passive_insight") {
+    stats.passive_insight = Math.max(createContextInteger(stats.passive_insight) + value, 0);
+  } else if (key === "passive_investigation") {
+    stats.passive_investigation = Math.max(createContextInteger(stats.passive_investigation) + value, 0);
+  }
+}
+
+function stripEditorManualStatAdjustments(stats: Record<string, unknown>): Record<string, unknown> {
+  const nextStats = deepCloneRecord(stats);
+  const existingAdjustments = normalizeEditorStatAdjustments(nextStats.manual_adjustments);
+  delete nextStats.manual_adjustments;
+  for (const [key, value] of Object.entries(existingAdjustments)) {
+    applyEditorStatAdjustment(nextStats, key, -value);
+  }
+  return nextStats;
+}
+
+function applyEditorManualStatAdjustments(
+  stats: Record<string, unknown>,
+  adjustments: Record<string, number>,
+): Record<string, unknown> {
+  const nextStats = deepCloneRecord(stats);
+  for (const [key, value] of Object.entries(adjustments)) {
+    applyEditorStatAdjustment(nextStats, key, value);
+  }
+  if (Object.keys(adjustments).length > 0) {
+    nextStats.manual_adjustments = { ...adjustments };
+  } else {
+    delete nextStats.manual_adjustments;
+  }
+  return nextStats;
+}
+
 export function buildCharacterAdvancedEditorPayload({
   campaign,
   characterSlug,
@@ -3166,6 +3316,7 @@ export function buildCharacterAdvancedEditorPayload({
   const profile = asRecord(definition.profile);
   const referenceNotes = asRecord(definition.reference_notes);
   const proficiencies = asRecord(definition.proficiencies);
+  const manualStatAdjustments = normalizeEditorStatAdjustments(asRecord(definition.stats).manual_adjustments);
   const features = asArray(definition.features).map((value, index) => {
     const feature = asRecord(value);
     return {
@@ -3202,6 +3353,14 @@ export function buildCharacterAdvancedEditorPayload({
           field.label,
           field.helpText,
           joinEditorMultilineValues(proficiencies[field.key]),
+        ),
+      ),
+      stat_adjustment_fields: ADVANCED_EDITOR_STAT_ADJUSTMENT_FIELDS.map((field) =>
+        buildReferenceField(
+          field.name,
+          field.label,
+          field.helpText,
+          manualStatAdjustments[field.key] ?? "",
         ),
       ),
       reference_fields: [
@@ -3272,8 +3431,16 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
   if (unsupportedFields.length > 0) {
     return {
       status: "validation_error",
-      message: `Unsupported Advanced Editor fields for the TypeScript reference/proficiency-field slice: ${unsupportedFields.join(", ")}.`,
+      message: `Unsupported Advanced Editor fields for the TypeScript reference/proficiency/stat-adjustment field slice: ${unsupportedFields.join(", ")}.`,
     };
+  }
+
+  const hasStatAdjustmentValues = Object.keys(values).some((fieldName) =>
+    ADVANCED_EDITOR_STAT_ADJUSTMENT_FIELD_NAMES.has(fieldName),
+  );
+  const parsedStatAdjustments = hasStatAdjustmentValues ? parseEditorStatAdjustments(values) : null;
+  if (parsedStatAdjustments?.status === "validation_error") {
+    return parsedStatAdjustments;
   }
 
   const nextDefinition = JSON.parse(JSON.stringify(definition || {})) as Record<string, unknown>;
@@ -3300,6 +3467,12 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
   nextDefinition.profile = profile;
   nextDefinition.reference_notes = referenceNotes;
   nextDefinition.proficiencies = proficiencies;
+  if (parsedStatAdjustments?.status === "ok") {
+    nextDefinition.stats = applyEditorManualStatAdjustments(
+      stripEditorManualStatAdjustments(asRecord(nextDefinition.stats)),
+      parsedStatAdjustments.adjustments,
+    );
+  }
   return {
     status: "ok",
     definition: nextDefinition,
