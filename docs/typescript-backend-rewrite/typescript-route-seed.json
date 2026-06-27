@@ -909,6 +909,33 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/retraining",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Character Retraining context read shell with Flask-compatible missing-campaign, missing-character, auth_required, route-specific forbidden, current fixture empty readiness, Advanced Editor/detail links, and retraining:null. POST/save parity remains deferred."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/level-up",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Character Level Up context read shell with Flask-compatible missing-campaign, missing-character, auth_required, route-specific forbidden, current fixture unsupported readiness, Advanced Editor/detail links, and level_up:null. POST/save parity remains deferred."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_readonly",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Character Progression Repair context read shell with Flask-compatible missing-campaign, missing-character, auth_required, manager-only forbidden, current fixture unsupported readiness, Advanced Editor/detail links, and repair:null. POST/save parity remains deferred."
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/campaigns/<campaign_slug>/characters/create",
       "route_family": "api_v1_characters",
       "status": "implemented_fixture_sqlite_readonly",

@@ -9665,6 +9665,129 @@ if (
   );
 }
 
+const characterLevelUpPath = "/api/v1/campaigns/linden-pass/characters/arden-march/level-up";
+const characterRetrainingPath = "/api/v1/campaigns/linden-pass/characters/arden-march/retraining";
+const characterProgressionRepairPath = "/api/v1/campaigns/linden-pass/characters/arden-march/progression-repair";
+const anonymousCharacterLevelUp = await requestJson(characterLevelUpPath);
+if (anonymousCharacterLevelUp.status !== 401 || anonymousCharacterLevelUp.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected anonymous level-up auth_required, got ${anonymousCharacterLevelUp.status} ${JSON.stringify(anonymousCharacterLevelUp.payload)}`,
+  );
+}
+
+const dmCharacterLevelUp = await requestJson(characterLevelUpPath, {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  dmCharacterLevelUp.status !== 200 ||
+  dmCharacterLevelUp.payload?.ok !== true ||
+  dmCharacterLevelUp.payload?.supported !== false ||
+  dmCharacterLevelUp.payload?.lane !== "unsupported" ||
+  dmCharacterLevelUp.payload?.level_up !== null ||
+  dmCharacterLevelUp.payload?.unsupported_message !== "Level-up currently supports native in-app characters and imported character sheets only." ||
+  dmCharacterLevelUp.payload?.readiness?.status !== "unsupported" ||
+  dmCharacterLevelUp.payload?.readiness?.current_level !== 5 ||
+  dmCharacterLevelUp.payload?.links?.advanced_editor_url !== "/app-next/campaigns/linden-pass/characters/arden-march/edit" ||
+  dmCharacterLevelUp.payload?.links?.flask_advanced_editor_url !== "/campaigns/linden-pass/characters/arden-march/edit"
+) {
+  throw new Error(`Unexpected DM level-up shell payload: ${JSON.stringify(dmCharacterLevelUp.payload)}`);
+}
+
+const assignedPlayerCharacterLevelUp = await requestJson(characterLevelUpPath, {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (
+  assignedPlayerCharacterLevelUp.status !== 200 ||
+  assignedPlayerCharacterLevelUp.payload?.ok !== true ||
+  assignedPlayerCharacterLevelUp.payload?.level_up !== null
+) {
+  throw new Error(
+    `Unexpected assigned-player level-up shell payload: ${assignedPlayerCharacterLevelUp.status} ${JSON.stringify(assignedPlayerCharacterLevelUp.payload)}`,
+  );
+}
+
+const dmCharacterRetraining = await requestJson(characterRetrainingPath, {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  dmCharacterRetraining.status !== 200 ||
+  dmCharacterRetraining.payload?.ok !== true ||
+  dmCharacterRetraining.payload?.supported !== false ||
+  dmCharacterRetraining.payload?.lane !== "unsupported" ||
+  dmCharacterRetraining.payload?.retraining !== null ||
+  dmCharacterRetraining.payload?.unsupported_message !== "This character does not currently have any supported structured retraining options." ||
+  dmCharacterRetraining.payload?.readiness?.status !== "empty" ||
+  dmCharacterRetraining.payload?.readiness?.level_up_readiness?.status !== "unsupported" ||
+  dmCharacterRetraining.payload?.readiness?.linked_feature_authoring?.supported !== true
+) {
+  throw new Error(`Unexpected DM retraining shell payload: ${JSON.stringify(dmCharacterRetraining.payload)}`);
+}
+
+const assignedPlayerCharacterRetraining = await requestJson(characterRetrainingPath, {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (
+  assignedPlayerCharacterRetraining.status !== 200 ||
+  assignedPlayerCharacterRetraining.payload?.ok !== true ||
+  assignedPlayerCharacterRetraining.payload?.retraining !== null
+) {
+  throw new Error(
+    `Unexpected assigned-player retraining shell payload: ${assignedPlayerCharacterRetraining.status} ${JSON.stringify(assignedPlayerCharacterRetraining.payload)}`,
+  );
+}
+
+const dmCharacterProgressionRepair = await requestJson(characterProgressionRepairPath, {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  dmCharacterProgressionRepair.status !== 200 ||
+  dmCharacterProgressionRepair.payload?.ok !== true ||
+  dmCharacterProgressionRepair.payload?.supported !== false ||
+  dmCharacterProgressionRepair.payload?.lane !== "unsupported" ||
+  dmCharacterProgressionRepair.payload?.repair !== null ||
+  dmCharacterProgressionRepair.payload?.unsupported_message !==
+    "Level-up currently supports native in-app characters and imported character sheets only." ||
+  dmCharacterProgressionRepair.payload?.readiness?.status !== "unsupported"
+) {
+  throw new Error(`Unexpected DM progression-repair shell payload: ${JSON.stringify(dmCharacterProgressionRepair.payload)}`);
+}
+
+const blockedPlayerCharacterProgressionRepair = await requestJson(characterProgressionRepairPath, {
+  Authorization: `Bearer ${playerApiToken}`,
+});
+if (
+  blockedPlayerCharacterProgressionRepair.status !== 403 ||
+  blockedPlayerCharacterProgressionRepair.payload?.error?.message !==
+    "You do not have permission to repair progression for this character."
+) {
+  throw new Error(
+    `Expected player progression-repair forbidden, got ${blockedPlayerCharacterProgressionRepair.status} ${JSON.stringify(blockedPlayerCharacterProgressionRepair.payload)}`,
+  );
+}
+
+const unassignedPlayerCharacterLevelUp = await requestJson(
+  "/api/v1/campaigns/linden-pass/characters/selene-brook/level-up",
+  { Authorization: `Bearer ${playerApiToken}` },
+);
+if (
+  unassignedPlayerCharacterLevelUp.status !== 403 ||
+  unassignedPlayerCharacterLevelUp.payload?.error?.message !== "You do not have permission to level up this character."
+) {
+  throw new Error(
+    `Expected unassigned player level-up forbidden, got ${unassignedPlayerCharacterLevelUp.status} ${JSON.stringify(unassignedPlayerCharacterLevelUp.payload)}`,
+  );
+}
+
+const missingCharacterLevelUp = await requestJson(
+  "/api/v1/campaigns/linden-pass/characters/missing-character/level-up",
+  { Authorization: `Bearer ${dmApiToken}` },
+);
+if (missingCharacterLevelUp.status !== 404 || missingCharacterLevelUp.payload?.error?.code !== "content_character_not_found") {
+  throw new Error(
+    `Expected missing level-up JSON 404, got ${missingCharacterLevelUp.status} ${missingCharacterLevelUp.payload?.error?.code}`,
+  );
+}
+
 const managedCharacterSlug = "api-scout";
 const managedCharacterPath = `/api/v1/campaigns/linden-pass/content/characters/${managedCharacterSlug}`;
 const managedCharacterDefinition = structuredClone(contentCharacter.payload.character_file.definition);

@@ -154,6 +154,9 @@ Route parity check command:
   - `POST /api/v1/campaigns/:campaignSlug/characters/create` (Xianxia native create; narrow DND-5E PHB Fighter pilot; full DND builder parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor` (context read only; PUT/save parity pending)
+  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (context shell only; POST/save parity pending)
+  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (context shell only; POST/save parity pending)
+  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (context shell only; POST/save parity pending)
   - `PATCH /api/v1/campaigns/:campaignSlug/characters/:characterSlug/sheet-edit`
   - `GET /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual`
   - `POST /api/v1/campaigns/:campaignSlug/characters/import/xianxia-manual` (preview and confirmed local fixture/SQLite create)
@@ -562,6 +565,12 @@ Route parity check command:
   checks, DND-5E support detection, unsupported non-DND payloads, edit-page links, state revision,
   reference fields, and feature/equipment row shells. The `PUT .../advanced-editor` save route,
   native edit derivation, state merging, and definition YAML writes remain pending.
+- The Character advancement context shell family now serves `GET .../characters/:characterSlug/retraining`,
+  `GET .../level-up`, and `GET .../progression-repair`, preserving Flask-compatible campaign/missing-character
+  envelopes, auth and route-specific access failures, current fixture unsupported/empty readiness
+  payloads, Advanced Editor/detail links, and route-specific `retraining`, `level_up`, and `repair`
+  null contexts. The POST/save routes, ready-state native builder contexts, state merges, and definition
+  YAML writes remain pending.
 - The first Xianxia inventory equipment write now serves
   `PATCH .../characters/:characterSlug/session/xianxia-inventory/:itemId/equipped`. It preserves the
   bearer-only session-state write gate, shared revision conflicts, Xianxia-only validation, unknown

@@ -122,6 +122,7 @@ import {
 } from "./systems/sources.js";
 import {
   buildCharacterAdvancedEditorPayload,
+  buildCharacterAdvancementShellPayload,
   buildCharacterAuthoringLinks,
   buildDndCharacterCreateContext,
   buildDndCreateCharacter,
@@ -5656,6 +5657,201 @@ app.get(ROUTES.characterAdvancedEditor, async (ctx) => {
     unsupported_message: editorPayload.unsupported_message,
     links: editorPayload.links,
     editor: editorPayload.editor,
+  });
+});
+
+app.get(ROUTES.characterRetraining, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character || String(character.definition.status || "").trim() !== "active") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!canEditCharacterSessionState(config, campaign.slug, characterSlug, auth.role, auth.actorUserId)) {
+    const error = forbidden("You do not have permission to retrain this character.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const stateRecord = readCharacterStateSnapshot(config, campaign.slug, character.character_slug, character.definition);
+  const advancementPayload = buildCharacterAdvancementShellPayload({
+    campaign,
+    characterSlug,
+    definition: character.definition,
+    kind: "retraining",
+  });
+
+  return ctx.json({
+    ok: true,
+    message: null,
+    campaign,
+    character: {
+      definition: character.definition,
+      import_metadata: character.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: character.character_slug,
+        revision: stateRecord.revision,
+        state: stateRecord.state,
+        updated_at: stateRecord.updated_at ?? null,
+        updated_by_user_id: stateRecord.updated_by_user_id ?? null,
+      },
+    },
+    lane: advancementPayload.lane,
+    supported: advancementPayload.supported,
+    unsupported_message: advancementPayload.unsupported_message,
+    readiness: advancementPayload.readiness,
+    retraining: advancementPayload.context,
+    links: advancementPayload.links,
+  });
+});
+
+app.get(ROUTES.characterLevelUp, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character || String(character.definition.status || "").trim() !== "active") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!canEditCharacterSessionState(config, campaign.slug, characterSlug, auth.role, auth.actorUserId)) {
+    const error = forbidden("You do not have permission to level up this character.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const stateRecord = readCharacterStateSnapshot(config, campaign.slug, character.character_slug, character.definition);
+  const advancementPayload = buildCharacterAdvancementShellPayload({
+    campaign,
+    characterSlug,
+    definition: character.definition,
+    kind: "level_up",
+  });
+
+  return ctx.json({
+    ok: true,
+    message: null,
+    campaign,
+    character: {
+      definition: character.definition,
+      import_metadata: character.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: character.character_slug,
+        revision: stateRecord.revision,
+        state: stateRecord.state,
+        updated_at: stateRecord.updated_at ?? null,
+        updated_by_user_id: stateRecord.updated_by_user_id ?? null,
+      },
+    },
+    lane: advancementPayload.lane,
+    supported: advancementPayload.supported,
+    unsupported_message: advancementPayload.unsupported_message,
+    readiness: advancementPayload.readiness,
+    level_up: advancementPayload.context,
+    links: advancementPayload.links,
+  });
+});
+
+app.get(ROUTES.characterProgressionRepair, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character || String(character.definition.status || "").trim() !== "active") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const canManageSession =
+    (auth.role === "admin" || auth.role === "dm") &&
+    campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session");
+  if (!canManageSession) {
+    const error = forbidden("You do not have permission to repair progression for this character.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const stateRecord = readCharacterStateSnapshot(config, campaign.slug, character.character_slug, character.definition);
+  const advancementPayload = buildCharacterAdvancementShellPayload({
+    campaign,
+    characterSlug,
+    definition: character.definition,
+    kind: "progression_repair",
+  });
+
+  return ctx.json({
+    ok: true,
+    message: null,
+    campaign,
+    character: {
+      definition: character.definition,
+      import_metadata: character.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: character.character_slug,
+        revision: stateRecord.revision,
+        state: stateRecord.state,
+        updated_at: stateRecord.updated_at ?? null,
+        updated_by_user_id: stateRecord.updated_by_user_id ?? null,
+      },
+    },
+    lane: advancementPayload.lane,
+    supported: advancementPayload.supported,
+    unsupported_message: advancementPayload.unsupported_message,
+    readiness: advancementPayload.readiness,
+    repair: advancementPayload.context,
+    links: advancementPayload.links,
   });
 });
 

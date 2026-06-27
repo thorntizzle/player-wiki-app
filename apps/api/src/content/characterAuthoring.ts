@@ -149,6 +149,8 @@ const XIANXIA_DAO_DEFAULT_MAX = 3;
 const XIANXIA_DIRECT_ADVANCEMENT_GENERIC_TECHNIQUE_KEYS = new Set(["cultivation", "meditation", "conditioning", "training"]);
 const NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE =
   "This campaign can still use the character roster, read-mode sheets, session-mode sheets, and Controls. Native DND-5E builder, edit, level-up, repair, retraining, PDF-import, and spellcasting tools are not implemented for this campaign system.";
+const XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE =
+  "Xianxia advancement and cultivation use their own character lane. Use the Xianxia Cultivation page instead of DND-5E level-up, repair, or retraining routes; remaining unmodeled advancement workflows should be added there.";
 const ADVANCED_EDITOR_UNSUPPORTED_MESSAGE =
   "Advanced Editor is currently available only for DND-5E native character tools in Gen2.";
 const DND_SYSTEMS_OPTION_PREFIX = "systems:";
@@ -223,6 +225,17 @@ export interface CharacterAdvancedEditorPayload {
   } | null;
 }
 
+export type CharacterAdvancementRouteKind = "level_up" | "retraining" | "progression_repair";
+
+export interface CharacterAdvancementShellPayload {
+  lane: "dnd5e" | "repairable" | "ready" | "unsupported";
+  supported: boolean;
+  unsupported_message: string;
+  readiness: Record<string, unknown>;
+  links: Record<string, string>;
+  context: Record<string, unknown> | null;
+}
+
 function normalizeSystemKey(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
@@ -239,6 +252,13 @@ export function nativeCharacterCreateLane(system: unknown): "dnd5e" | "xianxia" 
 }
 
 export function nativeCharacterCreateUnsupportedMessage(_system: unknown): string {
+  return NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE;
+}
+
+function characterAdvancementUnsupportedMessage(system: unknown): string {
+  if (nativeCharacterCreateLane(system) === "xianxia") {
+    return XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE;
+  }
   return NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE;
 }
 
@@ -400,6 +420,176 @@ export function buildCharacterAdvancedEditorPayload({
       feature_rows: features,
       equipment_rows: equipment,
     },
+  };
+}
+
+function definitionSourceType(definition: Record<string, unknown>): string {
+  return stringifyEditorValue(asRecord(definition.source).source_type).trim();
+}
+
+function definitionCurrentLevel(definition: Record<string, unknown>): number {
+  const profile = asRecord(definition.profile);
+  const classRows = asArray(profile.classes);
+  let summedLevel = 0;
+  for (const value of classRows) {
+    const row = asRecord(value);
+    const level = Number(row.level);
+    if (Number.isFinite(level) && level > 0) {
+      summedLevel += level;
+    }
+  }
+  if (summedLevel > 0) {
+    return summedLevel;
+  }
+
+  const classLevelText = stringifyEditorValue(profile.class_level_text);
+  const matchedLevels = [...classLevelText.matchAll(/\b(\d{1,2})\b/g)].map((match) => Number(match[1]));
+  const parsedLevel = matchedLevels.reduce((total, level) => (Number.isFinite(level) ? total + level : total), 0);
+  return parsedLevel > 0 ? parsedLevel : 1;
+}
+
+function buildCharacterAdvancementLinks({
+  campaign,
+  characterSlug,
+  definition,
+  readinessStatus,
+  kind,
+}: {
+  campaign: CampaignViewModel;
+  characterSlug: string;
+  definition: Record<string, unknown>;
+  readinessStatus: string;
+  kind: CharacterAdvancementRouteKind;
+}): Record<string, string> {
+  const links: Record<string, string> = {
+    flask_roster_url: flaskCampaignHref(campaign.slug, "characters"),
+    character_url: campaignHref(campaign.slug, `characters/${characterSlug}`),
+    flask_character_url: flaskCampaignHref(campaign.slug, `characters/${characterSlug}`),
+  };
+  const campaignLane = nativeCharacterCreateLane(campaign.system);
+  const characterLane = nativeCharacterCreateLane(definition.system);
+  if (campaignLane === "dnd5e" && characterLane === "dnd5e") {
+    links.advanced_editor_url = campaignHref(campaign.slug, `characters/${characterSlug}/edit`);
+    links.flask_advanced_editor_url = flaskCampaignHref(campaign.slug, `characters/${characterSlug}/edit`);
+  }
+  if (campaignLane === "xianxia" || characterLane === "xianxia") {
+    links.cultivation_url = campaignHref(campaign.slug, `characters/${characterSlug}/cultivation`);
+    links.flask_cultivation_url = flaskCampaignHref(campaign.slug, `characters/${characterSlug}/cultivation`);
+  }
+  if (kind === "level_up" && readinessStatus === "ready") {
+    links.level_up_url = campaignHref(campaign.slug, `characters/${characterSlug}/level-up`);
+    links.flask_level_up_url = flaskCampaignHref(campaign.slug, `characters/${characterSlug}/level-up`);
+  }
+  if (kind === "retraining" && readinessStatus === "ready") {
+    links.retraining_url = campaignHref(campaign.slug, `characters/${characterSlug}/retraining`);
+    links.flask_retraining_url = flaskCampaignHref(campaign.slug, `characters/${characterSlug}/retraining`);
+  }
+  if (readinessStatus === "repairable") {
+    links.progression_repair_url = campaignHref(campaign.slug, `characters/${characterSlug}/progression-repair`);
+    links.flask_progression_repair_url = flaskCampaignHref(campaign.slug, `characters/${characterSlug}/progression-repair`);
+  }
+  return links;
+}
+
+function buildLevelUpUnsupportedReadiness(definition: Record<string, unknown>, message: string): Record<string, unknown> {
+  const sourceType = definitionSourceType(definition);
+  return {
+    status: "unsupported",
+    message,
+    reasons: ["This character source is outside the current native progression flow."],
+    current_level: definitionCurrentLevel(definition),
+    source_type: sourceType,
+    is_native: sourceType === "native_character_builder",
+    is_imported: sourceType === "pdf_import" || sourceType === "markdown_import",
+  };
+}
+
+export function buildCharacterAdvancementShellPayload({
+  campaign,
+  characterSlug,
+  definition,
+  kind,
+}: {
+  campaign: CampaignViewModel;
+  characterSlug: string;
+  definition: Record<string, unknown>;
+  kind: CharacterAdvancementRouteKind;
+}): CharacterAdvancementShellPayload {
+  const campaignLane = nativeCharacterCreateLane(campaign.system);
+  const characterLane = nativeCharacterCreateLane(definition.system);
+  const dndSupported = campaignLane === "dnd5e" && characterLane === "dnd5e";
+
+  if (!dndSupported) {
+    const unsupportedMessage =
+      campaignLane !== "dnd5e"
+        ? characterAdvancementUnsupportedMessage(campaign.system)
+        : kind === "level_up"
+          ? "Level-up is currently available only for DND-5E native character tools in Gen2."
+        : kind === "retraining"
+          ? "Retraining is currently available only for DND-5E native character tools in Gen2."
+          : "Progression repair is currently available only for DND-5E imported character sheets in Gen2.";
+    const readiness = {
+      status: "unsupported",
+      message: unsupportedMessage,
+    };
+    return {
+      lane: "unsupported",
+      supported: false,
+      unsupported_message: unsupportedMessage,
+      readiness,
+      links: buildCharacterAdvancementLinks({
+        campaign,
+        characterSlug,
+        definition,
+        readinessStatus: "unsupported",
+        kind,
+      }),
+      context: null,
+    };
+  }
+
+  const levelUpMessage = "Level-up currently supports native in-app characters and imported character sheets only.";
+  const levelUpReadiness = buildLevelUpUnsupportedReadiness(definition, levelUpMessage);
+  if (kind === "retraining") {
+    const readiness = {
+      status: "empty",
+      message: "This character does not currently have any supported structured retraining options.",
+      level_up_readiness: levelUpReadiness,
+      linked_feature_authoring: {
+        supported: true,
+        is_imported: false,
+        message: "",
+      },
+    };
+    return {
+      lane: "unsupported",
+      supported: false,
+      unsupported_message: stringifyEditorValue(readiness.message),
+      readiness,
+      links: buildCharacterAdvancementLinks({
+        campaign,
+        characterSlug,
+        definition,
+        readinessStatus: "empty",
+        kind,
+      }),
+      context: null,
+    };
+  }
+
+  return {
+    lane: "unsupported",
+    supported: false,
+    unsupported_message: levelUpMessage,
+    readiness: levelUpReadiness,
+    links: buildCharacterAdvancementLinks({
+      campaign,
+      characterSlug,
+      definition,
+      readinessStatus: "unsupported",
+      kind,
+    }),
+    context: null,
   };
 }
 

@@ -1459,6 +1459,118 @@ def test_typescript_character_advanced_editor_context_matches_flask_shell(
     assert editor["equipment_rows"]
 
 
+def test_typescript_character_advancement_context_shells_match_flask_fixture(
+    typescript_api_mutation_server,
+    client,
+    app,
+    users,
+):
+    character_slug = "arden-march"
+    flask_dm_token = _issue_api_token(app, users["dm"]["email"], label="dm-character-advancement-shells-golden")
+    route_cases = [
+        ("level-up", "level_up"),
+        ("retraining", "retraining"),
+        ("progression-repair", "repair"),
+    ]
+
+    for route_suffix, context_key in route_cases:
+        route_path = f"/api/v1/campaigns/linden-pass/characters/{character_slug}/{route_suffix}"
+        flask_response = client.get(route_path, headers=_api_headers(flask_dm_token))
+        assert flask_response.status_code == 200
+        flask_payload = flask_response.get_json()
+        assert flask_payload["ok"] is True
+
+        status, payload = _to_json(
+            f"{typescript_api_mutation_server['url']}{route_path}",
+            headers=typescript_api_mutation_server["dm_headers"],
+        )
+
+        assert status == 200
+        assert payload["ok"] is True
+        assert payload["message"] is None
+        assert payload["campaign"] == flask_payload["campaign"]
+        assert payload["character"]["definition"] == flask_payload["character"]["definition"]
+        assert payload["character"]["import_metadata"] == flask_payload["character"]["import_metadata"]
+        assert payload["supported"] == flask_payload["supported"] is False
+        assert payload["lane"] == flask_payload["lane"] == "unsupported"
+        assert payload["unsupported_message"] == flask_payload["unsupported_message"]
+        assert payload["readiness"] == flask_payload["readiness"]
+        assert payload[context_key] is None
+        assert payload[context_key] == flask_payload[context_key]
+        for link_key in (
+            "advanced_editor_url",
+            "flask_advanced_editor_url",
+            "character_url",
+            "flask_character_url",
+            "flask_roster_url",
+        ):
+            assert payload["links"].get(link_key) == flask_payload["links"].get(link_key)
+
+    xianxia_character_slug = "api-advancement-crane"
+    flask_campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    _write_campaign_system(flask_campaigns_dir, system="Xianxia", systems_library="Xianxia")
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+    _write_campaign_system(typescript_api_mutation_server["campaigns_dir"], system="Xianxia", systems_library="Xianxia")
+    xianxia_definition_payload = {
+        "name": "API Advancement Crane",
+        "status": "active",
+        "system": "xianxia",
+        "xianxia": {
+            "realm": "Mortal",
+            "energy_maxima": {"jing": 1, "qi": 1, "shen": 1},
+            "yin_yang": {"yin_max": 1, "yang_max": 1},
+            "durability": {"hp_max": 10, "stance_max": 10, "manual_armor_bonus": 0},
+            "trained_skills": ["Qi Sense"],
+            "martial_arts": [{"name": "Cloud Palm", "current_rank": "Initiate"}],
+        },
+    }
+    xianxia_body = {"definition": xianxia_definition_payload}
+
+    flask_create = client.put(
+        f"/api/v1/campaigns/linden-pass/content/characters/{xianxia_character_slug}",
+        headers=_api_headers(flask_dm_token),
+        json=xianxia_body,
+    )
+    assert flask_create.status_code == 200
+    ts_create_status, _ts_create_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/characters/{xianxia_character_slug}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body=xianxia_body,
+    )
+    assert ts_create_status == 200
+
+    for route_suffix, context_key in route_cases:
+        route_path = f"/api/v1/campaigns/linden-pass/characters/{xianxia_character_slug}/{route_suffix}"
+        flask_response = client.get(route_path, headers=_api_headers(flask_dm_token))
+        assert flask_response.status_code == 200
+        flask_payload = flask_response.get_json()
+
+        status, payload = _to_json(
+            f"{typescript_api_mutation_server['url']}{route_path}",
+            headers=typescript_api_mutation_server["dm_headers"],
+        )
+
+        assert status == 200
+        assert payload["ok"] is True
+        assert payload["campaign"] == flask_payload["campaign"]
+        assert payload["supported"] == flask_payload["supported"] is False
+        assert payload["lane"] == flask_payload["lane"] == "unsupported"
+        assert payload["unsupported_message"] == flask_payload["unsupported_message"]
+        assert payload["readiness"] == flask_payload["readiness"]
+        assert payload[context_key] is None
+        assert payload[context_key] == flask_payload[context_key]
+        for link_key in (
+            "cultivation_url",
+            "flask_cultivation_url",
+            "character_url",
+            "flask_character_url",
+            "flask_roster_url",
+        ):
+            assert payload["links"].get(link_key) == flask_payload["links"].get(link_key)
+
+
 def test_typescript_content_character_backup_restore_rehearsal_recovers_files_assets_and_sqlite(
     tmp_path,
     typescript_api_mutation_server,
