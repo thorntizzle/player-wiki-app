@@ -122,6 +122,8 @@ import {
   type FixtureSystemsRole,
 } from "./systems/sources.js";
 import {
+  advancedEditorUnsupportedMessage,
+  applyCharacterAdvancedEditorReferenceUpdate,
   buildCharacterAdvancedEditorPayload,
   buildCharacterAdvancementShellPayload,
   buildCharacterAuthoringLinks,
@@ -131,6 +133,7 @@ import {
   listXianxiaCreateGenericTechniqueOptions,
   buildXianxiaManualImportCharacter,
   buildXianxiaManualImportContext,
+  characterAdvancedEditorIsSupported,
   listXianxiaManualImportMartialArtOptions,
   nativeCharacterCreateLane,
   nativeCharacterCreateUnsupportedMessage,
@@ -155,6 +158,7 @@ import {
   sanitizeContentPageRef,
   updateCampaignConfigFile,
   validateCampaignContentCharacterPortraitUpload,
+  writeCampaignCharacterDefinitionFile,
   writeCampaignContentAsset,
   writeCampaignContentCharacter,
   writeCampaignContentCharacterPortrait,
@@ -165,6 +169,7 @@ import {
   canEditCharacterSessionState,
   previewCharacterRest,
   readCharacterStateSnapshot,
+  updateCharacterAdvancedEditorReferenceState,
   updateCharacterSheetEdit,
   updateCharacterPortraitRevision,
   updateCharacterSessionArtificerInfusions,
@@ -5702,6 +5707,130 @@ app.get(ROUTES.characterAdvancedEditor, async (ctx) => {
         state: stateRecord.state,
         updated_at: stateRecord.updated_at ?? null,
         updated_by_user_id: stateRecord.updated_by_user_id ?? null,
+      },
+    },
+    lane: editorPayload.lane,
+    supported: editorPayload.supported,
+    unsupported_message: editorPayload.unsupported_message,
+    links: editorPayload.links,
+    editor: editorPayload.editor,
+  });
+});
+
+app.put(ROUTES.characterAdvancedEditorUpdate, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCharacterSessionBearerWrite(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "characters")) {
+    const error = forbidden("You do not have access to this campaign scope.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character || String(character.definition.status || "").trim() !== "active") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!canEditCharacterSessionState(config, campaign.slug, characterSlug, auth.role, auth.actorUserId)) {
+    const error = forbidden("You do not have permission to edit this character.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!characterAdvancedEditorIsSupported(campaign, character.definition)) {
+    const error = jsonError("unsupported_campaign_system", advancedEditorUnsupportedMessage(), 400);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const referenceUpdate = applyCharacterAdvancedEditorReferenceUpdate(character.definition, jsonPayload.payload);
+  if (referenceUpdate.status === "validation_error") {
+    const error = validationError(referenceUpdate.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const stateResult = updateCharacterAdvancedEditorReferenceState(
+    config,
+    campaign.slug,
+    characterSlug,
+    character.definition,
+    {
+      expected_revision: jsonPayload.payload.expected_revision,
+      state_note_values: referenceUpdate.stateNoteValues,
+    },
+    auth.actorUserId ?? 0,
+  );
+  if (stateResult.status === "state_conflict") {
+    const error = stateConflict(stateResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (stateResult.status === "validation_error") {
+    const error = validationError(stateResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (stateResult.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const writeResult = await writeCampaignCharacterDefinitionFile(
+    config,
+    campaign.slug,
+    characterSlug,
+    referenceUpdate.definition,
+  );
+  if (writeResult.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (writeResult.status === "validation_error") {
+    const error = validationError(writeResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const editorPayload = buildCharacterAdvancedEditorPayload({
+    campaign,
+    characterSlug,
+    definition: writeResult.record.definition,
+    state: stateResult.state,
+    stateRevision: stateResult.revision,
+  });
+
+  return ctx.json({
+    ok: true,
+    message: "Character details updated.",
+    campaign,
+    character: {
+      definition: writeResult.record.definition,
+      import_metadata: writeResult.record.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: writeResult.record.character_slug,
+        revision: stateResult.revision,
+        state: stateResult.state,
+        updated_at: stateResult.updatedAt,
+        updated_by_user_id: auth.actorUserId ?? null,
       },
     },
     lane: editorPayload.lane,

@@ -905,7 +905,16 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Character Advanced Editor context read route with Flask-compatible missing-campaign, missing-character, auth_required, forbidden, supported DND-5E lane, unsupported non-DND lane, edit-page links, state_revision, reference_fields, feature_rows, and equipment_rows. PUT/save parity remains deferred."
+      "notes": "Tracked Hono Character Advanced Editor context read route with Flask-compatible missing-campaign, missing-character, auth_required, forbidden, supported DND-5E lane, unsupported non-DND lane, edit-page links, state_revision, reference_fields, feature_rows, and equipment_rows. The PUT reference-field save slice is tracked separately; feature/equipment/native derivation parity remains deferred."
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/advanced-editor",
+      "route_family": "api_v1_characters",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono Character Advanced Editor reference-field write route with bearer API-token character access, fixture-role write denial, unsupported non-DND validation, stale revision conflicts, copied-fixture definition.yaml writes for profile/reference notes, SQLite notes persistence for state-backed reference fields, refreshed Advanced Editor payloads, and explicit validation for feature/equipment/native-derivation fields that remain outside this slice."
     },
     {
       "method": "GET",

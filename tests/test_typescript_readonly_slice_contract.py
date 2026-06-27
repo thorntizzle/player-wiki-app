@@ -1473,6 +1473,107 @@ def test_typescript_character_advanced_editor_context_matches_flask_shell(
     assert editor["equipment_rows"]
 
 
+def test_typescript_character_advanced_editor_reference_fields_save_fixture(
+    typescript_api_mutation_server,
+):
+    character_slug = "arden-march"
+    route_path = f"/api/v1/campaigns/linden-pass/characters/{character_slug}/advanced-editor"
+    route_url = f"{typescript_api_mutation_server['url']}{route_path}"
+
+    get_status, get_payload = _to_json(route_url, headers=typescript_api_mutation_server["dm_headers"])
+    assert get_status == 200
+    expected_revision = get_payload["editor"]["state_revision"]
+
+    fixture_status, fixture_payload = _to_json(
+        route_url,
+        headers=CONTENT_MANAGER_HEADERS,
+        method="PUT",
+        body={
+            "expected_revision": expected_revision,
+            "values": {"biography_markdown": "Fixture write should be denied."},
+        },
+    )
+    assert fixture_status == 403
+    assert fixture_payload["error"]["code"] == "forbidden"
+    assert "bearer API authentication" in fixture_payload["error"]["message"]
+
+    unsupported_status, unsupported_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={
+            "expected_revision": expected_revision,
+            "values": {"feature_rows": []},
+        },
+    )
+    assert unsupported_status == 400
+    assert unsupported_payload["error"]["code"] == "validation_error"
+    assert "feature_rows" in unsupported_payload["error"]["message"]
+
+    stale_status, stale_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={
+            "expected_revision": expected_revision - 1,
+            "values": {"biography_markdown": "Stale write should be rejected."},
+        },
+    )
+    assert stale_status == 409
+    assert stale_payload["error"]["code"] == "state_conflict"
+
+    values = {
+        "physical_description_markdown": "Updated physical description from TypeScript.",
+        "background_markdown": "Updated background from TypeScript.",
+        "biography_markdown": "Updated biography from TypeScript.",
+        "personality_markdown": "Updated personality from TypeScript.",
+        "additional_notes_markdown": "Updated additional notes from TypeScript.",
+        "allies_and_organizations_markdown": "Updated allies from TypeScript.",
+    }
+    save_status, save_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={"expected_revision": expected_revision, "values": values},
+    )
+    assert save_status == 200
+    assert save_payload["ok"] is True
+    assert save_payload["message"] == "Character details updated."
+    assert save_payload["editor"]["state_revision"] == expected_revision + 1
+    assert save_payload["character"]["state_record"]["revision"] == expected_revision + 1
+    assert save_payload["character"]["state_record"]["state"]["notes"]["physical_description_markdown"] == values["physical_description_markdown"]
+    assert save_payload["character"]["state_record"]["state"]["notes"]["background_markdown"] == values["background_markdown"]
+    assert save_payload["character"]["definition"]["profile"]["biography_markdown"] == values["biography_markdown"]
+    assert save_payload["character"]["definition"]["profile"]["personality_markdown"] == values["personality_markdown"]
+    assert save_payload["character"]["definition"]["reference_notes"]["additional_notes_markdown"] == values["additional_notes_markdown"]
+    assert (
+        save_payload["character"]["definition"]["reference_notes"]["allies_and_organizations_markdown"]
+        == values["allies_and_organizations_markdown"]
+    )
+    reference_values = {field["name"]: field["value"] for field in save_payload["editor"]["reference_fields"]}
+    for field_name, field_value in values.items():
+        assert reference_values[field_name] == field_value
+
+    sqlite_state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
+    assert sqlite_state is not None
+    assert sqlite_state["revision"] == expected_revision + 1
+    assert sqlite_state["state"]["notes"]["physical_description_markdown"] == values["physical_description_markdown"]
+    assert sqlite_state["state"]["notes"]["background_markdown"] == values["background_markdown"]
+
+    definition_path = (
+        typescript_api_mutation_server["campaigns_dir"]
+        / "linden-pass"
+        / "characters"
+        / character_slug
+        / "definition.yaml"
+    )
+    definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
+    assert definition["profile"]["biography_markdown"] == values["biography_markdown"]
+    assert definition["profile"]["personality_markdown"] == values["personality_markdown"]
+    assert definition["reference_notes"]["additional_notes_markdown"] == values["additional_notes_markdown"]
+    assert definition["reference_notes"]["allies_and_organizations_markdown"] == values["allies_and_organizations_markdown"]
+
+
 def test_typescript_character_advancement_context_shells_match_flask_fixture(
     typescript_api_mutation_server,
     client,

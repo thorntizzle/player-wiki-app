@@ -1931,6 +1931,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "campaign_asset_not_found",
     },
   },
+  {
+    method: "PUT",
+    honoPath: "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor",
+    snapshotFamily: "api_v1",
+    snapshotPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/advanced-editor",
+    seedPath: "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/advanced-editor",
+    routeFamily: "api_v1_characters",
+    missingResource: {
+      method: "PUT",
+      path: "/api/v1/campaigns/linden-pass/characters/missing-character/advanced-editor",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -2065,4 +2080,5 @@ export const ROUTES = {
   characterLevelUp: IMPLEMENTED_ROUTES[130].honoPath,
   characterProgressionRepair: IMPLEMENTED_ROUTES[131].honoPath,
   campaignAsset: IMPLEMENTED_ROUTES[132].honoPath,
+  characterAdvancedEditorUpdate: IMPLEMENTED_ROUTES[133].honoPath,
 } as const;

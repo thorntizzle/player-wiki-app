@@ -1568,6 +1568,65 @@ export async function createCampaignContentCharacter(
   return { status: "ok", record };
 }
 
+export async function writeCampaignCharacterDefinitionFile(
+  config: ApiConfig,
+  campaignSlug: string,
+  rawCharacterSlug: string,
+  definitionPayload: Record<string, unknown>,
+): Promise<
+  | {
+      status: "ok";
+      record: CampaignCharacterFileRecord;
+    }
+  | {
+      status: "not_found";
+    }
+  | {
+      status: "validation_error";
+      message: string;
+    }
+> {
+  const campaign = await loadCampaignContentContext(config, campaignSlug, { requireContentDir: false });
+  if (!campaign) {
+    return { status: "not_found" };
+  }
+
+  const characterSlugResult = normalizeContentCharacterWriteSlug(rawCharacterSlug);
+  if (characterSlugResult.status === "validation_error") {
+    return characterSlugResult;
+  }
+  const characterSlug = characterSlugResult.character_slug;
+  const characterDir = resolveSafeCharacterDir(campaign.charactersDir, characterSlug);
+  if (!characterDir) {
+    return { status: "validation_error", message: "Character slug must contain only letters, numbers, underscores, or hyphens." };
+  }
+
+  const definitionPath = path.join(characterDir, "definition.yaml");
+  try {
+    await fs.access(definitionPath);
+  } catch {
+    return { status: "not_found" };
+  }
+
+  const normalizedDefinition = normalizeCharacterDefinition(
+    {
+      ...definitionPayload,
+      campaign_slug: campaignSlug,
+      character_slug: characterSlug,
+    },
+    campaignSlug,
+    characterSlug,
+    campaign.system,
+  );
+  await fs.writeFile(definitionPath, dumpYamlRecord(normalizedDefinition), "utf-8");
+
+  const record = await toCharacterFileRecord(campaign, campaignSlug, characterSlug);
+  if (!record) {
+    return { status: "validation_error", message: "Character files were not readable after writing." };
+  }
+  return { status: "ok", record };
+}
+
 export async function deleteCampaignContentCharacter(
   config: ApiConfig,
   campaignSlug: string,

@@ -97,6 +97,8 @@ export type CharacterPortraitRevisionUpdateResult = CharacterSessionVitalsUpdate
 
 export type CharacterSheetEditUpdateResult = CharacterSessionVitalsUpdateResult;
 
+export type CharacterAdvancedEditorReferenceUpdateResult = CharacterSessionVitalsUpdateResult;
+
 export interface CharacterRestChangePayload {
   label: string;
   from_value: string;
@@ -3484,6 +3486,90 @@ export function updateCharacterSheetEdit(
       .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
     if (result.changes <= 0) {
       return { status: "state_conflict", message: CHARACTER_SHEET_EDIT_CONFLICT_MESSAGE };
+    }
+    return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCharacterAdvancedEditorReferenceState(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  definition: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  updatedByUserId: number,
+): CharacterAdvancedEditorReferenceUpdateResult {
+  let expectedRevision: number;
+  try {
+    expectedRevision = parseRequiredWholeNumber(payload.expected_revision, "Expected revision");
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid advanced editor payload." };
+  }
+
+  const stateNoteValues = asRecord(payload.state_note_values);
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+
+    let existingState = readCharacterState(database, campaignSlug, characterSlug);
+    const stateRowMissing = !existingState;
+    existingState ??= { revision: 1, state: buildInitialState(definition) };
+
+    if (existingState.revision !== expectedRevision) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+
+    const nextState = copyState(existingState.state);
+    const notes = { ...asRecord(nextState.notes) };
+    for (const [fieldName, value] of Object.entries(stateNoteValues)) {
+      notes[fieldName] = value === null || value === undefined ? "" : String(value);
+    }
+    nextState.notes = notes;
+
+    const now = utcIsoTimestamp();
+    if (stateRowMissing) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(campaignSlug, characterSlug, expectedRevision + 1, JSON.stringify(nextState), now, updatedByUserId);
+      return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+    }
+
+    const result = database
+      .prepare(
+        `
+          UPDATE character_state
+          SET revision = revision + 1,
+              state_json = ?,
+              updated_at = ?,
+              updated_by_user_id = ?
+          WHERE campaign_slug = ?
+            AND character_slug = ?
+            AND revision = ?
+        `,
+      )
+      .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
+    if (result.changes <= 0) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
     }
     return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
   } finally {

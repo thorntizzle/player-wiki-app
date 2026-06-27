@@ -153,6 +153,18 @@ const XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE =
   "Xianxia advancement and cultivation use their own character lane. Use the Xianxia Cultivation page instead of DND-5E level-up, repair, or retraining routes; remaining unmodeled advancement workflows should be added there.";
 const ADVANCED_EDITOR_UNSUPPORTED_MESSAGE =
   "Advanced Editor is currently available only for DND-5E native character tools in Gen2.";
+const ADVANCED_EDITOR_REFERENCE_FIELD_NAMES = new Set([
+  "physical_description_markdown",
+  "background_markdown",
+  "biography_markdown",
+  "personality_markdown",
+  "additional_notes_markdown",
+  "allies_and_organizations_markdown",
+]);
+const ADVANCED_EDITOR_STATE_NOTE_FIELD_NAMES = new Set([
+  "physical_description_markdown",
+  "background_markdown",
+]);
 const DND_SYSTEMS_OPTION_PREFIX = "systems:";
 const DND_PHB_SOURCE_ID = "PHB";
 const DND_SUPPORTED_NON_PHB_BASE_CLASSES = new Set(["TCE|artificer"]);
@@ -225,6 +237,15 @@ export interface CharacterAdvancedEditorPayload {
   } | null;
 }
 
+export type CharacterAdvancedEditorReferenceUpdate =
+  | {
+      status: "ok";
+      definition: Record<string, unknown>;
+      stateNoteValues: Record<string, string>;
+      values: Record<string, string>;
+    }
+  | { status: "validation_error"; message: string };
+
 export type CharacterAdvancementRouteKind = "level_up" | "retraining" | "progression_repair";
 
 export interface CharacterAdvancementShellPayload {
@@ -253,6 +274,17 @@ export function nativeCharacterCreateLane(system: unknown): "dnd5e" | "xianxia" 
 
 export function nativeCharacterCreateUnsupportedMessage(_system: unknown): string {
   return NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE;
+}
+
+export function advancedEditorUnsupportedMessage(): string {
+  return ADVANCED_EDITOR_UNSUPPORTED_MESSAGE;
+}
+
+export function characterAdvancedEditorIsSupported(
+  campaign: Pick<CampaignViewModel, "system">,
+  definition: Record<string, unknown>,
+): boolean {
+  return nativeCharacterCreateLane(campaign.system) === "dnd5e" && nativeCharacterCreateLane(definition.system) === "dnd5e";
 }
 
 function characterAdvancementUnsupportedMessage(system: unknown): string {
@@ -332,9 +364,7 @@ export function buildCharacterAdvancedEditorPayload({
   state: Record<string, unknown>;
   stateRevision: number;
 }): CharacterAdvancedEditorPayload {
-  const campaignLane = nativeCharacterCreateLane(campaign.system);
-  const characterLane = nativeCharacterCreateLane(definition.system);
-  const supported = campaignLane === "dnd5e" && characterLane === "dnd5e";
+  const supported = characterAdvancedEditorIsSupported(campaign, definition);
   const links = buildCharacterAdvancedEditorLinks(campaign, characterSlug);
   if (!supported) {
     return {
@@ -420,6 +450,59 @@ export function buildCharacterAdvancedEditorPayload({
       feature_rows: features,
       equipment_rows: equipment,
     },
+  };
+}
+
+export function applyCharacterAdvancedEditorReferenceUpdate(
+  definition: Record<string, unknown>,
+  payload: Record<string, unknown>,
+): CharacterAdvancedEditorReferenceUpdate {
+  const rawValues = asRecord(payload.values);
+  const values: Record<string, string> = {};
+  for (const [rawKey, value] of Object.entries(rawValues)) {
+    const fieldName = String(rawKey || "").trim();
+    if (!fieldName) {
+      continue;
+    }
+    if (Array.isArray(value)) {
+      values[fieldName] = String(value.length > 0 ? value[value.length - 1] : "");
+    } else if (value === null || value === undefined) {
+      values[fieldName] = "";
+    } else {
+      values[fieldName] = String(value);
+    }
+  }
+
+  const unsupportedFields = Object.keys(values).filter((fieldName) => !ADVANCED_EDITOR_REFERENCE_FIELD_NAMES.has(fieldName));
+  if (unsupportedFields.length > 0) {
+    return {
+      status: "validation_error",
+      message: `Unsupported Advanced Editor fields for the TypeScript reference-field slice: ${unsupportedFields.join(", ")}.`,
+    };
+  }
+
+  const nextDefinition = JSON.parse(JSON.stringify(definition || {})) as Record<string, unknown>;
+  const profile = { ...asRecord(nextDefinition.profile) };
+  const referenceNotes = { ...asRecord(nextDefinition.reference_notes) };
+  const stateNoteValues: Record<string, string> = {};
+
+  for (const [fieldName, value] of Object.entries(values)) {
+    if (fieldName === "biography_markdown" || fieldName === "personality_markdown") {
+      profile[fieldName] = value;
+    } else if (fieldName === "additional_notes_markdown" || fieldName === "allies_and_organizations_markdown") {
+      referenceNotes[fieldName] = value;
+    } else if (ADVANCED_EDITOR_STATE_NOTE_FIELD_NAMES.has(fieldName)) {
+      stateNoteValues[fieldName] = value;
+    }
+  }
+
+  nextDefinition.profile = profile;
+  nextDefinition.reference_notes = referenceNotes;
+  return {
+    status: "ok",
+    definition: nextDefinition,
+    stateNoteValues,
+    values,
   };
 }
 
