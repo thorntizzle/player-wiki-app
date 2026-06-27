@@ -543,6 +543,15 @@ export function getUserByEmail(dbPath: string, email: string): AuthUser | null {
   }
 }
 
+export function listActiveMembershipsForUser(dbPath: string, userId: number): AuthMembership[] {
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    return loadMemberships(database, userId);
+  } finally {
+    database.close();
+  }
+}
+
 export function createUser(
   dbPath: string,
   {

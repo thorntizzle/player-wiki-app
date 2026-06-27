@@ -55,6 +55,11 @@ Route parity check command:
 - `apps/api` exists and now serves:
   - `GET /healthz`
   - `GET /api/v1/app`
+  - `GET /api/v1/me`
+  - `POST /api/v1/me/view-as`
+  - `DELETE /api/v1/me/view-as`
+  - `GET /api/v1/me/settings`
+  - `PATCH /api/v1/me/settings`
   - `GET /api/v1/systems/import-runs`
   - `GET /api/v1/systems/import-runs/:importRunId`
   - `POST /api/v1/systems/imports/dnd5e`
@@ -292,7 +297,11 @@ Route parity check command:
   Flask-compatible unauthenticated `auth_required` behavior, returning synthetic role-header
   user, membership, preference, and View As metadata for player, DM, and admin fixture reads,
   and reading live-style API-token identity, active memberships, normalized preferences, and
-  admin View As choices from `CPW_DB_PATH` when a bearer token is supplied.
+  admin View As choices from `CPW_DB_PATH` when a bearer token is supplied. The View As mutation
+  pair now serves `POST /api/v1/me/view-as` and `DELETE /api/v1/me/view-as` for bearer-token
+  app admins, storing the requested active user in a same-origin cookie, preserving the real admin
+  identity on `/me` while reporting `auth_source: "view_as"`, switching campaign safe reads to the viewed user's effective role, and
+  blocking campaign API writes with `view_as_read_only` while preview mode is active.
 - The account settings slice now serves `GET /api/v1/me/settings` and
   `PATCH /api/v1/me/settings`, preserving Flask-compatible unauthenticated `auth_required`
   behavior, the current theme preset and live-session chat-order choice metadata, fixture-role

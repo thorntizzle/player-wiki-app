@@ -1,7 +1,7 @@
 import type { ApiConfig } from "../config.js";
 import type { CampaignViewModel } from "../campaigns/view.js";
 import type { FixtureSystemsRole } from "../systems/sources.js";
-import type { ApiTokenAuthContext } from "./repository.js";
+import type { ApiTokenAuthContext, AuthUser } from "./repository.js";
 
 const FIXTURE_TIMESTAMP = "2026-06-25T00:00:00+00:00";
 const FIXTURE_PREFERENCES = {
@@ -94,13 +94,21 @@ function fixtureUser(role: FixtureSystemsRole): FixtureUser {
   };
 }
 
-function viewAsChoice(user: FixtureUser) {
+function viewAsChoice(user: FixtureUser | AuthUser) {
   return {
     id: user.id,
     email: user.email,
     display_name: user.display_name,
     is_admin: user.is_admin,
     status: user.status,
+  };
+}
+
+export function buildApiTokenViewAsState(authContext: ApiTokenAuthContext, activeUser: AuthUser | null = null) {
+  return {
+    can_view_as: authContext.user.is_admin,
+    active_user: authContext.user.is_admin && activeUser ? viewAsChoice(activeUser) : null,
+    user_choices: authContext.user.is_admin ? authContext.viewAsUserChoices : [],
   };
 }
 
@@ -155,19 +163,15 @@ function appState(config: ApiConfig) {
   };
 }
 
-export function buildApiTokenMePayload(config: ApiConfig, authContext: ApiTokenAuthContext) {
+export function buildApiTokenMePayload(config: ApiConfig, authContext: ApiTokenAuthContext, activeViewAsUser: AuthUser | null = null) {
   return {
     ok: true,
     app: appState(config),
-    auth_source: authContext.authSource,
+    auth_source: authContext.user.is_admin && activeViewAsUser ? "view_as" : authContext.authSource,
     user: authContext.user,
     memberships: authContext.memberships,
     preferences: authContext.preferences,
-    view_as: {
-      can_view_as: authContext.user.is_admin,
-      active_user: null,
-      user_choices: authContext.viewAsUserChoices,
-    },
+    view_as: buildApiTokenViewAsState(authContext, activeViewAsUser),
   };
 }
 

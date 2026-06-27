@@ -953,6 +953,24 @@
       "notes": "Tracked Hono identity bootstrap route with Flask-compatible unauthenticated auth_required behavior, synthetic fixture-role user/membership/preference/View As metadata, and read-only SQLite API-token user, active membership, normalized preference, and admin View As choice reads through CPW_DB_PATH."
     },
     {
+      "method": "POST",
+      "path": "/api/v1/me/view-as",
+      "route_family": "api_v1",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/me/view-as",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono View As set route with bearer-token app-admin access, non-admin denial, active-user validation, self/blank clearing, HttpOnly same-origin cookie persistence, refreshed View As state responses, campaign safe-read identity switching, and campaign write view_as_read_only protection."
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/me/view-as",
+      "route_family": "api_v1",
+      "status": "implemented_fixture_sqlite_write",
+      "typescript_path": "/api/v1/me/view-as",
+      "snapshot_family": "api_v1",
+      "notes": "Tracked Hono View As clear route with bearer-token app-admin access, non-admin denial, cookie clearing, and refreshed View As state responses."
+    },
+    {
       "method": "GET",
       "path": "/api/v1/me/settings",
       "route_family": "api_v1",

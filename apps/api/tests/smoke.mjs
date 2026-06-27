@@ -1419,7 +1419,24 @@ const requestJson = async (path, headers = {}, options = {}) => {
     body,
   });
   const payload = await response.json();
-  return { status: response.status, payload };
+  return { status: response.status, payload, headers: response.headers };
+};
+
+let viewAsCookie = "";
+const updateViewAsCookie = (headers) => {
+  const setCookies = typeof headers.getSetCookie === "function"
+    ? headers.getSetCookie()
+    : [headers.get("set-cookie")].filter(Boolean);
+  const viewAsSetCookie = setCookies.find((item) => item.startsWith("cpw_view_as_user_id="));
+  if (viewAsSetCookie) {
+    viewAsCookie = viewAsSetCookie.split(";")[0];
+  }
+};
+const requestViewAsJson = async (path, headers = {}, options = {}) => {
+  const cookieHeaders = viewAsCookie ? { Cookie: viewAsCookie } : {};
+  const response = await requestJson(path, { ...cookieHeaders, ...headers }, options);
+  updateViewAsCookie(response.headers);
+  return response;
 };
 
 const requestBytes = async (path, headers = {}) => {
@@ -1569,6 +1586,198 @@ if (
   adminMe.payload?.view_as?.user_choices?.some((user) => user.id === adminMe.payload?.user?.id)
 ) {
   throw new Error(`Unexpected fixture admin me payload: ${JSON.stringify(adminMe.payload)}`);
+}
+
+const blockedViewAsSet = await requestJson("/api/v1/me/view-as", {}, { method: "POST", body: { user_id: 79 } });
+if (blockedViewAsSet.status !== 401 || blockedViewAsSet.payload?.error?.code !== "auth_required") {
+  throw new Error(
+    `Expected unauthenticated View As set auth_required 401, got ${blockedViewAsSet.status} ${JSON.stringify(blockedViewAsSet.payload)}`,
+  );
+}
+
+const playerViewAsSet = await requestJson(
+  "/api/v1/me/view-as",
+  { Authorization: `Bearer ${playerApiToken}` },
+  { method: "POST", body: { user_id: 77 } },
+);
+if (
+  playerViewAsSet.status !== 403 ||
+  playerViewAsSet.payload?.error?.code !== "forbidden" ||
+  playerViewAsSet.payload?.error?.message !== "Only app admins can use View As."
+) {
+  throw new Error(`Expected player View As set forbidden, got ${JSON.stringify(playerViewAsSet.payload)}`);
+}
+
+const invalidViewAsSet = await requestJson(
+  "/api/v1/me/view-as",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { user_id: "not-a-user-id" } },
+);
+if (
+  invalidViewAsSet.status !== 400 ||
+  invalidViewAsSet.payload?.error?.code !== "validation_error" ||
+  invalidViewAsSet.payload?.error?.message !== "Choose a valid user to view as."
+) {
+  throw new Error(`Expected invalid View As user validation, got ${JSON.stringify(invalidViewAsSet.payload)}`);
+}
+
+const inactiveViewAsSet = await requestJson(
+  "/api/v1/me/view-as",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { user_id: 82 } },
+);
+if (
+  inactiveViewAsSet.status !== 400 ||
+  inactiveViewAsSet.payload?.error?.code !== "validation_error" ||
+  inactiveViewAsSet.payload?.error?.message !== "Choose an active user to view as."
+) {
+  throw new Error(`Expected inactive View As user validation, got ${JSON.stringify(inactiveViewAsSet.payload)}`);
+}
+
+const viewAsSet = await requestViewAsJson(
+  "/api/v1/me/view-as",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { user_id: 79 } },
+);
+if (
+  viewAsSet.status !== 200 ||
+  viewAsSet.payload?.ok !== true ||
+  viewAsSet.payload?.view_as?.active_user?.email !== "fixture-token-player@example.com" ||
+  !viewAsCookie.startsWith("cpw_view_as_user_id=79")
+) {
+  throw new Error(`Unexpected View As set payload/cookie: ${JSON.stringify({ payload: viewAsSet.payload, viewAsCookie })}`);
+}
+
+const bearerMeAsPlayer = await requestViewAsJson("/api/v1/me", { Authorization: `Bearer ${liveApiToken}` });
+if (
+  bearerMeAsPlayer.status !== 200 ||
+  bearerMeAsPlayer.payload?.user?.email !== "fixture-token-user@example.com" ||
+  bearerMeAsPlayer.payload?.auth_source !== "view_as" ||
+  bearerMeAsPlayer.payload?.view_as?.active_user?.email !== "fixture-token-player@example.com"
+) {
+  throw new Error(`Unexpected bearer /me View As payload: ${JSON.stringify(bearerMeAsPlayer.payload)}`);
+}
+
+const campaignDetailAsPlayer = await requestViewAsJson("/api/v1/campaigns/linden-pass", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (
+  campaignDetailAsPlayer.status !== 200 ||
+  campaignDetailAsPlayer.payload?.role !== "player" ||
+  campaignDetailAsPlayer.payload?.auth_source !== "view_as" ||
+  campaignDetailAsPlayer.payload?.visibility?.dm_content?.can_access !== false ||
+  campaignDetailAsPlayer.payload?.permissions?.can_manage_dm_content !== false
+) {
+  throw new Error(`Unexpected campaign detail View As payload: ${JSON.stringify(campaignDetailAsPlayer.payload)}`);
+}
+
+const dmContentAsPlayer = await requestViewAsJson("/api/v1/campaigns/linden-pass/dm-content", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (dmContentAsPlayer.status !== 403 || dmContentAsPlayer.payload?.error?.code !== "forbidden") {
+  throw new Error(`Expected View As player DM Content read forbidden, got ${JSON.stringify(dmContentAsPlayer.payload)}`);
+}
+
+const viewAsWriteBlocked = await requestViewAsJson(
+  "/api/v1/campaigns/linden-pass/session/start",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: {} },
+);
+if (
+  viewAsWriteBlocked.status !== 403 ||
+  viewAsWriteBlocked.payload?.error?.code !== "view_as_read_only" ||
+  viewAsWriteBlocked.payload?.error?.message !==
+    "View As mode is read-only for campaign API writes. Exit View As before making changes."
+) {
+  throw new Error(`Expected View As write block, got ${JSON.stringify(viewAsWriteBlocked.payload)}`);
+}
+
+const viewAsClear = await requestViewAsJson(
+  "/api/v1/me/view-as",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "DELETE" },
+);
+if (
+  viewAsClear.status !== 200 ||
+  viewAsClear.payload?.ok !== true ||
+  viewAsClear.payload?.view_as?.active_user !== null
+) {
+  throw new Error(`Unexpected View As clear payload: ${JSON.stringify(viewAsClear.payload)}`);
+}
+
+viewAsCookie = "cpw_view_as_user_id=82";
+const campaignDetailWithStaleViewAs = await requestViewAsJson("/api/v1/campaigns/linden-pass", {
+  Authorization: `Bearer ${liveApiToken}`,
+});
+if (
+  campaignDetailWithStaleViewAs.status !== 200 ||
+  campaignDetailWithStaleViewAs.payload?.role !== "admin" ||
+  campaignDetailWithStaleViewAs.payload?.auth_source !== "api_token" ||
+  !viewAsCookie.startsWith("cpw_view_as_user_id=")
+) {
+  throw new Error(`Expected stale View As cookie to fall back to admin API-token role, got ${JSON.stringify({
+    payload: campaignDetailWithStaleViewAs.payload,
+    viewAsCookie,
+  })}`);
+}
+
+const viewAsResetForBlankClear = await requestViewAsJson(
+  "/api/v1/me/view-as",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { user_id: 79 } },
+);
+if (
+  viewAsResetForBlankClear.status !== 200 ||
+  viewAsResetForBlankClear.payload?.view_as?.active_user?.email !== "fixture-token-player@example.com"
+) {
+  throw new Error(`Unexpected View As reset before blank clear: ${JSON.stringify(viewAsResetForBlankClear.payload)}`);
+}
+
+const blankViewAsClear = await requestViewAsJson(
+  "/api/v1/me/view-as",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { user_id: "" } },
+);
+if (
+  blankViewAsClear.status !== 200 ||
+  blankViewAsClear.payload?.view_as?.active_user !== null ||
+  !viewAsCookie.startsWith("cpw_view_as_user_id=")
+) {
+  throw new Error(`Expected blank View As user_id to clear state, got ${JSON.stringify({ payload: blankViewAsClear.payload, viewAsCookie })}`);
+}
+
+const viewAsResetForSelfClear = await requestViewAsJson(
+  "/api/v1/me/view-as",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { user_id: 79 } },
+);
+if (
+  viewAsResetForSelfClear.status !== 200 ||
+  viewAsResetForSelfClear.payload?.view_as?.active_user?.email !== "fixture-token-player@example.com"
+) {
+  throw new Error(`Unexpected View As reset before self clear: ${JSON.stringify(viewAsResetForSelfClear.payload)}`);
+}
+
+const selfViewAsClear = await requestViewAsJson(
+  "/api/v1/me/view-as",
+  { Authorization: `Bearer ${liveApiToken}` },
+  { method: "POST", body: { user_id: 77 } },
+);
+if (
+  selfViewAsClear.status !== 200 ||
+  selfViewAsClear.payload?.view_as?.active_user !== null ||
+  !viewAsCookie.startsWith("cpw_view_as_user_id=")
+) {
+  throw new Error(`Expected self View As user_id to clear state, got ${JSON.stringify({ payload: selfViewAsClear.payload, viewAsCookie })}`);
+}
+
+const bearerMeAfterViewAsClear = await requestViewAsJson("/api/v1/me", { Authorization: `Bearer ${liveApiToken}` });
+if (
+  bearerMeAfterViewAsClear.status !== 200 ||
+  bearerMeAfterViewAsClear.payload?.auth_source !== "api_token" ||
+  bearerMeAfterViewAsClear.payload?.view_as?.active_user !== null
+) {
+  throw new Error(`Expected cleared View As state, got ${JSON.stringify(bearerMeAfterViewAsClear.payload)}`);
 }
 
 const blockedMeSettings = await requestJson("/api/v1/me/settings");

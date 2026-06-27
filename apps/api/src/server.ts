@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 
 import { buildAdminDashboardPayload, buildAdminUserDetailPayload } from "./admin/view.js";
 import {
@@ -22,6 +23,7 @@ import {
   insertAuthAuditLog,
   issueInviteToken,
   issuePasswordResetToken,
+  listActiveMembershipsForUser,
   listActivePlayerMembershipUsers,
   readApiTokenAuthContext,
   revokeAllUserApiTokens,
@@ -29,6 +31,8 @@ import {
   upsertCharacterAssignment,
   upsertMembership,
   updateApiTokenAccountSettings,
+  type ApiTokenAuthContext,
+  type AuthMembership,
   type AuthRouteRole,
   type AuthUser,
   type CharacterAssignment,
@@ -36,6 +40,7 @@ import {
 import {
   buildApiTokenAccountSettingsPayload,
   buildApiTokenMePayload,
+  buildApiTokenViewAsState,
   buildFixtureAccountSettingsPayload,
   buildFixtureMePayload,
 } from "./auth/view.js";
@@ -201,6 +206,27 @@ const app = new Hono();
 
 const config = getApiConfig();
 setWikiConfig(config);
+
+const VIEW_AS_COOKIE_NAME = "cpw_view_as_user_id";
+const VIEW_AS_COOKIE_OPTIONS = {
+  httpOnly: true,
+  path: "/",
+  sameSite: "Lax" as const,
+};
+const VIEW_AS_SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const VIEW_AS_READ_ONLY_MESSAGE = "View As mode is read-only for campaign API writes. Exit View As before making changes.";
+
+type ViewAsResolution = {
+  activeUser: AuthUser | null;
+  memberships: AuthMembership[];
+  shouldClearCookie: boolean;
+};
+
+type ApiTokenCampaignIdentity = {
+  role: AuthRouteRole;
+  user: AuthUser;
+  authSource: "api_token" | "view_as";
+};
 
 function utcIsoTimestamp(value: Date = new Date()): string {
   const normalized = new Date(value);
@@ -413,6 +439,105 @@ function fixtureRole(ctx: { req: { header: (name: string) => string | undefined 
   return null;
 }
 
+function requestedViewAsUserId(ctx: Context): number | null {
+  const parsed = parsePositiveInteger(String(getCookie(ctx, VIEW_AS_COOKIE_NAME) || ""));
+  return parsed === null ? null : parsed;
+}
+
+function setRequestedViewAsUserId(ctx: Context, userId: number): void {
+  setCookie(ctx, VIEW_AS_COOKIE_NAME, String(userId), VIEW_AS_COOKIE_OPTIONS);
+}
+
+function clearRequestedViewAsUserId(ctx: Context): void {
+  deleteCookie(ctx, VIEW_AS_COOKIE_NAME, VIEW_AS_COOKIE_OPTIONS);
+}
+
+function resolveViewAsState(ctx: Context, authContext: ApiTokenAuthContext): ViewAsResolution {
+  const requestedUserId = requestedViewAsUserId(ctx);
+  if (requestedUserId === null) {
+    return { activeUser: null, memberships: [], shouldClearCookie: false };
+  }
+  if (!authContext.user.is_admin) {
+    return { activeUser: null, memberships: [], shouldClearCookie: true };
+  }
+  const targetUser = getActiveUserById(config.dbPath, requestedUserId);
+  if (!targetUser) {
+    return { activeUser: null, memberships: [], shouldClearCookie: true };
+  }
+  return {
+    activeUser: targetUser,
+    memberships: listActiveMembershipsForUser(config.dbPath, targetUser.id),
+    shouldClearCookie: false,
+  };
+}
+
+function applyViewAsCookieState(ctx: Context, state: ViewAsResolution): void {
+  if (state.shouldClearCookie) {
+    clearRequestedViewAsUserId(ctx);
+  }
+}
+
+function viewAsRoleForCampaign(memberships: AuthMembership[], campaignSlug: string): AuthRouteRole | null {
+  const membership = memberships.find((item) => item.campaign_slug === campaignSlug && item.status === "active");
+  if (membership?.role === "dm" || membership?.role === "player") {
+    return membership.role;
+  }
+  return null;
+}
+
+function apiTokenCampaignIdentity(
+  ctx: Context,
+  authContext: ApiTokenAuthContext,
+  campaignSlug: string,
+): ApiTokenCampaignIdentity | null {
+  const viewAs = resolveViewAsState(ctx, authContext);
+  applyViewAsCookieState(ctx, viewAs);
+  if (viewAs.activeUser) {
+    if (viewAs.activeUser.is_admin) {
+      return { role: "admin", user: viewAs.activeUser, authSource: "view_as" };
+    }
+    const viewAsRole = viewAsRoleForCampaign(viewAs.memberships, campaignSlug);
+    return viewAsRole ? { role: viewAsRole, user: viewAs.activeUser, authSource: "view_as" } : null;
+  }
+
+  const role = apiTokenRoleForCampaign(authContext, campaignSlug);
+  return role ? { role, user: authContext.user, authSource: "api_token" } : null;
+}
+
+function viewAsReadOnlyError() {
+  return {
+    ok: false,
+    error: {
+      code: "view_as_read_only",
+      message: VIEW_AS_READ_ONLY_MESSAGE,
+      details: {},
+    },
+    status: 403 as const,
+  };
+}
+
+const viewAsReadOnlyGuard = async (ctx: Context, next: () => Promise<void>) => {
+  if (VIEW_AS_SAFE_METHODS.has(ctx.req.method.toUpperCase())) {
+    await next();
+    return;
+  }
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind !== "authenticated") {
+    await next();
+    return;
+  }
+  const viewAs = resolveViewAsState(ctx, apiAuth.context);
+  applyViewAsCookieState(ctx, viewAs);
+  if (viewAs.activeUser) {
+    const error = viewAsReadOnlyError();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  await next();
+};
+
+app.use("/api/v1/campaigns", viewAsReadOnlyGuard);
+app.use("/api/v1/campaigns/*", viewAsReadOnlyGuard);
+
 type RoleResolution =
   | {
       kind: "authenticated";
@@ -420,6 +545,7 @@ type RoleResolution =
       actorUserId?: number;
       actorDisplayName?: string;
       actorUser?: AuthUser;
+      authSource?: "api_token" | "view_as";
     }
   | { kind: "missing" }
   | { kind: "invalid" }
@@ -499,21 +625,19 @@ function resolveSessionManagerBearerWrite(
   };
 }
 
-function resolveCampaignRole(
-  ctx: { req: { header: (name: string) => string | undefined } },
-  campaignSlug: string,
-): RoleResolution {
+function resolveCampaignRole(ctx: Context, campaignSlug: string): RoleResolution {
   const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
   if (apiAuth.kind === "authenticated") {
-    const role = apiTokenRoleForCampaign(apiAuth.context, campaignSlug);
-    if (!role) {
+    const identity = apiTokenCampaignIdentity(ctx, apiAuth.context, campaignSlug);
+    if (!identity) {
       return { kind: "forbidden", message: "You do not have access to this campaign scope." };
     }
     return {
       kind: "authenticated",
-      role: toFixtureSystemsRole(role),
-      actorUserId: apiAuth.context.user.id,
-      actorDisplayName: apiAuth.context.user.display_name,
+      role: toFixtureSystemsRole(identity.role),
+      actorUserId: identity.user.id,
+      actorDisplayName: identity.user.display_name,
+      authSource: identity.authSource,
     };
   }
   if (apiAuth.kind === "invalid") {
@@ -525,15 +649,15 @@ function resolveCampaignRole(
 }
 
 function resolveContentManagerRole(
-  ctx: { req: { header: (name: string) => string | undefined } },
+  ctx: Context,
   campaignSlug: string,
 ): RoleResolution {
   const forbiddenMessage = "You do not have permission to manage campaign content.";
   const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
   if (apiAuth.kind === "authenticated") {
-    const role = apiTokenRoleForCampaign(apiAuth.context, campaignSlug);
-    if (role === "admin" || role === "dm") {
-      return { kind: "authenticated", role: toFixtureSystemsRole(role) };
+    const identity = apiTokenCampaignIdentity(ctx, apiAuth.context, campaignSlug);
+    if (identity?.role === "admin" || identity?.role === "dm") {
+      return { kind: "authenticated", role: toFixtureSystemsRole(identity.role) };
     }
     return { kind: "forbidden", message: forbiddenMessage };
   }
@@ -735,15 +859,15 @@ function resolveCharacterSessionBearerWrite(
 }
 
 function resolveCampaignVisibilityManagerRole(
-  ctx: { req: { header: (name: string) => string | undefined } },
+  ctx: Context,
   campaign: CampaignViewModel,
 ): RoleResolution {
   const forbiddenMessage = "You do not have permission to manage campaign visibility.";
   const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
   if (apiAuth.kind === "authenticated") {
-    const role = apiTokenRoleForCampaign(apiAuth.context, campaign.slug);
-    if (role && campaignRoleCanManageVisibility(config.dbPath, campaign, role)) {
-      return { kind: "authenticated", role: toFixtureSystemsRole(role) };
+    const identity = apiTokenCampaignIdentity(ctx, apiAuth.context, campaign.slug);
+    if (identity && campaignRoleCanManageVisibility(config.dbPath, campaign, identity.role)) {
+      return { kind: "authenticated", role: toFixtureSystemsRole(identity.role) };
     }
     return { kind: "forbidden", message: forbiddenMessage };
   }
@@ -1214,7 +1338,9 @@ app.get(ROUTES.appState, async (ctx) =>
 app.get(ROUTES.me, async (ctx) => {
   const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
   if (apiAuth.kind === "authenticated") {
-    return ctx.json(buildApiTokenMePayload(config, apiAuth.context));
+    const viewAs = resolveViewAsState(ctx, apiAuth.context);
+    applyViewAsCookieState(ctx, viewAs);
+    return ctx.json(buildApiTokenMePayload(config, apiAuth.context, viewAs.activeUser));
   }
   if (apiAuth.kind === "invalid") {
     const error = authRequired();
@@ -1229,6 +1355,64 @@ app.get(ROUTES.me, async (ctx) => {
 
   const campaigns = await listCampaigns(config);
   return ctx.json(buildFixtureMePayload(config, campaigns, role));
+});
+
+app.post(ROUTES.meViewAsUpdate, async (ctx) => {
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "invalid" || apiAuth.kind === "missing") {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (!apiAuth.context.user.is_admin) {
+    const error = forbidden("Only app admins can use View As.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const rawUserId = jsonPayload.payload.user_id;
+  if (rawUserId === null || rawUserId === undefined || rawUserId === "") {
+    clearRequestedViewAsUserId(ctx);
+    return ctx.json({ ok: true, view_as: buildApiTokenViewAsState(apiAuth.context, null) });
+  }
+
+  const targetUserId = parsePositiveInteger(String(rawUserId));
+  if (targetUserId === null) {
+    const error = validationError("Choose a valid user to view as.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (targetUserId === apiAuth.context.user.id) {
+    clearRequestedViewAsUserId(ctx);
+    return ctx.json({ ok: true, view_as: buildApiTokenViewAsState(apiAuth.context, null) });
+  }
+
+  const targetUser = getActiveUserById(config.dbPath, targetUserId);
+  if (!targetUser) {
+    const error = validationError("Choose an active user to view as.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  setRequestedViewAsUserId(ctx, targetUser.id);
+  return ctx.json({ ok: true, view_as: buildApiTokenViewAsState(apiAuth.context, targetUser) });
+});
+
+app.delete(ROUTES.meViewAsClear, async (ctx) => {
+  const apiAuth = readApiTokenAuthContext(config.dbPath, ctx.req.header("Authorization"));
+  if (apiAuth.kind === "invalid" || apiAuth.kind === "missing") {
+    const error = authRequired();
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (!apiAuth.context.user.is_admin) {
+    const error = forbidden("Only app admins can use View As.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  clearRequestedViewAsUserId(ctx);
+  return ctx.json({ ok: true, view_as: buildApiTokenViewAsState(apiAuth.context, null) });
 });
 
 app.get(ROUTES.meSettings, async (ctx) => {
@@ -3348,6 +3532,40 @@ app.get(ROUTES.campaignDetail, async (ctx) => {
       },
       404,
     );
+  }
+
+  if ((ctx.req.header("Authorization") || "").trim()) {
+    const auth = resolveCampaignRole(ctx, campaign.slug);
+    if (auth.kind !== "authenticated") {
+      const error = roleResolutionError(auth);
+      return ctx.json({ ok: error.ok, error: error.error }, error.status);
+    }
+    const canManageCampaign = auth.role === "admin" || auth.role === "dm";
+    return ctx.json({
+      ok: true,
+      campaign,
+      role: auth.role,
+      auth_source: auth.authSource || "api_token",
+      visibility: {
+        campaign: { effective: "public", can_access: true },
+        wiki: { effective: "public", can_access: true },
+        systems: { effective: "players", can_access: true },
+        session: { effective: "players", can_access: true },
+        combat: { effective: "players", can_access: true },
+        dm_content: { effective: "dm", can_access: canManageCampaign },
+        characters: { effective: "dm", can_access: canManageCampaign },
+      },
+      permissions: {
+        mode: "authenticated",
+        can_manage_visibility: campaignRoleCanManageVisibility(config.dbPath, campaign, auth.role),
+        can_manage_content: canManageCampaign,
+        can_manage_systems: canManageCampaign,
+        can_manage_combat: canManageCampaign,
+        can_manage_session: canManageCampaign,
+        can_manage_dm_content: canManageCampaign,
+        can_post_session_messages: true,
+      },
+    });
   }
 
   return ctx.json({
