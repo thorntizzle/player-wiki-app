@@ -354,6 +354,8 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
             ("DND-5E", "PHB", "PHB:optionalfeature:archery", "optionalfeature", "phb-optionalfeature-archery", "Archery", {"feature_type": ["FS:F"]}),
             ("DND-5E", "PHB", "PHB:optionalfeature:defense", "optionalfeature", "phb-optionalfeature-defense", "Defense", {"feature_type": ["FS:F"]}),
             ("DND-5E", "PHB", "PHB:optionalfeature:quickened-spell", "optionalfeature", "phb-optionalfeature-quickened-spell", "Quickened Spell", {"feature_type": ["MM"]}),
+            ("DND-5E", "PHB", "PHB:spell:alarm", "spell", "phb-spell-alarm", "Alarm", {"level": 1, "school": "A"}),
+            ("DND-5E", "PHB", "PHB:spell:fog-cloud", "spell", "phb-spell-fog-cloud", "Fog Cloud", {"level": 1, "school": "C"}),
         ]
         connection.executemany(
             "INSERT INTO systems_entries (library_slug, source_id, entry_key, entry_type, slug, title, metadata_json, body_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -2470,12 +2472,126 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         option["value"] for option in linked_feature_rows[1]["choice_fields"][0]["options"]
     } == {"phb-optionalfeature-archery", "phb-optionalfeature-defense"}
 
+    linked_spell_page_status, linked_spell_page_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/pages/mechanics/harbor-lore",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={
+            "metadata": {
+                "title": "Harbor Lore",
+                "section": "Mechanics",
+                "subsection": "Feats",
+                "type": "mechanic",
+                "summary": "A harbor discipline that teaches one abjuration spell.",
+                "published": True,
+                "reveal_after_session": 0,
+                "character_option": {
+                    "kind": "feat",
+                    "name": "Harbor Lore",
+                    "description_markdown": "Harbor veterans teach you one warding spell.",
+                    "activation_type": "passive",
+                    "additional_spells": [
+                        {
+                            "known": {
+                                "1": [
+                                    {
+                                        "choose": "level=1|school=A",
+                                        "count": 1,
+                                    }
+                                ]
+                            }
+                        }
+                    ],
+                },
+            },
+            "body_markdown": "The harbor keeps old warding formulae in salt-stained ledgers.",
+        },
+    )
+    assert linked_spell_page_status == 200
+    assert linked_spell_page_payload["ok"] is True
+
+    invalid_linked_spell_values = {
+        "custom_feature_id_1": custom_feature_id,
+        "custom_feature_name_1": "",
+        "custom_feature_page_ref_1": "mechanics/harbor-lore",
+        "custom_feature_activation_type_1": "",
+        "custom_feature_description_1": "",
+        "custom_feature_resource_max_1": "",
+        "custom_feature_resource_reset_on_1": "",
+        "custom_feature_additional_spells_1_known_1_1": "phb-spell-fog-cloud",
+    }
+    invalid_linked_spell_status, invalid_linked_spell_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={"expected_revision": expected_revision + 12, "values": invalid_linked_spell_values},
+    )
+    assert invalid_linked_spell_status == 400
+    assert invalid_linked_spell_payload["error"]["code"] == "validation_error"
+    assert invalid_linked_spell_payload["error"]["message"] == "Granted Spell 1 is not valid for the current selection."
+
+    linked_spell_values = {
+        **invalid_linked_spell_values,
+        "custom_feature_additional_spells_1_known_1_1": "phb-spell-alarm",
+    }
+    linked_spell_status, linked_spell_payload = _to_json(
+        route_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PUT",
+        body={"expected_revision": expected_revision + 12, "values": linked_spell_values},
+    )
+    assert linked_spell_status == 200
+    assert linked_spell_payload["editor"]["state_revision"] == expected_revision + 13
+    linked_spell_features = linked_spell_payload["character"]["definition"]["features"]
+    harbor_lore = next(
+        feature
+        for feature in linked_spell_features
+        if feature.get("category") == "custom_feature" and feature.get("page_ref") == "mechanics/harbor-lore"
+    )
+    assert harbor_lore["id"] == custom_feature_id
+    assert harbor_lore["name"] == "Harbor Lore"
+    assert harbor_lore["campaign_option"]["additional_spells"][0]["known"]["1"][0]["choose"] == "level=1|school=A"
+    assert all(
+        feature.get("native_edit_parent_feature_id") != custom_feature_id
+        for feature in linked_spell_features
+    )
+    spells_by_slug = {
+        (spell.get("systems_ref") or {}).get("slug"): spell
+        for spell in linked_spell_payload["character"]["definition"]["spellcasting"]["spells"]
+    }
+    alarm_spell = spells_by_slug["phb-spell-alarm"]
+    assert alarm_spell["name"] == "Alarm"
+    assert alarm_spell["mark"] == "Known"
+    assert alarm_spell["is_bonus_known"] is True
+    assert alarm_spell["has_base_spell"] is False
+    assert alarm_spell["campaign_option_sources"] == [
+        {
+            "source_ref": "mechanics/harbor-lore",
+            "mode": "additional_spell_choice",
+            "category": "known",
+            "spec_index": 1,
+            "choice_index": 1,
+            "mark": "",
+            "always_prepared": False,
+            "ritual": False,
+        }
+    ]
+    linked_spell_rows = {
+        row["index"]: row for row in linked_spell_payload["editor"]["feature_rows"]
+    }
+    assert linked_spell_rows[1]["name"] == "Harbor Lore"
+    assert linked_spell_rows[1]["spell_fields"][0]["name"] == "custom_feature_additional_spells_1_known_1_1"
+    assert linked_spell_rows[1]["spell_fields"][0]["selected"] == "phb-spell-alarm"
+    assert {
+        option["value"] for option in linked_spell_rows[1]["spell_fields"][0]["options"]
+    } == {"phb-spell-alarm"}
+
     invalid_feature_link_status, invalid_feature_link_payload = _to_json(
         route_url,
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
         body={
-            "expected_revision": expected_revision + 12,
+            "expected_revision": expected_revision + 13,
             "values": {
                 "custom_feature_name_1": "Broken Storm Feature",
                 "custom_feature_page_ref_1": "items/stormglass-compass",
@@ -2500,10 +2616,10 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         route_url,
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
-        body={"expected_revision": expected_revision + 12, "values": clear_custom_feature_values},
+        body={"expected_revision": expected_revision + 13, "values": clear_custom_feature_values},
     )
     assert clear_custom_feature_status == 200
-    assert clear_custom_feature_payload["editor"]["state_revision"] == expected_revision + 13
+    assert clear_custom_feature_payload["editor"]["state_revision"] == expected_revision + 14
     assert all(
         feature.get("category") != "custom_feature"
         for feature in clear_custom_feature_payload["character"]["definition"]["features"]
@@ -2511,6 +2627,13 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert all(
         feature.get("native_edit_parent_feature_id") != custom_feature_id
         for feature in clear_custom_feature_payload["character"]["definition"]["features"]
+    )
+    assert all(
+        not any(
+            source.get("source_ref") == "mechanics/harbor-lore"
+            for source in spell.get("campaign_option_sources", [])
+        )
+        for spell in clear_custom_feature_payload["character"]["definition"]["spellcasting"]["spells"]
     )
     assert all(
         template.get("id") != tracker_id

@@ -134,6 +134,7 @@ import {
   buildXianxiaCreateCharacter,
   type CharacterAdvancementRouteKind,
   listAdvancedEditorOptionalFeatureRows,
+  listAdvancedEditorSpellRows,
   listXianxiaCultivationGenericTechniqueRows,
   listXianxiaCultivationMartialArtRows,
   listXianxiaCreateGenericTechniqueOptions,
@@ -5701,6 +5702,11 @@ app.get(ROUTES.characterAdvancedEditor, async (ctx) => {
     campaign,
     campaignConfig,
   });
+  const spellRows = listAdvancedEditorSpellRows({
+    dbPath: config.dbPath,
+    campaign,
+    campaignConfig,
+  });
   const editorPayload = buildCharacterAdvancedEditorPayload({
     campaign,
     characterSlug,
@@ -5709,6 +5715,7 @@ app.get(ROUTES.characterAdvancedEditor, async (ctx) => {
     stateRevision: stateRecord.revision,
     campaignPageRecords,
     optionalFeatureRows,
+    spellRows,
   });
 
   return ctx.json({
@@ -5789,11 +5796,17 @@ app.put(ROUTES.characterAdvancedEditorUpdate, async (ctx) => {
     campaign,
     campaignConfig,
   });
+  const spellRows = listAdvancedEditorSpellRows({
+    dbPath: config.dbPath,
+    campaign,
+    campaignConfig,
+  });
   const referenceUpdate = applyCharacterAdvancedEditorReferenceUpdate(
     character.definition,
     jsonPayload.payload,
     campaignPageRecords,
     optionalFeatureRows,
+    spellRows,
   );
   if (referenceUpdate.status === "validation_error") {
     const error = validationError(referenceUpdate.message);
@@ -5846,6 +5859,7 @@ app.put(ROUTES.characterAdvancedEditorUpdate, async (ctx) => {
     stateRevision: stateResult.revision,
     campaignPageRecords,
     optionalFeatureRows,
+    spellRows,
   });
 
   return ctx.json({

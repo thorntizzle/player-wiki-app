@@ -245,6 +245,8 @@ const ADVANCED_EDITOR_CUSTOM_FEATURE_FIELD_PATTERN =
   /^custom_feature_(id|name|page_ref|activation_type|description|resource_max|resource_reset_on)_([1-9]\d*)$/;
 const ADVANCED_EDITOR_CUSTOM_FEATURE_OPTIONALFEATURE_FIELD_PATTERN =
   /^custom_feature_optionalfeature_([1-9]\d*)_([1-9]\d*)_([1-9]\d*)$/;
+const ADVANCED_EDITOR_CUSTOM_FEATURE_ADDITIONAL_SPELL_FIELD_PATTERN =
+  /^custom_feature_additional_spells_([1-9]\d*)_(known|prepared|granted)_([1-9]\d*)_([1-9]\d*)$/;
 const NATIVE_EDIT_PARENT_FEATURE_ID_KEY = "native_edit_parent_feature_id";
 const NATIVE_EDIT_OPTIONALFEATURE_SECTION_KEY = "native_edit_optionalfeature_section_index";
 const NATIVE_EDIT_OPTIONALFEATURE_CHOICE_KEY = "native_edit_optionalfeature_choice_index";
@@ -4157,11 +4159,13 @@ function buildEditorOptionalFeatureFieldsForRow({
 
 function buildCustomFeatureRows(
   definition: Record<string, unknown>,
-  options: { optionalFeatureRows?: SystemsEntryRow[]; values?: Record<string, string> } = {},
+  options: { optionalFeatureRows?: SystemsEntryRow[]; spellRows?: SystemsEntryRow[]; values?: Record<string, string> } = {},
 ): Array<Record<string, unknown>> {
   const customFeatures = editorCustomFeatureEntries(definition);
   const templates = resourceTemplateLookup(definition);
   const optionalFeatureSelections = nativeEditOptionalFeatureSelectionLookup(definition);
+  const spellcasting = asRecord(definition.spellcasting);
+  const currentLevel = definitionCurrentLevel(definition);
   const rowCount = Math.max(
     customFeatures.length + 1,
     ADVANCED_EDITOR_MIN_CUSTOM_FEATURE_ROWS,
@@ -4183,8 +4187,10 @@ function buildCustomFeatureRows(
       resource_max: resourceMax,
       resource_reset_on: normalizeEditorFeatureResourceResetOn(tracker.reset_on),
       spell_manager: { ...asRecord(feature.spell_manager) },
+      spellcasting,
       campaign_option: { ...asRecord(feature.campaign_option) },
       choice_fields: [],
+      spell_fields: [],
     };
     row.choice_fields = buildEditorOptionalFeatureFieldsForRow({
       row,
@@ -4192,6 +4198,13 @@ function buildCustomFeatureRows(
       optionalFeatureRows: options.optionalFeatureRows || [],
       selectedChoices: optionalFeatureSelections.get(stringifyEditorValue(feature.id).trim()),
     });
+    row.spell_fields = buildEditorAdditionalSpellChoiceFieldsForRow({
+      row,
+      values: options.values,
+      spellRows: options.spellRows || [],
+      currentLevel,
+    });
+    delete row.spellcasting;
     rows.push(row);
   }
   return rows;
@@ -4212,7 +4225,8 @@ function maxEditorCustomFeatureRowIndex(values: Record<string, string>): number 
 function hasEditorCustomFeatureValues(values: Record<string, string>): boolean {
   return Object.keys(values).some((fieldName) =>
     ADVANCED_EDITOR_CUSTOM_FEATURE_FIELD_PATTERN.test(fieldName)
-    || ADVANCED_EDITOR_CUSTOM_FEATURE_OPTIONALFEATURE_FIELD_PATTERN.test(fieldName),
+    || ADVANCED_EDITOR_CUSTOM_FEATURE_OPTIONALFEATURE_FIELD_PATTERN.test(fieldName)
+    || ADVANCED_EDITOR_CUSTOM_FEATURE_ADDITIONAL_SPELL_FIELD_PATTERN.test(fieldName),
   );
 }
 
@@ -4275,6 +4289,408 @@ function optionalFeatureRowBySlug(optionalFeatureRows: SystemsEntryRow[]): Map<s
   );
 }
 
+function systemsEntryRef(row: SystemsEntryRow): Record<string, unknown> {
+  return {
+    library_slug: row.library_slug,
+    source_id: row.source_id,
+    entry_key: row.entry_key,
+    entry_type: row.entry_type,
+    slug: row.slug,
+    title: row.title,
+  };
+}
+
+interface AdvancedEditorSpellCatalog {
+  entries: SystemsEntryRow[];
+  bySlug: Map<string, SystemsEntryRow>;
+  byTitle: Map<string, SystemsEntryRow>;
+}
+
+interface AdvancedEditorAdditionalSpellSpec {
+  filter: string;
+  count: number;
+  spellMark: string;
+  spellIsAlwaysPrepared: boolean;
+  spellIsRitual: boolean;
+}
+
+interface AdvancedEditorSpellChoiceField {
+  name: string;
+  label: string;
+  help_text: string;
+  options: Array<Record<string, unknown>>;
+  selected: string;
+  group_key: string;
+  kind: string;
+  spell_mark: string;
+  spell_is_always_prepared: boolean;
+  spell_is_ritual: boolean;
+}
+
+function buildAdvancedEditorSpellCatalog(spellRows: SystemsEntryRow[]): AdvancedEditorSpellCatalog {
+  const entries = spellRows.filter((row) => row.is_enabled_override !== 0);
+  const bySlug = new Map<string, SystemsEntryRow>();
+  const byTitle = new Map<string, SystemsEntryRow>();
+  for (const row of entries) {
+    const slug = stringifyEditorValue(row.slug).trim();
+    if (slug && !bySlug.has(slug)) {
+      bySlug.set(slug, row);
+    }
+    const titleKey = normalizeLookup(row.title);
+    if (titleKey && !byTitle.has(titleKey)) {
+      byTitle.set(titleKey, row);
+    }
+  }
+  return { entries, bySlug, byTitle };
+}
+
+function resolveAdvancedEditorSpellEntry(
+  selectedValue: unknown,
+  spellCatalog: AdvancedEditorSpellCatalog,
+): SystemsEntryRow | undefined {
+  const cleanValue = stringifyEditorValue(selectedValue).trim();
+  if (!cleanValue) {
+    return undefined;
+  }
+  return spellCatalog.bySlug.get(cleanValue) || spellCatalog.byTitle.get(normalizeLookup(cleanValue));
+}
+
+function spellEntryMetadata(row: SystemsEntryRow | undefined): Record<string, unknown> {
+  return row ? parseJsonRecord(row.metadata_json) : {};
+}
+
+function spellEntryLevel(row: SystemsEntryRow | undefined): number {
+  return createContextInteger(spellEntryMetadata(row).level);
+}
+
+function parseAdditionalSpellUnlockLevel(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  const match = stringifyEditorValue(value).match(/(\d+)/);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+function additionalSpellValuesUnlockedAt(value: unknown, currentLevel: number): unknown[] {
+  const values: unknown[] = [];
+  for (const [rawUnlockLevel, rawValues] of Object.entries(asRecord(value))) {
+    const unlockLevel = parseAdditionalSpellUnlockLevel(rawUnlockLevel);
+    if (unlockLevel !== null && unlockLevel <= currentLevel) {
+      values.push(rawValues);
+    }
+  }
+  return values;
+}
+
+function extractAdditionalSpellChoiceSpecs(
+  value: unknown,
+  extra: Partial<AdvancedEditorAdditionalSpellSpec> = {},
+): AdvancedEditorAdditionalSpellSpec[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => extractAdditionalSpellChoiceSpecs(item, extra));
+  }
+  const record = asRecord(value);
+  const chooseFilter = stringifyEditorValue(record.choose).trim();
+  const specs: AdvancedEditorAdditionalSpellSpec[] = [];
+  if (chooseFilter) {
+    specs.push({
+      filter: chooseFilter,
+      count: Math.max(createContextInteger(record.count, 1), 1),
+      spellMark: stringifyEditorValue(extra.spellMark).trim(),
+      spellIsAlwaysPrepared: Boolean(extra.spellIsAlwaysPrepared),
+      spellIsRitual: Boolean(extra.spellIsRitual),
+    });
+  }
+  if ("_" in record) {
+    specs.push(...extractAdditionalSpellChoiceSpecs(record._, extra));
+  }
+  return specs;
+}
+
+function flattenAdditionalSpellValues(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => flattenAdditionalSpellValues(item));
+  }
+  if (typeof value === "string") {
+    const cleanValue = value.trim();
+    return cleanValue ? [cleanValue] : [];
+  }
+  const record = asRecord(value);
+  if (Object.keys(record).length === 0 || stringifyEditorValue(record.choose).trim()) {
+    return [];
+  }
+  return Object.values(record).flatMap((item) => flattenAdditionalSpellValues(item));
+}
+
+function dedupeStrings(values: string[]): string[] {
+  const results: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const cleanValue = value.trim();
+    const marker = normalizeLookup(cleanValue);
+    if (!cleanValue || seen.has(marker)) {
+      continue;
+    }
+    seen.add(marker);
+    results.push(cleanValue);
+  }
+  return results;
+}
+
+function additionalSpellFilterCriteria(filterExpression: string): Record<string, unknown> {
+  const criteria: Record<string, unknown> = {};
+  for (const fragment of filterExpression.split("|")) {
+    const [rawKey, ...valueParts] = fragment.split("=");
+    const key = normalizeLookup(rawKey).replaceAll(" ", "_");
+    const value = valueParts.join("=").trim();
+    if (!key || !value) {
+      continue;
+    }
+    if (key === "level") {
+      const level = Number.parseInt(value, 10);
+      if (Number.isFinite(level)) {
+        criteria.level = level;
+      }
+    } else if (key === "school") {
+      criteria.school = value.toUpperCase();
+    } else if ((key === "components_miscellaneous" || key === "miscellaneous") && normalizeLookup(value) === "ritual") {
+      criteria.ritual = true;
+    } else if (key === "class") {
+      criteria.className = normalizeLookup(value);
+    }
+  }
+  return criteria;
+}
+
+function spellEntryMatchesAdditionalFilter(row: SystemsEntryRow, criteria: Record<string, unknown>): boolean {
+  const metadata = spellEntryMetadata(row);
+  if (typeof criteria.level === "number" && spellEntryLevel(row) !== criteria.level) {
+    return false;
+  }
+  const school = stringifyEditorValue(criteria.school).trim().toUpperCase();
+  if (school && stringifyEditorValue(metadata.school).trim().toUpperCase() !== school) {
+    return false;
+  }
+  if (Boolean(criteria.ritual) && !Boolean(metadata.ritual)) {
+    return false;
+  }
+  const className = stringifyEditorValue(criteria.className).trim();
+  if (className) {
+    const classLists = asRecord(metadata.class_lists);
+    const hasClassMatch = Object.values(classLists).some((rawTitles) =>
+      asArray(rawTitles).some((title) => normalizeLookup(title) === className),
+    );
+    if (!hasClassMatch) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function buildAdditionalSpellFilterOptions(
+  filterExpression: string,
+  spellCatalog: AdvancedEditorSpellCatalog,
+): Array<Record<string, unknown>> {
+  const criteria = additionalSpellFilterCriteria(filterExpression);
+  if (Object.keys(criteria).length === 0) {
+    return [];
+  }
+  return spellCatalog.entries
+    .filter((row) => spellEntryMatchesAdditionalFilter(row, criteria))
+    .map((row) => ({
+      value: stringifyEditorValue(row.slug).trim() || stringifyEditorValue(row.title).trim(),
+      label: stringifyEditorValue(row.title).trim() || stringifyEditorValue(row.slug).trim(),
+    }))
+    .filter((option) => stringifyEditorValue(option.value).trim());
+}
+
+function additionalSpellChoiceSpecs(
+  additionalSpells: unknown[],
+  category: "known" | "prepared" | "granted",
+  currentLevel: number,
+): AdvancedEditorAdditionalSpellSpec[] {
+  const specs: AdvancedEditorAdditionalSpellSpec[] = [];
+  for (const rawBlock of additionalSpells) {
+    const block = asRecord(rawBlock);
+    if (category === "known") {
+      for (const rawValue of additionalSpellValuesUnlockedAt(block.known, currentLevel)) {
+        specs.push(...extractAdditionalSpellChoiceSpecs(rawValue));
+      }
+    } else if (category === "prepared") {
+      for (const rawValue of additionalSpellValuesUnlockedAt(block.prepared, currentLevel)) {
+        specs.push(...extractAdditionalSpellChoiceSpecs(rawValue, { spellIsAlwaysPrepared: true }));
+      }
+    } else {
+      for (const rawValue of additionalSpellValuesUnlockedAt(block.innate, currentLevel)) {
+        for (const [rawDailyUses, dailyValues] of Object.entries(asRecord(asRecord(rawValue).daily))) {
+          const spellIsRitual = stringifyEditorValue(dailyValues).includes("miscellaneous=ritual");
+          const usesMatch = stringifyEditorValue(rawDailyUses).match(/(\d+)/);
+          const spellMark = spellIsRitual
+            ? "Ritual"
+            : usesMatch
+              ? `${Number.parseInt(usesMatch[1], 10)} / Long Rest`
+              : "Granted";
+          specs.push(...extractAdditionalSpellChoiceSpecs(dailyValues, { spellMark, spellIsRitual }));
+        }
+      }
+    }
+  }
+  return specs;
+}
+
+function automaticAdditionalSpellValues(
+  additionalSpells: unknown[],
+  category: "known" | "prepared" | "granted",
+  currentLevel: number,
+): Array<Record<string, unknown>> {
+  const values: Array<Record<string, unknown>> = [];
+  for (const rawBlock of additionalSpells) {
+    const block = asRecord(rawBlock);
+    if (category === "known" || category === "prepared") {
+      const source = category === "known" ? block.known : block.prepared;
+      for (const rawValue of additionalSpellValuesUnlockedAt(source, currentLevel)) {
+        for (const spellName of flattenAdditionalSpellValues(rawValue)) {
+          values.push({
+            value: spellName,
+            category,
+            alwaysPrepared: category === "prepared",
+          });
+        }
+      }
+    } else {
+      for (const rawValue of additionalSpellValuesUnlockedAt(block.innate, currentLevel)) {
+        for (const [rawDailyUses, dailyValues] of Object.entries(asRecord(asRecord(rawValue).daily))) {
+          const spellIsRitual = stringifyEditorValue(dailyValues).includes("miscellaneous=ritual");
+          const usesMatch = stringifyEditorValue(rawDailyUses).match(/(\d+)/);
+          const spellMark = spellIsRitual
+            ? "Ritual"
+            : usesMatch
+              ? `${Number.parseInt(usesMatch[1], 10)} / Long Rest`
+              : "Granted";
+          for (const spellName of flattenAdditionalSpellValues(dailyValues)) {
+            values.push({
+              value: spellName,
+              category,
+              mark: spellMark,
+              ritual: spellIsRitual,
+            });
+          }
+        }
+      }
+    }
+  }
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const marker = JSON.stringify([
+      normalizeLookup(value.value),
+      stringifyEditorValue(value.category),
+      stringifyEditorValue(value.mark),
+      Boolean(value.alwaysPrepared),
+      Boolean(value.ritual),
+    ]);
+    if (seen.has(marker)) {
+      return false;
+    }
+    seen.add(marker);
+    return true;
+  });
+}
+
+function editorAdditionalSpellFieldPrefix(rowIndex: number): string {
+  return `custom_feature_additional_spells_${rowIndex}`;
+}
+
+function inferEditorAdditionalSpellChoiceValue({
+  spellcasting,
+  sourceRef,
+  category,
+  specIndex,
+  choiceIndex,
+}: {
+  spellcasting: Record<string, unknown>;
+  sourceRef: string;
+  category: string;
+  specIndex: number;
+  choiceIndex: number;
+}): string {
+  for (const rawSpell of asArray(spellcasting.spells)) {
+    const spell = asRecord(rawSpell);
+    for (const rawSource of asArray(spell.campaign_option_sources)) {
+      const source = asRecord(rawSource);
+      if (
+        stringifyEditorValue(source.source_ref).trim() === sourceRef
+        && stringifyEditorValue(source.mode).trim() === "additional_spell_choice"
+        && stringifyEditorValue(source.category).trim() === category
+        && createContextInteger(source.spec_index) === specIndex
+        && createContextInteger(source.choice_index) === choiceIndex
+      ) {
+        return stringifyEditorValue(asRecord(spell.systems_ref).slug || spell.name).trim();
+      }
+    }
+  }
+  return "";
+}
+
+function buildEditorAdditionalSpellChoiceFieldsForRow({
+  row,
+  values,
+  spellRows,
+  currentLevel,
+}: {
+  row: Record<string, unknown>;
+  values?: Record<string, string>;
+  spellRows: SystemsEntryRow[];
+  currentLevel: number;
+}): AdvancedEditorSpellChoiceField[] {
+  const campaignOption = asRecord(row.campaign_option);
+  const additionalSpells = asArray(campaignOption.additional_spells);
+  if (additionalSpells.length === 0 || spellRows.length === 0) {
+    return [];
+  }
+  const spellCatalog = buildAdvancedEditorSpellCatalog(spellRows);
+  const rowIndex = createContextInteger(row.index);
+  const fieldPrefix = editorAdditionalSpellFieldPrefix(rowIndex);
+  const sourceRef = stringifyEditorValue(campaignOption.page_ref || row.page_ref || campaignOption.title).trim();
+  const fields: AdvancedEditorSpellChoiceField[] = [];
+  for (const category of ["known", "prepared", "granted"] as const) {
+    const specs = additionalSpellChoiceSpecs(additionalSpells, category, currentLevel);
+    for (const [specOffset, spec] of specs.entries()) {
+      const options = buildAdditionalSpellFilterOptions(spec.filter, spellCatalog);
+      if (options.length === 0) {
+        continue;
+      }
+      const isCantrip = options.every((option) =>
+        spellEntryLevel(resolveAdvancedEditorSpellEntry(option.value, spellCatalog)) === 0,
+      );
+      const labelPrefix = isCantrip ? "Granted Cantrip" : "Granted Spell";
+      const groupKey = `${fieldPrefix}_${category}_${specOffset + 1}`;
+      for (let choiceIndex = 1; choiceIndex <= spec.count; choiceIndex += 1) {
+        const fieldName = `${fieldPrefix}_${category}_${specOffset + 1}_${choiceIndex}`;
+        fields.push({
+          name: fieldName,
+          label: `${labelPrefix} ${choiceIndex}`,
+          help_text: isCantrip ? "Choose a feature-granted cantrip." : "Choose a feature-granted bonus spell.",
+          options,
+          selected: stringifyEditorValue(values?.[fieldName]).trim()
+            || inferEditorAdditionalSpellChoiceValue({
+              spellcasting: asRecord(row.spellcasting),
+              sourceRef,
+              category,
+              specIndex: specOffset + 1,
+              choiceIndex,
+            }),
+          group_key: groupKey,
+          kind: `additional_spell_${category}`,
+          spell_mark: spec.spellMark,
+          spell_is_always_prepared: spec.spellIsAlwaysPrepared,
+          spell_is_ritual: spec.spellIsRitual,
+        });
+      }
+    }
+  }
+  return fields;
+}
+
 function buildSelectedEditorOptionalFeatureFeatures({
   rowIndex,
   parentFeatureId,
@@ -4335,16 +4751,197 @@ function buildSelectedEditorOptionalFeatureFeatures({
   return selectedFeatures;
 }
 
+function spellPayloadKey(spell: Record<string, unknown>): string {
+  return stringifyEditorValue(asRecord(spell.systems_ref).slug || spell.name).trim();
+}
+
+function spellPayloadMapKey(spell: Record<string, unknown>): string {
+  const key = spellPayloadKey(spell);
+  if (!key) {
+    return "";
+  }
+  const sourceRowId = stringifyEditorValue(spell.spell_source_row_id).trim();
+  if (sourceRowId) {
+    return `${stringifyEditorValue(spell.spell_source_row_kind).trim() || "source"}:${sourceRowId}::${key}`;
+  }
+  const classRowId = stringifyEditorValue(spell.class_row_id).trim();
+  return classRowId ? `${classRowId}::${key}` : key;
+}
+
+function baseSpellcastingSpellsForCampaignOptionRebuild(spellcasting: Record<string, unknown>): Array<Record<string, unknown>> {
+  return asArray(spellcasting.spells)
+    .map((spell) => asRecord(spell))
+    .filter((spell) => !(asArray(spell.campaign_option_sources).length > 0 && !Boolean(spell.has_base_spell)))
+    .map((spell) => ({ ...spell }));
+}
+
+function buildEditorSpellPayload(
+  selectedValue: string,
+  spellCatalog: AdvancedEditorSpellCatalog,
+  options: {
+    mark?: string;
+    alwaysPrepared?: boolean;
+    bonusKnown?: boolean;
+    ritual?: boolean;
+    annotation: Record<string, unknown>;
+  },
+): Record<string, unknown> | null {
+  const entry = resolveAdvancedEditorSpellEntry(selectedValue, spellCatalog);
+  const name = stringifyEditorValue(entry?.title || selectedValue).trim();
+  const key = stringifyEditorValue(entry?.slug || selectedValue).trim();
+  if (!name || !key) {
+    return null;
+  }
+  const baseRitual = Boolean(spellEntryMetadata(entry).ritual);
+  const mark = stringifyEditorValue(
+    options.mark
+      || (options.bonusKnown ? (spellEntryLevel(entry) === 0 ? "Cantrip" : "Known") : ""),
+  ).trim();
+  return {
+    name,
+    source: stringifyEditorValue(entry?.source_id || "PHB").trim(),
+    mark,
+    is_always_prepared: Boolean(options.alwaysPrepared),
+    is_bonus_known: Boolean(options.bonusKnown),
+    is_ritual: Boolean(options.ritual) || baseRitual,
+    systems_ref: entry ? systemsEntryRef(entry) : {},
+    base_mark: "",
+    base_is_always_prepared: false,
+    base_is_bonus_known: false,
+    base_is_ritual: baseRitual,
+    has_base_spell: false,
+    campaign_option_sources: [{ ...options.annotation }],
+  };
+}
+
+function mergeEditorSpellPayload(
+  spellsByKey: Map<string, Record<string, unknown>>,
+  payload: Record<string, unknown> | null,
+): void {
+  if (!payload) {
+    return;
+  }
+  const key = spellPayloadMapKey(payload);
+  if (!key) {
+    return;
+  }
+  const existing = spellsByKey.get(key);
+  if (!existing) {
+    spellsByKey.set(key, payload);
+    return;
+  }
+  const existingMark = stringifyEditorValue(existing.mark).trim();
+  const nextMark = stringifyEditorValue(payload.mark).trim();
+  existing.mark = dedupeStrings([...existingMark.split("+"), ...nextMark.split("+")]).join(" + ");
+  existing.is_always_prepared = Boolean(existing.is_always_prepared) || Boolean(payload.is_always_prepared);
+  existing.is_bonus_known = Boolean(existing.is_bonus_known) || Boolean(payload.is_bonus_known);
+  existing.is_ritual = Boolean(existing.is_ritual) || Boolean(payload.is_ritual);
+  existing.campaign_option_sources = [
+    ...asArray(existing.campaign_option_sources).map((source) => asRecord(source)),
+    ...asArray(payload.campaign_option_sources).map((source) => asRecord(source)),
+  ];
+}
+
+function applyEditorAdditionalSpellsForFeature({
+  spellsByKey,
+  campaignOption,
+  values,
+  rowIndex,
+  sourceRef,
+  spellRows,
+  currentLevel,
+}: {
+  spellsByKey: Map<string, Record<string, unknown>>;
+  campaignOption: Record<string, unknown>;
+  values: Record<string, string>;
+  rowIndex: number;
+  sourceRef: string;
+  spellRows: SystemsEntryRow[];
+  currentLevel: number;
+}): { status: "ok" } | { status: "validation_error"; message: string } {
+  const additionalSpells = asArray(campaignOption.additional_spells);
+  if (additionalSpells.length === 0) {
+    return { status: "ok" };
+  }
+  const spellCatalog = buildAdvancedEditorSpellCatalog(spellRows);
+  for (const category of ["known", "prepared", "granted"] as const) {
+    for (const grant of automaticAdditionalSpellValues(additionalSpells, category, currentLevel)) {
+      mergeEditorSpellPayload(
+        spellsByKey,
+        buildEditorSpellPayload(stringifyEditorValue(grant.value).trim(), spellCatalog, {
+          mark: stringifyEditorValue(grant.mark).trim(),
+          alwaysPrepared: Boolean(grant.alwaysPrepared),
+          bonusKnown: category === "known",
+          ritual: Boolean(grant.ritual),
+          annotation: {
+            source_ref: sourceRef,
+            mode: "additional_spell_grant",
+            category,
+            spec_index: 0,
+            choice_index: 0,
+            mark: stringifyEditorValue(grant.mark).trim(),
+            always_prepared: Boolean(grant.alwaysPrepared),
+            ritual: Boolean(grant.ritual),
+          },
+        }),
+      );
+    }
+  }
+
+  const row = { index: rowIndex, page_ref: sourceRef, campaign_option: campaignOption };
+  const fields = buildEditorAdditionalSpellChoiceFieldsForRow({ row, values, spellRows, currentLevel });
+  for (const field of fields) {
+    const selectedValue = stringifyEditorValue(values[field.name]).trim();
+    if (!selectedValue) {
+      return { status: "validation_error", message: `${field.label} is required.` };
+    }
+    const allowedValues = new Set(
+      field.options
+        .map((option) => stringifyEditorValue(option.value).trim())
+        .filter(Boolean),
+    );
+    if (!allowedValues.has(selectedValue)) {
+      return { status: "validation_error", message: `${field.label} is not valid for the current selection.` };
+    }
+    const match = field.name.match(ADVANCED_EDITOR_CUSTOM_FEATURE_ADDITIONAL_SPELL_FIELD_PATTERN);
+    const category = match?.[2] || "";
+    const specIndex = match ? Number.parseInt(match[3], 10) : 0;
+    const choiceIndex = match ? Number.parseInt(match[4], 10) : 0;
+    mergeEditorSpellPayload(
+      spellsByKey,
+      buildEditorSpellPayload(selectedValue, spellCatalog, {
+        mark: stringifyEditorValue(field.spell_mark).trim(),
+        alwaysPrepared: Boolean(field.spell_is_always_prepared),
+        bonusKnown: category === "known",
+        ritual: Boolean(field.spell_is_ritual),
+        annotation: {
+          source_ref: sourceRef,
+          mode: "additional_spell_choice",
+          category,
+          spec_index: specIndex,
+          choice_index: choiceIndex,
+          mark: stringifyEditorValue(field.spell_mark).trim(),
+          always_prepared: Boolean(field.spell_is_always_prepared),
+          ritual: Boolean(field.spell_is_ritual),
+        },
+      }),
+    );
+  }
+  return { status: "ok" };
+}
+
 function parseEditorCustomFeatures(
   values: Record<string, string>,
   definition: Record<string, unknown>,
   campaignPageLookup: Record<string, Record<string, unknown>> = {},
   optionalFeatureRows: SystemsEntryRow[] = [],
+  spellRows: SystemsEntryRow[] = [],
 ): {
   status: "ok";
   features: Array<Record<string, unknown>>;
   resourceTemplates: Array<Record<string, unknown>>;
   removedResourceIds: string[];
+  spellcasting: Record<string, unknown>;
 } | { status: "validation_error"; message: string } {
   const existingFeatures = editorCustomFeatureEntries(definition);
   const existingById = new Map(
@@ -4358,6 +4955,15 @@ function parseEditorCustomFeatures(
   const features: Array<Record<string, unknown>> = [];
   const generatedOptionalFeatureFeatures: Array<Record<string, unknown>> = [];
   const resourceTemplates: Array<Record<string, unknown>> = [];
+  const spellcasting = { ...asRecord(definition.spellcasting) };
+  const spellsByKey = new Map<string, Record<string, unknown>>();
+  for (const spell of baseSpellcastingSpellsForCampaignOptionRebuild(spellcasting)) {
+    const key = spellPayloadMapKey(spell);
+    if (key) {
+      spellsByKey.set(key, spell);
+    }
+  }
+  const currentLevel = definitionCurrentLevel(definition);
   const rowCount = Math.max(
     maxEditorCustomFeatureRowIndex(values),
     ADVANCED_EDITOR_MIN_CUSTOM_FEATURE_ROWS,
@@ -4480,6 +5086,18 @@ function parseEditorCustomFeatures(
       return optionalFeatureSelection;
     }
     generatedOptionalFeatureFeatures.push(...optionalFeatureSelection);
+    const spellSelection = applyEditorAdditionalSpellsForFeature({
+      spellsByKey,
+      campaignOption,
+      values,
+      rowIndex: index,
+      sourceRef: stringifyEditorValue(pageRef || campaignOption.title || name).trim(),
+      spellRows,
+      currentLevel,
+    });
+    if (spellSelection.status === "validation_error") {
+      return spellSelection;
+    }
 
     if (resourceMax > 0) {
       const trackerId = manualFeatureTrackerId(featureId);
@@ -4505,7 +5123,8 @@ function parseEditorCustomFeatures(
     .map((feature) => stringifyEditorValue(feature.tracker_ref || manualFeatureTrackerId(stringifyEditorValue(feature.id))).trim())
     .filter(Boolean);
   const removedResourceIds = existingResourceIds.filter((resourceId) => !nextResourceIds.has(resourceId));
-  return { status: "ok", features: [...features, ...generatedOptionalFeatureFeatures], resourceTemplates, removedResourceIds };
+  spellcasting.spells = Array.from(spellsByKey.values());
+  return { status: "ok", features: [...features, ...generatedOptionalFeatureFeatures], resourceTemplates, removedResourceIds, spellcasting };
 }
 
 function adjustSpeedLabel(value: unknown, delta: number): string {
@@ -4643,6 +5262,7 @@ export function buildCharacterAdvancedEditorPayload({
   stateRevision,
   campaignPageRecords = [],
   optionalFeatureRows = [],
+  spellRows = [],
 }: {
   campaign: CampaignViewModel;
   characterSlug: string;
@@ -4651,6 +5271,7 @@ export function buildCharacterAdvancedEditorPayload({
   stateRevision: number;
   campaignPageRecords?: CampaignPageFileRecord[];
   optionalFeatureRows?: SystemsEntryRow[];
+  spellRows?: SystemsEntryRow[];
 }): CharacterAdvancedEditorPayload {
   const supported = characterAdvancedEditorIsSupported(campaign, definition);
   const links = buildCharacterAdvancedEditorLinks(campaign, characterSlug);
@@ -4671,7 +5292,7 @@ export function buildCharacterAdvancedEditorPayload({
   const manualStatAdjustments = normalizeEditorStatAdjustments(asRecord(definition.stats).manual_adjustments);
   const recoverablePenaltyRows = buildRecoverablePenaltyRows(asRecord(definition.stats).recoverable_penalties);
   const equipment = buildManualEquipmentRows(definition);
-  const features = buildCustomFeatureRows(definition, { optionalFeatureRows });
+  const features = buildCustomFeatureRows(definition, { optionalFeatureRows, spellRows });
   const featureLinkedPageRefs = new Set(
     features
       .map((feature) => extractEditorPageRefValue(feature.page_ref))
@@ -4772,6 +5393,7 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
   payload: Record<string, unknown>,
   campaignPageRecords: CampaignPageFileRecord[] = [],
   optionalFeatureRows: SystemsEntryRow[] = [],
+  spellRows: SystemsEntryRow[] = [],
 ): CharacterAdvancedEditorReferenceUpdate {
   const rawValues = asRecord(payload.values);
   const values: Record<string, string> = {};
@@ -4795,7 +5417,8 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
       !ADVANCED_EDITOR_RECOVERABLE_PENALTY_FIELD_PATTERN.test(fieldName) &&
       !ADVANCED_EDITOR_MANUAL_EQUIPMENT_FIELD_PATTERN.test(fieldName) &&
       !ADVANCED_EDITOR_CUSTOM_FEATURE_FIELD_PATTERN.test(fieldName) &&
-      !ADVANCED_EDITOR_CUSTOM_FEATURE_OPTIONALFEATURE_FIELD_PATTERN.test(fieldName),
+      !ADVANCED_EDITOR_CUSTOM_FEATURE_OPTIONALFEATURE_FIELD_PATTERN.test(fieldName) &&
+      !ADVANCED_EDITOR_CUSTOM_FEATURE_ADDITIONAL_SPELL_FIELD_PATTERN.test(fieldName),
   );
   if (unsupportedFields.length > 0) {
     return {
@@ -4857,7 +5480,7 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
     return parsedManualEquipment;
   }
   const parsedCustomFeatures = hasEditorCustomFeatureValues(values)
-    ? parseEditorCustomFeatures(values, nextDefinition, campaignFeaturePageLookup, optionalFeatureRows)
+    ? parseEditorCustomFeatures(values, nextDefinition, campaignFeaturePageLookup, optionalFeatureRows, spellRows)
     : null;
   if (parsedCustomFeatures?.status === "validation_error") {
     return parsedCustomFeatures;
@@ -4916,6 +5539,7 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
         && !isNativeEditGeneratedOptionalFeature(feature),
       );
     nextDefinition.features = [...baseFeatures, ...parsedCustomFeatures.features];
+    nextDefinition.spellcasting = parsedCustomFeatures.spellcasting;
     const baseResourceTemplates = asArray(nextDefinition.resource_templates)
       .map((template) => asRecord(template))
       .filter((template) => !existingManualTrackerIds.has(stringifyEditorValue(template.id).trim()));
@@ -5253,6 +5877,27 @@ export function listAdvancedEditorOptionalFeatureRows({
   const database = new Database(dbPath, { fileMustExist: true, readonly: true });
   try {
     return loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "optionalfeature")
+      .filter((row) => row.is_enabled_override !== 0);
+  } finally {
+    database.close();
+  }
+}
+
+export function listAdvancedEditorSpellRows({
+  dbPath,
+  campaign,
+  campaignConfig,
+}: {
+  dbPath: string;
+  campaign: CampaignViewModel;
+  campaignConfig: Record<string, unknown>;
+}): SystemsEntryRow[] {
+  if (!existsSync(dbPath)) {
+    return [];
+  }
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    return loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "spell")
       .filter((row) => row.is_enabled_override !== 0);
   } finally {
     database.close();
