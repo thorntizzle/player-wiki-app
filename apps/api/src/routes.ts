@@ -1916,6 +1916,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "content_character_not_found",
     },
   },
+  {
+    method: "GET",
+    honoPath: "/campaigns/:campaignSlug/assets/*",
+    snapshotFamily: "flask",
+    snapshotPath: "/campaigns/<campaign_slug>/assets/<path:asset_path>",
+    seedPath: "/campaigns/<campaign_slug>/assets/<path:asset_path>",
+    routeFamily: "assets",
+    missingResource: {
+      method: "GET",
+      path: "/campaigns/linden-pass/assets/definitely-not-an-asset.png",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "campaign_asset_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -2049,4 +2064,5 @@ export const ROUTES = {
   characterRetraining: IMPLEMENTED_ROUTES[129].honoPath,
   characterLevelUp: IMPLEMENTED_ROUTES[130].honoPath,
   characterProgressionRepair: IMPLEMENTED_ROUTES[131].honoPath,
+  campaignAsset: IMPLEMENTED_ROUTES[132].honoPath,
 } as const;

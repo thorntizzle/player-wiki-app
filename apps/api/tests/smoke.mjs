@@ -13900,6 +13900,93 @@ if (assetBytes.length !== 69) {
   throw new Error(`Expected Captain Lyra asset detail to include 69 bytes, got ${assetBytes.length}`);
 }
 
+const protectedCampaignAsset = await requestBytes(
+  "/campaigns/linden-pass/assets/npcs/captain-lyra-vale.png",
+  { Authorization: `Bearer ${dmApiToken}` },
+);
+if (
+  protectedCampaignAsset.status !== 200 ||
+  protectedCampaignAsset.headers.get("content-type") !== "image/png" ||
+  protectedCampaignAsset.body.length !== assetBytes.length ||
+  Buffer.compare(Buffer.from(protectedCampaignAsset.body), assetBytes) !== 0
+) {
+  throw new Error(
+    `Unexpected protected campaign asset response: ${protectedCampaignAsset.status} ${protectedCampaignAsset.headers.get("content-type")} ${protectedCampaignAsset.body.length}`,
+  );
+}
+
+const publicProtectedAssetVisibilityDb = new Database(dbPath);
+const upsertCampaignVisibility = publicProtectedAssetVisibilityDb.prepare(
+  "INSERT INTO campaign_visibility_settings (campaign_slug, scope, visibility, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT(campaign_slug, scope) DO UPDATE SET visibility = excluded.visibility, updated_at = excluded.updated_at, updated_by_user_id = excluded.updated_by_user_id",
+);
+upsertCampaignVisibility.run("linden-pass", "campaign", "public", "2026-06-25T16:39:00+00:00", 77);
+upsertCampaignVisibility.run("linden-pass", "wiki", "public", "2026-06-25T16:39:00+00:00", 77);
+publicProtectedAssetVisibilityDb.close();
+
+const publicProtectedCampaignAsset = await requestBytes("/campaigns/linden-pass/assets/npcs/captain-lyra-vale.png");
+if (
+  publicProtectedCampaignAsset.status !== 200 ||
+  publicProtectedCampaignAsset.headers.get("content-type") !== "image/png" ||
+  Buffer.compare(Buffer.from(publicProtectedCampaignAsset.body), assetBytes) !== 0
+) {
+  throw new Error(
+    `Unexpected public protected campaign asset response: ${publicProtectedCampaignAsset.status} ${publicProtectedCampaignAsset.headers.get("content-type")}`,
+  );
+}
+
+const protectedAssetVisibilityDb = new Database(dbPath);
+protectedAssetVisibilityDb
+  .prepare(
+    "INSERT INTO campaign_visibility_settings (campaign_slug, scope, visibility, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT(campaign_slug, scope) DO UPDATE SET visibility = excluded.visibility, updated_at = excluded.updated_at, updated_by_user_id = excluded.updated_by_user_id",
+  )
+  .run("linden-pass", "campaign", "players", "2026-06-25T16:40:00+00:00", 77);
+protectedAssetVisibilityDb
+  .prepare(
+    "INSERT INTO campaign_visibility_settings (campaign_slug, scope, visibility, updated_at, updated_by_user_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT(campaign_slug, scope) DO UPDATE SET visibility = excluded.visibility, updated_at = excluded.updated_at, updated_by_user_id = excluded.updated_by_user_id",
+  )
+  .run("linden-pass", "wiki", "players", "2026-06-25T16:40:00+00:00", 77);
+protectedAssetVisibilityDb.close();
+
+const protectedCampaignAssetPlayer = await requestBytes(
+  "/campaigns/linden-pass/assets/npcs/captain-lyra-vale.png",
+  { Authorization: `Bearer ${playerApiToken}` },
+);
+if (
+  protectedCampaignAssetPlayer.status !== 200 ||
+  protectedCampaignAssetPlayer.headers.get("content-type") !== "image/png" ||
+  Buffer.compare(Buffer.from(protectedCampaignAssetPlayer.body), assetBytes) !== 0
+) {
+  throw new Error(
+    `Unexpected player protected campaign asset response: ${protectedCampaignAssetPlayer.status} ${protectedCampaignAssetPlayer.headers.get("content-type")}`,
+  );
+}
+
+const missingProtectedCampaignAsset = await requestJson(
+  "/campaigns/linden-pass/assets/definitely-not-an-asset.png",
+  { Authorization: `Bearer ${dmApiToken}` },
+);
+if (
+  missingProtectedCampaignAsset.status !== 404 ||
+  missingProtectedCampaignAsset.payload?.error?.code !== "campaign_asset_not_found"
+) {
+  throw new Error(
+    `Expected missing protected campaign asset JSON 404, got ${missingProtectedCampaignAsset.status} ${missingProtectedCampaignAsset.payload?.error?.code}`,
+  );
+}
+
+const traversalProtectedCampaignAsset = await requestJson(
+  "/campaigns/linden-pass/assets/%252E%252E/campaign.yaml",
+  { Authorization: `Bearer ${dmApiToken}` },
+);
+if (
+  traversalProtectedCampaignAsset.status !== 404 ||
+  traversalProtectedCampaignAsset.payload?.error?.code !== "campaign_asset_not_found"
+) {
+  throw new Error(
+    `Expected traversal protected campaign asset JSON 404, got ${traversalProtectedCampaignAsset.status} ${traversalProtectedCampaignAsset.payload?.error?.code}`,
+  );
+}
+
 const missingContentAsset = await requestJson(
   "/api/v1/campaigns/linden-pass/content/assets/definitely-not-an-asset.png",
   contentManagerHeaders,

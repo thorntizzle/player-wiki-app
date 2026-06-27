@@ -49,6 +49,7 @@ import {
   buildCampaignControlPayload,
   campaignRoleCanAccessScope,
   campaignRoleCanManageVisibility,
+  campaignScopeIsPublic,
   updateCampaignVisibilitySettings,
 } from "./campaigns/control.js";
 import { getCampaignBySlug, listCampaigns, listCampaignSlugs } from "./campaigns/repository.js";
@@ -148,6 +149,7 @@ import {
   listCampaignContentAssets,
   listCampaignContentCharacters,
   listCampaignContentPages,
+  readCampaignProtectedAsset,
   sanitizeContentAssetRef,
   sanitizeContentCharacterSlug,
   sanitizeContentPageRef,
@@ -1372,6 +1374,14 @@ function contentAssetRefFromWildcard(pathname: string, campaignSlug: string): st
   } catch {
     return "";
   }
+}
+
+function campaignAssetPathFromWildcard(pathname: string, campaignSlug: string): string {
+  const prefix = `/campaigns/${campaignSlug}/assets/`;
+  if (!pathname.startsWith(prefix)) {
+    return "";
+  }
+  return pathname.slice(prefix.length);
 }
 
 function rawContentAssetRefFromWildcard(pathname: string, campaignSlug: string): string {
@@ -4618,6 +4628,48 @@ app.get(ROUTES.sessionArticleImage, async (ctx) => {
       "Content-Type": result.mediaType,
       "Content-Disposition": inlineContentDisposition(result.filename),
       "Content-Length": String(result.data.byteLength),
+    },
+  });
+});
+
+app.get(ROUTES.campaignAsset, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = notFound("campaign_asset_not_found", "Could not find that campaign asset.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const assetPath = campaignAssetPathFromWildcard(ctx.req.path, campaign.slug);
+  if (!assetPath) {
+    const error = notFound("campaign_asset_not_found", "Could not find that campaign asset.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!campaignScopeIsPublic(config.dbPath, campaign, "wiki")) {
+    const auth = resolveCampaignRole(ctx, campaign.slug);
+    if (auth.kind !== "authenticated") {
+      const error = roleResolutionError(auth);
+      return ctx.json({ ok: error.ok, error: error.error }, error.status);
+    }
+    if (!campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "wiki")) {
+      const error = forbidden("You do not have access to this campaign scope.");
+      return ctx.json({ ok: error.ok, error: error.error }, error.status);
+    }
+  }
+
+  const asset = await readCampaignProtectedAsset(config, campaign.slug, assetPath);
+  if (!asset) {
+    const error = notFound("campaign_asset_not_found", "Could not find that campaign asset.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return new Response(asset.data, {
+    status: 200,
+    headers: {
+      "Content-Type": asset.record.media_type,
+      "Content-Disposition": inlineContentDisposition(path.basename(asset.record.file_path)),
+      "Content-Length": String(asset.data.byteLength),
     },
   });
 });

@@ -54,6 +54,20 @@ def _to_json(
         return exc.code, json.loads(exc.read().decode("utf-8"))
 
 
+def _to_bytes(
+    url: str,
+    headers: dict[str, str] | None = None,
+    *,
+    method: str | None = None,
+):
+    request = Request(url, headers=dict(headers or {}), method=method)
+    try:
+        with urlopen(request) as response:
+            return response.getcode(), response.headers.get_content_type(), response.read()
+    except HTTPError as exc:
+        return exc.code, exc.headers.get_content_type(), exc.read()
+
+
 def _find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -1977,6 +1991,56 @@ def test_typescript_content_asset_detail_matches_flask_contract(typescript_api_s
     assert len(base64.b64decode(ts_asset_file["data_base64"])) == ts_asset_file["size_bytes"]
     assert isinstance(ts_asset_file["updated_at"], str) and ts_asset_file["updated_at"]
     _normalize_timestamp(ts_asset_file["updated_at"])
+
+
+def test_typescript_public_campaign_asset_matches_flask_contract(typescript_api_server, client):
+    target_asset_ref = "npcs/captain-lyra-vale.png"
+
+    flask_response = client.get(f"/campaigns/linden-pass/assets/{target_asset_ref}")
+    assert flask_response.status_code == 200
+    flask_bytes = flask_response.get_data()
+    flask_media_type = flask_response.mimetype
+
+    status, media_type, body = _to_bytes(
+        f"{typescript_api_server}/campaigns/linden-pass/assets/{target_asset_ref}",
+    )
+    assert status == 200
+    assert media_type == flask_media_type == "image/png"
+    assert body == flask_bytes
+
+
+def test_typescript_protected_campaign_asset_matches_flask_contract(typescript_api_server, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    target_asset_ref = "npcs/captain-lyra-vale.png"
+
+    flask_response = client.get(f"/campaigns/linden-pass/assets/{target_asset_ref}")
+    assert flask_response.status_code == 200
+    flask_bytes = flask_response.get_data()
+    flask_media_type = flask_response.mimetype
+
+    status, media_type, body = _to_bytes(
+        f"{typescript_api_server}/campaigns/linden-pass/assets/{target_asset_ref}",
+        headers=CONTENT_MANAGER_HEADERS,
+    )
+    assert status == 200
+    assert media_type == flask_media_type == "image/png"
+    assert body == flask_bytes
+
+
+def test_typescript_protected_campaign_asset_missing_returns_404(typescript_api_server, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    flask_response = client.get("/campaigns/linden-pass/assets/definitely-not-an-asset.png")
+    assert flask_response.status_code == 404
+
+    status, media_type, body = _to_bytes(
+        f"{typescript_api_server}/campaigns/linden-pass/assets/definitely-not-an-asset.png",
+        headers=CONTENT_MANAGER_HEADERS,
+    )
+    assert status == 404
+    assert media_type == "application/json"
+    payload = json.loads(body.decode("utf-8"))
+    assert payload["error"]["code"] == "campaign_asset_not_found"
 
 
 def test_typescript_content_characters_list_matches_flask_contract(typescript_api_server, client, sign_in, users):

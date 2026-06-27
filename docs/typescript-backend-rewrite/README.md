@@ -145,6 +145,7 @@ Route parity check command:
   - `GET /api/v1/campaigns/:campaignSlug/content/assets/*`
   - `PUT /api/v1/campaigns/:campaignSlug/content/assets/*`
   - `DELETE /api/v1/campaigns/:campaignSlug/content/assets/*`
+  - `GET /campaigns/:campaignSlug/assets/*`
   - `GET /api/v1/campaigns/:campaignSlug/content/characters`
   - `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
   - `PUT /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`

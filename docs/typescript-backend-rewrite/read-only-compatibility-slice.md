@@ -115,6 +115,8 @@ fixture database.
 - Added fixture-backed, content-management-gated content asset management read endpoints:
   - `GET /api/v1/campaigns/:campaignSlug/content/assets`
   - `GET /api/v1/campaigns/:campaignSlug/content/assets/*`
+- Added protected campaign asset byte-serving route:
+  - `GET /campaigns/:campaignSlug/assets/*`
 - Added fixture-backed content asset write/delete endpoints with bearer-token DM/admin access:
   - `PUT /api/v1/campaigns/:campaignSlug/content/assets/*`
   - `DELETE /api/v1/campaigns/:campaignSlug/content/assets/*`
@@ -638,6 +640,7 @@ fixture database.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/pages` list sorting/count/body omission and sampled `Port Meridian` metadata/removal fields, plus `GET /api/v1/campaigns/:campaignSlug/content/pages/*` detail payload body inclusion and missing-content-page 404.
   - validates `PUT` and `DELETE /api/v1/campaigns/:campaignSlug/content/pages/*` auth, fixture-write denial, player-forbidden behavior, metadata validation, missing-campaign behavior, copied-fixture Markdown writes, list/detail refresh, backlink hard-delete blockers, forced delete, deleted-reference payloads, file removal, and cleanup before later wiki count assertions.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/assets` list sorting/count/data omission and sampled PNG metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/assets/*` detail payload byte data and missing-content-asset 404.
+  - validates `GET /campaigns/:campaignSlug/assets/*` raw byte serving for fixture PNG assets, including public wiki anonymous access, wiki-scope-protected player access, `image/png`, exact byte parity, and missing/traversal 404 behavior.
   - validates `PUT` and `DELETE /api/v1/campaigns/:campaignSlug/content/assets/*` auth, fixture-write denial, player-forbidden behavior, base64 validation, missing-campaign behavior, copied-fixture file writes, list/detail refresh, deleted-reference payloads, file removal, and missing-asset delete 404.
   - validates `GET /api/v1/campaigns/:campaignSlug/content/characters` list sorting/count and sampled character summary metadata, plus `GET /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug` detail payload definition/import metadata and missing-content-character 404.
   - validates content-character SQLite persistence for DND-5E create/delete and Xianxia create/update/delete, including actual `state_created`, `deleted_state`, and `deleted_assignment` response flags and Xianxia mutable-state clamping/preservation.

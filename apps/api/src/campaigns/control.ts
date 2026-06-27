@@ -321,6 +321,12 @@ export function campaignRoleCanAccessScope(
   return roleSatisfiesVisibility(role, getEffectiveVisibility(scope, defaults, settings));
 }
 
+export function campaignScopeIsPublic(dbPath: string, campaign: CampaignViewModel, scope: VisibilityScope): boolean {
+  const defaults = campaignDefaultVisibility(campaign);
+  const settings = readVisibilitySettings(dbPath, campaign.slug);
+  return getEffectiveVisibility(scope, defaults, settings) === "public";
+}
+
 export function buildCampaignControlPayload(
   dbPath: string,
   campaign: CampaignViewModel,

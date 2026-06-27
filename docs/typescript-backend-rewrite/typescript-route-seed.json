@@ -1218,10 +1218,11 @@
     },
     {
       "method": "GET",
-      "path": "/assets/protected/<name>",
+      "path": "/campaigns/<campaign_slug>/assets/<path:asset_path>",
       "route_family": "assets",
-      "status": "deferred_scratch_proof",
-      "notes": "Protected WebP asset route passed in earlier scratch probes but is not implemented in apps/api."
+      "status": "implemented_hono",
+      "typescript_path": "/campaigns/:campaignSlug/assets/*",
+      "notes": "Protected campaign asset browser route serves raw bytes with safe asset-root resolution and wiki-scope access checks."
     },
     {
       "method": "POST",

@@ -1711,6 +1711,45 @@ export async function getCampaignContentAsset(
   return record;
 }
 
+export async function readCampaignProtectedAsset(
+  config: ApiConfig,
+  campaignSlug: string,
+  rawAssetRef: string,
+): Promise<{ record: CampaignAssetFileRecord; data: Uint8Array } | null> {
+  let assetRef = rawAssetRef;
+  try {
+    assetRef = decodeURIComponent(rawAssetRef);
+  } catch {
+    // keep raw value to preserve failure semantics.
+  }
+
+  const campaign = await loadCampaignContentContext(config, campaignSlug, { requireContentDir: false });
+  if (!campaign) {
+    return null;
+  }
+
+  const assetPath = resolveSafeAssetPath(campaign.assetsDir, assetRef);
+  if (!assetPath) {
+    return null;
+  }
+
+  let fileStats;
+  let data: Buffer;
+  try {
+    [fileStats, data] = await Promise.all([fs.stat(assetPath), fs.readFile(assetPath)]);
+    if (!fileStats.isFile()) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  return {
+    record: toAssetFileRecord(assetPath, campaign.assetsDir, fileStats),
+    data,
+  };
+}
+
 export async function writeCampaignContentAsset(
   config: ApiConfig,
   campaignSlug: string,
