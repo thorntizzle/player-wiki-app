@@ -1696,21 +1696,21 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert unsupported_payload["error"]["code"] == "validation_error"
     assert "feature_rows" in unsupported_payload["error"]["message"]
 
-    linked_feature_status, linked_feature_payload = _to_json(
+    invalid_feature_status, invalid_feature_payload = _to_json(
         route_url,
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
         body={
             "expected_revision": expected_revision,
             "values": {
-                "custom_feature_name_1": "Linked Storm Feature",
-                "custom_feature_page_ref_1": "boons/storm-feature",
+                "custom_feature_name_1": "Broken Storm Feature",
+                "custom_feature_activation_type_1": "not-a-real-action",
             },
         },
     )
-    assert linked_feature_status == 400
-    assert linked_feature_payload["error"]["code"] == "validation_error"
-    assert "Linked custom feature pages" in linked_feature_payload["error"]["message"]
+    assert invalid_feature_status == 400
+    assert invalid_feature_payload["error"]["code"] == "validation_error"
+    assert "valid activation type" in invalid_feature_payload["error"]["message"]
 
     stale_status, stale_payload = _to_json(
         route_url,
@@ -2006,25 +2006,9 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert invalid_equipment_payload["error"]["code"] == "validation_error"
     assert "whole numbers" in invalid_equipment_payload["error"]["message"]
 
-    linked_equipment_status, linked_equipment_payload = _to_json(
-        route_url,
-        headers=typescript_api_mutation_server["dm_headers"],
-        method="PUT",
-        body={
-            "expected_revision": expected_revision + 5,
-            "values": {
-                "manual_item_name_1": "Linked Token",
-                "manual_item_page_ref_1": "items/stormglass-compass",
-                "manual_item_quantity_1": "1",
-            },
-        },
-    )
-    assert linked_equipment_status == 400
-    assert linked_equipment_payload["error"]["code"] == "validation_error"
-    assert "Linked manual equipment pages" in linked_equipment_payload["error"]["message"]
-
     equipment_values = {
         "manual_item_name_1": "Storm Token",
+        "manual_item_page_ref_1": "items/stormglass-compass",
         "manual_item_quantity_1": "2",
         "manual_item_weight_1": "light",
         "manual_item_notes_1": "Stamped with blue wax.",
@@ -2047,6 +2031,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     manual_item_id = manual_item["id"]
     assert manual_item_id.startswith("manual-item-storm-token")
     assert manual_item["name"] == "Storm Token"
+    assert manual_item["page_ref"] == "items/stormglass-compass"
     assert manual_item["default_quantity"] == 2
     assert manual_item["weight"] == "light"
     assert manual_item["notes"] == "Stamped with blue wax."
@@ -2063,6 +2048,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     }
     assert equipment_rows[1]["id"] == manual_item_id
     assert equipment_rows[1]["name"] == "Storm Token"
+    assert equipment_rows[1]["page_ref"] == "items/stormglass-compass"
     assert equipment_rows[1]["quantity"] == "2"
     assert equipment_rows[1]["weight"] == "light"
     assert equipment_rows[1]["notes"] == "Stamped with blue wax."
@@ -2082,11 +2068,13 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     ]
     assert len(manual_definition_items) == 1
     assert manual_definition_items[0]["id"] == manual_item_id
+    assert manual_definition_items[0]["page_ref"] == "items/stormglass-compass"
     assert manual_definition_items[0]["default_quantity"] == 2
 
     update_equipment_values = {
         "manual_item_id_1": manual_item_id,
         "manual_item_name_1": "Silver Storm Token",
+        "manual_item_page_ref_1": "items/stormglass-compass",
         "manual_item_quantity_1": "0",
         "manual_item_weight_1": "1 lb.",
         "manual_item_notes_1": "Spent but kept as proof.",
@@ -2107,6 +2095,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert len(updated_manual_items) == 1
     assert updated_manual_items[0]["id"] == manual_item_id
     assert updated_manual_items[0]["name"] == "Silver Storm Token"
+    assert updated_manual_items[0]["page_ref"] == "items/stormglass-compass"
     assert updated_manual_items[0]["default_quantity"] == 0
     updated_inventory_by_ref = {
         item.get("catalog_ref"): item
@@ -2152,6 +2141,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
 
     custom_feature_values = {
         "custom_feature_name_1": "Storm Blessing",
+        "custom_feature_page_ref_1": "boons/storm-feature",
         "custom_feature_activation_type_1": "bonus_action",
         "custom_feature_description_1": "Call the storm once per rest.",
         "custom_feature_resource_max_1": "3",
@@ -2176,6 +2166,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     tracker_id = f"custom_feature:{custom_feature_id}"
     assert custom_feature_id.startswith("custom-feature-storm-blessing")
     assert custom_feature["name"] == "Storm Blessing"
+    assert custom_feature["page_ref"] == "boons/storm-feature"
     assert custom_feature["activation_type"] == "bonus_action"
     assert custom_feature["description_markdown"] == "Call the storm once per rest."
     assert custom_feature["source"] == "Campaign"
@@ -2211,6 +2202,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     }
     assert feature_rows[1]["id"] == custom_feature_id
     assert feature_rows[1]["name"] == "Storm Blessing"
+    assert feature_rows[1]["page_ref"] == "boons/storm-feature"
     assert feature_rows[1]["activation_type"] == "bonus_action"
     assert feature_rows[1]["description_markdown"] == "Call the storm once per rest."
     assert feature_rows[1]["resource_max"] == "3"
@@ -2228,6 +2220,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     ]
     assert len(definition_custom_features) == 1
     assert definition_custom_features[0]["id"] == custom_feature_id
+    assert definition_custom_features[0]["page_ref"] == "boons/storm-feature"
     assert [
         template for template in definition["resource_templates"] if template.get("category") == "custom_feature"
     ][0]["id"] == tracker_id
@@ -2235,6 +2228,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     update_custom_feature_values = {
         "custom_feature_id_1": custom_feature_id,
         "custom_feature_name_1": "Storm Blessing, Spent",
+        "custom_feature_page_ref_1": "boons/storm-feature",
         "custom_feature_activation_type_1": "reaction",
         "custom_feature_description_1": "Spend the storm after the first strike.",
         "custom_feature_resource_max_1": "1",
@@ -2256,6 +2250,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert len(updated_custom_features) == 1
     assert updated_custom_features[0]["id"] == custom_feature_id
     assert updated_custom_features[0]["name"] == "Storm Blessing, Spent"
+    assert updated_custom_features[0]["page_ref"] == "boons/storm-feature"
     assert updated_custom_features[0]["activation_type"] == "reaction"
     updated_template = [
         template

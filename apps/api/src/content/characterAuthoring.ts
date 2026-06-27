@@ -3569,17 +3569,6 @@ function parseEditorManualEquipmentItems(
       continue;
     }
 
-    if (pageRef) {
-      const existingPageRef = extractEditorPageRefValue(asRecord(existing).page_ref);
-      if (!existing || existingPageRef !== pageRef) {
-        return {
-          status: "validation_error",
-          message:
-            "Linked manual equipment pages are not yet supported by the TypeScript Advanced Editor slice.",
-        };
-      }
-    }
-
     const name = rawName || stringifyEditorValue(asRecord(existing).name).trim();
     if (!name) {
       return { status: "validation_error", message: "Each custom equipment row needs an item name." };
@@ -3790,17 +3779,6 @@ function parseEditorCustomFeatures(
     if (!hasContent) {
       continue;
     }
-    if (pageRef) {
-      const existingPageRef = extractEditorPageRefValue(asRecord(existing).page_ref);
-      if (!existing || existingPageRef !== pageRef) {
-        return {
-          status: "validation_error",
-          message:
-            "Linked custom feature pages are not yet supported by the TypeScript Advanced Editor slice.",
-        };
-      }
-    }
-
     const name = rawName || stringifyEditorValue(asRecord(existing).name).trim();
     if (!name) {
       return { status: "validation_error", message: "Each custom feature needs a name." };

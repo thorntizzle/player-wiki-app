@@ -167,7 +167,7 @@ Do not implement these routes as part of the parity program unless a later archi
   - `POST /api/v1/campaigns/:campaignSlug/characters/create` (Xianxia native create; narrow DND-5E PHB Fighter pilot; full DND builder parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor`
-  - `PUT /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor` (reference, proficiency, stat-adjustment, recoverable-penalty, unlinked custom-feature, and unlinked manual-equipment fields only; linked feature/page derivation, page-linked manual item derivation, and full native derivation parity pending)
+  - `PUT /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor` (reference, proficiency, stat-adjustment, recoverable-penalty, custom-feature, and manual-equipment fields with `page_ref` round-trip only; linked feature/page derivation, page-linked manual item option derivation, and full native derivation parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (context shell only; real save parity pending)
   - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (unsupported/current-shell response only; real save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (context shell only; real save parity pending)
@@ -584,11 +584,11 @@ Do not implement these routes as part of the parity program unless a later archi
   checks, DND-5E support detection, unsupported non-DND payloads, edit-page links, state revision,
   reference fields, proficiency fields, stat-adjustment fields, recoverable-penalty rows, and feature/equipment row shells.
   The `PUT .../advanced-editor` reference/proficiency/stat-adjustment/recoverable-penalty/custom-feature/manual-equipment-field slice now serves
-  bearer-token writes for the existing reference, proficiency, stat-adjustment, recoverable-penalty, unlinked custom-feature, and unlinked manual-equipment fields,
+  bearer-token writes for the existing reference, proficiency, stat-adjustment, recoverable-penalty, custom-feature, and manual-equipment fields with `page_ref` round-trip,
   preserving fixture-role write denial, unsupported non-DND validation, stale revision conflicts, copied-fixture
   `definition.yaml` and managed `import.yaml` writes for profile/reference notes/proficiencies/stat adjustments/recoverable penalties/custom features/manual equipment,
   SQLite notes persistence for state-backed reference fields, current-HP clamping for lowered max HP, SQLite inventory
-  reconciliation for unlinked manual equipment rows, SQLite resource reconciliation for unlinked custom-feature trackers,
+  reconciliation for manual equipment rows, SQLite resource reconciliation for custom-feature trackers,
   and refreshed Advanced Editor payloads. Linked custom-feature page/choice/spell derivation,
   page-linked manual item option derivation, full native edit derivation, and complete Advanced Editor
   parity remain pending.
