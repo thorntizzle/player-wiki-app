@@ -77,6 +77,28 @@ Supported write families:
 - `publishing`
 - `rollback-cutover`
 
+Staging snapshot preflight checklist:
+
+```powershell
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py staging-snapshot-preflight
+```
+
+The preflight output is a sanitized Markdown checklist for operator intake
+before a user-approved staging-equivalent snapshot is copied under `.task-temp`.
+It rechecks the tracked readiness docs, records the no-live boundary, lists
+family gates and table families, and keeps every readiness label unchanged.
+For a focused family preflight:
+
+```powershell
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py staging-snapshot-preflight `
+  --family combat
+```
+
+This checklist is not a rehearsal transcript and cannot mark any family
+`staging snapshot ready`. A later approved run must still use `check-paths`,
+capture baseline/mutation/restore evidence, compare equivalence, and commit only
+the sanitized human transcript.
+
 Dry-run scaffold:
 
 ```powershell
