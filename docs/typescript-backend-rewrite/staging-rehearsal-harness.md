@@ -108,17 +108,40 @@ Dry-run scaffold:
   --dry-run
 ```
 
-The dry-run output includes the transcript preview that would be written. To
-inspect only the family-specific checklist for a planned Combat rehearsal:
+The dry-run output includes the transcript preview that would be written.
+
+Every copied-data-ready route family has a family-specific guide for the next
+operator-approved staging-equivalent snapshot run:
+
+- `content-character`
+- `combat`
+- `session`
+- `systems`
+- `dm-content`
+- `publishing`
+
+To inspect only the family-specific checklist for a planned staging snapshot
+rehearsal:
+
+```powershell
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py guide `
+  --family content-character
+```
+
+Each guide output is a scaffold, not approval. It lists route/action scope,
+baseline evidence, copied-data backup evidence, mutation sequence, restore
+equivalence requirements, and the honest label transition from
+`copied-data rollback ready` to `staging snapshot ready`. A family can only
+claim that transition after a user-approved staging-equivalent snapshot
+transcript records approval, path-guard success, backup, mutation, restore, and
+equivalence evidence.
+
+For example, to inspect the Combat staging snapshot checklist:
 
 ```powershell
 & '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py guide `
   --family combat
 ```
-
-Combat guide output is a scaffold, not approval. The Combat write family remains
-below `copied-data rollback ready` until a copied-data run records backup,
-mutation, restore, and equivalence evidence in a transcript.
 
 To inspect only the rollback and full cutover checklist:
 

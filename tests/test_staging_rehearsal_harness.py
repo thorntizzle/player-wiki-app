@@ -95,9 +95,60 @@ def test_combat_rehearsal_transcript_includes_concrete_write_family_plan(tmp_pat
     transcript = (root / "transcript.md").read_text(encoding="utf-8")
     assert "POST /api/v1/campaigns/<slug>/combat/player-combatants" in transcript
     assert "PATCH /api/v1/campaigns/<slug>/combat/combatants/<combatantId>/vitals" in transcript
+    assert "Create a backup from the copied SQLite and copied campaigns directory only." in transcript
     assert "Restored linked character_state JSON and revision values must match baseline." in transcript
-    assert "Label before: `fixture-write validated`" in transcript
-    assert "Label after only if backup, mutation, restore, and equivalence all pass: `copied-data rollback ready`" in transcript
+    assert "Label before: `copied-data rollback ready`" in transcript
+    assert "Label after only if backup, mutation, restore, and equivalence all pass: `staging snapshot ready`" in transcript
+
+
+def test_all_copied_data_families_have_staging_snapshot_guides():
+    harness = _load_harness_module()
+
+    for family in (
+        "content-character",
+        "combat",
+        "session",
+        "systems",
+        "dm-content",
+        "publishing",
+    ):
+        guide = harness.family_guide_markdown(family)
+
+        assert "## Family-Specific Rehearsal Guide" in guide
+        assert "### Backup Evidence Checklist" in guide
+        assert "### Mutation Sequence" in guide
+        assert "### Restore Equivalence Requirements" in guide
+        assert "Label before: `copied-data rollback ready`" in guide
+        assert "Label after only if backup, mutation, restore, and equivalence all pass: `staging snapshot ready`" in guide
+        assert "staging-equivalent snapshot" in guide
+
+
+def test_staging_snapshot_guides_use_current_api_contract_routes():
+    harness = _load_harness_module()
+
+    session_guide = harness.family_guide_markdown("session")
+    assert "PUT /api/v1/campaigns/<slug>/session/articles/<articleId>" in session_guide
+    assert "PATCH /api/v1/campaigns/<slug>/session/articles/<articleId>" not in session_guide
+
+    systems_guide = harness.family_guide_markdown("systems")
+    assert "PUT /api/v1/campaigns/<slug>/systems/sources" in systems_guide
+    assert "PUT /api/v1/campaigns/<slug>/systems/overrides/<entryKey>" in systems_guide
+    assert "PUT /api/v1/campaigns/<slug>/systems/custom-entries/<entrySlug>" in systems_guide
+    assert "POST /api/v1/campaigns/<slug>/systems/item-mechanics/import" in systems_guide
+    assert "/systems/source-policy" not in systems_guide
+    assert "/systems/import-item-mechanics" not in systems_guide
+
+    dm_content_guide = harness.family_guide_markdown("dm-content")
+    assert "PUT /api/v1/campaigns/<slug>/dm-content/statblocks/<statblockId>" in dm_content_guide
+    assert "PUT /api/v1/campaigns/<slug>/dm-content/conditions/<conditionDefinitionId>" in dm_content_guide
+    assert "PATCH /api/v1/campaigns/<slug>/dm-content/statblocks/<statblockId>" not in dm_content_guide
+    assert "/dm-content/conditions/<conditionId>" not in dm_content_guide
+
+    publishing_guide = harness.family_guide_markdown("publishing")
+    assert "PUT /api/v1/campaigns/<slug>/content/pages/<pageRef>" in publishing_guide
+    assert "PUT /api/v1/campaigns/<slug>/content/assets/<assetRef>" in publishing_guide
+    assert "POST /api/v1/campaigns/<slug>/content/pages" not in publishing_guide
+    assert "POST /api/v1/campaigns/<slug>/content/assets" not in publishing_guide
 
 
 def test_rollback_cutover_transcript_captures_runbook_evidence(tmp_path):
