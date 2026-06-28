@@ -389,15 +389,182 @@ const DND_ABILITY_LABELS: Record<(typeof DND_ABILITY_KEYS)[number], string> = {
 const DND_CREATE_LIMITATIONS = [
   "Base classes come from enabled Systems rows inside the current native support lane: PHB base classes plus TCE Artificer.",
   "Species and backgrounds come from enabled Systems rows in the current supported source matrix for this TypeScript parity slice.",
-  "DND-5E submit is limited to the narrow PHB Fighter pilot lane in the TypeScript API; full level-one builder parity remains pending.",
+  "DND-5E submit currently supports PHB Fighter and PHB Barbarian with bounded level-one packages; broader choice parity remains pending.",
 ];
-const DND_CHARACTER_CREATE_SOURCE_PATH = "builder://dnd5e-create-pilot";
-const DND_CHARACTER_CREATE_SOURCE_TYPE = "dnd5e_character_builder_pilot";
-const DND_CHARACTER_CREATE_VERSION = "2026-06-27.0";
-const DND_CHARACTER_CREATE_IMPORTED_FROM = "In-app DND-5E Character Creator pilot";
-const DND_PILOT_CLASS = "fighter";
+const DND_CHARACTER_CREATE_SOURCE_PATH = "builder://dnd5e-create-level-one";
+const DND_CHARACTER_CREATE_SOURCE_TYPE = "dnd5e_character_builder_level_one";
+const DND_CHARACTER_CREATE_VERSION = "2026-06-28.0";
+const DND_CHARACTER_CREATE_IMPORTED_FROM = "In-app DND-5E Character Creator level-one slice";
 const DND_PILOT_SPECIES = "human";
 const DND_PILOT_BACKGROUND = "soldier";
+const DND_LEVEL_ONE_CLASS_CONFIGS = {
+  fighter: {
+    className: "Fighter",
+    armorClass: 18,
+    skillProficiencies: ["Athletics", "Intimidation"],
+    proficiencies: {
+      armor: ["All armor", "Shields"],
+      weapons: ["Simple weapons", "Martial weapons"],
+      tools: ["One gaming set", "Vehicles (land)"],
+    },
+    equipmentCatalog: [
+      {
+        id: "chain-mail-1",
+        name: "Chain Mail",
+        default_quantity: 1,
+        weight: "55 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        tags: ["armor"],
+      },
+      {
+        id: "shield-1",
+        name: "Shield",
+        default_quantity: 1,
+        weight: "6 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        tags: ["shield", "armor"],
+      },
+      {
+        id: "longsword-1",
+        name: "Longsword",
+        default_quantity: 1,
+        weight: "3 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        weapon_wield_mode: "main-hand",
+        weapon_wield_modes: ["main-hand", "two-handed"],
+        tags: ["weapon", "martial weapon", "melee weapon"],
+      },
+      {
+        id: "light-crossbow-1",
+        name: "Light Crossbow",
+        default_quantity: 1,
+        weight: "5 lb.",
+        tags: ["weapon", "simple weapon", "ranged weapon"],
+      },
+      {
+        id: "crossbow-bolts-1",
+        name: "Crossbow Bolts",
+        default_quantity: 20,
+        weight: "1.5 lb.",
+        tags: ["ammunition"],
+      },
+      {
+        id: "explorers-pack-1",
+        name: "Explorer's Pack",
+        default_quantity: 1,
+        weight: "59 lb.",
+        tags: ["gear"],
+      },
+    ],
+    features: [
+      {
+        id: "fighting-style-1",
+        name: "Fighting Style",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "This level-one TypeScript slice records the Fighter starting feature as reference text only.",
+      },
+      {
+        id: "second-wind-1",
+        name: "Second Wind",
+        category: "class_feature",
+        tracker_ref: "second-wind",
+        source: "PHB",
+        description_markdown: "You have one use of Second Wind. Full Fighter feature automation remains outside this slice.",
+      },
+    ],
+    resourceTemplates: [
+      {
+        id: "second-wind",
+        label: "Second Wind",
+        category: "class_feature",
+        max: 1,
+        initial_current: 1,
+        reset_on: "short_rest",
+        reset_to: "max",
+        rest_behavior: "restore_full",
+        display_order: 10,
+      },
+    ],
+  },
+  barbarian: {
+    className: "Barbarian",
+    armorClass: "unarmored",
+    skillProficiencies: ["Athletics", "Perception", "Intimidation"],
+    proficiencies: {
+      armor: ["Light armor", "Medium armor", "Shields"],
+      weapons: ["Simple weapons", "Martial weapons"],
+      tools: ["Vehicles (land)"],
+    },
+    equipmentCatalog: [
+      {
+        id: "greataxe-1",
+        name: "Greataxe",
+        default_quantity: 1,
+        weight: "7 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        weapon_wield_mode: "two-handed",
+        weapon_wield_modes: ["two-handed"],
+        tags: ["weapon", "martial weapon", "melee weapon"],
+      },
+      {
+        id: "handaxe-1",
+        name: "Handaxe",
+        default_quantity: 2,
+        weight: "2 lb.",
+        tags: ["weapon", "simple weapon", "melee weapon", "thrown weapon"],
+      },
+      {
+        id: "javelin-1",
+        name: "Javelin",
+        default_quantity: 4,
+        weight: "2 lb.",
+        tags: ["weapon", "simple weapon", "melee weapon", "thrown weapon"],
+      },
+      {
+        id: "explorers-pack-1",
+        name: "Explorer's Pack",
+        default_quantity: 1,
+        weight: "59 lb.",
+        tags: ["gear"],
+      },
+    ],
+    features: [
+      {
+        id: "rage-1",
+        name: "Rage",
+        category: "class_feature",
+        tracker_ref: "rage",
+        source: "PHB",
+        description_markdown: "You can rage twice per long rest. Damage/resistance automation remains outside this level-one slice.",
+      },
+      {
+        id: "unarmored-defense-1",
+        name: "Unarmored Defense",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "While not wearing armor, your Armor Class is 10 + Dexterity modifier + Constitution modifier.",
+      },
+    ],
+    resourceTemplates: [
+      {
+        id: "rage",
+        label: "Rage",
+        category: "class_feature",
+        max: 2,
+        initial_current: 2,
+        reset_on: "long_rest",
+        reset_to: "max",
+        rest_behavior: "restore_full",
+        display_order: 10,
+      },
+    ],
+  },
+} as const;
 
 export interface XianxiaManualImportBuildResult {
   definition: Record<string, unknown>;
@@ -6476,18 +6643,36 @@ export function buildDndCharacterCreateContext({
   }
 }
 
-function assertDndPilotEntry(row: SystemsEntryRow | null, expectedTitle: string, expectedType: string, fieldLabel: string): SystemsEntryRow {
+function assertDndStaticEntry(row: SystemsEntryRow | null, expectedTitle: string, expectedType: string, fieldLabel: string): SystemsEntryRow {
   if (!row) {
-    throw new Error(`${fieldLabel} is required for the DND-5E create pilot.`);
+    throw new Error(`${fieldLabel} is required for DND-5E character creation.`);
   }
   if (
     normalizeDndSourceId(row.source_id) !== DND_PHB_SOURCE_ID ||
     normalizeLookup(row.title) !== expectedTitle ||
     String(row.entry_type || "") !== expectedType
   ) {
-    throw new Error("DND-5E character creation submit currently supports only the PHB Fighter / Human / Soldier pilot lane.");
+    throw new Error("DND-5E character creation submit currently supports only PHB Human / Soldier static choices.");
   }
   return row;
+}
+
+type DndLevelOneClassKey = keyof typeof DND_LEVEL_ONE_CLASS_CONFIGS;
+
+function dndLevelOneClassKey(row: SystemsEntryRow | null): DndLevelOneClassKey | "" {
+  const normalizedTitle = normalizeLookup(row?.title);
+  return normalizedTitle in DND_LEVEL_ONE_CLASS_CONFIGS ? (normalizedTitle as DndLevelOneClassKey) : "";
+}
+
+function assertDndLevelOneClass(row: SystemsEntryRow | null): { row: SystemsEntryRow; classKey: DndLevelOneClassKey } {
+  if (!row) {
+    throw new Error("Class is required for DND-5E character creation.");
+  }
+  const classKey = dndLevelOneClassKey(row);
+  if (!classKey || normalizeDndSourceId(row.source_id) !== DND_PHB_SOURCE_ID || String(row.entry_type || "") !== "class") {
+    throw new Error("DND-5E character creation submit currently supports only PHB Fighter and PHB Barbarian.");
+  }
+  return { row, classKey };
 }
 
 function dndSystemsRef(row: SystemsEntryRow): Record<string, unknown> {
@@ -6505,7 +6690,18 @@ function dndSystemsRef(row: SystemsEntryRow): Record<string, unknown> {
   return ref;
 }
 
-function dndAbilityScores(values: Record<string, string>) {
+function dndSavingThrowKeys(classMetadata: Record<string, unknown>): Set<string> {
+  const savingThrowNames = asArray(classMetadata.saving_throw_proficiencies).map((value) => normalizeLookup(value));
+  return new Set(
+    DND_ABILITY_KEYS.filter((key) => {
+      const label = normalizeLookup(DND_ABILITY_LABELS[key]);
+      return savingThrowNames.includes(label);
+    }),
+  );
+}
+
+function dndAbilityScores(values: Record<string, string>, classMetadata: Record<string, unknown>) {
+  const savingThrowKeys = dndSavingThrowKeys(classMetadata);
   return Object.fromEntries(
     DND_ABILITY_KEYS.map((key) => {
       const score = Math.min(30, Math.max(1, createContextInteger(values[key], 10)));
@@ -6514,7 +6710,7 @@ function dndAbilityScores(values: Record<string, string>) {
         {
           score,
           modifier: abilityModifier(score),
-          save_bonus: abilityModifier(score) + (key === "str" || key === "con" ? 2 : 0),
+          save_bonus: abilityModifier(score) + (savingThrowKeys.has(key) ? 2 : 0),
         },
       ];
     }),
@@ -6529,58 +6725,9 @@ function dndSkillBonus(abilityScores: Record<string, unknown>, abilityKey: (type
   return abilityModifier(dndAbilityScoreValue(abilityScores, abilityKey)) + (proficient ? 2 : 0);
 }
 
-function dndPilotEquipmentCatalog(): Array<Record<string, unknown>> {
+function dndStartingEquipmentCatalog(classKey: DndLevelOneClassKey): Array<Record<string, unknown>> {
   return [
-    {
-      id: "chain-mail-1",
-      name: "Chain Mail",
-      default_quantity: 1,
-      weight: "55 lb.",
-      is_equipped: true,
-      supports_equipped_state: true,
-      tags: ["armor"],
-    },
-    {
-      id: "shield-1",
-      name: "Shield",
-      default_quantity: 1,
-      weight: "6 lb.",
-      is_equipped: true,
-      supports_equipped_state: true,
-      tags: ["shield", "armor"],
-    },
-    {
-      id: "longsword-1",
-      name: "Longsword",
-      default_quantity: 1,
-      weight: "3 lb.",
-      is_equipped: true,
-      supports_equipped_state: true,
-      weapon_wield_mode: "main-hand",
-      weapon_wield_modes: ["main-hand", "two-handed"],
-      tags: ["weapon", "martial weapon", "melee weapon"],
-    },
-    {
-      id: "light-crossbow-1",
-      name: "Light Crossbow",
-      default_quantity: 1,
-      weight: "5 lb.",
-      tags: ["weapon", "simple weapon", "ranged weapon"],
-    },
-    {
-      id: "crossbow-bolts-1",
-      name: "Crossbow Bolts",
-      default_quantity: 20,
-      weight: "1.5 lb.",
-      tags: ["ammunition"],
-    },
-    {
-      id: "explorers-pack-1",
-      name: "Explorer's Pack",
-      default_quantity: 1,
-      weight: "59 lb.",
-      tags: ["gear"],
-    },
+    ...DND_LEVEL_ONE_CLASS_CONFIGS[classKey].equipmentCatalog.map((item) => JSON.parse(JSON.stringify(item)) as Record<string, unknown>),
     {
       id: "insignia-rank-1",
       name: "Insignia of Rank",
@@ -6597,27 +6744,116 @@ function dndPilotEquipmentCatalog(): Array<Record<string, unknown>> {
   ];
 }
 
-function dndPilotAttacks(abilityScores: Record<string, unknown>): Array<Record<string, unknown>> {
+function signedBonus(value: number): string {
+  return value >= 0 ? `+${value}` : String(value);
+}
+
+function dndWeaponAttack({
+  name,
+  category,
+  abilityModifierValue,
+  damageDie,
+  damageType,
+  notes,
+  equipmentRef,
+}: {
+  name: string;
+  category: string;
+  abilityModifierValue: number;
+  damageDie: string;
+  damageType: string;
+  notes: string;
+  equipmentRef: string;
+}): Record<string, unknown> {
+  return {
+    name,
+    category,
+    attack_bonus: abilityModifierValue + 2,
+    damage: `${damageDie}${signedBonus(abilityModifierValue)} ${damageType}`,
+    notes,
+    equipment_ref: equipmentRef,
+  };
+}
+
+function dndLevelOneAttacks(classKey: DndLevelOneClassKey, abilityScores: Record<string, unknown>): Array<Record<string, unknown>> {
   const strengthModifier = abilityModifier(dndAbilityScoreValue(abilityScores, "str"));
   const dexterityModifier = abilityModifier(dndAbilityScoreValue(abilityScores, "dex"));
+  if (classKey === "barbarian") {
+    return [
+      dndWeaponAttack({
+        name: "Greataxe",
+        category: "melee weapon",
+        abilityModifierValue: strengthModifier,
+        damageDie: "1d12",
+        damageType: "slashing",
+        notes: "Heavy, two-handed.",
+        equipmentRef: "greataxe-1",
+      }),
+      dndWeaponAttack({
+        name: "Handaxe",
+        category: "melee or thrown weapon",
+        abilityModifierValue: strengthModifier,
+        damageDie: "1d6",
+        damageType: "slashing",
+        notes: "Light, thrown range 20/60.",
+        equipmentRef: "handaxe-1",
+      }),
+      dndWeaponAttack({
+        name: "Javelin",
+        category: "melee or thrown weapon",
+        abilityModifierValue: strengthModifier,
+        damageDie: "1d6",
+        damageType: "piercing",
+        notes: "Thrown range 30/120.",
+        equipmentRef: "javelin-1",
+      }),
+    ];
+  }
   return [
-    {
+    dndWeaponAttack({
       name: "Longsword",
       category: "melee weapon",
-      attack_bonus: strengthModifier + 2,
-      damage: `1d8${strengthModifier >= 0 ? "+" : ""}${strengthModifier} slashing`,
-      notes: "Versatile (1d10). Pilot lane uses a shield-and-longsword starting package.",
-      equipment_ref: "longsword-1",
-    },
-    {
+      abilityModifierValue: strengthModifier,
+      damageDie: "1d8",
+      damageType: "slashing",
+      notes: "Versatile (1d10). Level-one slice uses a shield-and-longsword starting package.",
+      equipmentRef: "longsword-1",
+    }),
+    dndWeaponAttack({
       name: "Light Crossbow",
       category: "ranged weapon",
-      attack_bonus: dexterityModifier + 2,
-      damage: `1d8${dexterityModifier >= 0 ? "+" : ""}${dexterityModifier} piercing`,
+      abilityModifierValue: dexterityModifier,
+      damageDie: "1d8",
+      damageType: "piercing",
       notes: "Ammunition, loading, range 80/320.",
-      equipment_ref: "light-crossbow-1",
-    },
+      equipmentRef: "light-crossbow-1",
+    }),
   ];
+}
+
+function dndLevelOneArmorClass(classKey: DndLevelOneClassKey, abilityScores: Record<string, unknown>): number {
+  const armorClass = DND_LEVEL_ONE_CLASS_CONFIGS[classKey].armorClass;
+  if (armorClass === "unarmored") {
+    return 10 + abilityModifier(dndAbilityScoreValue(abilityScores, "dex")) + abilityModifier(dndAbilityScoreValue(abilityScores, "con"));
+  }
+  return armorClass;
+}
+
+function dndLevelOneSkills(classKey: DndLevelOneClassKey, abilityScores: Record<string, unknown>): Array<Record<string, unknown>> {
+  const proficientSkills = new Set(DND_LEVEL_ONE_CLASS_CONFIGS[classKey].skillProficiencies.map((skill) => normalizeLookup(skill)));
+  const skillRows: Array<{ name: string; abilityKey: (typeof DND_ABILITY_KEYS)[number] }> = [
+    { name: "Athletics", abilityKey: "str" },
+    { name: "Intimidation", abilityKey: "cha" },
+    { name: "Perception", abilityKey: "wis" },
+  ];
+  return skillRows.map((skill) => {
+    const proficient = proficientSkills.has(normalizeLookup(skill.name));
+    return {
+      name: skill.name,
+      bonus: dndSkillBonus(abilityScores, skill.abilityKey, proficient),
+      proficiency_level: proficient ? "proficient" : "none",
+    };
+  });
 }
 
 export function buildDndCreateCharacter({
@@ -6659,19 +6895,16 @@ export function buildDndCreateCharacter({
     normalizedValues.class_slug = sanitizeDndEntrySelectionValue(normalizedValues.class_slug, classRows);
     normalizedValues.species_slug = sanitizeDndEntrySelectionValue(normalizedValues.species_slug, speciesRows);
     normalizedValues.background_slug = sanitizeDndEntrySelectionValue(normalizedValues.background_slug, backgroundRows);
-    const selectedClass = assertDndPilotEntry(
-      selectedDndEntry(classRows, normalizedValues.class_slug),
-      DND_PILOT_CLASS,
-      "class",
-      "Class",
-    );
-    const selectedSpecies = assertDndPilotEntry(
+    const selectedClassResult = assertDndLevelOneClass(selectedDndEntry(classRows, normalizedValues.class_slug));
+    const selectedClass = selectedClassResult.row;
+    const classKey = selectedClassResult.classKey;
+    const selectedSpecies = assertDndStaticEntry(
       selectedDndEntry(speciesRows, normalizedValues.species_slug),
       DND_PILOT_SPECIES,
       "race",
       "Species",
     );
-    const selectedBackground = assertDndPilotEntry(
+    const selectedBackground = assertDndStaticEntry(
       selectedDndEntry(backgroundRows, normalizedValues.background_slug),
       DND_PILOT_BACKGROUND,
       "background",
@@ -6684,12 +6917,13 @@ export function buildDndCreateCharacter({
     const classMetadata = parseJsonRecord(selectedClass.metadata_json);
     const speciesMetadata = parseJsonRecord(selectedSpecies.metadata_json);
     const hitDie = createContextInteger(classMetadata.hit_die, 10);
-    const abilityScores = dndAbilityScores(normalizedValues);
+    const abilityScores = dndAbilityScores(normalizedValues, classMetadata);
     const conModifier = abilityModifier(dndAbilityScoreValue(abilityScores, "con"));
     const maxHp = Math.max(1, hitDie + conModifier);
     const createdAt = new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
     const speciesSpeed = createContextInteger(firstPresent(speciesMetadata.speed, speciesMetadata.walk_speed), 30);
-    const equipmentCatalog = dndPilotEquipmentCatalog();
+    const classConfig = DND_LEVEL_ONE_CLASS_CONFIGS[classKey];
+    const equipmentCatalog = dndStartingEquipmentCatalog(classKey);
     const definition: Record<string, unknown> = {
       campaign_slug: campaign.slug,
       character_slug: characterSlug,
@@ -6697,10 +6931,10 @@ export function buildDndCreateCharacter({
       status: "active",
       system: "DND-5E",
       profile: {
-        class_level_text: "Fighter 1",
+        class_level_text: `${classConfig.className} 1`,
         classes: [
           {
-            class_name: "Fighter",
+            class_name: classConfig.className,
             level: 1,
             hit_die_faces: hitDie,
             systems_ref: dndSystemsRef(selectedClass),
@@ -6716,7 +6950,7 @@ export function buildDndCreateCharacter({
       },
       stats: {
         max_hp: maxHp,
-        armor_class: 18,
+        armor_class: dndLevelOneArmorClass(classKey, abilityScores),
         initiative_bonus: abilityModifier(dndAbilityScoreValue(abilityScores, "dex")),
         speed: `${speciesSpeed} ft.`,
         proficiency_bonus: 2,
@@ -6725,56 +6959,24 @@ export function buildDndCreateCharacter({
         passive_investigation: 10 + dndSkillBonus(abilityScores, "int", false),
         ability_scores: abilityScores,
       },
-      skills: [
-        { name: "Athletics", bonus: dndSkillBonus(abilityScores, "str", true), proficiency_level: "proficient" },
-        { name: "Intimidation", bonus: dndSkillBonus(abilityScores, "cha", true), proficiency_level: "proficient" },
-        { name: "Perception", bonus: dndSkillBonus(abilityScores, "wis", false), proficiency_level: "none" },
-      ],
+      skills: dndLevelOneSkills(classKey, abilityScores),
       proficiencies: {
-        armor: ["All armor", "Shields"],
-        weapons: ["Simple weapons", "Martial weapons"],
-        tools: ["One gaming set", "Vehicles (land)"],
+        armor: [...classConfig.proficiencies.armor],
+        weapons: [...classConfig.proficiencies.weapons],
+        tools: [...classConfig.proficiencies.tools],
         languages: asArray(speciesMetadata.languages).map(String).filter(Boolean),
         tool_expertise: [],
       },
-      attacks: dndPilotAttacks(abilityScores),
-      features: [
-        {
-          id: "fighting-style-1",
-          name: "Fighting Style",
-          category: "class_feature",
-          source: "PHB",
-          description_markdown: "Pilot DND-5E character creation records the Fighter starting feature as reference text only.",
-        },
-        {
-          id: "second-wind-1",
-          name: "Second Wind",
-          category: "class_feature",
-          tracker_ref: "second-wind",
-          source: "PHB",
-          description_markdown: "You have one use of Second Wind. Full Fighter feature automation remains outside this pilot slice.",
-        },
-      ],
+      attacks: dndLevelOneAttacks(classKey, abilityScores),
+      features: classConfig.features.map((feature) => JSON.parse(JSON.stringify(feature)) as Record<string, unknown>),
       spellcasting: {},
       equipment_catalog: equipmentCatalog,
       reference_notes: {
-        additional_notes_markdown: "Created by the TypeScript DND-5E pilot lane. Full native builder parity remains pending.",
+        additional_notes_markdown: "Created by the TypeScript DND-5E level-one create slice. Full native builder parity remains pending.",
         allies_and_organizations_markdown: "",
         custom_sections: [],
       },
-      resource_templates: [
-        {
-          id: "second-wind",
-          label: "Second Wind",
-          category: "class_feature",
-          max: 1,
-          initial_current: 1,
-          reset_on: "short_rest",
-          reset_to: "max",
-          rest_behavior: "restore_full",
-          display_order: 10,
-        },
-      ],
+      resource_templates: classConfig.resourceTemplates.map((template) => JSON.parse(JSON.stringify(template)) as Record<string, unknown>),
       source: {
         source_path: DND_CHARACTER_CREATE_SOURCE_PATH,
         source_type: DND_CHARACTER_CREATE_SOURCE_TYPE,
@@ -6791,7 +6993,7 @@ export function buildDndCreateCharacter({
       parser_version: DND_CHARACTER_CREATE_VERSION,
       import_status: "managed",
       warnings: [
-        "Created by the narrow TypeScript DND-5E pilot lane; full level-one builder parity remains pending.",
+        "Created by the bounded TypeScript DND-5E level-one slice; full level-one builder parity remains pending.",
       ],
     };
     return { definition, importMetadata };

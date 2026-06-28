@@ -1004,7 +1004,7 @@
       "status": "implemented_fixture_sqlite_write",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/create",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Character create submit route with Flask-compatible missing-campaign, auth_required, forbidden, unsupported_campaign_system, invalid_json, validation_error, and character_exists envelopes, manager-only character authoring access, Xianxia native create writes through createCampaignContentCharacter with builder://xianxia-create metadata and initialized SQLite mutable state, plus a narrow DND-5E PHB Fighter / Human / Soldier pilot write with builder://dnd5e-create-pilot metadata, initialized SQLite state, duplicate-slug handling, and validation errors for out-of-pilot DND selections. Full DND level-one builder write parity remains pending."
+      "notes": "Tracked Hono Character create submit route with Flask-compatible missing-campaign, auth_required, forbidden, unsupported_campaign_system, invalid_json, validation_error, and character_exists envelopes, manager-only character authoring access, Xianxia native create writes through createCampaignContentCharacter with builder://xianxia-create metadata and initialized SQLite mutable state, plus a bounded DND-5E PHB Fighter or PHB Barbarian / Human / Soldier level-one write with builder://dnd5e-create-level-one metadata, initialized SQLite state, duplicate-slug handling, and validation errors for out-of-slice DND selections. Full DND level-one builder write parity remains pending."
     },
     {
       "method": "GET",
