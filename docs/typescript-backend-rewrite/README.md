@@ -611,10 +611,12 @@ Do not implement these routes as part of the parity program unless a later archi
   portrait URLs from existing asset references, and Flask/Gen2 detail links. The route now also
   derives a bounded CharacterPane presenter cluster consumed by Gen2 Character, Session Character,
   and Combat selected-PC panes: DND overview stat rows, reference/note HTML, abilities/skills,
-  proficiency groups, equipment-state rows, presented inventory, presented spellcasting rows, and
-  Xianxia `presented_xianxia` identity/resources/active-state/inventory/approval basics. Full Flask
-  presenter derivation, including richer linked Systems/page body resolution and broader DND/Xianxia
-  presenter sections, remains outside this detail-read slice.
+  proficiency groups, equipment-state rows, presented inventory, presented spellcasting rows with
+  linked campaign-page body resolution, and Xianxia `presented_xianxia`
+  identity/resources/active-state/inventory/approval basics. DND inventory/equipment item rows now
+  resolve accessible linked Systems entries into Gen2 hrefs, item-property summaries, and rendered
+  body HTML. Full Flask presenter derivation, including broader linked body coverage and broader
+  DND/Xianxia presenter sections, remains outside this detail-read slice.
 - The Character Advanced Editor context route now serves `GET .../characters/:characterSlug/advanced-editor`,
   preserving Flask-compatible campaign/missing-character envelopes, auth and assigned-owner access
   checks, DND-5E support detection, unsupported non-DND payloads, edit-page links, state revision,

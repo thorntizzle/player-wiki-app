@@ -464,6 +464,19 @@ interface CharacterDetailControls {
   links?: Record<string, string>;
 }
 
+export interface CharacterDetailLinkedSystemsEntry {
+  slug: string;
+  title: string;
+  entry_type: string;
+  metadata: Record<string, unknown>;
+  rendered_html: string;
+}
+
+interface CharacterDetailPresenterSources {
+  campaignPageRecords?: CampaignPageFileRecord[];
+  systemsEntriesBySlug?: Map<string, CharacterDetailLinkedSystemsEntry>;
+}
+
 function buildEmptyArcaneArmorState() {
   return {
     available: false,
@@ -614,6 +627,191 @@ function buildReferenceSections(definition: Record<string, unknown>) {
     .filter((section) => section.title || section.html);
 }
 
+function normalizePageRefSlug(value: unknown): string {
+  const record = asRecord(value);
+  const rawValue = asString(record.slug) || asString(record.page_slug) || asString(record.page_ref) || asString(value);
+  return rawValue.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").trim();
+}
+
+function normalizeLookupKey(value: unknown): string {
+  return asString(value).replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").toLowerCase();
+}
+
+function displayText(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No";
+  }
+  return "";
+}
+
+function buildCampaignPageIndex(records: CampaignPageFileRecord[] = []): Map<string, CampaignPageFileRecord> {
+  const index = new Map<string, CampaignPageFileRecord>();
+  for (const record of records) {
+    if (!record.page.is_visible) {
+      continue;
+    }
+    for (const key of [record.page_ref, record.page.route_slug]) {
+      const normalized = normalizeLookupKey(key);
+      if (normalized && !index.has(normalized)) {
+        index.set(normalized, record);
+      }
+    }
+  }
+  return index;
+}
+
+function mergeLinkedPayload(...records: Record<string, unknown>[]): Record<string, unknown> {
+  const merged: Record<string, unknown> = {};
+  for (const record of records) {
+    const systemsRef = asRecord(record.systems_ref);
+    if (Object.keys(systemsRef).length > 0 && Object.keys(asRecord(merged.systems_ref)).length === 0) {
+      merged.systems_ref = systemsRef;
+    }
+    const pageRef = normalizePageRefSlug(record.page_ref);
+    if (pageRef && !normalizePageRefSlug(merged.page_ref)) {
+      merged.page_ref = record.page_ref;
+    }
+    for (const key of ["description_markdown", "description_html"]) {
+      if (asString(record[key]) && !asString(merged[key])) {
+        merged[key] = record[key];
+      }
+    }
+  }
+  return merged;
+}
+
+function linkedSystemsEntry(
+  payload: Record<string, unknown>,
+  sources: CharacterDetailPresenterSources,
+): CharacterDetailLinkedSystemsEntry | null {
+  const slug = normalizeLookupKey(asRecord(payload.systems_ref).slug);
+  if (!slug) {
+    return null;
+  }
+  return sources.systemsEntriesBySlug?.get(slug) ?? null;
+}
+
+function linkedCampaignPage(
+  payload: Record<string, unknown>,
+  pageIndex: Map<string, CampaignPageFileRecord>,
+): CampaignPageFileRecord | null {
+  const pageRef = normalizeLookupKey(normalizePageRefSlug(payload.page_ref));
+  return pageRef ? pageIndex.get(pageRef) ?? null : null;
+}
+
+function buildLinkedEntryHref(
+  campaignSlug: string,
+  payload: Record<string, unknown>,
+  sources: CharacterDetailPresenterSources,
+  pageIndex: Map<string, CampaignPageFileRecord>,
+): string {
+  const systemsRef = asRecord(payload.systems_ref);
+  const explicitSystemsHref = asString(systemsRef.href);
+  if (explicitSystemsHref) {
+    return explicitSystemsHref;
+  }
+  const systemsSlug = asString(systemsRef.slug) || linkedSystemsEntry(payload, sources)?.slug || "";
+  if (systemsSlug) {
+    return campaignHref(campaignSlug, `systems/entries/${systemsSlug}`);
+  }
+  const explicitPageHref = asString(asRecord(payload.page_ref).href);
+  if (explicitPageHref) {
+    return explicitPageHref;
+  }
+  const page = linkedCampaignPage(payload, pageIndex);
+  const pageSlug = page?.page.route_slug || normalizePageRefSlug(payload.page_ref);
+  return pageSlug ? campaignHref(campaignSlug, `pages/${pageSlug}`) : "";
+}
+
+function itemPropertyRows(entry: CharacterDetailLinkedSystemsEntry): Array<[string, string]> {
+  if (entry.entry_type !== "item") {
+    return [];
+  }
+  const metadata = asRecord(entry.metadata);
+  const armor = asRecord(metadata.armor);
+  const rows: Array<[string, string]> = [];
+  const properties = asArray(metadata.properties || metadata.property).map(asString).filter(Boolean);
+  const weaponCategory = asString(metadata.weapon_category);
+  const weaponType = displayText(metadata.weapon_type || metadata.type);
+  const damage = displayText(metadata.damage);
+  const versatileDamage = displayText(metadata.versatile_damage);
+  const range = displayText(metadata.range);
+  const armorClass = displayText(metadata.armor_class) || displayText(metadata.ac) || displayText(armor.ac);
+
+  if (weaponCategory) {
+    rows.push(["Weapon Category", titleCaseFromKey(weaponCategory)]);
+  }
+  if (weaponType) {
+    rows.push(["Weapon Type", weaponType]);
+  }
+  if (damage) {
+    rows.push(["Damage", damage]);
+  }
+  if (versatileDamage) {
+    rows.push(["Versatile Damage", versatileDamage]);
+  }
+  if (range) {
+    rows.push(["Range", range]);
+  }
+  if (properties.length > 0) {
+    rows.push(["Weapon Properties", properties.join(", ")]);
+  }
+  if (armorClass) {
+    rows.push(["Armor Class", armorClass]);
+  }
+  return rows;
+}
+
+function buildItemPropertiesHtml(entry: CharacterDetailLinkedSystemsEntry): string {
+  const rows = itemPropertyRows(entry);
+  if (rows.length === 0) {
+    return "";
+  }
+  const rowHtml = rows
+    .map(([label, value]) => `<li><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></li>`)
+    .join("");
+  return `<div class="item-property-summary"><h5>Item properties</h5><ul class="plain-list slot-list">${rowHtml}</ul></div>`;
+}
+
+function resolveLinkedEntryDescriptionHtml(
+  payload: Record<string, unknown>,
+  sources: CharacterDetailPresenterSources,
+  pageIndex: Map<string, CampaignPageFileRecord>,
+): string {
+  const descriptionMarkdown = asString(payload.description_markdown);
+  if (descriptionMarkdown) {
+    return renderPlainMarkdownHtml(descriptionMarkdown);
+  }
+  const systemsEntry = linkedSystemsEntry(payload, sources);
+  if (systemsEntry) {
+    return asString(systemsEntry.rendered_html);
+  }
+  const page = linkedCampaignPage(payload, pageIndex);
+  return page ? renderPlainMarkdownHtml(page.body_markdown) : "";
+}
+
+function resolveItemDescriptionHtml(
+  payload: Record<string, unknown>,
+  sources: CharacterDetailPresenterSources,
+  pageIndex: Map<string, CampaignPageFileRecord>,
+): string {
+  const descriptionMarkdown = asString(payload.description_markdown);
+  if (descriptionMarkdown) {
+    return renderPlainMarkdownHtml(descriptionMarkdown);
+  }
+  const systemsEntry = linkedSystemsEntry(payload, sources);
+  if (systemsEntry) {
+    return `${buildItemPropertiesHtml(systemsEntry)}${asString(systemsEntry.rendered_html)}`;
+  }
+  return resolveLinkedEntryDescriptionHtml(payload, sources, pageIndex);
+}
+
 function inventoryStateRows(definition: Record<string, unknown>, state: Record<string, unknown>): Record<string, unknown>[] {
   const stateRows = asArray(state.inventory).map(asRecord);
   if (stateRows.length > 0) {
@@ -626,7 +824,13 @@ function inventoryStateRows(definition: Record<string, unknown>, state: Record<s
   }));
 }
 
-function buildInventoryPresentation(definition: Record<string, unknown>, state: Record<string, unknown>) {
+function buildInventoryPresentation(
+  definition: Record<string, unknown>,
+  state: Record<string, unknown>,
+  campaignSlug: string,
+  sources: CharacterDetailPresenterSources,
+  pageIndex: Map<string, CampaignPageFileRecord>,
+) {
   const catalogById = new Map(asArray(definition.equipment_catalog).map(asRecord).map((item) => [asString(item.id), item]));
   return inventoryStateRows(definition, state).map((row) => {
     const id = asString(row.id);
@@ -634,15 +838,16 @@ function buildInventoryPresentation(definition: Record<string, unknown>, state: 
     const catalog = catalogById.get(catalogRef) || catalogById.get(id) || {};
     const name = asString(row.name) || asString(catalog.name) || "Item";
     const notes = asString(row.notes) || asString(catalog.notes);
+    const linkedPayload = mergeLinkedPayload(row, catalog);
     return {
       id,
       item_ref: catalogRef,
       name,
-      href: asString(asRecord(row.systems_ref).href) || asString(asRecord(catalog.systems_ref).href),
+      href: buildLinkedEntryHref(campaignSlug, linkedPayload, sources, pageIndex),
       description_html:
         asString(row.description_html) ||
         asString(catalog.description_html) ||
-        renderPlainMarkdownHtml(row.description_markdown || catalog.description_markdown),
+        resolveItemDescriptionHtml(linkedPayload, sources, pageIndex),
       quantity: nonNegativeInt(row.quantity ?? row.current_quantity ?? catalog.default_quantity, 1),
       weight: asString(row.weight) || asString(catalog.weight),
       notes,
@@ -665,7 +870,13 @@ function isLikelyWeapon(item: Record<string, unknown>): boolean {
   return /(weapon|crossbow|bow|sword|staff|dagger|axe|mace|spear|hammer|blade)/.test(haystack);
 }
 
-function buildEquipmentState(definition: Record<string, unknown>, state: Record<string, unknown>) {
+function buildEquipmentState(
+  definition: Record<string, unknown>,
+  state: Record<string, unknown>,
+  campaignSlug: string,
+  sources: CharacterDetailPresenterSources,
+  pageIndex: Map<string, CampaignPageFileRecord>,
+) {
   const stateRows = inventoryStateRows(definition, state);
   const stateByRef = new Map<string, Record<string, unknown>>();
   for (const row of stateRows) {
@@ -690,6 +901,7 @@ function buildEquipmentState(definition: Record<string, unknown>, state: Record<
     const requiresAttunement = asBool(item.requires_attunement ?? item.attunement_required, false);
     const supportsWeaponWieldMode = asBool(item.supports_weapon_wield_mode, false) || isLikelyWeapon(item);
     const weaponWieldMode = asString(stateRow.weapon_wield_mode) || (supportsWeaponWieldMode && isEquipped ? "main_hand" : "");
+    const linkedPayload = mergeLinkedPayload(item, stateRow);
     return {
       id,
       name: asString(item.name) || asString(stateRow.name) || "Item",
@@ -697,11 +909,11 @@ function buildEquipmentState(definition: Record<string, unknown>, state: Record<
       weight: asString(item.weight) || asString(stateRow.weight),
       notes: asString(stateRow.notes) || asString(item.notes),
       tags: asArray(item.tags).map(asString).filter(Boolean),
-      href: asString(asRecord(item.systems_ref).href) || asString(asRecord(stateRow.systems_ref).href),
+      href: buildLinkedEntryHref(campaignSlug, linkedPayload, sources, pageIndex),
       description_html:
         asString(item.description_html) ||
         asString(stateRow.description_html) ||
-        renderPlainMarkdownHtml(item.description_markdown || stateRow.description_markdown),
+        resolveItemDescriptionHtml(linkedPayload, sources, pageIndex),
       source_label: asString(item.source_label) || asString(asRecord(item.systems_ref).source_label) || "Character sheet",
       is_equipped: isEquipped,
       equipped_label: isEquipped ? "Equipped" : "Not equipped",
@@ -750,31 +962,39 @@ function spellLevelLabel(spell: Record<string, unknown>): string {
   return "Spell";
 }
 
-function buildSpellPresentation(definition: Record<string, unknown>) {
+function buildSpellPresentation(
+  definition: Record<string, unknown>,
+  campaignSlug: string,
+  sources: CharacterDetailPresenterSources,
+  pageIndex: Map<string, CampaignPageFileRecord>,
+) {
   const spellcasting = asRecord(definition.spellcasting);
   const rawSpells = asArray(spellcasting.spells).map(asRecord);
-  const spells = rawSpells.map((spell) => ({
-    name: asString(spell.name) || "Spell",
-    href: asString(asRecord(spell.systems_ref).href),
-    description_html: asString(spell.description_html) || renderPlainMarkdownHtml(spell.description_markdown),
-    level_label: spellLevelLabel(spell),
-    school: asString(spell.school),
-    casting_time: asString(spell.casting_time),
-    range: asString(spell.range),
-    duration: asString(spell.duration),
-    components: asString(spell.components),
-    save_or_hit: asString(spell.save_or_hit),
-    source: asString(spell.source),
-    reference: asString(spell.reference),
-    ...(asString(spell.at_higher_levels) ? { at_higher_levels: asString(spell.at_higher_levels) } : {}),
-    badges: [
-      asBool(spell.always_prepared, false) ? "Always prepared" : "",
-      asBool(spell.prepared, false) ? "Prepared" : "",
-      asString(spell.source_package_label),
-    ].filter(Boolean),
-    class_row_id: asString(spell.class_row_id),
-    management_note: asString(spell.management_note),
-  }));
+  const spells = rawSpells.map((spell) => {
+    const linkedPayload = mergeLinkedPayload(spell);
+    return {
+      name: asString(spell.name) || "Spell",
+      href: buildLinkedEntryHref(campaignSlug, linkedPayload, sources, pageIndex),
+      description_html: asString(spell.description_html) || resolveLinkedEntryDescriptionHtml(linkedPayload, sources, pageIndex),
+      level_label: spellLevelLabel(spell),
+      school: asString(spell.school),
+      casting_time: asString(spell.casting_time),
+      range: asString(spell.range),
+      duration: asString(spell.duration),
+      components: asString(spell.components),
+      save_or_hit: asString(spell.save_or_hit),
+      source: asString(spell.source),
+      reference: asString(spell.reference),
+      ...(asString(spell.at_higher_levels) ? { at_higher_levels: asString(spell.at_higher_levels) } : {}),
+      badges: [
+        asBool(spell.always_prepared, false) ? "Always prepared" : "",
+        asBool(spell.prepared, false) ? "Prepared" : "",
+        asString(spell.source_package_label),
+      ].filter(Boolean),
+      class_row_id: asString(spell.class_row_id),
+      management_note: asString(spell.management_note),
+    };
+  });
   const section = {
     class_row_id: asString(asRecord(asArray(spellcasting.class_rows)[0]).id),
     title: asString(spellcasting.spellcasting_class) || "Spellcasting",
@@ -1016,6 +1236,8 @@ export function buildCharacterDetailPayload({
   assetByRef,
   permissions,
   controls,
+  campaignPageRecords = [],
+  systemsEntriesBySlug = new Map(),
 }: {
   campaign: CampaignViewModel;
   record: CampaignCharacterFileRecord;
@@ -1023,11 +1245,17 @@ export function buildCharacterDetailPayload({
   assetByRef: Map<string, CampaignAssetFileRecord>;
   permissions: CharacterDetailPermissions;
   controls: CharacterDetailControls | null;
+  campaignPageRecords?: CampaignPageFileRecord[];
+  systemsEntriesBySlug?: Map<string, CharacterDetailLinkedSystemsEntry>;
 }) {
   const state = asRecord(stateRecord.state);
   const definition = record.definition;
   const systemKey = normalizeSystemKey(definition.system);
-  const equipmentState = systemKey === "xianxia" ? buildEmptyEquipmentState() : buildEquipmentState(definition, state);
+  const presenterSources = { campaignPageRecords, systemsEntriesBySlug };
+  const pageIndex = buildCampaignPageIndex(campaignPageRecords);
+  const equipmentState = systemKey === "xianxia"
+    ? buildEmptyEquipmentState()
+    : buildEquipmentState(definition, state, campaign.slug, presenterSources, pageIndex);
   const arcaneArmorState = equipmentState.arcane_armor_state;
   const notes = asRecord(state.notes);
   const overview = buildOverviewStats(definition, state);
@@ -1061,8 +1289,8 @@ export function buildCharacterDetailPayload({
       abilities: abilitySkillPresentation.abilities,
       skills: abilitySkillPresentation.skills,
       proficiency_groups: buildProficiencyGroups(definition),
-      presented_inventory: systemKey === "xianxia" ? [] : buildInventoryPresentation(definition, state),
-      presented_spellcasting: systemKey === "xianxia" ? {} : buildSpellPresentation(definition),
+      presented_inventory: systemKey === "xianxia" ? [] : buildInventoryPresentation(definition, state, campaign.slug, presenterSources, pageIndex),
+      presented_spellcasting: systemKey === "xianxia" ? {} : buildSpellPresentation(definition, campaign.slug, presenterSources, pageIndex),
       presented_xianxia: buildXianxiaPresentation(definition, state),
       equipment_state: equipmentState,
       arcane_armor_state: arcaneArmorState,

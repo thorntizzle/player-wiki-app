@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
 import { zipSync } from "fflate";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 const DEFAULT_PORT = 39873;
 const port = Number(process.env.CPW_SMOKE_PORT || DEFAULT_PORT);
@@ -9549,6 +9549,23 @@ if (!ardenDefinitionForRoster.includes("portrait_asset_ref:")) {
     ),
   );
 }
+const ardenDetailDefinition = parseYaml(readFileSync(ardenDefinitionPathForRoster, "utf8"));
+const ardenDetailSpells = Array.isArray(ardenDetailDefinition?.spellcasting?.spells)
+  ? ardenDetailDefinition.spellcasting.spells
+  : [];
+if (ardenDetailSpells[0]) {
+  ardenDetailSpells[0].page_ref = "spells/message";
+}
+if (Array.isArray(ardenDetailDefinition?.equipment_catalog)) {
+  ardenDetailDefinition.equipment_catalog.push({
+    id: "chain-mail-detail-proof-7",
+    name: "Chain Mail",
+    default_quantity: 1,
+    weight: "55 lb.",
+    systems_ref: { slug: "phb-item-chain-mail" },
+  });
+}
+writeFileSync(ardenDefinitionPathForRoster, stringifyYaml(ardenDetailDefinition), "utf8");
 
 const blockedCharacterRoster = await requestJson("/api/v1/campaigns/linden-pass/characters");
 if (blockedCharacterRoster.status !== 401 || blockedCharacterRoster.payload?.error?.code !== "auth_required") {
@@ -9644,6 +9661,12 @@ if (blockedCharacterDetail.status !== 401 || blockedCharacterDetail.payload?.err
 const dmCharacterDetail = await requestJson("/api/v1/campaigns/linden-pass/characters/arden-march", {
   Authorization: `Bearer ${dmApiToken}`,
 });
+const dmDetailMessageSpell = dmCharacterDetail.payload?.character?.presented_spellcasting?.current_row_sections?.[0]?.spells?.find(
+  (spell) => spell?.name === "Message",
+);
+const dmDetailChainMail = dmCharacterDetail.payload?.character?.presented_inventory?.find(
+  (item) => item?.item_ref === "chain-mail-detail-proof-7",
+);
 if (
   dmCharacterDetail.status !== 200 ||
   dmCharacterDetail.payload?.ok !== true ||
@@ -9686,7 +9709,13 @@ if (
   dmCharacterDetail.payload?.character?.presented_spellcasting?.spellcasting_class !== "Sorcerer" ||
   dmCharacterDetail.payload?.character?.presented_spellcasting?.spell_attack_bonus !== "+7" ||
   dmCharacterDetail.payload?.character?.presented_spellcasting?.current_row_sections?.[0]?.spells?.[0]?.name !== "Message" ||
-  dmCharacterDetail.payload?.character?.presented_spellcasting?.current_row_sections?.[0]?.spells?.[0]?.casting_time !== "1 action"
+  dmCharacterDetail.payload?.character?.presented_spellcasting?.current_row_sections?.[0]?.spells?.[0]?.casting_time !== "1 action" ||
+  dmDetailMessageSpell?.href !== "/app-next/campaigns/linden-pass/pages/spells/message" ||
+  !String(dmDetailMessageSpell?.description_html || "").includes("whisper a short message") ||
+  dmDetailChainMail?.href !== "/app-next/campaigns/linden-pass/systems/entries/phb-item-chain-mail" ||
+  !String(dmDetailChainMail?.description_html || "").includes("Item properties") ||
+  !String(dmDetailChainMail?.description_html || "").includes("Armor Class") ||
+  !String(dmDetailChainMail?.description_html || "").includes("A sample armor entry.")
 ) {
   throw new Error(`Unexpected DM character detail payload: ${JSON.stringify(dmCharacterDetail.payload)}`);
 }
