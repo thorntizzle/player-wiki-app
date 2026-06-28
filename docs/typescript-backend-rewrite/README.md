@@ -20,6 +20,7 @@ This folder tracks the deliberate TypeScript backend rewrite path for Campaign P
 - `combat-rehearsal-readiness.md`: Combat copied-data rehearsal status, commands, evidence checklist, and remaining staging snapshot gate.
 - `combat-copied-data-rehearsal-2026-06-28.md`: completed no-live copied-fixture Combat backup/mutate/restore transcript.
 - `systems-copied-data-rehearsal-2026-06-28.md`: completed no-live copied-fixture Systems and shared-source backup/mutate/restore transcript.
+- `dm-content-copied-data-rehearsal-2026-06-28.md`: completed no-live copied-fixture DM Content backup/mutate/restore transcript.
 - `rollback-cutover-runbook.md`: no-live rollback and full cutover evidence runbook, including the `rollback-cutover` harness guide for last known-good Flask target, pre-cutover backups, TypeScript data-delta decisions, restore command shape, and Flask health smoke.
 - `.local/roadmaps/typescript-backend-rewrite-roadmap.md`: local active task queue for the rewrite track.
 - `docs/current-state/INDEX.md`: current product contract index. Use it to confirm present behavior before porting any workflow.
@@ -439,9 +440,10 @@ Do not implement these routes as part of the parity program unless a later archi
   create/update/delete routes against `CPW_DB_PATH`, preserving Flask-compatible durable-actor
   requirements, markdown statblock upload validation and parser field extraction, condition
   name/description/duplicate validation, deleted-record response payloads, and missing-resource
-  `validation_error` JSON. Current validation covers a disposable fixture database only; production
-  or staging write readiness remains gated by migration, backup, copied-data rehearsal, and rollback
-  approval.
+  `validation_error` JSON. Fixture route validation exists; `dm-content-copied-data-rehearsal-2026-06-28.md`
+  records the copied-data rollback pass for statblock and custom condition writes plus Combat
+  source-backed statblock/condition smoke after restore. Production or staging write readiness remains
+  gated by migration, staging snapshot rehearsal, and rollback approval.
 - The content/config, content page, content asset, and content character management read routes now
   preserve Flask-compatible content-management auth: no identity returns `auth_required`, fixture or
   bearer-token player/outsider identities return `forbidden`, and fixture or bearer-token DM/admin
