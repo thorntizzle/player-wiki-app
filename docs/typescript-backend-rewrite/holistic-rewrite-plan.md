@@ -233,8 +233,9 @@ Slice artifacts:
   module boundaries for character routes, persistence, DND progression, choices,
   options, derivation, presenter adapters, and Xianxia authoring.
 - `gen2-pilot-payload-needs.md`: chooses Combat as the first likely frontend
-  workspace pilot after API stabilization and records the payload needs for
-  Combat, Character, and Session.
+  workspace pilot after Character read/widget dependencies and API stabilization
+  are satisfied, and records the payload needs for Combat, Character, and
+  Session.
 - `cutover-readiness.md`: now carries an architecture classification overlay
   so future branches can distinguish product contract, compatibility shim,
   migration bridge, architecture debt, and open decision work.
@@ -243,8 +244,11 @@ Combined recommendation:
 
 - Do the DND progression-kernel and character boundary work before widening
   level-up class-by-class.
-- Do not wait for the DND kernel to plan the first frontend modernization pilot;
-  start from a Combat service-contract pass once the TypeScript API is stable.
+- Stabilize Character read/widget payloads before the full Combat workspace
+  pilot, because Combat embeds Character sections and mutations heavily.
+- Do not wait for the DND authoring kernel to plan Combat service contracts;
+  do wait for Character read/widget and Combat service-contract passes before
+  frontend implementation.
 - Do wait for the DND kernel before redesigning character authoring surfaces
   such as create, level-up, progression repair, or retraining.
 

@@ -13,8 +13,8 @@ preserve Flask page shapes that Gen2 then has to work around.
 
 ## Recommendation
 
-Use **Combat** as the first frontend workspace pilot after TypeScript API
-stabilization.
+Use **Character read/widget foundation first**, then use **Combat** as the first
+full frontend workspace pilot after TypeScript API stabilization.
 
 Reasoning:
 
@@ -23,16 +23,19 @@ Reasoning:
 - Current Gen2 Combat already has a useful shape: encounter summary, local
   player inspection, DM `status` and `controls` views, selected-PC sections, and
   source-backed NPC resources.
-- Combat can advance on live-state service contracts without waiting for the
-  DND progression kernel to finish.
+- Combat depends on Character read/session/combat payloads for selected-PC
+  sections, HP, resources, spell slots, equipment state, inventory, abilities,
+  skills, notes, and linked item/spell detail dialogs.
+- Combat service-contract planning can advance without waiting for the DND
+  progression kernel to finish, but the full Combat pilot should not start until
+  the Character read/widget payloads it embeds are stable.
 - Character authoring modernization should wait for the DND progression kernel,
   because create/level-up/retraining UI would otherwise anchor to temporary
   class-by-class backend behavior.
 
-Character remains the likely second pilot if the DND kernel lands first or if
-the team chooses to modernize read-only sheet widgets without touching authoring.
-Session is a good later pilot once Combat proves live polling and pane
-preservation patterns.
+Character read/widget foundation is therefore a prerequisite, not necessarily a
+standalone visual pilot. Session is a good later pilot once Combat proves live
+polling, embedded Character widgets, and pane preservation patterns.
 
 ## Shared Payload Principles
 
@@ -50,6 +53,28 @@ All pilots need:
   refetches for small widget mutations.
 
 ## Combat Pilot Payload Needs
+
+### Character Dependency Gate
+
+Before a full Combat workspace pilot begins, the embedded Character payloads
+must be stable enough that Combat can reuse them rather than inventing
+combat-local sheet models.
+
+Minimum Character dependencies:
+
+- stable CharacterPane section keys shared by Character, Session Character, and
+  Combat selected-PC views;
+- DND HP/temp HP/Hit Dice, resources, spell slots, equipment state, inventory,
+  abilities/skills, notes, rest preview, and linked item/spell detail payloads;
+- Xianxia read/session widgets for campaigns that expose Session Character
+  without DND combat automation;
+- mutation targets with permissions, disabled reasons, state revisions, and
+  focused updated fragments;
+- a presenter/domain adapter boundary so Combat consumes server-derived
+  character values instead of re-deriving sheet rules.
+
+This gate does not require the DND authoring kernel to be complete unless the
+pilot expands into create, level-up, repair, retraining, or authoring preview UI.
 
 ### Read Payloads
 
@@ -142,10 +167,25 @@ Session workspace payloads should expose:
 Session is a strong follow-up pilot, but it should reuse live-state and widget
 patterns proven in Combat first.
 
-## First Backend Contract Slice For The Pilot
+## First Backend Contract Slices For The Pilot
 
-Before frontend implementation begins, add a TypeScript service-contract pass
-for Combat:
+Before frontend implementation begins, add two TypeScript service-contract
+passes.
+
+Character read/widget contract:
+
+1. Name the canonical Character read/widget model separate from current route
+   payload shape.
+2. Identify which Character fields are product contract, compatibility shape, or
+   pilot-only convenience.
+3. Define focused mutation return fragments for vitals, resources, spell slots,
+   equipment state, inventory, notes, and rest preview.
+4. Confirm Character, Session Character, and Combat selected-PC views can consume
+   the same adapter without losing current compatibility behavior.
+5. Add tests that assert representative DND and Xianxia read/widget payloads stay
+   aligned across Character, Session Character, and Combat selected-PC contexts.
+
+Combat service contract:
 
 1. Name the canonical Combat read model separate from `/api/v1` response shape.
 2. Identify which fields are product contract versus compatibility shape.
@@ -158,9 +198,9 @@ for Combat:
 
 ## Decision
 
-Do not wait for the DND progression kernel to start the first frontend
-modernization pilot. Do wait for API stabilization and a Combat service-contract
-pass.
+Do not wait for the DND progression kernel to plan Combat service contracts.
+Do wait for Character read/widget payload stability before starting the full
+Combat workspace pilot.
 
 Do wait for the DND progression kernel before modernizing character authoring
 flows such as create, level-up, progression repair, or retraining.

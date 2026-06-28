@@ -110,7 +110,7 @@ These lanes can proceed without conflicting with this docs-only readiness lane:
 1. Queue the DND progression-kernel and character module-boundary work before opening more broad class-by-class level-up lanes. Full DND create, Advanced Editor derivation, and advancement save parity remain blockers, but current class-specific slices should become golden tests rather than the default architecture.
 2. Use the staging rehearsal harness in parallel with implementation: `staging-snapshot-preflight` can prepare the sanitized operator checklist and `guide`/`init` can collect backup/restore command scaffolding and transcript templates without touching active runtime files.
 3. Queue an ops packaging proof before any deploy discussion: TypeScript must prove local production build, container/Fly startup shape, mounted volume paths, and rollback instructions.
-4. Start the first frontend modernization pilot from a Combat service-contract pass after TypeScript API stabilization; keep Character authoring modernization behind the DND progression-kernel decision.
+4. Stabilize Character read/widget payloads before the full Combat frontend pilot; Combat service-contract planning can proceed in parallel, but Combat implementation depends on the embedded Character sections and mutation fragments it reuses.
 5. Keep `deferred_scratch_proof` routes out of cutover scope unless a later architecture decision promotes session-cookie auth, generic upload, or generic notes APIs.
 6. Before a user-approved PR/merge/deploy/cutover step, run the final freeze/drift checklist in `cutover-freeze-drift-audit.md` across `docs/current-state/INDEX.md`, `docs/api-v1.md`, `route-snapshots.json`, `typescript-route-seed.json`, the TypeScript route manifest, and this matrix.
 
