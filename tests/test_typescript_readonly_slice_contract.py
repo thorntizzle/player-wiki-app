@@ -4176,7 +4176,13 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
     assert linked_spell_rows[1]["spell_fields"][0]["selected"] == "phb-spell-alarm"
     assert {
         option["value"] for option in linked_spell_rows[1]["spell_fields"][0]["options"]
-    } == {"phb-spell-alarm"}
+    } == {
+        "phb-spell-alarm",
+        "phb-spell-armor-of-agathys",
+        "phb-spell-mage-armor",
+        "phb-spell-shield",
+        "phb-spell-shield-of-faith",
+    }
 
     invalid_feature_link_status, invalid_feature_link_payload = _to_json(
         route_url,
