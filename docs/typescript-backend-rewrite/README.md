@@ -687,7 +687,7 @@ Do not implement these routes as part of the parity program unless a later archi
   hydrates a ready level-1 to level-2 context for the supported Fighter/Barbarian/Rogue/Monk/Paladin slice, while
   `POST .../level-up` validates HP Gain, writes copied-fixture `definition.yaml` / managed `import.yaml`,
   bumps SQLite state revisions, reconciles HP, Hit Dice, derived resources, and newly initialized spell slots, records
-  `source.native_progression.hp_baseline` plus `level_up` history, appends Rogue `Cunning Action`, appends Monk `Ki` and `Unarmored Movement` with a 2-point Ki resource and the level-2 speed increase, and appends Paladin deferred-choice `Fighting Style`, `Spellcasting`, `Divine Smite`, first-level Paladin spell slots, and Lay on Hands scaling, then returns refreshed level-up payloads.
+  `source.native_progression.hp_baseline` plus `level_up` history, appends Barbarian `Reckless Attack` and `Danger Sense`, appends Rogue `Cunning Action`, appends Monk `Ki` and `Unarmored Movement` with a 2-point Ki resource and the level-2 speed increase, and appends Paladin deferred-choice `Fighting Style`, `Spellcasting`, `Divine Smite`, first-level Paladin spell slots, and Lay on Hands scaling, then returns refreshed level-up payloads.
   Multiclassing, subclass choices, ASI/feat choices, broad Fighting Style UI, prepared-spell choice UI, spell growth beyond this Paladin slot initialization, imported-sheet repair, and broader native
   level-up parity remain pending. The Character Progression Repair route now has the first bounded imported-sheet
   fixture save slice: `GET .../progression-repair` hydrates a repairable context for imported DND-5E sheets that
