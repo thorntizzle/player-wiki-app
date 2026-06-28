@@ -57,6 +57,28 @@ command shape is exercised:
   --backup-archive .\.task-temp\ts-rollback-cutover-YYYYMMDD\backup\pre-cutover-backup.zip
 ```
 
+For Flask backup/restore wrapper rehearsals, set both Flask-side copied-data
+environment variables before invoking `local.ps1`. `-DbPath` redirects the
+SQLite database, while `PLAYER_WIKI_CAMPAIGNS_DIR` redirects copied campaign
+content:
+
+```powershell
+$env:PLAYER_WIKI_DB_PATH = ".task-temp/ts-rollback-cutover-YYYYMMDD/input/player_wiki.sqlite3"
+$env:PLAYER_WIKI_CAMPAIGNS_DIR = ".task-temp/ts-rollback-cutover-YYYYMMDD/input/campaigns"
+powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action backup `
+  -DbPath .\.task-temp\ts-rollback-cutover-YYYYMMDD\input\player_wiki.sqlite3 `
+  -BackupDir .\.task-temp\ts-rollback-cutover-YYYYMMDD\backup `
+  -BackupLabel rollback-cutover-pre
+
+$env:PLAYER_WIKI_DB_PATH = ".task-temp/ts-rollback-cutover-YYYYMMDD/restore/target/player_wiki.sqlite3"
+$env:PLAYER_WIKI_CAMPAIGNS_DIR = ".task-temp/ts-rollback-cutover-YYYYMMDD/restore/target/campaigns"
+powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action restore `
+  -DbPath .\.task-temp\ts-rollback-cutover-YYYYMMDD\restore\target\player_wiki.sqlite3 `
+  -BackupArchive .\.task-temp\ts-rollback-cutover-YYYYMMDD\backup\<archive>.zip `
+  -ForceRestore `
+  -SkipPreRestoreBackup
+```
+
 ## Required Transcript Fields
 
 Record these before any cutover smoke:
