@@ -68,7 +68,7 @@ def test_anonymous_user_can_browse_public_campaign_content(client):
     assert "System: DND-5E" in campaigns_body
 
 
-def test_campaign_picker_defaults_to_gen2_without_preview_card(client):
+def test_campaign_picker_defaults_to_flask_without_preview_card(client):
     response = client.get("/campaigns")
 
     assert response.status_code == 200
@@ -76,7 +76,8 @@ def test_campaign_picker_defaults_to_gen2_without_preview_card(client):
     assert "Frontend preview" not in body
     assert "Stable Flask mode is active." not in body
     assert "Gen2 preview mode is active." not in body
-    assert 'href="/app-next/campaigns/linden-pass"' in body
+    assert 'href="/campaigns/linden-pass"' in body
+    assert 'href="/app-next/campaigns/linden-pass"' not in body
 
 
 def test_campaign_picker_uses_flask_links_when_gen2_hosting_is_disabled(app, client):
@@ -102,7 +103,9 @@ def test_gen2_frontend_account_setting_is_retired(app, client, sign_in, users):
     assert 'href="/app-next/' not in account_body
 
     picker = client.get("/campaigns")
-    assert 'href="/app-next/campaigns/linden-pass"' in picker.get_data(as_text=True)
+    picker_body = picker.get_data(as_text=True)
+    assert 'href="/campaigns/linden-pass"' in picker_body
+    assert 'href="/app-next/campaigns/linden-pass"' not in picker_body
 
     enable_response = client.post(
         "/account/frontend-mode",
@@ -117,10 +120,11 @@ def test_gen2_frontend_account_setting_is_retired(app, client, sign_in, users):
 
     flask_picker = client.get("/campaigns")
     flask_body = flask_picker.get_data(as_text=True)
-    assert 'href="/app-next/campaigns/linden-pass"' in flask_body
+    assert 'href="/campaigns/linden-pass"' in flask_body
+    assert 'href="/app-next/campaigns/linden-pass"' not in flask_body
 
 
-def test_legacy_flask_account_preference_does_not_change_gen2_campaign_picker(app, client, sign_in, users):
+def test_legacy_flask_account_preference_keeps_flask_campaign_picker(app, client, sign_in, users):
     sign_in(users["party"]["email"], users["party"]["password"])
 
     with app.app_context():
@@ -147,12 +151,14 @@ def test_legacy_flask_account_preference_does_not_change_gen2_campaign_picker(ap
 
     signed_in_picker = client.get("/campaigns")
     signed_in_body = signed_in_picker.get_data(as_text=True)
-    assert 'href="/app-next/campaigns/linden-pass"' in signed_in_body
+    assert 'href="/campaigns/linden-pass"' in signed_in_body
+    assert 'href="/app-next/campaigns/linden-pass"' not in signed_in_body
 
     client.post("/sign-out", follow_redirects=False)
     anonymous_picker = client.get("/campaigns")
     anonymous_body = anonymous_picker.get_data(as_text=True)
-    assert 'href="/app-next/campaigns/linden-pass"' in anonymous_body
+    assert 'href="/campaigns/linden-pass"' in anonymous_body
+    assert 'href="/app-next/campaigns/linden-pass"' not in anonymous_body
 
 
 def test_campaign_home_flask_fallback_has_no_preview_card(client):

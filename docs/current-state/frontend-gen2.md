@@ -1,6 +1,6 @@
 # Frontend And Gen2 Shell
 
-Last updated: 2026-06-25
+Last updated: 2026-06-28
 
 ## Owns
 
@@ -8,8 +8,8 @@ Last updated: 2026-06-25
 
 ## Current User-Facing Behavior
 
-- Gen2 is the default frontend. Root, campaign picker, campaign navigation, Campaign Home, wiki browsing, Systems browsing, Characters, Session, Combat, DM Content, Account, Campaign Help, Campaign Control, and Admin target `/app-next` routes when supported.
-- Direct Flask routes remain compatibility fallbacks and no-JS or unsupported-slice exits.
+- Flask is the stable default frontend. Root, single-campaign entry, campaign picker cards, and normal campaign navigation target Flask `/campaigns/...` routes.
+- Gen2 remains available through explicit `/app-next` routes for preview and parity checks. Direct `/app-next` navigation keeps the Gen2 shell, campaign navigation, Campaign Home, wiki browsing, Systems browsing, Characters, Session, Combat, DM Content, Account, Campaign Help, Campaign Control, and Admin inside `/app-next` when supported.
 - `/app-next` serves the built `frontend/dist` bundle when present and uses SPA fallback for Gen2 document routes. Missing builds and missing assets still return 404.
 - The app shell exposes a two-row campaign header with global brand/account/admin controls, campaign navigation, and a shared campaign global search row.
 - At tablet widths the campaign title chip spans its own readable header row instead of shrinking into a narrow vertical column; desktop keeps the compact three-column header and mobile keeps the stacked one-column header.
@@ -58,7 +58,7 @@ Last updated: 2026-06-25
 
 ## Known Limits
 
-- Some advanced Flask maintenance routes remain intentional fallbacks until a scoped Gen2 parity item is opened.
+- Some advanced maintenance routes remain Flask-only until a scoped Gen2 parity item is opened.
 - The older `.local/gen2-front-end-roadmap.md`, `.local/gen2-manual-feedback-roadmap.md`, and `.local/gen2-manual-sweep-checklist.md` files are historical or audit sources. Active frontend follow-up belongs in `.local/roadmaps/gen2-frontend-backlog.md`.
 
 ## Related Backlog

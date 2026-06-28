@@ -1,8 +1,8 @@
 # Gen2 Frontend
 
-This React + TypeScript frontend is the default browser UI for the app. Flask serves Gen2 at `/app-next` from the built `frontend/dist` bundle when `index.html` exists, with direct Flask campaign routes preserved as compatibility URLs.
+This React + TypeScript frontend is the Gen2 client for explicit `/app-next` previews. The Flask frontend is the default browser UI for the app again. Flask still serves Gen2 at `/app-next` from the built `frontend/dist` bundle when `index.html` exists.
 
-The current default-frontend contract and historical migration notes live in:
+The current route contract and historical migration notes live in:
 
 - `docs/gen2-migration-readiness.md`
 
@@ -44,7 +44,7 @@ Gen2 uses TanStack Router's file-based route generator through `@tanstack/router
 
 ## Surface Coverage
 
-The default Gen2 build covers:
+The Gen2 build covers:
 
 - campaign list, campaign home, published wiki sections, and published wiki pages
 - Session player/character/DM panes
@@ -59,7 +59,7 @@ The default Gen2 build covers:
 
 The refreshed browser acceptance suite lives in `tests/test_frontend_gen2_session_browser.py` and currently covers route loading, core write flows, route-mode preservation inside `/app-next`, desktop/mobile overflow checks, and visible Flask-fallback cleanup.
 
-Flask remains the source of truth for workflows that are still Flask-first or intentionally fallback-only, including shared/core Systems entry editing, Systems imports, and CLI/bootstrap recovery operations.
+Flask is the stable default frontend and remains the source of truth for workflows that are still Flask-first, including shared/core Systems entry editing, Systems imports, and CLI/bootstrap recovery operations.
 
 ## UX Standards
 
@@ -87,14 +87,14 @@ When Gen2 hosting is enabled, Flask serves `PLAYER_WIKI_APP_NEXT_DIST_DIR` (defa
 
 ## Flask integration
 
-- Flask hosts Gen2 by default. Set `PLAYER_WIKI_ENABLE_APP_NEXT_PREVIEW=0` only as a temporary kill switch; then Flask returns 404 for `GET /app-next`, `GET /app-next/`, and `GET /app-next/<path>`.
+- Flask hosts Gen2 at `/app-next` when a built bundle exists. Set `PLAYER_WIKI_ENABLE_APP_NEXT_PREVIEW=0` to disable that explicit preview surface; then Flask returns 404 for `GET /app-next`, `GET /app-next/`, and `GET /app-next/<path>`.
 - Account settings no longer include a preferred-frontend selector.
-- Root/single-campaign entry points and campaign picker cards prefer `/app-next/campaigns/<slug>` when Gen2 hosting is available.
+- Root/single-campaign entry points and campaign picker cards use Flask `/campaigns/<slug>` routes even when Gen2 hosting is available.
 - Direct `/app-next` navigation keeps shell, campaign, and wiki links in Gen2 while stored legacy Flask preferences normalize to Gen2.
 
 ## API Used By Gen2
 
-The full API reference is maintained in `docs/api-v1.md`. The list below is orientation for the default Gen2 app.
+The full API reference is maintained in `docs/api-v1.md`. The list below is orientation for the Gen2 client.
 
 - `GET /api/v1/app`
 - `GET /api/v1/me`

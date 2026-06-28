@@ -1,6 +1,6 @@
 # Characters Overview
 
-Last updated: 2026-06-25
+Last updated: 2026-06-28
 
 ## Owns
 
@@ -10,8 +10,8 @@ Last updated: 2026-06-25
 
 ## Current User-Facing Behavior
 
-- Campaign character roster and detail pages are available in Flask compatibility routes and Gen2 `/app-next` routes.
-- Gen2 is the default frontend. Character roster, detail, native create/import lanes, DND-5E Advanced Editor, Progression Repair, Level Up, Retraining, Xianxia Cultivation, Portrait, Controls, and selected live-state edits have Gen2 parity.
+- Campaign character roster and detail pages are available in the stable Flask default routes and explicit Gen2 `/app-next` routes.
+- Gen2 character roster, detail, native create/import lanes, DND-5E Advanced Editor, Progression Repair, Level Up, Retraining, Xianxia Cultivation, Portrait, Controls, and selected live-state edits have parity for direct `/app-next` checks.
 - Character detail pages default to the normal read shell. Legacy `?mode=session` URLs remain compatibility aliases that render the normal Character page for the requested subpage.
 - The Gen2 character read header is stable above the subpage navigation. Its identity summary can display the portrait image/caption and character identity details, but HP, Temp HP, Hit Dice, System, and resource previews live on their owning sheet sections instead of the header summary.
 - Character Controls includes a theme-aware destructive delete card that keeps the warning copy, slug-confirmation input, and destructive action readable across supported themes.

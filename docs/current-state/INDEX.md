@@ -1,6 +1,6 @@
 # Current State Index
 
-Last updated: 2026-06-25
+Last updated: 2026-06-28
 
 This directory is the fast reference layer for the current Campaign Player Wiki app contract. It is meant for implementation, audits, and roadmap close-out. Prefer these atomized docs over old roadmap completion notes when deciding what the app does now.
 

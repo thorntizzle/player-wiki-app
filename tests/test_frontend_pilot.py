@@ -284,7 +284,7 @@ def test_frontend_pilot_routes_are_available_by_default_with_index(app, client, 
     assert missing_asset_response.status_code == 404
 
 
-def test_home_redirects_to_gen2_campaign_when_built_index_is_available(app, client, tmp_path):
+def test_home_redirects_to_flask_campaign_when_built_index_is_available(app, client, tmp_path):
     dist_dir = tmp_path / "frontend-dist-default"
     dist_dir.mkdir(parents=True)
     (dist_dir / "index.html").write_text("<!doctype html><html><body>gen2</body></html>", encoding="utf-8")
@@ -293,7 +293,7 @@ def test_home_redirects_to_gen2_campaign_when_built_index_is_available(app, clie
     response = client.get("/", follow_redirects=False)
 
     assert response.status_code == 302
-    assert response.headers["Location"].endswith("/app-next/campaigns/linden-pass")
+    assert response.headers["Location"].endswith("/campaigns/linden-pass")
 
 
 def test_frontend_index_includes_app_loading_shell_source() -> None:

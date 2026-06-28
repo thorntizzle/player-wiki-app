@@ -1306,9 +1306,6 @@ def create_app() -> Flask:
     def _app_next_available() -> bool:
         return _app_next_preview_enabled() and _app_next_index_html().is_file()
 
-    def _app_next_campaign_url(campaign_slug: str) -> str:
-        return url_for("app_next_path", asset_path=f"campaigns/{campaign_slug}")
-
     def _app_next_campaign_slug_from_asset_path(asset_path: str = "") -> str:
         path_parts = [part for part in asset_path.strip("/").split("/") if part]
         if len(path_parts) >= 2 and path_parts[0] == "campaigns":
@@ -9229,22 +9226,14 @@ def create_app() -> Flask:
         if user is None:
             public_entries = get_public_campaign_entries(get_repository())
             if len(public_entries) == 1:
-                if _app_next_available():
-                    return redirect(_app_next_campaign_url(public_entries[0].campaign.slug))
                 return redirect(url_for("campaign_view", campaign_slug=public_entries[0].campaign.slug))
-            if _app_next_available():
-                return redirect(url_for("app_next_root_or_index"))
             return redirect(url_for("campaign_picker"))
 
         campaign_entries = get_accessible_campaign_entries(get_repository())
         if len(campaign_entries) == 1:
-            if _app_next_available():
-                return redirect(_app_next_campaign_url(campaign_entries[0].campaign.slug))
             return redirect(
                 url_for("campaign_view", campaign_slug=campaign_entries[0].campaign.slug)
             )
-        if _app_next_available():
-            return redirect(url_for("app_next_root_or_index"))
         return redirect(url_for("campaign_picker"))
 
     @app.get("/campaigns/<campaign_slug>")
