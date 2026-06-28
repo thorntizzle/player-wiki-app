@@ -1,6 +1,6 @@
 # Ops And Fly Deployment
 
-Last updated: 2026-06-25
+Last updated: 2026-06-28
 
 ## Owns
 
@@ -11,7 +11,9 @@ Last updated: 2026-06-25
 - Work from the `campaign_player_wiki` app repo root for app repo operations.
 - Prefer the workspace virtualenv Python or `local.ps1` instead of bare `python`.
 - Prefer existing `frontend/node_modules` tools or bundled Node; do not assume global `npm` is on `PATH`.
-- `local.ps1` is the Windows-first wrapper for bootstrap, run, test, check, backup, restore, prepare-fly-campaigns, sync-fly, and deploy-fly.
+- `local.ps1` is the Windows-first wrapper for bootstrap, run, test, check, TypeScript API validation, backup, restore, prepare-fly-campaigns, sync-fly, and deploy-fly.
+- `local.ps1 -Action ts-api-check` is the local TypeScript API validation gate. It resolves Node/npm from explicit parameters, `CPW_NODE_*` environment variables, repo-local ignored runtimes, `$HOME`-relative Codex or pinned Node runtime locations, and then `PATH`; it does not require global `npm` to be on `PATH`.
+- The TypeScript API gate runs `npm ci`, `scripts/route_snapshots.py --check`, `npm --prefix apps/api run typecheck`, `npm --prefix apps/api run build`, and `npm --prefix apps/api run test:route-parity`. Use `-SkipTsApiInstall` only when `apps/api/node_modules` is already current, and `-SkipRouteSnapshotCheck` only for an npm-only diagnostic.
 - Disposable local runtime temp files belong under `.local/tmp/<action>/` or task-specific `.task-temp` folders outside durable app data.
 - The default Docker/Fly image remains Flask/Gunicorn. `Dockerfile` also exposes a non-default `ts-api-runtime-proof` target for local-only TypeScript API packaging proof work; it is not the production deploy target.
 

@@ -1,6 +1,6 @@
 # TypeScript Backend Ops Packaging Proof
 
-Last updated: 2026-06-27
+Last updated: 2026-06-28
 
 Status: no-deploy packaging readiness artifact for future TypeScript backend cutover
 
@@ -93,6 +93,9 @@ Allowed before explicit deployment approval:
   - `npm --prefix apps/api run typecheck`
   - `npm --prefix apps/api run build`
   - `npm --prefix apps/api test`
+- Run the repo wrapper gate when validating the local TypeScript API route
+  parity path on Windows without relying on global npm:
+  - `powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action ts-api-check`
 - Run static Docker context hygiene checks that do not contact Fly.
 - Run `npm --prefix apps/api run test:packaging-proof` to verify the
   non-default TypeScript image target and proof entrypoint wiring.
@@ -137,14 +140,20 @@ Collect:
 
 Current gap:
 
-- The app has local TypeScript API scripts and a non-default Docker proof target,
-  but those scripts are not wired into the production Flask image, Fly process,
-  or `local.ps1` deploy path.
+- The app has local TypeScript API scripts, a durable `local.ps1 -Action
+  ts-api-check` validation wrapper, and a non-default Docker proof target, but
+  those scripts are not wired into the production Flask image, Fly process, or
+  `local.ps1` deploy path.
 
 Current local evidence:
 
 - Pinned Node `v22.12.0` and npm `10.9.0` can run `npm --prefix apps/api ci`,
   `npm --prefix apps/api run typecheck`, and `npm --prefix apps/api run build`.
+- `local.ps1 -Action ts-api-check` resolves Node/npm from explicit parameters,
+  `CPW_NODE_*` environment variables, repo-local ignored runtimes,
+  `$HOME`-relative Codex/pinned runtime locations, or `PATH`; the wrapper runs
+  `npm ci`, route snapshot validation, API typecheck, API build, and
+  `test:route-parity` without requiring global npm.
 - `apps/api/dist/server.js` starts locally with copied fixture campaigns under
   `.task-temp` and a disposable SQLite path.
 - Local `GET /healthz` returns `status: ok`, `runtime_mode: fixture`, and
