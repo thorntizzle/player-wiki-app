@@ -25,7 +25,7 @@ Last updated: 2026-06-28
 
 - Native DND-5E create, edit, level-up, progression repair, and retraining are DND-5E-only.
 - Native base-class boundary is explicit: PHB base classes plus the TCE Artificer lane.
-- The TypeScript create parity path currently has bounded level-one PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric/Life Domain, PHB Druid, PHB Sorcerer/Draconic Bloodline, PHB Warlock/Fiend, and PHB Wizard slices; full DND builder parity remains pending.
+- The TypeScript create parity path currently has bounded level-one PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric/Life Domain, PHB Druid, PHB Rogue, PHB Sorcerer/Draconic Bloodline, PHB Warlock/Fiend, and PHB Wizard slices; full DND builder parity remains pending.
 - Supported subordinate non-PHB rows include current accepted SCAG, XGE, EGW, and DMG rows when attached to supported base classes.
 - Native level-up is one level at a time through level 20 and can advance an existing class row or add a class row when the support matrix allows it.
 - Progression repair resolves ambiguous imported class/subclass/species/background links and converts legacy imported spell marks to durable spell flags.

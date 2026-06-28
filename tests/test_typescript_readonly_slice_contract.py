@@ -433,6 +433,7 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
             ),
             ("DND-5E", "PHB", "PHB:class:druid", "class", "phb-druid", "Druid", {"hit_die": 8, "saving_throw_proficiencies": ["Intelligence", "Wisdom"]}),
             ("DND-5E", "PHB", "PHB:class:fighter", "class", "phb-fighter", "Fighter", {"hit_die": 10, "saving_throw_proficiencies": ["Strength", "Constitution"]}),
+            ("DND-5E", "PHB", "PHB:class:rogue", "class", "phb-rogue", "Rogue", {"hit_die": 8, "saving_throw_proficiencies": ["Dexterity", "Intelligence"]}),
             (
                 "DND-5E",
                 "PHB",
@@ -2239,6 +2240,113 @@ def test_typescript_dnd_character_create_druid_writes_prepared_spells_and_state(
     assert rejected_status == 400
     assert rejected_payload["error"]["code"] == "validation_error"
     assert "Prepared Spell 1 is not valid" in rejected_payload["error"]["message"]
+
+
+def test_typescript_dnd_character_create_rogue_writes_expertise_equipment_and_state(
+    typescript_api_mutation_server,
+):
+    character_slug = "api-dnd-rogue"
+    body = {
+        "values": {
+            "name": "API DND Rogue",
+            "character_slug": character_slug,
+            "class_slug": "systems:phb-rogue",
+            "species_slug": "systems:phb-human",
+            "background_slug": "systems:phb-sage",
+            "str": "10",
+            "dex": "16",
+            "con": "14",
+            "int": "12",
+            "wis": "12",
+            "cha": "10",
+        }
+    }
+
+    status, payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body=body,
+    )
+
+    assert status == 200
+    assert payload["message"] == "API DND Rogue created."
+    definition = payload["character"]["definition"]
+    import_metadata = payload["character"]["import_metadata"]
+    state_record = payload["character"]["state_record"]
+    assert definition["character_slug"] == character_slug
+    assert definition["system"] == "DND-5E"
+    assert definition["profile"]["class_level_text"] == "Rogue 1"
+    assert definition["profile"]["classes"][0]["systems_ref"]["entry_key"] == "PHB:class:rogue"
+    assert definition["profile"]["species_ref"]["entry_key"] == "PHB:race:human"
+    assert definition["profile"]["background"] == "Sage"
+    assert definition["stats"]["max_hp"] == 10
+    assert definition["stats"]["armor_class"] == 14
+    assert definition["stats"]["passive_perception"] == 13
+    assert definition["stats"]["ability_scores"]["dex"]["save_bonus"] == 5
+    assert definition["stats"]["ability_scores"]["int"]["save_bonus"] == 3
+    assert definition["source"]["source_path"] == "builder://dnd5e-create-level-one"
+    assert import_metadata["source_path"] == "builder://dnd5e-create-level-one"
+    assert import_metadata["import_status"] == "managed"
+
+    assert definition["proficiencies"]["armor"] == ["Light armor"]
+    assert "Thieves' tools" in definition["proficiencies"]["tools"]
+    assert definition["proficiencies"]["tool_expertise"] == ["Thieves' tools"]
+    skills_by_name = {skill["name"]: skill for skill in definition["skills"]}
+    assert skills_by_name["Acrobatics"]["proficiency_level"] == "proficient"
+    assert skills_by_name["Sleight of Hand"]["proficiency_level"] == "proficient"
+    assert skills_by_name["Stealth"]["proficiency_level"] == "expertise"
+    assert skills_by_name["Stealth"]["bonus"] == 7
+    assert skills_by_name["Investigation"]["bonus"] == 1
+    features_by_id = {feature["id"]: feature for feature in definition["features"]}
+    assert features_by_id["expertise-1"]["name"] == "Expertise"
+    assert features_by_id["sneak-attack-1"]["name"] == "Sneak Attack"
+    assert features_by_id["thieves-cant-1"]["name"] == "Thieves' Cant"
+    assert definition["resource_templates"] == []
+    assert definition["spellcasting"] == {}
+    assert definition["attacks"][0]["equipment_ref"] == "rapier-1"
+    assert "Sneak Attack" in definition["attacks"][0]["notes"]
+    assert any(item["name"] == "Thieves' Tools" for item in definition["equipment_catalog"])
+    assert any(item["name"] == "Sage Starting Package" for item in definition["equipment_catalog"])
+
+    assert state_record["revision"] == 1
+    assert state_record["state"]["vitals"]["current_hp"] == 10
+    assert state_record["state"]["hit_dice"]["pools"] == [{"faces": 8, "current": 1, "max": 1}]
+    assert state_record["state"]["spell_slots"] == []
+    assert state_record["state"]["resources"] == []
+    assert state_record["state"]["inventory"][0]["catalog_ref"] == "leather-armor-1"
+    assert state_record["state"]["inventory"][1]["catalog_ref"] == "rapier-1"
+    assert state_record["state"]["inventory"][2]["catalog_ref"] == "shortbow-1"
+    assert state_record["state"]["currency"]["gp"] == 10
+
+    state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
+    assert state is not None
+    assert state["revision"] == 1
+    assert state["state"]["vitals"]["current_hp"] == 10
+    assert state["state"]["hit_dice"]["pools"][0]["faces"] == 8
+
+    character_dir = typescript_api_mutation_server["campaigns_dir"] / "linden-pass" / "characters" / character_slug
+    written_definition = yaml.safe_load((character_dir / "definition.yaml").read_text(encoding="utf-8"))
+    written_import = yaml.safe_load((character_dir / "import.yaml").read_text(encoding="utf-8"))
+    assert written_definition["name"] == "API DND Rogue"
+    assert written_definition["proficiencies"]["tool_expertise"] == ["Thieves' tools"]
+    assert written_import["source_path"] == "builder://dnd5e-create-level-one"
+
+    level_up_status, level_up_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{character_slug}/level-up",
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+    assert level_up_status == 200
+    assert level_up_payload["supported"] is False
+
+    duplicate_status, duplicate_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body=body,
+    )
+    assert duplicate_status == 409
+    assert duplicate_payload["error"]["code"] == "character_exists"
 
 
 def test_typescript_dnd_character_create_sorcerer_writes_draconic_bloodline_spells_and_state(
