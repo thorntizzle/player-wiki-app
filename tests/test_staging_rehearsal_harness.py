@@ -95,9 +95,32 @@ def test_combat_rehearsal_transcript_includes_concrete_write_family_plan(tmp_pat
     transcript = (root / "transcript.md").read_text(encoding="utf-8")
     assert "POST /api/v1/campaigns/<slug>/combat/player-combatants" in transcript
     assert "PATCH /api/v1/campaigns/<slug>/combat/combatants/<combatantId>/vitals" in transcript
+    assert "Create a backup from the copied SQLite and copied campaigns directory only." in transcript
     assert "Restored linked character_state JSON and revision values must match baseline." in transcript
-    assert "Label before: `fixture-write validated`" in transcript
-    assert "Label after only if backup, mutation, restore, and equivalence all pass: `copied-data rollback ready`" in transcript
+    assert "Label before: `copied-data rollback ready`" in transcript
+    assert "Label after only if backup, mutation, restore, and equivalence all pass: `staging snapshot ready`" in transcript
+
+
+def test_all_copied_data_families_have_staging_snapshot_guides():
+    harness = _load_harness_module()
+
+    for family in (
+        "content-character",
+        "combat",
+        "session",
+        "systems",
+        "dm-content",
+        "publishing",
+    ):
+        guide = harness.family_guide_markdown(family)
+
+        assert "## Family-Specific Rehearsal Guide" in guide
+        assert "### Backup Evidence Checklist" in guide
+        assert "### Mutation Sequence" in guide
+        assert "### Restore Equivalence Requirements" in guide
+        assert "Label before: `copied-data rollback ready`" in guide
+        assert "Label after only if backup, mutation, restore, and equivalence all pass: `staging snapshot ready`" in guide
+        assert "staging-equivalent snapshot" in guide
 
 
 def test_rollback_cutover_transcript_captures_runbook_evidence(tmp_path):

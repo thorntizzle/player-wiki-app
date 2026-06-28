@@ -95,9 +95,44 @@ FAMILY_TABLES: dict[str, tuple[str, ...]] = {
 
 
 FAMILY_REHEARSAL_GUIDES: dict[str, dict[str, tuple[str, ...] | str]] = {
+    "content-character": {
+        "label_before": "copied-data rollback ready",
+        "label_after": "staging snapshot ready",
+        "routes": (
+            "PUT /api/v1/campaigns/<slug>/content/characters/<characterSlug>",
+            "DELETE /api/v1/campaigns/<slug>/content/characters/<characterSlug>",
+            "Character Controls delete path if it reuses content-character deletion.",
+        ),
+        "baseline": (
+            "Record selected character definition/import files and portrait asset manifests.",
+            "Record character detail API samples for DND-5E and Xianxia characters when both are present.",
+            "Record `character_state` JSON, revision, and system-specific mutable-state fields for selected characters.",
+            "Record `character_assignments` rows for selected assigned and unassigned characters.",
+            "Record any existing audit rows that the copied staging-equivalent snapshot already contains.",
+        ),
+        "backup": (
+            "Create a backup from the copied SQLite and copied campaigns directory only.",
+            "Record archive path, command, contents summary, file count, and checksum.",
+            "Confirm the backup archive path passed `check-paths` and stayed under `.task-temp/`.",
+            "Record restore target path before mutation; stop if the restore target is not disposable.",
+        ),
+        "mutation": (
+            "Update one DND-5E character definition or import field without inventing private campaign content.",
+            "Update one Xianxia character field when present and record mutable-state preservation.",
+            "Delete one disposable or operator-approved character and record state and assignment cleanup flags.",
+            "Record response fields such as `state_created`, `deleted_state`, and `deleted_assignment`.",
+        ),
+        "equivalence": (
+            "Restored character files, import files, portrait asset bytes, and manifests must match baseline.",
+            "Restored `character_state` JSON and revision values must match baseline for sampled characters.",
+            "Restored assignments and sampled character detail responses must match baseline or list exact accepted differences.",
+            "Any missing portrait, orphaned assignment, unexpected state deletion, or changed source file keeps the gate blocked.",
+        ),
+        "safety_note": "This guide can support `staging snapshot ready` only when the source approval explicitly names a staging-equivalent snapshot and restore equivalence passes.",
+    },
     "combat": {
-        "label_before": "fixture-write validated",
-        "label_after": "copied-data rollback ready",
+        "label_before": "copied-data rollback ready",
+        "label_after": "staging snapshot ready",
         "routes": (
             "GET /api/v1/campaigns/<slug>/combat",
             "GET /api/v1/campaigns/<slug>/combat/live-state",
@@ -124,6 +159,12 @@ FAMILY_REHEARSAL_GUIDES: dict[str, dict[str, tuple[str, ...] | str]] = {
             "Record source-backed NPC resource counters and mechanic notes when present.",
             "Record condition rows and custom condition option payloads.",
         ),
+        "backup": (
+            "Create a backup from the copied SQLite and copied campaigns directory only.",
+            "Record archive path, command, contents summary, file count, and checksum.",
+            "Confirm the backup archive path passed `check-paths` and stayed under `.task-temp/`.",
+            "Record restore target path before mutation; stop if the restore target is not disposable.",
+        ),
         "mutation": (
             "Add one player combatant and verify character-state initialization or mirror behavior.",
             "Add one manual NPC, then update vitals, action economy, and movement.",
@@ -138,7 +179,165 @@ FAMILY_REHEARSAL_GUIDES: dict[str, dict[str, tuple[str, ...] | str]] = {
             "Restored linked character_state JSON and revision values must match baseline.",
             "Restored player Combat, DM Status, DM Controls, and live-state samples must match baseline or list exact accepted differences.",
         ),
-        "safety_note": "This copied-data result is not `staging snapshot ready` unless the source snapshot was explicitly approved as staging-equivalent and the transcript records that approval.",
+        "safety_note": "This guide can support `staging snapshot ready` only when the source approval explicitly names a staging-equivalent snapshot and restore equivalence passes.",
+    },
+    "session": {
+        "label_before": "copied-data rollback ready",
+        "label_after": "staging snapshot ready",
+        "routes": (
+            "GET /api/v1/campaigns/<slug>/session",
+            "GET /api/v1/campaigns/<slug>/session/live-state",
+            "POST /api/v1/campaigns/<slug>/session/start",
+            "POST /api/v1/campaigns/<slug>/session/close",
+            "POST /api/v1/campaigns/<slug>/session/messages",
+            "POST /api/v1/campaigns/<slug>/session/articles",
+            "PATCH /api/v1/campaigns/<slug>/session/articles/<articleId>",
+            "POST /api/v1/campaigns/<slug>/session/articles/<articleId>/reveal",
+            "DELETE /api/v1/campaigns/<slug>/session/articles/<articleId>",
+            "DELETE /api/v1/campaigns/<slug>/session/logs/<sessionId>",
+        ),
+        "baseline": (
+            "Record live Session, DM Session, and closed-log API samples for active and closed sessions when present.",
+            "Record `campaign_sessions`, `campaign_session_states`, and `campaign_session_messages` row counts and selected rows.",
+            "Record staged/revealed article rows, image rows, and representative image byte hashes.",
+            "Record current revision/view-token behavior for sampled player and DM views.",
+        ),
+        "backup": (
+            "Create a backup from the copied SQLite and copied campaigns directory only.",
+            "Record archive path, command, contents summary, file count, and checksum.",
+            "Confirm the backup archive path passed `check-paths` and stayed under `.task-temp/`.",
+            "Record restore target path before mutation; stop if the restore target is not disposable.",
+        ),
+        "mutation": (
+            "Start or close one operator-approved copied session and record state transition payloads.",
+            "Send global, DM-only, and player-targeted messages with actor role and audience evidence.",
+            "Create, update, reveal, delete, and clear staged articles only when copied data supports those actions.",
+            "Delete one copied closed log only after baseline evidence and backup are recorded.",
+        ),
+        "equivalence": (
+            "Restored sessions, state rows, messages, article rows, image rows, and image hashes must match baseline.",
+            "Restored player and DM live-state samples must match baseline or list exact accepted differences.",
+            "Audience filtering, revisions, and unchanged-response behavior must match baseline after restore.",
+            "Any leaked DM-only message, missing image, orphaned article, or changed closed log keeps the gate blocked.",
+        ),
+        "safety_note": "This guide can support `staging snapshot ready` only when the source approval explicitly names a staging-equivalent snapshot and restore equivalence passes.",
+    },
+    "systems": {
+        "label_before": "copied-data rollback ready",
+        "label_after": "staging snapshot ready",
+        "routes": (
+            "GET /api/v1/campaigns/<slug>/systems",
+            "GET /api/v1/campaigns/<slug>/systems/sources/<sourceId>",
+            "GET /api/v1/campaigns/<slug>/systems/entries/<entryKey>",
+            "PATCH /api/v1/campaigns/<slug>/systems/source-policy",
+            "PATCH /api/v1/campaigns/<slug>/systems/entries/<entryKey>/override",
+            "POST /api/v1/campaigns/<slug>/systems/custom-entries",
+            "PATCH /api/v1/campaigns/<slug>/systems/custom-entries/<entryKey>",
+            "POST /api/v1/campaigns/<slug>/systems/import-item-mechanics",
+            "POST /api/v1/systems/import-dnd5e-source when explicitly approved for the copied snapshot.",
+        ),
+        "baseline": (
+            "Record Systems landing, source, entry, and DM Content Systems API samples.",
+            "Record libraries, sources, entries, import runs, entry links, policies, enabled sources, and overrides.",
+            "Record custom entries, archived entries, campaign overrides, and proprietary acknowledgement state when present.",
+            "Record shared-source import history and media-stripping expectations before any import action.",
+        ),
+        "backup": (
+            "Create a backup from the copied SQLite and copied campaigns directory only.",
+            "Record archive path, command, contents summary, file count, and checksum.",
+            "Confirm the backup archive path passed `check-paths` and stayed under `.task-temp/`.",
+            "Record restore target path before mutation; stop if the restore target is not disposable.",
+        ),
+        "mutation": (
+            "Update one source policy and verify public/private/proprietary visibility decisions.",
+            "Create, update, archive, and restore one custom entry when copied data supports it.",
+            "Apply and remove one entry override while preserving source entry identity.",
+            "Run item mechanics import or shared DND-5E import only when the operator explicitly approved that copied snapshot action.",
+        ),
+        "equivalence": (
+            "Restored library, source, entry, import-run, link, policy, enabled-source, and override rows must match baseline.",
+            "Restored landing/source/entry/DM Content Systems samples must match baseline or list exact accepted differences.",
+            "Shared-source import decisions and media stripping must be recorded before any staging snapshot label change.",
+            "Any visibility regression, orphaned custom entry, changed source row, or unresolved import delta keeps the gate blocked.",
+        ),
+        "safety_note": "This guide can support `staging snapshot ready` only when the source approval explicitly names a staging-equivalent snapshot and restore equivalence passes.",
+    },
+    "dm-content": {
+        "label_before": "copied-data rollback ready",
+        "label_after": "staging snapshot ready",
+        "routes": (
+            "GET /api/v1/campaigns/<slug>/dm-content",
+            "POST /api/v1/campaigns/<slug>/dm-content/statblocks",
+            "PATCH /api/v1/campaigns/<slug>/dm-content/statblocks/<statblockId>",
+            "DELETE /api/v1/campaigns/<slug>/dm-content/statblocks/<statblockId>",
+            "POST /api/v1/campaigns/<slug>/dm-content/conditions",
+            "PATCH /api/v1/campaigns/<slug>/dm-content/conditions/<conditionId>",
+            "DELETE /api/v1/campaigns/<slug>/dm-content/conditions/<conditionId>",
+            "GET /api/v1/campaigns/<slug>/combat/setup choices that consume DM Content rows.",
+        ),
+        "baseline": (
+            "Record DM Content payload samples and Combat setup choices that consume statblocks or conditions.",
+            "Record `campaign_dm_statblocks` rows, parser output summaries, actor columns, and audit rows if present.",
+            "Record `campaign_dm_condition_definitions` rows and custom condition option payloads.",
+            "Record duplicate-condition and validation baselines when copied data already contains edge cases.",
+        ),
+        "backup": (
+            "Create a backup from the copied SQLite and copied campaigns directory only.",
+            "Record archive path, command, contents summary, file count, and checksum.",
+            "Confirm the backup archive path passed `check-paths` and stayed under `.task-temp/`.",
+            "Record restore target path before mutation; stop if the restore target is not disposable.",
+        ),
+        "mutation": (
+            "Create, update, and delete one copied statblock while recording parser output and actor metadata.",
+            "Create, update, and delete one copied custom condition while recording duplicate/validation behavior.",
+            "Verify Combat setup choices reflect copied mutations before restore and return to baseline after restore.",
+        ),
+        "equivalence": (
+            "Restored statblock rows, condition rows, parser summaries, and actor/audit evidence must match baseline.",
+            "Restored DM Content and Combat setup payloads must match baseline or list exact accepted differences.",
+            "Any parser drift, stale Combat option, missing actor evidence, or unexpected condition duplicate keeps the gate blocked.",
+        ),
+        "safety_note": "This guide can support `staging snapshot ready` only when the source approval explicitly names a staging-equivalent snapshot and restore equivalence passes.",
+    },
+    "publishing": {
+        "label_before": "copied-data rollback ready",
+        "label_after": "staging snapshot ready",
+        "routes": (
+            "GET /api/v1/campaigns/<slug>/wiki",
+            "GET /api/v1/campaigns/<slug>/wiki/pages/<pageSlug>",
+            "PATCH /api/v1/campaigns/<slug>/content/config",
+            "POST /api/v1/campaigns/<slug>/content/pages",
+            "PATCH /api/v1/campaigns/<slug>/content/pages/<pageSlug>",
+            "DELETE /api/v1/campaigns/<slug>/content/pages/<pageSlug>",
+            "POST /api/v1/campaigns/<slug>/content/assets",
+            "DELETE /api/v1/campaigns/<slug>/content/assets/<assetPath>",
+            "GET protected asset byte-serving routes for selected copied assets.",
+        ),
+        "baseline": (
+            "Record `campaign.yaml`, selected content Markdown files, selected assets, and file hashes.",
+            "Record `campaign_pages` and `campaign_page_sync_state` rows and selected read-model payloads.",
+            "Record wiki list/detail, DM Content Player Wiki, and protected asset response samples.",
+            "Record provenance blockers such as character/session references when present in the copied snapshot.",
+        ),
+        "backup": (
+            "Create a backup from the copied SQLite and copied campaigns directory only.",
+            "Record archive path, command, contents summary, file count, and checksum.",
+            "Confirm the backup archive path passed `check-paths` and stayed under `.task-temp/`.",
+            "Record restore target path before mutation; stop if the restore target is not disposable.",
+        ),
+        "mutation": (
+            "Patch content config and record read-model refresh behavior.",
+            "Create, update, unpublish/republish, delete, and force-delete one copied page when blockers are intentionally present.",
+            "Upload, read, and delete one copied-safe asset; record media type, base64 payload shape, raw bytes, and empty-dir cleanup.",
+            "Record protected asset serving behavior before and after mutation.",
+        ),
+        "equivalence": (
+            "Restored config, Markdown files, assets, file hashes, read-model rows, and sampled wiki/API responses must match baseline.",
+            "Restored protected asset bytes and media types must match baseline or list exact accepted differences.",
+            "Provenance blocker outcomes must be recorded before any forced delete can support a staging label.",
+            "Any lost asset, stale read-model row, changed Markdown frontmatter, or unapproved image conversion delta keeps the gate blocked.",
+        ),
+        "safety_note": "This guide can support `staging snapshot ready` only when the source approval explicitly names a staging-equivalent snapshot and restore equivalence passes.",
     },
     "rollback-cutover": {
         "label_before": "staging snapshot ready",
@@ -156,6 +355,12 @@ FAMILY_REHEARSAL_GUIDES: dict[str, dict[str, tuple[str, ...] | str]] = {
             "Record pre-cutover SQLite backup command, archive path, contents summary, and checksum.",
             "Record pre-cutover campaign-content backup command, archive path, contents summary, and checksum.",
             "Record local or staging-equivalent runtime environment without real Fly app identifiers, tokens, secrets, or live paths.",
+        ),
+        "backup": (
+            "Create both SQLite and campaign-content backups from copied or approved staging-equivalent inputs only.",
+            "Record archive paths, commands, contents summaries, file counts, and checksums.",
+            "Confirm every backup archive path passed `check-paths` and stayed under `.task-temp/` or an approved disposable staging scratch root.",
+            "Record the Flask rollback target before TypeScript mutation begins.",
         ),
         "mutation": (
             "Run the full charter workflow smoke on copied or user-approved staging-equivalent data only.",
@@ -404,6 +609,9 @@ def family_guide_markdown(family: str) -> str:
 ### Baseline Evidence Checklist
 {bullet_list(guide["baseline"])}
 
+### Backup Evidence Checklist
+{bullet_list(guide["backup"])}
+
 ### Mutation Sequence
 {bullet_list(guide["mutation"])}
 
@@ -492,7 +700,7 @@ def staging_snapshot_gate_markdown(family: str, current: str, required: str) -> 
 - Required staging-snapshot evidence: {required}
 - Tables to include when present:
 {tables}
-- [ ] Family-specific `guide --family {family}` reviewed when available.
+- [ ] Family-specific `guide --family {family}` reviewed.
 - [ ] Baseline, mutation, restore, and equivalence artifacts remain under `.task-temp/`.
 - [ ] Transcript explicitly says this gate is not complete unless restore equivalence passes."""
 
