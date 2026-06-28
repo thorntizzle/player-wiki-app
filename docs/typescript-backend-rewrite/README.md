@@ -171,8 +171,8 @@ Do not implement these routes as part of the parity program unless a later archi
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor`
   - `PUT /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor` (reference, proficiency, stat-adjustment, recoverable-penalty, custom-feature, and manual-equipment fields with linked-page selector hydration plus `page_ref` validation/round-trip; linked custom-feature defaults, campaign-feat Optional Feature choices, and linked additional-spell choices supported; spell support/manager replacement derivation and full native derivation parity pending)
-  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (context shell only; real save parity pending)
-  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (unsupported/current-shell response only; real save parity pending)
+  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (empty-readiness shell plus ready-state linked custom-feature retraining context)
+  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (bounded linked custom-feature structured-choice save parity through the Advanced Editor derivation path)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (context shell only; real save parity pending)
   - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (unsupported/current-shell response only; real save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (context shell only; real save parity pending)
@@ -607,13 +607,15 @@ Do not implement these routes as part of the parity program unless a later archi
   now cover the Harbor Drill-style linked feature slices, including generated child feature rows with native
   edit parent/position metadata. Manual item option derivation from linked manual pages is implemented. Spell
   support/manager replacement derivation, full native edit derivation, and complete Advanced Editor parity remain pending.
-- The Character advancement context shell family now serves `GET .../characters/:characterSlug/retraining`,
-  `GET .../level-up`, and `GET .../progression-repair`, preserving Flask-compatible campaign/missing-character
-  envelopes, auth and route-specific access failures, current fixture unsupported/empty readiness
-  payloads, Advanced Editor/detail links, and route-specific `retraining`, `level_up`, and `repair`
-  null contexts. The matching `POST` routes now serve unsupported/current-shell parity for those same fixture
-  states, including route-specific access checks and `unsupported_campaign_system` responses, but real save
-  parity, ready-state native builder contexts, state merges, and definition YAML writes remain pending.
+- The Character retraining route now serves the first DND-5E advancement save-parity slice. `GET .../characters/:characterSlug/retraining`
+  preserves Flask-compatible campaign/missing-character envelopes, auth and route-specific access failures,
+  current fixture empty-readiness shells, Advanced Editor/detail links, and ready-state linked custom-feature
+  contexts for persisted structured choices such as Optional Feature swaps. `POST .../retraining` preserves
+  unsupported empty-shell responses, validates ready-state retraining choices, reuses the Advanced Editor
+  derivation and state-reconciliation path, writes copied-fixture `definition.yaml` / managed `import.yaml`,
+  bumps SQLite state revisions, records `source.native_progression.history` retrain events when the definition
+  changes, and returns refreshed retraining payloads. `GET/POST .../level-up` and
+  `GET/POST .../progression-repair` remain shell-only with real save parity pending.
 - The first Character Cultivation write slices now serve
   `POST .../characters/:characterSlug/cultivation` for the `save_insight`, `record_gathering_insight`,
   `spend_cultivation_energy`, `spend_meditation_yin_yang`, `spend_conditioning`,
