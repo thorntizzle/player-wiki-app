@@ -941,7 +941,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Character Progression Repair context read shell with Flask-compatible missing-campaign, missing-character, auth_required, manager-only forbidden, current fixture unsupported readiness, Advanced Editor/detail links, and repair:null. POST/save parity remains deferred."
+      "notes": "Tracked Hono Character Progression Repair context route with Flask-compatible missing-campaign, missing-character, auth_required, manager-only forbidden, unsupported/current-shell readiness for out-of-slice characters, Advanced Editor/detail links, and a bounded repairable context for imported DND-5E sheets missing durable class/subclass/species/background refs. Legacy spell-mark repair and broader imported progression repair contexts remain deferred."
     },
     {
       "method": "POST",
@@ -965,10 +965,10 @@
       "method": "POST",
       "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair",
       "route_family": "api_v1_characters",
-      "status": "implemented_fixture_sqlite_readonly",
+      "status": "implemented_fixture_sqlite_write",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Character Progression Repair POST shell with Flask-compatible missing-campaign, missing-character, auth_required, manager-only forbidden, current fixture unsupported-readiness unsupported_campaign_system response, and no definition/state writes. Real progression-repair save parity remains deferred."
+      "notes": "Tracked Hono Character Progression Repair POST route with Flask-compatible missing-campaign, missing-character, auth_required, manager-only forbidden, unsupported/current-shell unsupported_campaign_system responses for out-of-slice characters, bearer-token fixture write access, stale shared-revision conflicts, bounded class/subclass/species/background ref validation, copied-fixture definition.yaml/import.yaml writes, SQLite state revision bumps, source.native_progression baseline repair/history evidence, refreshed repair or Level Up handoff payloads, and focused copied-fixture contract coverage. Legacy spell-mark repair, feat/optional-feature repair backfills, and broader imported progression repair save parity remain deferred."
     },
     {
       "method": "GET",

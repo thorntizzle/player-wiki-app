@@ -377,6 +377,12 @@ const DND_SYSTEMS_OPTION_PREFIX = "systems:";
 const DND_PHB_SOURCE_ID = "PHB";
 const DND_SUPPORTED_NON_PHB_BASE_CLASSES = new Set(["TCE|artificer"]);
 const DND_SUPPORTED_SUBORDINATE_SOURCES = new Set(["TCE", "SCAG", "XGE", "EGW", "DMG"]);
+const DND_IMPORTED_CHARACTER_SOURCE_TYPES = new Set([
+  "markdown_character_sheet",
+  "pdf_character_sheet_annotations",
+  "markdown_import",
+  "pdf_import",
+]);
 const DND_ABILITY_KEYS = ["str", "dex", "con", "int", "wis", "cha"] as const;
 const DND_ABILITY_LABELS: Record<(typeof DND_ABILITY_KEYS)[number], string> = {
   str: "Strength",
@@ -662,6 +668,14 @@ export type CharacterLevelUpApplyResult =
       status: "ok";
       definition: Record<string, unknown>;
       hpGain: number;
+      values: Record<string, string>;
+    }
+  | { status: "validation_error"; message: string };
+
+export type CharacterProgressionRepairApplyResult =
+  | {
+      status: "ok";
+      definition: Record<string, unknown>;
       values: Record<string, string>;
     }
   | { status: "validation_error"; message: string };
@@ -5905,6 +5919,479 @@ function addNativeRetrainingEventIfChanged(
   };
 }
 
+function isImportedDndSourceType(sourceType: string): boolean {
+  return DND_IMPORTED_CHARACTER_SOURCE_TYPES.has(sourceType);
+}
+
+function hasDurableDndRef(value: unknown): boolean {
+  const record = asRecord(value);
+  return Boolean(
+    stringifyEditorValue(record.entry_key).trim()
+    || stringifyEditorValue(record.slug).trim()
+    || stringifyEditorValue(record.page_ref).trim(),
+  );
+}
+
+function normalizeProgressionRepairValues(values: Record<string, unknown>): Record<string, string> {
+  const normalized: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(values)) {
+    const fieldName = stringifyEditorValue(rawKey).trim();
+    if (!fieldName) {
+      continue;
+    }
+    if (Array.isArray(rawValue)) {
+      normalized[fieldName] = stringifyEditorValue(rawValue.length > 0 ? rawValue[rawValue.length - 1] : "").trim();
+    } else {
+      normalized[fieldName] = stringifyEditorValue(rawValue).trim();
+    }
+  }
+  return normalized;
+}
+
+function dndOptionValue(row: SystemsEntryRow): string {
+  return stringifyEditorValue(dndEntryOption(row).value).trim();
+}
+
+function findUniqueDndEntryByTitle(rows: SystemsEntryRow[], title: unknown): SystemsEntryRow | null {
+  const normalizedTitle = normalizeLookup(title);
+  if (!normalizedTitle) {
+    return null;
+  }
+  const matches = rows.filter((row) => normalizeLookup(row.title) === normalizedTitle);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function dndSelectionFromExistingRef(
+  rows: SystemsEntryRow[],
+  ref: unknown,
+  fallbackTitle: unknown,
+): string {
+  const record = asRecord(ref);
+  const candidates = [
+    record.entry_key,
+    record.slug,
+    stringifyEditorValue(record.slug).trim() ? `${DND_SYSTEMS_OPTION_PREFIX}${stringifyEditorValue(record.slug).trim()}` : "",
+    record.page_ref,
+  ].map((value) => stringifyEditorValue(value).trim()).filter(Boolean);
+  for (const row of rows) {
+    const option = dndEntryOption(row);
+    const optionCandidates = [
+      option.value,
+      option.slug,
+      stringifyEditorValue(option.slug).trim()
+        ? `${DND_SYSTEMS_OPTION_PREFIX}${stringifyEditorValue(option.slug).trim()}`
+        : "",
+      option.entry_key,
+      option.page_ref,
+    ].map((value) => stringifyEditorValue(value).trim()).filter(Boolean);
+    if (candidates.some((candidate) => optionCandidates.includes(candidate))) {
+      return dndOptionValue(row);
+    }
+  }
+  const uniqueTitleMatch = findUniqueDndEntryByTitle(rows, fallbackTitle);
+  return uniqueTitleMatch ? dndOptionValue(uniqueTitleMatch) : "";
+}
+
+function selectedRepairValue(
+  rows: SystemsEntryRow[],
+  submittedValues: Record<string, string>,
+  fieldName: string,
+  existingRef: unknown,
+  fallbackTitle: unknown,
+): string {
+  if (Object.hasOwn(submittedValues, fieldName)) {
+    return sanitizeDndEntrySelectionValue(submittedValues[fieldName], rows);
+  }
+  return dndSelectionFromExistingRef(rows, existingRef, fallbackTitle);
+}
+
+function repairOptionForValue(options: unknown, rawValue: unknown): Record<string, unknown> | null {
+  const value = stringifyEditorValue(rawValue).trim();
+  if (!value) {
+    return null;
+  }
+  return asArray(options)
+    .map((option) => asRecord(option))
+    .find((option) => {
+      const slug = stringifyEditorValue(option.slug).trim();
+      const candidates = [
+        option.value,
+        slug,
+        slug ? `${DND_SYSTEMS_OPTION_PREFIX}${slug}` : "",
+        option.entry_key,
+        option.page_ref,
+      ].map((candidate) => stringifyEditorValue(candidate).trim()).filter(Boolean);
+      return candidates.includes(value);
+    }) ?? null;
+}
+
+function dndSystemsRefFromRepairOption(option: Record<string, unknown>): Record<string, unknown> {
+  const ref: Record<string, unknown> = {
+    source_id: stringifyEditorValue(option.source_id).trim(),
+    entry_key: stringifyEditorValue(option.entry_key).trim(),
+    slug: stringifyEditorValue(option.slug).trim(),
+    title: stringifyEditorValue(option.title || option.label).trim(),
+  };
+  const entryType = stringifyEditorValue(option.entry_type).trim();
+  if (entryType) {
+    ref.entry_type = entryType;
+  }
+  return Object.fromEntries(Object.entries(ref).filter(([, value]) => stringifyEditorValue(value).trim()));
+}
+
+function classLevelTextFromRows(classes: Array<Record<string, unknown>>): string {
+  return classes
+    .map((row) => {
+      const className = stringifyEditorValue(row.class_name).trim();
+      const level = createContextInteger(row.level);
+      return className && level > 0 ? `${className} ${level}` : "";
+    })
+    .filter(Boolean)
+    .join(" / ");
+}
+
+function addNativeProgressionRepairEvent(
+  nextDefinition: Record<string, unknown>,
+  repairedFields: string[],
+): Record<string, unknown> {
+  const targetLevel = definitionCurrentLevel(nextDefinition);
+  const source = { ...asRecord(nextDefinition.source) };
+  const nativeProgression = { ...asRecord(source.native_progression) };
+  const timestamp = currentUtcIsoTimestamp();
+  nativeProgression.baseline_repaired_at = stringifyEditorValue(nativeProgression.baseline_repaired_at).trim() || timestamp;
+  const history = asArray(nativeProgression.history).map((entry) => ({ ...asRecord(entry) }));
+  history.push({
+    kind: "repair",
+    at: timestamp,
+    target_level: targetLevel,
+    from_level: targetLevel,
+    to_level: targetLevel,
+    action: "repair",
+    repaired_fields: repairedFields,
+  });
+  nativeProgression.history = history;
+  source.native_progression = nativeProgression;
+  return {
+    ...nextDefinition,
+    source,
+  };
+}
+
+function progressionRepairMessage(): string {
+  return "This imported character needs durable DND-5E progression links before native level-up.";
+}
+
+export function buildCharacterProgressionRepairPayload({
+  dbPath,
+  campaign,
+  campaignConfig,
+  characterSlug,
+  definition,
+  stateRevision,
+  values = {},
+}: {
+  dbPath: string;
+  campaign: CampaignViewModel;
+  campaignConfig: Record<string, unknown>;
+  characterSlug: string;
+  definition: Record<string, unknown>;
+  stateRevision: number;
+  values?: Record<string, unknown>;
+}): CharacterAdvancementShellPayload {
+  const shellPayload = buildCharacterAdvancementShellPayload({
+    campaign,
+    characterSlug,
+    definition,
+    kind: "progression_repair",
+  });
+  const campaignLane = nativeCharacterCreateLane(campaign.system);
+  const characterLane = nativeCharacterCreateLane(definition.system);
+  if (campaignLane !== "dnd5e" || characterLane !== "dnd5e") {
+    return shellPayload;
+  }
+
+  const sourceType = definitionSourceType(definition);
+  if (!isImportedDndSourceType(sourceType)) {
+    return shellPayload;
+  }
+
+  if (!campaign.systems_library_slug || !existsSync(dbPath)) {
+    return shellPayload;
+  }
+
+  const submittedValues = normalizeProgressionRepairValues(values);
+  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const classRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "class")
+      .filter((row) => row.is_enabled_override !== 0)
+      .filter(dndSupportsNativeClassEntry);
+    const speciesRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "race")
+      .filter((row) => row.is_enabled_override !== 0)
+      .filter((row) => dndSupportsSubordinateSource(row.source_id));
+    const backgroundRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "background")
+      .filter((row) => row.is_enabled_override !== 0)
+      .filter((row) => dndSupportsSubordinateSource(row.source_id));
+    const subclassRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "subclass")
+      .filter((row) => row.is_enabled_override !== 0)
+      .filter((row) => dndSupportsSubordinateSource(row.source_id));
+
+    const profile = asRecord(definition.profile);
+    const profileClassRows = asArray(profile.classes).map((row) => asRecord(row));
+    const classes = profileClassRows.length > 0 ? profileClassRows : [{ class_name: profile.class_level_text, level: definitionCurrentLevel(definition) }];
+    const contextValues: Record<string, string> = {};
+    const reasons: string[] = [];
+    const repairClassRows = classes.map((classRow, index) => {
+      const rowId = stringifyEditorValue(classRow.row_id || classRow.id).trim() || `class-row-${index + 1}`;
+      const classFieldName = `repair_class_slug_${rowId}`;
+      const subclassFieldName = `repair_subclass_slug_${rowId}`;
+      const selectedClassValue = selectedRepairValue(
+        classRows,
+        submittedValues,
+        classFieldName,
+        classRow.systems_ref || classRow.class_ref,
+        classRow.class_name,
+      );
+      const selectedClass = selectedDndEntry(classRows, selectedClassValue);
+      const availableSubclassRows = subclassRows.filter((row) => dndSupportsNativeSubclassEntry(row, selectedClass));
+      const selectedSubclassValue = selectedRepairValue(
+        availableSubclassRows,
+        submittedValues,
+        subclassFieldName,
+        classRow.subclass_ref,
+        classRow.subclass_name,
+      );
+      contextValues[classFieldName] = selectedClassValue;
+      contextValues[subclassFieldName] = selectedSubclassValue;
+
+      if (!hasDurableDndRef(classRow.systems_ref || classRow.class_ref)) {
+        reasons.push(`Choose a supported class link for class row ${index + 1}.`);
+      }
+      if (stringifyEditorValue(classRow.subclass_name).trim() && !hasDurableDndRef(classRow.subclass_ref)) {
+        reasons.push(`Choose a supported subclass link for class row ${index + 1}.`);
+      }
+
+      return {
+        row_id: rowId,
+        row_index: index + 1,
+        row_level: createContextInteger(classRow.level),
+        class_name: stringifyEditorValue(classRow.class_name).trim(),
+        subclass_name: stringifyEditorValue(classRow.subclass_name).trim(),
+        class_field_name: classFieldName,
+        subclass_field_name: subclassFieldName,
+        class_selected: selectedClassValue,
+        subclass_selected: selectedSubclassValue,
+        class_options: classRows.map(dndEntryOption),
+        subclass_options: availableSubclassRows.map(dndEntryOption),
+      };
+    });
+
+    const speciesValue = selectedRepairValue(
+      speciesRows,
+      submittedValues,
+      "repair_species_slug",
+      profile.species_ref || profile.species_page_ref,
+      profile.species,
+    );
+    const backgroundValue = selectedRepairValue(
+      backgroundRows,
+      submittedValues,
+      "repair_background_slug",
+      profile.background_ref || profile.background_page_ref,
+      profile.background,
+    );
+    contextValues.repair_species_slug = speciesValue;
+    contextValues.repair_background_slug = backgroundValue;
+    if (!hasDurableDndRef(profile.species_ref || profile.species_page_ref)) {
+      reasons.push("Choose a supported species link.");
+    }
+    if (!hasDurableDndRef(profile.background_ref || profile.background_page_ref)) {
+      reasons.push("Choose a supported background link.");
+    }
+
+    const currentLevel = definitionCurrentLevel(definition);
+    if (reasons.length === 0) {
+      const readiness = {
+        status: "ready",
+        message: "",
+        reasons: [],
+        current_level: currentLevel,
+        source_type: sourceType,
+        is_native: false,
+        is_imported: true,
+      };
+      return {
+        lane: "ready",
+        supported: false,
+        unsupported_message: "This character is already ready for native level-up.",
+        readiness,
+        links: buildCharacterAdvancementLinks({
+          campaign,
+          characterSlug,
+          definition,
+          readinessStatus: "ready",
+          kind: "progression_repair",
+        }),
+        context: null,
+      };
+    }
+
+    const readiness = {
+      status: "repairable",
+      message: progressionRepairMessage(),
+      reasons,
+      current_level: currentLevel,
+      source_type: sourceType,
+      is_native: false,
+      is_imported: true,
+    };
+    return {
+      lane: "repairable",
+      supported: true,
+      unsupported_message: "",
+      readiness,
+      links: buildCharacterAdvancementLinks({
+        campaign,
+        characterSlug,
+        definition,
+        readinessStatus: "repairable",
+        kind: "progression_repair",
+      }),
+      context: {
+        state_revision: stateRevision,
+        values: contextValues,
+        character_name: stringifyEditorValue(definition.name).trim(),
+        current_level: currentLevel,
+        readiness,
+        class_rows: repairClassRows,
+        species_options: speciesRows.map(dndEntryOption),
+        background_options: backgroundRows.map(dndEntryOption),
+        feat_rows: [],
+        optionalfeature_rows: [],
+        spell_rows: [],
+      },
+    };
+  } finally {
+    database.close();
+  }
+}
+
+export function applyCharacterProgressionRepairUpdate(
+  definition: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  repairContext: Record<string, unknown>,
+): CharacterProgressionRepairApplyResult {
+  const contextValues = asRecord(repairContext.values);
+  const submittedValues = normalizeProgressionRepairValues(asRecord(payload.values));
+  const values = { ...contextValues } as Record<string, string>;
+  for (const [fieldName, value] of Object.entries(submittedValues)) {
+    values[fieldName] = value;
+  }
+
+  const classRowsContext = asArray(repairContext.class_rows).map((row) => asRecord(row));
+  const selectedClassRows: Array<{
+    rowId: string;
+    rowIndex: number;
+    classOption: Record<string, unknown>;
+    subclassOption: Record<string, unknown> | null;
+  }> = [];
+  const missingRefs: string[] = [];
+  const seenClassIdentities = new Set<string>();
+  for (const row of classRowsContext) {
+    const rowIndex = createContextInteger(row.row_index, selectedClassRows.length + 1);
+    const rowId = stringifyEditorValue(row.row_id).trim() || `class-row-${rowIndex}`;
+    const classFieldName = stringifyEditorValue(row.class_field_name).trim();
+    const subclassFieldName = stringifyEditorValue(row.subclass_field_name).trim();
+    const classOption = repairOptionForValue(row.class_options, values[classFieldName]);
+    if (!classOption) {
+      missingRefs.push("class");
+      continue;
+    }
+    const subclassRequired = Boolean(stringifyEditorValue(row.subclass_name).trim());
+    const subclassOption = repairOptionForValue(row.subclass_options, values[subclassFieldName]);
+    if (subclassRequired && !subclassOption) {
+      missingRefs.push("subclass");
+      continue;
+    }
+    if (values[subclassFieldName] && !subclassOption) {
+      return { status: "validation_error", message: `Choose a valid subclass link for class row ${rowIndex}.` };
+    }
+    const identity = `${stringifyEditorValue(classOption.entry_key || classOption.slug).trim()}|${stringifyEditorValue(subclassOption?.entry_key || subclassOption?.slug).trim()}`;
+    if (seenClassIdentities.has(identity)) {
+      return { status: "validation_error", message: "Choose distinct class/subclass repairs for each class row before saving." };
+    }
+    seenClassIdentities.add(identity);
+    selectedClassRows.push({ rowId, rowIndex, classOption, subclassOption });
+  }
+
+  const speciesOption = repairOptionForValue(repairContext.species_options, values.repair_species_slug);
+  const backgroundOption = repairOptionForValue(repairContext.background_options, values.repair_background_slug);
+  if (!speciesOption) {
+    missingRefs.push("species");
+  }
+  if (!backgroundOption) {
+    missingRefs.push("background");
+  }
+  if (missingRefs.length > 0 || selectedClassRows.length !== classRowsContext.length) {
+    const joined = Array.from(new Set(missingRefs)).join(", ");
+    return { status: "validation_error", message: `Choose the missing ${joined || "progression"} links before saving progression repair.` };
+  }
+  const primaryClassRow = selectedClassRows[0];
+  if (!primaryClassRow || !speciesOption || !backgroundOption) {
+    return { status: "validation_error", message: "Choose the missing progression links before saving progression repair." };
+  }
+
+  const nextDefinition = deepCloneRecord(definition);
+  const profile = { ...asRecord(nextDefinition.profile) };
+  const existingClasses = asArray(profile.classes).map((row) => ({ ...asRecord(row) }));
+  const nextClasses = selectedClassRows.map((selected, index) => {
+    const existingRow = { ...(existingClasses[index] ?? {}) };
+    const classRef = dndSystemsRefFromRepairOption(selected.classOption);
+    const subclassRef = selected.subclassOption ? dndSystemsRefFromRepairOption(selected.subclassOption) : null;
+    const nextRow: Record<string, unknown> = {
+      ...existingRow,
+      row_id: selected.rowId,
+      class_name: stringifyEditorValue(selected.classOption.title || selected.classOption.label).trim(),
+      level: createContextInteger(existingRow.level || asRecord(classRowsContext[index]).row_level || 1, 1),
+      systems_ref: classRef,
+    };
+    if (subclassRef) {
+      nextRow.subclass_name = stringifyEditorValue(selected.subclassOption?.title || selected.subclassOption?.label).trim();
+      nextRow.subclass_ref = subclassRef;
+    } else {
+      nextRow.subclass_name = "";
+      delete nextRow.subclass_ref;
+    }
+    delete nextRow.class_ref;
+    return nextRow;
+  });
+  profile.classes = nextClasses;
+  profile.class_level_text = classLevelTextFromRows(nextClasses) || profile.class_level_text;
+  profile.class_ref = dndSystemsRefFromRepairOption(primaryClassRow.classOption);
+  if (primaryClassRow.subclassOption) {
+    profile.subclass_ref = dndSystemsRefFromRepairOption(primaryClassRow.subclassOption);
+  } else {
+    delete profile.subclass_ref;
+  }
+  profile.species = stringifyEditorValue(speciesOption.title || speciesOption.label).trim();
+  profile.species_ref = dndSystemsRefFromRepairOption(speciesOption);
+  delete profile.species_page_ref;
+  profile.background = stringifyEditorValue(backgroundOption.title || backgroundOption.label).trim();
+  profile.background_ref = dndSystemsRefFromRepairOption(backgroundOption);
+  delete profile.background_page_ref;
+  nextDefinition.profile = profile;
+
+  return {
+    status: "ok",
+    definition: addNativeProgressionRepairEvent(nextDefinition, [
+      "class_refs",
+      "subclass_refs",
+      "species_ref",
+      "background_ref",
+    ]),
+    values,
+  };
+}
+
 function supportedTypeScriptLevelUpClassRow(definition: Record<string, unknown>): {
   row: Record<string, unknown>;
   classKey: DndLevelOneClassKey;
@@ -6401,7 +6888,7 @@ function buildCharacterAdvancementLinks({
     links.cultivation_url = campaignHref(campaign.slug, `characters/${characterSlug}/cultivation`);
     links.flask_cultivation_url = flaskCampaignHref(campaign.slug, `characters/${characterSlug}/cultivation`);
   }
-  if (kind === "level_up" && readinessStatus === "ready") {
+  if ((kind === "level_up" || kind === "progression_repair") && readinessStatus === "ready") {
     links.level_up_url = campaignHref(campaign.slug, `characters/${characterSlug}/level-up`);
     links.flask_level_up_url = flaskCampaignHref(campaign.slug, `characters/${characterSlug}/level-up`);
   }
@@ -6425,7 +6912,7 @@ function buildLevelUpUnsupportedReadiness(definition: Record<string, unknown>, m
     current_level: definitionCurrentLevel(definition),
     source_type: sourceType,
     is_native: sourceType === "native_character_builder",
-    is_imported: sourceType === "pdf_import" || sourceType === "markdown_import",
+    is_imported: isImportedDndSourceType(sourceType),
   };
 }
 
@@ -6781,6 +7268,7 @@ function dndEntryOption(row: SystemsEntryRow): Record<string, unknown> {
     title: String(row.title || "").trim(),
     source_id: String(row.source_id || "").trim(),
     entry_key: String(row.entry_key || "").trim(),
+    entry_type: String(row.entry_type || "").trim(),
     page_ref: pageRef,
     campaign_option: asRecord(metadata.campaign_option),
     label: String(row.title || "").trim(),
