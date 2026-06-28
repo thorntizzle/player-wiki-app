@@ -569,6 +569,30 @@ smokeDb.exec(`
     UNIQUE (library_slug, slug)
   );
 
+  CREATE TABLE systems_shared_entry_edit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_slug TEXT NOT NULL,
+    library_slug TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    entry_key TEXT NOT NULL,
+    entry_slug TEXT NOT NULL,
+    original_source_identity_json TEXT NOT NULL DEFAULT '{}',
+    edited_fields_json TEXT NOT NULL DEFAULT '[]',
+    actor_user_id INTEGER,
+    audit_event_type TEXT NOT NULL,
+    audit_metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE systems_entry_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    library_slug TEXT NOT NULL,
+    from_entry_key TEXT NOT NULL,
+    to_entry_key TEXT NOT NULL,
+    relation_type TEXT NOT NULL,
+    UNIQUE (library_slug, from_entry_key, to_entry_key, relation_type)
+  );
+
   CREATE TABLE campaign_entry_overrides (
     campaign_slug TEXT NOT NULL,
     library_slug TEXT NOT NULL,
@@ -604,6 +628,11 @@ smokeDb.exec(`
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (campaign_slug, page_ref)
+  );
+
+  CREATE TABLE campaign_page_sync_state (
+    campaign_slug TEXT PRIMARY KEY,
+    seeded_at TEXT NOT NULL
   );
 
   CREATE TABLE campaign_sessions (
@@ -760,6 +789,70 @@ smokeDb.exec(`
     created_at TEXT NOT NULL,
     created_by_user_id INTEGER
   );
+
+  CREATE INDEX idx_api_tokens_user
+  ON api_tokens(user_id, created_at DESC, id DESC);
+
+  CREATE UNIQUE INDEX idx_campaign_sessions_active
+  ON campaign_sessions(campaign_slug)
+  WHERE status = 'active';
+
+  CREATE INDEX idx_campaign_session_articles_campaign_status
+  ON campaign_session_articles(campaign_slug, status, created_at, id);
+
+  CREATE INDEX idx_campaign_session_messages_session
+  ON campaign_session_messages(session_id, created_at, id);
+
+  CREATE INDEX idx_campaign_session_messages_session_recipient
+  ON campaign_session_messages(session_id, recipient_scope, recipient_user_id, created_at, id);
+
+  CREATE INDEX idx_campaign_dm_statblocks_campaign
+  ON campaign_dm_statblocks(campaign_slug, updated_at DESC, title, id);
+
+  CREATE INDEX idx_campaign_dm_condition_definitions_campaign
+  ON campaign_dm_condition_definitions(campaign_slug, name, id);
+
+  CREATE INDEX idx_campaign_combatants_campaign_order
+  ON campaign_combatants(campaign_slug, turn_value DESC, display_name, id);
+
+  CREATE INDEX idx_campaign_combatants_campaign_order_v2
+  ON campaign_combatants(campaign_slug, turn_value DESC, dexterity_modifier DESC, initiative_priority, display_name, id);
+
+  CREATE INDEX idx_campaign_combat_conditions_combatant
+  ON campaign_combat_conditions(combatant_id, created_at, id);
+
+  CREATE INDEX idx_campaign_combatant_resource_counters_combatant
+  ON campaign_combatant_resource_counters(combatant_id, resource_key, id);
+
+  CREATE INDEX idx_campaign_combatant_resource_notes_combatant
+  ON campaign_combatant_resource_notes(combatant_id, id);
+
+  CREATE INDEX idx_systems_sources_library
+  ON systems_sources(library_slug, title, source_id);
+
+  CREATE INDEX idx_systems_import_runs_library_source
+  ON systems_import_runs(library_slug, source_id, started_at DESC, id DESC);
+
+  CREATE INDEX idx_systems_entries_source
+  ON systems_entries(library_slug, source_id, title, id);
+
+  CREATE INDEX idx_systems_entries_search
+  ON systems_entries(library_slug, source_id, entry_type, title, id);
+
+  CREATE INDEX idx_systems_shared_entry_edit_events_entry
+  ON systems_shared_entry_edit_events(library_slug, entry_key, created_at DESC, id DESC);
+
+  CREATE INDEX idx_campaign_enabled_sources_campaign
+  ON campaign_enabled_sources(campaign_slug, library_slug, source_id);
+
+  CREATE INDEX idx_campaign_entry_overrides_campaign
+  ON campaign_entry_overrides(campaign_slug, library_slug, entry_key);
+
+  CREATE INDEX idx_campaign_pages_campaign_route
+  ON campaign_pages(campaign_slug, route_slug);
+
+  CREATE INDEX idx_campaign_pages_campaign_section
+  ON campaign_pages(campaign_slug, section, subsection, display_order, title, page_ref);
 `);
 smokeDb
   .prepare(

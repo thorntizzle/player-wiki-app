@@ -1,9 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 
-import Database from "better-sqlite3";
+import { openSqliteDatabase, type SqliteDatabase } from "../sqlite.js";
 
-type SqliteDatabase = InstanceType<typeof Database>;
 
 export interface AuthUser {
   id: number;
@@ -389,7 +388,7 @@ export function readApiTokenAuthContext(
     return { kind: "invalid" };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const nowMs = Date.now();
     const tokenRow = database
@@ -464,7 +463,7 @@ export function updateApiTokenAccountSettings(
     };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const currentPreferences = loadPreferences(database, authContext.user.id);
     const normalizedThemeKey = hasThemeUpdate ? normalizeThemeKey(requestedThemeKey) : currentPreferences.theme_key;
@@ -508,7 +507,7 @@ export function apiTokenRoleForCampaign(authContext: ApiTokenAuthContext, campai
 }
 
 export function getActiveUserById(dbPath: string, userId: number): AuthUser | null {
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const row = database
       .prepare("SELECT * FROM users WHERE id = ? AND status = 'active'")
@@ -520,7 +519,7 @@ export function getActiveUserById(dbPath: string, userId: number): AuthUser | nu
 }
 
 export function getUserById(dbPath: string, userId: number): AuthUser | null {
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const row = database
       .prepare("SELECT * FROM users WHERE id = ?")
@@ -532,7 +531,7 @@ export function getUserById(dbPath: string, userId: number): AuthUser | null {
 }
 
 export function getUserByEmail(dbPath: string, email: string): AuthUser | null {
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const row = database
       .prepare("SELECT * FROM users WHERE email = ?")
@@ -544,7 +543,7 @@ export function getUserByEmail(dbPath: string, email: string): AuthUser | null {
 }
 
 export function listActiveMembershipsForUser(dbPath: string, userId: number): AuthMembership[] {
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     return loadMemberships(database, userId);
   } finally {
@@ -566,7 +565,7 @@ export function createUser(
     status?: string;
   },
 ): AuthUser {
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const now = utcIsoTimestamp();
     const writeUser = database.transaction(() => {
@@ -599,7 +598,7 @@ export function createUser(
 }
 
 export function disableUser(dbPath: string, userId: number): AuthUser {
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const now = utcIsoTimestamp();
     const writeUser = database.transaction(() => {
@@ -625,7 +624,7 @@ export function disableUser(dbPath: string, userId: number): AuthUser {
 }
 
 export function enableUser(dbPath: string, userId: number): AuthUser {
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const now = utcIsoTimestamp();
     const writeUser = database.transaction(() => {
@@ -656,7 +655,7 @@ export function enableUser(dbPath: string, userId: number): AuthUser {
 }
 
 export function deleteUser(dbPath: string, userId: number): AuthUser | null {
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const deleteUserTransaction = database.transaction(() => {
       const row = database.prepare("SELECT * FROM users WHERE id = ?").get(userId) as UserRow | undefined;
@@ -723,7 +722,7 @@ export function deleteUser(dbPath: string, userId: number): AuthUser | null {
 }
 
 export function revokeAllUserSessions(dbPath: string, userId: number): void {
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     database
       .prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
@@ -734,7 +733,7 @@ export function revokeAllUserSessions(dbPath: string, userId: number): void {
 }
 
 export function revokeAllUserApiTokens(dbPath: string, userId: number): void {
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     database
       .prepare("UPDATE api_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
@@ -745,7 +744,7 @@ export function revokeAllUserApiTokens(dbPath: string, userId: number): void {
 }
 
 export function hasActivePlayerMembership(dbPath: string, userId: number, campaignSlug: string): boolean {
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const row = database
       .prepare(
@@ -770,7 +769,7 @@ export function getMembership(
   campaignSlug: string,
   statuses: string[] | null = ["active"],
 ): AuthMembership | null {
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const row = database
       .prepare("SELECT * FROM campaign_memberships WHERE user_id = ? AND campaign_slug = ?")
@@ -800,7 +799,7 @@ export function upsertMembership(
     status?: string;
   },
 ): AuthMembership {
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const now = utcIsoTimestamp();
     const writeMembership = database.transaction(() => {
@@ -844,7 +843,7 @@ export function upsertMembership(
 }
 
 export function listActivePlayerMembershipUsers(dbPath: string, campaignSlug: string): AuthUser[] {
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const rows = database
       .prepare(
@@ -869,7 +868,7 @@ export function getCharacterAssignment(
   campaignSlug: string,
   characterSlug: string,
 ): CharacterAssignment | null {
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const row = database
       .prepare("SELECT * FROM character_assignments WHERE campaign_slug = ? AND character_slug = ?")
@@ -886,7 +885,7 @@ export function upsertCharacterAssignment(
   campaignSlug: string,
   characterSlug: string,
 ): CharacterAssignment {
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const now = utcIsoTimestamp();
     const writeAssignment = database.transaction(() => {
@@ -925,7 +924,7 @@ export function deleteCharacterAssignment(
   campaignSlug: string,
   characterSlug: string,
 ): CharacterAssignment | null {
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const deleteAssignment = database.transaction(() => {
       const row = database
@@ -957,7 +956,7 @@ export function issuePasswordResetToken(
     createdByUserId: number | null;
   },
 ): string {
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const rawToken = randomBytes(32).toString("base64url");
     const nowDate = new Date();
@@ -998,7 +997,7 @@ export function issueInviteToken(
     createdByUserId: number | null;
   },
 ): string {
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const rawToken = randomBytes(32).toString("base64url");
     const nowDate = new Date();
@@ -1044,7 +1043,7 @@ export function insertAuthAuditLog(
     metadata: Record<string, unknown>;
   },
 ): void {
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     database
       .prepare(

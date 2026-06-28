@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 
-import Database from "better-sqlite3";
+import { openSqliteDatabase, type SqliteDatabase } from "../sqlite.js";
 
 import type { CampaignViewModel } from "../campaigns/view.js";
 import type { ApiConfig } from "../config.js";
@@ -12,7 +12,6 @@ import type { FixtureSystemsRole } from "../systems/sources.js";
 
 export type FixtureCombatRole = FixtureSystemsRole;
 
-type SqliteDatabase = Database.Database;
 
 const COMBAT_READONLY_REVISION = 0;
 
@@ -1710,7 +1709,7 @@ function loadCombatRuntimeState(
     return emptyCombatRuntimeState();
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const trackerRow = readCombatTrackerRow(database, campaignSlug);
     const combatantRows = readCombatantRows(database, campaignSlug);
@@ -1777,7 +1776,7 @@ export function setCurrentCombatant(
     return { status: "validation_error", message: "Combat storage is not initialized." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const writeSetCurrent = database.transaction((): CombatMutationResult => {
       const combatant = readCombatantRow(database, campaignSlug, combatantId);
@@ -1846,7 +1845,7 @@ export function updateCombatantTurn(
     return { status: "validation_error", message: expectedRevision.message };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const writeTurnValue = database.transaction((): CombatMutationResult => {
       const combatant = readCombatantRow(database, campaignSlug, combatantId);
@@ -2211,7 +2210,7 @@ export async function updateCombatantVitals(
 
   const characterRecords = (await listCampaignContentCharacters(config, campaignSlug)) || [];
   const characterRecordsBySlug = characterRecordMap(characterRecords);
-  const database = new Database(config.dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(config.dbPath, { fileMustExist: true });
   try {
     const writeVitals = database.transaction((): CombatMutationResult => {
       const combatant = readCombatantRow(database, campaignSlug, combatantId);
@@ -2268,7 +2267,7 @@ export function updateCombatantResources(
     return { status: "validation_error", message: "Combat storage is not initialized." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const writeResources = database.transaction((): CombatMutationResult => {
       const combatant = readCombatantRow(database, campaignSlug, combatantId);
@@ -2393,7 +2392,7 @@ export function updateCombatantNpcResources(
     return { status: "validation_error", message: "Combat storage is not initialized." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const writeNpcResources = database.transaction((): CombatMutationResult => {
       const combatant = readCombatantRow(database, campaignSlug, combatantId);
@@ -2535,7 +2534,7 @@ export function updateCombatantPlayerDetailVisibility(
     return { status: "validation_error", message: "Combat storage is not initialized." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const writeVisibility = database.transaction((): CombatMutationResult => {
       const combatant = readCombatantRow(database, campaignSlug, combatantId);
@@ -2635,7 +2634,7 @@ export function addCombatCondition(
     return { status: "validation_error", message: "Combat storage is not initialized." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const writeCondition = database.transaction((): CombatMutationResult => {
       if (!isCombatManager(actorRole)) {
@@ -2707,7 +2706,7 @@ export function updateCombatCondition(
     return { status: "validation_error", message: "Combat storage is not initialized." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const writeCondition = database.transaction((): CombatMutationResult => {
       if (!isCombatManager(actorRole)) {
@@ -2787,7 +2786,7 @@ export function deleteCombatCondition(
     return { status: "validation_error", message: "Combat storage is not initialized." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const deleteCondition = database.transaction((): CombatMutationResult => {
       if (!isCombatManager(actorRole)) {
@@ -2844,7 +2843,7 @@ export function deleteCombatant(
     return { status: "validation_error", message: "Combat storage is not initialized." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const deleteCombatantRow = database.transaction((): CombatMutationResult => {
       if (!isCombatManager(actorRole)) {
@@ -2900,7 +2899,7 @@ export function advanceCombatTurn(dbPath: string, campaignSlug: string, actorUse
     return { status: "validation_error", message: "Combat storage is not initialized." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const writeAdvanceTurn = database.transaction((): CombatMutationResult => {
       const tracker = ensureCombatTrackerRow(database, campaignSlug, actorUserId);
@@ -2975,7 +2974,7 @@ export function clearCombatTracker(dbPath: string, campaignSlug: string, actorUs
     return { status: "validation_error", message: "Combat storage is not initialized." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const writeClearTracker = database.transaction((): CombatMutationResult => {
       ensureCombatTrackerRow(database, campaignSlug, actorUserId);
@@ -3072,7 +3071,7 @@ export async function addPlayerCombatant(
 
   persistCharacterStateForDefinition(config, record.definition);
 
-  const database = new Database(config.dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(config.dbPath, { fileMustExist: true });
   try {
     const snapshot = buildPlayerCharacterSnapshot(database, campaignSlug, record);
     const turnValue = parseCombatInteger(payload.turn_value, "Turn value", snapshot.initiativeBonus, null);
@@ -3244,7 +3243,7 @@ export function addNpcCombatant(
     return { status: "validation_error", message: "Current HP cannot exceed max HP." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const writeAddNpc = database.transaction((): CombatMutationResult => {
       ensureCombatTrackerRow(database, campaignSlug, actorUserId);
@@ -3413,7 +3412,7 @@ export function addStatblockCombatant(
     return { status: "validation_error", message: "Choose a valid DM Content statblock to add." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const statblock = readDmStatblockDetailRow(database, campaignSlug, statblockId);
     if (!statblock) {
@@ -3556,7 +3555,7 @@ export function addSystemsMonsterCombatant(
     return { status: "validation_error", message: "Choose a valid Systems monster to add." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const entry = readSystemsMonsterEntryRow(database, librarySlug, entryKey);
     const sourceSeeds = parseCampaignSourceSeeds(campaignConfig);
@@ -3710,7 +3709,7 @@ function loadDmContentCombatChoices(
     };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     return {
       availableStatblockChoices: listAvailableStatblockChoices(database, campaignSlug, canAccessDmContent),

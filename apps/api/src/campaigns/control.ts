@@ -1,11 +1,10 @@
 import { existsSync } from "node:fs";
 
-import Database from "better-sqlite3";
+import { openSqliteDatabase, type SqliteDatabase } from "../sqlite.js";
 
 import type { AuthRouteRole } from "../auth/repository.js";
 import type { CampaignViewModel } from "./view.js";
 
-type SqliteDatabase = InstanceType<typeof Database>;
 
 const VISIBILITY_SCOPES = ["campaign", "wiki", "systems", "session", "combat", "characters", "dm_content"] as const;
 export type VisibilityScope = (typeof VISIBILITY_SCOPES)[number];
@@ -128,7 +127,7 @@ function readVisibilitySettings(dbPath: string, campaignSlug: string): Map<Visib
     return settings;
   }
 
-  const database: SqliteDatabase = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database: SqliteDatabase = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     return readVisibilitySettingsFromDatabase(database, campaignSlug);
   } catch (error) {
@@ -191,7 +190,7 @@ export function updateCampaignVisibilitySettings(
   rawVisibility: Record<string, unknown>,
 ): VisibilityUpdateResult {
   const defaults = campaignDefaultVisibility(campaign);
-  const database: SqliteDatabase = new Database(dbPath, { fileMustExist: true });
+  const database: SqliteDatabase = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const settings = readVisibilitySettingsFromDatabase(database, campaign.slug);
     const changedScopes: string[] = [];

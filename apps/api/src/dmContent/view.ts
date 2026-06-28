@@ -1,13 +1,12 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-import Database from "better-sqlite3";
+import { openSqliteDatabase, type SqliteDatabase } from "../sqlite.js";
 import { parse as parseYaml } from "yaml";
 
 import type { CampaignViewModel } from "../campaigns/view.js";
 import type { FixtureSystemsRole } from "../systems/sources.js";
 
-type SqliteDatabase = Database.Database;
 
 const ALLOWED_DM_CONTENT_MARKDOWN_EXTENSIONS = new Set([".markdown", ".md"]);
 const FRONTMATTER_PATTERN = /^---\s*\n([\s\S]*?)\n---\s*\n?/;
@@ -483,7 +482,7 @@ export function createDmContentStatblock(
     };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const now = utcIsoTimestamp();
     const result = database
@@ -551,7 +550,7 @@ export function updateDmContentStatblock(
     };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const existing = getStatblockRow(database, campaignSlug, statblockId);
     if (!existing) {
@@ -634,7 +633,7 @@ export function deleteDmContentStatblock(
   campaignSlug: string,
   statblockId: number,
 ): DmContentMutationResult<{ statblock: ReturnType<typeof serializeStatblock> }> {
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const statblock = getStatblock(database, campaignSlug, statblockId);
     if (!statblock) {
@@ -655,7 +654,7 @@ export function createDmContentCondition(
   payload: Record<string, unknown>,
   actorUserId: number,
 ): DmContentMutationResult<{ condition: ReturnType<typeof serializeCondition> }> {
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     let conditionPayload: { name: string; description_markdown: string };
     try {
@@ -721,7 +720,7 @@ export function updateDmContentCondition(
     };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const existing = getCondition(database, campaignSlug, conditionDefinitionId);
     if (!existing) {
@@ -781,7 +780,7 @@ export function deleteDmContentCondition(
   campaignSlug: string,
   conditionDefinitionId: number,
 ): DmContentMutationResult<{ condition: ReturnType<typeof serializeCondition> }> {
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const condition = getCondition(database, campaignSlug, conditionDefinitionId);
     if (!condition) {
@@ -808,7 +807,7 @@ export function buildDmContentPayload(
   let systemsLaneCount = 0;
 
   if (existsSync(dbPath)) {
-    const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+    const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
     try {
       statblocks = listStatblocks(database, campaign.slug);
       conditions = listConditions(database, campaign.slug);

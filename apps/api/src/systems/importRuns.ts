@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 
-import Database from "better-sqlite3";
+import { openSqliteDatabase, type SqliteDatabase } from "../sqlite.js";
 
 export interface SystemsImportRun {
   id: number;
@@ -103,7 +103,7 @@ export function listSystemsImportRuns(dbPath: string, filters: SystemsImportRunF
   query += " ORDER BY started_at DESC, id DESC LIMIT ?";
   parameters.push(Math.max(1, Math.trunc(filters.limit)));
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const rows = database.prepare(query).all(...parameters) as SystemsImportRunRow[];
     return rows.map(serializeImportRun);
@@ -122,7 +122,7 @@ export function getSystemsImportRun(dbPath: string, importRunId: number): System
     return null;
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const row = database
       .prepare(

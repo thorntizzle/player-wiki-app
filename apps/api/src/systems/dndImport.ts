@@ -1,11 +1,10 @@
 import { existsSync } from "node:fs";
 
-import Database from "better-sqlite3";
+import { openSqliteDatabase, type SqliteDatabase } from "../sqlite.js";
 import { unzipSync } from "fflate";
 
 import { slugify } from "../wiki/repository.js";
 
-type SqliteDatabase = Database.Database;
 
 export interface Dnd5eImportResult {
   source_id: string;
@@ -989,7 +988,7 @@ export function importDnd5eSystemsArchive(
     return { status: "validation_error", message: dataRootPrefix.error };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const importResults = normalizedPayload.sourceIds.map((sourceId) =>
       importOneSource(database, files, dataRootPrefix, normalizedPayload, sourceId, actorUserId),

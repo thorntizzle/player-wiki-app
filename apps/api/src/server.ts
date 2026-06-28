@@ -45,6 +45,7 @@ import {
   buildFixtureMePayload,
 } from "./auth/view.js";
 import { getApiConfig } from "./config.js";
+import { assertSqliteStartupSchema } from "./sqlite.js";
 import {
   buildCampaignControlPayload,
   campaignRoleCanAccessScope,
@@ -9320,6 +9321,7 @@ app.notFound((ctx) =>
 
 const port = Number(process.env.PORT || 3000);
 const startup = async () => {
+  assertSqliteStartupSchema(config.dbPath);
   const server = serve({
     fetch: app.fetch,
     port,
@@ -9338,6 +9340,9 @@ function isMainModule(): boolean {
 if (isMainModule()) {
   startup().then(() => {
     console.info(`[campaign-player-wiki-typescript-api] listening on :${port}`);
+  }).catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
   });
 }
 

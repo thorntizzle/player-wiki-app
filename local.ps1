@@ -482,6 +482,9 @@ function Run-TypeScriptApiChecks {
     Write-Host "Building TypeScript API..."
     Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "build")
 
+    Write-Host "Checking TypeScript API SQLite startup posture..."
+    Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "test:sqlite-startup-posture")
+
     Write-Host "Checking TypeScript API route parity..."
     Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "test:route-parity")
 }

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 
-import Database from "better-sqlite3";
+import { openSqliteDatabase, type SqliteDatabase } from "../sqlite.js";
 
 import type { CampaignViewModel } from "../campaigns/view.js";
 import { slugify } from "../wiki/repository.js";
@@ -26,7 +26,6 @@ import {
   type SystemsSourceState,
 } from "./sources.js";
 
-type SqliteDatabase = Database.Database;
 
 interface CampaignSystemsPolicyRow {
   library_slug: string;
@@ -1624,7 +1623,7 @@ export function createCustomSystemsEntry(
     return { status: "validation_error", message: "That campaign does not have a systems library configured." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const now = utcIsoTimestamp();
     let serializedEntry: SerializedCustomEntry | null = null;
@@ -1715,7 +1714,7 @@ export function importCampaignItemMechanics(
     return { status: "validation_error", message: "That campaign does not have a systems library configured." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const rawPageRef = String(payload.page_ref || "").trim();
     const page = loadPublishedItemPage(database, campaign.slug, rawPageRef);
@@ -1853,7 +1852,7 @@ export function updateCustomSystemsEntry(
     return { status: "validation_error", message: "That campaign does not have a systems library configured." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const context = existingCustomEntryContext(
       database,
@@ -1956,7 +1955,7 @@ function setCustomSystemsEntryArchivedState(
     return { status: "validation_error", message: "That campaign does not have a systems library configured." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const invalidMessage = archived
       ? "Choose a valid custom Systems entry before archiving."
@@ -2148,7 +2147,7 @@ export function buildDmContentSystemsPayload(
     return baseline;
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const policy = loadPolicy(database, campaign.slug);
     const librarySlug = policy?.library_slug || campaign.systems_library_slug || "";
