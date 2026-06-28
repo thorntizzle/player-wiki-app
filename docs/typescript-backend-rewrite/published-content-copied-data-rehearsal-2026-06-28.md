@@ -18,8 +18,8 @@ tracked `campaigns/` data, or production-like secrets.
 
 ## Safety Confirmation
 
-- Repo root: `C:/Users/thorn/.codex/worktrees/7c81/campaign_player_wiki`.
-- Owner checkout avoided: `C:\Users\thorn\Documents\my_scripts\campaign_player_wiki` was not used as a mutation target.
+- Repo root: `<app-worktree>/campaign_player_wiki`.
+- Owner checkout avoided: `<owner-checkout>/campaign_player_wiki` was not used as a mutation target.
 - `.local/roadmaps/typescript-backend-rewrite-roadmap.md`: absent in this worktree.
 - Rehearsal root path guard: `scripts/staging_rehearsal_harness.py check-paths` passed for copied SQLite, copied campaigns dir, and backup archive path.
 - Copied SQLite: `.task-temp/ts-published-content-copied-data-rehearsal-20260628/input/player_wiki.sqlite3`.
@@ -33,7 +33,7 @@ tracked `campaigns/` data, or production-like secrets.
 git fetch origin rewrite/ts-phase3-integration
 git rebase origin/rewrite/ts-phase3-integration
 
-$nodeRoot = 'C:\Users\thorn\AppData\Local\OpenAI\Codex\runtimes\cua_node\a89897d3d9baa117\bin'
+$nodeRoot = '<bundled-node-runtime>\bin'
 $env:PATH = "$nodeRoot;$env:PATH"
 & "$nodeRoot\npm.cmd" ci
 & "$nodeRoot\npm.cmd" --prefix apps/api run build
@@ -43,12 +43,12 @@ $env:PATH = "$nodeRoot;$env:PATH"
 The scratch driver called the guarded harness:
 
 ```powershell
-& 'C:\Users\thorn\Documents\my_scripts\.venv\Scripts\python.exe' .\scripts\staging_rehearsal_harness.py init --family publishing ...
-& 'C:\Users\thorn\Documents\my_scripts\.venv\Scripts\python.exe' .\scripts\staging_rehearsal_harness.py check-paths ...
-& 'C:\Users\thorn\Documents\my_scripts\.venv\Scripts\python.exe' .\scripts\staging_rehearsal_harness.py snapshot --label pre ...
-& 'C:\Users\thorn\Documents\my_scripts\.venv\Scripts\python.exe' .\scripts\staging_rehearsal_harness.py snapshot --label post ...
-& 'C:\Users\thorn\Documents\my_scripts\.venv\Scripts\python.exe' .\scripts\staging_rehearsal_harness.py snapshot --label restore ...
-& 'C:\Users\thorn\Documents\my_scripts\.venv\Scripts\python.exe' .\scripts\staging_rehearsal_harness.py compare --before ...\pre\manifest.json --after ...\restore\manifest.json
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py init --family publishing ...
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py check-paths ...
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py snapshot --label pre ...
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py snapshot --label post ...
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py snapshot --label restore ...
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py compare --before ...\pre\manifest.json --after ...\restore\manifest.json
 ```
 
 ## Baseline Evidence
