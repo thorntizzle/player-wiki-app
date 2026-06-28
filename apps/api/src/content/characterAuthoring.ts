@@ -395,7 +395,7 @@ const DND_ABILITY_LABELS: Record<(typeof DND_ABILITY_KEYS)[number], string> = {
 const DND_CREATE_LIMITATIONS = [
   "Base classes come from enabled Systems rows inside the current native support lane: PHB base classes plus TCE Artificer.",
   "Species and backgrounds come from enabled Systems rows in the current supported source matrix for this TypeScript parity slice.",
-  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, and PHB Cleric with a bounded Life Domain level-one package; broader choice parity remains pending.",
+  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Cleric with a bounded Life Domain level-one package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
 ];
 const DND_CHARACTER_CREATE_SOURCE_PATH = "builder://dnd5e-create-level-one";
 const DND_CHARACTER_CREATE_SOURCE_TYPE = "dnd5e_character_builder_level_one";
@@ -585,9 +585,16 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
     spellcasting: {
       abilityKey: "wis",
       abilityLabel: "Wisdom",
+      spellMode: "prepared",
       slotProgression: [{ level: 1, max_slots: 2 }],
+      cantripCount: 3,
+      cantripFieldPrefix: "cantrip_spell",
       alwaysPreparedSpellTitles: ["Bless", "Cure Wounds"],
+      alwaysPreparedGrantSourceLabel: "Life Domain",
       preparedSpellFieldPrefix: "prepared_spell",
+      spellbookFieldPrefix: "",
+      spellbookCount: 0,
+      spellSourceLabel: "PHB",
     },
     proficiencies: {
       armor: ["Light armor", "Medium armor", "Shields", "Heavy armor"],
@@ -677,6 +684,103 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
       },
     ],
     resourceTemplates: [],
+  },
+  wizard: {
+    className: "Wizard",
+    armorClass: "unarmored-dex",
+    supportedSubclassTitles: [],
+    skillProficiencies: ["Arcana", "History", "Athletics", "Intimidation"],
+    skillRows: ["Arcana", "History", "Athletics", "Intimidation", "Perception"],
+    spellcasting: {
+      abilityKey: "int",
+      abilityLabel: "Intelligence",
+      spellMode: "wizard",
+      slotProgression: [{ level: 1, max_slots: 2 }],
+      cantripCount: 3,
+      cantripFieldPrefix: "cantrip_spell",
+      alwaysPreparedSpellTitles: [],
+      alwaysPreparedGrantSourceLabel: "",
+      preparedSpellFieldPrefix: "wizard_prepared",
+      spellbookFieldPrefix: "wizard_spellbook",
+      spellbookCount: 6,
+      spellSourceLabel: "Wizard",
+    },
+    proficiencies: {
+      armor: [],
+      weapons: ["Daggers", "Darts", "Slings", "Quarterstaffs", "Light crossbows"],
+      tools: ["One gaming set", "Vehicles (land)"],
+    },
+    equipmentCatalog: [
+      {
+        id: "quarterstaff-1",
+        name: "Quarterstaff",
+        default_quantity: 1,
+        weight: "4 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        weapon_wield_mode: "main-hand",
+        weapon_wield_modes: ["main-hand", "two-handed"],
+        tags: ["weapon", "simple weapon", "melee weapon"],
+      },
+      {
+        id: "dagger-1",
+        name: "Dagger",
+        default_quantity: 1,
+        weight: "1 lb.",
+        tags: ["weapon", "simple weapon", "melee weapon", "finesse", "thrown weapon"],
+      },
+      {
+        id: "component-pouch-1",
+        name: "Component Pouch",
+        default_quantity: 1,
+        weight: "2 lb.",
+        tags: ["spellcasting focus"],
+      },
+      {
+        id: "spellbook-1",
+        name: "Spellbook",
+        default_quantity: 1,
+        weight: "3 lb.",
+        tags: ["spellbook"],
+      },
+      {
+        id: "scholars-pack-1",
+        name: "Scholar's Pack",
+        default_quantity: 1,
+        weight: "10 lb.",
+        tags: ["gear"],
+      },
+    ],
+    features: [
+      {
+        id: "spellcasting-1",
+        name: "Spellcasting",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "This level-one TypeScript slice records Wizard cantrips, spellbook spells, prepared spells, and first-level slots.",
+      },
+      {
+        id: "arcane-recovery-1",
+        name: "Arcane Recovery",
+        category: "class_feature",
+        tracker_ref: "arcane-recovery",
+        source: "PHB",
+        description_markdown: "You can recover expended spell slots once per long rest. Full slot-level recovery automation remains outside this slice.",
+      },
+    ],
+    resourceTemplates: [
+      {
+        id: "arcane-recovery",
+        label: "Arcane Recovery",
+        category: "class_feature",
+        max: 1,
+        initial_current: 1,
+        reset_on: "long_rest",
+        reset_to: "max",
+        rest_behavior: "restore_full",
+        display_order: 10,
+      },
+    ],
   },
 } as const;
 
@@ -7471,6 +7575,18 @@ function dndSpellLevel(row: SystemsEntryRow): number {
   return createContextInteger(firstPresent(metadata.level, metadata.spell_level), -1);
 }
 
+function dndSpellSupportsClass(row: SystemsEntryRow, className: string): boolean {
+  const metadata = parseJsonRecord(row.metadata_json);
+  const classLists = asRecord(metadata.class_lists);
+  if (Object.keys(classLists).length === 0) {
+    return true;
+  }
+  const normalizedClassName = normalizeLookup(className);
+  return Object.values(classLists).some((rawTitles) =>
+    asArray(rawTitles).some((title) => normalizeLookup(title) === normalizedClassName),
+  );
+}
+
 function dndCreateSpellChoiceFields({
   selectedClass,
   spellRows,
@@ -7488,35 +7604,62 @@ function dndCreateSpellChoiceFields({
   if (!spellcasting) {
     return [];
   }
+  const classConfig = DND_LEVEL_ONE_CLASS_CONFIGS[classKey];
   const alwaysPreparedTitles = new Set(spellcasting.alwaysPreparedSpellTitles.map((title) => normalizeLookup(title)));
-  const cantripOptions = spellRows.filter((row) => dndSpellLevel(row) === 0).map(dndEntryOption);
-  const preparedOptions = spellRows
+  const cantripOptions = spellRows
+    .filter((row) => dndSpellLevel(row) === 0)
+    .filter((row) => dndSpellSupportsClass(row, classConfig.className))
+    .map(dndEntryOption);
+  const levelOneOptions = spellRows
     .filter((row) => dndSpellLevel(row) === 1)
+    .filter((row) => dndSpellSupportsClass(row, classConfig.className))
     .filter((row) => !alwaysPreparedTitles.has(normalizeLookup(row.title)))
     .map(dndEntryOption);
+  const selectedSpellbookValues = Array.from({ length: spellcasting.spellbookCount }, (_, index) =>
+    String(values[`${spellcasting.spellbookFieldPrefix}_${index + 1}`] || "").trim(),
+  ).filter(Boolean);
+  const preparedOptions =
+    spellcasting.spellMode === "wizard" && selectedSpellbookValues.length > 0
+      ? levelOneOptions.filter((option) => selectedSpellbookValues.includes(String(option.value || "").trim()))
+      : levelOneOptions;
   const preparedLimit = Math.max(
     1,
     abilityModifier(createContextInteger(values[spellcasting.abilityKey], 10)) + 1,
   );
 
   return [
-    ...Array.from({ length: 3 }, (_, index) => {
-      const name = `cantrip_spell_${index + 1}`;
+    ...Array.from({ length: spellcasting.cantripCount }, (_, index) => {
+      const name = `${spellcasting.cantripFieldPrefix}_${index + 1}`;
       return {
         name,
         label: `Cantrip ${index + 1}`,
         selected: values[name] || "",
-        help_text: "Choose a Cleric cantrip from enabled PHB spell rows.",
+        help_text: `Choose a ${classConfig.className} cantrip from enabled PHB spell rows.`,
         options: cantripOptions,
       };
     }),
+    ...(spellcasting.spellMode === "wizard"
+      ? Array.from({ length: spellcasting.spellbookCount }, (_, index) => {
+          const name = `${spellcasting.spellbookFieldPrefix}_${index + 1}`;
+          return {
+            name,
+            label: `Spellbook Spell ${index + 1}`,
+            selected: values[name] || "",
+            help_text: "Choose a 1st-level Wizard spell for your spellbook.",
+            options: levelOneOptions,
+          };
+        })
+      : []),
     ...Array.from({ length: preparedLimit }, (_, index) => {
       const name = `${spellcasting.preparedSpellFieldPrefix}_${index + 1}`;
       return {
         name,
         label: `Prepared Spell ${index + 1}`,
         selected: values[name] || "",
-        help_text: "Choose a prepared Cleric spell. Domain spells are always prepared and do not count here.",
+        help_text:
+          spellcasting.spellMode === "wizard"
+            ? "Choose a prepared Wizard spell from your selected spellbook spells."
+            : "Choose a prepared Cleric spell. Domain spells are always prepared and do not count here.",
         options: preparedOptions,
       };
     }),
@@ -7674,7 +7817,7 @@ function assertDndLevelOneClass(row: SystemsEntryRow | null): { row: SystemsEntr
   }
   const classKey = dndLevelOneClassKey(row);
   if (!classKey || normalizeDndSourceId(row.source_id) !== DND_PHB_SOURCE_ID || String(row.entry_type || "") !== "class") {
-    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, and PHB Cleric.");
+    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Cleric, and PHB Wizard.");
   }
   return { row, classKey };
 }
@@ -7798,12 +7941,14 @@ function dndSpellSelectionRow({
   value,
   expectedLevel,
   fieldLabel,
+  className,
   disallowedTitles = new Set<string>(),
 }: {
   rowsBySlug: Map<string, SystemsEntryRow>;
   value: unknown;
   expectedLevel: number;
   fieldLabel: string;
+  className: string;
   disallowedTitles?: Set<string>;
 }): SystemsEntryRow | null {
   const normalizedValue = String(value ?? "").trim();
@@ -7819,6 +7964,7 @@ function dndSpellSelectionRow({
     normalizeDndSourceId(row.source_id) !== DND_PHB_SOURCE_ID ||
     String(row.entry_type || "") !== "spell" ||
     dndSpellLevel(row) !== expectedLevel ||
+    !dndSpellSupportsClass(row, className) ||
     disallowedTitles.has(normalizeLookup(row.title))
   ) {
     throw new Error(`${fieldLabel} is not valid for the current DND-5E creation slice.`);
@@ -7845,12 +7991,14 @@ function dndSpellPayload({
   row,
   mark,
   classRowId,
+  sourceLabel = "PHB",
   alwaysPrepared = false,
   grantSourceLabel = "",
 }: {
   row: SystemsEntryRow;
   mark: string;
   classRowId: string;
+  sourceLabel?: string;
   alwaysPrepared?: boolean;
   grantSourceLabel?: string;
 }): Record<string, unknown> {
@@ -7860,7 +8008,7 @@ function dndSpellPayload({
     mark,
     class_row_id: classRowId,
     systems_ref: dndSpellRef(row),
-    source: alwaysPrepared ? "Cleric (Always Prepared)" : "PHB",
+    source: sourceLabel,
   };
   if (alwaysPrepared) {
     payload.is_always_prepared = true;
@@ -7884,73 +8032,149 @@ function dndLevelOneSpellcasting({
   if (!spellcasting) {
     return {};
   }
+  const classConfig = DND_LEVEL_ONE_CLASS_CONFIGS[classKey];
   const rowsBySlug = dndSpellRowsBySlug(spellRows);
   const alwaysPreparedTitles = new Set(spellcasting.alwaysPreparedSpellTitles.map((title) => normalizeLookup(title)));
   const seenSpellSlugs = new Set<string>();
   const selectedSpells: Record<string, unknown>[] = [];
 
-  for (let index = 1; index <= 3; index += 1) {
+  for (let index = 1; index <= spellcasting.cantripCount; index += 1) {
     const row = dndSpellSelectionRow({
       rowsBySlug,
-      value: values[`cantrip_spell_${index}`],
+      value: values[`${spellcasting.cantripFieldPrefix}_${index}`],
       expectedLevel: 0,
       fieldLabel: `Cantrip ${index}`,
+      className: classConfig.className,
     });
     if (!row) {
       continue;
     }
     if (seenSpellSlugs.has(row.slug)) {
-      throw new Error("Choose distinct Cleric spells before saving.");
+      throw new Error(`Choose distinct ${classConfig.className} spells before saving.`);
     }
     seenSpellSlugs.add(row.slug);
-    selectedSpells.push(dndSpellPayload({ row, mark: "Cantrip", classRowId: "class-row-1" }));
+    selectedSpells.push(
+      dndSpellPayload({
+        row,
+        mark: "Cantrip",
+        classRowId: "class-row-1",
+        sourceLabel: spellcasting.spellSourceLabel,
+      }),
+    );
   }
 
   const preparedLimit = Math.max(
     1,
     abilityModifier(dndAbilityScoreValue(abilityScores, spellcasting.abilityKey)) + 1,
   );
-  for (let index = 1; index <= preparedLimit; index += 1) {
-    const row = dndSpellSelectionRow({
-      rowsBySlug,
-      value: values[`${spellcasting.preparedSpellFieldPrefix}_${index}`],
-      expectedLevel: 1,
-      fieldLabel: `Prepared Spell ${index}`,
-      disallowedTitles: alwaysPreparedTitles,
-    });
-    if (!row) {
-      continue;
-    }
-    if (seenSpellSlugs.has(row.slug)) {
-      throw new Error("Choose distinct Cleric spells before saving.");
-    }
-    seenSpellSlugs.add(row.slug);
-    selectedSpells.push(dndSpellPayload({ row, mark: "Prepared", classRowId: "class-row-1" }));
-  }
 
-  for (const spellTitle of spellcasting.alwaysPreparedSpellTitles) {
-    const row = [...rowsBySlug.values()].find((candidate) => normalizeLookup(candidate.title) === normalizeLookup(spellTitle));
-    if (!row || dndSpellLevel(row) !== 1) {
-      throw new Error(`${spellTitle} must be available from enabled PHB spell rows for this Cleric create slice.`);
+  if (spellcasting.spellMode === "wizard") {
+    const spellbookRows: SystemsEntryRow[] = [];
+    const spellbookSlugs = new Set<string>();
+    for (let index = 1; index <= spellcasting.spellbookCount; index += 1) {
+      const row = dndSpellSelectionRow({
+        rowsBySlug,
+        value: values[`${spellcasting.spellbookFieldPrefix}_${index}`],
+        expectedLevel: 1,
+        fieldLabel: `Spellbook Spell ${index}`,
+        className: classConfig.className,
+      });
+      if (!row) {
+        continue;
+      }
+      if (spellbookSlugs.has(row.slug)) {
+        throw new Error("Choose distinct Wizard spellbook spells before saving.");
+      }
+      spellbookSlugs.add(row.slug);
+      spellbookRows.push(row);
     }
-    if (seenSpellSlugs.has(row.slug)) {
-      continue;
+    if (spellbookRows.length !== spellcasting.spellbookCount) {
+      throw new Error(`Choose ${spellcasting.spellbookCount} Wizard spellbook spells before saving.`);
     }
-    seenSpellSlugs.add(row.slug);
-    selectedSpells.push(
-      dndSpellPayload({
-        row,
-        mark: "Prepared",
-        classRowId: "class-row-1",
-        alwaysPrepared: true,
-        grantSourceLabel: "Life Domain",
-      }),
-    );
+
+    const preparedSlugs = new Set<string>();
+    for (let index = 1; index <= preparedLimit; index += 1) {
+      const row = dndSpellSelectionRow({
+        rowsBySlug,
+        value: values[`${spellcasting.preparedSpellFieldPrefix}_${index}`],
+        expectedLevel: 1,
+        fieldLabel: `Prepared Spell ${index}`,
+        className: classConfig.className,
+      });
+      if (!row) {
+        continue;
+      }
+      if (!spellbookSlugs.has(row.slug)) {
+        throw new Error(`Prepared Spell ${index} must be one of the selected Wizard spellbook spells.`);
+      }
+      if (preparedSlugs.has(row.slug)) {
+        throw new Error("Choose distinct Wizard prepared spells before saving.");
+      }
+      preparedSlugs.add(row.slug);
+    }
+
+    for (const row of spellbookRows) {
+      selectedSpells.push(
+        dndSpellPayload({
+          row,
+          mark: preparedSlugs.has(row.slug) ? "Prepared + Spellbook" : "Spellbook",
+          classRowId: "class-row-1",
+          sourceLabel: spellcasting.spellSourceLabel,
+        }),
+      );
+    }
+  } else {
+    for (let index = 1; index <= preparedLimit; index += 1) {
+      const row = dndSpellSelectionRow({
+        rowsBySlug,
+        value: values[`${spellcasting.preparedSpellFieldPrefix}_${index}`],
+        expectedLevel: 1,
+        fieldLabel: `Prepared Spell ${index}`,
+        className: classConfig.className,
+        disallowedTitles: alwaysPreparedTitles,
+      });
+      if (!row) {
+        continue;
+      }
+      if (seenSpellSlugs.has(row.slug)) {
+        throw new Error(`Choose distinct ${classConfig.className} spells before saving.`);
+      }
+      seenSpellSlugs.add(row.slug);
+      selectedSpells.push(
+        dndSpellPayload({
+          row,
+          mark: "Prepared",
+          classRowId: "class-row-1",
+          sourceLabel: spellcasting.spellSourceLabel,
+        }),
+      );
+    }
+
+    for (const spellTitle of spellcasting.alwaysPreparedSpellTitles) {
+      const row = [...rowsBySlug.values()].find((candidate) => normalizeLookup(candidate.title) === normalizeLookup(spellTitle));
+      if (!row || dndSpellLevel(row) !== 1 || !dndSpellSupportsClass(row, classConfig.className)) {
+        throw new Error(`${spellTitle} must be available from enabled PHB spell rows for this ${classConfig.className} create slice.`);
+      }
+      if (seenSpellSlugs.has(row.slug)) {
+        continue;
+      }
+      seenSpellSlugs.add(row.slug);
+      selectedSpells.push(
+        dndSpellPayload({
+          row,
+          mark: "Prepared",
+          classRowId: "class-row-1",
+          sourceLabel: `${classConfig.className} (Always Prepared)`,
+          alwaysPrepared: true,
+          grantSourceLabel: spellcasting.alwaysPreparedGrantSourceLabel,
+        }),
+      );
+    }
   }
 
   const abilityModifierValue = abilityModifier(dndAbilityScoreValue(abilityScores, spellcasting.abilityKey));
   return {
-    spellcasting_class: DND_LEVEL_ONE_CLASS_CONFIGS[classKey].className,
+    spellcasting_class: classConfig.className,
     spellcasting_ability: spellcasting.abilityLabel,
     spell_save_dc: 8 + 2 + abilityModifierValue,
     spell_attack_bonus: 2 + abilityModifierValue,
@@ -7967,15 +8191,15 @@ function dndLevelOneSpellcasting({
     class_rows: [
       {
         class_row_id: "class-row-1",
-        class_name: DND_LEVEL_ONE_CLASS_CONFIGS[classKey].className,
+        class_name: classConfig.className,
         level: 1,
         caster_progression: "full",
-        spell_mode: "prepared",
+        spell_mode: spellcasting.spellMode,
         spellcasting_ability: spellcasting.abilityLabel,
         spell_save_dc: 8 + 2 + abilityModifierValue,
         spell_attack_bonus: 2 + abilityModifierValue,
         slot_lane_id: "class-row-1-slots",
-        spell_list_class_name: DND_LEVEL_ONE_CLASS_CONFIGS[classKey].className,
+        spell_list_class_name: classConfig.className,
         prepared_spell_limit: preparedLimit,
       },
     ],
@@ -8070,6 +8294,28 @@ function dndLevelOneAttacks(classKey: DndLevelOneClassKey, abilityScores: Record
       }),
     ];
   }
+  if (classKey === "wizard") {
+    return [
+      dndWeaponAttack({
+        name: "Quarterstaff",
+        category: "melee weapon",
+        abilityModifierValue: strengthModifier,
+        damageDie: "1d6",
+        damageType: "bludgeoning",
+        notes: "Versatile (1d8).",
+        equipmentRef: "quarterstaff-1",
+      }),
+      dndWeaponAttack({
+        name: "Dagger",
+        category: "melee or thrown weapon",
+        abilityModifierValue: Math.max(strengthModifier, dexterityModifier),
+        damageDie: "1d4",
+        damageType: "piercing",
+        notes: "Finesse, light, thrown range 20/60.",
+        equipmentRef: "dagger-1",
+      }),
+    ];
+  }
   return [
     dndWeaponAttack({
       name: "Longsword",
@@ -8097,13 +8343,18 @@ function dndLevelOneArmorClass(classKey: DndLevelOneClassKey, abilityScores: Rec
   if (armorClass === "unarmored") {
     return 10 + abilityModifier(dndAbilityScoreValue(abilityScores, "dex")) + abilityModifier(dndAbilityScoreValue(abilityScores, "con"));
   }
+  if (armorClass === "unarmored-dex") {
+    return 10 + abilityModifier(dndAbilityScoreValue(abilityScores, "dex"));
+  }
   return armorClass;
 }
 
 function dndLevelOneSkills(classKey: DndLevelOneClassKey, abilityScores: Record<string, unknown>): Array<Record<string, unknown>> {
   const proficientSkills = new Set(DND_LEVEL_ONE_CLASS_CONFIGS[classKey].skillProficiencies.map((skill) => normalizeLookup(skill)));
   const skillAbilityKeys: Record<string, (typeof DND_ABILITY_KEYS)[number]> = {
+    arcana: "int",
     athletics: "str",
+    history: "int",
     insight: "wis",
     intimidation: "cha",
     medicine: "wis",
