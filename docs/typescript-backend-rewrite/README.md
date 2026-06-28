@@ -21,6 +21,7 @@ This folder tracks the deliberate TypeScript backend rewrite path for Campaign P
 - `combat-copied-data-rehearsal-2026-06-28.md`: completed no-live copied-fixture Combat backup/mutate/restore transcript.
 - `systems-copied-data-rehearsal-2026-06-28.md`: completed no-live copied-fixture Systems and shared-source backup/mutate/restore transcript.
 - `dm-content-copied-data-rehearsal-2026-06-28.md`: completed no-live copied-fixture DM Content backup/mutate/restore transcript.
+- `session-runtime-copied-data-rehearsal-2026-06-28.md`: completed no-live copied-fixture Session/runtime backup/mutate/restore transcript.
 - `rollback-cutover-runbook.md`: no-live rollback and full cutover evidence runbook, including the `rollback-cutover` harness guide for last known-good Flask target, pre-cutover backups, TypeScript data-delta decisions, restore command shape, and Flask health smoke.
 - `.local/roadmaps/typescript-backend-rewrite-roadmap.md`: local active task queue for the rewrite track.
 - `docs/current-state/INDEX.md`: current product contract index. Use it to confirm present behavior before porting any workflow.
