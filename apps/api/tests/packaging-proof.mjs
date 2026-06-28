@@ -51,6 +51,7 @@ if (entrypoint.includes("manage.py init-db")) {
 assertIncludes(dockerignore, "apps/**/dist", "ignored host-built API dist");
 assertIncludes(dockerignore, "apps/**/node_modules", "ignored host API node_modules");
 assertIncludes(dockerignore, ".task-temp*", "ignored local proof scratch");
+assertIncludes(dockerignore, "**/.task-temp*", "ignored nested local proof scratch");
 
 assertIncludes(flyConfig, "app = 'campaign-player-wiki-example'", "sanitized Fly placeholder app");
 assertIncludes(flyConfig, "PLAYER_WIKI_DB_PATH = '/data/player_wiki.sqlite3'", "Fly DB path");

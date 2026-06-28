@@ -59,6 +59,7 @@ Do not implement these routes as part of the parity program unless a later archi
 - `sqlite-migration-hook-proof-2026-06-28.md`: tracked TypeScript explicit migration-hook proof command that refuses unsafe targets, requires a Flask-current schema, creates only a TypeScript migration ledger, and runs only when manually invoked against disposable or approved copied databases.
 - `read-only-compatibility-slice.md`: evidence for the fixture-backed compatibility API slice, including the first controlled SQLite write route validated against a disposable fixture database.
 - `ops-image-runtime-proof.md`: no-deploy TypeScript API image-target proof notes, including the current Docker tooling blocker.
+- `ops-container-runtime-proof-2026-06-28.md`: repeatable no-deploy wrapper proof that builds the TypeScript API, initializes a disposable Flask-schema SQLite DB, starts `apps/api/dist/server.js` in production-shaped env against copied sanitized fixture campaigns, checks `/healthz`, `/api/v1/app`, and representative PNG asset serving, and skips the optional Docker image smoke when Docker is unavailable.
 
 ## Working Rules
 

@@ -96,6 +96,9 @@ Allowed before explicit deployment approval:
 - Run the repo wrapper gate when validating the local TypeScript API route
   parity path on Windows without relying on global npm:
   - `powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action ts-api-check`
+- Run the repo wrapper proof when validating the compiled TypeScript runtime
+  and optional local Docker target against disposable copied data:
+  - `powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action ts-api-container-proof`
 - Run static Docker context hygiene checks that do not contact Fly.
 - Run `npm --prefix apps/api run test:packaging-proof` to verify the
   non-default TypeScript image target and proof entrypoint wiring.
@@ -211,6 +214,22 @@ Current local evidence:
   DB/campaign metadata. The standalone packaging proof also passed with the
   pinned Node/npm runtime on `PATH`. Docker remained unavailable on `PATH`, so
   no local image build or container boot transcript was collected.
+- On 2026-06-28, `rewrite/ts-ops-container-runtime-proof` started from
+  integration commit `d9c1cf8eb544059b36116158de5ff95dd4eb485a` and added a
+  repeatable wrapper command:
+  `local.ps1 -Action ts-api-container-proof`. The command installs API
+  dependencies when needed, builds `apps/api`, creates a Flask-initialized
+  disposable SQLite DB under `.task-temp\ts-ops-container-runtime-proof\`, copies
+  sanitized fixture campaigns under the same ignored proof root, starts
+  `apps/api/dist/server.js` in production-shaped env with
+  `PLAYER_WIKI_RUNTIME=typescript-container-proof`, and checks local `/healthz`,
+  `/api/v1/app`, and representative protected PNG asset serving. The compiled
+  runtime proof passed with `/healthz status=ok`, `environment=production`,
+  `campaign_count=1`, `/api/v1/app ok=true`, and
+  `/campaigns/linden-pass/assets/lore/trade-coast-map.png` returning
+  `image/png`. The same command skipped the optional Docker build/run phase with
+  `spawnSync docker ENOENT`, classifying Docker absence as a tooling/environment
+  skip rather than a touched-code regression.
 
 ### Docker Context Hygiene
 
@@ -225,7 +244,8 @@ Collect:
 
 Current gap:
 
-- `.dockerignore` correctly blocks host-built API output and dependencies.
+- `.dockerignore` correctly blocks host-built API output, dependencies, and
+  root or nested `.task-temp*` proof scratch folders.
 - The `ts-api-runtime-proof` target now builds `apps/api` inside Docker and
   copies only the pruned production dependency tree plus compiled `dist`, but
   Docker is unavailable in this worktree environment so the image build itself
@@ -350,6 +370,10 @@ Current gap:
 
 - Existing Fly health checks target Flask `/healthz`; no staged TypeScript image
   health transcript exists.
+- The 2026-06-28 container runtime proof covers TypeScript `/healthz`,
+  `/api/v1/app`, and representative PNG asset serving for the local compiled
+  runtime only. It does not cover `/app-next/` or a TypeScript image/container
+  boot because the proof target is API-only and Docker was unavailable.
 
 ### Rollback Image And Data Boundaries
 
@@ -439,10 +463,11 @@ Current gap:
 Any failed build, live-path dependency, missing rollback path, or unproven data
 mutation keeps the label at the previous stage.
 
-The 2026-06-28 `rewrite/ts-ops-packaging-proof` pass strengthens the local
-compiled-start evidence and static scaffold evidence, but it does not advance
-the gate to `local image builds` because no local Docker build or container
-smoke could run in this worktree environment.
+The 2026-06-28 `rewrite/ts-ops-container-runtime-proof` pass strengthens the
+local compiled-start evidence, static scaffold evidence, wrapper repeatability,
+and representative protected asset smoke, but it does not advance the gate to
+`local image builds` because no local Docker build or container smoke could run
+in this worktree environment.
 
 ## Current Concrete Gaps
 
@@ -457,9 +482,9 @@ smoke could run in this worktree environment.
 - TypeScript env names are mapped only in the proof entrypoint, not in the
   default Flask entrypoint or Fly process model.
 - Startup schema behavior is still Flask `manage.py init-db` plus TypeScript
-  startup preflight. The latest local Flask-initialized scratch DB now passes
-  TypeScript compiled-start proof after the `sessions.token_hash` fix, but a
-  tracked TypeScript migration command, migration dry-run, and startup
+  startup preflight. The latest wrapper-backed local Flask-initialized scratch
+  DB proof now passes TypeScript compiled-start smoke and protected asset smoke,
+  but a tracked TypeScript migration command, migration dry-run, and startup
   migration hook remain unproven.
 - No local Docker build transcript exists for a TypeScript API runtime because
   Docker was unavailable in the current worktree environment.

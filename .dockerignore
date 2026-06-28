@@ -2,6 +2,9 @@
 **/.local
 **/.local/
 .task-temp*
+.task-temp*/
+**/.task-temp*
+**/.task-temp*/
 .mypy_cache
 .ruff_cache
 .pytest_cache
