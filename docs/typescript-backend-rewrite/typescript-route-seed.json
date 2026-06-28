@@ -1282,6 +1282,42 @@
       "notes": "Protected campaign asset browser route serves raw bytes with safe asset-root resolution and wiki-scope access checks."
     },
     {
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/global-search",
+      "route_family": "browser_json_compatibility",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/campaigns/:campaignSlug/global-search",
+      "snapshot_family": "flask",
+      "notes": "Tracked Hono browser JSON compatibility route used by Gen2 global search; preserved as a Flask snapshot-backed non-/api/v1 cutover target unless the frontend moves to an approved API replacement first."
+    },
+    {
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/global-search/preview",
+      "route_family": "browser_json_compatibility",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/campaigns/:campaignSlug/global-search/preview",
+      "snapshot_family": "flask",
+      "notes": "Tracked Hono browser JSON compatibility route used by Gen2 global search previews; preserved as a Flask snapshot-backed non-/api/v1 cutover target unless the frontend moves to an approved API replacement first."
+    },
+    {
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/session/wiki-lookup/search",
+      "route_family": "browser_json_compatibility",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/campaigns/:campaignSlug/session/wiki-lookup/search",
+      "snapshot_family": "flask",
+      "notes": "Tracked Hono browser JSON compatibility route used by Gen2 Session wiki lookup search; preserved as a Flask snapshot-backed non-/api/v1 cutover target unless the frontend moves to an approved API replacement first."
+    },
+    {
+      "method": "GET",
+      "path": "/campaigns/<campaign_slug>/session/wiki-lookup/preview",
+      "route_family": "browser_json_compatibility",
+      "status": "implemented_fixture_readonly",
+      "typescript_path": "/campaigns/:campaignSlug/session/wiki-lookup/preview",
+      "snapshot_family": "flask",
+      "notes": "Tracked Hono browser JSON compatibility route used by Gen2 Session wiki lookup previews; preserved as a Flask snapshot-backed non-/api/v1 cutover target unless the frontend moves to an approved API replacement first."
+    },
+    {
       "method": "POST",
       "path": "/api/v1/upload",
       "route_family": "api_v1",
