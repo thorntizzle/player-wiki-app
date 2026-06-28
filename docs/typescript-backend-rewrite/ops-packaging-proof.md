@@ -52,8 +52,9 @@ image.
 Follow-up local runtime evidence is recorded in
 `docs/typescript-backend-rewrite/ops-local-runtime-evidence.md`. That proof shows
 the integrated TypeScript API can install, build, start from `apps/api/dist`, and
-answer `/healthz` against fixture/local paths on Windows with the pinned Node/npm
-runtime. It still does not prove Docker/Fly packaging or authorize deploy.
+answer `/healthz` plus `/api/v1/app` against copied fixture/local paths on
+Windows with the pinned Node/npm runtime. It still does not prove Docker/Fly
+packaging or authorize deploy.
 
 ## Inspected Files
 
@@ -127,6 +128,17 @@ Current gap:
 
 - The app has local TypeScript API scripts, but those scripts are not wired into
   the production Dockerfile or `local.ps1` deploy path.
+
+Current local evidence:
+
+- Pinned Node `v22.12.0` and npm `10.9.0` can run `npm --prefix apps/api ci`,
+  `npm --prefix apps/api run typecheck`, and `npm --prefix apps/api run build`.
+- `apps/api/dist/server.js` starts locally with copied fixture campaigns under
+  `.task-temp` and a disposable SQLite path.
+- Local `GET /healthz` returns `status: ok`, `runtime_mode: fixture`, and
+  `campaign_count: 1`.
+- Local `GET /api/v1/app` returns `ok: true` and reflects the disposable
+  `CPW_DB_PATH`, `CPW_CAMPAIGNS_DIR`, and health metadata overrides.
 
 ### Docker Context Hygiene
 
