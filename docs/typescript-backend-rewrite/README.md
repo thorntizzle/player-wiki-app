@@ -181,7 +181,7 @@ Do not implement these routes as part of the parity program unless a later archi
   - `DELETE /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
   - `GET /api/v1/campaigns/:campaignSlug/characters`
   - `GET /api/v1/campaigns/:campaignSlug/characters/create`
-  - `POST /api/v1/campaigns/:campaignSlug/characters/create` (Xianxia native create; bounded DND-5E PHB Fighter/Barbarian level-one slice plus PHB Bard known-spell, PHB Cleric/Life Domain, PHB Druid prepared-spell, PHB Rogue expertise/equipment, PHB Ranger feature/equipment, PHB Sorcerer/Draconic Bloodline known-spell, PHB Warlock/Fiend Pact Magic, and PHB Wizard spellcasting create slices; full DND builder parity pending)
+  - `POST /api/v1/campaigns/:campaignSlug/characters/create` (Xianxia native create; bounded DND-5E PHB Fighter/Barbarian level-one slice plus PHB Bard known-spell, PHB Cleric/Life Domain, PHB Druid prepared-spell, PHB Rogue expertise/equipment, PHB Ranger feature/equipment, PHB Paladin Divine Sense/Lay on Hands, PHB Sorcerer/Draconic Bloodline known-spell, PHB Warlock/Fiend Pact Magic, and PHB Wizard spellcasting create slices; full DND builder parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor`
   - `PUT /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor` (reference, proficiency, stat-adjustment, recoverable-penalty, custom-feature, and manual-equipment fields with linked-page selector hydration plus `page_ref` validation/round-trip; linked custom-feature defaults, campaign-feat Optional Feature choices, and linked additional-spell choices supported; spell support/manager replacement derivation and full native derivation parity pending)
@@ -624,7 +624,7 @@ Do not implement these routes as part of the parity program unless a later archi
   basics, and explicit support-limit notes, and Xianxia create fields/defaults plus enabled
   martial-art and Generic Technique options. The POST lane writes native Xianxia records through the copied fixture
   content-character persistence path with `builder://xianxia-create` import metadata, and now also
-  writes a bounded DND-5E PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, PHB Druid, PHB Rogue, PHB Ranger, PHB Sorcerer, PHB Warlock, or PHB Wizard level-one slice with enabled Systems species/background rows from the current supported source matrix through the same persistence path with
+  writes a bounded DND-5E PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, PHB Druid, PHB Rogue, PHB Ranger, PHB Paladin, PHB Sorcerer, PHB Warlock, or PHB Wizard level-one slice with enabled Systems species/background rows from the current supported source matrix through the same persistence path with
   `builder://dnd5e-create-level-one` metadata, initialized SQLite mutable state, duplicate-slug
   `character_exists` handling, and validation errors for out-of-slice DND selections. The Bard slice writes selected cantrips/known spells, Bardic Inspiration from Charisma modifier, and first-level spell slots. The Cleric slice requires the PHB Life Domain,
   writes prepared cantrip/spell selections plus Life Domain always-prepared spells, and seeds first-level spell slots in SQLite.
@@ -632,6 +632,7 @@ Do not implement these routes as part of the parity program unless a later archi
   The Druid slice writes selected cantrips/prepared spells, Druidic and Spellcasting feature rows, first-level spell slots, bounded proficiencies/skills, and a leather/shield/scimitar starter equipment package.
   The Rogue slice writes Expertise, Sneak Attack, Thieves' Cant, bounded proficiencies/skills/tool expertise, and a leather/rapier/shortbow/dagger/thieves' tools starter equipment package.
   The Ranger slice writes Favored Enemy and Natural Explorer feature rows, bounded proficiencies/skills, no level-one spellcasting, and a leather/two-shortsword/longbow starter equipment package.
+  The Paladin slice writes Divine Sense and Lay on Hands tracked resources, bounded proficiencies/skills, no level-one spellcasting, and a chain-mail/shield/longsword/javelin starter equipment package.
   The Sorcerer slice requires the PHB Draconic Bloodline origin, writes selected cantrips/known spells, Sorcerous Origin/Draconic Ancestry/Draconic Resilience feature rows, Charisma spell DC/attack, first-level spell slots, Draconic language, Draconic Resilience HP/AC, bounded proficiencies/skills, and a crossbow/dagger/component-pouch starter package.
   The Warlock slice requires the PHB Fiend patron, writes selected cantrips/known spells, Otherworldly Patron/Pact Magic/Dark One's Blessing feature rows, Charisma spell DC/attack, bounded proficiencies/skills, a leather/crossbow/dagger starter package, and a distinct first-level Pact Magic slot lane in definition and SQLite state.
   The Wizard slice writes selected cantrips, six selected spellbook spells, selected prepared spellbook spells, Arcane Recovery, first-level spell slots, and PHB Sage background refs when that enabled Systems row is selected.

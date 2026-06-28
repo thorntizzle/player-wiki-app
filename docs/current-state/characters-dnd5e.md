@@ -25,7 +25,7 @@ Last updated: 2026-06-28
 
 - Native DND-5E create, edit, level-up, progression repair, and retraining are DND-5E-only.
 - Native base-class boundary is explicit: PHB base classes plus the TCE Artificer lane.
-- The TypeScript create parity path currently has bounded level-one PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric/Life Domain, PHB Druid, PHB Rogue, PHB Ranger, PHB Sorcerer/Draconic Bloodline, PHB Warlock/Fiend, and PHB Wizard slices; full DND builder parity remains pending.
+- The TypeScript create parity path currently has bounded level-one PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric/Life Domain, PHB Druid, PHB Rogue, PHB Ranger, PHB Paladin, PHB Sorcerer/Draconic Bloodline, PHB Warlock/Fiend, and PHB Wizard slices; full DND builder parity remains pending.
 - Supported subordinate non-PHB rows include current accepted SCAG, XGE, EGW, and DMG rows when attached to supported base classes.
 - Native level-up is one level at a time through level 20 and can advance an existing class row or add a class row when the support matrix allows it.
 - Progression repair resolves ambiguous imported class/subclass/species/background links and converts legacy imported spell marks to durable spell flags.
@@ -45,6 +45,7 @@ Last updated: 2026-06-28
 - Shared-slot multiclass spellcasting is limited to supported `full`, `1/2`, `artificer`, and currently supported `1/3` subclass-only lanes.
 - The TypeScript create parity path now has a bounded PHB Sorcerer/Draconic Bloodline level-one slice with known spells, first-level slots, Charisma spell DC/attack, Draconic language, and Draconic Resilience HP/AC; broader Sorcerous Origin choices, ancestry choices, Sorcery Points, Metamagic, and Sorcerer progression remain outside full builder parity.
 - Warlock Pact Magic remains a separate lane from shared-slot full-caster math. The TypeScript create parity path now has a bounded PHB Warlock/Fiend level-one slice with a distinct Pact Magic slot lane, but broader Warlock progression, invocations, pact boons, and multiclass Pact Magic remain outside full builder parity.
+- PHB Paladin level-one TypeScript create parity is intentionally non-spellcasting: it writes Divine Sense and Lay on Hands tracked resources, bounded proficiencies/skills, starter equipment/attacks, and initialized mutable state; Fighting Style, spellcasting, Sacred Oath, and level 2+ Paladin progression remain pending.
 - Subclass-only spellcasting requires supported Systems metadata or bundled fallback coverage for PHB Eldritch Knight and Arcane Trickster.
 - Spell add/update/remove actions route through an explicit target class row.
 - Combat and Session Character consume only the Current spell set; unprepared candidates do not appear as castable spells there.

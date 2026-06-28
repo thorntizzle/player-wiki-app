@@ -392,11 +392,11 @@ const DND_ABILITY_LABELS: Record<(typeof DND_ABILITY_KEYS)[number], string> = {
 const DND_CREATE_LIMITATIONS = [
   "Base classes come from enabled Systems rows inside the current native support lane: PHB base classes plus TCE Artificer.",
   "Species and backgrounds come from enabled Systems rows in the current supported source matrix for this TypeScript parity slice.",
-  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Bard with a bounded known-spells package, PHB Cleric with a bounded Life Domain level-one package, PHB Druid with a bounded prepared-spells package, PHB Rogue with a bounded expertise and starter-equipment package, PHB Ranger with a bounded Favored Enemy/Natural Explorer package, PHB Sorcerer with a bounded Draconic Bloodline known-spells package, PHB Warlock with a bounded Fiend Pact Magic package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
+  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Bard with a bounded known-spells package, PHB Cleric with a bounded Life Domain level-one package, PHB Druid with a bounded prepared-spells package, PHB Rogue with a bounded expertise and starter-equipment package, PHB Ranger with a bounded Favored Enemy/Natural Explorer package, PHB Paladin with a bounded Divine Sense/Lay on Hands package, PHB Sorcerer with a bounded Draconic Bloodline known-spells package, PHB Warlock with a bounded Fiend Pact Magic package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
 ];
 const DND_CHARACTER_CREATE_SOURCE_PATH = "builder://dnd5e-create-level-one";
 const DND_CHARACTER_CREATE_SOURCE_TYPE = "dnd5e_character_builder_level_one";
-const DND_CHARACTER_CREATE_VERSION = "2026-06-28.0";
+const DND_CHARACTER_CREATE_VERSION = "2026-06-28.1";
 const DND_CHARACTER_CREATE_IMPORTED_FROM = "In-app DND-5E Character Creator level-one slice";
 const DND_LEVEL_ONE_CLASS_CONFIGS = {
   bard: {
@@ -1059,6 +1059,117 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
       },
     ],
     resourceTemplates: [],
+  },
+  paladin: {
+    className: "Paladin",
+    armorClass: 18,
+    supportedSubclassTitles: [],
+    skillProficiencies: ["Athletics", "Persuasion"],
+    skillRows: ["Athletics", "Insight", "Intimidation", "Medicine", "Persuasion", "Religion"],
+    spellcasting: null,
+    proficiencies: {
+      armor: ["All armor", "Shields"],
+      weapons: ["Simple weapons", "Martial weapons"],
+      tools: [],
+    },
+    equipmentCatalog: [
+      {
+        id: "chain-mail-1",
+        name: "Chain Mail",
+        default_quantity: 1,
+        weight: "55 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        tags: ["armor"],
+      },
+      {
+        id: "shield-1",
+        name: "Shield",
+        default_quantity: 1,
+        weight: "6 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        tags: ["shield", "armor"],
+      },
+      {
+        id: "longsword-1",
+        name: "Longsword",
+        default_quantity: 1,
+        weight: "3 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        weapon_wield_mode: "main-hand",
+        weapon_wield_modes: ["main-hand", "two-handed"],
+        tags: ["weapon", "martial weapon", "melee weapon"],
+      },
+      {
+        id: "javelin-1",
+        name: "Javelin",
+        default_quantity: 5,
+        weight: "2 lb.",
+        tags: ["weapon", "simple weapon", "melee weapon", "thrown weapon"],
+      },
+      {
+        id: "priests-pack-1",
+        name: "Priest's Pack",
+        default_quantity: 1,
+        weight: "25 lb.",
+        tags: ["gear"],
+      },
+      {
+        id: "holy-symbol-1",
+        name: "Holy Symbol",
+        default_quantity: 1,
+        weight: "1 lb.",
+        tags: ["holy symbol", "spellcasting focus"],
+      },
+    ],
+    features: [
+      {
+        id: "divine-sense-1",
+        name: "Divine Sense",
+        category: "class_feature",
+        tracker_ref: "divine-sense",
+        source: "PHB",
+        description_markdown: "Divine Sense starts with uses equal to 1 + your Charisma modifier, minimum one. Detection presentation remains reference-only in this level-one slice.",
+      },
+      {
+        id: "lay-on-hands-1",
+        name: "Lay on Hands",
+        category: "class_feature",
+        tracker_ref: "lay-on-hands",
+        source: "PHB",
+        description_markdown: "Lay on Hands starts with a 5-point healing pool at level 1. Healing automation remains outside this slice.",
+      },
+    ],
+    resourceTemplates: [
+      {
+        id: "divine-sense",
+        label: "Divine Sense",
+        category: "class_feature",
+        max: 1,
+        initial_current: 1,
+        max_ability_key: "cha",
+        max_ability_bonus: 1,
+        minimum_max: 1,
+        reset_on: "long_rest",
+        reset_to: "max",
+        rest_behavior: "restore_full",
+        display_order: 10,
+      },
+      {
+        id: "lay-on-hands",
+        label: "Lay on Hands",
+        category: "class_feature",
+        max: 5,
+        initial_current: 5,
+        reset_on: "long_rest",
+        reset_to: "max",
+        rest_behavior: "restore_full",
+        notes: "Healing pool points.",
+        display_order: 20,
+      },
+    ],
   },
   sorcerer: {
     className: "Sorcerer",
@@ -8412,7 +8523,7 @@ function assertDndLevelOneClass(row: SystemsEntryRow | null): { row: SystemsEntr
   }
   const classKey = dndLevelOneClassKey(row);
   if (!classKey || normalizeDndSourceId(row.source_id) !== DND_PHB_SOURCE_ID || String(row.entry_type || "") !== "class") {
-    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, PHB Druid, PHB Rogue, PHB Ranger, PHB Sorcerer, PHB Warlock, and PHB Wizard.");
+    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, PHB Druid, PHB Rogue, PHB Ranger, PHB Paladin, PHB Sorcerer, PHB Warlock, and PHB Wizard.");
   }
   return { row, classKey };
 }
@@ -8529,10 +8640,12 @@ function dndLevelOneResourceTemplates(
     const maxAbilityKey = String(template.max_ability_key || "").trim() as (typeof DND_ABILITY_KEYS)[number];
     if ((DND_ABILITY_KEYS as readonly string[]).includes(maxAbilityKey)) {
       const minimumMax = createContextInteger(template.minimum_max, 0);
-      const max = Math.max(minimumMax, abilityModifier(dndAbilityScoreValue(abilityScores, maxAbilityKey)));
+      const abilityBonus = createContextInteger(template.max_ability_bonus, 0);
+      const max = Math.max(minimumMax, abilityModifier(dndAbilityScoreValue(abilityScores, maxAbilityKey)) + abilityBonus);
       template.max = max;
       template.initial_current = max;
       delete template.max_ability_key;
+      delete template.max_ability_bonus;
       delete template.minimum_max;
     }
     return template;
@@ -9010,6 +9123,28 @@ function dndLevelOneAttacks(classKey: DndLevelOneClassKey, abilityScores: Record
         damageType: "piercing",
         notes: "Ammunition, heavy, two-handed, range 150/600.",
         equipmentRef: "longbow-1",
+      }),
+    ];
+  }
+  if (classKey === "paladin") {
+    return [
+      dndWeaponAttack({
+        name: "Longsword",
+        category: "melee weapon",
+        abilityModifierValue: strengthModifier,
+        damageDie: "1d8",
+        damageType: "slashing",
+        notes: "Versatile (1d10). Level-one slice uses a shield-and-longsword starting package.",
+        equipmentRef: "longsword-1",
+      }),
+      dndWeaponAttack({
+        name: "Javelin",
+        category: "melee or thrown weapon",
+        abilityModifierValue: strengthModifier,
+        damageDie: "1d6",
+        damageType: "piercing",
+        notes: "Thrown range 30/120. Starting package includes five javelins.",
+        equipmentRef: "javelin-1",
       }),
     ];
   }
