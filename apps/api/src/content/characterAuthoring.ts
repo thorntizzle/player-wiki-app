@@ -392,7 +392,7 @@ const DND_ABILITY_LABELS: Record<(typeof DND_ABILITY_KEYS)[number], string> = {
 const DND_CREATE_LIMITATIONS = [
   "Base classes come from enabled Systems rows inside the current native support lane: PHB base classes plus TCE Artificer.",
   "Species and backgrounds come from enabled Systems rows in the current supported source matrix for this TypeScript parity slice.",
-  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Bard with a bounded known-spells package, PHB Cleric with a bounded Life Domain level-one package, PHB Druid with a bounded prepared-spells package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
+  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Bard with a bounded known-spells package, PHB Cleric with a bounded Life Domain level-one package, PHB Druid with a bounded prepared-spells package, PHB Warlock with a bounded Fiend Pact Magic package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
 ];
 const DND_CHARACTER_CREATE_SOURCE_PATH = "builder://dnd5e-create-level-one";
 const DND_CHARACTER_CREATE_SOURCE_TYPE = "dnd5e_character_builder_level_one";
@@ -409,7 +409,10 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
       abilityKey: "cha",
       abilityLabel: "Charisma",
       spellMode: "known",
+      casterProgression: "full",
       slotProgression: [{ level: 1, max_slots: 2 }],
+      slotLaneId: "class-row-1-slots",
+      slotLaneTitle: "Spell slots",
       cantripCount: 2,
       cantripFieldPrefix: "cantrip_spell",
       knownSpellCount: 4,
@@ -683,7 +686,10 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
       abilityKey: "wis",
       abilityLabel: "Wisdom",
       spellMode: "prepared",
+      casterProgression: "full",
       slotProgression: [{ level: 1, max_slots: 2 }],
+      slotLaneId: "class-row-1-slots",
+      slotLaneTitle: "Spell slots",
       cantripCount: 3,
       cantripFieldPrefix: "cantrip_spell",
       knownSpellCount: 0,
@@ -793,7 +799,10 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
       abilityKey: "wis",
       abilityLabel: "Wisdom",
       spellMode: "prepared",
+      casterProgression: "full",
       slotProgression: [{ level: 1, max_slots: 2 }],
+      slotLaneId: "class-row-1-slots",
+      slotLaneTitle: "Spell slots",
       cantripCount: 2,
       cantripFieldPrefix: "cantrip_spell",
       knownSpellCount: 0,
@@ -872,6 +881,110 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
     ],
     resourceTemplates: [],
   },
+  warlock: {
+    className: "Warlock",
+    armorClass: "leather",
+    supportedSubclassTitles: ["the fiend"],
+    skillProficiencies: ["Arcana", "Deception"],
+    skillRows: ["Arcana", "Deception", "History", "Intimidation", "Investigation", "Nature", "Perception", "Religion"],
+    spellcasting: {
+      abilityKey: "cha",
+      abilityLabel: "Charisma",
+      spellMode: "known",
+      casterProgression: "pact",
+      slotProgression: [{ level: 1, max_slots: 1 }],
+      slotLaneId: "class-row-1-pact-slots",
+      slotLaneTitle: "Pact Magic slots",
+      cantripCount: 2,
+      cantripFieldPrefix: "cantrip_spell",
+      knownSpellCount: 2,
+      alwaysPreparedSpellTitles: [],
+      alwaysPreparedGrantSourceLabel: "",
+      preparedSpellFieldPrefix: "known_spell",
+      spellbookFieldPrefix: "",
+      spellbookCount: 0,
+      spellSourceLabel: "Warlock",
+    },
+    proficiencies: {
+      armor: ["Light armor"],
+      weapons: ["Simple weapons"],
+      tools: [],
+    },
+    equipmentCatalog: [
+      {
+        id: "leather-armor-1",
+        name: "Leather Armor",
+        default_quantity: 1,
+        weight: "10 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        tags: ["armor", "light armor"],
+      },
+      {
+        id: "light-crossbow-1",
+        name: "Light Crossbow",
+        default_quantity: 1,
+        weight: "5 lb.",
+        tags: ["weapon", "simple weapon", "ranged weapon"],
+      },
+      {
+        id: "crossbow-bolts-1",
+        name: "Crossbow Bolts",
+        default_quantity: 20,
+        weight: "1.5 lb.",
+        tags: ["ammunition"],
+      },
+      {
+        id: "dagger-1",
+        name: "Dagger",
+        default_quantity: 2,
+        weight: "1 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        weapon_wield_mode: "main-hand",
+        weapon_wield_modes: ["main-hand", "off-hand"],
+        tags: ["weapon", "simple weapon", "melee weapon", "finesse", "thrown weapon"],
+      },
+      {
+        id: "component-pouch-1",
+        name: "Component Pouch",
+        default_quantity: 1,
+        weight: "2 lb.",
+        tags: ["spellcasting focus"],
+      },
+      {
+        id: "scholars-pack-1",
+        name: "Scholar's Pack",
+        default_quantity: 1,
+        weight: "10 lb.",
+        tags: ["gear"],
+      },
+    ],
+    features: [
+      {
+        id: "otherworldly-patron-1",
+        name: "Otherworldly Patron",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "The Fiend is the bounded level-one patron supported by this TypeScript create slice.",
+      },
+      {
+        id: "pact-magic-1",
+        name: "Pact Magic",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "This level-one TypeScript slice records Warlock cantrips, known spells, and one first-level Pact Magic slot.",
+      },
+      {
+        id: "dark-ones-blessing-1",
+        name: "Dark One's Blessing",
+        category: "subclass_feature",
+        source: "PHB",
+        description_markdown: "Fiend patron temporary hit point rules are recorded as reference text; kill-trigger automation remains outside this slice.",
+      },
+    ],
+    resourceTemplates: [],
+  },
   wizard: {
     className: "Wizard",
     armorClass: "unarmored-dex",
@@ -882,7 +995,10 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
       abilityKey: "int",
       abilityLabel: "Intelligence",
       spellMode: "wizard",
+      casterProgression: "full",
       slotProgression: [{ level: 1, max_slots: 2 }],
+      slotLaneId: "class-row-1-slots",
+      slotLaneTitle: "Spell slots",
       cantripCount: 3,
       cantripFieldPrefix: "cantrip_spell",
       knownSpellCount: 0,
@@ -8015,7 +8131,7 @@ function assertDndLevelOneClass(row: SystemsEntryRow | null): { row: SystemsEntr
   }
   const classKey = dndLevelOneClassKey(row);
   if (!classKey || normalizeDndSourceId(row.source_id) !== DND_PHB_SOURCE_ID || String(row.entry_type || "") !== "class") {
-    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, PHB Druid, and PHB Wizard.");
+    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, PHB Druid, PHB Warlock, and PHB Wizard.");
   }
   return { row, classKey };
 }
@@ -8402,16 +8518,17 @@ function dndLevelOneSpellcasting({
   }
 
   const abilityModifierValue = abilityModifier(dndAbilityScoreValue(abilityScores, spellcasting.abilityKey));
+  const slotLaneId = String(spellcasting.slotLaneId || "class-row-1-slots");
   const classRow: Record<string, unknown> = {
     class_row_id: "class-row-1",
     class_name: classConfig.className,
     level: 1,
-    caster_progression: "full",
+    caster_progression: spellcasting.casterProgression,
     spell_mode: spellcasting.spellMode,
     spellcasting_ability: spellcasting.abilityLabel,
     spell_save_dc: 8 + 2 + abilityModifierValue,
     spell_attack_bonus: 2 + abilityModifierValue,
-    slot_lane_id: "class-row-1-slots",
+    slot_lane_id: slotLaneId,
     spell_list_class_name: classConfig.className,
   };
   if (spellcasting.spellMode === "known") {
@@ -8428,8 +8545,8 @@ function dndLevelOneSpellcasting({
     slot_progression: spellcasting.slotProgression.map((slot) => ({ ...slot })),
     slot_lanes: [
       {
-        id: "class-row-1-slots",
-        title: "Spell slots",
+        id: slotLaneId,
+        title: spellcasting.slotLaneTitle,
         shared: false,
         row_ids: ["class-row-1"],
         slot_progression: spellcasting.slotProgression.map((slot) => ({ ...slot })),
@@ -8562,6 +8679,28 @@ function dndLevelOneAttacks(classKey: DndLevelOneClassKey, abilityScores: Record
       }),
     ];
   }
+  if (classKey === "warlock") {
+    return [
+      dndWeaponAttack({
+        name: "Dagger",
+        category: "melee or thrown weapon",
+        abilityModifierValue: Math.max(strengthModifier, dexterityModifier),
+        damageDie: "1d4",
+        damageType: "piercing",
+        notes: "Finesse, light, thrown range 20/60.",
+        equipmentRef: "dagger-1",
+      }),
+      dndWeaponAttack({
+        name: "Light Crossbow",
+        category: "ranged weapon",
+        abilityModifierValue: dexterityModifier,
+        damageDie: "1d8",
+        damageType: "piercing",
+        notes: "Ammunition, loading, range 80/320.",
+        equipmentRef: "light-crossbow-1",
+      }),
+    ];
+  }
   if (classKey === "wizard") {
     return [
       dndWeaponAttack({
@@ -8633,6 +8772,7 @@ function dndLevelOneSkills(classKey: DndLevelOneClassKey, abilityScores: Record<
     history: "int",
     insight: "wis",
     intimidation: "cha",
+    investigation: "int",
     medicine: "wis",
     nature: "int",
     perception: "wis",
