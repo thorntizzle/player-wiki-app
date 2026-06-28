@@ -478,6 +478,7 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
             ),
             ("DND-5E", "PHB", "PHB:class:druid", "class", "phb-druid", "Druid", {"hit_die": 8, "saving_throw_proficiencies": ["Intelligence", "Wisdom"]}),
             ("DND-5E", "PHB", "PHB:class:fighter", "class", "phb-fighter", "Fighter", {"hit_die": 10, "saving_throw_proficiencies": ["Strength", "Constitution"]}),
+            ("DND-5E", "PHB", "PHB:class:paladin", "class", "phb-paladin", "Paladin", {"hit_die": 10, "saving_throw_proficiencies": ["Wisdom", "Charisma"]}),
             ("DND-5E", "PHB", "PHB:class:ranger", "class", "phb-ranger", "Ranger", {"hit_die": 10, "saving_throw_proficiencies": ["Strength", "Dexterity"]}),
             ("DND-5E", "PHB", "PHB:class:rogue", "class", "phb-rogue", "Rogue", {"hit_die": 8, "saving_throw_proficiencies": ["Dexterity", "Intelligence"]}),
             (
@@ -2625,6 +2626,121 @@ def test_typescript_dnd_character_create_ranger_writes_features_equipment_and_st
     assert written_definition["name"] == "API DND Ranger"
     assert written_definition["features"][0]["id"] == "favored-enemy-1"
     assert written_definition["equipment_catalog"][1]["name"] == "Shortsword"
+    assert written_import["source_path"] == "builder://dnd5e-create-level-one"
+
+    level_up_status, level_up_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{character_slug}/level-up",
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+    assert level_up_status == 200
+    assert level_up_payload["supported"] is False
+
+    duplicate_status, duplicate_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body=body,
+    )
+    assert duplicate_status == 409
+    assert duplicate_payload["error"]["code"] == "character_exists"
+
+
+def test_typescript_dnd_character_create_paladin_writes_resources_equipment_and_state(
+    typescript_api_mutation_server,
+):
+    character_slug = "api-dnd-paladin"
+    body = {
+        "values": {
+            "name": "API DND Paladin",
+            "character_slug": character_slug,
+            "class_slug": "systems:phb-paladin",
+            "species_slug": "systems:phb-human",
+            "background_slug": "systems:phb-soldier",
+            "str": "16",
+            "dex": "10",
+            "con": "14",
+            "int": "8",
+            "wis": "12",
+            "cha": "14",
+        }
+    }
+
+    status, payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body=body,
+    )
+
+    assert status == 200
+    assert payload["message"] == "API DND Paladin created."
+    assert payload["links"]["character_url"] == f"/app-next/campaigns/linden-pass/characters/{character_slug}"
+    assert payload["links"]["flask_character_url"] == f"/campaigns/linden-pass/characters/{character_slug}"
+    definition = payload["character"]["definition"]
+    import_metadata = payload["character"]["import_metadata"]
+    state_record = payload["character"]["state_record"]
+    assert definition["character_slug"] == character_slug
+    assert definition["system"] == "DND-5E"
+    assert definition["profile"]["class_level_text"] == "Paladin 1"
+    assert definition["profile"]["classes"][0]["systems_ref"]["entry_key"] == "PHB:class:paladin"
+    assert definition["profile"]["species_ref"]["entry_key"] == "PHB:race:human"
+    assert definition["profile"]["background"] == "Soldier"
+    assert definition["stats"]["max_hp"] == 12
+    assert definition["stats"]["armor_class"] == 18
+    assert definition["stats"]["passive_perception"] == 11
+    assert definition["stats"]["ability_scores"]["wis"]["save_bonus"] == 3
+    assert definition["stats"]["ability_scores"]["cha"]["save_bonus"] == 4
+    assert definition["source"]["source_path"] == "builder://dnd5e-create-level-one"
+    assert import_metadata["source_path"] == "builder://dnd5e-create-level-one"
+    assert import_metadata["import_status"] == "managed"
+
+    assert definition["proficiencies"]["armor"] == ["All armor", "Shields"]
+    assert definition["proficiencies"]["weapons"] == ["Simple weapons", "Martial weapons"]
+    assert definition["proficiencies"]["tools"] == []
+    skills_by_name = {skill["name"]: skill for skill in definition["skills"]}
+    assert skills_by_name["Athletics"]["proficiency_level"] == "proficient"
+    assert skills_by_name["Persuasion"]["proficiency_level"] == "proficient"
+    assert skills_by_name["Religion"]["bonus"] == -1
+    features_by_id = {feature["id"]: feature for feature in definition["features"]}
+    assert features_by_id["divine-sense-1"]["tracker_ref"] == "divine-sense"
+    assert features_by_id["lay-on-hands-1"]["tracker_ref"] == "lay-on-hands"
+    resources_by_id = {resource["id"]: resource for resource in definition["resource_templates"]}
+    assert resources_by_id["divine-sense"]["max"] == 3
+    assert resources_by_id["divine-sense"]["initial_current"] == 3
+    assert resources_by_id["lay-on-hands"]["max"] == 5
+    assert definition["spellcasting"] == {}
+    assert definition["attacks"][0]["equipment_ref"] == "longsword-1"
+    assert definition["attacks"][1]["equipment_ref"] == "javelin-1"
+    assert any(item["name"] == "Priest's Pack" for item in definition["equipment_catalog"])
+    assert any(item["name"] == "Soldier Starting Package" for item in definition["equipment_catalog"])
+
+    assert state_record["revision"] == 1
+    assert state_record["state"]["vitals"]["current_hp"] == 12
+    assert state_record["state"]["hit_dice"]["pools"] == [{"faces": 10, "current": 1, "max": 1}]
+    assert state_record["state"]["spell_slots"] == []
+    state_resources_by_id = {resource["id"]: resource for resource in state_record["state"]["resources"]}
+    assert state_resources_by_id["divine-sense"]["current"] == 3
+    assert state_resources_by_id["divine-sense"]["max"] == 3
+    assert state_resources_by_id["lay-on-hands"]["current"] == 5
+    assert state_resources_by_id["lay-on-hands"]["max"] == 5
+    assert state_record["state"]["inventory"][0]["catalog_ref"] == "chain-mail-1"
+    assert state_record["state"]["inventory"][1]["catalog_ref"] == "shield-1"
+    assert state_record["state"]["inventory"][2]["catalog_ref"] == "longsword-1"
+    assert state_record["state"]["currency"]["gp"] == 10
+
+    state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
+    assert state is not None
+    assert state["revision"] == 1
+    assert state["state"]["vitals"]["current_hp"] == 12
+    assert state["state"]["hit_dice"]["pools"][0]["faces"] == 10
+    assert state["state"]["resources"][0]["id"] == "divine-sense"
+
+    character_dir = typescript_api_mutation_server["campaigns_dir"] / "linden-pass" / "characters" / character_slug
+    written_definition = yaml.safe_load((character_dir / "definition.yaml").read_text(encoding="utf-8"))
+    written_import = yaml.safe_load((character_dir / "import.yaml").read_text(encoding="utf-8"))
+    assert written_definition["name"] == "API DND Paladin"
+    assert written_definition["features"][0]["id"] == "divine-sense-1"
+    assert written_definition["resource_templates"][1]["id"] == "lay-on-hands"
     assert written_import["source_path"] == "builder://dnd5e-create-level-one"
 
     level_up_status, level_up_payload = _to_json(
