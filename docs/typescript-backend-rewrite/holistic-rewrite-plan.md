@@ -224,6 +224,30 @@ implementation push:
 This avoids the trap of finishing backend parity in a shape the frontend then
 has to work around.
 
+Slice artifacts:
+
+- `dnd-progression-kernel-adr.md`: adopts a data-driven DND progression kernel
+  as the target architecture and reframes current class-specific slices as
+  golden tests.
+- `character-authoring-module-boundaries.md`: defines the target TypeScript
+  module boundaries for character routes, persistence, DND progression, choices,
+  options, derivation, presenter adapters, and Xianxia authoring.
+- `gen2-pilot-payload-needs.md`: chooses Combat as the first likely frontend
+  workspace pilot after API stabilization and records the payload needs for
+  Combat, Character, and Session.
+- `cutover-readiness.md`: now carries an architecture classification overlay
+  so future branches can distinguish product contract, compatibility shim,
+  migration bridge, architecture debt, and open decision work.
+
+Combined recommendation:
+
+- Do the DND progression-kernel and character boundary work before widening
+  level-up class-by-class.
+- Do not wait for the DND kernel to plan the first frontend modernization pilot;
+  start from a Combat service-contract pass once the TypeScript API is stable.
+- Do wait for the DND kernel before redesigning character authoring surfaces
+  such as create, level-up, progression repair, or retraining.
+
 ## Validation Matrix
 
 | Change type | Minimum validation |

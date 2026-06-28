@@ -12,6 +12,9 @@ This folder tracks the deliberate TypeScript backend rewrite path for Campaign P
 - `parity-inventory.md`: current route, API, data, command, and policy inventory that TypeScript must preserve.
 - `architecture-opportunity-audit.md`: audit rubric for separating product contracts from compatibility shims, migration bridges, architecture debt, and rewrite opportunities.
 - `holistic-rewrite-plan.md`: combined backend architecture and frontend modernization plan for moving from TypeScript parity to a cleaner app foundation.
+- `dnd-progression-kernel-adr.md`: target architecture decision for replacing class-by-class DND advancement slices with a data-driven progression kernel.
+- `character-authoring-module-boundaries.md`: target TypeScript module boundaries for character routes, persistence, choices, DND progression, derivation, presenter adapters, and Xianxia authoring.
+- `gen2-pilot-payload-needs.md`: payload sketch and pilot sequencing recommendation for Combat, Character, and Session frontend modernization.
 - `../frontend-modernization-vision.md`: Gen2 modernization direction for persistent workspace shell, adaptive workspaces, gameplay widgets, progressive loading, honest mutations, container-aware layout, and pilot selection.
 - `route-snapshots.md`: executable route snapshot artifact companion review notes.
 - `route-snapshots.json`: tracked executable snapshot from

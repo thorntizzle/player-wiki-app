@@ -71,6 +71,27 @@ Use these labels consistently in follow-up evidence:
 - `staging snapshot ready`: A user-approved staging-equivalent snapshot rehearsal has passed and the transcript is tracked.
 - `cutover rehearsal passed`: All charter workflows pass against copied or staging data, rollback is rehearsed, and Flask hard-freeze exceptions are resolved.
 
+## Architecture Classification Overlay
+
+Use this overlay with the gate matrix above. Future readiness updates should
+name both the readiness label and the architecture classification so parity work
+does not silently become the long-term design.
+
+| Gate family | Architecture classification | Rewrite posture |
+| --- | --- | --- |
+| API route inventory | Compatibility shim plus product contract at the HTTP edge | Keep route snapshots strict, but move reusable behavior behind canonical services. |
+| Browser JSON compatibility endpoints | Compatibility shim | Keep the four closed routes for cutover; do not make them the pattern for new APIs. |
+| Character create/edit parity | Architecture debt plus product contract | Preserve current behavior, but require the character module-boundary plan before broadening create/edit internals. |
+| Character advancement parity | Architecture debt with useful golden evidence | Treat current class-specific level-up slices as acceptance tests for the DND progression kernel. |
+| Character detail/presenter parity | Product contract plus frontend foundation | Preserve Gen2/Session/Combat payloads while moving derivation behind presenter/domain adapters. |
+| Missing-resource/error shape parity | Compatibility shim plus open decision | Record deliberate JSON-normalization breaks instead of inheriting Flask HTML errors by accident. |
+| Fixture-only write routes | Migration bridge | Keep labels honest; fixture writes are not staging or production readiness. |
+| Content-character, Session, Combat, Systems, DM Content, and published-content writes | Product contract plus migration bridge | Preserve authorization, revision, backup, restore, and rollback behavior; expose canonical service models where route code is too wide. |
+| Image and portrait behavior | Open decision plus migration bridge | Do not widen image writes until the cutover image policy is chosen. |
+| SQLite schema/migration layer | Open decision plus migration bridge | Keep TypeScript preflight/ledger proof separate from real schema ownership until a schema decision lands. |
+| Local ops and Docker/Fly packaging | Migration bridge plus compatibility/local shim | Keep wrapper proof repeatable while moving durable checks into portable scripts where practical. |
+| Freeze, rollback, and full cutover smoke | Product contract | Keep conservative parity and evidence discipline; no architecture cleanup should weaken rollback. |
+
 ## Parallel Lane Queue
 
 These lanes can proceed without conflicting with this docs-only readiness lane:
@@ -86,11 +107,12 @@ These lanes can proceed without conflicting with this docs-only readiness lane:
 
 ## Immediate Orchestrator Recommendations
 
-1. Queue character authoring parity next if the goal is route-semantic completeness: full DND create, Advanced Editor derivation, and advancement save parity are the clearest implementation blockers.
+1. Queue the DND progression-kernel and character module-boundary work before opening more broad class-by-class level-up lanes. Full DND create, Advanced Editor derivation, and advancement save parity remain blockers, but current class-specific slices should become golden tests rather than the default architecture.
 2. Use the staging rehearsal harness in parallel with implementation: `staging-snapshot-preflight` can prepare the sanitized operator checklist and `guide`/`init` can collect backup/restore command scaffolding and transcript templates without touching active runtime files.
 3. Queue an ops packaging proof before any deploy discussion: TypeScript must prove local production build, container/Fly startup shape, mounted volume paths, and rollback instructions.
-4. Keep `deferred_scratch_proof` routes out of cutover scope unless a later architecture decision promotes session-cookie auth, generic upload, or generic notes APIs.
-5. Before a user-approved PR/merge/deploy/cutover step, run the final freeze/drift checklist in `cutover-freeze-drift-audit.md` across `docs/current-state/INDEX.md`, `docs/api-v1.md`, `route-snapshots.json`, `typescript-route-seed.json`, the TypeScript route manifest, and this matrix.
+4. Start the first frontend modernization pilot from a Combat service-contract pass after TypeScript API stabilization; keep Character authoring modernization behind the DND progression-kernel decision.
+5. Keep `deferred_scratch_proof` routes out of cutover scope unless a later architecture decision promotes session-cookie auth, generic upload, or generic notes APIs.
+6. Before a user-approved PR/merge/deploy/cutover step, run the final freeze/drift checklist in `cutover-freeze-drift-audit.md` across `docs/current-state/INDEX.md`, `docs/api-v1.md`, `route-snapshots.json`, `typescript-route-seed.json`, the TypeScript route manifest, and this matrix.
 
 ## Non-Goals For This Lane
 
