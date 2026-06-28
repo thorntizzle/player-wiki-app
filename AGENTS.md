@@ -17,6 +17,7 @@
 - Keep each worktree lane bounded to a feature, module cluster, or roadmap slice with clear file ownership.
 - Before code work, start from `docs/current-state/INDEX.md` and the narrow current-state or specialist reference that owns the surface.
 - Keep one active writer per module cluster. Do not revert unrelated edits from other threads, worktrees, or the user.
+- After a temporary lane branch has been integrated and is no longer needed, remove the local/remote branch and prune stale worktree refs after confirming no unmerged work remains.
 - For ignored app-local files that a Codex-managed worktree must copy, add only those ignored paths to `.worktreeinclude`.
 
 ## Validation And Git

@@ -1,6 +1,6 @@
 # Workspace Boundaries And Worktrees
 
-Last updated: 2026-06-27
+Last updated: 2026-06-28
 
 ## Owns
 
@@ -28,6 +28,7 @@ Last updated: 2026-06-27
 - Give each lane a narrow feature, module cluster, or roadmap slice with clear file ownership.
 - Keep app worktree threads rooted in the `campaign_player_wiki` project so they inherit the app repo instructions and use Git worktrees correctly.
 - Use separate lanes for independent work such as frontend surfaces, backend/API changes, validation/review, or documentation cleanup when file ownership does not overlap.
+- When a temporary lane branch has been merged into its durable integration branch and no longer has unique work, delete the temporary local and remote branches and prune stale worktree metadata so the repo stays readable.
 - Do not use app worktrees for direct vault editing. Use the Linden Pass vault project for campaign content work.
 
 ## Local Setup Notes
