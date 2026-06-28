@@ -7383,7 +7383,7 @@ function supportedTypeScriptLevelUpClassRow(definition: Record<string, unknown>)
   if (!(classKey in DND_LEVEL_ONE_CLASS_CONFIGS) || currentLevel !== 1) {
     return null;
   }
-  if (classKey !== "fighter" && classKey !== "barbarian" && classKey !== "rogue") {
+  if (classKey !== "fighter" && classKey !== "barbarian" && classKey !== "rogue" && classKey !== "monk") {
     return null;
   }
   return {
@@ -7398,7 +7398,7 @@ function averageHpGainForClass(classKey: DndLevelOneClassKey): number {
   if (classKey === "barbarian") {
     return 7;
   }
-  if (classKey === "rogue") {
+  if (classKey === "rogue" || classKey === "monk") {
     return 5;
   }
   return 6;
@@ -7458,6 +7458,27 @@ function levelTwoFeatureRows(classKey: DndLevelOneClassKey): Array<Record<string
       },
     ];
   }
+  if (classKey === "monk") {
+    return [
+      {
+        id: "ki-2",
+        name: "Ki",
+        category: "class_feature",
+        tracker_ref: "ki",
+        source: "PHB",
+        source_kind: "native_progression",
+        description_markdown: "Starting at 2nd level, your training lets you harness ki for Flurry of Blows, Patient Defense, Step of the Wind, and other ki features.",
+      },
+      {
+        id: "unarmored-movement-2",
+        name: "Unarmored Movement",
+        category: "class_feature",
+        source: "PHB",
+        source_kind: "native_progression",
+        description_markdown: "Starting at 2nd level, your speed increases by 10 feet while you are not wearing armor or wielding a shield.",
+      },
+    ];
+  }
   return [
     {
       id: "action-surge-2",
@@ -7472,6 +7493,21 @@ function levelTwoFeatureRows(classKey: DndLevelOneClassKey): Array<Record<string
 }
 
 function levelTwoResourceTemplates(classKey: DndLevelOneClassKey): Array<Record<string, unknown>> {
+  if (classKey === "monk") {
+    return [
+      {
+        id: "ki",
+        label: "Ki",
+        category: "class_feature",
+        max: 2,
+        initial_current: 2,
+        reset_on: "short_rest",
+        reset_to: "max",
+        rest_behavior: "restore_full",
+        display_order: 20,
+      },
+    ];
+  }
   if (classKey !== "fighter") {
     return [];
   }
@@ -7607,7 +7643,7 @@ export function buildCharacterLevelUpPayload({
     requires_subclass: false,
     choice_sections: [],
     limitations: [
-      "TypeScript level-up save parity currently supports only the bounded level-1 to level-2 Fighter/Barbarian/Rogue sheets created by the TypeScript DND-5E level-one slice.",
+      "TypeScript level-up save parity currently supports only the bounded level-1 to level-2 Fighter/Barbarian/Rogue/Monk sheets created by the TypeScript DND-5E level-one slice.",
       "Multiclassing, subclass choices, ASI/feat choices, spell growth, imported-sheet repair, and broader native builder derivation remain pending.",
     ],
     preview: {
@@ -7696,6 +7732,9 @@ export function applyCharacterLevelUpUpdate(
   const stats = { ...asRecord(nextDefinition.stats) };
   stats.max_hp = createContextInteger(stats.max_hp) + hpGain;
   stats.proficiency_bonus = 2;
+  if (supportedRow.classKey === "monk") {
+    stats.speed = adjustSpeedLabel(stats.speed, 10);
+  }
   nextDefinition.stats = stats;
   nextDefinition.features = appendRowsById(nextDefinition.features, levelTwoFeatureRows(supportedRow.classKey));
   nextDefinition.resource_templates = appendRowsById(
