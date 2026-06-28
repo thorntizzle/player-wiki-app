@@ -125,10 +125,12 @@ import {
   advancedEditorUnsupportedMessage,
   applyCharacterAdvancedEditorReferenceUpdate,
   applyCharacterCultivationAction,
+  applyCharacterRetrainingUpdate,
   buildCharacterAdvancedEditorPayload,
   buildCharacterAdvancementShellPayload,
   buildCharacterAuthoringLinks,
   buildCharacterCultivationShellPayload,
+  buildCharacterRetrainingPayload,
   buildDndCharacterCreateContext,
   buildDndCreateCharacter,
   buildXianxiaCreateCharacter,
@@ -5930,11 +5932,27 @@ app.get(ROUTES.characterRetraining, async (ctx) => {
   }
 
   const stateRecord = readCharacterStateSnapshot(config, campaign.slug, character.character_slug, character.definition);
-  const advancementPayload = buildCharacterAdvancementShellPayload({
+  const campaignPageRecords = await listCampaignContentPages(config, campaign.slug) ?? [];
+  const campaignConfig = (await getCampaignConfigFile(config, campaign.slug))?.config || {};
+  const optionalFeatureRows = listAdvancedEditorOptionalFeatureRows({
+    dbPath: config.dbPath,
+    campaign,
+    campaignConfig,
+  });
+  const spellRows = listAdvancedEditorSpellRows({
+    dbPath: config.dbPath,
+    campaign,
+    campaignConfig,
+  });
+  const advancementPayload = buildCharacterRetrainingPayload({
     campaign,
     characterSlug,
     definition: character.definition,
-    kind: "retraining",
+    state: stateRecord.state,
+    stateRevision: stateRecord.revision,
+    campaignPageRecords,
+    optionalFeatureRows,
+    spellRows,
   });
 
   return ctx.json({
@@ -5959,6 +5977,161 @@ app.get(ROUTES.characterRetraining, async (ctx) => {
     readiness: advancementPayload.readiness,
     retraining: advancementPayload.context,
     links: advancementPayload.links,
+  });
+});
+
+app.post(ROUTES.characterRetrainingSubmit, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character || String(character.definition.status || "").trim() !== "active") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!canEditCharacterSessionState(config, campaign.slug, characterSlug, auth.role, auth.actorUserId)) {
+    const error = forbidden("You do not have permission to retrain this character.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const stateRecord = readCharacterStateSnapshot(config, campaign.slug, character.character_slug, character.definition);
+  const campaignPageRecords = await listCampaignContentPages(config, campaign.slug) ?? [];
+  const campaignConfig = (await getCampaignConfigFile(config, campaign.slug))?.config || {};
+  const optionalFeatureRows = listAdvancedEditorOptionalFeatureRows({
+    dbPath: config.dbPath,
+    campaign,
+    campaignConfig,
+  });
+  const spellRows = listAdvancedEditorSpellRows({
+    dbPath: config.dbPath,
+    campaign,
+    campaignConfig,
+  });
+  const advancementPayload = buildCharacterRetrainingPayload({
+    campaign,
+    characterSlug,
+    definition: character.definition,
+    state: stateRecord.state,
+    stateRevision: stateRecord.revision,
+    campaignPageRecords,
+    optionalFeatureRows,
+    spellRows,
+  });
+  if (!advancementPayload.supported || !advancementPayload.context) {
+    const message = advancementPayload.supported
+      ? "This character is not ready for Gen2 retraining."
+      : advancementPayload.unsupported_message || "This character is not ready for Gen2 retraining.";
+    const error = jsonError("unsupported_campaign_system", message, 400);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const retrainingUpdate = applyCharacterRetrainingUpdate(
+    character.definition,
+    jsonPayload.payload,
+    advancementPayload.context,
+    campaignPageRecords,
+    optionalFeatureRows,
+    spellRows,
+  );
+  if (retrainingUpdate.status === "validation_error") {
+    const error = validationError(retrainingUpdate.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const stateResult = updateCharacterAdvancedEditorReferenceState(
+    config,
+    campaign.slug,
+    characterSlug,
+    retrainingUpdate.definition,
+    {
+      expected_revision: jsonPayload.payload.expected_revision,
+      state_note_values: retrainingUpdate.stateNoteValues,
+      manualEquipmentReconcile: retrainingUpdate.manualEquipmentReconcile,
+    },
+    auth.actorUserId ?? 0,
+  );
+  if (stateResult.status === "state_conflict") {
+    const error = stateConflict(stateResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (stateResult.status === "validation_error") {
+    const error = validationError(stateResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (stateResult.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const writeResult = await writeCampaignContentCharacter(config, campaign.slug, characterSlug, {
+    definition: retrainingUpdate.definition,
+    import_metadata: buildManagedCharacterImportMetadata(campaign.slug, characterSlug, character.import_metadata),
+  });
+  if (writeResult.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (writeResult.status === "validation_error") {
+    const error = validationError(writeResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const refreshedPayload = buildCharacterRetrainingPayload({
+    campaign,
+    characterSlug,
+    definition: writeResult.record.definition,
+    state: stateResult.state,
+    stateRevision: stateResult.revision,
+    campaignPageRecords,
+    optionalFeatureRows,
+    spellRows,
+  });
+
+  return ctx.json({
+    ok: true,
+    message: "Character retraining saved.",
+    campaign,
+    character: {
+      definition: writeResult.record.definition,
+      import_metadata: writeResult.record.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: writeResult.record.character_slug,
+        revision: stateResult.revision,
+        state: stateResult.state,
+        updated_at: stateResult.updatedAt,
+        updated_by_user_id: auth.actorUserId ?? null,
+      },
+    },
+    lane: refreshedPayload.lane,
+    supported: refreshedPayload.supported,
+    unsupported_message: refreshedPayload.unsupported_message,
+    readiness: refreshedPayload.readiness,
+    retraining: refreshedPayload.context,
+    links: refreshedPayload.links,
   });
 });
 
@@ -6149,15 +6322,6 @@ async function handleCharacterAdvancementShellSubmit(
   const error = jsonError("unsupported_campaign_system", message, 400);
   return ctx.json({ ok: error.ok, error: error.error }, error.status);
 }
-
-app.post(ROUTES.characterRetrainingSubmit, async (ctx) =>
-  handleCharacterAdvancementShellSubmit(
-    ctx,
-    "retraining",
-    "You do not have permission to retrain this character.",
-    "This character is not ready for Gen2 retraining.",
-  ),
-);
 
 app.post(ROUTES.characterLevelUpSubmit, async (ctx) =>
   handleCharacterAdvancementShellSubmit(
