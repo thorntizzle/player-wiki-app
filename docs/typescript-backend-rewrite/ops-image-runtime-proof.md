@@ -50,6 +50,24 @@ answering `/healthz` and `/api/v1/app` with the expected local path metadata.
 Docker remained unavailable on `PATH`, so this still is not an image-build
 transcript.
 
+Follow-up validation on 2026-06-28 from
+`rewrite/ts-ops-packaging-runtime-proof-next` after resetting to integration
+commit `61191fe17651309dfdad9f9c42c26cd6cc4c5be0` confirmed:
+
+- `local.ps1 -Action ts-api-check -NodeRoot <pinned Codex Node bin>` passes,
+  including npm install, route snapshot check, TypeScript typecheck/build,
+  SQLite startup-posture test, and route-parity test.
+- `apps/api` packaging static proof passes when the same pinned Node bin is on
+  `PATH`.
+- Docker is still unavailable on `PATH`, so no local image build or container
+  boot transcript could be collected.
+- A compiled-start proof against copied fixture campaigns and a scratch
+  SQLite DB initialized with Flask `manage.py init-db` is blocked on this
+  baseline: TypeScript startup preflight expects `sessions.session_token_hash`,
+  while Flask initializes the table with `sessions.token_hash`. This is a
+  fresh integration baseline blocker, not a touched-code regression from this
+  docs-only ops packaging lane.
+
 ## Startup And Migration Boundary
 
 The proof entrypoint creates only the parent directories for the configured
@@ -63,6 +81,9 @@ TypeScript startup migration behavior remains a separate cutover gate.
 - New packaging label: `static image path scaffolded`
 - Not reached: `local image builds`
 - Blocker: Docker unavailable for local build/run proof in this worktree
+- Additional blocker: latest integration compiled-start proof from a
+  Flask-initialized scratch DB is blocked by the `sessions.token_hash` versus
+  `sessions.session_token_hash` startup-preflight mismatch
 - Remaining gates: local Docker build, local container boot with copied data,
   migration dry-run decision, rollback transcript, staging snapshot rehearsal,
   and full cutover smoke

@@ -60,7 +60,7 @@ export const CURRENT_SQLITE_SCHEMA_REQUIREMENTS: SqliteSchemaRequirements = {
     character_assignments: ["id", "user_id", "campaign_slug", "character_slug", "assignment_type"],
     invite_tokens: ["id", "user_id", "token_hash", "expires_at", "used_at", "created_by_user_id"],
     password_reset_tokens: ["id", "user_id", "token_hash", "expires_at", "used_at", "created_by_user_id"],
-    sessions: ["id", "user_id", "session_token_hash", "last_seen_at", "expires_at", "revoked_at"],
+    sessions: ["id", "user_id", "token_hash", "last_seen_at", "expires_at", "revoked_at"],
     api_tokens: ["id", "user_id", "label", "token_hash", "last_used_at", "expires_at", "revoked_at"],
     auth_audit_log: ["id", "actor_user_id", "target_user_id", "campaign_slug", "character_slug", "event_type"],
     character_state: ["campaign_slug", "character_slug", "revision", "state_json", "updated_by_user_id"],

@@ -73,7 +73,7 @@ smokeDb.exec(`
   CREATE TABLE sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
-    session_token_hash TEXT NOT NULL UNIQUE,
+    token_hash TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     expires_at TEXT,
@@ -326,7 +326,7 @@ smokeDb
   );
 smokeDb
   .prepare(
-    "INSERT INTO sessions (id, user_id, session_token_hash, created_at, last_seen_at, expires_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO sessions (id, user_id, token_hash, created_at, last_seen_at, expires_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
   )
   .run(
     1101,
