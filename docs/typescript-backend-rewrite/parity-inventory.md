@@ -262,7 +262,7 @@ These are Flask-side routes still required for existing links, direct browser na
   - `/campaigns/<campaign_slug>/session/wiki-lookup/preview`
   - Cutover classification: **initial cutover** unless equivalent `/api/v1` replacements are built and the frontend client is moved first
   - Source: `frontend/src/api/client.ts:438`, `446`, `1022`, `1028`; `player_wiki/app.py:9289`, `9313`, `12188`, `12220`
-  - Notes: these are not under `/api/v1`, but the current Gen2 API client consumes them with `requestBrowserJson`. They must either remain supported as compatibility routes or be replaced by explicit API contract routes before Gen2 cutover.
+  - Notes: these are not under `/api/v1`, but the current Gen2 API client consumes them with `requestBrowserJson`. The `rewrite/ts-browser-json-compatibility` slice preserves them as TypeScript compatibility routes; see `browser-json-compatibility-decision.md` and `apps/api/tests/browser-json-compatibility.mjs`.
 
 - Asset and player wiki compatibility pages
   - `/campaigns/<campaign_slug>/assets/<path:asset_path>`
