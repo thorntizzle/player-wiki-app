@@ -395,7 +395,7 @@ const DND_ABILITY_LABELS: Record<(typeof DND_ABILITY_KEYS)[number], string> = {
 const DND_CREATE_LIMITATIONS = [
   "Base classes come from enabled Systems rows inside the current native support lane: PHB base classes plus TCE Artificer.",
   "Species and backgrounds come from enabled Systems rows in the current supported source matrix for this TypeScript parity slice.",
-  "DND-5E submit currently supports PHB Fighter and PHB Barbarian with bounded level-one packages; broader choice parity remains pending.",
+  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, and PHB Cleric with a bounded Life Domain level-one package; broader choice parity remains pending.",
 ];
 const DND_CHARACTER_CREATE_SOURCE_PATH = "builder://dnd5e-create-level-one";
 const DND_CHARACTER_CREATE_SOURCE_TYPE = "dnd5e_character_builder_level_one";
@@ -407,7 +407,10 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
   fighter: {
     className: "Fighter",
     armorClass: 18,
+    supportedSubclassTitles: [],
     skillProficiencies: ["Athletics", "Intimidation"],
+    skillRows: ["Athletics", "Intimidation", "Perception"],
+    spellcasting: null,
     proficiencies: {
       armor: ["All armor", "Shields"],
       weapons: ["Simple weapons", "Martial weapons"],
@@ -499,7 +502,10 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
   barbarian: {
     className: "Barbarian",
     armorClass: "unarmored",
+    supportedSubclassTitles: [],
     skillProficiencies: ["Athletics", "Perception", "Intimidation"],
+    skillRows: ["Athletics", "Intimidation", "Perception"],
+    spellcasting: null,
     proficiencies: {
       armor: ["Light armor", "Medium armor", "Shields"],
       weapons: ["Simple weapons", "Martial weapons"],
@@ -569,6 +575,108 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
         display_order: 10,
       },
     ],
+  },
+  cleric: {
+    className: "Cleric",
+    armorClass: 18,
+    supportedSubclassTitles: ["life domain"],
+    skillProficiencies: ["Insight", "Medicine"],
+    skillRows: ["Insight", "Medicine", "Perception", "Religion"],
+    spellcasting: {
+      abilityKey: "wis",
+      abilityLabel: "Wisdom",
+      slotProgression: [{ level: 1, max_slots: 2 }],
+      alwaysPreparedSpellTitles: ["Bless", "Cure Wounds"],
+      preparedSpellFieldPrefix: "prepared_spell",
+    },
+    proficiencies: {
+      armor: ["Light armor", "Medium armor", "Shields", "Heavy armor"],
+      weapons: ["Simple weapons"],
+      tools: [],
+    },
+    equipmentCatalog: [
+      {
+        id: "chain-mail-1",
+        name: "Chain Mail",
+        default_quantity: 1,
+        weight: "55 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        tags: ["armor"],
+      },
+      {
+        id: "shield-1",
+        name: "Shield",
+        default_quantity: 1,
+        weight: "6 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        tags: ["shield", "armor"],
+      },
+      {
+        id: "mace-1",
+        name: "Mace",
+        default_quantity: 1,
+        weight: "4 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        weapon_wield_mode: "main-hand",
+        weapon_wield_modes: ["main-hand"],
+        tags: ["weapon", "simple weapon", "melee weapon"],
+      },
+      {
+        id: "light-crossbow-1",
+        name: "Light Crossbow",
+        default_quantity: 1,
+        weight: "5 lb.",
+        tags: ["weapon", "simple weapon", "ranged weapon"],
+      },
+      {
+        id: "crossbow-bolts-1",
+        name: "Crossbow Bolts",
+        default_quantity: 20,
+        weight: "1.5 lb.",
+        tags: ["ammunition"],
+      },
+      {
+        id: "priests-pack-1",
+        name: "Priest's Pack",
+        default_quantity: 1,
+        weight: "25 lb.",
+        tags: ["gear"],
+      },
+      {
+        id: "holy-symbol-1",
+        name: "Holy Symbol",
+        default_quantity: 1,
+        weight: "1 lb.",
+        tags: ["spellcasting focus"],
+      },
+    ],
+    features: [
+      {
+        id: "spellcasting-1",
+        name: "Spellcasting",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "This level-one TypeScript slice records Cleric prepared spellcasting and first-level slots.",
+      },
+      {
+        id: "divine-domain-1",
+        name: "Divine Domain",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "Life Domain is the bounded level-one domain supported by this TypeScript create slice.",
+      },
+      {
+        id: "disciple-of-life-1",
+        name: "Disciple of Life",
+        category: "subclass_feature",
+        source: "PHB",
+        description_markdown: "Life Domain healing bonus is recorded as reference text; healing automation remains outside this slice.",
+      },
+    ],
+    resourceTemplates: [],
   },
 } as const;
 
@@ -6411,6 +6519,9 @@ function supportedTypeScriptLevelUpClassRow(definition: Record<string, unknown>)
   if (!(classKey in DND_LEVEL_ONE_CLASS_CONFIGS) || currentLevel !== 1) {
     return null;
   }
+  if (classKey !== "fighter" && classKey !== "barbarian") {
+    return null;
+  }
   return {
     row,
     classKey,
@@ -7355,6 +7466,63 @@ function dndCreatePreview({
   };
 }
 
+function dndSpellLevel(row: SystemsEntryRow): number {
+  const metadata = parseJsonRecord(row.metadata_json);
+  return createContextInteger(firstPresent(metadata.level, metadata.spell_level), -1);
+}
+
+function dndCreateSpellChoiceFields({
+  selectedClass,
+  spellRows,
+  values,
+}: {
+  selectedClass: SystemsEntryRow | null;
+  spellRows: SystemsEntryRow[];
+  values: Record<string, string>;
+}): Array<Record<string, unknown>> {
+  const classKey = dndLevelOneClassKey(selectedClass);
+  if (!classKey) {
+    return [];
+  }
+  const spellcasting = DND_LEVEL_ONE_CLASS_CONFIGS[classKey].spellcasting;
+  if (!spellcasting) {
+    return [];
+  }
+  const alwaysPreparedTitles = new Set(spellcasting.alwaysPreparedSpellTitles.map((title) => normalizeLookup(title)));
+  const cantripOptions = spellRows.filter((row) => dndSpellLevel(row) === 0).map(dndEntryOption);
+  const preparedOptions = spellRows
+    .filter((row) => dndSpellLevel(row) === 1)
+    .filter((row) => !alwaysPreparedTitles.has(normalizeLookup(row.title)))
+    .map(dndEntryOption);
+  const preparedLimit = Math.max(
+    1,
+    abilityModifier(createContextInteger(values[spellcasting.abilityKey], 10)) + 1,
+  );
+
+  return [
+    ...Array.from({ length: 3 }, (_, index) => {
+      const name = `cantrip_spell_${index + 1}`;
+      return {
+        name,
+        label: `Cantrip ${index + 1}`,
+        selected: values[name] || "",
+        help_text: "Choose a Cleric cantrip from enabled PHB spell rows.",
+        options: cantripOptions,
+      };
+    }),
+    ...Array.from({ length: preparedLimit }, (_, index) => {
+      const name = `${spellcasting.preparedSpellFieldPrefix}_${index + 1}`;
+      return {
+        name,
+        label: `Prepared Spell ${index + 1}`,
+        selected: values[name] || "",
+        help_text: "Choose a prepared Cleric spell. Domain spells are always prepared and do not count here.",
+        options: preparedOptions,
+      };
+    }),
+  ];
+}
+
 function abilityModifier(score: number): number {
   return Math.floor((score - 10) / 2);
 }
@@ -7414,6 +7582,9 @@ export function buildDndCharacterCreateContext({
     const backgroundRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "background")
       .filter((row) => row.is_enabled_override !== 0)
       .filter((row) => dndSupportsSubordinateSource(row.source_id));
+    const spellRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "spell")
+      .filter((row) => row.is_enabled_override !== 0)
+      .filter((row) => dndSupportsSubordinateSource(row.source_id));
 
     normalizedValues.class_slug = sanitizeDndEntrySelectionValue(normalizedValues.class_slug, classRows);
     normalizedValues.species_slug = sanitizeDndEntrySelectionValue(normalizedValues.species_slug, speciesRows);
@@ -7440,7 +7611,17 @@ export function buildDndCharacterCreateContext({
       background_options: backgroundRows.map(dndEntryOption),
       subclass_options: subclassRows.map(dndEntryOption),
       requires_subclass: requiresSubclass,
-      choice_sections: [dndAbilityChoiceSection(normalizedValues)],
+      choice_sections: [
+        dndAbilityChoiceSection(normalizedValues),
+        ...(dndCreateSpellChoiceFields({ selectedClass, spellRows, values: normalizedValues }).length
+          ? [
+              {
+                title: "Spell Choices",
+                fields: dndCreateSpellChoiceFields({ selectedClass, spellRows, values: normalizedValues }),
+              },
+            ]
+          : []),
+      ],
       preview: dndCreatePreview({ selectedClass, selectedSpecies, selectedBackground, values: normalizedValues }),
       limitations: DND_CREATE_LIMITATIONS,
     };
@@ -7493,9 +7674,38 @@ function assertDndLevelOneClass(row: SystemsEntryRow | null): { row: SystemsEntr
   }
   const classKey = dndLevelOneClassKey(row);
   if (!classKey || normalizeDndSourceId(row.source_id) !== DND_PHB_SOURCE_ID || String(row.entry_type || "") !== "class") {
-    throw new Error("DND-5E character creation submit currently supports only PHB Fighter and PHB Barbarian.");
+    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, and PHB Cleric.");
   }
   return { row, classKey };
+}
+
+function assertDndLevelOneSubclass({
+  classKey,
+  selectedSubclass,
+}: {
+  classKey: DndLevelOneClassKey;
+  selectedSubclass: SystemsEntryRow | null;
+}): SystemsEntryRow | null {
+  const supportedTitles: readonly string[] = DND_LEVEL_ONE_CLASS_CONFIGS[classKey].supportedSubclassTitles;
+  if (supportedTitles.length === 0) {
+    if (selectedSubclass) {
+      throw new Error("DND-5E character creation submit currently does not support subclass choices for that class.");
+    }
+    return null;
+  }
+  if (!selectedSubclass) {
+    throw new Error(`${DND_LEVEL_ONE_CLASS_CONFIGS[classKey].className} requires a supported level-one subclass choice.`);
+  }
+  if (
+    normalizeDndSourceId(selectedSubclass.source_id) !== DND_PHB_SOURCE_ID ||
+    String(selectedSubclass.entry_type || "") !== "subclass" ||
+    !supportedTitles.includes(normalizeLookup(selectedSubclass.title))
+  ) {
+    throw new Error(
+      `${DND_LEVEL_ONE_CLASS_CONFIGS[classKey].className} creation currently supports only PHB ${DND_LEVEL_ONE_CLASS_CONFIGS[classKey].className} subclass choices in the bounded slice.`,
+    );
+  }
+  return selectedSubclass;
 }
 
 function dndSystemsRef(row: SystemsEntryRow): Record<string, unknown> {
@@ -7548,6 +7758,11 @@ function dndSkillBonus(abilityScores: Record<string, unknown>, abilityKey: (type
   return abilityModifier(dndAbilityScoreValue(abilityScores, abilityKey)) + (proficient ? 2 : 0);
 }
 
+function dndClassHasSkillProficiency(classKey: DndLevelOneClassKey, skillName: string): boolean {
+  const proficientSkills = new Set(DND_LEVEL_ONE_CLASS_CONFIGS[classKey].skillProficiencies.map((skill) => normalizeLookup(skill)));
+  return proficientSkills.has(normalizeLookup(skillName));
+}
+
 function dndStartingEquipmentCatalog(classKey: DndLevelOneClassKey): Array<Record<string, unknown>> {
   return [
     ...DND_LEVEL_ONE_CLASS_CONFIGS[classKey].equipmentCatalog.map((item) => JSON.parse(JSON.stringify(item)) as Record<string, unknown>),
@@ -7565,6 +7780,207 @@ function dndStartingEquipmentCatalog(classKey: DndLevelOneClassKey): Array<Recor
       currency: { cp: 0, sp: 0, ep: 0, gp: 10, pp: 0 },
     },
   ];
+}
+
+function dndSpellRowsBySlug(rows: SystemsEntryRow[]): Map<string, SystemsEntryRow> {
+  const rowsBySlug = new Map<string, SystemsEntryRow>();
+  for (const row of rows) {
+    const slug = String(row.slug || "").trim();
+    if (slug) {
+      rowsBySlug.set(slug, row);
+    }
+  }
+  return rowsBySlug;
+}
+
+function dndSpellSelectionRow({
+  rowsBySlug,
+  value,
+  expectedLevel,
+  fieldLabel,
+  disallowedTitles = new Set<string>(),
+}: {
+  rowsBySlug: Map<string, SystemsEntryRow>;
+  value: unknown;
+  expectedLevel: number;
+  fieldLabel: string;
+  disallowedTitles?: Set<string>;
+}): SystemsEntryRow | null {
+  const normalizedValue = String(value ?? "").trim();
+  if (!normalizedValue) {
+    return null;
+  }
+  const slug = normalizedValue.startsWith(DND_SYSTEMS_OPTION_PREFIX)
+    ? normalizedValue.slice(DND_SYSTEMS_OPTION_PREFIX.length)
+    : normalizedValue;
+  const row = rowsBySlug.get(slug);
+  if (
+    !row ||
+    normalizeDndSourceId(row.source_id) !== DND_PHB_SOURCE_ID ||
+    String(row.entry_type || "") !== "spell" ||
+    dndSpellLevel(row) !== expectedLevel ||
+    disallowedTitles.has(normalizeLookup(row.title))
+  ) {
+    throw new Error(`${fieldLabel} is not valid for the current DND-5E creation slice.`);
+  }
+  return row;
+}
+
+function dndSpellRef(row: SystemsEntryRow): Record<string, unknown> {
+  const metadata = parseJsonRecord(row.metadata_json);
+  const ref: Record<string, unknown> = {
+    source_id: row.source_id,
+    entry_key: row.entry_key,
+    slug: row.slug,
+    title: row.title,
+    entry_type: row.entry_type,
+  };
+  if (Object.keys(metadata).length > 0) {
+    ref.metadata = metadata;
+  }
+  return ref;
+}
+
+function dndSpellPayload({
+  row,
+  mark,
+  classRowId,
+  alwaysPrepared = false,
+  grantSourceLabel = "",
+}: {
+  row: SystemsEntryRow;
+  mark: string;
+  classRowId: string;
+  alwaysPrepared?: boolean;
+  grantSourceLabel?: string;
+}): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    name: row.title,
+    spell_level: dndSpellLevel(row),
+    mark,
+    class_row_id: classRowId,
+    systems_ref: dndSpellRef(row),
+    source: alwaysPrepared ? "Cleric (Always Prepared)" : "PHB",
+  };
+  if (alwaysPrepared) {
+    payload.is_always_prepared = true;
+    payload.grant_source_label = grantSourceLabel;
+  }
+  return payload;
+}
+
+function dndLevelOneSpellcasting({
+  classKey,
+  abilityScores,
+  spellRows,
+  values,
+}: {
+  classKey: DndLevelOneClassKey;
+  abilityScores: Record<string, unknown>;
+  spellRows: SystemsEntryRow[];
+  values: Record<string, string>;
+}): Record<string, unknown> {
+  const spellcasting = DND_LEVEL_ONE_CLASS_CONFIGS[classKey].spellcasting;
+  if (!spellcasting) {
+    return {};
+  }
+  const rowsBySlug = dndSpellRowsBySlug(spellRows);
+  const alwaysPreparedTitles = new Set(spellcasting.alwaysPreparedSpellTitles.map((title) => normalizeLookup(title)));
+  const seenSpellSlugs = new Set<string>();
+  const selectedSpells: Record<string, unknown>[] = [];
+
+  for (let index = 1; index <= 3; index += 1) {
+    const row = dndSpellSelectionRow({
+      rowsBySlug,
+      value: values[`cantrip_spell_${index}`],
+      expectedLevel: 0,
+      fieldLabel: `Cantrip ${index}`,
+    });
+    if (!row) {
+      continue;
+    }
+    if (seenSpellSlugs.has(row.slug)) {
+      throw new Error("Choose distinct Cleric spells before saving.");
+    }
+    seenSpellSlugs.add(row.slug);
+    selectedSpells.push(dndSpellPayload({ row, mark: "Cantrip", classRowId: "class-row-1" }));
+  }
+
+  const preparedLimit = Math.max(
+    1,
+    abilityModifier(dndAbilityScoreValue(abilityScores, spellcasting.abilityKey)) + 1,
+  );
+  for (let index = 1; index <= preparedLimit; index += 1) {
+    const row = dndSpellSelectionRow({
+      rowsBySlug,
+      value: values[`${spellcasting.preparedSpellFieldPrefix}_${index}`],
+      expectedLevel: 1,
+      fieldLabel: `Prepared Spell ${index}`,
+      disallowedTitles: alwaysPreparedTitles,
+    });
+    if (!row) {
+      continue;
+    }
+    if (seenSpellSlugs.has(row.slug)) {
+      throw new Error("Choose distinct Cleric spells before saving.");
+    }
+    seenSpellSlugs.add(row.slug);
+    selectedSpells.push(dndSpellPayload({ row, mark: "Prepared", classRowId: "class-row-1" }));
+  }
+
+  for (const spellTitle of spellcasting.alwaysPreparedSpellTitles) {
+    const row = [...rowsBySlug.values()].find((candidate) => normalizeLookup(candidate.title) === normalizeLookup(spellTitle));
+    if (!row || dndSpellLevel(row) !== 1) {
+      throw new Error(`${spellTitle} must be available from enabled PHB spell rows for this Cleric create slice.`);
+    }
+    if (seenSpellSlugs.has(row.slug)) {
+      continue;
+    }
+    seenSpellSlugs.add(row.slug);
+    selectedSpells.push(
+      dndSpellPayload({
+        row,
+        mark: "Prepared",
+        classRowId: "class-row-1",
+        alwaysPrepared: true,
+        grantSourceLabel: "Life Domain",
+      }),
+    );
+  }
+
+  const abilityModifierValue = abilityModifier(dndAbilityScoreValue(abilityScores, spellcasting.abilityKey));
+  return {
+    spellcasting_class: DND_LEVEL_ONE_CLASS_CONFIGS[classKey].className,
+    spellcasting_ability: spellcasting.abilityLabel,
+    spell_save_dc: 8 + 2 + abilityModifierValue,
+    spell_attack_bonus: 2 + abilityModifierValue,
+    slot_progression: spellcasting.slotProgression.map((slot) => ({ ...slot })),
+    slot_lanes: [
+      {
+        id: "class-row-1-slots",
+        title: "Spell slots",
+        shared: false,
+        row_ids: ["class-row-1"],
+        slot_progression: spellcasting.slotProgression.map((slot) => ({ ...slot })),
+      },
+    ],
+    class_rows: [
+      {
+        class_row_id: "class-row-1",
+        class_name: DND_LEVEL_ONE_CLASS_CONFIGS[classKey].className,
+        level: 1,
+        caster_progression: "full",
+        spell_mode: "prepared",
+        spellcasting_ability: spellcasting.abilityLabel,
+        spell_save_dc: 8 + 2 + abilityModifierValue,
+        spell_attack_bonus: 2 + abilityModifierValue,
+        slot_lane_id: "class-row-1-slots",
+        spell_list_class_name: DND_LEVEL_ONE_CLASS_CONFIGS[classKey].className,
+        prepared_spell_limit: preparedLimit,
+      },
+    ],
+    spells: selectedSpells,
+  };
 }
 
 function signedBonus(value: number): string {
@@ -7632,6 +8048,28 @@ function dndLevelOneAttacks(classKey: DndLevelOneClassKey, abilityScores: Record
       }),
     ];
   }
+  if (classKey === "cleric") {
+    return [
+      dndWeaponAttack({
+        name: "Mace",
+        category: "melee weapon",
+        abilityModifierValue: strengthModifier,
+        damageDie: "1d6",
+        damageType: "bludgeoning",
+        notes: "Simple melee weapon.",
+        equipmentRef: "mace-1",
+      }),
+      dndWeaponAttack({
+        name: "Light Crossbow",
+        category: "ranged weapon",
+        abilityModifierValue: dexterityModifier,
+        damageDie: "1d8",
+        damageType: "piercing",
+        notes: "Ammunition, loading, range 80/320.",
+        equipmentRef: "light-crossbow-1",
+      }),
+    ];
+  }
   return [
     dndWeaponAttack({
       name: "Longsword",
@@ -7664,16 +8102,20 @@ function dndLevelOneArmorClass(classKey: DndLevelOneClassKey, abilityScores: Rec
 
 function dndLevelOneSkills(classKey: DndLevelOneClassKey, abilityScores: Record<string, unknown>): Array<Record<string, unknown>> {
   const proficientSkills = new Set(DND_LEVEL_ONE_CLASS_CONFIGS[classKey].skillProficiencies.map((skill) => normalizeLookup(skill)));
-  const skillRows: Array<{ name: string; abilityKey: (typeof DND_ABILITY_KEYS)[number] }> = [
-    { name: "Athletics", abilityKey: "str" },
-    { name: "Intimidation", abilityKey: "cha" },
-    { name: "Perception", abilityKey: "wis" },
-  ];
-  return skillRows.map((skill) => {
-    const proficient = proficientSkills.has(normalizeLookup(skill.name));
+  const skillAbilityKeys: Record<string, (typeof DND_ABILITY_KEYS)[number]> = {
+    athletics: "str",
+    insight: "wis",
+    intimidation: "cha",
+    medicine: "wis",
+    perception: "wis",
+    religion: "int",
+  };
+  return DND_LEVEL_ONE_CLASS_CONFIGS[classKey].skillRows.map((skillName) => {
+    const proficient = proficientSkills.has(normalizeLookup(skillName));
+    const abilityKey = skillAbilityKeys[normalizeLookup(skillName)] ?? "wis";
     return {
-      name: skill.name,
-      bonus: dndSkillBonus(abilityScores, skill.abilityKey, proficient),
+      name: skillName,
+      bonus: dndSkillBonus(abilityScores, abilityKey, proficient),
       proficiency_level: proficient ? "proficient" : "none",
     };
   });
@@ -7713,6 +8155,9 @@ export function buildDndCreateCharacter({
     const backgroundRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "background")
       .filter((row) => row.is_enabled_override !== 0)
       .filter((row) => dndSupportsSubordinateSource(row.source_id));
+    const spellRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "spell")
+      .filter((row) => row.is_enabled_override !== 0)
+      .filter((row) => dndSupportsSubordinateSource(row.source_id));
 
     const normalizedValues = normalizeCharacterAuthoringValues(values);
     normalizedValues.class_slug = sanitizeDndEntrySelectionValue(normalizedValues.class_slug, classRows);
@@ -7721,6 +8166,14 @@ export function buildDndCreateCharacter({
     const selectedClassResult = assertDndLevelOneClass(selectedDndEntry(classRows, normalizedValues.class_slug));
     const selectedClass = selectedClassResult.row;
     const classKey = selectedClassResult.classKey;
+    const subclassRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "subclass")
+      .filter((row) => row.is_enabled_override !== 0)
+      .filter((row) => dndSupportsNativeSubclassEntry(row, selectedClass));
+    normalizedValues.subclass_slug = sanitizeDndEntrySelectionValue(normalizedValues.subclass_slug, subclassRows);
+    const selectedSubclass = assertDndLevelOneSubclass({
+      classKey,
+      selectedSubclass: selectedDndEntry(subclassRows, normalizedValues.subclass_slug),
+    });
     const selectedSpecies = assertDndStaticEntry(
       selectedDndEntry(speciesRows, normalizedValues.species_slug),
       DND_PILOT_SPECIES,
@@ -7733,9 +8186,6 @@ export function buildDndCreateCharacter({
       "background",
       "Background",
     );
-    if (isPresent(normalizedValues.subclass_slug)) {
-      throw new Error("DND-5E character creation submit currently does not support subclass choices.");
-    }
 
     const classMetadata = parseJsonRecord(selectedClass.metadata_json);
     const speciesMetadata = parseJsonRecord(selectedSpecies.metadata_json);
@@ -7747,6 +8197,22 @@ export function buildDndCreateCharacter({
     const speciesSpeed = createContextInteger(firstPresent(speciesMetadata.speed, speciesMetadata.walk_speed), 30);
     const classConfig = DND_LEVEL_ONE_CLASS_CONFIGS[classKey];
     const equipmentCatalog = dndStartingEquipmentCatalog(classKey);
+    const primaryClassRow: Record<string, unknown> = {
+      class_name: classConfig.className,
+      level: 1,
+      hit_die_faces: hitDie,
+      systems_ref: dndSystemsRef(selectedClass),
+    };
+    if (selectedSubclass) {
+      primaryClassRow.subclass_name = selectedSubclass.title;
+      primaryClassRow.subclass_ref = dndSystemsRef(selectedSubclass);
+    }
+    const spellcasting = dndLevelOneSpellcasting({
+      classKey,
+      abilityScores,
+      spellRows,
+      values: normalizedValues,
+    });
     const definition: Record<string, unknown> = {
       campaign_slug: campaign.slug,
       character_slug: characterSlug,
@@ -7755,14 +8221,7 @@ export function buildDndCreateCharacter({
       system: "DND-5E",
       profile: {
         class_level_text: `${classConfig.className} 1`,
-        classes: [
-          {
-            class_name: classConfig.className,
-            level: 1,
-            hit_die_faces: hitDie,
-            systems_ref: dndSystemsRef(selectedClass),
-          },
-        ],
+        classes: [primaryClassRow],
         species: "Human",
         species_ref: dndSystemsRef(selectedSpecies),
         background: "Soldier",
@@ -7777,9 +8236,9 @@ export function buildDndCreateCharacter({
         initiative_bonus: abilityModifier(dndAbilityScoreValue(abilityScores, "dex")),
         speed: `${speciesSpeed} ft.`,
         proficiency_bonus: 2,
-        passive_perception: 10 + dndSkillBonus(abilityScores, "wis", false),
-        passive_insight: 10 + dndSkillBonus(abilityScores, "wis", false),
-        passive_investigation: 10 + dndSkillBonus(abilityScores, "int", false),
+        passive_perception: 10 + dndSkillBonus(abilityScores, "wis", dndClassHasSkillProficiency(classKey, "Perception")),
+        passive_insight: 10 + dndSkillBonus(abilityScores, "wis", dndClassHasSkillProficiency(classKey, "Insight")),
+        passive_investigation: 10 + dndSkillBonus(abilityScores, "int", dndClassHasSkillProficiency(classKey, "Investigation")),
         ability_scores: abilityScores,
       },
       skills: dndLevelOneSkills(classKey, abilityScores),
@@ -7792,7 +8251,7 @@ export function buildDndCreateCharacter({
       },
       attacks: dndLevelOneAttacks(classKey, abilityScores),
       features: classConfig.features.map((feature) => JSON.parse(JSON.stringify(feature)) as Record<string, unknown>),
-      spellcasting: {},
+      spellcasting,
       equipment_catalog: equipmentCatalog,
       reference_notes: {
         additional_notes_markdown: "Created by the TypeScript DND-5E level-one create slice. Full native builder parity remains pending.",
@@ -7808,6 +8267,10 @@ export function buildDndCreateCharacter({
         parse_warnings: [],
       },
     };
+    if (selectedSubclass) {
+      asRecord(definition.profile).subclass = selectedSubclass.title;
+      asRecord(definition.profile).subclass_ref = dndSystemsRef(selectedSubclass);
+    }
     const importMetadata = {
       campaign_slug: campaign.slug,
       character_slug: characterSlug,
