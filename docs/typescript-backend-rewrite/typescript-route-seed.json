@@ -923,7 +923,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Character Retraining context read shell with Flask-compatible missing-campaign, missing-character, auth_required, route-specific forbidden, current fixture empty readiness, Advanced Editor/detail links, and retraining:null. POST/save parity remains deferred."
+      "notes": "Tracked Hono Character Retraining context read route with Flask-compatible missing-campaign, missing-character, auth_required, route-specific forbidden, empty-readiness unsupported shells for characters without supported retraining choices, ready-state linked custom-feature context hydration, Advanced Editor/detail links, state revision, persisted structured choice fields, and supported-scope guidance. Save parity for the bounded linked custom-feature retraining slice is tracked by the POST route; generic rebuilds, full respec, level-up, and progression-repair parity remain deferred."
     },
     {
       "method": "GET",
@@ -947,10 +947,10 @@
       "method": "POST",
       "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/retraining",
       "route_family": "api_v1_characters",
-      "status": "implemented_fixture_sqlite_readonly",
+      "status": "implemented_fixture_sqlite_write",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Character Retraining POST shell with Flask-compatible missing-campaign, missing-character, auth_required, route-specific forbidden, current fixture empty-readiness unsupported_campaign_system response, and no definition/state writes. Real retraining save parity remains deferred."
+      "notes": "Tracked Hono Character Retraining POST route with Flask-compatible missing-campaign, missing-character, auth_required, route-specific forbidden, empty-readiness unsupported_campaign_system response, bearer-token fixture write access, stale shared-revision conflicts, ready-state linked custom-feature choice validation, reuse of the Advanced Editor derivation/state path, copied-fixture definition.yaml/import.yaml writes, SQLite state revision bumps, state-note/resource/inventory reconciliation where the shared edit path requires it, native_progression retrain history rows when the definition changes, refreshed retraining payloads, and focused Flask-vs-TypeScript golden coverage. Generic rebuilds, full respec, level-up save parity, and progression-repair save parity remain deferred."
     },
     {
       "method": "POST",
