@@ -347,6 +347,15 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
             ("linden-pass", "DND-5E", "PHB", 1, "players", now, 77),
         )
         dnd_entries = [
+            (
+                "DND-5E",
+                "PHB",
+                "PHB:class:barbarian",
+                "class",
+                "phb-barbarian",
+                "Barbarian",
+                {"hit_die": 12, "saving_throw_proficiencies": ["Strength", "Constitution"]},
+            ),
             ("DND-5E", "PHB", "PHB:class:fighter", "class", "phb-fighter", "Fighter", {"hit_die": 10, "saving_throw_proficiencies": ["Strength", "Constitution"]}),
             ("DND-5E", "PHB", "PHB:race:human", "race", "phb-human", "Human", {"size": "Medium", "speed": 30, "languages": ["Common", "one extra language"]}),
             ("DND-5E", "PHB", "PHB:background:soldier", "background", "phb-soldier", "Soldier", {}),
@@ -1524,8 +1533,8 @@ def test_typescript_dnd_character_create_pilot_writes_definition_import_and_stat
     assert definition["stats"]["max_hp"] == 12
     assert definition["stats"]["armor_class"] == 18
     assert definition["resource_templates"][0]["id"] == "second-wind"
-    assert definition["source"]["source_path"] == "builder://dnd5e-create-pilot"
-    assert import_metadata["source_path"] == "builder://dnd5e-create-pilot"
+    assert definition["source"]["source_path"] == "builder://dnd5e-create-level-one"
+    assert import_metadata["source_path"] == "builder://dnd5e-create-level-one"
     assert import_metadata["import_status"] == "managed"
     assert state_record["revision"] == 1
     assert state_record["state"]["vitals"]["current_hp"] == 12
@@ -1545,7 +1554,7 @@ def test_typescript_dnd_character_create_pilot_writes_definition_import_and_stat
     written_definition = yaml.safe_load((character_dir / "definition.yaml").read_text(encoding="utf-8"))
     written_import = yaml.safe_load((character_dir / "import.yaml").read_text(encoding="utf-8"))
     assert written_definition["name"] == "API DND Pilot"
-    assert written_definition["source"]["source_path"] == "builder://dnd5e-create-pilot"
+    assert written_definition["source"]["source_path"] == "builder://dnd5e-create-level-one"
     assert written_import["import_status"] == "managed"
 
     duplicate_status, duplicate_payload = _to_json(
@@ -1574,6 +1583,70 @@ def test_typescript_dnd_character_create_pilot_writes_definition_import_and_stat
     assert rejected_status == 400
     assert rejected_payload["error"]["code"] == "validation_error"
     assert "does not support subclass choices" in rejected_payload["error"]["message"]
+
+
+def test_typescript_dnd_character_create_barbarian_writes_definition_import_and_state(
+    typescript_api_mutation_server,
+):
+    character_slug = "api-dnd-barbarian"
+    body = {
+        "values": {
+            "name": "API DND Barbarian",
+            "character_slug": character_slug,
+            "class_slug": "systems:phb-barbarian",
+            "species_slug": "systems:phb-human",
+            "background_slug": "systems:phb-soldier",
+            "str": "16",
+            "dex": "12",
+            "con": "14",
+            "int": "10",
+            "wis": "10",
+            "cha": "10",
+        }
+    }
+
+    status, payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body=body,
+    )
+
+    assert status == 200
+    definition = payload["character"]["definition"]
+    import_metadata = payload["character"]["import_metadata"]
+    state_record = payload["character"]["state_record"]
+    assert definition["character_slug"] == character_slug
+    assert definition["system"] == "DND-5E"
+    assert definition["profile"]["class_level_text"] == "Barbarian 1"
+    assert definition["profile"]["classes"][0]["systems_ref"]["entry_key"] == "PHB:class:barbarian"
+    assert definition["stats"]["max_hp"] == 14
+    assert definition["stats"]["armor_class"] == 13
+    assert definition["resource_templates"][0]["id"] == "rage"
+    assert definition["attacks"][0]["equipment_ref"] == "greataxe-1"
+    assert definition["source"]["source_path"] == "builder://dnd5e-create-level-one"
+    assert import_metadata["source_path"] == "builder://dnd5e-create-level-one"
+    assert state_record["revision"] == 1
+    assert state_record["state"]["vitals"]["current_hp"] == 14
+    assert state_record["state"]["hit_dice"]["pools"] == [{"faces": 12, "current": 1, "max": 1}]
+    assert state_record["state"]["resources"][0]["id"] == "rage"
+    assert state_record["state"]["resources"][0]["current"] == 2
+    assert state_record["state"]["inventory"][0]["catalog_ref"] == "greataxe-1"
+    assert state_record["state"]["currency"]["gp"] == 10
+    assert state_record["state"]["spell_slots"] == []
+
+    state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
+    assert state is not None
+    assert state["revision"] == 1
+    assert state["state"]["vitals"]["current_hp"] == 14
+    assert state["state"]["hit_dice"]["pools"][0]["faces"] == 12
+
+    character_dir = typescript_api_mutation_server["campaigns_dir"] / "linden-pass" / "characters" / character_slug
+    written_definition = yaml.safe_load((character_dir / "definition.yaml").read_text(encoding="utf-8"))
+    written_import = yaml.safe_load((character_dir / "import.yaml").read_text(encoding="utf-8"))
+    assert written_definition["name"] == "API DND Barbarian"
+    assert written_definition["source"]["source_path"] == "builder://dnd5e-create-level-one"
+    assert written_import["import_status"] == "managed"
 
 
 def test_typescript_character_advanced_editor_context_matches_flask_shell(

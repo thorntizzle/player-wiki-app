@@ -164,7 +164,7 @@ Do not implement these routes as part of the parity program unless a later archi
   - `DELETE /api/v1/campaigns/:campaignSlug/content/characters/:characterSlug`
   - `GET /api/v1/campaigns/:campaignSlug/characters`
   - `GET /api/v1/campaigns/:campaignSlug/characters/create`
-  - `POST /api/v1/campaigns/:campaignSlug/characters/create` (Xianxia native create; narrow DND-5E PHB Fighter pilot; full DND builder parity pending)
+  - `POST /api/v1/campaigns/:campaignSlug/characters/create` (Xianxia native create; bounded DND-5E PHB Fighter/Barbarian level-one slice; full DND builder parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug`
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor`
   - `PUT /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor` (reference, proficiency, stat-adjustment, recoverable-penalty, custom-feature, and manual-equipment fields with linked-page selector hydration plus `page_ref` validation/round-trip; linked custom-feature defaults, campaign-feat Optional Feature choices, and linked additional-spell choices supported; spell support/manager replacement derivation and full native derivation parity pending)
@@ -578,10 +578,10 @@ Do not implement these routes as part of the parity program unless a later archi
   basics, and explicit support-limit notes, and Xianxia create fields/defaults plus enabled
   martial-art and Generic Technique options. The POST lane writes native Xianxia records through the copied fixture
   content-character persistence path with `builder://xianxia-create` import metadata, and now also
-  writes a narrow DND-5E PHB Fighter / Human / Soldier pilot through the same persistence path with
-  `builder://dnd5e-create-pilot` metadata, initialized SQLite mutable state, duplicate-slug
-  `character_exists` handling, and validation errors for out-of-pilot DND selections. Full DND
-  level-one builder write parity remains pending.
+  writes a bounded DND-5E PHB Fighter or PHB Barbarian / Human / Soldier level-one slice through the same persistence path with
+  `builder://dnd5e-create-level-one` metadata, initialized SQLite mutable state, duplicate-slug
+  `character_exists` handling, and validation errors for out-of-slice DND selections. Full DND
+  level-one builder write parity, broader species/background choices, spellcasting classes, and level-one subclass choices remain pending.
 - The Character detail read route now serves `GET .../characters/:characterSlug`, preserving
   Flask-compatible campaign/missing-character envelopes, Characters-scope or assigned-owner
   Session-scope access, SQLite `state_record` reads, CharacterPane-safe optional presentation
