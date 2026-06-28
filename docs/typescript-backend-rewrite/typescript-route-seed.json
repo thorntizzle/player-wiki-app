@@ -932,7 +932,7 @@
       "status": "implemented_fixture_sqlite_readonly",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Character Level Up context read shell with Flask-compatible missing-campaign, missing-character, auth_required, route-specific forbidden, current fixture unsupported readiness, Advanced Editor/detail links, and level_up:null. POST/save parity remains deferred."
+      "notes": "Tracked Hono Character Level Up context route with Flask-compatible missing-campaign, missing-character, auth_required, route-specific forbidden, unsupported readiness for out-of-slice characters, Advanced Editor/detail links, and a bounded ready context for TypeScript-created DND-5E Fighter/Barbarian level-one sheets advancing to level two. Broader native/imported level-up context parity remains deferred."
     },
     {
       "method": "GET",
@@ -956,10 +956,10 @@
       "method": "POST",
       "path": "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/level-up",
       "route_family": "api_v1_characters",
-      "status": "implemented_fixture_sqlite_readonly",
+      "status": "implemented_fixture_sqlite_write",
       "typescript_path": "/api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up",
       "snapshot_family": "api_v1",
-      "notes": "Tracked Hono Character Level Up POST shell with Flask-compatible missing-campaign, missing-character, auth_required, route-specific forbidden, current fixture unsupported-readiness unsupported_campaign_system response, and no definition/state writes. Real level-up save parity remains deferred."
+      "notes": "Tracked Hono Character Level Up POST route with Flask-compatible missing-campaign, missing-character, auth_required, route-specific forbidden, unsupported_campaign_system responses for out-of-slice characters, bearer-token fixture write access, stale shared-revision conflicts, HP Gain validation, copied-fixture definition.yaml/import.yaml writes, SQLite state revision bumps, HP/hit-dice/resource reconciliation, native_progression level_up history and hp_baseline evidence, and focused smoke/contract coverage for the TypeScript-created DND-5E Fighter level-one to level-two slice. Multiclassing, subclass choices, ASI/feat choices, spell growth, imported-sheet repair, and broader native level-up save parity remain deferred."
     },
     {
       "method": "POST",

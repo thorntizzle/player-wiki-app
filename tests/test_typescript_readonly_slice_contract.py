@@ -1557,6 +1557,77 @@ def test_typescript_dnd_character_create_pilot_writes_definition_import_and_stat
     assert written_definition["source"]["source_path"] == "builder://dnd5e-create-level-one"
     assert written_import["import_status"] == "managed"
 
+    level_up_url = (
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/"
+        f"characters/{character_slug}/level-up"
+    )
+    level_up_get_status, level_up_get_payload = _to_json(
+        level_up_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+    assert level_up_get_status == 200
+    assert level_up_get_payload["supported"] is True
+    assert level_up_get_payload["lane"] == "ready"
+    assert level_up_get_payload["level_up"]["state_revision"] == 1
+    assert level_up_get_payload["level_up"]["next_level"] == 2
+    assert level_up_get_payload["level_up"]["values"]["hp_gain"] == "6"
+    assert level_up_get_payload["level_up"]["preview"]["gained_features"] == ["Action Surge"]
+
+    invalid_level_up_status, invalid_level_up_payload = _to_json(
+        level_up_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": 1,
+            "values": {
+                "advancement_mode": "advance_existing",
+                "target_class_row_id": "class-1",
+                "hp_gain": "0",
+            },
+        },
+    )
+    assert invalid_level_up_status == 400
+    assert invalid_level_up_payload["error"]["code"] == "validation_error"
+    assert invalid_level_up_payload["error"]["message"] == "HP Gain must be at least 1."
+
+    level_up_status, level_up_payload = _to_json(
+        level_up_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": 1,
+            "values": {
+                "advancement_mode": "advance_existing",
+                "target_class_row_id": "class-1",
+                "hp_gain": "6",
+            },
+        },
+    )
+    assert level_up_status == 200
+    assert level_up_payload["message"] == "Character level-up saved."
+    leveled_definition = level_up_payload["character"]["definition"]
+    leveled_state = level_up_payload["character"]["state_record"]
+    assert leveled_definition["profile"]["class_level_text"] == "Fighter 2"
+    assert leveled_definition["profile"]["classes"][0]["level"] == 2
+    assert leveled_definition["stats"]["max_hp"] == 18
+    assert any(feature["id"] == "action-surge-2" for feature in leveled_definition["features"])
+    assert any(template["id"] == "action-surge" for template in leveled_definition["resource_templates"])
+    assert leveled_definition["source"]["native_progression"]["hp_baseline"] == {"level": 1, "max_hp": 12}
+    level_up_history = leveled_definition["source"]["native_progression"]["history"]
+    assert level_up_history[-1]["kind"] == "level_up"
+    assert level_up_history[-1]["hp_gain"] == 6
+    assert leveled_state["revision"] == 2
+    assert leveled_state["state"]["vitals"]["current_hp"] == 18
+    assert leveled_state["state"]["hit_dice"]["pools"] == [{"faces": 10, "current": 1, "max": 2}]
+    state_resource_ids = {resource["id"] for resource in leveled_state["state"]["resources"]}
+    assert {"second-wind", "action-surge"} <= state_resource_ids
+
+    written_definition = yaml.safe_load((character_dir / "definition.yaml").read_text(encoding="utf-8"))
+    written_import = yaml.safe_load((character_dir / "import.yaml").read_text(encoding="utf-8"))
+    assert written_definition["profile"]["class_level_text"] == "Fighter 2"
+    assert written_definition["source"]["native_progression"]["history"][-1]["kind"] == "level_up"
+    assert written_import["source_path"] == "builder://dnd5e-create-level-one"
+
     duplicate_status, duplicate_payload = _to_json(
         f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
         headers=typescript_api_mutation_server["dm_headers"],

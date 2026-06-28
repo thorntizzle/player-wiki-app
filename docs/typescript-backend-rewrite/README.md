@@ -174,8 +174,8 @@ Do not implement these routes as part of the parity program unless a later archi
   - `PUT /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor` (reference, proficiency, stat-adjustment, recoverable-penalty, custom-feature, and manual-equipment fields with linked-page selector hydration plus `page_ref` validation/round-trip; linked custom-feature defaults, campaign-feat Optional Feature choices, and linked additional-spell choices supported; spell support/manager replacement derivation and full native derivation parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (empty-readiness shell plus ready-state linked custom-feature retraining context)
   - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (bounded linked custom-feature structured-choice save parity through the Advanced Editor derivation path)
-  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (context shell only; real save parity pending)
-  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (unsupported/current-shell response only; real save parity pending)
+  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (unsupported shells plus bounded ready context for TypeScript-created DND-5E Fighter/Barbarian level-one sheets)
+  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (bounded TypeScript-created DND-5E Fighter/Barbarian level-one to level-two fixture save; broader save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (context shell only; real save parity pending)
   - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (unsupported/current-shell response only; real save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (supported Xianxia read context)
@@ -615,8 +615,14 @@ Do not implement these routes as part of the parity program unless a later archi
   unsupported empty-shell responses, validates ready-state retraining choices, reuses the Advanced Editor
   derivation and state-reconciliation path, writes copied-fixture `definition.yaml` / managed `import.yaml`,
   bumps SQLite state revisions, records `source.native_progression.history` retrain events when the definition
-  changes, and returns refreshed retraining payloads. `GET/POST .../level-up` and
-  `GET/POST .../progression-repair` remain shell-only with real save parity pending.
+  changes, and returns refreshed retraining payloads. The Character Level Up route now has the first bounded
+  DND-5E level-up save-parity slice for sheets created by the TypeScript DND level-one builder: `GET .../level-up`
+  hydrates a ready level-1 to level-2 context for the supported Fighter/Barbarian slice, while
+  `POST .../level-up` validates HP Gain, writes copied-fixture `definition.yaml` / managed `import.yaml`,
+  bumps SQLite state revisions, reconciles HP, Hit Dice, and derived resources, records
+  `source.native_progression.hp_baseline` plus `level_up` history, and returns refreshed level-up payloads.
+  Multiclassing, subclass choices, ASI/feat choices, spell growth, imported-sheet repair, and broader native
+  level-up parity remain pending. `GET/POST .../progression-repair` remains shell-only with real save parity pending.
 - The first Character Cultivation write slices now serve
   `POST .../characters/:characterSlug/cultivation` for the `save_insight`, `record_gathering_insight`,
   `spend_cultivation_energy`, `spend_meditation_yin_yang`, `spend_conditioning`,

@@ -11990,6 +11990,99 @@ if (
   throw new Error(`Unexpected DND pilot files: ${JSON.stringify({ dndPilotDefinition, dndPilotImport })}`);
 }
 
+const dndPilotLevelUpPath = "/api/v1/campaigns/linden-pass/characters/pilot-knight/level-up";
+const dndPilotLevelUpGet = await requestJson(dndPilotLevelUpPath, {
+  Authorization: `Bearer ${dmApiToken}`,
+});
+if (
+  dndPilotLevelUpGet.status !== 200 ||
+  dndPilotLevelUpGet.payload?.ok !== true ||
+  dndPilotLevelUpGet.payload?.supported !== true ||
+  dndPilotLevelUpGet.payload?.lane !== "ready" ||
+  dndPilotLevelUpGet.payload?.level_up?.state_revision !== 1 ||
+  dndPilotLevelUpGet.payload?.level_up?.next_level !== 2 ||
+  dndPilotLevelUpGet.payload?.level_up?.values?.hp_gain !== "6" ||
+  dndPilotLevelUpGet.payload?.level_up?.preview?.gained_features?.[0] !== "Action Surge"
+) {
+  throw new Error(`Unexpected DND pilot level-up context: ${dndPilotLevelUpGet.status} ${JSON.stringify(dndPilotLevelUpGet.payload)}`);
+}
+
+const invalidDndPilotLevelUp = await requestJson(
+  dndPilotLevelUpPath,
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: {
+      expected_revision: 1,
+      values: {
+        advancement_mode: "advance_existing",
+        target_class_row_id: "class-1",
+        hp_gain: "0",
+      },
+    },
+  },
+);
+if (
+  invalidDndPilotLevelUp.status !== 400 ||
+  invalidDndPilotLevelUp.payload?.error?.code !== "validation_error" ||
+  invalidDndPilotLevelUp.payload?.error?.message !== "HP Gain must be at least 1."
+) {
+  throw new Error(`Unexpected invalid DND pilot level-up payload: ${JSON.stringify(invalidDndPilotLevelUp.payload)}`);
+}
+
+const dndPilotLevelUpPost = await requestJson(
+  dndPilotLevelUpPath,
+  { Authorization: `Bearer ${dmApiToken}` },
+  {
+    method: "POST",
+    body: {
+      expected_revision: 1,
+      values: {
+        advancement_mode: "advance_existing",
+        target_class_row_id: "class-1",
+        hp_gain: "6",
+      },
+    },
+  },
+);
+const dndPilotLevelUpDefinition = dndPilotLevelUpPost.payload?.character?.definition;
+const dndPilotLevelUpState = dndPilotLevelUpPost.payload?.character?.state_record?.state;
+if (
+  dndPilotLevelUpPost.status !== 200 ||
+  dndPilotLevelUpPost.payload?.message !== "Character level-up saved." ||
+  dndPilotLevelUpDefinition?.profile?.class_level_text !== "Fighter 2" ||
+  dndPilotLevelUpDefinition?.profile?.classes?.[0]?.level !== 2 ||
+  dndPilotLevelUpDefinition?.stats?.max_hp !== 18 ||
+  !dndPilotLevelUpDefinition?.features?.some((feature) => feature.id === "action-surge-2") ||
+  !dndPilotLevelUpDefinition?.resource_templates?.some((template) => template.id === "action-surge") ||
+  dndPilotLevelUpDefinition?.source?.native_progression?.history?.at(-1)?.kind !== "level_up" ||
+  dndPilotLevelUpPost.payload?.character?.state_record?.revision !== 2 ||
+  dndPilotLevelUpState?.vitals?.current_hp !== 18 ||
+  dndPilotLevelUpState?.hit_dice?.pools?.[0]?.max !== 2 ||
+  !dndPilotLevelUpState?.resources?.some((resource) => resource.id === "action-surge")
+) {
+  throw new Error(`Unexpected DND pilot level-up submit payload: ${JSON.stringify(dndPilotLevelUpPost.payload)}`);
+}
+
+const leveledDndPilotStateDb = new Database(dbPath);
+const leveledDndPilotState = leveledDndPilotStateDb
+  .prepare("SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?")
+  .get("linden-pass", "pilot-knight");
+leveledDndPilotStateDb.close();
+const leveledDndPilotStateJson = leveledDndPilotState ? JSON.parse(leveledDndPilotState.state_json) : null;
+const leveledDndPilotDefinition = parseYaml(
+  readFileSync(path.join(campaignsDir, "linden-pass", "characters", "pilot-knight", "definition.yaml"), "utf8"),
+);
+if (
+  leveledDndPilotState?.revision !== 2 ||
+  leveledDndPilotState?.updated_by_user_id !== 81 ||
+  leveledDndPilotStateJson?.vitals?.current_hp !== 18 ||
+  leveledDndPilotDefinition?.profile?.class_level_text !== "Fighter 2" ||
+  leveledDndPilotDefinition?.source?.native_progression?.history?.at(-1)?.hp_gain !== 6
+) {
+  throw new Error(`Unexpected persisted DND pilot level-up evidence: ${JSON.stringify({ leveledDndPilotState, leveledDndPilotStateJson, leveledDndPilotDefinition })}`);
+}
+
 const dndBarbarianCreateSubmit = await requestJson(
   characterCreatePath,
   { Authorization: `Bearer ${dmApiToken}` },

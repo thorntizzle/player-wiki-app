@@ -99,6 +99,8 @@ export type CharacterSheetEditUpdateResult = CharacterSessionVitalsUpdateResult;
 
 export type CharacterAdvancedEditorReferenceUpdateResult = CharacterSessionVitalsUpdateResult;
 
+export type CharacterLevelUpDefinitionUpdateResult = CharacterSessionVitalsUpdateResult;
+
 export type CharacterCultivationDefinitionUpdateResult = CharacterSessionVitalsUpdateResult;
 
 export interface CharacterRestChangePayload {
@@ -1405,6 +1407,43 @@ function reconcileAdvancedEditorCustomFeatureResourcesState(
     nextResources.push(resource);
   }
 
+  for (const template of templateRows) {
+    const resourceId = asString(template.id);
+    const existing = existingById.get(resourceId);
+    if (!existing) {
+      nextResources.push(template);
+      continue;
+    }
+    const maxValue = template.max === null || template.max === undefined
+      ? undefined
+      : nonNegativeInt(template.max, 0);
+    nextResources.push({
+      ...template,
+      current: clampInt(existing.current, nonNegativeInt(template.current, 0), maxValue),
+    });
+  }
+  state.resources = nextResources;
+}
+
+function reconcileResourceStateFromDefinition(
+  state: Record<string, unknown>,
+  definition: Record<string, unknown>,
+): void {
+  const templateRows = buildResourceStates(definition).map((resource) => asRecord(resource));
+  const templateIds = new Set(templateRows.map((resource) => asString(resource.id)).filter(Boolean));
+  const existingById = new Map(
+    asArray(state.resources)
+      .map((resource) => asRecord(resource))
+      .map((resource) => [asString(resource.id), resource] as const)
+      .filter(([resourceId]) => Boolean(resourceId)),
+  );
+
+  const nextResources = asArray(state.resources)
+    .map((resource) => asRecord(resource))
+    .filter((resource) => {
+      const resourceId = asString(resource.id);
+      return resourceId && !templateIds.has(resourceId);
+    });
   for (const template of templateRows) {
     const resourceId = asString(template.id);
     const existing = existingById.get(resourceId);
@@ -3698,6 +3737,92 @@ export function updateCharacterAdvancedEditorReferenceState(
       vitals.current_hp = clampInt(vitals.current_hp, 0, nonNegativeInt(definitionStats(definition).max_hp, 0));
       nextState.vitals = vitals;
     }
+
+    const now = utcIsoTimestamp();
+    if (stateRowMissing) {
+      database
+        .prepare(
+          `
+            INSERT INTO character_state (
+              campaign_slug,
+              character_slug,
+              revision,
+              state_json,
+              updated_at,
+              updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(campaignSlug, characterSlug, expectedRevision + 1, JSON.stringify(nextState), now, updatedByUserId);
+      return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+    }
+
+    const result = database
+      .prepare(
+        `
+          UPDATE character_state
+          SET revision = revision + 1,
+              state_json = ?,
+              updated_at = ?,
+              updated_by_user_id = ?
+          WHERE campaign_slug = ?
+            AND character_slug = ?
+            AND revision = ?
+        `,
+      )
+      .run(JSON.stringify(nextState), now, updatedByUserId, campaignSlug, characterSlug, expectedRevision);
+    if (result.changes <= 0) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+    return { status: "ok", revision: expectedRevision + 1, state: nextState, updatedAt: now };
+  } finally {
+    database.close();
+  }
+}
+
+export function updateCharacterLevelUpDefinitionState(
+  config: ApiConfig,
+  campaignSlug: string,
+  characterSlug: string,
+  previousDefinition: Record<string, unknown>,
+  nextDefinition: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  hpDelta: number,
+  updatedByUserId: number,
+): CharacterLevelUpDefinitionUpdateResult {
+  let expectedRevision: number;
+  try {
+    expectedRevision = parseRequiredWholeNumber(payload.expected_revision, "Expected revision");
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid level-up payload." };
+  }
+
+  const database = openDatabase(config);
+  if (!database) {
+    return { status: "validation_error", message: "Character state store is not available." };
+  }
+
+  try {
+    if (!tableExists(database, "character_state")) {
+      return { status: "validation_error", message: "Character state store is not available." };
+    }
+
+    let existingState = readCharacterState(database, campaignSlug, characterSlug);
+    const stateRowMissing = !existingState;
+    existingState ??= { revision: 1, state: buildInitialState(previousDefinition) };
+
+    if (existingState.revision !== expectedRevision) {
+      return { status: "state_conflict", message: CHARACTER_STATE_CONFLICT_MESSAGE };
+    }
+
+    const nextState = copyState(existingState.state);
+    const vitals = { ...asRecord(nextState.vitals) };
+    const nextMaxHp = nonNegativeInt(definitionStats(nextDefinition).max_hp, 0);
+    vitals.current_hp = clampInt(asInt(vitals.current_hp, 0) + hpDelta, 0, nextMaxHp);
+    nextState.vitals = vitals;
+    nextState.hit_dice = normalizeHitDiceState(nextDefinition, nextState.hit_dice);
+    reconcileResourceStateFromDefinition(nextState, nextDefinition);
 
     const now = utcIsoTimestamp();
     if (stateRowMissing) {
