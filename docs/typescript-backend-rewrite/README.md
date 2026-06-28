@@ -349,6 +349,11 @@ Do not implement these routes as part of the parity program unless a later archi
   cleanup, revealed-article session provenance unlinking, and session revision bumps. Current
   validation covers a disposable fixture database only; production/staging write readiness remains
   gated by migration, backup, and rollback rehearsal.
+- The 2026-06-28 Session missing-resource/error-shape slice now pins the Flask-vs-TypeScript
+  boundary for missing session article images, closed-log details, missing staged article
+  update/reveal/delete, and missing closed-log delete: Flask keeps generic HTML 404s for the
+  missing read resources, while TypeScript keeps explicit JSON 404 envelopes; mutation misses
+  remain Flask-compatible JSON `validation_error` responses.
 - The first identity bootstrap slice now serves `GET /api/v1/me`, preserving
   Flask-compatible unauthenticated `auth_required` behavior, returning synthetic role-header
   user, membership, preference, and View As metadata for player, DM, and admin fixture reads,

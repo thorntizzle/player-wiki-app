@@ -386,6 +386,33 @@ not a Flask production behavior change. Cutover still needs an API-version or
 client-compatibility decision before treating JSON-normalized missing publishing
 resources as a general contract across all route families.
 
+### TypeScript JSON Boundary For Session Article Images And Logs
+
+The 2026-06-28 `rewrite/ts-session-error-shape-parity` slice promotes a
+focused live Session route family from observed matrix rows to executable
+Flask-vs-TypeScript boundary coverage in
+`tests/test_typescript_readonly_slice_contract.py::test_typescript_session_missing_resource_json_boundary_matches_documented_flask_shapes`.
+Flask remains the production authority. It still serves generic `404 text/html`
+pages for missing session article image and closed-log detail reads, even when
+the request sends `Accept: application/json`; the TypeScript candidate keeps
+structured JSON envelopes for the fixture API surface. Missing staged-article
+and log mutation targets already use Flask JSON `400 validation_error` and
+TypeScript preserves that shape:
+
+| Method | Normalized path | Role | Flask shape | TypeScript shape | TypeScript error code |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/v1/campaigns/<campaign_slug>/session/articles/999999/image` | `dm` | `404 text/html` generic page | `404 application/json` | `session_article_image_not_found` |
+| `GET` | `/api/v1/campaigns/<campaign_slug>/session/logs/999999` | `dm` | `404 text/html` generic page | `404 application/json` | `session_log_not_found` |
+| `PUT` | `/api/v1/campaigns/<campaign_slug>/session/articles/999999` | `dm` | `400 application/json` | `400 application/json` | `validation_error` |
+| `POST` | `/api/v1/campaigns/<campaign_slug>/session/articles/999999/reveal` | `dm` | `400 application/json` when a session is active | `400 application/json` when a session is active | `validation_error` |
+| `DELETE` | `/api/v1/campaigns/<campaign_slug>/session/articles/999999` | `dm` | `400 application/json` | `400 application/json` | `validation_error` |
+| `DELETE` | `/api/v1/campaigns/<campaign_slug>/session/logs/999999` | `dm` | `400 application/json` | `400 application/json` | `validation_error` |
+
+The missing-article reveal probe intentionally starts a disposable active
+session on both Flask and TypeScript before requesting the missing article. If
+no active session exists, both implementations may legitimately return the
+begin-session validation error before checking article existence.
+
 ## Source-Level 404 Notes
 
 - `player_wiki/api.py` defines the JSON error envelope in `json_error` near
