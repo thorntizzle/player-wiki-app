@@ -1,6 +1,6 @@
 # TypeScript Backend Staging Rehearsal Harness
 
-Last updated: 2026-06-27
+Last updated: 2026-06-28
 
 Status: guarded script, runbook, and transcript template for copied-data and staging-snapshot rehearsals
 
@@ -59,7 +59,8 @@ target. If any resolved path is outside the rehearsal root, stop.
 
 Use `scripts/staging_rehearsal_harness.py` to create the disposable folder
 layout, write the initial transcript, validate copied-data paths, capture file
-hashes plus selected SQLite row counts, and compare restored evidence.
+hashes plus selected SQLite row counts, print family-specific transcript guides,
+and compare restored evidence.
 
 The helper deliberately does not run TypeScript mutations, Flask mutations,
 restore commands, Fly commands, deploys, or live syncs. It refuses evidence
@@ -83,6 +84,18 @@ Dry-run scaffold:
   --family content-character `
   --dry-run
 ```
+
+The dry-run output includes the transcript preview that would be written. To
+inspect only the family-specific checklist for a planned Combat rehearsal:
+
+```powershell
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py guide `
+  --family combat
+```
+
+Combat guide output is a scaffold, not approval. The Combat write family remains
+below `copied-data rollback ready` until a copied-data run records backup,
+mutation, restore, and equivalence evidence in a transcript.
 
 Create a rehearsal scaffold:
 
@@ -335,6 +348,11 @@ Decision gate:
 
 - Require restored tracker, combatants, conditions, counters, notes, and linked
   character state to match baseline or list exact acceptable differences.
+- The harness-generated Combat transcript guide starts from
+  `fixture-write validated` and may only move to `copied-data rollback ready`
+  after the copied-data transcript proves backup, mutation, restore, and
+  equivalence. It is not `staging snapshot ready` unless the source snapshot was
+  explicitly approved as staging-equivalent and that approval is recorded.
 
 ### Session
 
