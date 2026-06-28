@@ -176,6 +176,77 @@ FAMILY_REHEARSAL_GUIDES: dict[str, dict[str, tuple[str, ...] | str]] = {
 }
 
 
+STAGING_SNAPSHOT_PREFLIGHT_DOCS: tuple[tuple[str, str], ...] = (
+    (
+        "docs/typescript-backend-rewrite/README.md",
+        "rewrite evidence index and production-authority boundary",
+    ),
+    (
+        "docs/typescript-backend-rewrite/cutover-readiness.md",
+        "current staging-snapshot gate matrix",
+    ),
+    (
+        "docs/typescript-backend-rewrite/staging-rehearsal-harness.md",
+        "copied-data and staging-snapshot harness contract",
+    ),
+    (
+        "docs/typescript-backend-rewrite/rollback-cutover-runbook.md",
+        "rollback and full-cutover downstream evidence contract",
+    ),
+    (
+        "docs/typescript-backend-rewrite/full-cutover-copied-workflow-smoke-2026-06-28.md",
+        "latest no-live copied-data full workflow smoke limits",
+    ),
+    (
+        "docs/current-state/ops-deploy.md",
+        "local wrapper, SQLite volume, and verification boundaries",
+    ),
+    (
+        "docs/current-state/workspace-boundaries.md",
+        "app/vault/worktree split and tracked-data guardrails",
+    ),
+)
+
+
+STAGING_SNAPSHOT_PREFLIGHT_GATES: tuple[dict[str, str], ...] = (
+    {
+        "family": "content-character",
+        "current": "copied-data rollback ready",
+        "required": "User-approved copied staging-equivalent snapshot with character files, portrait assets, character_state, and character_assignments.",
+    },
+    {
+        "family": "session",
+        "current": "copied-data rollback ready",
+        "required": "Staging-equivalent session/chat/article/log/image rows plus restore equivalence for sampled player and DM responses.",
+    },
+    {
+        "family": "combat",
+        "current": "copied-data rollback ready",
+        "required": "Staging-equivalent tracker, combatants, conditions, source-backed resources, linked character_state, and restore equivalence.",
+    },
+    {
+        "family": "systems",
+        "current": "copied-data rollback ready",
+        "required": "Staging-equivalent Systems libraries, policies, imports, overrides, custom entries, and shared-source decision evidence.",
+    },
+    {
+        "family": "dm-content",
+        "current": "copied-data rollback ready",
+        "required": "Staging-equivalent statblocks, conditions, parser outputs, Combat setup consumers, and restore equivalence.",
+    },
+    {
+        "family": "publishing",
+        "current": "copied-data rollback ready",
+        "required": "Staging-equivalent content config, pages, assets, read-model rows, provenance blockers, and protected asset serving.",
+    },
+    {
+        "family": "rollback-cutover",
+        "current": "blocked until route-family staging snapshot gates pass",
+        "required": "Downstream full workflow and rollback smoke only after every route-family staging-snapshot transcript is complete.",
+    },
+)
+
+
 REHEARSAL_DIRS = ("input", "backup", "pre", "mutation", "post", "restore", "logs")
 
 
@@ -344,6 +415,86 @@ def family_guide_markdown(family: str) -> str:
 - Label after only if backup, mutation, restore, and equivalence all pass: `{guide["label_after"]}`
 - {guide["safety_note"]}
 """
+
+
+def staging_snapshot_preflight_markdown(*, family: str | None = None) -> str:
+    if family is not None and family not in FAMILY_TABLES:
+        raise ValueError(f"Unsupported write family: {family}")
+
+    selected_gates = [
+        gate
+        for gate in STAGING_SNAPSHOT_PREFLIGHT_GATES
+        if family is None or gate["family"] == family
+    ]
+    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    source_docs = "\n".join(
+        f"- [ ] `{path}` - {purpose}"
+        for path, purpose in STAGING_SNAPSHOT_PREFLIGHT_DOCS
+    )
+    gate_sections = "\n\n".join(
+        staging_snapshot_gate_markdown(gate["family"], gate["current"], gate["required"])
+        for gate in selected_gates
+    )
+    family_note = family if family is not None else "all staging/cutover families"
+    return f"""# Staging Snapshot Preflight Checklist
+
+Generated: {generated}
+
+Scope: {family_note}
+
+This checklist is operator readiness scaffolding only. It does not approve a
+staging snapshot, run a rehearsal, deploy, sync Fly, write live data, inspect
+private campaign content, or move any readiness label.
+
+## Source Docs To Recheck
+{source_docs}
+
+## No-Live Boundary
+- [ ] Flask remains the production authority.
+- [ ] No Fly command, deploy, live API write, live SQLite sync, or production volume access is part of this preflight.
+- [ ] Snapshot source approval is recorded before any local copy is used.
+- [ ] The staging-equivalent source has already been copied into `<repo-root>/.task-temp/<staging-snapshot-id>/input/`.
+- [ ] Commands and transcript fields use placeholders for private app identity, private URLs, tokens, and secrets.
+- [ ] No local absolute paths, real Fly app names, vault material, or `campaigns/<campaign-slug>/` content will be committed.
+
+## Operator Intake
+- [ ] Rehearsal id: `<staging-snapshot-id>`.
+- [ ] Operator/thread:
+- [ ] Approved source summary:
+- [ ] Approval record:
+- [ ] Copied SQLite path: `<repo-root>/.task-temp/<staging-snapshot-id>/input/player_wiki.sqlite3`.
+- [ ] Copied campaigns dir: `<repo-root>/.task-temp/<staging-snapshot-id>/input/campaigns`.
+- [ ] Backup archive path: `<repo-root>/.task-temp/<staging-snapshot-id>/backup/<archive>.zip`.
+- [ ] TypeScript branch/commit:
+- [ ] Flask authority branch/commit:
+- [ ] `.local` roadmap visibility:
+
+## Path Guard Before Mutation
+- [ ] Run `check-paths` with the copied SQLite, copied campaigns dir, and intended backup archive.
+- [ ] Stop if any resolved path is outside `<repo-root>/.task-temp/<staging-snapshot-id>/`.
+- [ ] Stop if a command needs live Fly, production SQLite, production campaign content, an owner checkout, or vault source.
+
+## Gate Checklist
+{gate_sections}
+
+## Transcript Decision Stub
+- Result: blocked until an approved staging-snapshot rehearsal transcript passes.
+- Label before: keep the current label from `cutover-readiness.md`.
+- Label after: unchanged by this preflight.
+- Follow-up required: run the family-specific rehearsal only after approval and copied-path guard pass.
+"""
+
+
+def staging_snapshot_gate_markdown(family: str, current: str, required: str) -> str:
+    tables = "\n".join(f"  - [ ] `{table}`" for table in FAMILY_TABLES[family])
+    return f"""### {family}
+- Current readiness: {current}
+- Required staging-snapshot evidence: {required}
+- Tables to include when present:
+{tables}
+- [ ] Family-specific `guide --family {family}` reviewed when available.
+- [ ] Baseline, mutation, restore, and equivalence artifacts remain under `.task-temp/`.
+- [ ] Transcript explicitly says this gate is not complete unless restore equivalence passes."""
 
 
 def init_rehearsal(
@@ -544,6 +695,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     guide_parser = subparsers.add_parser("guide", help="Print a family-specific transcript guide.")
     guide_parser.add_argument("--family", required=True, choices=sorted(FAMILY_TABLES))
 
+    preflight_parser = subparsers.add_parser(
+        "staging-snapshot-preflight",
+        help="Print a sanitized staging snapshot preflight checklist.",
+    )
+    preflight_parser.add_argument("--family", choices=sorted(FAMILY_TABLES))
+
     return parser.parse_args(argv)
 
 
@@ -586,6 +743,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "family": args.family,
                 "guide_markdown": family_guide_markdown(args.family),
             }
+        elif args.command == "staging-snapshot-preflight":
+            print(staging_snapshot_preflight_markdown(family=args.family))
+            return 0
         else:
             raise ValueError(f"Unsupported command: {args.command}")
         print(json.dumps(result, indent=2, sort_keys=True))

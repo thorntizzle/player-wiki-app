@@ -125,6 +125,36 @@ def test_rollback_cutover_transcript_captures_runbook_evidence(tmp_path):
     assert "This rehearsal result is not production cutover approval" in transcript
 
 
+def test_staging_snapshot_preflight_is_sanitized_and_non_approving():
+    harness = _load_harness_module()
+
+    markdown = harness.staging_snapshot_preflight_markdown()
+
+    assert markdown.startswith("# Staging Snapshot Preflight Checklist")
+    assert "`docs/typescript-backend-rewrite/cutover-readiness.md`" in markdown
+    assert "`docs/typescript-backend-rewrite/staging-rehearsal-harness.md`" in markdown
+    assert "No Fly command, deploy, live API write, live SQLite sync, or production volume access" in markdown
+    assert "Result: blocked until an approved staging-snapshot rehearsal transcript passes." in markdown
+    assert "Label after: unchanged by this preflight." in markdown
+    assert "### content-character" in markdown
+    assert "### rollback-cutover" in markdown
+    assert "`character_state`" in markdown
+    assert "<repo-root>/.task-temp/<staging-snapshot-id>/input/player_wiki.sqlite3" in markdown
+    assert "C:" not in markdown
+
+
+def test_staging_snapshot_preflight_can_focus_one_family():
+    harness = _load_harness_module()
+
+    markdown = harness.staging_snapshot_preflight_markdown(family="combat")
+
+    assert "Scope: combat" in markdown
+    assert "### combat" in markdown
+    assert "`campaign_combat_trackers`" in markdown
+    assert "### session" not in markdown
+    assert "### rollback-cutover" not in markdown
+
+
 def test_path_guard_rejects_targets_outside_rehearsal_root(tmp_path):
     harness = _load_harness_module()
     root = tmp_path / ".task-temp" / "rehearsal"
