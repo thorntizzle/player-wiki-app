@@ -11,6 +11,8 @@ This folder tracks the deliberate TypeScript backend rewrite path for Campaign P
 - `charter.md`: scope, freeze rules, cutover gates, rollback requirement, and branch/spec ownership.
 - `parity-inventory.md`: current route, API, data, command, and policy inventory that TypeScript must preserve.
 - `architecture-opportunity-audit.md`: audit rubric for separating product contracts from compatibility shims, migration bridges, architecture debt, and rewrite opportunities.
+- `holistic-rewrite-plan.md`: combined backend architecture and frontend modernization plan for moving from TypeScript parity to a cleaner app foundation.
+- `../frontend-modernization-vision.md`: Gen2 modernization direction for persistent workspace shell, adaptive workspaces, gameplay widgets, progressive loading, honest mutations, container-aware layout, and pilot selection.
 - `route-snapshots.md`: executable route snapshot artifact companion review notes.
 - `route-snapshots.json`: tracked executable snapshot from
   `scripts/route_snapshots.py` used by parity checks.
