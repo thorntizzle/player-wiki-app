@@ -41,6 +41,15 @@ SQLite access, or cutover. Flask remains the production authority.
   worktree environment, so local image build/container smoke remains a
   tooling/environment blocker rather than a touched-code regression.
 
+Follow-up validation on 2026-06-28 from `rewrite/ts-ops-packaging-proof` at
+`5d886814593536dc08d17a2aa1236de668159597` confirmed the static proof still
+passes after the phase 3 integration baseline. The same pass also proved the
+compiled TypeScript API can start locally from `apps/api/dist/server.js` with
+copied fixture campaigns and a disposable SQLite path under `.task-temp`,
+answering `/healthz` and `/api/v1/app` with the expected local path metadata.
+Docker remained unavailable on `PATH`, so this still is not an image-build
+transcript.
+
 ## Startup And Migration Boundary
 
 The proof entrypoint creates only the parent directories for the configured
@@ -54,6 +63,6 @@ TypeScript startup migration behavior remains a separate cutover gate.
 - New packaging label: `static image path scaffolded`
 - Not reached: `local image builds`
 - Blocker: Docker unavailable for local build/run proof in this worktree
-- Remaining gates: local Docker build, local boot with copied data, `/healthz`,
-  `/api/v1/app`, migration dry-run decision, rollback runbook, staging snapshot
-  rehearsal, and full cutover smoke
+- Remaining gates: local Docker build, local container boot with copied data,
+  migration dry-run decision, rollback transcript, staging snapshot rehearsal,
+  and full cutover smoke
