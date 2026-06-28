@@ -392,11 +392,11 @@ const DND_ABILITY_LABELS: Record<(typeof DND_ABILITY_KEYS)[number], string> = {
 const DND_CREATE_LIMITATIONS = [
   "Base classes come from enabled Systems rows inside the current native support lane: PHB base classes plus TCE Artificer.",
   "Species and backgrounds come from enabled Systems rows in the current supported source matrix for this TypeScript parity slice.",
-  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Bard with a bounded known-spells package, PHB Cleric with a bounded Life Domain level-one package, PHB Druid with a bounded prepared-spells package, PHB Rogue with a bounded expertise and starter-equipment package, PHB Ranger with a bounded Favored Enemy/Natural Explorer package, PHB Paladin with a bounded Divine Sense/Lay on Hands package, PHB Sorcerer with a bounded Draconic Bloodline known-spells package, PHB Warlock with a bounded Fiend Pact Magic package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
+  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Bard with a bounded known-spells package, PHB Cleric with a bounded Life Domain level-one package, PHB Druid with a bounded prepared-spells package, PHB Rogue with a bounded expertise and starter-equipment package, PHB Ranger with a bounded Favored Enemy/Natural Explorer package, PHB Monk with a bounded Unarmored Defense/Martial Arts package, PHB Paladin with a bounded Divine Sense/Lay on Hands package, PHB Sorcerer with a bounded Draconic Bloodline known-spells package, PHB Warlock with a bounded Fiend Pact Magic package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
 ];
 const DND_CHARACTER_CREATE_SOURCE_PATH = "builder://dnd5e-create-level-one";
 const DND_CHARACTER_CREATE_SOURCE_TYPE = "dnd5e_character_builder_level_one";
-const DND_CHARACTER_CREATE_VERSION = "2026-06-28.1";
+const DND_CHARACTER_CREATE_VERSION = "2026-06-28.2";
 const DND_CHARACTER_CREATE_IMPORTED_FROM = "In-app DND-5E Character Creator level-one slice";
 const DND_LEVEL_ONE_CLASS_CONFIGS = {
   bard: {
@@ -1056,6 +1056,70 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
         category: "class_feature",
         source: "PHB",
         description_markdown: "This level-one TypeScript slice records Forest as the deterministic favored terrain. Exploration automation remains outside this slice.",
+      },
+    ],
+    resourceTemplates: [],
+  },
+  monk: {
+    className: "Monk",
+    armorClass: "monk-unarmored",
+    supportedSubclassTitles: [],
+    skillProficiencies: ["Acrobatics", "Insight"],
+    skillRows: ["Acrobatics", "Athletics", "History", "Insight", "Religion", "Stealth"],
+    spellcasting: null,
+    proficiencies: {
+      armor: [],
+      weapons: ["Simple weapons", "Shortswords"],
+      tools: ["Calligrapher's supplies"],
+    },
+    equipmentCatalog: [
+      {
+        id: "shortsword-1",
+        name: "Shortsword",
+        default_quantity: 1,
+        weight: "2 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        weapon_wield_mode: "main-hand",
+        weapon_wield_modes: ["main-hand", "off-hand"],
+        tags: ["weapon", "martial weapon", "melee weapon", "finesse", "light", "monk weapon"],
+      },
+      {
+        id: "dart-1",
+        name: "Dart",
+        default_quantity: 10,
+        weight: "0.25 lb.",
+        tags: ["weapon", "simple weapon", "ranged weapon", "thrown weapon", "finesse"],
+      },
+      {
+        id: "explorers-pack-1",
+        name: "Explorer's Pack",
+        default_quantity: 1,
+        weight: "59 lb.",
+        tags: ["gear"],
+      },
+      {
+        id: "calligraphers-supplies-1",
+        name: "Calligrapher's Supplies",
+        default_quantity: 1,
+        weight: "5 lb.",
+        tags: ["artisan's tools", "tool"],
+      },
+    ],
+    features: [
+      {
+        id: "unarmored-defense-1",
+        name: "Unarmored Defense",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "While not wearing armor or wielding a shield, your Armor Class is 10 + Dexterity modifier + Wisdom modifier.",
+      },
+      {
+        id: "martial-arts-1",
+        name: "Martial Arts",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "This level-one TypeScript slice records Martial Arts with a d4 Martial Arts die for unarmed strikes and monk weapons. Ki, Unarmored Movement, and subclass choices remain outside this slice.",
       },
     ],
     resourceTemplates: [],
@@ -8523,7 +8587,7 @@ function assertDndLevelOneClass(row: SystemsEntryRow | null): { row: SystemsEntr
   }
   const classKey = dndLevelOneClassKey(row);
   if (!classKey || normalizeDndSourceId(row.source_id) !== DND_PHB_SOURCE_ID || String(row.entry_type || "") !== "class") {
-    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, PHB Druid, PHB Rogue, PHB Ranger, PHB Paladin, PHB Sorcerer, PHB Warlock, and PHB Wizard.");
+    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, PHB Druid, PHB Rogue, PHB Ranger, PHB Monk, PHB Paladin, PHB Sorcerer, PHB Warlock, and PHB Wizard.");
   }
   return { row, classKey };
 }
@@ -9126,6 +9190,37 @@ function dndLevelOneAttacks(classKey: DndLevelOneClassKey, abilityScores: Record
       }),
     ];
   }
+  if (classKey === "monk") {
+    return [
+      dndWeaponAttack({
+        name: "Unarmed Strike",
+        category: "melee weapon",
+        abilityModifierValue: Math.max(strengthModifier, dexterityModifier),
+        damageDie: "1d4",
+        damageType: "bludgeoning",
+        notes: "Martial Arts die. Bonus-action use and other combat timing remain manual in this level-one slice.",
+        equipmentRef: "unarmed-strike",
+      }),
+      dndWeaponAttack({
+        name: "Shortsword",
+        category: "melee weapon",
+        abilityModifierValue: Math.max(strengthModifier, dexterityModifier),
+        damageDie: "1d6",
+        damageType: "piercing",
+        notes: "Finesse, light, monk weapon.",
+        equipmentRef: "shortsword-1",
+      }),
+      dndWeaponAttack({
+        name: "Dart",
+        category: "ranged or thrown weapon",
+        abilityModifierValue: dexterityModifier,
+        damageDie: "1d4",
+        damageType: "piercing",
+        notes: "Finesse, thrown range 20/60. Starting package includes ten darts.",
+        equipmentRef: "dart-1",
+      }),
+    ];
+  }
   if (classKey === "paladin") {
     return [
       dndWeaponAttack({
@@ -9240,6 +9335,9 @@ function dndLevelOneArmorClass(classKey: DndLevelOneClassKey, abilityScores: Rec
   const armorClass = DND_LEVEL_ONE_CLASS_CONFIGS[classKey].armorClass;
   if (armorClass === "unarmored") {
     return 10 + abilityModifier(dndAbilityScoreValue(abilityScores, "dex")) + abilityModifier(dndAbilityScoreValue(abilityScores, "con"));
+  }
+  if (armorClass === "monk-unarmored") {
+    return 10 + abilityModifier(dndAbilityScoreValue(abilityScores, "dex")) + abilityModifier(dndAbilityScoreValue(abilityScores, "wis"));
   }
   if (armorClass === "unarmored-dex") {
     return 10 + abilityModifier(dndAbilityScoreValue(abilityScores, "dex"));
