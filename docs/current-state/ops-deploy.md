@@ -13,6 +13,7 @@ Last updated: 2026-06-25
 - Prefer existing `frontend/node_modules` tools or bundled Node; do not assume global `npm` is on `PATH`.
 - `local.ps1` is the Windows-first wrapper for bootstrap, run, test, check, backup, restore, prepare-fly-campaigns, sync-fly, and deploy-fly.
 - Disposable local runtime temp files belong under `.local/tmp/<action>/` or task-specific `.task-temp` folders outside durable app data.
+- The default Docker/Fly image remains Flask/Gunicorn. `Dockerfile` also exposes a non-default `ts-api-runtime-proof` target for local-only TypeScript API packaging proof work; it is not the production deploy target.
 
 ## Current Fly Deployment Shape
 

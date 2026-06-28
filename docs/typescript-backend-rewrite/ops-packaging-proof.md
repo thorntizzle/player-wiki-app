@@ -31,21 +31,27 @@ The tracked production packaging is currently Flask/Python:
 - `local.ps1 -Action deploy-fly` is the current deploy wrapper and refuses the
   sample Fly app unless a real app is supplied locally.
 
-The TypeScript API is not production-packaged by the current image:
+The TypeScript API is not production-packaged by the default image:
 
-- The final image is Python-based and does not retain the Node build-stage
-  runtime.
-- `apps/api/package.json` defines `build`, `typecheck`, `start`, `smoke`, and
-  route-parity scripts, but the Dockerfile does not run `npm ci`, `npm run
-  build`, or `npm run start` in `apps/api`.
+- The default final image is Python-based and does not retain the Node
+  build-stage runtime.
+- `apps/api/package.json` defines `build`, `typecheck`, `start`, `smoke`,
+  packaging-proof, and route-parity scripts, but the default Flask image does
+  not run `npm ci`, `npm run build`, or `npm run start` in `apps/api`.
 - `.dockerignore` excludes `apps/**/dist` and `apps/**/node_modules`, so a
   host-built TypeScript API bundle and dependencies are not sent in the Docker
   context.
 - `deploy/fly-entrypoint.sh` starts only Gunicorn. It has no TypeScript API
   process, sidecar, proxy, or cutover start path.
+- The Dockerfile now has a non-default `ts-api-runtime-proof` target that builds
+  `apps/api` inside Docker and starts `deploy/ts-api-proof-entrypoint.sh`.
+  This target is for local no-deploy proof work only; it is not selected by the
+  sanitized Fly config or the default Docker build.
 
-Current packaging therefore proves the Flask production image and Gen2 frontend
-bundle path only. It does not prove a TypeScript API image, a combined
+Current production packaging therefore proves the Flask production image and
+Gen2 frontend bundle path only. The TypeScript proof target statically proves a
+build/start path exists, but because Docker is unavailable in this worktree
+environment it does not yet prove a locally built image, a combined
 Flask-plus-TypeScript image, a TypeScript sidecar, or a TypeScript-only cutover
 image.
 
@@ -62,12 +68,15 @@ packaging or authorize deploy.
 - `.dockerignore`
 - `fly.toml`
 - `deploy/fly-entrypoint.sh`
+- `deploy/ts-api-proof-entrypoint.sh`
 - `local.ps1`
 - `ops.py`
 - `apps/api/package.json`
+- `apps/api/tests/packaging-proof.mjs`
 - `docs/current-state/ops-deploy.md`
 - `docs/typescript-backend-rewrite/cutover-readiness.md`
 - `docs/typescript-backend-rewrite/staging-rehearsal-harness.md`
+- `docs/typescript-backend-rewrite/ops-image-runtime-proof.md`
 
 Ignored `.local` roadmap files are absent in this worktree, so this proof is
 based on tracked packaging files and tracked rewrite docs only.
@@ -85,9 +94,11 @@ Allowed before explicit deployment approval:
   - `npm --prefix apps/api run build`
   - `npm --prefix apps/api test`
 - Run static Docker context hygiene checks that do not contact Fly.
+- Run `npm --prefix apps/api run test:packaging-proof` to verify the
+  non-default TypeScript image target and proof entrypoint wiring.
 - Run a local Docker image build only when Docker is available and the target is
   explicitly local, for example `docker build --pull=false -t
-  campaign-player-wiki-ts-proof:local .`.
+  campaign-player-wiki-ts-proof:local --target ts-api-runtime-proof .`.
 - Run a local container only against disposable copied data under `.task-temp/`.
 - Probe only local URLs such as `http://127.0.0.1:<port>/healthz`.
 
@@ -126,8 +137,9 @@ Collect:
 
 Current gap:
 
-- The app has local TypeScript API scripts, but those scripts are not wired into
-  the production Dockerfile or `local.ps1` deploy path.
+- The app has local TypeScript API scripts and a non-default Docker proof target,
+  but those scripts are not wired into the production Flask image, Fly process,
+  or `local.ps1` deploy path.
 
 Current local evidence:
 
@@ -139,6 +151,11 @@ Current local evidence:
   `campaign_count: 1`.
 - Local `GET /api/v1/app` returns `ok: true` and reflects the disposable
   `CPW_DB_PATH`, `CPW_CAMPAIGNS_DIR`, and health metadata overrides.
+- `npm --prefix apps/api run test:packaging-proof` statically verifies that the
+  Dockerfile keeps Flask as the default final image, exposes a non-default
+  `ts-api-runtime-proof` target, builds `apps/api` inside Docker, ignores
+  host-built API output/dependencies from the Docker context, and maps Fly-style
+  `PLAYER_WIKI_*` env vars to the TypeScript API's `CPW_*` runtime env vars.
 
 ### Docker Context Hygiene
 
@@ -153,9 +170,11 @@ Collect:
 
 Current gap:
 
-- `.dockerignore` correctly blocks host-built API output and dependencies, so a
-  TypeScript production image must build `apps/api` inside Docker or use a
-  deliberate multi-stage API build artifact.
+- `.dockerignore` correctly blocks host-built API output and dependencies.
+- The `ts-api-runtime-proof` target now builds `apps/api` inside Docker and
+  copies only the pruned production dependency tree plus compiled `dist`, but
+  Docker is unavailable in this worktree environment so the image build itself
+  has not run.
 
 ### Entry Point And Line Endings
 
@@ -171,6 +190,8 @@ Current evidence:
 - `deploy/fly-entrypoint.sh` is tracked with `i/lf w/lf attr/text eol=lf`.
 - `.gitattributes` contains `*.sh text eol=lf`.
 - Dockerfile includes `sed -i 's/\r$//' /app/deploy/fly-entrypoint.sh`.
+- `deploy/ts-api-proof-entrypoint.sh` is also covered by `*.sh text eol=lf`,
+  and the `ts-api-runtime-proof` target strips CRLF before `chmod +x`.
 
 ### Fly Config Sanitization
 
@@ -193,7 +214,9 @@ Current evidence:
 Current gap:
 
 - No TypeScript-specific runtime variables, process names, or health checks are
-  defined in Fly config.
+  defined in Fly config. The TypeScript proof target relies on Docker
+  `--target ts-api-runtime-proof` and is intentionally not selected by
+  `fly.toml`.
 
 ### Startup And Schema Behavior
 
@@ -216,6 +239,9 @@ Current gap:
   or TypeScript schema dry-run wired into the production image.
 - There is no decision yet on whether TypeScript uses the existing Flask
   `manage.py init-db`, a Drizzle migration path, or a transitional dual check.
+- `deploy/ts-api-proof-entrypoint.sh` deliberately creates only the parent
+  directories for copied local paths, then starts Node. It does not claim schema
+  initialization or migration readiness.
 
 ### Runtime Environment
 
@@ -232,11 +258,12 @@ Current evidence:
 - Flask owns `PLAYER_WIKI_*` runtime env vars and port `8080`.
 - The TypeScript API local slice reads `CPW_DB_PATH` and `CPW_CAMPAIGNS_DIR` in
   local rehearsal docs.
+- The proof-only entrypoint maps `PLAYER_WIKI_PORT` to `PORT`,
+  `PLAYER_WIKI_DB_PATH` to `CPW_DB_PATH`, and `PLAYER_WIKI_CAMPAIGNS_DIR` to
+  `CPW_CAMPAIGNS_DIR` when the TypeScript-specific env vars are not supplied.
 
 Current gaps:
 
-- `CPW_DB_PATH` and `CPW_CAMPAIGNS_DIR` are not mapped from Fly
-  `PLAYER_WIKI_DB_PATH` and `PLAYER_WIKI_CAMPAIGNS_DIR`.
 - Port ownership between Gunicorn and Hono is undecided.
 - No process supervisor or proxy plan exists for running both Flask and
   TypeScript in one image.
@@ -334,6 +361,7 @@ Current gap:
 | Label | Meaning | Required evidence |
 | --- | --- | --- |
 | `not packaged` | TypeScript API can run locally but is not part of a production-like image. | Current state. Local `apps/api` scripts may pass, but Docker/Fly startup does not include TypeScript. |
+| `static image path scaffolded` | A non-default image target and proof entrypoint exist, and static checks verify the build/start/env-mapping shape without running Docker. | `npm --prefix apps/api run test:packaging-proof`, Docker context hygiene review, and explicit documentation that default Flask packaging remains unchanged. |
 | `local image builds` | A local-only image includes the intended TypeScript runtime and builds without live dependencies. | Local Docker build transcript, Docker context hygiene, TypeScript build inside image or copied deliberate artifact, no private/live identifiers. |
 | `staging image boots with copied data` | The image boots locally or in a non-live staging target against copied data and passes local health/smoke checks. | Copied SQLite/content paths, schema/migration proof, `/healthz`, `/app-next/` if applicable, protected asset check, no live paths. |
 | `user-approved deploy ready` | The image and rollback plan are ready for an explicitly approved deploy step. | Staging snapshot rehearsal, rollback transcript, final route/data parity gates, clean committed state, explicit user approval. |
@@ -343,18 +371,20 @@ mutation keeps the label at the previous stage.
 
 ## Current Concrete Gaps
 
-- The current production image is Flask/Gunicorn only.
-- The final Docker stage does not include Node, API dependencies, or
+- The default production image is Flask/Gunicorn only.
+- The default final Docker stage does not include Node, API dependencies, or
   `apps/api/dist`.
-- The Dockerfile does not build or start `apps/api`.
+- The Dockerfile builds and starts `apps/api` only in the non-default
+  `ts-api-runtime-proof` target.
 - The entrypoint has no TypeScript process, process supervisor, proxy, or
   TypeScript-only cutover command.
 - Fly config has no TypeScript-specific process, port, or health check.
-- TypeScript env names used by local rehearsal docs are not mapped to current
-  Fly `PLAYER_WIKI_*` env names.
+- TypeScript env names are mapped only in the proof entrypoint, not in the
+  default Flask entrypoint or Fly process model.
 - Startup schema behavior is still Flask `manage.py init-db`; TypeScript
   migration dry-run/startup behavior is unproven.
-- No local production image transcript exists for a TypeScript API runtime.
+- No local Docker build transcript exists for a TypeScript API runtime because
+  Docker was unavailable in the current worktree environment.
 - No image-level rollback transcript exists for returning from TypeScript to the
   last known-good Flask image.
 
@@ -363,8 +393,10 @@ mutation keeps the label at the previous stage.
 1. Decide the packaging shape: TypeScript-only replacement, temporary
    Flask-plus-TypeScript image, separate sidecar, or local-only Hono proof until
    cutover.
-2. Add a non-live Docker proof lane that builds `apps/api` inside Docker and
-   boots only against copied data.
+2. Run the non-live Docker proof lane with
+   `docker build --pull=false --target ts-api-runtime-proof -t
+   campaign-player-wiki-ts-proof:local .` when Docker is available, then boot
+   it only against copied data.
 3. Define the migration/startup boundary between Flask `manage.py init-db` and
    the TypeScript/Drizzle path.
 4. Add a rollback runbook with image and data boundaries before any deploy
