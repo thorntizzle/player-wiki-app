@@ -3056,7 +3056,96 @@ def test_typescript_dnd_character_create_paladin_writes_resources_equipment_and_
         headers=typescript_api_mutation_server["dm_headers"],
     )
     assert level_up_status == 200
-    assert level_up_payload["supported"] is False
+    assert level_up_payload["supported"] is True
+    assert level_up_payload["lane"] == "ready"
+    assert level_up_payload["level_up"]["state_revision"] == 1
+    assert level_up_payload["level_up"]["next_level"] == 2
+    assert level_up_payload["level_up"]["values"]["hp_gain"] == "6"
+    assert level_up_payload["level_up"]["preview"]["gained_features"] == [
+        "Fighting Style",
+        "Spellcasting",
+        "Divine Smite",
+    ]
+    assert level_up_payload["level_up"]["preview"]["resources"] == ["Lay on Hands"]
+    assert level_up_payload["level_up"]["preview"]["spell_slots"] == ["1st level: 2"]
+
+    level_up_status, level_up_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{character_slug}/level-up",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": 1,
+            "values": {
+                "advancement_mode": "advance_existing",
+                "target_class_row_id": "class-1",
+                "hp_gain": "6",
+            },
+        },
+    )
+    assert level_up_status == 200
+    assert level_up_payload["message"] == "Character level-up saved."
+    leveled_definition = level_up_payload["character"]["definition"]
+    leveled_state = level_up_payload["character"]["state_record"]
+    assert leveled_definition["profile"]["class_level_text"] == "Paladin 2"
+    assert leveled_definition["profile"]["classes"][0]["level"] == 2
+    assert leveled_definition["profile"]["classes"][0]["id"] == "class-1"
+    assert leveled_definition["stats"]["max_hp"] == 18
+    leveled_features_by_id = {feature["id"]: feature for feature in leveled_definition["features"]}
+    assert leveled_features_by_id["fighting-style-2"]["name"] == "Fighting Style"
+    assert "deferred choice" in leveled_features_by_id["fighting-style-2"]["description_markdown"]
+    assert leveled_features_by_id["spellcasting-2"]["name"] == "Spellcasting"
+    assert leveled_features_by_id["divine-smite-2"]["name"] == "Divine Smite"
+    assert leveled_features_by_id["divine-smite-2"]["source_kind"] == "native_progression"
+    leveled_resources_by_id = {resource["id"]: resource for resource in leveled_definition["resource_templates"]}
+    assert leveled_resources_by_id["divine-sense"]["max"] == 3
+    assert leveled_resources_by_id["lay-on-hands"]["max"] == 10
+    assert leveled_resources_by_id["lay-on-hands"]["initial_current"] == 10
+    spellcasting = leveled_definition["spellcasting"]
+    assert spellcasting["spellcasting_class"] == "Paladin"
+    assert spellcasting["spellcasting_ability"] == "Charisma"
+    assert spellcasting["spell_save_dc"] == 12
+    assert spellcasting["spell_attack_bonus"] == 4
+    assert spellcasting["slot_progression"] == [{"level": 1, "max_slots": 2}]
+    assert spellcasting["slot_lanes"] == [
+        {
+            "id": "class-1-slots",
+            "title": "Spell slots",
+            "shared": False,
+            "row_ids": ["class-1"],
+            "slot_progression": [{"level": 1, "max_slots": 2}],
+        }
+    ]
+    assert spellcasting["class_rows"][0]["class_row_id"] == "class-1"
+    assert spellcasting["class_rows"][0]["class_name"] == "Paladin"
+    assert spellcasting["class_rows"][0]["level"] == 2
+    assert spellcasting["class_rows"][0]["caster_progression"] == "1/2"
+    assert spellcasting["class_rows"][0]["spell_mode"] == "prepared"
+    assert spellcasting["class_rows"][0]["prepared_spell_limit"] == 3
+    assert spellcasting["spells"] == []
+    assert leveled_definition["source"]["native_progression"]["hp_baseline"] == {"level": 1, "max_hp": 12}
+    level_up_history = leveled_definition["source"]["native_progression"]["history"]
+    assert level_up_history[-1]["kind"] == "level_up"
+    assert level_up_history[-1]["class_name"] == "Paladin"
+    assert level_up_history[-1]["hp_gain"] == 6
+    assert leveled_state["revision"] == 2
+    assert leveled_state["state"]["vitals"]["current_hp"] == 18
+    assert leveled_state["state"]["hit_dice"]["pools"] == [{"faces": 10, "current": 1, "max": 2}]
+    leveled_state_resources_by_id = {resource["id"]: resource for resource in leveled_state["state"]["resources"]}
+    assert leveled_state_resources_by_id["divine-sense"]["current"] == 3
+    assert leveled_state_resources_by_id["divine-sense"]["max"] == 3
+    assert leveled_state_resources_by_id["lay-on-hands"]["current"] == 10
+    assert leveled_state_resources_by_id["lay-on-hands"]["max"] == 10
+    assert leveled_state["state"]["spell_slots"] == [
+        {"level": 1, "max": 2, "used": 0, "slot_lane_id": "class-1-slots"}
+    ]
+
+    written_definition = yaml.safe_load((character_dir / "definition.yaml").read_text(encoding="utf-8"))
+    written_import = yaml.safe_load((character_dir / "import.yaml").read_text(encoding="utf-8"))
+    assert written_definition["profile"]["class_level_text"] == "Paladin 2"
+    assert written_definition["source"]["native_progression"]["history"][-1]["class_name"] == "Paladin"
+    assert written_definition["spellcasting"]["class_rows"][0]["spell_mode"] == "prepared"
+    assert written_definition["resource_templates"][1]["max"] == 10
+    assert written_import["source_path"] == "builder://dnd5e-create-level-one"
 
     duplicate_status, duplicate_payload = _to_json(
         f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",

@@ -1418,7 +1418,7 @@ function reconcileAdvancedEditorCustomFeatureResourcesState(
       : nonNegativeInt(template.max, 0);
     nextResources.push({
       ...template,
-      current: clampInt(existing.current, nonNegativeInt(template.current, 0), maxValue),
+      current: reconciledResourceCurrent(existing, template, maxValue),
     });
   }
   state.resources = nextResources;
@@ -1455,10 +1455,70 @@ function reconcileResourceStateFromDefinition(
       : nonNegativeInt(template.max, 0);
     nextResources.push({
       ...template,
-      current: clampInt(existing.current, nonNegativeInt(template.current, 0), maxValue),
+      current: reconciledResourceCurrent(existing, template, maxValue),
     });
   }
   state.resources = nextResources;
+}
+
+function reconciledResourceCurrent(
+  existing: Record<string, unknown>,
+  template: Record<string, unknown>,
+  maxValue: number | undefined,
+): number {
+  const templateCurrent = nonNegativeInt(template.current, 0);
+  if (maxValue === undefined) {
+    return clampInt(existing.current, templateCurrent);
+  }
+
+  const existingCurrent = clampInt(existing.current, 0);
+  if (existing.max !== null && existing.max !== undefined) {
+    const existingMax = nonNegativeInt(existing.max, maxValue);
+    if (maxValue > existingMax) {
+      const spent = Math.max(0, existingMax - Math.min(existingCurrent, existingMax));
+      return Math.max(0, Math.min(maxValue - spent, maxValue));
+    }
+  }
+  return clampInt(existingCurrent, templateCurrent, maxValue);
+}
+
+function spellSlotStateKey(slot: Record<string, unknown>): string {
+  return `${normalizeSpellSlotLaneId(slot.slot_lane_id)}|${asInt(slot.level, 0)}`;
+}
+
+function reconcileSpellSlotStateFromDefinition(
+  state: Record<string, unknown>,
+  definition: Record<string, unknown>,
+): void {
+  const templateSlots = buildSpellSlotStates(definition).map((slot) => asRecord(slot));
+  if (templateSlots.length === 0) {
+    return;
+  }
+  const existingSlots = asArray(state.spell_slots).map((slot) => asRecord(slot));
+  const existingByKey = new Map(
+    existingSlots.map((slot) => [spellSlotStateKey(slot), slot] as const),
+  );
+  const legacySlotsByLevel = new Map<number, Record<string, unknown>[]>();
+  for (const slot of existingSlots) {
+    if (normalizeSpellSlotLaneId(slot.slot_lane_id)) {
+      continue;
+    }
+    const level = asInt(slot.level, 0);
+    legacySlotsByLevel.set(level, [...(legacySlotsByLevel.get(level) ?? []), slot]);
+  }
+
+  state.spell_slots = templateSlots.map((template) => {
+    const laneId = normalizeSpellSlotLaneId(template.slot_lane_id);
+    const level = asInt(template.level, 0);
+    const maxSlots = nonNegativeInt(template.max, 0);
+    const existing =
+      existingByKey.get(spellSlotStateKey(template)) ??
+      (laneId ? (legacySlotsByLevel.get(level) ?? []).shift() : undefined);
+    return {
+      ...template,
+      used: clampInt(asRecord(existing).used, 0, maxSlots),
+    };
+  });
 }
 
 function normalizeAttunementState(inventory: unknown[]): Record<string, unknown> {
@@ -3822,6 +3882,7 @@ export function updateCharacterLevelUpDefinitionState(
     nextState.vitals = vitals;
     nextState.hit_dice = normalizeHitDiceState(nextDefinition, nextState.hit_dice);
     reconcileResourceStateFromDefinition(nextState, nextDefinition);
+    reconcileSpellSlotStateFromDefinition(nextState, nextDefinition);
 
     const now = utcIsoTimestamp();
     if (stateRowMissing) {

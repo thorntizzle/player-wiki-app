@@ -7383,7 +7383,7 @@ function supportedTypeScriptLevelUpClassRow(definition: Record<string, unknown>)
   if (!(classKey in DND_LEVEL_ONE_CLASS_CONFIGS) || currentLevel !== 1) {
     return null;
   }
-  if (classKey !== "fighter" && classKey !== "barbarian" && classKey !== "rogue" && classKey !== "monk") {
+  if (classKey !== "fighter" && classKey !== "barbarian" && classKey !== "rogue" && classKey !== "monk" && classKey !== "paladin") {
     return null;
   }
   return {
@@ -7479,6 +7479,34 @@ function levelTwoFeatureRows(classKey: DndLevelOneClassKey): Array<Record<string
       },
     ];
   }
+  if (classKey === "paladin") {
+    return [
+      {
+        id: "fighting-style-2",
+        name: "Fighting Style",
+        category: "class_feature",
+        source: "PHB",
+        source_kind: "native_progression",
+        description_markdown: "At 2nd level, you choose a Fighting Style. This TypeScript slice records the feature as a deferred choice; broad Fighting Style selection UI remains pending.",
+      },
+      {
+        id: "spellcasting-2",
+        name: "Spellcasting",
+        category: "class_feature",
+        source: "PHB",
+        source_kind: "native_progression",
+        description_markdown: "At 2nd level, you can prepare and cast Paladin spells. This slice initializes Paladin spell slots and spellcasting math without adding prepared-spell choice UI.",
+      },
+      {
+        id: "divine-smite-2",
+        name: "Divine Smite",
+        category: "class_feature",
+        source: "PHB",
+        source_kind: "native_progression",
+        description_markdown: "Starting at 2nd level, when you hit a creature with a melee weapon attack, you can expend a spell slot to deal radiant damage.",
+      },
+    ];
+  }
   return [
     {
       id: "action-surge-2",
@@ -7508,6 +7536,22 @@ function levelTwoResourceTemplates(classKey: DndLevelOneClassKey): Array<Record<
       },
     ];
   }
+  if (classKey === "paladin") {
+    return [
+      {
+        id: "lay-on-hands",
+        label: "Lay on Hands",
+        category: "class_feature",
+        max: 10,
+        initial_current: 10,
+        reset_on: "long_rest",
+        reset_to: "max",
+        rest_behavior: "restore_full",
+        notes: "Healing pool points.",
+        display_order: 20,
+      },
+    ];
+  }
   if (classKey !== "fighter") {
     return [];
   }
@@ -7526,6 +7570,57 @@ function levelTwoResourceTemplates(classKey: DndLevelOneClassKey): Array<Record<
   ];
 }
 
+function levelTwoSpellcasting(
+  classKey: DndLevelOneClassKey,
+  definition: Record<string, unknown>,
+  classRow: Record<string, unknown>,
+): Record<string, unknown> | null {
+  if (classKey !== "paladin") {
+    return null;
+  }
+  const abilityScores = asRecord(asRecord(definition.stats).ability_scores);
+  const charismaModifier = abilityModifier(dndAbilityScoreValue(abilityScores, "cha"));
+  const spellSaveDc = 8 + 2 + charismaModifier;
+  const spellAttackBonus = 2 + charismaModifier;
+  const classRowId = stringifyEditorValue(classRow.id).trim() || "class-1";
+  const slotLaneId = `${classRowId}-slots`;
+  const slotProgression = [{ level: 1, max_slots: 2 }];
+  const preparedSpellLimit = Math.max(1, Math.floor(2 / 2) + charismaModifier);
+  const existingSpellcasting = asRecord(definition.spellcasting);
+  return {
+    spellcasting_class: "Paladin",
+    spellcasting_ability: "Charisma",
+    spell_save_dc: spellSaveDc,
+    spell_attack_bonus: spellAttackBonus,
+    slot_progression: slotProgression.map((slot) => ({ ...slot })),
+    slot_lanes: [
+      {
+        id: slotLaneId,
+        title: "Spell slots",
+        shared: false,
+        row_ids: [classRowId],
+        slot_progression: slotProgression.map((slot) => ({ ...slot })),
+      },
+    ],
+    class_rows: [
+      {
+        class_row_id: classRowId,
+        class_name: "Paladin",
+        level: 2,
+        caster_progression: "1/2",
+        spell_mode: "prepared",
+        spellcasting_ability: "Charisma",
+        spell_save_dc: spellSaveDc,
+        spell_attack_bonus: spellAttackBonus,
+        slot_lane_id: slotLaneId,
+        spell_list_class_name: "Paladin",
+        prepared_spell_limit: preparedSpellLimit,
+      },
+    ],
+    spells: asArray(existingSpellcasting.spells).map((spell) => ({ ...asRecord(spell) })),
+  };
+}
+
 function appendRowsById(existingRows: unknown, rowsToAppend: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
   const existing = asArray(existingRows).map((row) => asRecord(row));
   const existingIds = new Set(existing.map((row) => stringifyEditorValue(row.id).trim()).filter(Boolean));
@@ -7538,6 +7633,29 @@ function appendRowsById(existingRows: unknown, rowsToAppend: Array<Record<string
     nextRows.push(JSON.parse(JSON.stringify(row)) as Record<string, unknown>);
     if (rowId) {
       existingIds.add(rowId);
+    }
+  }
+  return nextRows;
+}
+
+function upsertRowsById(existingRows: unknown, rowsToUpsert: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const nextRows = asArray(existingRows).map((row) => ({ ...asRecord(row) }));
+  const indexById = new Map(
+    nextRows
+      .map((row, index) => [stringifyEditorValue(row.id).trim(), index] as const)
+      .filter(([rowId]) => Boolean(rowId)),
+  );
+  for (const row of rowsToUpsert) {
+    const rowId = stringifyEditorValue(row.id).trim();
+    const clonedRow = JSON.parse(JSON.stringify(row)) as Record<string, unknown>;
+    if (rowId && indexById.has(rowId)) {
+      const index = indexById.get(rowId) ?? -1;
+      nextRows[index] = { ...nextRows[index], ...clonedRow };
+      continue;
+    }
+    nextRows.push(clonedRow);
+    if (rowId) {
+      indexById.set(rowId, nextRows.length - 1);
     }
   }
   return nextRows;
@@ -7618,6 +7736,7 @@ export function buildCharacterLevelUpPayload({
   const maxHp = createContextInteger(asRecord(definition.stats).max_hp) + hpGain;
   const gainedFeatures = levelTwoFeatureRows(supportedRow.classKey).map((feature) => stringifyEditorValue(feature.name).trim());
   const resources = levelTwoResourceTemplates(supportedRow.classKey).map((resource) => stringifyEditorValue(resource.label).trim());
+  const spellSlots = supportedRow.classKey === "paladin" ? ["1st level: 2"] : [];
   const context = {
     state_revision: stateRevision,
     values: normalizedValues,
@@ -7643,8 +7762,8 @@ export function buildCharacterLevelUpPayload({
     requires_subclass: false,
     choice_sections: [],
     limitations: [
-      "TypeScript level-up save parity currently supports only the bounded level-1 to level-2 Fighter/Barbarian/Rogue/Monk sheets created by the TypeScript DND-5E level-one slice.",
-      "Multiclassing, subclass choices, ASI/feat choices, spell growth, imported-sheet repair, and broader native builder derivation remain pending.",
+      "TypeScript level-up save parity currently supports only the bounded level-1 to level-2 Fighter/Barbarian/Rogue/Monk/Paladin sheets created by the TypeScript DND-5E level-one slice.",
+      "Multiclassing, subclass choices, ASI/feat choices, broad Fighting Style UI, prepared-spell choice UI, imported-sheet repair, and broader native builder derivation remain pending.",
     ],
     preview: {
       class_level_text: `${className} ${supportedRow.currentLevel + 1}`,
@@ -7653,7 +7772,7 @@ export function buildCharacterLevelUpPayload({
       gained_features: gainedFeatures,
       resources,
       attacks: asArray(definition.attacks).map((attack) => stringifyEditorValue(asRecord(attack).name).trim()).filter(Boolean),
-      spell_slots: [],
+      spell_slots: spellSlots,
       new_spells: [],
     },
     field_live_preview: {},
@@ -7737,10 +7856,14 @@ export function applyCharacterLevelUpUpdate(
   }
   nextDefinition.stats = stats;
   nextDefinition.features = appendRowsById(nextDefinition.features, levelTwoFeatureRows(supportedRow.classKey));
-  nextDefinition.resource_templates = appendRowsById(
+  nextDefinition.resource_templates = upsertRowsById(
     nextDefinition.resource_templates,
     levelTwoResourceTemplates(supportedRow.classKey),
   );
+  const spellcasting = levelTwoSpellcasting(supportedRow.classKey, nextDefinition, classRow);
+  if (spellcasting) {
+    nextDefinition.spellcasting = spellcasting;
+  }
 
   return {
     status: "ok",
