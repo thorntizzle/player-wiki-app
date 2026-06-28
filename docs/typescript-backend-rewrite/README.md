@@ -19,6 +19,7 @@ This folder tracks the deliberate TypeScript backend rewrite path for Campaign P
 - `staging-rehearsal-harness.md` and `scripts/staging_rehearsal_harness.py`: guarded copied-data/staging-snapshot transcript scaffold, path checks, evidence manifests, family-specific transcript guides, and restore-equivalence comparison helper for TypeScript write-family readiness.
 - `combat-rehearsal-readiness.md`: Combat copied-data rehearsal status, commands, evidence checklist, and remaining staging snapshot gate.
 - `combat-copied-data-rehearsal-2026-06-28.md`: completed no-live copied-fixture Combat backup/mutate/restore transcript.
+- `systems-copied-data-rehearsal-2026-06-28.md`: completed no-live copied-fixture Systems and shared-source backup/mutate/restore transcript.
 - `rollback-cutover-runbook.md`: no-live rollback and full cutover evidence runbook, including the `rollback-cutover` harness guide for last known-good Flask target, pre-cutover backups, TypeScript data-delta decisions, restore command shape, and Flask health smoke.
 - `.local/roadmaps/typescript-backend-rewrite-roadmap.md`: local active task queue for the rewrite track.
 - `docs/current-state/INDEX.md`: current product contract index. Use it to confirm present behavior before porting any workflow.
@@ -397,41 +398,43 @@ Do not implement these routes as part of the parity program unless a later archi
   forbiddance, update-row shape validation, boolean enablement validation, source-id validation,
   private/admin and public-allowed visibility gates, proprietary source acknowledgement,
   `campaign_system_policies` and `campaign_enabled_sources` upserts, `auth_audit_log`
-  source-update events, refreshed source rows, and missing-campaign JSON. Current validation covers a
-  disposable fixture database only; production or staging write readiness remains gated by migration,
-  backup, copied-data rehearsal, and rollback approval.
+  source-update events, refreshed source rows, and missing-campaign JSON. Fixture route validation
+  exists; `systems-copied-data-rehearsal-2026-06-28.md` records the copied-data rollback pass for the
+  combined Systems write family. Production or staging write readiness remains gated by migration,
+  staging snapshot rehearsal, and rollback approval.
 - The bounded Systems entry override write route now serves `PUT .../systems/overrides/*` for
   bearer-token DM/admin actors against `CPW_DB_PATH`, preserving slashy entry keys, fixture-role
   write denial, player/outsider forbiddance, Flask-compatible boolean coercion, private/admin and
   public-allowed visibility gates, `campaign_system_policies` and `campaign_entry_overrides`
   upserts, `auth_audit_log` entry-override events, serialized override/entry responses, and
-  missing-campaign JSON. Current validation covers a disposable fixture database only; production or
-  staging write readiness remains gated by migration, backup, copied-data rehearsal, and rollback
-  approval.
+  missing-campaign JSON. Fixture route validation exists; `systems-copied-data-rehearsal-2026-06-28.md`
+  records the copied-data rollback pass for the combined Systems write family. Production or staging
+  write readiness remains gated by migration, staging snapshot rehearsal, and rollback approval.
 - The custom campaign Systems entry write family now serves `POST .../systems/custom-entries`,
   `PUT .../systems/custom-entries/:entrySlug`, and the archive/restore POST routes for bearer-token
   DM/admin actors against `CPW_DB_PATH`, preserving custom source bootstrap, slug/key preservation,
   title/type/visibility/body validation, item-only linked page validation, SQLite `systems_entries`
   and `campaign_entry_overrides` writes, override-based archive/restore, `auth_audit_log` custom
   entry events, serialized entry responses, refreshed DM Content Systems payloads, and
-  missing-campaign JSON. Current validation covers a disposable fixture database only; production or
-  staging write readiness remains gated by migration, backup, copied-data rehearsal, and rollback
-  approval.
+  missing-campaign JSON. Fixture route validation exists; `systems-copied-data-rehearsal-2026-06-28.md`
+  records the copied-data rollback pass for the combined Systems write family. Production or staging
+  write readiness remains gated by migration, staging snapshot rehearsal, and rollback approval.
 - The campaign item mechanics import route now serves `POST .../systems/item-mechanics/import` for
   bearer-token DM/admin actors against `CPW_DB_PATH`, preserving published item-page validation,
   custom source bootstrap, imported item slug/key reuse, linked page metadata, approved modeled
   review payloads, override preservation on refresh, `campaign_systems_item_mechanics_imported`
   audit rows, serialized entry responses, refreshed DM Content Systems payloads, and
-  missing-campaign JSON. Current validation covers a disposable fixture database only; production or
-  staging write readiness remains gated by migration, backup, copied-data rehearsal, and rollback
-  approval.
+  missing-campaign JSON. Fixture route validation exists; `systems-copied-data-rehearsal-2026-06-28.md`
+  records the copied-data rollback pass for the combined Systems write family. Production or staging
+  write readiness remains gated by migration, staging snapshot rehearsal, and rollback approval.
 - The shared DND-5E Systems import route now serves `POST /api/v1/systems/imports/dnd5e` for bearer
   API-token app-admin actors against `CPW_DB_PATH`, preserving fixture-role write denial, source and
   entry-type validation, `.zip` archive validation through a small pure-JS dependency, unsafe archive
   path rejection, mechanics-only media stripping, `systems_import_runs` persistence, and source-row
-  replacement for the requested source/type slice. Current validation covers a disposable fixture
-  database only; production or staging import readiness remains gated by migration, backup,
-  copied-data rehearsal, and rollback approval.
+  replacement for the requested source/type slice. Fixture route validation exists;
+  `systems-copied-data-rehearsal-2026-06-28.md` records the copied-data rollback pass for the combined
+  Systems write family. Production or staging import readiness remains gated by migration, staging
+  snapshot rehearsal, and rollback approval.
 - The DM Content statblock and custom condition API mutations now serve bearer-token DM/admin
   create/update/delete routes against `CPW_DB_PATH`, preserving Flask-compatible durable-actor
   requirements, markdown statblock upload validation and parser field extraction, condition
