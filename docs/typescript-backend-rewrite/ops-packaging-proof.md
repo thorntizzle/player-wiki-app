@@ -295,8 +295,10 @@ Collect:
 
 Current gap:
 
-- Rollback is required by the charter, but an image-level TypeScript rollback
-  transcript has not been captured.
+- Rollback is required by the charter. `rollback-cutover-runbook.md` and the
+  staging harness `rollback-cutover` guide now define the no-live transcript
+  fields, but an image-level TypeScript rollback transcript has not been
+  completed.
 
 ## Packaging Proof Transcript Template
 
@@ -385,7 +387,8 @@ mutation keeps the label at the previous stage.
   migration dry-run/startup behavior is unproven.
 - No local Docker build transcript exists for a TypeScript API runtime because
   Docker was unavailable in the current worktree environment.
-- No image-level rollback transcript exists for returning from TypeScript to the
+- A no-live rollback/cutover transcript scaffold exists, but no image-level
+  rollback transcript has been completed for returning from TypeScript to the
   last known-good Flask image.
 
 ## Next Packaging Work
@@ -399,5 +402,5 @@ mutation keeps the label at the previous stage.
    it only against copied data.
 3. Define the migration/startup boundary between Flask `manage.py init-db` and
    the TypeScript/Drizzle path.
-4. Add a rollback runbook with image and data boundaries before any deploy
-   request.
+4. Complete the rollback/cutover transcript with image and data boundaries
+   before any deploy request.

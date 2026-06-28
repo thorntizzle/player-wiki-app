@@ -58,6 +58,39 @@ FAMILY_TABLES: dict[str, tuple[str, ...]] = {
         "campaign_pages",
         "campaign_page_sync_state",
     ),
+    "rollback-cutover": (
+        "users",
+        "user_preferences",
+        "campaign_memberships",
+        "campaign_visibility_settings",
+        "character_assignments",
+        "api_tokens",
+        "auth_audit_log",
+        "character_state",
+        "campaign_sessions",
+        "campaign_session_states",
+        "campaign_session_messages",
+        "campaign_session_articles",
+        "campaign_session_article_images",
+        "campaign_dm_statblocks",
+        "campaign_dm_condition_definitions",
+        "campaign_combat_trackers",
+        "campaign_combatants",
+        "campaign_combat_conditions",
+        "campaign_combatant_resource_counters",
+        "campaign_combatant_resource_notes",
+        "systems_libraries",
+        "systems_sources",
+        "systems_entries",
+        "systems_import_runs",
+        "systems_shared_entry_edit_events",
+        "systems_entry_links",
+        "campaign_system_policies",
+        "campaign_enabled_sources",
+        "campaign_entry_overrides",
+        "campaign_pages",
+        "campaign_page_sync_state",
+    ),
 }
 
 
@@ -105,6 +138,40 @@ FAMILY_REHEARSAL_GUIDES: dict[str, dict[str, tuple[str, ...] | str]] = {
             "Restored linked character_state JSON and revision values must match baseline.",
             "Restored player Combat, DM Status, DM Controls, and live-state samples must match baseline or list exact accepted differences.",
         ),
+        "safety_note": "This copied-data result is not `staging snapshot ready` unless the source snapshot was explicitly approved as staging-equivalent and the transcript records that approval.",
+    },
+    "rollback-cutover": {
+        "label_before": "staging snapshot ready",
+        "label_after": "cutover rehearsal passed",
+        "routes": (
+            "Flask authority /healthz smoke before TypeScript routing changes.",
+            "TypeScript /healthz smoke against copied or staging-equivalent data.",
+            "Representative auth, Campaign Home, wiki, search, help, DM Content, Systems, Characters, Session, and Combat smoke paths.",
+            "Rollback runtime repoint/redeploy command shape back to the last known-good Flask commit or image.",
+            "Post-rollback Flask /healthz and representative player/DM smoke paths.",
+        ),
+        "baseline": (
+            "Record the last known-good Flask commit SHA, image tag/id if available, branch, and build source.",
+            "Record the TypeScript branch/commit and route snapshot/check status under rehearsal.",
+            "Record pre-cutover SQLite backup command, archive path, contents summary, and checksum.",
+            "Record pre-cutover campaign-content backup command, archive path, contents summary, and checksum.",
+            "Record local or staging-equivalent runtime environment without real Fly app identifiers, tokens, secrets, or live paths.",
+        ),
+        "mutation": (
+            "Run the full charter workflow smoke on copied or user-approved staging-equivalent data only.",
+            "Record every TypeScript write accepted during the smoke with route/action, actor role, affected files/tables, and response payload.",
+            "Classify each TypeScript data delta as revert, preserve, merge manually, or block rollback until operator decision.",
+            "Record migration dry-run/startup schema evidence and any additive schema deltas before rollback.",
+            "Do not run Fly deploy, live sync, live API writes, or commands pointed at production volumes in this harness.",
+        ),
+        "equivalence": (
+            "Rollback command shape must name the Flask commit/image target and restore archive inputs, using placeholders for private app identity.",
+            "Restored SQLite row counts, campaign-content hashes, and sampled API responses must match the pre-cutover baseline or list exact accepted differences.",
+            "Post-rollback Flask health smoke must pass before the transcript can pass.",
+            "The data-delta decision tree must resolve every TypeScript write accepted before rollback.",
+            "Any unresolved delta, failed restore, failed Flask health smoke, or live-path dependency keeps the result blocked.",
+        ),
+        "safety_note": "This rehearsal result is not production cutover approval; PR, merge, deploy, Fly sync, and live cutover still require explicit user approval.",
     }
 }
 
@@ -275,7 +342,7 @@ def family_guide_markdown(family: str) -> str:
 ### Honest Label Transition
 - Label before: `{guide["label_before"]}`
 - Label after only if backup, mutation, restore, and equivalence all pass: `{guide["label_after"]}`
-- This copied-data result is not `staging snapshot ready` unless the source snapshot was explicitly approved as staging-equivalent and the transcript records that approval.
+- {guide["safety_note"]}
 """
 
 

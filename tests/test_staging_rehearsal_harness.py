@@ -43,6 +43,22 @@ def _write_combat_database(path: Path) -> None:
         connection.commit()
 
 
+def _write_cutover_database(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE users (id TEXT NOT NULL)")
+        connection.execute("CREATE TABLE campaign_memberships (id TEXT NOT NULL)")
+        connection.execute("CREATE TABLE character_state (id TEXT NOT NULL)")
+        connection.execute("CREATE TABLE campaign_sessions (id TEXT NOT NULL)")
+        connection.execute("CREATE TABLE campaign_combat_trackers (id TEXT NOT NULL)")
+        connection.execute("CREATE TABLE campaign_pages (id TEXT NOT NULL)")
+        connection.execute("INSERT INTO users (id) VALUES ('operator')")
+        connection.execute("INSERT INTO campaign_memberships (id) VALUES ('dm')")
+        connection.execute("INSERT INTO character_state (id) VALUES ('arden')")
+        connection.execute("INSERT INTO campaign_pages (id) VALUES ('home')")
+        connection.commit()
+
+
 def test_init_rehearsal_creates_guarded_folder_and_transcript(tmp_path):
     harness = _load_harness_module()
     root = tmp_path / ".task-temp" / "content-character-rehearsal"
@@ -82,6 +98,31 @@ def test_combat_rehearsal_transcript_includes_concrete_write_family_plan(tmp_pat
     assert "Restored linked character_state JSON and revision values must match baseline." in transcript
     assert "Label before: `fixture-write validated`" in transcript
     assert "Label after only if backup, mutation, restore, and equivalence all pass: `copied-data rollback ready`" in transcript
+
+
+def test_rollback_cutover_transcript_captures_runbook_evidence(tmp_path):
+    harness = _load_harness_module()
+    root = tmp_path / ".task-temp" / "rollback-cutover"
+
+    result = harness.init_rehearsal(
+        rehearsal_id="rollback-cutover",
+        family="rollback-cutover",
+        root=root,
+        source_description="copied staging-equivalent snapshot",
+        source_approval="test approval",
+        dry_run=True,
+    )
+
+    transcript = result["transcript_preview"]
+    assert "Write family: rollback-cutover" in transcript
+    assert "Record the last known-good Flask commit SHA, image tag/id if available, branch, and build source." in transcript
+    assert "Record pre-cutover SQLite backup command, archive path, contents summary, and checksum." in transcript
+    assert "Record pre-cutover campaign-content backup command, archive path, contents summary, and checksum." in transcript
+    assert "Classify each TypeScript data delta as revert, preserve, merge manually, or block rollback until operator decision." in transcript
+    assert "Rollback command shape must name the Flask commit/image target and restore archive inputs, using placeholders for private app identity." in transcript
+    assert "Post-rollback Flask health smoke must pass before the transcript can pass." in transcript
+    assert "Label after only if backup, mutation, restore, and equivalence all pass: `cutover rehearsal passed`" in transcript
+    assert "This rehearsal result is not production cutover approval" in transcript
 
 
 def test_path_guard_rejects_targets_outside_rehearsal_root(tmp_path):
@@ -184,3 +225,31 @@ def test_combat_snapshot_captures_family_tables_and_restore_drift(tmp_path):
     assert comparison["changed_files"] == []
     assert comparison["sqlite_equal"] is False
     assert comparison["after_sqlite"]["tables"]["campaign_combat_conditions"] == 1
+
+
+def test_rollback_cutover_snapshot_captures_cross_domain_tables(tmp_path):
+    harness = _load_harness_module()
+    root = tmp_path / ".task-temp" / "rollback-cutover"
+    campaigns_dir = root / "input" / "campaigns"
+    db_path = root / "input" / "player_wiki.sqlite3"
+    (campaigns_dir / "linden-pass" / "content").mkdir(parents=True)
+    (campaigns_dir / "linden-pass" / "content" / "index.md").write_text(
+        "# Cutover Smoke\n",
+        encoding="utf-8",
+    )
+    _write_cutover_database(db_path)
+
+    manifest = harness.capture_snapshot(
+        root=root,
+        label="pre",
+        family="rollback-cutover",
+        db_path=db_path,
+        campaigns_dir=campaigns_dir,
+    )["manifest"]
+
+    assert manifest["sqlite"]["tables"]["users"] == 1
+    assert manifest["sqlite"]["tables"]["campaign_memberships"] == 1
+    assert manifest["sqlite"]["tables"]["character_state"] == 1
+    assert manifest["sqlite"]["tables"]["campaign_pages"] == 1
+    assert "campaign_combat_trackers" in manifest["sqlite"]["tables"]
+    assert "campaign_session_messages" in manifest["sqlite"]["missing_tables"]
