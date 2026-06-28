@@ -16,6 +16,7 @@ This folder tracks the deliberate TypeScript backend rewrite path for Campaign P
 - `typescript-route-seed.json`: provisional route seed for initial TypeScript handlers.
 - `handoff-2026-06-26.md`: current pause/resume note for the Hono rewrite branch.
 - `content-character-staging-readiness.md`: content-character write/delete rollback evidence and staging-readiness decision.
+- `staging-rehearsal-harness.md` and `scripts/staging_rehearsal_harness.py`: guarded copied-data/staging-snapshot transcript scaffold, path checks, evidence manifests, and restore-equivalence comparison helper for TypeScript write-family readiness.
 - `.local/roadmaps/typescript-backend-rewrite-roadmap.md`: local active task queue for the rewrite track.
 - `docs/current-state/INDEX.md`: current product contract index. Use it to confirm present behavior before porting any workflow.
 - `docs/api-v1.md`: current JSON API contract.
