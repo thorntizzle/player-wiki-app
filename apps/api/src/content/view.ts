@@ -116,6 +116,75 @@ function asInt(value: unknown, fallback = 0): number {
   return fallback;
 }
 
+function asBool(value: unknown, fallback = false): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on", "equipped", "attuned"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no", "off", "none", "not equipped", "not attuned"].includes(normalized)) {
+      return false;
+    }
+  }
+  return fallback;
+}
+
+function nonNegativeInt(value: unknown, fallback = 0): number {
+  return Math.max(0, asInt(value, fallback));
+}
+
+function escapeHtml(rawValue: unknown): string {
+  return String(rawValue ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderPlainMarkdownHtml(rawValue: unknown): string {
+  const text = asString(rawValue);
+  if (!text) {
+    return "";
+  }
+  return text
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => `<p>${escapeHtml(block).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
+function formatModifier(value: unknown): string {
+  if (typeof value === "string" && value.trim()) {
+    const trimmed = value.trim();
+    const numeric = Number(trimmed);
+    if (!Number.isFinite(numeric)) {
+      return trimmed;
+    }
+    value = numeric;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const normalized = Math.trunc(value);
+    return normalized >= 0 ? `+${normalized}` : String(normalized);
+  }
+  return "";
+}
+
+function titleCaseFromKey(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 const STANDARD_DND_CLASS_HIT_DICE: Record<string, number> = {
   artificer: 8,
   barbarian: 12,
@@ -424,6 +493,522 @@ function buildEmptyEquipmentState() {
   };
 }
 
+function buildOverviewStats(definition: Record<string, unknown>, state: Record<string, unknown>) {
+  const profile = asRecord(definition.profile);
+  const stats = asRecord(definition.stats);
+  const vitals = asRecord(state.vitals);
+  const overviewStats = [
+    { label: "Class", value: asString(profile.class_level_text) || profileClassLevelText(profile) },
+    { label: "Species", value: asString(profile.species) || "--" },
+    { label: "Background", value: asString(profile.background) || "--" },
+    { label: "Armor Class", value: asString(stats.armor_class) || String(asInt(stats.armor_class, 0) || "--") },
+    {
+      label: "Current HP",
+      value: `${asInt(vitals.current_hp, asInt(stats.max_hp, 0))} / ${asInt(stats.max_hp, 0) || "--"}`,
+    },
+    { label: "Temp HP", value: String(asInt(vitals.temp_hp, 0)) },
+    { label: "Initiative", value: formatModifier(stats.initiative_bonus) || "--" },
+    { label: "Speed", value: asString(stats.speed) || "--" },
+    { label: "Proficiency", value: formatModifier(stats.proficiency_bonus) || "--" },
+    { label: "Passive Perception", value: String(asInt(stats.passive_perception, 0) || "--") },
+    { label: "Passive Insight", value: String(asInt(stats.passive_insight, 0) || "--") },
+    { label: "Passive Investigation", value: String(asInt(stats.passive_investigation, 0) || "--") },
+  ];
+  return {
+    overviewStats,
+    overviewStatRows: [overviewStats.slice(0, 4), overviewStats.slice(4, 8), overviewStats.slice(8, 12)],
+  };
+}
+
+const ABILITY_LABELS: Record<string, { abbr: string; name: string }> = {
+  str: { abbr: "STR", name: "Strength" },
+  dex: { abbr: "DEX", name: "Dexterity" },
+  con: { abbr: "CON", name: "Constitution" },
+  int: { abbr: "INT", name: "Intelligence" },
+  wis: { abbr: "WIS", name: "Wisdom" },
+  cha: { abbr: "CHA", name: "Charisma" },
+};
+
+const SKILL_ABILITY_LOOKUP: Record<string, string> = {
+  acrobatics: "dex",
+  animal_handling: "wis",
+  arcana: "int",
+  athletics: "str",
+  deception: "cha",
+  history: "int",
+  insight: "wis",
+  intimidation: "cha",
+  investigation: "int",
+  medicine: "wis",
+  nature: "int",
+  perception: "wis",
+  performance: "cha",
+  persuasion: "cha",
+  religion: "int",
+  sleight_of_hand: "dex",
+  stealth: "dex",
+  survival: "wis",
+};
+
+function buildAbilitySkillPresentation(definition: Record<string, unknown>) {
+  const abilityScores = asRecord(asRecord(definition.stats).ability_scores);
+  const skills = asArray(definition.skills).map(asRecord).map((skill) => {
+    const name = asString(skill.name);
+    const skillKey = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    const proficiencyLevel = asString(skill.proficiency_level);
+    return {
+      name,
+      bonus: formatModifier(skill.bonus) || asString(skill.bonus),
+      proficiency_label: proficiencyLevel ? titleCaseFromKey(proficiencyLevel) : "",
+      is_proficient: proficiencyLevel !== "" && proficiencyLevel !== "none",
+      ability_key: asString(skill.ability_key) || SKILL_ABILITY_LOOKUP[skillKey] || "",
+    };
+  });
+  const skillsByAbility = new Map<string, typeof skills>();
+  for (const skill of skills) {
+    if (!skillsByAbility.has(skill.ability_key)) {
+      skillsByAbility.set(skill.ability_key, []);
+    }
+    skillsByAbility.get(skill.ability_key)!.push(skill);
+  }
+  const abilities = Object.entries(ABILITY_LABELS).map(([key, labels]) => {
+    const ability = asRecord(abilityScores[key]);
+    return {
+      key,
+      abbr: labels.abbr,
+      name: labels.name,
+      score: asInt(ability.score, 10),
+      modifier: formatModifier(ability.modifier),
+      save_bonus: formatModifier(ability.save_bonus),
+      skills: skillsByAbility.get(key) || [],
+    };
+  });
+  return { abilities, skills };
+}
+
+function buildProficiencyGroups(definition: Record<string, unknown>) {
+  const proficiencies = asRecord(definition.proficiencies);
+  const groups = [
+    { title: "Armor", values_list: asArray(proficiencies.armor).map(asString).filter(Boolean) },
+    { title: "Weapons", values_list: asArray(proficiencies.weapons).map(asString).filter(Boolean) },
+    { title: "Tools", values_list: asArray(proficiencies.tools).map(asString).filter(Boolean) },
+    { title: "Languages", values_list: asArray(proficiencies.languages).map(asString).filter(Boolean) },
+  ];
+  return groups.filter((group) => group.values_list.length > 0);
+}
+
+function buildReferenceSections(definition: Record<string, unknown>) {
+  const profile = asRecord(definition.profile);
+  const referenceNotes = asRecord(definition.reference_notes);
+  const sections = [
+    { title: "Biography", markdown: profile.biography_markdown },
+    { title: "Personality", markdown: profile.personality_markdown },
+    { title: "Additional Notes", markdown: referenceNotes.additional_notes_markdown },
+    { title: "Allies and Organizations", markdown: referenceNotes.allies_and_organizations_markdown },
+  ];
+  for (const custom of asArray(referenceNotes.custom_sections).map(asRecord)) {
+    sections.push({ title: asString(custom.title), markdown: custom.body_markdown });
+  }
+  return sections
+    .map((section) => ({ title: asString(section.title), html: renderPlainMarkdownHtml(section.markdown) }))
+    .filter((section) => section.title || section.html);
+}
+
+function inventoryStateRows(definition: Record<string, unknown>, state: Record<string, unknown>): Record<string, unknown>[] {
+  const stateRows = asArray(state.inventory).map(asRecord);
+  if (stateRows.length > 0) {
+    return stateRows;
+  }
+  return asArray(definition.equipment_catalog).map(asRecord).map((item) => ({
+    ...item,
+    quantity: nonNegativeInt(item.quantity ?? item.default_quantity, 1),
+    catalog_ref: asString(item.catalog_ref) || asString(item.id),
+  }));
+}
+
+function buildInventoryPresentation(definition: Record<string, unknown>, state: Record<string, unknown>) {
+  const catalogById = new Map(asArray(definition.equipment_catalog).map(asRecord).map((item) => [asString(item.id), item]));
+  return inventoryStateRows(definition, state).map((row) => {
+    const id = asString(row.id);
+    const catalogRef = asString(row.catalog_ref) || id;
+    const catalog = catalogById.get(catalogRef) || catalogById.get(id) || {};
+    const name = asString(row.name) || asString(catalog.name) || "Item";
+    const notes = asString(row.notes) || asString(catalog.notes);
+    return {
+      id,
+      item_ref: catalogRef,
+      name,
+      href: asString(asRecord(row.systems_ref).href) || asString(asRecord(catalog.systems_ref).href),
+      description_html:
+        asString(row.description_html) ||
+        asString(catalog.description_html) ||
+        renderPlainMarkdownHtml(row.description_markdown || catalog.description_markdown),
+      quantity: nonNegativeInt(row.quantity ?? row.current_quantity ?? catalog.default_quantity, 1),
+      weight: asString(row.weight) || asString(catalog.weight),
+      notes,
+      tags: [...new Set([...asArray(catalog.tags), ...asArray(row.tags)].map(asString).filter(Boolean))],
+    };
+  });
+}
+
+function isLikelyWeapon(item: Record<string, unknown>): boolean {
+  const haystack = [item.name, item.category, item.item_type, item.type, ...(asArray(item.tags) as unknown[])]
+    .map(asString)
+    .join(" ")
+    .toLowerCase();
+  if (
+    /(ammunition|arrow|bolt)/.test(haystack) &&
+    !/(weapon|crossbow|bow|sword|staff|dagger|axe|mace|spear|hammer|blade)/.test(asString(item.category).toLowerCase())
+  ) {
+    return false;
+  }
+  return /(weapon|crossbow|bow|sword|staff|dagger|axe|mace|spear|hammer|blade)/.test(haystack);
+}
+
+function buildEquipmentState(definition: Record<string, unknown>, state: Record<string, unknown>) {
+  const stateRows = inventoryStateRows(definition, state);
+  const stateByRef = new Map<string, Record<string, unknown>>();
+  for (const row of stateRows) {
+    const id = asString(row.id);
+    const catalogRef = asString(row.catalog_ref) || id;
+    if (id) {
+      stateByRef.set(id, row);
+    }
+    if (catalogRef) {
+      stateByRef.set(catalogRef, row);
+    }
+  }
+  const attunement = asRecord(state.attunement);
+  const attunedRefs = new Set(asArray(attunement.attuned_item_refs).map(asString).filter(Boolean));
+  const maxAttunedItems = nonNegativeInt(attunement.max_attuned_items, 3);
+  const rows = asArray(definition.equipment_catalog).map(asRecord).map((item) => {
+    const id = asString(item.id);
+    const stateRow = stateByRef.get(id) || {};
+    const itemRef = asString(stateRow.catalog_ref) || id;
+    const isEquipped = asBool(stateRow.is_equipped ?? item.is_equipped ?? item.equipped, false);
+    const isAttuned = attunedRefs.has(itemRef) || attunedRefs.has(id) || asBool(stateRow.is_attuned ?? item.is_attuned, false);
+    const requiresAttunement = asBool(item.requires_attunement ?? item.attunement_required, false);
+    const supportsWeaponWieldMode = asBool(item.supports_weapon_wield_mode, false) || isLikelyWeapon(item);
+    const weaponWieldMode = asString(stateRow.weapon_wield_mode) || (supportsWeaponWieldMode && isEquipped ? "main_hand" : "");
+    return {
+      id,
+      name: asString(item.name) || asString(stateRow.name) || "Item",
+      quantity: nonNegativeInt(stateRow.quantity ?? item.default_quantity, 1),
+      weight: asString(item.weight) || asString(stateRow.weight),
+      notes: asString(stateRow.notes) || asString(item.notes),
+      tags: asArray(item.tags).map(asString).filter(Boolean),
+      href: asString(asRecord(item.systems_ref).href) || asString(asRecord(stateRow.systems_ref).href),
+      description_html:
+        asString(item.description_html) ||
+        asString(stateRow.description_html) ||
+        renderPlainMarkdownHtml(item.description_markdown || stateRow.description_markdown),
+      source_label: asString(item.source_label) || asString(asRecord(item.systems_ref).source_label) || "Character sheet",
+      is_equipped: isEquipped,
+      equipped_label: isEquipped ? "Equipped" : "Not equipped",
+      is_attuned: isAttuned,
+      requires_attunement: requiresAttunement,
+      supports_attunement: requiresAttunement,
+      supports_weapon_wield_mode: supportsWeaponWieldMode,
+      weapon_wield_mode: weaponWieldMode,
+      weapon_wield_options: [
+        { value: "main_hand", label: "Main Hand" },
+        { value: "off_hand", label: "Off Hand" },
+        { value: "two_handed", label: "Two-Handed" },
+      ],
+      attunement_hint: requiresAttunement ? "Requires attunement" : "",
+    };
+  });
+  const equipmentItemRefs = rows.map((row) => row.id).filter(Boolean);
+  const attunableItemRefs = rows.filter((row) => row.supports_attunement).map((row) => row.id).filter(Boolean);
+  const attunedCount = rows.filter((row) => row.is_attuned).length;
+  const arcaneArmorState = buildEmptyArcaneArmorState();
+  return {
+    rows,
+    attuned_count: attunedCount,
+    equipped_count: rows.filter((row) => row.is_equipped || row.weapon_wield_mode).length,
+    max_attuned_items: maxAttunedItems,
+    equipment_item_refs: equipmentItemRefs,
+    attunable_item_refs: attunableItemRefs,
+    at_attunement_limit: attunedCount >= maxAttunedItems,
+    over_attunement_limit: attunedCount > maxAttunedItems,
+    arcane_armor_state: arcaneArmorState,
+  };
+}
+
+function spellLevelLabel(spell: Record<string, unknown>): string {
+  const explicit = asString(spell.level_label);
+  if (explicit) {
+    return explicit;
+  }
+  const level = asInt(spell.level, -1);
+  if (level === 0) {
+    return "Cantrip";
+  }
+  if (level > 0) {
+    return `${level}${level === 1 ? "st" : level === 2 ? "nd" : level === 3 ? "rd" : "th"} level`;
+  }
+  return "Spell";
+}
+
+function buildSpellPresentation(definition: Record<string, unknown>) {
+  const spellcasting = asRecord(definition.spellcasting);
+  const rawSpells = asArray(spellcasting.spells).map(asRecord);
+  const spells = rawSpells.map((spell) => ({
+    name: asString(spell.name) || "Spell",
+    href: asString(asRecord(spell.systems_ref).href),
+    description_html: asString(spell.description_html) || renderPlainMarkdownHtml(spell.description_markdown),
+    level_label: spellLevelLabel(spell),
+    school: asString(spell.school),
+    casting_time: asString(spell.casting_time),
+    range: asString(spell.range),
+    duration: asString(spell.duration),
+    components: asString(spell.components),
+    save_or_hit: asString(spell.save_or_hit),
+    source: asString(spell.source),
+    reference: asString(spell.reference),
+    ...(asString(spell.at_higher_levels) ? { at_higher_levels: asString(spell.at_higher_levels) } : {}),
+    badges: [
+      asBool(spell.always_prepared, false) ? "Always prepared" : "",
+      asBool(spell.prepared, false) ? "Prepared" : "",
+      asString(spell.source_package_label),
+    ].filter(Boolean),
+    class_row_id: asString(spell.class_row_id),
+    management_note: asString(spell.management_note),
+  }));
+  const section = {
+    class_row_id: asString(asRecord(asArray(spellcasting.class_rows)[0]).id),
+    title: asString(spellcasting.spellcasting_class) || "Spellcasting",
+    spells,
+    spell_level_sections: [
+      {
+        title: "Current spells",
+        groups: Object.entries(
+          spells.reduce<Record<string, typeof spells>>((groups, spell) => {
+            groups[spell.level_label] ??= [];
+            groups[spell.level_label].push(spell);
+            return groups;
+          }, {}),
+        ).map(([title, groupedSpells]) => ({ title, spells: groupedSpells })),
+      },
+    ],
+  };
+  return {
+    spellcasting_class: asString(spellcasting.spellcasting_class),
+    spellcasting_ability: asString(spellcasting.spellcasting_ability),
+    spell_save_dc: spellcasting.spell_save_dc ?? null,
+    spell_attack_bonus: asString(spellcasting.spell_attack_bonus) || formatModifier(spellcasting.spell_attack_bonus),
+    current_row_sections: spells.length ? [section] : [],
+    row_sections: spells.length ? [section] : [],
+  };
+}
+
+const XIANXIA_ENERGY_LABELS: Record<string, string> = { jing: "Jing", qi: "Qi", shen: "Shen" };
+const XIANXIA_CURRENCY_LABELS: Record<string, string> = {
+  coin: "Coin",
+  supply: "Supply",
+  spirit_stones: "Spirit Stones",
+};
+
+function xianxiaPool(key: string, label: string, current: unknown, max: unknown, temp?: unknown) {
+  return {
+    key,
+    label,
+    current: nonNegativeInt(current, nonNegativeInt(max, 0)),
+    max: nonNegativeInt(max, 0),
+    ...(nonNegativeInt(temp, 0) > 0 ? { temp: nonNegativeInt(temp, 0) } : {}),
+  };
+}
+
+function xianxiaInventoryRows(definition: Record<string, unknown>, state: Record<string, unknown>) {
+  const xianxiaState = asRecord(state.xianxia);
+  const stateInventory = asRecord(xianxiaState.inventory);
+  const rows = asArray(stateInventory.quantities).length
+    ? asArray(stateInventory.quantities)
+    : asArray(state.inventory).length
+      ? asArray(state.inventory)
+      : asArray(asRecord(definition.xianxia).inventory);
+  return rows.map(asRecord).map((item) => ({
+    id: asString(item.id) || asString(item.item_ref) || asString(item.name).toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+    name: asString(item.name) || "Item",
+    quantity: nonNegativeInt(item.quantity, 1),
+    item_nature: asString(item.item_nature) || asString(item.nature),
+    item_type: asString(item.item_type) || asString(item.type),
+    notes: asString(item.notes),
+    tags: asArray(item.tags).map(asString).filter(Boolean),
+    catalog_ref: asString(item.catalog_ref),
+    equippable: asBool(item.equippable, false),
+    is_equipped: asBool(item.is_equipped ?? item.equipped, false),
+    systems_ref: Object.keys(asRecord(item.systems_ref)).length ? asRecord(item.systems_ref) : null,
+  }));
+}
+
+function buildXianxiaPresentation(definition: Record<string, unknown>, state: Record<string, unknown>) {
+  const xianxia = asRecord(definition.xianxia);
+  if (normalizeSystemKey(definition.system) !== "xianxia" && Object.keys(xianxia).length === 0) {
+    return {};
+  }
+  const xianxiaState = asRecord(state.xianxia);
+  const xianxiaVitals = asRecord(xianxiaState.vitals);
+  const durability = asRecord(xianxia.durability);
+  const energies = asRecord(xianxiaState.energies);
+  const energyMaxima = asRecord(xianxia.energy_maxima);
+  const yinYangState = asRecord(xianxiaState.yin_yang);
+  const yinYangDefinition = asRecord(xianxia.yin_yang);
+  const daoState = asRecord(xianxiaState.dao);
+  const insight = asRecord(xianxia.insight);
+  const inventory = xianxiaInventoryRows(definition, state);
+  const currency = asRecord(xianxiaState.currency);
+  const daoImmolating = asRecord(xianxia.dao_immolating_techniques);
+  const activeStance = asRecord(xianxiaState.active_stance);
+  const activeAura = asRecord(xianxiaState.active_aura);
+  const realm = asString(xianxia.realm) || "Mortal";
+  const actionsPerTurn = nonNegativeInt(xianxia.actions_per_turn, realm === "Divine" ? 4 : realm === "Immortal" ? 3 : 2);
+  const manualArmorBonus = asInt(durability.manual_armor_bonus ?? xianxia.manual_armor_bonus, 0);
+  const defense = asInt(durability.defense ?? xianxia.defense, 10 + manualArmorBonus);
+  const attributes = asRecord(xianxia.attributes);
+  const efforts = asRecord(xianxia.efforts);
+  return {
+    system_label: "Xianxia",
+    subpages: [
+      { slug: "overview", label: "Quick Reference" },
+      { slug: "martial_arts", label: "Martial Arts" },
+      { slug: "techniques", label: "Techniques" },
+      { slug: "resources", label: "Resources" },
+      { slug: "skills", label: "Skills" },
+      { slug: "equipment", label: "Equipment" },
+      { slug: "inventory", label: "Inventory" },
+      { slug: "personal", label: "Personal" },
+      { slug: "notes", label: "Notes" },
+    ],
+    identity: {
+      realm,
+      actions_per_turn: actionsPerTurn,
+      honor: asString(xianxia.honor) || asString(xianxia.honor_rank),
+      reputation: asString(xianxia.reputation),
+    },
+    attributes: Object.entries(attributes).map(([key, value]) => ({
+      key,
+      label: titleCaseFromKey(key),
+      score: asInt(value, asInt(asRecord(value).score, 0)),
+    })),
+    efforts: Object.entries(efforts).map(([key, value]) => ({
+      key,
+      label: titleCaseFromKey(key),
+      score: asInt(value, asInt(asRecord(value).score, 0)),
+      damage: asString(asRecord(value).damage),
+    })),
+    resources: {
+      durability: [
+        xianxiaPool("hp", "HP", xianxiaVitals.current_hp ?? asRecord(state.vitals).current_hp, durability.hp_max ?? xianxia.hp_max, xianxiaVitals.temp_hp),
+        xianxiaPool("stance", "Stance", xianxiaVitals.current_stance, durability.stance_max ?? xianxia.stance_max, xianxiaVitals.temp_stance),
+      ],
+      energies: Object.entries(XIANXIA_ENERGY_LABELS).map(([key, label]) =>
+        xianxiaPool(key, label, asRecord(energies[key]).current, asRecord(xianxia.energies)[key] ?? energyMaxima[key]),
+      ),
+      yin_yang: [
+        xianxiaPool("yin", "Yin", yinYangState.yin_current, yinYangDefinition.yin_max ?? xianxia.yin_max),
+        xianxiaPool("yang", "Yang", yinYangState.yang_current, yinYangDefinition.yang_max ?? xianxia.yang_max),
+      ],
+      dao: { current: nonNegativeInt(daoState.current ?? xianxiaState.dao_current, 0), max: nonNegativeInt(xianxia.dao_max, 3) },
+      insight: { available: nonNegativeInt(insight.available, 0), spent: nonNegativeInt(insight.spent, 0) },
+    },
+    skills: {
+      trained: asArray(xianxia.trained_skills).map(asString).filter(Boolean).map((name) => ({ name })),
+    },
+    equipment: {
+      manual_armor_bonus: manualArmorBonus,
+      defense,
+      equipped_items: inventory.filter((item) => item.is_equipped),
+      equipped_weapons: inventory.filter((item) => item.is_equipped && /weapon|sword|jian|bow|staff/i.test(`${item.item_type} ${item.name}`)),
+      equipped_armor: inventory.filter((item) => item.is_equipped && /armor/i.test(`${item.item_type} ${item.name}`)),
+      equipped_artifacts: inventory.filter((item) => item.is_equipped && /artifact/i.test(`${item.item_nature} ${item.item_type}`)),
+      necessary_weapons: asArray(xianxia.necessary_weapons).map(asString).filter(Boolean).map((name) => ({ name })),
+      necessary_tools: asArray(xianxia.necessary_tools).map(asString).filter(Boolean).map((name) => ({ name })),
+    },
+    martial_arts: asArray(xianxia.martial_arts).map(asRecord).map((art) => ({
+      name: asString(art.name) || "Martial Art",
+      current_rank_label: asString(art.current_rank) || asString(art.rank),
+      source_label: asString(art.source_label),
+      notes: asString(art.notes),
+    })),
+    generic_techniques: asArray(xianxia.generic_techniques).map(asRecord).map((technique) => ({
+      name: asString(technique.name) || "Technique",
+      status_label: asString(technique.status_label) || asString(technique.approval_status),
+      notes: asString(technique.notes),
+      insight_cost: nonNegativeInt(technique.insight_cost, 0),
+    })),
+    basic_actions: [],
+    inventory: {
+      enabled: true,
+      currency: Object.entries(XIANXIA_CURRENCY_LABELS).map(([key, label]) => ({
+        key,
+        label,
+        amount: nonNegativeInt(currency[key], 0),
+      })),
+      quantities: inventory,
+    },
+    approval: {
+      variants: asArray(xianxia.variants).map(asRecord),
+      dao_immolating_prepared: asArray(daoImmolating.prepared).map(asRecord).map((record, index) => ({
+        name: asString(record.name) || "Prepared note",
+        notes: asString(record.notes),
+        prepared_record_index: index,
+      })),
+      dao_immolating_use_history: asArray(daoImmolating.use_history).map(asRecord).map((record, index) => ({
+        name: asString(record.name) || "Dao Immolating use",
+        status_key: asString(record.approval_status) || asString(record.status_key),
+        status_label: titleCaseFromKey(asString(record.approval_status) || asString(record.status_key)),
+        approval_notes: asString(record.approval_notes),
+        insight_cost: nonNegativeInt(record.insight_cost, 10),
+        insight_spent: nonNegativeInt(record.insight_spent, 0),
+        used: asBool(record.used, false),
+        use_notes: asString(record.use_notes),
+        use_record_index: index,
+      })),
+      approval_requests: asArray(xianxia.approval_requests).map(asRecord),
+      status_groups: [
+        {
+          key: "dao_immolating_use_records",
+          title: "Dao Immolating Use Records",
+          empty_message: "No Dao Immolating use records.",
+          records: asArray(daoImmolating.use_history).map(asRecord).map((record, index) => ({
+            name: asString(record.name) || "Dao Immolating use",
+            status_key: asString(record.approval_status) || asString(record.status_key),
+            status_label: titleCaseFromKey(asString(record.approval_status) || asString(record.status_key)),
+            approval_notes: asString(record.approval_notes),
+            insight_cost: nonNegativeInt(record.insight_cost, 10),
+            insight_spent: nonNegativeInt(record.insight_spent, 0),
+            used: asBool(record.used, false),
+            use_notes: asString(record.use_notes),
+            use_record_index: index,
+          })),
+        },
+      ],
+    },
+    active_state: {
+      stance: {
+        label: "Active Stance",
+        name: asString(activeStance.name),
+        status_label: asString(activeStance.name) ? `Active Stance: ${asString(activeStance.name)}` : "No active Stance",
+      },
+      aura: {
+        label: "Active Aura",
+        name: asString(activeAura.name),
+        status_label: asString(activeAura.name) ? `Active Aura: ${asString(activeAura.name)}` : "No active Aura",
+      },
+    },
+    quick_reference: {
+      actions: { realm, actions_per_turn: String(actionsPerTurn), formula: "Realm-based action count" },
+      defense: { base: 10, manual_armor_bonus: manualArmorBonus, value: defense, formula: "10 + manual armor bonus + modeled bonuses" },
+      check_formula: {
+        formula: "d20 + Attribute + Effort",
+        spend_bonus: "+1 per relevant spend",
+        summary: "Roll d20 plus the relevant Attribute and Effort.",
+      },
+    },
+  };
+}
+
 export function buildCharacterDetailPayload({
   campaign,
   record,
@@ -439,8 +1024,15 @@ export function buildCharacterDetailPayload({
   permissions: CharacterDetailPermissions;
   controls: CharacterDetailControls | null;
 }) {
-  const equipmentState = buildEmptyEquipmentState();
+  const state = asRecord(stateRecord.state);
+  const definition = record.definition;
+  const systemKey = normalizeSystemKey(definition.system);
+  const equipmentState = systemKey === "xianxia" ? buildEmptyEquipmentState() : buildEquipmentState(definition, state);
   const arcaneArmorState = equipmentState.arcane_armor_state;
+  const notes = asRecord(state.notes);
+  const overview = buildOverviewStats(definition, state);
+  const abilitySkillPresentation = buildAbilitySkillPresentation(definition);
+  const personalBackgroundMarkdown = asString(notes.background_markdown ?? notes.personal_background_markdown);
   return {
     ok: true,
     character: {
@@ -457,21 +1049,21 @@ export function buildCharacterDetailPayload({
       permissions,
       controls,
       portrait: buildCharacterPortraitPayload(campaign.slug, record, assetByRef),
-      overview_stat_rows: [],
-      overview_stats: [],
-      player_notes_markdown: asString(asRecord(stateRecord.state.notes).player_notes_markdown),
-      player_notes_html: "",
-      physical_description_markdown: asString(asRecord(stateRecord.state.notes).physical_description_markdown),
-      physical_description_html: "",
-      personal_background_markdown: asString(asRecord(stateRecord.state.notes).personal_background_markdown),
-      personal_background_html: "",
-      reference_sections: [],
-      abilities: [],
-      skills: [],
-      proficiency_groups: [],
-      presented_inventory: [],
-      presented_spellcasting: {},
-      presented_xianxia: {},
+      overview_stat_rows: overview.overviewStatRows,
+      overview_stats: overview.overviewStats,
+      player_notes_markdown: asString(notes.player_notes_markdown),
+      player_notes_html: renderPlainMarkdownHtml(notes.player_notes_markdown),
+      physical_description_markdown: asString(notes.physical_description_markdown),
+      physical_description_html: renderPlainMarkdownHtml(notes.physical_description_markdown),
+      personal_background_markdown: personalBackgroundMarkdown,
+      personal_background_html: renderPlainMarkdownHtml(personalBackgroundMarkdown),
+      reference_sections: buildReferenceSections(definition),
+      abilities: abilitySkillPresentation.abilities,
+      skills: abilitySkillPresentation.skills,
+      proficiency_groups: buildProficiencyGroups(definition),
+      presented_inventory: systemKey === "xianxia" ? [] : buildInventoryPresentation(definition, state),
+      presented_spellcasting: systemKey === "xianxia" ? {} : buildSpellPresentation(definition),
+      presented_xianxia: buildXianxiaPresentation(definition, state),
       equipment_state: equipmentState,
       arcane_armor_state: arcaneArmorState,
     },

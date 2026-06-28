@@ -9665,10 +9665,28 @@ if (
   dmCharacterDetail.payload?.links?.gen2_character_url !== "/app-next/campaigns/linden-pass/characters/arden-march" ||
   dmCharacterDetail.payload?.links?.flask_character_url !== "/campaigns/linden-pass/characters/arden-march" ||
   !Array.isArray(dmCharacterDetail.payload?.character?.overview_stat_rows) ||
+  dmCharacterDetail.payload?.character?.overview_stat_rows?.[0]?.[0]?.label !== "Class" ||
+  dmCharacterDetail.payload?.character?.overview_stat_rows?.[0]?.[0]?.value !== "Sorcerer 5" ||
+  dmCharacterDetail.payload?.character?.overview_stat_rows?.[1]?.find((stat) => stat?.label === "Current HP")?.value !== "29 / 38" ||
   !Array.isArray(dmCharacterDetail.payload?.character?.reference_sections) ||
+  !dmCharacterDetail.payload?.character?.reference_sections?.some(
+    (section) => section?.title === "Biography" && String(section?.html || "").includes("relay mage"),
+  ) ||
   !Array.isArray(dmCharacterDetail.payload?.character?.abilities) ||
+  dmCharacterDetail.payload?.character?.abilities?.find((ability) => ability?.key === "cha")?.modifier !== "+4" ||
+  dmCharacterDetail.payload?.character?.skills?.find((skill) => skill?.name === "Arcana")?.bonus !== "+7" ||
+  !dmCharacterDetail.payload?.character?.proficiency_groups?.some(
+    (group) => group?.title === "Weapons" && group?.values_list?.includes("Quarterstaffs"),
+  ) ||
   !dmCharacterDetail.payload?.character?.equipment_state ||
-  !dmCharacterDetail.payload?.character?.arcane_armor_state
+  dmCharacterDetail.payload?.character?.equipment_state?.rows?.find((row) => row?.id === "light-crossbow-1")?.is_equipped !== true ||
+  dmCharacterDetail.payload?.character?.equipment_state?.equipped_count !== 2 ||
+  !dmCharacterDetail.payload?.character?.arcane_armor_state ||
+  dmCharacterDetail.payload?.character?.presented_inventory?.find((item) => item?.item_ref === "crossbow-bolts-4")?.quantity !== 20 ||
+  dmCharacterDetail.payload?.character?.presented_spellcasting?.spellcasting_class !== "Sorcerer" ||
+  dmCharacterDetail.payload?.character?.presented_spellcasting?.spell_attack_bonus !== "+7" ||
+  dmCharacterDetail.payload?.character?.presented_spellcasting?.current_row_sections?.[0]?.spells?.[0]?.name !== "Message" ||
+  dmCharacterDetail.payload?.character?.presented_spellcasting?.current_row_sections?.[0]?.spells?.[0]?.casting_time !== "1 action"
 ) {
   throw new Error(`Unexpected DM character detail payload: ${JSON.stringify(dmCharacterDetail.payload)}`);
 }
@@ -13219,6 +13237,32 @@ if (
   throw new Error(
     `Expected Xianxia mutable state reconciliation, got revision=${xianxiaUpdatedRow?.revision} state=${JSON.stringify(xianxiaUpdatedState)}`,
   );
+}
+
+const xianxiaCharacterDetail = await requestJson(
+  `/api/v1/campaigns/linden-pass/characters/${xianxiaCharacterSlug}`,
+  { Authorization: `Bearer ${dmApiToken}` },
+);
+const xianxiaPresented = xianxiaCharacterDetail.payload?.character?.presented_xianxia || {};
+if (
+  xianxiaCharacterDetail.status !== 200 ||
+  xianxiaCharacterDetail.payload?.ok !== true ||
+  xianxiaPresented.identity?.realm !== "Mortal" ||
+  xianxiaPresented.identity?.actions_per_turn !== 2 ||
+  xianxiaPresented.equipment?.defense !== 11 ||
+  xianxiaPresented.resources?.durability?.find((pool) => pool?.key === "hp")?.current !== 6 ||
+  xianxiaPresented.resources?.durability?.find((pool) => pool?.key === "stance")?.max !== 4 ||
+  xianxiaPresented.resources?.energies?.find((pool) => pool?.key === "jing")?.current !== 1 ||
+  xianxiaPresented.resources?.dao?.current !== 2 ||
+  xianxiaPresented.resources?.insight?.available !== 12 ||
+  xianxiaPresented.active_state?.stance?.name !== "Stone Root" ||
+  xianxiaPresented.active_state?.aura?.name !== "Azure Bell" ||
+  xianxiaPresented.inventory?.quantities?.find((item) => item?.id === "spirit-rice")?.quantity !== 2 ||
+  xianxiaPresented.approval?.dao_immolating_prepared?.[0]?.name !== "Ashen Bell" ||
+  xianxiaPresented.approval?.status_groups?.[0]?.records?.[0]?.status_key !== "approved" ||
+  xianxiaCharacterDetail.payload?.character?.player_notes_html !== "<p>Keep the manual pool edits in SQLite.</p>"
+) {
+  throw new Error(`Unexpected Xianxia character detail presenter payload: ${JSON.stringify(xianxiaCharacterDetail.payload)}`);
 }
 
 const xianxiaSessionVitalsUpdate = await requestJson(
