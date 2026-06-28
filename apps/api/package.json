@@ -15,6 +15,7 @@
     "test:container-runtime-proof": "npm run build && node ./tests/container-runtime-proof.mjs",
     "test:packaging-proof": "node ./tests/packaging-proof.mjs",
     "test:route-parity": "node ./tests/route-parity.mjs",
+    "test:sqlite-migration-readiness-inventory": "node ./tests/sqlite-migration-readiness-inventory.mjs",
     "test:sqlite-migrate-proof": "node ./tests/sqlite-migrate-proof.mjs",
     "test:sqlite-schema-check": "node ./tests/sqlite-schema-check.mjs",
     "test:sqlite-startup-posture": "node ./tests/sqlite-startup-posture.mjs",
