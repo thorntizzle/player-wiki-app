@@ -75,6 +75,7 @@ Supported write families:
 - `systems`
 - `dm-content`
 - `publishing`
+- `rollback-cutover`
 
 Dry-run scaffold:
 
@@ -96,6 +97,19 @@ inspect only the family-specific checklist for a planned Combat rehearsal:
 Combat guide output is a scaffold, not approval. The Combat write family remains
 below `copied-data rollback ready` until a copied-data run records backup,
 mutation, restore, and equivalence evidence in a transcript.
+
+To inspect only the rollback and full cutover checklist:
+
+```powershell
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py guide `
+  --family rollback-cutover
+```
+
+The rollback/cutover guide is a scaffold, not approval. It may only be used
+after the route-family staging snapshot gates are ready, and it must record a
+last known-good Flask target, pre-cutover SQLite and campaign-content backups,
+TypeScript data-delta decisions, restore command shape, post-rollback Flask
+health smoke, and representative player/DM smoke.
 
 Create a rehearsal scaffold:
 
@@ -479,6 +493,49 @@ Decision gate:
 - Require file hash, SQLite read-model, and sampled API response equivalence after
   restore. Image conversion differences need a separate cutover decision before
   staging-write approval.
+
+### Rollback And Full Cutover
+
+Scope:
+
+- Flask authority health smoke before any TypeScript routing change.
+- Full charter workflow smoke across auth, Campaign Home, wiki, search, help, DM
+  Content, Systems, Characters, Session, Combat, local build, `/healthz`,
+  backup, restore, migration dry-run, and rollback.
+- Runtime repoint/redeploy command shape back to Flask using placeholders for
+  private app identity.
+- Post-rollback Flask health and representative player/DM smoke.
+
+Baseline evidence:
+
+- Last known-good Flask commit SHA, branch, and image tag/id if available.
+- TypeScript branch/commit and route snapshot/check status.
+- Pre-cutover SQLite backup command, archive path, contents summary, and checksum.
+- Pre-cutover campaign-content backup command, archive path, contents summary,
+  and checksum.
+- Runtime target summary that omits real Fly app identifiers, tokens, secrets,
+  and live URLs.
+
+Mutation checks:
+
+- Every TypeScript write accepted during the smoke records route/action, actor
+  role, affected files/tables, request payload, and response payload.
+- Every accepted write has a data-delta decision: `revert`, `preserve`,
+  `merge manually`, or `block rollback`.
+- Migration dry-run/startup schema evidence and additive schema deltas are
+  recorded before rollback.
+
+Decision gate:
+
+- Require restored SQLite row counts, campaign-content hashes, sampled API
+  responses, and post-rollback Flask `/healthz` to match baseline or list exact
+  approved differences.
+- Any unresolved TypeScript data delta, failed restore, failed Flask smoke,
+  missing last known-good Flask target, missing backup, or live-path dependency
+  keeps the transcript blocked.
+- This family can move from `staging snapshot ready` to `cutover rehearsal
+  passed` only after all charter workflows and rollback evidence pass against
+  copied or user-approved staging-equivalent data.
 
 ## Readiness Transitions
 
