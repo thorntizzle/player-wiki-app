@@ -473,6 +473,23 @@ export type CharacterAdvancedEditorReferenceUpdate =
     }
   | { status: "validation_error"; message: string };
 
+export type CharacterRetrainingApplyResult =
+  | {
+      status: "ok";
+      definition: Record<string, unknown>;
+      stateNoteValues: Record<string, string>;
+      manualEquipmentReconcile: {
+        enabled: boolean;
+        removedItemIds: string[];
+        customFeatureResourceReconcile?: {
+          enabled: boolean;
+          removedResourceIds: string[];
+        };
+      };
+      values: Record<string, string>;
+    }
+  | { status: "validation_error"; message: string };
+
 export type CharacterAdvancementRouteKind = "level_up" | "retraining" | "progression_repair";
 
 export interface CharacterAdvancementShellPayload {
@@ -5555,6 +5572,277 @@ export function applyCharacterAdvancedEditorReferenceUpdate(
     stateNoteValues,
     manualEquipmentReconcile,
     values,
+  };
+}
+
+function editorFieldValue(field: Record<string, unknown>, valueKey = "value"): string {
+  return stringifyEditorValue(field[valueKey]);
+}
+
+function editorValuesFromAdvancedEditorPayload(editor: NonNullable<CharacterAdvancedEditorPayload["editor"]>): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const groupKey of ["proficiency_fields", "reference_fields", "stat_adjustment_fields"] as const) {
+    for (const rawField of asArray(editor[groupKey])) {
+      const field = asRecord(rawField);
+      const fieldName = stringifyEditorValue(field.name).trim();
+      if (fieldName) {
+        values[fieldName] = editorFieldValue(field);
+      }
+    }
+  }
+
+  for (const rawRow of asArray(editor.recoverable_penalty_rows)) {
+    const row = asRecord(rawRow);
+    const rowIndex = createContextInteger(row.index);
+    if (rowIndex <= 0) {
+      continue;
+    }
+    values[`recoverable_penalty_id_${rowIndex}`] = stringifyEditorValue(row.id).trim();
+    values[`recoverable_penalty_source_${rowIndex}`] = stringifyEditorValue(row.source).trim();
+    values[`recoverable_penalty_target_${rowIndex}`] = stringifyEditorValue(row.target).trim();
+    values[`recoverable_penalty_amount_${rowIndex}`] = stringifyEditorValue(row.amount).trim();
+    values[`recoverable_penalty_notes_${rowIndex}`] = stringifyEditorValue(row.notes);
+  }
+
+  for (const rawRow of asArray(editor.feature_rows)) {
+    const row = asRecord(rawRow);
+    const rowIndex = createContextInteger(row.index);
+    if (rowIndex <= 0) {
+      continue;
+    }
+    values[`custom_feature_id_${rowIndex}`] = stringifyEditorValue(row.id).trim();
+    values[`custom_feature_name_${rowIndex}`] = stringifyEditorValue(row.name).trim();
+    values[`custom_feature_page_ref_${rowIndex}`] = extractEditorPageRefValue(row.page_ref);
+    values[`custom_feature_activation_type_${rowIndex}`] = stringifyEditorValue(row.activation_type).trim();
+    values[`custom_feature_description_${rowIndex}`] = stringifyEditorValue(row.description_markdown);
+    values[`custom_feature_resource_max_${rowIndex}`] = stringifyEditorValue(row.resource_max).trim();
+    values[`custom_feature_resource_reset_on_${rowIndex}`] = stringifyEditorValue(row.resource_reset_on).trim();
+    for (const rawField of [...asArray(row.choice_fields), ...asArray(row.spell_fields)]) {
+      const field = asRecord(rawField);
+      const fieldName = stringifyEditorValue(field.name).trim();
+      if (fieldName) {
+        values[fieldName] = stringifyEditorValue(field.selected).trim();
+      }
+    }
+  }
+
+  for (const rawRow of asArray(editor.equipment_rows)) {
+    const row = asRecord(rawRow);
+    const rowIndex = createContextInteger(row.index);
+    if (rowIndex <= 0) {
+      continue;
+    }
+    values[`manual_item_id_${rowIndex}`] = stringifyEditorValue(row.id).trim();
+    values[`manual_item_name_${rowIndex}`] = stringifyEditorValue(row.name).trim();
+    values[`manual_item_page_ref_${rowIndex}`] = extractEditorPageRefValue(row.page_ref);
+    values[`manual_item_quantity_${rowIndex}`] = stringifyEditorValue(row.quantity).trim();
+    values[`manual_item_weight_${rowIndex}`] = stringifyEditorValue(row.weight).trim();
+    values[`manual_item_notes_${rowIndex}`] = stringifyEditorValue(row.notes);
+  }
+  return values;
+}
+
+function retrainingFieldsForFeatureRow(row: Record<string, unknown>): Array<Record<string, unknown>> {
+  return [...asArray(row.choice_fields), ...asArray(row.spell_fields)]
+    .map((field) => asRecord(field))
+    .filter((field) => stringifyEditorValue(field.name).trim());
+}
+
+function buildNativeCharacterRetrainingContextFromEditor(
+  editor: NonNullable<CharacterAdvancedEditorPayload["editor"]>,
+): Record<string, unknown> {
+  const values = editorValuesFromAdvancedEditorPayload(editor);
+  const featureRows: Array<Record<string, unknown>> = [];
+  for (const rawRow of asArray(editor.feature_rows)) {
+    const row = asRecord(rawRow);
+    const featureId = stringifyEditorValue(row.id).trim();
+    const choiceFields = retrainingFieldsForFeatureRow(row);
+    if (!featureId || choiceFields.length === 0) {
+      continue;
+    }
+    const campaignOption = asRecord(row.campaign_option);
+    featureRows.push({
+      index: createContextInteger(row.index),
+      id: featureId,
+      name: stringifyEditorValue(row.name || campaignOption.name || "Linked Feature").trim() || "Linked Feature",
+      page_ref: extractEditorPageRefValue(row.page_ref),
+      activation_type: stringifyEditorValue(row.activation_type).trim(),
+      summary: stringifyEditorValue(campaignOption.description_markdown || row.description_markdown).trim(),
+      choice_fields: choiceFields,
+    });
+  }
+  return {
+    values,
+    feature_rows: featureRows,
+    state_revision: editor.state_revision,
+    supported_scope: [
+      "Linked custom features with persisted structured choices such as optional-feature swaps, granted spell selectors, explicit spell-support replacements, and supported feature spell-manager source choices.",
+      "The route reuses the existing native edit derivation pass, so spells, attacks, resources, and other downstream sheet math are rebuilt through the normal shared path instead of a retraining-only side engine.",
+      "Generic rebuilds, full respec, and freeform history rewrites remain out of scope for this first retraining slice.",
+    ],
+  };
+}
+
+function retrainingFieldNames(retrainingContext: Record<string, unknown>): Set<string> {
+  const fieldNames = new Set<string>();
+  for (const rawRow of asArray(retrainingContext.feature_rows)) {
+    for (const rawField of asArray(asRecord(rawRow).choice_fields)) {
+      const fieldName = stringifyEditorValue(asRecord(rawField).name).trim();
+      if (fieldName) {
+        fieldNames.add(fieldName);
+      }
+    }
+  }
+  return fieldNames;
+}
+
+function currentUtcIsoTimestamp(): string {
+  const value = new Date();
+  value.setMilliseconds(0);
+  return value.toISOString().replace(/\.\d{3}Z$/, "+00:00");
+}
+
+function addNativeRetrainingEventIfChanged(
+  nextDefinition: Record<string, unknown>,
+  previousDefinition: Record<string, unknown>,
+): Record<string, unknown> {
+  if (JSON.stringify(nextDefinition) === JSON.stringify(previousDefinition)) {
+    return nextDefinition;
+  }
+  const targetLevel = definitionCurrentLevel(nextDefinition);
+  const source = { ...asRecord(nextDefinition.source) };
+  const nativeProgression = { ...asRecord(source.native_progression) };
+  const history = asArray(nativeProgression.history).map((entry) => ({ ...asRecord(entry) }));
+  history.push({
+    kind: "retrain",
+    at: currentUtcIsoTimestamp(),
+    target_level: targetLevel,
+    from_level: definitionCurrentLevel(previousDefinition),
+    to_level: targetLevel,
+    action: "retrain",
+  });
+  nativeProgression.history = history;
+  source.native_progression = nativeProgression;
+  return {
+    ...nextDefinition,
+    source,
+  };
+}
+
+export function buildCharacterRetrainingPayload({
+  campaign,
+  characterSlug,
+  definition,
+  state,
+  stateRevision,
+  campaignPageRecords = [],
+  optionalFeatureRows = [],
+  spellRows = [],
+}: {
+  campaign: CampaignViewModel;
+  characterSlug: string;
+  definition: Record<string, unknown>;
+  state: Record<string, unknown>;
+  stateRevision: number;
+  campaignPageRecords?: CampaignPageFileRecord[];
+  optionalFeatureRows?: SystemsEntryRow[];
+  spellRows?: SystemsEntryRow[];
+}): CharacterAdvancementShellPayload {
+  const shellPayload = buildCharacterAdvancementShellPayload({
+    campaign,
+    characterSlug,
+    definition,
+    kind: "retraining",
+  });
+  if (shellPayload.readiness.status === "unsupported") {
+    return shellPayload;
+  }
+
+  const editorPayload = buildCharacterAdvancedEditorPayload({
+    campaign,
+    characterSlug,
+    definition,
+    state,
+    stateRevision,
+    campaignPageRecords,
+    optionalFeatureRows,
+    spellRows,
+  });
+  if (!editorPayload.editor) {
+    return shellPayload;
+  }
+  const context = buildNativeCharacterRetrainingContextFromEditor(editorPayload.editor);
+  const fieldNames = retrainingFieldNames(context);
+  if (fieldNames.size === 0) {
+    return shellPayload;
+  }
+
+  const readiness = {
+    status: "ready",
+    message: "",
+    level_up_readiness: buildLevelUpUnsupportedReadiness(definition, "Level-up currently supports native in-app characters and imported character sheets only."),
+    linked_feature_authoring: {
+      supported: true,
+      is_imported: definitionSourceType(definition) === "pdf_import" || definitionSourceType(definition) === "markdown_import",
+      message: "",
+    },
+  };
+  return {
+    lane: "ready",
+    supported: true,
+    unsupported_message: "",
+    readiness,
+    links: buildCharacterAdvancementLinks({
+      campaign,
+      characterSlug,
+      definition,
+      readinessStatus: "ready",
+      kind: "retraining",
+    }),
+    context,
+  };
+}
+
+export function applyCharacterRetrainingUpdate(
+  definition: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  retrainingContext: Record<string, unknown>,
+  campaignPageRecords: CampaignPageFileRecord[] = [],
+  optionalFeatureRows: SystemsEntryRow[] = [],
+  spellRows: SystemsEntryRow[] = [],
+): CharacterRetrainingApplyResult {
+  const fieldNames = retrainingFieldNames(retrainingContext);
+  if (fieldNames.size === 0) {
+    return {
+      status: "validation_error",
+      message: "This character does not currently have any supported structured retraining options.",
+    };
+  }
+  const mergedValues = { ...asRecord(retrainingContext.values) } as Record<string, string>;
+  const submittedValues = asRecord(payload.values);
+  for (const fieldName of fieldNames) {
+    if (!Object.hasOwn(submittedValues, fieldName)) {
+      continue;
+    }
+    const value = submittedValues[fieldName];
+    mergedValues[fieldName] = Array.isArray(value)
+      ? stringifyEditorValue(value.length > 0 ? value[value.length - 1] : "").trim()
+      : stringifyEditorValue(value).trim();
+  }
+
+  const update = applyCharacterAdvancedEditorReferenceUpdate(
+    definition,
+    { ...payload, values: mergedValues },
+    campaignPageRecords,
+    optionalFeatureRows,
+    spellRows,
+  );
+  if (update.status === "validation_error") {
+    return update;
+  }
+  return {
+    ...update,
+    definition: addNativeRetrainingEventIfChanged(update.definition, definition),
   };
 }
 

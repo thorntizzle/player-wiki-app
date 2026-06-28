@@ -2472,6 +2472,71 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         option["value"] for option in linked_feature_rows[1]["choice_fields"][0]["options"]
     } == {"phb-optionalfeature-archery", "phb-optionalfeature-defense"}
 
+    retraining_url = (
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/"
+        f"characters/{character_slug}/retraining"
+    )
+    retraining_get_status, retraining_get_payload = _to_json(
+        retraining_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+    assert retraining_get_status == 200
+    assert retraining_get_payload["supported"] is True
+    assert retraining_get_payload["lane"] == "ready"
+    assert retraining_get_payload["retraining"]["state_revision"] == expected_revision + 12
+    retraining_rows = {
+        row["index"]: row for row in retraining_get_payload["retraining"]["feature_rows"]
+    }
+    assert retraining_rows[1]["id"] == custom_feature_id
+    assert retraining_rows[1]["name"] == "Harbor Drill"
+    assert retraining_rows[1]["choice_fields"][0]["name"] == "custom_feature_optionalfeature_1_1_1"
+    assert retraining_rows[1]["choice_fields"][0]["selected"] == "phb-optionalfeature-archery"
+
+    invalid_retraining_status, invalid_retraining_payload = _to_json(
+        retraining_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": expected_revision + 12,
+            "values": {"custom_feature_optionalfeature_1_1_1": "phb-optionalfeature-quickened-spell"},
+        },
+    )
+    assert invalid_retraining_status == 400
+    assert invalid_retraining_payload["error"]["code"] == "validation_error"
+    assert invalid_retraining_payload["error"]["message"] == "Choose a valid option for Harbor Drill."
+
+    retraining_status, retraining_payload = _to_json(
+        retraining_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": expected_revision + 12,
+            "values": {"custom_feature_optionalfeature_1_1_1": "phb-optionalfeature-defense"},
+        },
+    )
+    assert retraining_status == 200
+    assert retraining_payload["message"] == "Character retraining saved."
+    assert retraining_payload["character"]["state_record"]["revision"] == expected_revision + 13
+    retrained_features = retraining_payload["character"]["definition"]["features"]
+    retrained_feature_slugs = {
+        (feature.get("systems_ref") or {}).get("slug")
+        for feature in retrained_features
+    }
+    assert "phb-optionalfeature-archery" not in retrained_feature_slugs
+    assert "phb-optionalfeature-defense" in retrained_feature_slugs
+    retrained_defense = next(
+        feature
+        for feature in retrained_features
+        if (feature.get("systems_ref") or {}).get("slug") == "phb-optionalfeature-defense"
+    )
+    assert retrained_defense["native_edit_parent_feature_id"] == custom_feature_id
+    assert retrained_defense["native_edit_optionalfeature_section_index"] == 1
+    assert retrained_defense["native_edit_optionalfeature_choice_index"] == 1
+    retraining_history = retraining_payload["character"]["definition"]["source"]["native_progression"]["history"]
+    assert retraining_history[-1]["kind"] == "retrain"
+    assert retraining_history[-1]["action"] == "retrain"
+    assert retraining_payload["retraining"]["feature_rows"][0]["choice_fields"][0]["selected"] == "phb-optionalfeature-defense"
+
     linked_spell_page_status, linked_spell_page_payload = _to_json(
         f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/content/pages/mechanics/harbor-lore",
         headers=typescript_api_mutation_server["dm_headers"],
@@ -2524,7 +2589,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         route_url,
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
-        body={"expected_revision": expected_revision + 12, "values": invalid_linked_spell_values},
+        body={"expected_revision": expected_revision + 13, "values": invalid_linked_spell_values},
     )
     assert invalid_linked_spell_status == 400
     assert invalid_linked_spell_payload["error"]["code"] == "validation_error"
@@ -2538,10 +2603,10 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         route_url,
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
-        body={"expected_revision": expected_revision + 12, "values": linked_spell_values},
+        body={"expected_revision": expected_revision + 13, "values": linked_spell_values},
     )
     assert linked_spell_status == 200
-    assert linked_spell_payload["editor"]["state_revision"] == expected_revision + 13
+    assert linked_spell_payload["editor"]["state_revision"] == expected_revision + 14
     linked_spell_features = linked_spell_payload["character"]["definition"]["features"]
     harbor_lore = next(
         feature
@@ -2591,7 +2656,7 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
         body={
-            "expected_revision": expected_revision + 13,
+            "expected_revision": expected_revision + 14,
             "values": {
                 "custom_feature_name_1": "Broken Storm Feature",
                 "custom_feature_page_ref_1": "items/stormglass-compass",
@@ -2616,10 +2681,10 @@ def test_typescript_character_advanced_editor_reference_fields_save_fixture(
         route_url,
         headers=typescript_api_mutation_server["dm_headers"],
         method="PUT",
-        body={"expected_revision": expected_revision + 13, "values": clear_custom_feature_values},
+        body={"expected_revision": expected_revision + 14, "values": clear_custom_feature_values},
     )
     assert clear_custom_feature_status == 200
-    assert clear_custom_feature_payload["editor"]["state_revision"] == expected_revision + 14
+    assert clear_custom_feature_payload["editor"]["state_revision"] == expected_revision + 15
     assert all(
         feature.get("category") != "custom_feature"
         for feature in clear_custom_feature_payload["character"]["definition"]["features"]
