@@ -7383,7 +7383,14 @@ function supportedTypeScriptLevelUpClassRow(definition: Record<string, unknown>)
   if (!(classKey in DND_LEVEL_ONE_CLASS_CONFIGS) || currentLevel !== 1) {
     return null;
   }
-  if (classKey !== "fighter" && classKey !== "barbarian" && classKey !== "rogue" && classKey !== "monk" && classKey !== "paladin") {
+  if (
+    classKey !== "fighter" &&
+    classKey !== "barbarian" &&
+    classKey !== "rogue" &&
+    classKey !== "ranger" &&
+    classKey !== "monk" &&
+    classKey !== "paladin"
+  ) {
     return null;
   }
   return {
@@ -7418,11 +7425,16 @@ function levelUpValuesFromPayload(
   classKey: DndLevelOneClassKey,
 ): Record<string, string> {
   const hpGain = stringifyEditorValue(values.hp_gain).trim() || String(averageHpGainForClass(classKey));
-  return {
+  const normalizedValues: Record<string, string> = {
     advancement_mode: stringifyEditorValue(values.advancement_mode).trim() || "advance_existing",
     target_class_row_id: stringifyEditorValue(values.target_class_row_id).trim() || rowId,
     hp_gain: hpGain,
   };
+  if (classKey === "ranger") {
+    normalizedValues.known_spell_1 = stringifyEditorValue(values.known_spell_1).trim();
+    normalizedValues.known_spell_2 = stringifyEditorValue(values.known_spell_2).trim();
+  }
+  return normalizedValues;
 }
 
 function levelTwoFeatureRows(classKey: DndLevelOneClassKey): Array<Record<string, unknown>> {
@@ -7455,6 +7467,26 @@ function levelTwoFeatureRows(classKey: DndLevelOneClassKey): Array<Record<string
         source: "PHB",
         source_kind: "native_progression",
         description_markdown: "Starting at 2nd level, your quick thinking and agility let you take a bonus action to Dash, Disengage, or Hide.",
+      },
+    ];
+  }
+  if (classKey === "ranger") {
+    return [
+      {
+        id: "fighting-style-2",
+        name: "Fighting Style",
+        category: "class_feature",
+        source: "PHB",
+        source_kind: "native_progression",
+        description_markdown: "At 2nd level, you choose a Fighting Style. This TypeScript slice records the feature as a deferred choice; broad Fighting Style selection UI remains pending.",
+      },
+      {
+        id: "spellcasting-2",
+        name: "Spellcasting",
+        category: "class_feature",
+        source: "PHB",
+        source_kind: "native_progression",
+        description_markdown: "At 2nd level, you learn two Ranger spells and gain first-level Ranger spell slots. This slice initializes known-spell choices, slots, and spellcasting math.",
       },
     ];
   }
@@ -7574,22 +7606,34 @@ function levelTwoSpellcasting(
   classKey: DndLevelOneClassKey,
   definition: Record<string, unknown>,
   classRow: Record<string, unknown>,
+  values: Record<string, string> = {},
+  spellRows: SystemsEntryRow[] = [],
 ): Record<string, unknown> | null {
-  if (classKey !== "paladin") {
+  if (classKey !== "paladin" && classKey !== "ranger") {
     return null;
   }
   const abilityScores = asRecord(asRecord(definition.stats).ability_scores);
-  const charismaModifier = abilityModifier(dndAbilityScoreValue(abilityScores, "cha"));
-  const spellSaveDc = 8 + 2 + charismaModifier;
-  const spellAttackBonus = 2 + charismaModifier;
+  const spellcastingAbilityKey = classKey === "ranger" ? "wis" : "cha";
+  const spellcastingAbilityLabel = classKey === "ranger" ? "Wisdom" : "Charisma";
+  const spellcastingModifier = abilityModifier(dndAbilityScoreValue(abilityScores, spellcastingAbilityKey));
+  const spellSaveDc = 8 + 2 + spellcastingModifier;
+  const spellAttackBonus = 2 + spellcastingModifier;
   const classRowId = stringifyEditorValue(classRow.id).trim() || "class-1";
   const slotLaneId = `${classRowId}-slots`;
   const slotProgression = [{ level: 1, max_slots: 2 }];
-  const preparedSpellLimit = Math.max(1, Math.floor(2 / 2) + charismaModifier);
   const existingSpellcasting = asRecord(definition.spellcasting);
+  const spells =
+    classKey === "ranger"
+      ? rangerLevelTwoKnownSpellRows({
+          spellRows,
+          values,
+          classRowId,
+        })
+      : asArray(existingSpellcasting.spells).map((spell) => ({ ...asRecord(spell) }));
+  const preparedSpellLimit = Math.max(1, Math.floor(2 / 2) + spellcastingModifier);
   return {
-    spellcasting_class: "Paladin",
-    spellcasting_ability: "Charisma",
+    spellcasting_class: classKey === "ranger" ? "Ranger" : "Paladin",
+    spellcasting_ability: spellcastingAbilityLabel,
     spell_save_dc: spellSaveDc,
     spell_attack_bonus: spellAttackBonus,
     slot_progression: slotProgression.map((slot) => ({ ...slot })),
@@ -7605,20 +7649,88 @@ function levelTwoSpellcasting(
     class_rows: [
       {
         class_row_id: classRowId,
-        class_name: "Paladin",
+        class_name: classKey === "ranger" ? "Ranger" : "Paladin",
         level: 2,
         caster_progression: "1/2",
-        spell_mode: "prepared",
-        spellcasting_ability: "Charisma",
+        spell_mode: classKey === "ranger" ? "known" : "prepared",
+        spellcasting_ability: spellcastingAbilityLabel,
         spell_save_dc: spellSaveDc,
         spell_attack_bonus: spellAttackBonus,
         slot_lane_id: slotLaneId,
-        spell_list_class_name: "Paladin",
-        prepared_spell_limit: preparedSpellLimit,
+        spell_list_class_name: classKey === "ranger" ? "Ranger" : "Paladin",
+        ...(classKey === "ranger" ? { known_spell_limit: 2 } : { prepared_spell_limit: preparedSpellLimit }),
       },
     ],
-    spells: asArray(existingSpellcasting.spells).map((spell) => ({ ...asRecord(spell) })),
+    spells,
   };
+}
+
+function rangerLevelTwoSpellOptions(spellRows: SystemsEntryRow[]): Array<Record<string, unknown>> {
+  return spellRows
+    .filter((row) => normalizeDndSourceId(row.source_id) === DND_PHB_SOURCE_ID)
+    .filter((row) => String(row.entry_type || "") === "spell")
+    .filter((row) => dndSpellLevel(row) === 1)
+    .filter((row) => dndSpellSupportsClass(row, "Ranger"))
+    .map(dndEntryOption);
+}
+
+function rangerLevelTwoSpellChoiceFields(
+  spellRows: SystemsEntryRow[],
+  values: Record<string, string>,
+): Array<Record<string, unknown>> {
+  const options = rangerLevelTwoSpellOptions(spellRows);
+  return [1, 2].map((index) => {
+    const name = `known_spell_${index}`;
+    return {
+      name,
+      label: `Known Spell ${index}`,
+      selected: values[name] || "",
+      help_text: "Choose a Ranger spell you know from enabled PHB spell rows.",
+      options,
+    };
+  });
+}
+
+function rangerLevelTwoKnownSpellRows({
+  spellRows,
+  values,
+  classRowId,
+}: {
+  spellRows: SystemsEntryRow[];
+  values: Record<string, string>;
+  classRowId: string;
+}): Array<Record<string, unknown>> {
+  const rowsBySlug = dndSpellRowsBySlug(spellRows);
+  const selectedRows: SystemsEntryRow[] = [];
+  const seenSpellSlugs = new Set<string>();
+  for (let index = 1; index <= 2; index += 1) {
+    const row = dndSpellSelectionRow({
+      rowsBySlug,
+      value: values[`known_spell_${index}`],
+      expectedLevel: 1,
+      fieldLabel: `Known Spell ${index}`,
+      className: "Ranger",
+    });
+    if (!row) {
+      continue;
+    }
+    if (seenSpellSlugs.has(row.slug)) {
+      throw new Error("Choose distinct Ranger spells before saving.");
+    }
+    seenSpellSlugs.add(row.slug);
+    selectedRows.push(row);
+  }
+  if (selectedRows.length !== 2) {
+    throw new Error("Choose 2 Ranger known spells before saving.");
+  }
+  return selectedRows.map((row) =>
+    dndSpellPayload({
+      row,
+      mark: "Known",
+      classRowId,
+      sourceLabel: "PHB",
+    }),
+  );
 }
 
 function appendRowsById(existingRows: unknown, rowsToAppend: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
@@ -7701,12 +7813,14 @@ export function buildCharacterLevelUpPayload({
   definition,
   stateRevision,
   values = {},
+  spellRows = [],
 }: {
   campaign: CampaignViewModel;
   characterSlug: string;
   definition: Record<string, unknown>;
   stateRevision: number;
   values?: Record<string, unknown>;
+  spellRows?: SystemsEntryRow[];
 }): CharacterAdvancementShellPayload {
   const shellPayload = buildCharacterAdvancementShellPayload({
     campaign,
@@ -7736,7 +7850,28 @@ export function buildCharacterLevelUpPayload({
   const maxHp = createContextInteger(asRecord(definition.stats).max_hp) + hpGain;
   const gainedFeatures = levelTwoFeatureRows(supportedRow.classKey).map((feature) => stringifyEditorValue(feature.name).trim());
   const resources = levelTwoResourceTemplates(supportedRow.classKey).map((resource) => stringifyEditorValue(resource.label).trim());
-  const spellSlots = supportedRow.classKey === "paladin" ? ["1st level: 2"] : [];
+  const spellSlots = supportedRow.classKey === "paladin" || supportedRow.classKey === "ranger" ? ["1st level: 2"] : [];
+  const choiceSections =
+    supportedRow.classKey === "ranger"
+      ? [
+          {
+            title: "Spell Choices",
+            fields: rangerLevelTwoSpellChoiceFields(spellRows, normalizedValues),
+          },
+        ]
+      : [];
+  const newSpells =
+    supportedRow.classKey === "ranger"
+      ? rangerLevelTwoSpellChoiceFields(spellRows, normalizedValues)
+          .map((field) => {
+            const selected = stringifyEditorValue(field.selected).trim();
+            const option = asArray(field.options)
+              .map((rawOption) => asRecord(rawOption))
+              .find((rawOption) => stringifyEditorValue(rawOption.value).trim() === selected);
+            return option ? stringifyEditorValue(option.label).trim() : "";
+          })
+          .filter(Boolean)
+      : [];
   const context = {
     state_revision: stateRevision,
     values: normalizedValues,
@@ -7760,9 +7895,9 @@ export function buildCharacterLevelUpPayload({
     new_subclass_options: [],
     subclass_options: [],
     requires_subclass: false,
-    choice_sections: [],
+    choice_sections: choiceSections,
     limitations: [
-      "TypeScript level-up save parity currently supports only the bounded level-1 to level-2 Fighter/Barbarian/Rogue/Monk/Paladin sheets created by the TypeScript DND-5E level-one slice.",
+      "TypeScript level-up save parity currently supports only the bounded level-1 to level-2 Fighter/Barbarian/Rogue/Ranger/Monk/Paladin sheets created by the TypeScript DND-5E level-one slice.",
       "Multiclassing, subclass choices, ASI/feat choices, broad Fighting Style UI, prepared-spell choice UI, imported-sheet repair, and broader native builder derivation remain pending.",
     ],
     preview: {
@@ -7773,7 +7908,7 @@ export function buildCharacterLevelUpPayload({
       resources,
       attacks: asArray(definition.attacks).map((attack) => stringifyEditorValue(asRecord(attack).name).trim()).filter(Boolean),
       spell_slots: spellSlots,
-      new_spells: [],
+      new_spells: newSpells,
     },
     field_live_preview: {},
     preview_region_ids: ["preview-summary"],
@@ -7808,6 +7943,7 @@ export function applyCharacterLevelUpUpdate(
   definition: Record<string, unknown>,
   payload: Record<string, unknown>,
   levelUpContext: Record<string, unknown>,
+  spellRows: SystemsEntryRow[] = [],
 ): CharacterLevelUpApplyResult {
   const supportedRow = supportedTypeScriptLevelUpClassRow(definition);
   if (!supportedRow) {
@@ -7860,7 +7996,12 @@ export function applyCharacterLevelUpUpdate(
     nextDefinition.resource_templates,
     levelTwoResourceTemplates(supportedRow.classKey),
   );
-  const spellcasting = levelTwoSpellcasting(supportedRow.classKey, nextDefinition, classRow);
+  let spellcasting: Record<string, unknown> | null;
+  try {
+    spellcasting = levelTwoSpellcasting(supportedRow.classKey, nextDefinition, classRow, values, spellRows);
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid spell choices." };
+  }
   if (spellcasting) {
     nextDefinition.spellcasting = spellcasting;
   }

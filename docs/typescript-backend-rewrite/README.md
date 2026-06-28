@@ -191,8 +191,8 @@ Do not implement these routes as part of the parity program unless a later archi
   - `PUT /api/v1/campaigns/:campaignSlug/characters/:characterSlug/advanced-editor` (reference, proficiency, stat-adjustment, recoverable-penalty, custom-feature, and manual-equipment fields with linked-page selector hydration plus `page_ref` validation/round-trip; linked custom-feature defaults, campaign-feat Optional Feature choices, and linked additional-spell choices supported; spell support/manager replacement derivation and full native derivation parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (empty-readiness shell plus ready-state linked custom-feature retraining context)
   - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (bounded linked custom-feature structured-choice save parity through the Advanced Editor derivation path)
-  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (unsupported shells plus bounded ready context for TypeScript-created DND-5E Fighter/Barbarian/Rogue/Monk/Paladin level-one sheets)
-  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (bounded TypeScript-created DND-5E Fighter/Barbarian/Rogue/Monk/Paladin level-one to level-two fixture save; broader save parity pending)
+  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (unsupported shells plus bounded ready context for TypeScript-created DND-5E Fighter/Barbarian/Rogue/Ranger/Monk/Paladin level-one sheets)
+  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (bounded TypeScript-created DND-5E Fighter/Barbarian/Rogue/Ranger/Monk/Paladin level-one to level-two fixture save; broader save parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (unsupported/current shells plus bounded imported DND-5E class/subclass/species/background ref repair context)
   - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (bounded imported DND-5E class/subclass/species/background ref fixture save; broader repair parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (supported Xianxia read context)
@@ -684,10 +684,10 @@ Do not implement these routes as part of the parity program unless a later archi
   bumps SQLite state revisions, records `source.native_progression.history` retrain events when the definition
   changes, and returns refreshed retraining payloads. The Character Level Up route now has the first bounded
   DND-5E level-up save-parity slice for sheets created by the TypeScript DND level-one builder: `GET .../level-up`
-  hydrates a ready level-1 to level-2 context for the supported Fighter/Barbarian/Rogue/Monk/Paladin slice, while
+  hydrates a ready level-1 to level-2 context for the supported Fighter/Barbarian/Rogue/Ranger/Monk/Paladin slice, while
   `POST .../level-up` validates HP Gain, writes copied-fixture `definition.yaml` / managed `import.yaml`,
   bumps SQLite state revisions, reconciles HP, Hit Dice, derived resources, and newly initialized spell slots, records
-  `source.native_progression.hp_baseline` plus `level_up` history, appends Barbarian `Reckless Attack` and `Danger Sense`, appends Rogue `Cunning Action`, appends Monk `Ki` and `Unarmored Movement` with a 2-point Ki resource and the level-2 speed increase, and appends Paladin deferred-choice `Fighting Style`, `Spellcasting`, `Divine Smite`, first-level Paladin spell slots, and Lay on Hands scaling, then returns refreshed level-up payloads.
+  `source.native_progression.hp_baseline` plus `level_up` history, appends Barbarian `Reckless Attack` and `Danger Sense`, appends Rogue `Cunning Action`, appends Ranger deferred-choice `Fighting Style`, `Spellcasting`, two first-level known-spell choices, and first-level Ranger spell slots, appends Monk `Ki` and `Unarmored Movement` with a 2-point Ki resource and the level-2 speed increase, and appends Paladin deferred-choice `Fighting Style`, `Spellcasting`, `Divine Smite`, first-level Paladin spell slots, and Lay on Hands scaling, then returns refreshed level-up payloads.
   Multiclassing, subclass choices, ASI/feat choices, broad Fighting Style UI, prepared-spell choice UI, spell growth beyond this Paladin slot initialization, imported-sheet repair, and broader native
   level-up parity remain pending. The Character Progression Repair route now has the first bounded imported-sheet
   fixture save slice: `GET .../progression-repair` hydrates a repairable context for imported DND-5E sheets that
