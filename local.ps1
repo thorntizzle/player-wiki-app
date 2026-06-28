@@ -493,6 +493,9 @@ function Run-TypeScriptApiChecks {
         Write-Host "Checking TypeScript API SQLite schema command..."
         Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "test:sqlite-schema-check")
 
+        Write-Host "Checking TypeScript API SQLite migration proof command..."
+        Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "test:sqlite-migrate-proof")
+
         Write-Host "Checking TypeScript API route parity..."
         Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "test:route-parity")
     } finally {
