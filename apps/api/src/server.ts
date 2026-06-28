@@ -117,6 +117,7 @@ import {
   buildCampaignSystemsSourceCategoryPayload,
   buildCampaignSystemsSourceDetailPayload,
   buildCampaignSystemsSourceListPayload,
+  entryTypeLabel,
   updateCampaignSystemsEntryOverride,
   updateCampaignSystemsSources,
   type FixtureSystemsRole,
@@ -1000,6 +1001,123 @@ function campaignHref(campaignSlug: string, suffix = ""): string {
 function flaskCampaignHref(campaignSlug: string, suffix = ""): string {
   const normalized = suffix.replace(/^\/+|\/+$/g, "");
   return normalized ? `/campaigns/${campaignSlug}/${normalized}` : `/campaigns/${campaignSlug}`;
+}
+
+function escapeHtml(rawValue: unknown): string {
+  return String(rawValue ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function pageContextLabel(page: WikiPageRecord): string {
+  return [page.section, page.subsection].map((part) => part.trim()).filter(Boolean).join(" / ");
+}
+
+function pageMetaLabel(page: WikiPageRecord): string {
+  return [page.section, page.subsection, page.display_type.replace(/\b\w/g, (char) => char.toUpperCase())]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" / ");
+}
+
+function browserCompatibilityUnavailableHtml(message: string, className: string, includeModifier = true): string {
+  const classes = includeModifier ? `${className} ${className}--empty` : className;
+  return `<div class="${classes}"><p class="meta">${escapeHtml(message)}</p></div>`;
+}
+
+function browserGlobalPreviewHtml({
+  kindLabel,
+  title,
+  meta,
+  summary,
+  url,
+  bodyHtml,
+  imageUrl = "",
+  imageAlt = "",
+  imageCaption = "",
+}: {
+  kindLabel: string;
+  title: string;
+  meta: string;
+  summary: string;
+  url: string;
+  bodyHtml: string;
+  imageUrl?: string;
+  imageAlt?: string;
+  imageCaption?: string;
+}): string {
+  const summaryHtml = summary ? `<p class="lede">${escapeHtml(summary)}</p>` : "";
+  const metaHtml = meta ? `<p class="meta">${escapeHtml(meta)}</p>` : "";
+  const imageHtml = imageUrl
+    ? `<figure class="article-figure"><img class="article-image" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(
+        imageAlt || title,
+      )}">${
+        imageCaption ? `<figcaption class="meta article-image__caption">${escapeHtml(imageCaption)}</figcaption>` : ""
+      }</figure>`
+    : "";
+  return `<article class="campaign-global-search-preview"><header class="campaign-global-search-preview__header"><p class="eyebrow">${escapeHtml(
+    kindLabel,
+  )}</p><h3>${escapeHtml(title)}</h3>${metaHtml}${summaryHtml}<p><a class="button-link" href="${escapeHtml(
+    url,
+  )}">Open dedicated page</a></p></header>${imageHtml}<div class="article-body article-body--compact">${bodyHtml}</div></article>`;
+}
+
+function browserSessionWikiPreviewHtml({
+  page,
+  url,
+  bodyHtml,
+  imageUrl = "",
+}: {
+  page: WikiPageRecord;
+  url: string;
+  bodyHtml: string;
+  imageUrl?: string;
+}): string {
+  const summaryHtml =
+    page.summary && !["item", "spell", "mechanic"].includes(page.page_type)
+      ? `<p class="lede">${escapeHtml(page.summary)}</p>`
+      : "";
+  const imageHtml = imageUrl
+    ? `<figure class="article-figure"><img class="article-image" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(
+        page.image_alt || page.title,
+      )}">${
+        page.image_caption
+          ? `<figcaption class="meta article-image__caption">${escapeHtml(page.image_caption)}</figcaption>`
+          : ""
+      }</figure>`
+    : "";
+  return `<section class="session-wiki-lookup-result"><header class="session-wiki-lookup-result__header"><p class="eyebrow">Wiki article</p><h3>${escapeHtml(
+    page.title,
+  )}</h3><p class="meta">${escapeHtml(pageMetaLabel(page))}</p>${summaryHtml}<p class="meta"><a href="${escapeHtml(
+    url,
+  )}" target="_blank" rel="noopener noreferrer">Open full article in a new tab</a></p></header>${imageHtml}<div class="article-body article-body--compact">${bodyHtml}</div></section>`;
+}
+
+function resolveBrowserScopeAccess(
+  ctx: Context,
+  campaign: CampaignViewModel,
+  scope: "campaign" | "wiki" | "systems" | "session",
+): RoleResolution | { kind: "public" } {
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind === "authenticated") {
+    return campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, scope)
+      ? auth
+      : { kind: "forbidden", message: "You do not have access to this campaign scope." };
+  }
+  if (auth.kind === "invalid") {
+    return auth;
+  }
+  return campaignScopeIsPublic(config.dbPath, campaign, scope) ? { kind: "public" } : auth;
+}
+
+function browserAccessError(result: Exclude<ReturnType<typeof resolveBrowserScopeAccess>, { kind: "authenticated" } | { kind: "public" }>) {
+  if (result.kind === "forbidden") {
+    return forbidden(result.message);
+  }
+  return authRequired();
 }
 
 function supportsCharacterControlsRoutes(_system: unknown): boolean {
@@ -3778,6 +3896,177 @@ app.get(ROUTES.campaignDetail, async (ctx) => {
   });
 });
 
+app.get(ROUTES.campaignGlobalSearch, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignAccess = resolveBrowserScopeAccess(ctx, campaign, "campaign");
+  if (campaignAccess.kind !== "authenticated" && campaignAccess.kind !== "public") {
+    const error = browserAccessError(campaignAccess);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const query = (ctx.req.query("q") || "").trim();
+  if (query.length < 2) {
+    return ctx.json({
+      results: [],
+      message: "Type at least 2 letters to search wiki pages and Systems entries.",
+    });
+  }
+
+  const role = campaignAccess.kind === "authenticated" ? campaignAccess.role : null;
+  const results: Array<{
+    result_id: string;
+    kind: string;
+    kind_label: string;
+    title: string;
+    subtitle: string;
+    select_label: string;
+  }> = [];
+
+  const canSearchWiki = role
+    ? campaignRoleCanAccessScope(config.dbPath, campaign, role, "wiki")
+    : campaignScopeIsPublic(config.dbPath, campaign, "wiki");
+  if (canSearchWiki) {
+    const wikiPages = await campaignWikiRepository.searchPages(campaign.slug, query);
+    for (const page of wikiPages) {
+      const subtitle = pageContextLabel(page);
+      results.push({
+        result_id: `wiki:${page.page_ref}`,
+        kind: "wiki",
+        kind_label: "Wiki",
+        title: page.title,
+        subtitle,
+        select_label: subtitle ? `${page.title} - Wiki - ${subtitle}` : `${page.title} - Wiki`,
+      });
+      if (results.length >= 30) {
+        break;
+      }
+    }
+  }
+
+  const canSearchSystems = role ? campaignRoleCanAccessScope(config.dbPath, campaign, role, "systems") : false;
+  if (results.length < 30 && canSearchSystems && role) {
+    const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+    const systemsPayload = buildCampaignSystemsIndexPayload(
+      config.dbPath,
+      campaign,
+      campaignConfig?.config || {},
+      role,
+      query,
+      "",
+    );
+    for (const entry of systemsPayload.search_results) {
+      results.push({
+        result_id: `systems:${entry.slug}`,
+        kind: "systems",
+        kind_label: "Systems",
+        title: entry.title,
+        subtitle: `${entry.entry_type_label} / ${entry.source_id}`,
+        select_label: `${entry.title} - Systems - ${entry.entry_type_label} - ${entry.source_id}`,
+      });
+      if (results.length >= 30) {
+        break;
+      }
+    }
+  }
+
+  return ctx.json({
+    results,
+    message:
+      results.length === 30
+        ? "Showing the first 30 matching references."
+        : results.length > 0
+          ? `Found ${results.length} matching reference${results.length === 1 ? "" : "s"}.`
+          : "No visible wiki pages or Systems entries matched that search.",
+  });
+});
+
+app.get(ROUTES.campaignGlobalSearchPreview, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  const wikiCampaign = await campaignWikiRepository.getCampaign(campaignSlug);
+  if (!campaign || !wikiCampaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const campaignAccess = resolveBrowserScopeAccess(ctx, campaign, "campaign");
+  if (campaignAccess.kind !== "authenticated" && campaignAccess.kind !== "public") {
+    const error = browserAccessError(campaignAccess);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const resultId = (ctx.req.query("result_id") || "").trim();
+  if (!resultId) {
+    return ctx.json({ preview_html: "" });
+  }
+
+  const [kind, ...refParts] = resultId.split(":");
+  const ref = refParts.join(":").trim();
+  const role = campaignAccess.kind === "authenticated" ? campaignAccess.role : null;
+  if (kind === "wiki" && ref) {
+    const canPreviewWiki = role
+      ? campaignRoleCanAccessScope(config.dbPath, campaign, role, "wiki")
+      : campaignScopeIsPublic(config.dbPath, campaign, "wiki");
+    const page = canPreviewWiki ? await campaignWikiRepository.getPage(campaign.slug, ref) : null;
+    const bodyHtml = page ? await campaignWikiRepository.getPageBodyHtml(campaign.slug, page.route_slug) : null;
+    if (page && bodyHtml !== null) {
+      const imageUrl = page.image_ref && (await assetExists(wikiCampaign, page.image_ref))
+        ? flaskCampaignHref(campaign.slug, `assets/${page.image_ref}`)
+        : "";
+      return ctx.json({
+        preview_html: browserGlobalPreviewHtml({
+          kindLabel: "Wiki article",
+          title: page.title,
+          meta: pageMetaLabel(page),
+          summary: ["item", "spell", "mechanic"].includes(page.page_type) ? "" : page.summary,
+          url: flaskCampaignHref(campaign.slug, `pages/${page.route_slug}`),
+          bodyHtml,
+          imageUrl,
+          imageAlt: page.image_alt || page.title,
+          imageCaption: page.image_caption,
+        }),
+      });
+    }
+  }
+
+  if (kind === "systems" && ref && role && campaignRoleCanAccessScope(config.dbPath, campaign, role, "systems")) {
+    const campaignConfig = await getCampaignConfigFile(config, campaign.slug);
+    const result = buildCampaignSystemsEntryDetailPayload(config.dbPath, campaign, campaignConfig?.config || {}, ref, role);
+    if (result.status === "ok") {
+      const entry = result.payload.entry;
+      const bodyHtml =
+        String(entry.rendered_html || "").trim() ||
+        '<p class="meta">This Systems entry does not have rendered article content yet.</p>';
+      return ctx.json({
+        preview_html: browserGlobalPreviewHtml({
+          kindLabel: "Systems entry",
+          title: entry.title,
+          meta: `${entryTypeLabel(entry.entry_type)} / ${entry.source_id}`,
+          summary: "",
+          url: flaskCampaignHref(campaign.slug, `systems/entries/${entry.slug}`),
+          bodyHtml,
+        }),
+      });
+    }
+  }
+
+  return ctx.json(
+    {
+      preview_html: browserCompatibilityUnavailableHtml(
+        "That reference is not currently visible.",
+        "campaign-global-search-preview",
+      ),
+    },
+    404,
+  );
+});
+
 app.get(ROUTES.campaignHelp, async (ctx) => {
   const campaignSlug = ctx.req.param("campaignSlug") || "";
   const campaign = await getCampaignBySlug(config, campaignSlug);
@@ -4806,6 +5095,114 @@ app.get(ROUTES.sessionArticleSourceSearch, async (ctx) => {
   return ctx.json({
     ok: true,
     ...result.payload,
+  });
+});
+
+app.get(ROUTES.sessionWikiLookupSearch, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const sessionAccess = resolveBrowserScopeAccess(ctx, campaign, "session");
+  if (sessionAccess.kind !== "authenticated" && sessionAccess.kind !== "public") {
+    const error = browserAccessError(sessionAccess);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const role = sessionAccess.kind === "authenticated" ? sessionAccess.role : null;
+  const canSearchWiki = role
+    ? campaignRoleCanAccessScope(config.dbPath, campaign, role, "wiki")
+    : campaignScopeIsPublic(config.dbPath, campaign, "wiki");
+  if (!canSearchWiki) {
+    return ctx.json({
+      results: [],
+      message: "No player-visible wiki articles are available right now.",
+    });
+  }
+
+  const query = (ctx.req.query("q") || "").trim();
+  if (query.length < 2) {
+    return ctx.json({
+      results: [],
+      message: "Type at least 2 letters to search player-visible wiki articles.",
+    });
+  }
+
+  const pages = await campaignWikiRepository.searchPages(campaign.slug, query);
+  const results = pages.slice(0, 30).map((page) => {
+    const subtitle = pageContextLabel(page);
+    return {
+      page_ref: page.page_ref,
+      title: page.title,
+      subtitle,
+      select_label: subtitle ? `${page.title} - ${subtitle}` : page.title,
+    };
+  });
+
+  return ctx.json({
+    results,
+    message:
+      results.length === 30
+        ? "Showing the first 30 matching wiki articles."
+        : results.length > 0
+          ? `Found ${results.length} matching article${results.length === 1 ? "" : "s"}.`
+          : "No player-visible wiki articles matched that search.",
+  });
+});
+
+app.get(ROUTES.sessionWikiLookupPreview, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  const wikiCampaign = await campaignWikiRepository.getCampaign(campaignSlug);
+  if (!campaign || !wikiCampaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const sessionAccess = resolveBrowserScopeAccess(ctx, campaign, "session");
+  if (sessionAccess.kind !== "authenticated" && sessionAccess.kind !== "public") {
+    const error = browserAccessError(sessionAccess);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const pageRef = (ctx.req.query("page_ref") || "").trim();
+  if (!pageRef) {
+    return ctx.json({ preview_html: "" });
+  }
+
+  const role = sessionAccess.kind === "authenticated" ? sessionAccess.role : null;
+  const canPreviewWiki = role
+    ? campaignRoleCanAccessScope(config.dbPath, campaign, role, "wiki")
+    : campaignScopeIsPublic(config.dbPath, campaign, "wiki");
+  const page = canPreviewWiki ? await campaignWikiRepository.getPage(campaign.slug, pageRef) : null;
+  const bodyHtml = page ? await campaignWikiRepository.getPageBodyHtml(campaign.slug, page.route_slug) : null;
+  if (!page || bodyHtml === null) {
+    return ctx.json(
+      {
+        preview_html: browserCompatibilityUnavailableHtml(
+          "That article is not currently visible to players.",
+          "session-wiki-lookup-empty",
+          false,
+        ),
+      },
+      404,
+    );
+  }
+
+  const imageUrl =
+    page.image_ref && (await assetExists(wikiCampaign, page.image_ref))
+      ? flaskCampaignHref(campaign.slug, `assets/${page.image_ref}`)
+      : "";
+  return ctx.json({
+    preview_html: browserSessionWikiPreviewHtml({
+      page,
+      url: flaskCampaignHref(campaign.slug, `pages/${page.route_slug}`),
+      bodyHtml,
+      imageUrl,
+    }),
   });
 });
 

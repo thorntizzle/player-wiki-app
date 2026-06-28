@@ -561,6 +561,15 @@ Do not implement these routes as part of the parity program unless a later archi
   campaign existence checks, Characters-scope visibility, assigned-player fallback visibility,
   `q` filtering against roster `search_text`, roster card fields consumed by Gen2, existing
   portrait asset references without image conversion, and create/import link/tool flags.
+- The Browser JSON compatibility route slice now serves the four legacy Gen2 browser endpoints
+  outside `/api/v1`: `/campaigns/:campaignSlug/global-search`,
+  `/campaigns/:campaignSlug/global-search/preview`,
+  `/campaigns/:campaignSlug/session/wiki-lookup/search`, and
+  `/campaigns/:campaignSlug/session/wiki-lookup/preview`. These Hono handlers preserve the
+  Gen2-consumed `results`/`message` and `preview_html` contracts, short-query and empty-preview
+  behavior, JSON missing-campaign envelopes, unavailable preview `404` responses, and
+  Session-scope/player-visible wiki gating. `browser-json-compatibility-decision.md` records the
+  route-level cutover decision and focused fixture proof.
 - The Character create route pair now serves `GET .../characters/create` plus Xianxia-lane
   `POST .../characters/create`, preserving
   Flask-compatible campaign existence checks, authoring auth/permission failures, unsupported-system

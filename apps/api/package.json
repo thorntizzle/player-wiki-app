@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "node dist/server.js",
     "smoke": "node ./tests/smoke.mjs",
+    "test:browser-json-compatibility": "node ./tests/browser-json-compatibility.mjs",
     "test:route-parity": "node ./tests/route-parity.mjs",
     "pretest": "npm run build",
     "test": "node ./tests/route-parity.mjs && node ./tests/smoke.mjs"
