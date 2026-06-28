@@ -657,6 +657,15 @@ export type CharacterRetrainingApplyResult =
     }
   | { status: "validation_error"; message: string };
 
+export type CharacterLevelUpApplyResult =
+  | {
+      status: "ok";
+      definition: Record<string, unknown>;
+      hpGain: number;
+      values: Record<string, string>;
+    }
+  | { status: "validation_error"; message: string };
+
 export type CharacterAdvancementRouteKind = "level_up" | "retraining" | "progression_repair";
 
 export interface CharacterAdvancementShellPayload {
@@ -5893,6 +5902,332 @@ function addNativeRetrainingEventIfChanged(
   return {
     ...nextDefinition,
     source,
+  };
+}
+
+function supportedTypeScriptLevelUpClassRow(definition: Record<string, unknown>): {
+  row: Record<string, unknown>;
+  classKey: DndLevelOneClassKey;
+  rowId: string;
+  currentLevel: number;
+} | null {
+  if (definitionSourceType(definition) !== DND_CHARACTER_CREATE_SOURCE_TYPE) {
+    return null;
+  }
+  const classRows = asArray(asRecord(definition.profile).classes).map((row) => asRecord(row));
+  if (classRows.length !== 1) {
+    return null;
+  }
+  const row = classRows[0] ?? {};
+  const classKey = normalizeLookup(row.class_name) as DndLevelOneClassKey;
+  const currentLevel = createContextInteger(row.level);
+  if (!(classKey in DND_LEVEL_ONE_CLASS_CONFIGS) || currentLevel !== 1) {
+    return null;
+  }
+  return {
+    row,
+    classKey,
+    rowId: stringifyEditorValue(row.id).trim() || "class-1",
+    currentLevel,
+  };
+}
+
+function averageHpGainForClass(classKey: DndLevelOneClassKey): number {
+  return classKey === "barbarian" ? 7 : 6;
+}
+
+function parseLevelUpHpGain(value: unknown): number {
+  const hpGain = createContextInteger(value);
+  if (hpGain < 1) {
+    throw new Error("HP Gain must be at least 1.");
+  }
+  return hpGain;
+}
+
+function levelUpValuesFromPayload(
+  values: Record<string, unknown>,
+  rowId: string,
+  classKey: DndLevelOneClassKey,
+): Record<string, string> {
+  const hpGain = stringifyEditorValue(values.hp_gain).trim() || String(averageHpGainForClass(classKey));
+  return {
+    advancement_mode: stringifyEditorValue(values.advancement_mode).trim() || "advance_existing",
+    target_class_row_id: stringifyEditorValue(values.target_class_row_id).trim() || rowId,
+    hp_gain: hpGain,
+  };
+}
+
+function levelTwoFeatureRows(classKey: DndLevelOneClassKey): Array<Record<string, unknown>> {
+  if (classKey === "barbarian") {
+    return [
+      {
+        id: "reckless-attack-2",
+        name: "Reckless Attack",
+        category: "class_feature",
+        source: "PHB",
+        source_kind: "native_progression",
+        description_markdown: "Beginning at 2nd level, you can attack recklessly for advantage with the normal drawback.",
+      },
+      {
+        id: "danger-sense-2",
+        name: "Danger Sense",
+        category: "class_feature",
+        source: "PHB",
+        source_kind: "native_progression",
+        description_markdown: "At 2nd level, you gain an uncanny sense of nearby danger.",
+      },
+    ];
+  }
+  return [
+    {
+      id: "action-surge-2",
+      name: "Action Surge",
+      category: "class_feature",
+      tracker_ref: "action-surge",
+      source: "PHB",
+      source_kind: "native_progression",
+      description_markdown: "Starting at 2nd level, you can push yourself beyond your normal limits for one extra action.",
+    },
+  ];
+}
+
+function levelTwoResourceTemplates(classKey: DndLevelOneClassKey): Array<Record<string, unknown>> {
+  if (classKey !== "fighter") {
+    return [];
+  }
+  return [
+    {
+      id: "action-surge",
+      label: "Action Surge",
+      category: "class_feature",
+      max: 1,
+      initial_current: 1,
+      reset_on: "short_rest",
+      reset_to: "max",
+      rest_behavior: "restore_full",
+      display_order: 20,
+    },
+  ];
+}
+
+function appendRowsById(existingRows: unknown, rowsToAppend: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const existing = asArray(existingRows).map((row) => asRecord(row));
+  const existingIds = new Set(existing.map((row) => stringifyEditorValue(row.id).trim()).filter(Boolean));
+  const nextRows = [...existing];
+  for (const row of rowsToAppend) {
+    const rowId = stringifyEditorValue(row.id).trim();
+    if (rowId && existingIds.has(rowId)) {
+      continue;
+    }
+    nextRows.push(JSON.parse(JSON.stringify(row)) as Record<string, unknown>);
+    if (rowId) {
+      existingIds.add(rowId);
+    }
+  }
+  return nextRows;
+}
+
+function addNativeLevelUpEvent(
+  nextDefinition: Record<string, unknown>,
+  previousDefinition: Record<string, unknown>,
+  classRow: Record<string, unknown>,
+  hpGain: number,
+): Record<string, unknown> {
+  const source = { ...asRecord(nextDefinition.source) };
+  const nativeProgression = { ...asRecord(source.native_progression) };
+  if (!nativeProgression.hp_baseline) {
+    nativeProgression.hp_baseline = {
+      level: definitionCurrentLevel(previousDefinition),
+      max_hp: createContextInteger(asRecord(previousDefinition.stats).max_hp),
+    };
+  }
+  const history = asArray(nativeProgression.history).map((entry) => ({ ...asRecord(entry) }));
+  history.push({
+    kind: "level_up",
+    at: currentUtcIsoTimestamp(),
+    from_level: definitionCurrentLevel(previousDefinition),
+    to_level: definitionCurrentLevel(nextDefinition),
+    target_level: definitionCurrentLevel(nextDefinition),
+    action: "level_up",
+    class_name: stringifyEditorValue(classRow.class_name).trim(),
+    class_row_id: stringifyEditorValue(classRow.id).trim() || "class-1",
+    hp_gain: hpGain,
+  });
+  nativeProgression.history = history;
+  source.native_progression = nativeProgression;
+  return {
+    ...nextDefinition,
+    source,
+  };
+}
+
+export function buildCharacterLevelUpPayload({
+  campaign,
+  characterSlug,
+  definition,
+  stateRevision,
+  values = {},
+}: {
+  campaign: CampaignViewModel;
+  characterSlug: string;
+  definition: Record<string, unknown>;
+  stateRevision: number;
+  values?: Record<string, unknown>;
+}): CharacterAdvancementShellPayload {
+  const shellPayload = buildCharacterAdvancementShellPayload({
+    campaign,
+    characterSlug,
+    definition,
+    kind: "level_up",
+  });
+  if (nativeCharacterCreateLane(campaign.system) !== "dnd5e" || nativeCharacterCreateLane(definition.system) !== "dnd5e") {
+    return shellPayload;
+  }
+
+  const supportedRow = supportedTypeScriptLevelUpClassRow(definition);
+  if (!supportedRow) {
+    return shellPayload;
+  }
+
+  const normalizedValues = levelUpValuesFromPayload(values, supportedRow.rowId, supportedRow.classKey);
+  let hpGain = averageHpGainForClass(supportedRow.classKey);
+  try {
+    hpGain = parseLevelUpHpGain(normalizedValues.hp_gain);
+  } catch {
+    normalizedValues.hp_gain = String(hpGain);
+  }
+  const currentLevel = definitionCurrentLevel(definition);
+  const nextLevel = currentLevel + 1;
+  const className = stringifyEditorValue(supportedRow.row.class_name).trim();
+  const maxHp = createContextInteger(asRecord(definition.stats).max_hp) + hpGain;
+  const gainedFeatures = levelTwoFeatureRows(supportedRow.classKey).map((feature) => stringifyEditorValue(feature.name).trim());
+  const resources = levelTwoResourceTemplates(supportedRow.classKey).map((resource) => stringifyEditorValue(resource.label).trim());
+  const context = {
+    state_revision: stateRevision,
+    values: normalizedValues,
+    character_name: stringifyEditorValue(definition.name).trim(),
+    current_level: currentLevel,
+    next_level: nextLevel,
+    advancement_mode: "advance_existing",
+    mode_options: [{ value: "advance_existing", label: "Advance Existing Class" }],
+    can_add_class: false,
+    current_class_rows: [`${className} ${supportedRow.currentLevel}`],
+    target_row_options: [
+      {
+        value: supportedRow.rowId,
+        label: `${className} ${supportedRow.currentLevel} -> ${supportedRow.currentLevel + 1}`,
+      },
+    ],
+    target_class_row_id: supportedRow.rowId,
+    row_current_level: supportedRow.currentLevel,
+    row_target_level: supportedRow.currentLevel + 1,
+    new_class_options: [],
+    new_subclass_options: [],
+    subclass_options: [],
+    requires_subclass: false,
+    choice_sections: [],
+    limitations: [
+      "TypeScript level-up save parity currently supports only the bounded level-1 to level-2 Fighter/Barbarian sheets created by the TypeScript DND-5E level-one slice.",
+      "Multiclassing, subclass choices, ASI/feat choices, spell growth, imported-sheet repair, and broader native builder derivation remain pending.",
+    ],
+    preview: {
+      class_level_text: `${className} ${supportedRow.currentLevel + 1}`,
+      max_hp: maxHp,
+      class_rows: [`${className} ${supportedRow.currentLevel + 1}`],
+      gained_features: gainedFeatures,
+      resources,
+      attacks: asArray(definition.attacks).map((attack) => stringifyEditorValue(asRecord(attack).name).trim()).filter(Boolean),
+      spell_slots: [],
+      new_spells: [],
+    },
+    field_live_preview: {},
+    preview_region_ids: ["preview-summary"],
+    live_region_ids: ["preview-summary"],
+  };
+  const readiness = {
+    status: "ready",
+    message: "",
+    reasons: [],
+    current_level: currentLevel,
+    source_type: definitionSourceType(definition),
+    is_native: true,
+    is_imported: false,
+  };
+  return {
+    lane: "ready",
+    supported: true,
+    unsupported_message: "",
+    readiness,
+    links: buildCharacterAdvancementLinks({
+      campaign,
+      characterSlug,
+      definition,
+      readinessStatus: "ready",
+      kind: "level_up",
+    }),
+    context,
+  };
+}
+
+export function applyCharacterLevelUpUpdate(
+  definition: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  levelUpContext: Record<string, unknown>,
+): CharacterLevelUpApplyResult {
+  const supportedRow = supportedTypeScriptLevelUpClassRow(definition);
+  if (!supportedRow) {
+    return {
+      status: "validation_error",
+      message: "This character is not ready for the TypeScript DND-5E level-up slice.",
+    };
+  }
+  const values = levelUpValuesFromPayload(asRecord(payload.values), supportedRow.rowId, supportedRow.classKey);
+  if (values.advancement_mode !== "advance_existing") {
+    return { status: "validation_error", message: "This TypeScript level-up slice can only advance an existing class." };
+  }
+  if (values.target_class_row_id !== supportedRow.rowId) {
+    return { status: "validation_error", message: "Choose a valid class row to level up." };
+  }
+
+  let hpGain: number;
+  try {
+    hpGain = parseLevelUpHpGain(values.hp_gain);
+  } catch (error) {
+    return { status: "validation_error", message: error instanceof Error ? error.message : "Invalid HP Gain." };
+  }
+
+  const expectedRevision = createContextInteger(levelUpContext.state_revision);
+  const submittedRevision = createContextInteger(payload.expected_revision);
+  if (expectedRevision > 0 && submittedRevision !== expectedRevision) {
+    return { status: "validation_error", message: "Expected revision does not match the loaded level-up context." };
+  }
+
+  const nextDefinition = deepCloneRecord(definition);
+  const profile = { ...asRecord(nextDefinition.profile) };
+  const classRows = asArray(profile.classes).map((row) => ({ ...asRecord(row) }));
+  const classRow = { ...classRows[0] };
+  classRow.id = stringifyEditorValue(classRow.id).trim() || supportedRow.rowId;
+  classRow.level = supportedRow.currentLevel + 1;
+  classRows[0] = classRow;
+  profile.classes = classRows;
+  profile.class_level_text = `${stringifyEditorValue(classRow.class_name).trim()} ${supportedRow.currentLevel + 1}`;
+  nextDefinition.profile = profile;
+
+  const stats = { ...asRecord(nextDefinition.stats) };
+  stats.max_hp = createContextInteger(stats.max_hp) + hpGain;
+  stats.proficiency_bonus = 2;
+  nextDefinition.stats = stats;
+  nextDefinition.features = appendRowsById(nextDefinition.features, levelTwoFeatureRows(supportedRow.classKey));
+  nextDefinition.resource_templates = appendRowsById(
+    nextDefinition.resource_templates,
+    levelTwoResourceTemplates(supportedRow.classKey),
+  );
+
+  return {
+    status: "ok",
+    definition: addNativeLevelUpEvent(nextDefinition, definition, classRow, hpGain),
+    hpGain,
+    values,
   };
 }
 

@@ -2246,7 +2246,7 @@ export interface CharacterLevelUpContext {
 export interface CharacterLevelUpResponse extends ApiResponseBase {
   campaign: CampaignRecord;
   character: CharacterRecord;
-  lane: "dnd5e" | "repairable" | "unsupported";
+  lane: "dnd5e" | "ready" | "repairable" | "unsupported";
   supported: boolean;
   message?: string | null;
   unsupported_message?: string;
