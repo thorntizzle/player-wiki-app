@@ -392,13 +392,115 @@ const DND_ABILITY_LABELS: Record<(typeof DND_ABILITY_KEYS)[number], string> = {
 const DND_CREATE_LIMITATIONS = [
   "Base classes come from enabled Systems rows inside the current native support lane: PHB base classes plus TCE Artificer.",
   "Species and backgrounds come from enabled Systems rows in the current supported source matrix for this TypeScript parity slice.",
-  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Cleric with a bounded Life Domain level-one package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
+  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Bard with a bounded known-spells package, PHB Cleric with a bounded Life Domain level-one package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
 ];
 const DND_CHARACTER_CREATE_SOURCE_PATH = "builder://dnd5e-create-level-one";
 const DND_CHARACTER_CREATE_SOURCE_TYPE = "dnd5e_character_builder_level_one";
 const DND_CHARACTER_CREATE_VERSION = "2026-06-28.0";
 const DND_CHARACTER_CREATE_IMPORTED_FROM = "In-app DND-5E Character Creator level-one slice";
 const DND_LEVEL_ONE_CLASS_CONFIGS = {
+  bard: {
+    className: "Bard",
+    armorClass: "leather",
+    supportedSubclassTitles: [],
+    skillProficiencies: ["Performance", "Persuasion", "Perception"],
+    skillRows: ["Arcana", "History", "Perception", "Performance", "Persuasion"],
+    spellcasting: {
+      abilityKey: "cha",
+      abilityLabel: "Charisma",
+      spellMode: "known",
+      slotProgression: [{ level: 1, max_slots: 2 }],
+      cantripCount: 2,
+      cantripFieldPrefix: "cantrip_spell",
+      knownSpellCount: 4,
+      alwaysPreparedSpellTitles: [],
+      alwaysPreparedGrantSourceLabel: "",
+      preparedSpellFieldPrefix: "known_spell",
+      spellbookFieldPrefix: "",
+      spellbookCount: 0,
+      spellSourceLabel: "PHB",
+    },
+    proficiencies: {
+      armor: ["Light armor"],
+      weapons: ["Simple weapons", "Hand crossbows", "Longswords", "Rapiers", "Shortswords"],
+      tools: ["Three musical instruments"],
+    },
+    equipmentCatalog: [
+      {
+        id: "leather-armor-1",
+        name: "Leather Armor",
+        default_quantity: 1,
+        weight: "10 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        tags: ["armor", "light armor"],
+      },
+      {
+        id: "rapier-1",
+        name: "Rapier",
+        default_quantity: 1,
+        weight: "2 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        weapon_wield_mode: "main-hand",
+        weapon_wield_modes: ["main-hand"],
+        tags: ["weapon", "martial weapon", "melee weapon", "finesse"],
+      },
+      {
+        id: "dagger-1",
+        name: "Dagger",
+        default_quantity: 1,
+        weight: "1 lb.",
+        tags: ["weapon", "simple weapon", "melee weapon", "finesse", "thrown weapon"],
+      },
+      {
+        id: "lute-1",
+        name: "Lute",
+        default_quantity: 1,
+        weight: "2 lb.",
+        tags: ["musical instrument", "spellcasting focus"],
+      },
+      {
+        id: "diplomats-pack-1",
+        name: "Diplomat's Pack",
+        default_quantity: 1,
+        weight: "36 lb.",
+        tags: ["gear"],
+      },
+    ],
+    features: [
+      {
+        id: "spellcasting-1",
+        name: "Spellcasting",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "This level-one TypeScript slice records Bard cantrips, known spells, and first-level slots.",
+      },
+      {
+        id: "bardic-inspiration-1",
+        name: "Bardic Inspiration",
+        category: "class_feature",
+        tracker_ref: "bardic-inspiration",
+        source: "PHB",
+        description_markdown: "Bardic Inspiration starts with uses equal to your Charisma modifier, minimum one. Die-size scaling and higher-level refresh changes remain outside this slice.",
+      },
+    ],
+    resourceTemplates: [
+      {
+        id: "bardic-inspiration",
+        label: "Bardic Inspiration",
+        category: "class_feature",
+        max: 1,
+        initial_current: 1,
+        max_ability_key: "cha",
+        minimum_max: 1,
+        reset_on: "long_rest",
+        reset_to: "max",
+        rest_behavior: "restore_full",
+        display_order: 10,
+      },
+    ],
+  },
   fighter: {
     className: "Fighter",
     armorClass: 18,
@@ -584,6 +686,7 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
       slotProgression: [{ level: 1, max_slots: 2 }],
       cantripCount: 3,
       cantripFieldPrefix: "cantrip_spell",
+      knownSpellCount: 0,
       alwaysPreparedSpellTitles: ["Bless", "Cure Wounds"],
       alwaysPreparedGrantSourceLabel: "Life Domain",
       preparedSpellFieldPrefix: "prepared_spell",
@@ -693,6 +796,7 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
       slotProgression: [{ level: 1, max_slots: 2 }],
       cantripCount: 3,
       cantripFieldPrefix: "cantrip_spell",
+      knownSpellCount: 0,
       alwaysPreparedSpellTitles: [],
       alwaysPreparedGrantSourceLabel: "",
       preparedSpellFieldPrefix: "wizard_prepared",
@@ -7621,6 +7725,14 @@ function dndCreateSpellChoiceFields({
     1,
     abilityModifier(createContextInteger(values[spellcasting.abilityKey], 10)) + 1,
   );
+  const levelOneSelectionLimit = spellcasting.spellMode === "known" ? spellcasting.knownSpellCount : preparedLimit;
+  const levelOneLabelPrefix = spellcasting.spellMode === "known" ? "Known Spell" : "Prepared Spell";
+  const levelOneHelpText =
+    spellcasting.spellMode === "known"
+      ? `Choose a ${classConfig.className} spell you know from enabled PHB spell rows.`
+      : spellcasting.spellMode === "wizard"
+        ? "Choose a prepared Wizard spell from your selected spellbook spells."
+        : "Choose a prepared Cleric spell. Domain spells are always prepared and do not count here.";
 
   return [
     ...Array.from({ length: spellcasting.cantripCount }, (_, index) => {
@@ -7645,16 +7757,13 @@ function dndCreateSpellChoiceFields({
           };
         })
       : []),
-    ...Array.from({ length: preparedLimit }, (_, index) => {
+    ...Array.from({ length: levelOneSelectionLimit }, (_, index) => {
       const name = `${spellcasting.preparedSpellFieldPrefix}_${index + 1}`;
       return {
         name,
-        label: `Prepared Spell ${index + 1}`,
+        label: `${levelOneLabelPrefix} ${index + 1}`,
         selected: values[name] || "",
-        help_text:
-          spellcasting.spellMode === "wizard"
-            ? "Choose a prepared Wizard spell from your selected spellbook spells."
-            : "Choose a prepared Cleric spell. Domain spells are always prepared and do not count here.",
+        help_text: levelOneHelpText,
         options: preparedOptions,
       };
     }),
@@ -7817,7 +7926,7 @@ function assertDndLevelOneClass(row: SystemsEntryRow | null): { row: SystemsEntr
   }
   const classKey = dndLevelOneClassKey(row);
   if (!classKey || normalizeDndSourceId(row.source_id) !== DND_PHB_SOURCE_ID || String(row.entry_type || "") !== "class") {
-    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Cleric, and PHB Wizard.");
+    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, and PHB Wizard.");
   }
   return { row, classKey };
 }
@@ -7923,6 +8032,25 @@ function dndStartingEquipmentCatalog(classKey: DndLevelOneClassKey, backgroundTi
       currency: { cp: 0, sp: 0, ep: 0, gp: 10, pp: 0 },
     },
   ];
+}
+
+function dndLevelOneResourceTemplates(
+  classKey: DndLevelOneClassKey,
+  abilityScores: Record<string, unknown>,
+): Array<Record<string, unknown>> {
+  return DND_LEVEL_ONE_CLASS_CONFIGS[classKey].resourceTemplates.map((rawTemplate) => {
+    const template = JSON.parse(JSON.stringify(rawTemplate)) as Record<string, unknown>;
+    const maxAbilityKey = String(template.max_ability_key || "").trim() as (typeof DND_ABILITY_KEYS)[number];
+    if ((DND_ABILITY_KEYS as readonly string[]).includes(maxAbilityKey)) {
+      const minimumMax = createContextInteger(template.minimum_max, 0);
+      const max = Math.max(minimumMax, abilityModifier(dndAbilityScoreValue(abilityScores, maxAbilityKey)));
+      template.max = max;
+      template.initial_current = max;
+      delete template.max_ability_key;
+      delete template.minimum_max;
+    }
+    return template;
+  });
 }
 
 function dndSpellRowsBySlug(rows: SystemsEntryRow[]): Map<string, SystemsEntryRow> {
@@ -8037,6 +8165,7 @@ function dndLevelOneSpellcasting({
   const alwaysPreparedTitles = new Set(spellcasting.alwaysPreparedSpellTitles.map((title) => normalizeLookup(title)));
   const seenSpellSlugs = new Set<string>();
   const selectedSpells: Record<string, unknown>[] = [];
+  let selectedCantripCount = 0;
 
   for (let index = 1; index <= spellcasting.cantripCount; index += 1) {
     const row = dndSpellSelectionRow({
@@ -8053,6 +8182,7 @@ function dndLevelOneSpellcasting({
       throw new Error(`Choose distinct ${classConfig.className} spells before saving.`);
     }
     seenSpellSlugs.add(row.slug);
+    selectedCantripCount += 1;
     selectedSpells.push(
       dndSpellPayload({
         row,
@@ -8061,6 +8191,9 @@ function dndLevelOneSpellcasting({
         sourceLabel: spellcasting.spellSourceLabel,
       }),
     );
+  }
+  if (spellcasting.spellMode === "known" && selectedCantripCount !== spellcasting.cantripCount) {
+    throw new Error(`Choose ${spellcasting.cantripCount} ${classConfig.className} cantrips before saving.`);
   }
 
   const preparedLimit = Math.max(
@@ -8124,12 +8257,15 @@ function dndLevelOneSpellcasting({
       );
     }
   } else {
-    for (let index = 1; index <= preparedLimit; index += 1) {
+    const selectionLimit = spellcasting.spellMode === "known" ? spellcasting.knownSpellCount : preparedLimit;
+    const selectionFieldLabel = spellcasting.spellMode === "known" ? "Known Spell" : "Prepared Spell";
+    let selectedLevelOneSpellCount = 0;
+    for (let index = 1; index <= selectionLimit; index += 1) {
       const row = dndSpellSelectionRow({
         rowsBySlug,
         value: values[`${spellcasting.preparedSpellFieldPrefix}_${index}`],
         expectedLevel: 1,
-        fieldLabel: `Prepared Spell ${index}`,
+        fieldLabel: `${selectionFieldLabel} ${index}`,
         className: classConfig.className,
         disallowedTitles: alwaysPreparedTitles,
       });
@@ -8140,14 +8276,18 @@ function dndLevelOneSpellcasting({
         throw new Error(`Choose distinct ${classConfig.className} spells before saving.`);
       }
       seenSpellSlugs.add(row.slug);
+      selectedLevelOneSpellCount += 1;
       selectedSpells.push(
         dndSpellPayload({
           row,
-          mark: "Prepared",
+          mark: spellcasting.spellMode === "known" ? "Known" : "Prepared",
           classRowId: "class-row-1",
           sourceLabel: spellcasting.spellSourceLabel,
         }),
       );
+    }
+    if (spellcasting.spellMode === "known" && selectedLevelOneSpellCount !== spellcasting.knownSpellCount) {
+      throw new Error(`Choose ${spellcasting.knownSpellCount} ${classConfig.className} known spells before saving.`);
     }
 
     for (const spellTitle of spellcasting.alwaysPreparedSpellTitles) {
@@ -8173,6 +8313,24 @@ function dndLevelOneSpellcasting({
   }
 
   const abilityModifierValue = abilityModifier(dndAbilityScoreValue(abilityScores, spellcasting.abilityKey));
+  const classRow: Record<string, unknown> = {
+    class_row_id: "class-row-1",
+    class_name: classConfig.className,
+    level: 1,
+    caster_progression: "full",
+    spell_mode: spellcasting.spellMode,
+    spellcasting_ability: spellcasting.abilityLabel,
+    spell_save_dc: 8 + 2 + abilityModifierValue,
+    spell_attack_bonus: 2 + abilityModifierValue,
+    slot_lane_id: "class-row-1-slots",
+    spell_list_class_name: classConfig.className,
+  };
+  if (spellcasting.spellMode === "known") {
+    classRow.known_spell_limit = spellcasting.knownSpellCount;
+  } else {
+    classRow.prepared_spell_limit = preparedLimit;
+  }
+
   return {
     spellcasting_class: classConfig.className,
     spellcasting_ability: spellcasting.abilityLabel,
@@ -8188,21 +8346,7 @@ function dndLevelOneSpellcasting({
         slot_progression: spellcasting.slotProgression.map((slot) => ({ ...slot })),
       },
     ],
-    class_rows: [
-      {
-        class_row_id: "class-row-1",
-        class_name: classConfig.className,
-        level: 1,
-        caster_progression: "full",
-        spell_mode: spellcasting.spellMode,
-        spellcasting_ability: spellcasting.abilityLabel,
-        spell_save_dc: 8 + 2 + abilityModifierValue,
-        spell_attack_bonus: 2 + abilityModifierValue,
-        slot_lane_id: "class-row-1-slots",
-        spell_list_class_name: classConfig.className,
-        prepared_spell_limit: preparedLimit,
-      },
-    ],
+    class_rows: [classRow],
     spells: selectedSpells,
   };
 }
@@ -8241,6 +8385,28 @@ function dndWeaponAttack({
 function dndLevelOneAttacks(classKey: DndLevelOneClassKey, abilityScores: Record<string, unknown>): Array<Record<string, unknown>> {
   const strengthModifier = abilityModifier(dndAbilityScoreValue(abilityScores, "str"));
   const dexterityModifier = abilityModifier(dndAbilityScoreValue(abilityScores, "dex"));
+  if (classKey === "bard") {
+    return [
+      dndWeaponAttack({
+        name: "Rapier",
+        category: "melee weapon",
+        abilityModifierValue: Math.max(strengthModifier, dexterityModifier),
+        damageDie: "1d8",
+        damageType: "piercing",
+        notes: "Finesse.",
+        equipmentRef: "rapier-1",
+      }),
+      dndWeaponAttack({
+        name: "Dagger",
+        category: "melee or thrown weapon",
+        abilityModifierValue: Math.max(strengthModifier, dexterityModifier),
+        damageDie: "1d4",
+        damageType: "piercing",
+        notes: "Finesse, light, thrown range 20/60.",
+        equipmentRef: "dagger-1",
+      }),
+    ];
+  }
   if (classKey === "barbarian") {
     return [
       dndWeaponAttack({
@@ -8346,6 +8512,9 @@ function dndLevelOneArmorClass(classKey: DndLevelOneClassKey, abilityScores: Rec
   if (armorClass === "unarmored-dex") {
     return 10 + abilityModifier(dndAbilityScoreValue(abilityScores, "dex"));
   }
+  if (armorClass === "leather") {
+    return 11 + abilityModifier(dndAbilityScoreValue(abilityScores, "dex"));
+  }
   return armorClass;
 }
 
@@ -8354,11 +8523,14 @@ function dndLevelOneSkills(classKey: DndLevelOneClassKey, abilityScores: Record<
   const skillAbilityKeys: Record<string, (typeof DND_ABILITY_KEYS)[number]> = {
     arcana: "int",
     athletics: "str",
+    deception: "cha",
     history: "int",
     insight: "wis",
     intimidation: "cha",
     medicine: "wis",
     perception: "wis",
+    performance: "cha",
+    persuasion: "cha",
     religion: "int",
   };
   return DND_LEVEL_ONE_CLASS_CONFIGS[classKey].skillRows.map((skillName) => {
@@ -8507,7 +8679,7 @@ export function buildDndCreateCharacter({
         allies_and_organizations_markdown: "",
         custom_sections: [],
       },
-      resource_templates: classConfig.resourceTemplates.map((template) => JSON.parse(JSON.stringify(template)) as Record<string, unknown>),
+      resource_templates: dndLevelOneResourceTemplates(classKey, abilityScores),
       source: {
         source_path: DND_CHARACTER_CREATE_SOURCE_PATH,
         source_type: DND_CHARACTER_CREATE_SOURCE_TYPE,
