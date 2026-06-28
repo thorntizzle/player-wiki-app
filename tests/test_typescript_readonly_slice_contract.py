@@ -2141,6 +2141,87 @@ def test_typescript_dnd_character_create_barbarian_writes_definition_import_and_
     assert written_definition["source"]["source_path"] == "builder://dnd5e-create-level-one"
     assert written_import["import_status"] == "managed"
 
+    level_up_url = (
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/"
+        f"characters/{character_slug}/level-up"
+    )
+    level_up_get_status, level_up_get_payload = _to_json(
+        level_up_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+    assert level_up_get_status == 200
+    assert level_up_get_payload["supported"] is True
+    assert level_up_get_payload["lane"] == "ready"
+    assert level_up_get_payload["level_up"]["state_revision"] == state_record["revision"]
+    assert level_up_get_payload["level_up"]["next_level"] == 2
+    assert level_up_get_payload["level_up"]["values"]["hp_gain"] == "7"
+    assert level_up_get_payload["level_up"]["preview"]["gained_features"] == [
+        "Reckless Attack",
+        "Danger Sense",
+    ]
+    assert level_up_get_payload["level_up"]["preview"]["resources"] == []
+
+    expected_hp_gain = int(level_up_get_payload["level_up"]["values"]["hp_gain"])
+    target_class_row_id = level_up_get_payload["level_up"]["values"]["target_class_row_id"]
+    level_up_status, level_up_payload = _to_json(
+        level_up_url,
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": level_up_get_payload["level_up"]["state_revision"],
+            "values": {
+                "advancement_mode": "advance_existing",
+                "target_class_row_id": target_class_row_id,
+                "hp_gain": str(expected_hp_gain),
+            },
+        },
+    )
+    assert level_up_status == 200
+    assert level_up_payload["message"] == "Character level-up saved."
+    leveled_definition = level_up_payload["character"]["definition"]
+    leveled_state = level_up_payload["character"]["state_record"]
+    assert leveled_definition["profile"]["class_level_text"] == "Barbarian 2"
+    assert leveled_definition["profile"]["classes"][0].get("id", target_class_row_id) == target_class_row_id
+    assert leveled_definition["profile"]["classes"][0]["level"] == 2
+    assert leveled_definition["stats"]["max_hp"] == definition["stats"]["max_hp"] + expected_hp_gain
+    leveled_features_by_id = {feature["id"]: feature for feature in leveled_definition["features"]}
+    assert leveled_features_by_id["reckless-attack-2"]["name"] == "Reckless Attack"
+    assert leveled_features_by_id["reckless-attack-2"]["source_kind"] == "native_progression"
+    assert leveled_features_by_id["danger-sense-2"]["name"] == "Danger Sense"
+    assert leveled_features_by_id["danger-sense-2"]["source_kind"] == "native_progression"
+    leveled_resources_by_id = {resource["id"]: resource for resource in leveled_definition["resource_templates"]}
+    assert leveled_resources_by_id["rage"]["max"] == 2
+    assert leveled_resources_by_id["rage"]["initial_current"] == 2
+    assert leveled_definition["source"]["native_progression"]["hp_baseline"] == {"level": 1, "max_hp": 14}
+    level_up_history = leveled_definition["source"]["native_progression"]["history"]
+    assert level_up_history[-1]["kind"] == "level_up"
+    assert level_up_history[-1]["class_name"] == "Barbarian"
+    assert level_up_history[-1]["class_row_id"] == target_class_row_id
+    assert level_up_history[-1]["hp_gain"] == expected_hp_gain
+    assert leveled_state["revision"] == state_record["revision"] + 1
+    assert leveled_state["state"]["vitals"]["current_hp"] == definition["stats"]["max_hp"] + expected_hp_gain
+    assert leveled_state["state"]["hit_dice"]["pools"] == [{"faces": 12, "current": 1, "max": 2}]
+    leveled_state_resources_by_id = {resource["id"]: resource for resource in leveled_state["state"]["resources"]}
+    assert leveled_state_resources_by_id["rage"]["current"] == 2
+    assert leveled_state_resources_by_id["rage"]["max"] == 2
+    assert leveled_state["state"]["spell_slots"] == []
+
+    state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
+    assert state is not None
+    assert state["revision"] == state_record["revision"] + 1
+    assert state["state"]["vitals"]["current_hp"] == definition["stats"]["max_hp"] + expected_hp_gain
+    assert state["state"]["hit_dice"]["pools"] == [{"faces": 12, "current": 1, "max": 2}]
+
+    written_definition = yaml.safe_load((character_dir / "definition.yaml").read_text(encoding="utf-8"))
+    written_import = yaml.safe_load((character_dir / "import.yaml").read_text(encoding="utf-8"))
+    assert written_definition["profile"]["class_level_text"] == "Barbarian 2"
+    assert written_definition["source"]["native_progression"]["history"][-1]["class_name"] == "Barbarian"
+    assert written_definition["source"]["native_progression"]["history"][-1]["hp_gain"] == expected_hp_gain
+    written_features_by_id = {feature["id"]: feature for feature in written_definition["features"]}
+    assert written_features_by_id["reckless-attack-2"]["name"] == "Reckless Attack"
+    assert written_features_by_id["danger-sense-2"]["name"] == "Danger Sense"
+    assert written_import["source_path"] == "builder://dnd5e-create-level-one"
+
 
 def test_typescript_dnd_character_create_bard_writes_known_spells_resource_and_state(
     typescript_api_mutation_server,
