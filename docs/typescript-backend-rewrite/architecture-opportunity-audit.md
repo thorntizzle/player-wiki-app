@@ -6,16 +6,16 @@ Status: active audit and architecture decision input
 
 ## Purpose
 
-The TypeScript rewrite needs enough behavioral parity to replace Flask safely,
-but parity should not mean copying every Flask implementation shape into the new
-backend. This audit separates product contracts that must be preserved from
-temporary compatibility shims, migration bridges, and places where the rewrite
-should deliberately build a better foundation.
+The TypeScript rewrite is now V2-first. Flask behavior is evidence for current
+data, permissions, workflows, and migration risk, but parity is not the goal.
+This audit separates data/safety contracts that must be preserved from temporary
+compatibility shims, migration bridges, and places where V2 should deliberately
+build a better foundation.
 
 The immediate trigger for this audit is the DND-5E level-up lane. The current
-branch is adding bounded class-by-class parity slices to close observable
-Flask gaps. That is useful as characterization evidence, but it should not
-become the permanent architecture for advancement.
+branch is adding bounded class-by-class slices to characterize existing behavior.
+That is useful as migration and golden-test evidence, but it should not become
+the permanent V2 architecture for advancement.
 
 ## Audit Rubric
 
@@ -23,7 +23,7 @@ Use these labels when reviewing existing or new TypeScript rewrite work:
 
 | Label | Meaning | Rewrite posture |
 | --- | --- | --- |
-| Product contract | User-visible behavior, safety, authorization, rollback, or data boundary that must survive cutover. | Preserve directly and test heavily. |
+| Data/safety contract | User-visible data, safety, authorization, rollback, or visibility boundary that must survive migration and cutover. | Preserve directly and test heavily. |
 | Compatibility shim | Legacy route, response shape, or browser contract needed so Gen2/current clients survive cutover. | Preserve at the edge; keep canonical internals cleaner. |
 | Migration bridge | Transitional behavior needed while Flask, existing SQLite rows, YAML files, mirrors, or copied-data rehearsals remain authoritative. | Encapsulate and give it an exit condition. |
 | Architecture debt | TypeScript is reproducing Flask's incidental implementation style instead of modeling the domain. | Stop widening where possible; design a reusable foundation. |
@@ -49,17 +49,17 @@ parts are intentional contracts and which parts are temporary scaffolding.
 
 ## Guardrails
 
-- Behavioral parity tests should characterize the Flask/product contract, not
-  require TypeScript to keep Flask's internal structure.
-- Route handlers should be compatibility adapters over service/domain modules,
+- Behavioral parity tests should characterize data, security, and workflow risk,
+  not require TypeScript to keep Flask's route or internal structure.
+- Route handlers should be compatibility adapters over V2 service/domain modules,
   not the permanent home for domain behavior.
 - Safety-critical behavior remains strict parity: auth, membership, view-as,
   visibility, revision checks, backup, restore, rollback, and no-live-data
   boundaries should not be loosened for architectural neatness.
 - Migration bridges should have named exit criteria. If an exit is unknown,
   mark it as an open decision instead of letting it become permanent by default.
-- New implementation lanes should state whether they are adding product
-  contract, compatibility shim, migration bridge, or architecture foundation.
+- New implementation lanes should state whether they are adding data/safety
+  contract, compatibility shim, migration bridge, or V2 architecture foundation.
 
 ## Audit Matrix
 

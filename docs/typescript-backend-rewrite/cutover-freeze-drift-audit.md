@@ -22,7 +22,7 @@ copied/staging-approved data.
 | --- | --- | --- |
 | Rewrite cutover coordinator | Declares the freeze window, records the baseline commit, collects the transcript, and makes the go/no-go recommendation. | Confirms no unapproved Flask feature work entered during freeze. |
 | Route/API parity owner | Reviews `docs/api-v1.md`, route snapshots, route seed, TypeScript route manifest, and `parity-inventory.md` for drift. | Confirms route inventory, documented API contract, and TypeScript seed/manifest agree or lists approved exceptions. |
-| Current-state doc owner | Checks `docs/current-state/INDEX.md` plus touched current-state docs for behavior added since the last audit. | Confirms current product contract is reflected in rewrite parity evidence. |
+| Current-state doc owner | Checks `docs/current-state/INDEX.md` plus touched current-state docs for behavior added since the last audit. | Confirms current product behavior is reflected in V2 migration/workflow evidence or listed as an approved exception. |
 | Data/rollback owner | Checks copied-data or staging snapshot transcripts, rollback runbook, and data-delta decisions. | Confirms write-family labels are not overstated and rollback evidence is current. |
 | Ops owner | Checks local wrapper, build, health, packaging, backup, restore, and environment notes. | Confirms all evidence is no-live unless the user explicitly approved staging/live action. |
 

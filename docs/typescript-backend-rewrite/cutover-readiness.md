@@ -2,13 +2,16 @@
 
 Last updated: 2026-06-28
 
-Status: planning and validation-gap matrix for the TypeScript backend rewrite
+Status: V2 migration, workflow, and cutover validation-gap matrix
 
 ## Operating Boundary
 
-Flask remains the production authority. This document does not approve a PR, merge,
-deploy, live data write, Fly sync, or production cutover. It defines the remaining
-evidence needed before those user-approved steps can be considered.
+Flask remains the production authority. This document does not approve a PR,
+merge, deploy, live data write, Fly sync, or production cutover. It defines the
+remaining evidence needed before those user-approved steps can be considered.
+For V2, readiness is about non-destructive legacy data migration, safety,
+workflow coverage, operations, and rollback. Route parity remains useful
+evidence where it protects those goals, but it is not the V2 architecture target.
 
 This lane intentionally owns documentation only. It should not edit active
 implementation files such as `apps/api/src/content/characterAuthoring.ts`,
@@ -79,9 +82,9 @@ does not silently become the long-term design.
 
 | Gate family | Architecture classification | Rewrite posture |
 | --- | --- | --- |
-| API route inventory | Compatibility shim plus product contract at the HTTP edge | Keep route snapshots strict, but move reusable behavior behind canonical services. |
+| API route inventory | Compatibility shim plus data/safety contract at the HTTP edge | Keep route snapshots useful for migration/workflow evidence, but move reusable behavior behind canonical V2 services. |
 | Browser JSON compatibility endpoints | Compatibility shim | Keep the four closed routes for cutover; do not make them the pattern for new APIs. |
-| Character create/edit parity | Architecture debt plus product contract | Preserve current behavior, but require the character module-boundary plan before broadening create/edit internals. |
+| Character create/edit parity | Architecture debt plus data migration/workflow evidence | Preserve current data and critical behavior, but require the character module-boundary plan before broadening create/edit internals. |
 | Character advancement parity | Architecture debt with useful golden evidence | Treat current class-specific level-up slices as acceptance tests for the DND progression kernel. |
 | Character detail/presenter parity | Product contract plus frontend foundation | Preserve Gen2/Session/Combat payloads while moving derivation behind presenter/domain adapters. |
 | Missing-resource/error shape parity | Compatibility shim plus open decision | Record deliberate JSON-normalization breaks instead of inheriting Flask HTML errors by accident. |
@@ -89,6 +92,7 @@ does not silently become the long-term design.
 | Content-character, Session, Combat, Systems, DM Content, and published-content writes | Product contract plus migration bridge | Preserve authorization, revision, backup, restore, and rollback behavior; expose canonical service models where route code is too wide. |
 | Image and portrait behavior | Open decision plus migration bridge | Do not widen image writes until the cutover image policy is chosen. |
 | SQLite schema/migration layer | Open decision plus migration bridge | Keep TypeScript preflight/ledger proof separate from real schema ownership until a schema decision lands. |
+| Legacy data migration | V2 foundation plus migration bridge | Treat non-destructive import, mapping manifests, validation reports, and rollback/export as first-class readiness gates. |
 | Local ops and Docker/Fly packaging | Migration bridge plus compatibility/local shim | Keep wrapper proof repeatable while moving durable checks into portable scripts where practical. |
 | Freeze, rollback, and full cutover smoke | Product contract | Keep conservative parity and evidence discipline; no architecture cleanup should weaken rollback. |
 

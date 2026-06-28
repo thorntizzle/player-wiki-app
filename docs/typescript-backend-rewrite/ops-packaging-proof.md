@@ -472,7 +472,7 @@ Current gap:
 | `static image path scaffolded` | A non-default image target and proof entrypoint exist, and static checks verify the build/start/env-mapping shape without running Docker. | `npm --prefix apps/api run test:packaging-proof`, Docker context hygiene review, and explicit documentation that default Flask packaging remains unchanged. |
 | `local image builds` | A local-only image includes the intended TypeScript runtime and builds without live dependencies. | Local Docker build transcript, Docker context hygiene, TypeScript build inside image or copied deliberate artifact, no private/live identifiers. |
 | `staging image boots with copied data` | The image boots locally or in a non-live staging target against copied data and passes local health/smoke checks. | Copied SQLite/content paths, schema/migration proof, `/healthz`, `/app-next/` if applicable, protected asset check, no live paths. |
-| `user-approved deploy ready` | The image and rollback plan are ready for an explicitly approved deploy step. | Staging snapshot rehearsal, rollback transcript, final route/data parity gates, clean committed state, explicit user approval. |
+| `user-approved deploy ready` | The image and rollback plan are ready for an explicitly approved deploy step. | Staging snapshot rehearsal, rollback transcript, final V2 migration/workflow and data-safety gates, clean committed state, explicit user approval. |
 
 Any failed build, live-path dependency, missing rollback path, or unproven data
 mutation keeps the label at the previous stage.

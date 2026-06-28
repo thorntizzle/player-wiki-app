@@ -4,12 +4,14 @@ Last updated: 2026-06-28
 
 Status: active rewrite planning and implementation track
 
-This folder tracks the deliberate TypeScript backend rewrite path for Campaign Player Wiki. It is separate from incremental Flask refactor work. The goal is a production-capable TypeScript backend that preserves the current product contract, data safety boundaries, local/Fly operations, and rollback path before replacing Flask.
+This folder tracks the deliberate TypeScript V2 rewrite path for Campaign Player Wiki. It is separate from incremental Flask refactor work and from route-by-route Flask parity as an end in itself. The goal is a production-capable V2 app with strong domain models, typed service contracts, a non-destructive legacy data bridge, current data-safety boundaries, local/Fly operations, and rollback path before replacing Flask.
 
 ## Source Of Truth
 
 - `charter.md`: scope, freeze rules, cutover gates, rollback requirement, and branch/spec ownership.
-- `parity-inventory.md`: current route, API, data, command, and policy inventory that TypeScript must preserve.
+- `v2-rewrite-strategy.md`: V2-first rewrite posture, legacy data bridge requirements, and readiness metrics that replace route parity as the main scoreboard.
+- `legacy-data-migration-plan.md`: non-destructive migration bridge plan for current SQLite, YAML, Markdown, assets, characters, content, Systems, Session, Combat, and DM Content data.
+- `parity-inventory.md`: legacy route, API, data, command, and policy inventory used as migration/workflow evidence, not the V2 architecture target.
 - `architecture-opportunity-audit.md`: audit rubric for separating product contracts from compatibility shims, migration bridges, architecture debt, and rewrite opportunities.
 - `holistic-rewrite-plan.md`: combined backend architecture and frontend modernization plan for moving from TypeScript parity to a cleaner app foundation.
 - `dnd-progression-kernel-adr.md`: target architecture decision for replacing class-by-class DND advancement slices with a data-driven progression kernel.
@@ -38,7 +40,7 @@ This folder tracks the deliberate TypeScript backend rewrite path for Campaign P
 - `full-cutover-copied-workflow-smoke-2026-06-28.md`: completed no-live copied-data API/server workflow smoke across auth, Campaign Home/wiki/search/help, DM Content, Systems, Characters, Session, Combat, content assets/portrait serving, local build health, backup, restore, one reverted TypeScript settings write, and Flask fallback health; no cutover readiness label change.
 - `image-portrait-compat-proof-2026-06-28.md`: focused no-live proof for direct legacy character portrait URL serving and extension-preserving portrait/content asset behavior.
 - `.local/roadmaps/typescript-backend-rewrite-roadmap.md`: local active task queue for the rewrite track.
-- `docs/current-state/INDEX.md`: current product contract index. Use it to confirm present behavior before porting any workflow.
+- `docs/current-state/INDEX.md`: current product contract index. Use it to confirm present behavior before modeling, migrating, or replacing any workflow.
 - `docs/api-v1.md`: current JSON API contract.
 
 Route parity check command:
@@ -76,21 +78,21 @@ Do not implement these routes as part of the parity program unless a later archi
 
 ## Working Rules
 
-- Python/Flask remains the production authority until TypeScript passes parity gates and a cutover rehearsal.
-- TypeScript work starts read-only and fixture-backed before any production write path is added.
+- Python/Flask remains the production authority until V2 passes legacy-data migration, safety, workflow, operational, and rollback gates plus a cutover rehearsal.
+- TypeScript/V2 work starts from canonical domain/service contracts and read-only/import validation before any production write path is added.
 - Controlled write routes on this branch are not production-write readiness by themselves; production use still requires backup, dry-run, copied-data rehearsal, and rollback evidence for the affected data.
 - Domain, service, persistence, content, auth, Systems, character, session, and combat logic must not live in React route components.
 - Experimental spikes stay in `.task-temp` or an isolated approved workspace until a workspace layout decision is recorded.
-- Any Python behavior that ships during the rewrite must either be added to the parity inventory or recorded as an explicit deferred exception.
+- Any Python behavior that ships during the rewrite must either be added to the V2 migration/workflow inventory or recorded as an explicit deferred exception.
 
 ## Initial Phase Order
 
 1. Rewrite charter and tracked spec home.
-2. Product contract and parity inventory.
+2. Product contract, V2 strategy, and legacy data inventory.
 3. Stack and workspace spike with a written decision record.
 4. Framework-free domain and policy packages.
-5. Compatibility persistence and migration reads.
-6. Auth, API contracts, read-only Gen2 slices, then controlled write paths.
+5. V2 persistence, legacy import adapters, and migration reads.
+6. Auth, typed service contracts, read-only Gen2/workspace slices, then controlled write paths.
 
 ## Slice Progress
 
