@@ -1,6 +1,6 @@
 # Characters: DND-5E
 
-Last updated: 2026-06-25
+Last updated: 2026-06-28
 
 ## Owns
 
@@ -42,7 +42,7 @@ Last updated: 2026-06-25
 ## Current Spellcasting Contract
 
 - Shared-slot multiclass spellcasting is limited to supported `full`, `1/2`, `artificer`, and currently supported `1/3` subclass-only lanes.
-- Warlock Pact Magic remains a separate lane.
+- Warlock Pact Magic remains a separate lane from shared-slot full-caster math. The TypeScript create parity path now has a bounded PHB Warlock/Fiend level-one slice with a distinct Pact Magic slot lane, but broader Warlock progression, invocations, pact boons, and multiclass Pact Magic remain outside full builder parity.
 - Subclass-only spellcasting requires supported Systems metadata or bundled fallback coverage for PHB Eldritch Knight and Arcane Trickster.
 - Spell add/update/remove actions route through an explicit target class row.
 - Combat and Session Character consume only the Current spell set; unprepared candidates do not appear as castable spells there.
