@@ -601,10 +601,14 @@ Do not implement these routes as part of the parity program unless a later archi
   Full DND level-one builder write parity, broader background package automation, broader spellcasting classes, and broader level-one subclass choices remain pending.
 - The Character detail read route now serves `GET .../characters/:characterSlug`, preserving
   Flask-compatible campaign/missing-character envelopes, Characters-scope or assigned-owner
-  Session-scope access, SQLite `state_record` reads, CharacterPane-safe optional presentation
-  shells, permissions, controls metadata, protected portrait URLs from existing asset references,
-  and Flask/Gen2 detail links. Full Flask presenter derivation remains outside this detail-read
-  slice.
+  Session-scope access, SQLite `state_record` reads, permissions, controls metadata, protected
+  portrait URLs from existing asset references, and Flask/Gen2 detail links. The route now also
+  derives a bounded CharacterPane presenter cluster consumed by Gen2 Character, Session Character,
+  and Combat selected-PC panes: DND overview stat rows, reference/note HTML, abilities/skills,
+  proficiency groups, equipment-state rows, presented inventory, presented spellcasting rows, and
+  Xianxia `presented_xianxia` identity/resources/active-state/inventory/approval basics. Full Flask
+  presenter derivation, including richer linked Systems/page body resolution and broader DND/Xianxia
+  presenter sections, remains outside this detail-read slice.
 - The Character Advanced Editor context route now serves `GET .../characters/:characterSlug/advanced-editor`,
   preserving Flask-compatible campaign/missing-character envelopes, auth and assigned-owner access
   checks, DND-5E support detection, unsupported non-DND payloads, edit-page links, state revision,
