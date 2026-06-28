@@ -392,7 +392,7 @@ const DND_ABILITY_LABELS: Record<(typeof DND_ABILITY_KEYS)[number], string> = {
 const DND_CREATE_LIMITATIONS = [
   "Base classes come from enabled Systems rows inside the current native support lane: PHB base classes plus TCE Artificer.",
   "Species and backgrounds come from enabled Systems rows in the current supported source matrix for this TypeScript parity slice.",
-  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Bard with a bounded known-spells package, PHB Cleric with a bounded Life Domain level-one package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
+  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Bard with a bounded known-spells package, PHB Cleric with a bounded Life Domain level-one package, PHB Druid with a bounded prepared-spells package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
 ];
 const DND_CHARACTER_CREATE_SOURCE_PATH = "builder://dnd5e-create-level-one";
 const DND_CHARACTER_CREATE_SOURCE_TYPE = "dnd5e_character_builder_level_one";
@@ -779,6 +779,95 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
         category: "subclass_feature",
         source: "PHB",
         description_markdown: "Life Domain healing bonus is recorded as reference text; healing automation remains outside this slice.",
+      },
+    ],
+    resourceTemplates: [],
+  },
+  druid: {
+    className: "Druid",
+    armorClass: "leather-shield",
+    supportedSubclassTitles: [],
+    skillProficiencies: ["Animal Handling", "Survival"],
+    skillRows: ["Animal Handling", "Insight", "Medicine", "Nature", "Perception", "Survival"],
+    spellcasting: {
+      abilityKey: "wis",
+      abilityLabel: "Wisdom",
+      spellMode: "prepared",
+      slotProgression: [{ level: 1, max_slots: 2 }],
+      cantripCount: 2,
+      cantripFieldPrefix: "cantrip_spell",
+      knownSpellCount: 0,
+      alwaysPreparedSpellTitles: [],
+      alwaysPreparedGrantSourceLabel: "",
+      preparedSpellFieldPrefix: "prepared_spell",
+      spellbookFieldPrefix: "",
+      spellbookCount: 0,
+      spellSourceLabel: "PHB",
+    },
+    proficiencies: {
+      armor: ["Light armor", "Medium armor", "Shields"],
+      weapons: ["Clubs", "Daggers", "Darts", "Javelins", "Maces", "Quarterstaffs", "Scimitars", "Sickles", "Slings", "Spears"],
+      tools: ["Herbalism kit"],
+    },
+    equipmentCatalog: [
+      {
+        id: "leather-armor-1",
+        name: "Leather Armor",
+        default_quantity: 1,
+        weight: "10 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        tags: ["armor", "light armor"],
+      },
+      {
+        id: "wooden-shield-1",
+        name: "Wooden Shield",
+        default_quantity: 1,
+        weight: "6 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        tags: ["shield", "armor"],
+      },
+      {
+        id: "scimitar-1",
+        name: "Scimitar",
+        default_quantity: 1,
+        weight: "3 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        weapon_wield_mode: "main-hand",
+        weapon_wield_modes: ["main-hand"],
+        tags: ["weapon", "martial weapon", "melee weapon", "finesse"],
+      },
+      {
+        id: "druidic-focus-1",
+        name: "Druidic Focus",
+        default_quantity: 1,
+        weight: "1 lb.",
+        tags: ["spellcasting focus"],
+      },
+      {
+        id: "explorers-pack-1",
+        name: "Explorer's Pack",
+        default_quantity: 1,
+        weight: "59 lb.",
+        tags: ["gear"],
+      },
+    ],
+    features: [
+      {
+        id: "druidic-1",
+        name: "Druidic",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "This level-one TypeScript slice records Druidic as reference text only.",
+      },
+      {
+        id: "spellcasting-1",
+        name: "Spellcasting",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "This level-one TypeScript slice records Druid cantrips, prepared spells, and first-level slots.",
       },
     ],
     resourceTemplates: [],
@@ -7732,7 +7821,7 @@ function dndCreateSpellChoiceFields({
       ? `Choose a ${classConfig.className} spell you know from enabled PHB spell rows.`
       : spellcasting.spellMode === "wizard"
         ? "Choose a prepared Wizard spell from your selected spellbook spells."
-        : "Choose a prepared Cleric spell. Domain spells are always prepared and do not count here.";
+        : `Choose a prepared ${classConfig.className} spell from enabled PHB spell rows. Automatic prepared spells do not count here.`;
 
   return [
     ...Array.from({ length: spellcasting.cantripCount }, (_, index) => {
@@ -7926,7 +8015,7 @@ function assertDndLevelOneClass(row: SystemsEntryRow | null): { row: SystemsEntr
   }
   const classKey = dndLevelOneClassKey(row);
   if (!classKey || normalizeDndSourceId(row.source_id) !== DND_PHB_SOURCE_ID || String(row.entry_type || "") !== "class") {
-    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, and PHB Wizard.");
+    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, PHB Druid, and PHB Wizard.");
   }
   return { row, classKey };
 }
@@ -8192,7 +8281,7 @@ function dndLevelOneSpellcasting({
       }),
     );
   }
-  if (spellcasting.spellMode === "known" && selectedCantripCount !== spellcasting.cantripCount) {
+  if (spellcasting.cantripCount > 0 && selectedCantripCount !== spellcasting.cantripCount) {
     throw new Error(`Choose ${spellcasting.cantripCount} ${classConfig.className} cantrips before saving.`);
   }
 
@@ -8460,6 +8549,19 @@ function dndLevelOneAttacks(classKey: DndLevelOneClassKey, abilityScores: Record
       }),
     ];
   }
+  if (classKey === "druid") {
+    return [
+      dndWeaponAttack({
+        name: "Scimitar",
+        category: "melee weapon",
+        abilityModifierValue: Math.max(strengthModifier, dexterityModifier),
+        damageDie: "1d6",
+        damageType: "slashing",
+        notes: "Finesse, light.",
+        equipmentRef: "scimitar-1",
+      }),
+    ];
+  }
   if (classKey === "wizard") {
     return [
       dndWeaponAttack({
@@ -8515,12 +8617,16 @@ function dndLevelOneArmorClass(classKey: DndLevelOneClassKey, abilityScores: Rec
   if (armorClass === "leather") {
     return 11 + abilityModifier(dndAbilityScoreValue(abilityScores, "dex"));
   }
+  if (armorClass === "leather-shield") {
+    return 13 + abilityModifier(dndAbilityScoreValue(abilityScores, "dex"));
+  }
   return armorClass;
 }
 
 function dndLevelOneSkills(classKey: DndLevelOneClassKey, abilityScores: Record<string, unknown>): Array<Record<string, unknown>> {
   const proficientSkills = new Set(DND_LEVEL_ONE_CLASS_CONFIGS[classKey].skillProficiencies.map((skill) => normalizeLookup(skill)));
   const skillAbilityKeys: Record<string, (typeof DND_ABILITY_KEYS)[number]> = {
+    "animal handling": "wis",
     arcana: "int",
     athletics: "str",
     deception: "cha",
@@ -8528,10 +8634,12 @@ function dndLevelOneSkills(classKey: DndLevelOneClassKey, abilityScores: Record<
     insight: "wis",
     intimidation: "cha",
     medicine: "wis",
+    nature: "int",
     perception: "wis",
     performance: "cha",
     persuasion: "cha",
     religion: "int",
+    survival: "wis",
   };
   return DND_LEVEL_ONE_CLASS_CONFIGS[classKey].skillRows.map((skillName) => {
     const proficient = proficientSkills.has(normalizeLookup(skillName));
