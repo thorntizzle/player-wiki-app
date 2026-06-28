@@ -49,6 +49,12 @@ bundle path only. It does not prove a TypeScript API image, a combined
 Flask-plus-TypeScript image, a TypeScript sidecar, or a TypeScript-only cutover
 image.
 
+Follow-up local runtime evidence is recorded in
+`docs/typescript-backend-rewrite/ops-local-runtime-evidence.md`. That proof shows
+the integrated TypeScript API can install, build, start from `apps/api/dist`, and
+answer `/healthz` against fixture/local paths on Windows with the pinned Node/npm
+runtime. It still does not prove Docker/Fly packaging or authorize deploy.
+
 ## Inspected Files
 
 - `Dockerfile`
