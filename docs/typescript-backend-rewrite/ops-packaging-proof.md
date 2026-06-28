@@ -183,6 +183,19 @@ Current local evidence:
   `ts-api-runtime-proof` target, builds `apps/api` inside Docker, ignores
   host-built API output/dependencies from the Docker context, and maps Fly-style
   `PLAYER_WIKI_*` env vars to the TypeScript API's `CPW_*` runtime env vars.
+- On 2026-06-28, `rewrite/ts-ops-packaging-runtime-proof-next` was reset to
+  integration commit `61191fe17651309dfdad9f9c42c26cd6cc4c5be0` before proof
+  work. `local.ps1 -Action ts-api-check -NodeRoot <pinned Codex Node bin>`
+  passed on that baseline. The standalone packaging proof also passed when the
+  pinned Node bin was placed on `PATH`.
+- The same 2026-06-28 pass attempted to reproduce the compiled-start smoke
+  from a clean scratch DB created by Flask `manage.py init-db` and copied
+  sanitized fixture campaigns under
+  `.task-temp\ts-ops-packaging-runtime-proof-next-20260628`. Startup failed
+  before serving because TypeScript preflight expected
+  `sessions.session_token_hash`, while the Flask initializer created
+  `sessions.token_hash`. This keeps the compiled-start-from-Flask-schema proof
+  blocked on the latest integration baseline.
 
 ### Docker Context Hygiene
 
@@ -277,6 +290,11 @@ Current gap:
 - `deploy/ts-api-proof-entrypoint.sh` deliberately creates only the parent
   directories for copied local paths, then starts Node. It does not claim schema
   initialization or migration readiness.
+- On integration commit `61191fe17651309dfdad9f9c42c26cd6cc4c5be0`, the
+  transitional claim that Flask `manage.py init-db` prepares a DB acceptable to
+  TypeScript startup preflight needs follow-up: the Flask `sessions` table uses
+  `token_hash`, while TypeScript's current startup requirement asks for
+  `session_token_hash`.
 
 ### Runtime Environment
 
@@ -424,7 +442,9 @@ smoke could run in this worktree environment.
 - TypeScript env names are mapped only in the proof entrypoint, not in the
   default Flask entrypoint or Fly process model.
 - Startup schema behavior is still Flask `manage.py init-db`; TypeScript
-  migration dry-run/startup behavior is unproven.
+  migration dry-run/startup behavior is unproven, and the latest local
+  Flask-initialized scratch DB did not pass TypeScript startup preflight because
+  of the `sessions` token column mismatch.
 - No local Docker build transcript exists for a TypeScript API runtime because
   Docker was unavailable in the current worktree environment.
 - A no-live rollback/cutover transcript scaffold exists, but no image-level
