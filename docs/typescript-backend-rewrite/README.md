@@ -14,6 +14,10 @@ This folder tracks the deliberate TypeScript backend rewrite path for Campaign P
 - `route-snapshots.json`: tracked executable snapshot from
   `scripts/route_snapshots.py` used by parity checks.
 - `typescript-route-seed.json`: provisional route seed for initial TypeScript handlers.
+- `cutover-freeze-drift-audit.md` and
+  `scripts/cutover_freeze_drift_audit.py`: no-runtime final freeze/drift
+  checklist plus source-input validation scaffold for the last pre-rehearsal
+  audit.
 - `handoff-2026-06-26.md`: current pause/resume note for the Hono rewrite branch.
 - `content-character-staging-readiness.md`: content-character write/delete rollback evidence and staging-readiness decision.
 - `staging-rehearsal-harness.md` and `scripts/staging_rehearsal_harness.py`: guarded copied-data/staging-snapshot transcript scaffold, staging snapshot preflight checklist, path checks, evidence manifests, family-specific transcript guides, and restore-equivalence comparison helper for TypeScript write-family readiness.
@@ -739,5 +743,8 @@ Do not implement these routes as part of the parity program unless a later archi
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.
 - `apps/api/tests/sqlite-schema-check.mjs` checks the TypeScript schema command against a Flask-initialized scratch DB plus missing-schema and missing-file failures.
+- `scripts/cutover_freeze_drift_audit.py` checks that final freeze/drift
+  evidence inputs exist and parse before heavier route parity, build, rehearsal,
+  or rollback checks run; it is not a parity or cutover approval by itself.
 
 Production cutover is not part of the early phases. It requires backup, migration dry-run, browser rehearsal, production smoke checks, and an approved rollback window.
