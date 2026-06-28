@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -72,6 +72,17 @@ db.exec(`
     updated_by_user_id INTEGER,
     PRIMARY KEY (campaign_slug, character_slug)
   );
+
+  CREATE TABLE character_assignments (
+    id INTEGER PRIMARY KEY,
+    campaign_slug TEXT NOT NULL,
+    character_slug TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    assigned_by_user_id INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(campaign_slug, character_slug)
+  );
 `);
 
 const now = "2026-06-27T12:00:00+00:00";
@@ -122,70 +133,171 @@ async function requestBytes(pathname) {
 const authHeaders = { Authorization: `Bearer ${dmApiToken}` };
 const portraitPath = "/api/v1/campaigns/linden-pass/characters/arden-march/portrait";
 const portraitDir = path.join(campaignsDir, "linden-pass", "assets", "characters", "arden-march");
+const definitionPath = path.join(campaignsDir, "linden-pass", "characters", "arden-march", "definition.yaml");
+const importPath = path.join(campaignsDir, "linden-pass", "characters", "arden-march", "import.yaml");
+const existingWebpAssetRef = "characters/arden-march/portrait.webp";
+const existingWebpBytes = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x77, 0x65, 0x62, 0x70, 0x30]);
 const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x70, 0x6e, 0x67]);
 const jpgBytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x6a, 0x70, 0x67, 0xff, 0xd9]);
+const gifBytes = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x67, 0x69, 0x66]);
+const webpBytes = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x77, 0x65, 0x62, 0x70, 0x31]);
+
+mkdirSync(portraitDir, { recursive: true });
+writeFileSync(path.join(portraitDir, "portrait.webp"), existingWebpBytes);
+writeFileSync(
+  definitionPath,
+  readFileSync(definitionPath, "utf8").replace(
+    /profile:\r?\n/,
+    `profile:\n  portrait_asset_ref: ${existingWebpAssetRef}\n  portrait_alt: Existing WebP portrait\n  portrait_caption: Existing WebP fixture.\n`,
+  ),
+);
+
+function assetPath(assetRef) {
+  return path.join(campaignsDir, "linden-pass", "assets", ...assetRef.split("/"));
+}
+
+function assertImportMetadataPreserved() {
+  const importText = readFileSync(importPath, "utf8");
+  assert.match(importText, /parser_version:\s*fixture/);
+  assert.match(importText, /import_status:\s*clean/);
+  assert.match(importText, /source_path:/);
+}
+
+function assertProfileMetadata(assetRef, altText, caption) {
+  const definitionText = readFileSync(definitionPath, "utf8");
+  assert.match(definitionText, new RegExp(`portrait_asset_ref:\\s*${assetRef.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.match(definitionText, new RegExp(`portrait_alt:\\s*${altText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.match(definitionText, new RegExp(`portrait_caption:\\s*${caption.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+}
+
+function readCharacterStateRow() {
+  const assertionDb = new Database(dbPath, { readonly: true });
+  try {
+    return assertionDb
+      .prepare(
+        "SELECT revision, state_json, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?",
+      )
+      .get("linden-pass", "arden-march");
+  } finally {
+    assertionDb.close();
+  }
+}
+
+async function assertProtectedAsset(assetRef, expectedContentType, expectedBytes) {
+  const served = await requestBytes(`/campaigns/linden-pass/assets/${assetRef}`);
+  assert.equal(served.status, 200);
+  assert.match(served.contentType, expectedContentType);
+  assert.deepEqual(served.bytes, expectedBytes);
+}
+
+async function uploadPortrait({ expectedRevision, filename, bytes, assetRef, mediaType, contentType, altText, caption, removedRefs }) {
+  const upload = await requestJson(portraitPath, {
+    method: "PUT",
+    headers: authHeaders,
+    body: {
+      expected_revision: expectedRevision,
+      portrait_file: {
+        filename,
+        data_base64: bytes.toString("base64"),
+      },
+      alt_text: altText,
+      caption,
+    },
+  });
+  assert.equal(upload.status, 200);
+  assert.equal(upload.payload.character.portrait.asset_ref, assetRef);
+  assert.equal(upload.payload.character.portrait.media_type, mediaType);
+  assert.equal(upload.payload.character.portrait.alt_text, altText);
+  assert.equal(upload.payload.character.portrait.caption, caption);
+  assert.deepEqual(readFileSync(assetPath(assetRef)), bytes);
+  for (const removedRef of removedRefs) {
+    assert.equal(existsSync(assetPath(removedRef)), false);
+  }
+  await assertProtectedAsset(assetRef, contentType, bytes);
+  assertProfileMetadata(assetRef, altText, caption);
+  assertImportMetadataPreserved();
+  const stateRow = readCharacterStateRow();
+  assert.equal(stateRow.revision, expectedRevision + 1);
+  assert.equal(stateRow.updated_by_user_id, 81);
+  return upload;
+}
 
 try {
-  const pngUpload = await requestJson(portraitPath, {
-    method: "PUT",
+  const existingDetail = await requestJson("/api/v1/campaigns/linden-pass/characters/arden-march", {
     headers: authHeaders,
-    body: {
-      expected_revision: 1,
-      portrait_file: {
-        filename: "Arden.PNG",
-        data_base64: pngBytes.toString("base64"),
-      },
-      alt_text: "Arden portrait",
-      caption: "PNG source preserved.",
-    },
   });
-  assert.equal(pngUpload.status, 200);
-  assert.equal(pngUpload.payload.character.portrait.asset_ref, "characters/arden-march/portrait.png");
-  assert.equal(pngUpload.payload.character.portrait.media_type, "image/png");
-  assert.deepEqual(readFileSync(path.join(portraitDir, "portrait.png")), pngBytes);
+  assert.equal(existingDetail.status, 200);
+  assert.equal(existingDetail.payload.character.portrait.asset_ref, existingWebpAssetRef);
+  assert.equal(existingDetail.payload.character.portrait.media_type, "image/webp");
+  assert.equal(existingDetail.payload.character.portrait.url, "/campaigns/linden-pass/characters/arden-march/portrait");
+  await assertProtectedAsset(existingWebpAssetRef, /^image\/webp\b/, existingWebpBytes);
 
-  const servedPng = await requestBytes("/campaigns/linden-pass/assets/characters/arden-march/portrait.png");
-  assert.equal(servedPng.status, 200);
-  assert.match(servedPng.contentType, /^image\/png\b/);
-  assert.deepEqual(servedPng.bytes, pngBytes);
-
-  const jpgUpload = await requestJson(portraitPath, {
-    method: "PUT",
-    headers: authHeaders,
-    body: {
-      expected_revision: 2,
-      portrait_file: {
-        filename: "arden.jpg",
-        data_base64: jpgBytes.toString("base64"),
-      },
-      alt_text: "Arden portrait",
-      caption: "JPG replacement preserved.",
-    },
+  await uploadPortrait({
+    expectedRevision: 1,
+    filename: "Arden.PNG",
+    bytes: pngBytes,
+    assetRef: "characters/arden-march/portrait.png",
+    mediaType: "image/png",
+    contentType: /^image\/png\b/,
+    altText: "Arden portrait PNG",
+    caption: "PNG source preserved.",
+    removedRefs: [existingWebpAssetRef],
   });
-  assert.equal(jpgUpload.status, 200);
-  assert.equal(jpgUpload.payload.character.portrait.asset_ref, "characters/arden-march/portrait.jpg");
-  assert.equal(jpgUpload.payload.character.portrait.media_type, "image/jpeg");
-  assert.equal(existsSync(path.join(portraitDir, "portrait.png")), false);
-  assert.deepEqual(readFileSync(path.join(portraitDir, "portrait.jpg")), jpgBytes);
 
-  const servedJpg = await requestBytes("/campaigns/linden-pass/assets/characters/arden-march/portrait.jpg");
-  assert.equal(servedJpg.status, 200);
-  assert.match(servedJpg.contentType, /^image\/jpeg\b/);
-  assert.deepEqual(servedJpg.bytes, jpgBytes);
+  await uploadPortrait({
+    expectedRevision: 2,
+    filename: "arden.JPG",
+    bytes: jpgBytes,
+    assetRef: "characters/arden-march/portrait.jpg",
+    mediaType: "image/jpeg",
+    contentType: /^image\/jpeg\b/,
+    altText: "Arden portrait JPG",
+    caption: "JPG replacement preserved.",
+    removedRefs: ["characters/arden-march/portrait.png"],
+  });
+
+  await uploadPortrait({
+    expectedRevision: 3,
+    filename: "arden.gif",
+    bytes: gifBytes,
+    assetRef: "characters/arden-march/portrait.gif",
+    mediaType: "image/gif",
+    contentType: /^image\/gif\b/,
+    altText: "Arden portrait GIF",
+    caption: "GIF replacement preserved.",
+    removedRefs: ["characters/arden-march/portrait.jpg"],
+  });
+
+  await uploadPortrait({
+    expectedRevision: 4,
+    filename: "arden.webp",
+    bytes: webpBytes,
+    assetRef: "characters/arden-march/portrait.webp",
+    mediaType: "image/webp",
+    contentType: /^image\/webp\b/,
+    altText: "Arden portrait WEBP",
+    caption: "WEBP replacement preserved.",
+    removedRefs: ["characters/arden-march/portrait.gif"],
+  });
 
   const portraitDelete = await requestJson(portraitPath, {
     method: "DELETE",
     headers: authHeaders,
-    body: { expected_revision: 3 },
+    body: { expected_revision: 5 },
   });
   assert.equal(portraitDelete.status, 200);
   assert.equal(portraitDelete.payload.character.portrait, null);
-  assert.equal(existsSync(path.join(portraitDir, "portrait.jpg")), false);
-  const definitionAfterDelete = readFileSync(
-    path.join(campaignsDir, "linden-pass", "characters", "arden-march", "definition.yaml"),
-    "utf8",
-  );
+  assert.equal(portraitDelete.payload.character.deleted_portrait.asset_ref, "characters/arden-march/portrait.webp");
+  assert.equal(portraitDelete.payload.character.deleted_portrait.media_type, "image/webp");
+  assert.equal(existsSync(path.join(portraitDir, "portrait.webp")), false);
+  const definitionAfterDelete = readFileSync(definitionPath, "utf8");
   assert.equal(definitionAfterDelete.includes("portrait_asset_ref"), false);
+  assert.equal(definitionAfterDelete.includes("portrait_alt"), false);
+  assert.equal(definitionAfterDelete.includes("portrait_caption"), false);
+  assertImportMetadataPreserved();
+  const stateAfterDelete = readCharacterStateRow();
+  assert.equal(stateAfterDelete.revision, 6);
+  assert.equal(stateAfterDelete.updated_by_user_id, 81);
 
   const assetBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x61, 0x73, 0x73, 0x65, 0x74]);
   const assetRef = "wiki-pages/policy-proof.png";
