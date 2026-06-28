@@ -55,6 +55,7 @@ Do not implement these routes as part of the parity program unless a later archi
 - `sqlite-migration-spike.md`: migration-layer proof for Drizzle `generate`/`migrate`, runtime probes, and driver comparison.
 - `sqlite-migration-dry-run-2026-06-28.md`: copied synthetic current-style SQLite migration dry-run evidence, including Flask additive schema initialization, TypeScript read/startup smoke, restore equivalence, and the remaining TypeScript startup migration blocker.
 - `sqlite-startup-posture-2026-06-28.md`: transitional TypeScript SQLite startup posture, shared helper PRAGMAs, startup schema preflight, and remaining full migration-command blockers.
+- `sqlite-schema-command-proof-2026-06-28.md`: tracked TypeScript read-only schema command proof against a Flask-initialized scratch DB plus missing-schema failure evidence; additive migration readiness remains pending.
 - `read-only-compatibility-slice.md`: evidence for the fixture-backed compatibility API slice, including the first controlled SQLite write route validated against a disposable fixture database.
 - `ops-image-runtime-proof.md`: no-deploy TypeScript API image-target proof notes, including the current Docker tooling blocker.
 
@@ -210,6 +211,14 @@ Do not implement these routes as part of the parity program unless a later archi
 - The first combat-adjacent read path reuses the Systems SQLite fixture layer for Combat Systems monster
   search, preserving Flask-compatible unauthenticated `auth_required`, bearer-token or fixture-role
   manager-only access, short-query guidance, and monster HP/speed/initiative result formatting.
+- The tracked SQLite schema proof command now runs as
+  `npm --prefix apps/api run sqlite:schema-check -- --db <sqlite-path>` or through
+  `CPW_DB_PATH`. It opens the database read-only, checks the current TypeScript
+  startup schema requirements, reports required schema and PRAGMA status in text
+  or JSON, and exits nonzero on missing schema. `local.ps1 -Action ts-api-check`
+  includes the focused Flask-initialized scratch DB and missing-schema command
+  test. This is not an additive migration hook and does not replace Flask
+  `manage.py init-db`.
 - The Combat state shell now serves read-only tracker payloads for `GET .../combat` and
   `GET .../combat/live-state`, preserving Flask-compatible unauthenticated `auth_required`, fixture
   or bearer-token membership-derived player/DM permission splits, live polling metadata,
@@ -708,5 +717,6 @@ Do not implement these routes as part of the parity program unless a later archi
 - Read-only auth/permission metadata for the fixture mode is explicit in the response.
 - `apps/api/src/routes.ts` is the implemented-route manifest for the tracked slice.
 - `apps/api/tests/route-parity.mjs` checks implemented TypeScript routes against the Python route snapshot and active route seed.
+- `apps/api/tests/sqlite-schema-check.mjs` checks the TypeScript schema command against a Flask-initialized scratch DB plus missing-schema and missing-file failures.
 
 Production cutover is not part of the early phases. It requires backup, migration dry-run, browser rehearsal, production smoke checks, and an approved rollback window.

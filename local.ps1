@@ -463,30 +463,45 @@ function Run-TypeScriptApiChecks {
     Write-Host "Using Node: $($toolchain.NodePath)"
     Write-Host "Using npm: $($toolchain.NpmPath)"
 
-    if (-not $SkipTsApiInstall) {
-        Write-Host "Installing TypeScript API dependencies with npm ci..."
-        Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "ci")
+    Ensure-Python
+    $previousCpwPythonPath = $env:CPW_PYTHON_PATH
+    $env:CPW_PYTHON_PATH = $script:ResolvedPythonPath
+
+    try {
+        if (-not $SkipTsApiInstall) {
+            Write-Host "Installing TypeScript API dependencies with npm ci..."
+            Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "ci")
+        }
+
+        if (-not $SkipRouteSnapshotCheck) {
+            Write-Host "Checking Flask route snapshot..."
+            Invoke-Python -Arguments @(
+                (Join-Path $projectRoot "scripts\route_snapshots.py"),
+                "--check"
+            )
+        }
+
+        Write-Host "Running TypeScript API typecheck..."
+        Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "typecheck")
+
+        Write-Host "Building TypeScript API..."
+        Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "build")
+
+        Write-Host "Checking TypeScript API SQLite startup posture..."
+        Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "test:sqlite-startup-posture")
+
+        Write-Host "Checking TypeScript API SQLite schema command..."
+        Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "test:sqlite-schema-check")
+
+        Write-Host "Checking TypeScript API route parity..."
+        Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "test:route-parity")
+    } finally {
+        if ($null -eq $previousCpwPythonPath) {
+            Remove-Item Env:\CPW_PYTHON_PATH -ErrorAction SilentlyContinue
+        } else {
+            $env:CPW_PYTHON_PATH = $previousCpwPythonPath
+        }
     }
-
-    if (-not $SkipRouteSnapshotCheck) {
-        Write-Host "Checking Flask route snapshot..."
-        Invoke-Python -Arguments @(
-            (Join-Path $projectRoot "scripts\route_snapshots.py"),
-            "--check"
-        )
-    }
-
-    Write-Host "Running TypeScript API typecheck..."
-    Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "typecheck")
-
-    Write-Host "Building TypeScript API..."
-    Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "build")
-
-    Write-Host "Checking TypeScript API SQLite startup posture..."
-    Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "test:sqlite-startup-posture")
-
-    Write-Host "Checking TypeScript API route parity..."
-    Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "test:route-parity")
 }
 
 function Backup-LocalState {
