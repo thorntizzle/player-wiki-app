@@ -15,6 +15,49 @@ export interface SqliteSchemaRequirements {
   indexes: readonly string[];
 }
 
+export interface SqliteSchemaInspection {
+  dbPath: string;
+  mode: "readonly";
+  ok: boolean;
+  schema: {
+    required: {
+      tables: number;
+      columns: number;
+      indexes: number;
+    };
+    present: {
+      tables: number;
+      columns: number;
+      indexes: number;
+    };
+    missing: string[];
+  };
+  pragmas: {
+    connection: {
+      foreign_keys: {
+        expected: 1;
+        actual: number;
+        ok: boolean;
+      };
+      busy_timeout_ms: {
+        expected: typeof SQLITE_BUSY_TIMEOUT_MS;
+        actual: number;
+        ok: boolean;
+      };
+    };
+    observed_database: {
+      journal_mode: string;
+      synchronous: number;
+    };
+    writable_open_policy: {
+      journal_mode: typeof SQLITE_JOURNAL_MODE;
+      synchronous: typeof SQLITE_SYNCHRONOUS;
+      applied_by_readonly_check: false;
+    };
+  } | null;
+  note: string;
+}
+
 export const CURRENT_SQLITE_SCHEMA_REQUIREMENTS: SqliteSchemaRequirements = {
   tables: [
     "users",
@@ -177,6 +220,43 @@ function formatSqliteStartupSchemaError(dbPath: string, missing: string[]): stri
   ].join(" ");
 }
 
+function countRequiredColumns(requirements: SqliteSchemaRequirements): number {
+  return Object.values(requirements.columns).reduce((total, columnNames) => total + columnNames.length, 0);
+}
+
+function countPresentRequiredColumns(
+  database: SqliteDatabase,
+  tableNames: Set<string>,
+  requirements: SqliteSchemaRequirements,
+): number {
+  let present = 0;
+  for (const [tableName, columnNames] of Object.entries(requirements.columns)) {
+    if (!tableNames.has(tableName)) {
+      continue;
+    }
+    const columnRows = database.prepare(`PRAGMA table_info(${sqliteIdentifier(tableName)})`).all() as Array<{ name?: string }>;
+    const existingColumns = new Set(columnRows.map((row) => String(row.name || "")).filter(Boolean));
+    for (const columnName of columnNames) {
+      if (existingColumns.has(columnName)) {
+        present += 1;
+      }
+    }
+  }
+  return present;
+}
+
+function readSimplePragma(database: SqliteDatabase, pragmaName: string): unknown {
+  return database.pragma(pragmaName, { simple: true });
+}
+
+function readNumberPragma(database: SqliteDatabase, pragmaName: string): number {
+  return Number(readSimplePragma(database, pragmaName));
+}
+
+function readStringPragma(database: SqliteDatabase, pragmaName: string): string {
+  return String(readSimplePragma(database, pragmaName) || "");
+}
+
 export function applySqliteConnectionPragmas(database: SqliteDatabase, options: SqliteOpenOptions = {}): void {
   database.pragma("foreign_keys = ON");
   database.pragma(`busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
@@ -228,6 +308,93 @@ export function listMissingSqliteSchema(
   }
 
   return missing;
+}
+
+export function inspectSqliteSchema(
+  dbPath: string,
+  requirements: SqliteSchemaRequirements = CURRENT_SQLITE_SCHEMA_REQUIREMENTS,
+): SqliteSchemaInspection {
+  const required = {
+    tables: requirements.tables.length,
+    columns: countRequiredColumns(requirements),
+    indexes: requirements.indexes.length,
+  };
+
+  if (!existsSync(dbPath)) {
+    return {
+      dbPath,
+      mode: "readonly",
+      ok: false,
+      schema: {
+        required,
+        present: {
+          tables: 0,
+          columns: 0,
+          indexes: 0,
+        },
+        missing: ["database file"],
+      },
+      pragmas: null,
+      note: "Read-only schema check did not open the database because the file is missing.",
+    };
+  }
+
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const missing = listMissingSqliteSchema(database, requirements);
+    const tableRows = database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
+    const tableNames = new Set(tableRows.map(normalizeSqliteNameRow).filter(Boolean));
+    const missingTables = missing.filter((item) => item.startsWith("table ")).length;
+    const missingIndexes = missing.filter((item) => item.startsWith("index ")).length;
+    const presentColumns = countPresentRequiredColumns(database, tableNames, requirements);
+    const foreignKeys = readNumberPragma(database, "foreign_keys");
+    const busyTimeoutMs = readNumberPragma(database, "busy_timeout");
+    const pragmaFailures = [
+      foreignKeys === 1 ? "" : "PRAGMA foreign_keys",
+      busyTimeoutMs === SQLITE_BUSY_TIMEOUT_MS ? "" : "PRAGMA busy_timeout",
+    ].filter(Boolean);
+
+    return {
+      dbPath,
+      mode: "readonly",
+      ok: missing.length === 0 && pragmaFailures.length === 0,
+      schema: {
+        required,
+        present: {
+          tables: required.tables - missingTables,
+          columns: presentColumns,
+          indexes: required.indexes - missingIndexes,
+        },
+        missing: [...missing, ...pragmaFailures],
+      },
+      pragmas: {
+        connection: {
+          foreign_keys: {
+            expected: 1,
+            actual: foreignKeys,
+            ok: foreignKeys === 1,
+          },
+          busy_timeout_ms: {
+            expected: SQLITE_BUSY_TIMEOUT_MS,
+            actual: busyTimeoutMs,
+            ok: busyTimeoutMs === SQLITE_BUSY_TIMEOUT_MS,
+          },
+        },
+        observed_database: {
+          journal_mode: readStringPragma(database, "journal_mode"),
+          synchronous: readNumberPragma(database, "synchronous"),
+        },
+        writable_open_policy: {
+          journal_mode: SQLITE_JOURNAL_MODE,
+          synchronous: SQLITE_SYNCHRONOUS,
+          applied_by_readonly_check: false,
+        },
+      },
+      note: "Read-only schema check; no migrations, PRAGMA journal changes, or schema writes were run.",
+    };
+  } finally {
+    database.close();
+  }
 }
 
 export function assertSqliteStartupSchema(dbPath: string): void {

@@ -8,13 +8,15 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "node dist/server.js",
+    "sqlite:schema-check": "node ./dist/sqliteSchemaCheck.js",
     "smoke": "node ./tests/smoke.mjs",
     "test:browser-json-compatibility": "node ./tests/browser-json-compatibility.mjs",
     "test:packaging-proof": "node ./tests/packaging-proof.mjs",
     "test:route-parity": "node ./tests/route-parity.mjs",
+    "test:sqlite-schema-check": "node ./tests/sqlite-schema-check.mjs",
     "test:sqlite-startup-posture": "node ./tests/sqlite-startup-posture.mjs",
     "pretest": "npm run build",
-    "test": "node ./tests/route-parity.mjs && node ./tests/sqlite-startup-posture.mjs && node ./tests/smoke.mjs"
+    "test": "node ./tests/route-parity.mjs && node ./tests/sqlite-startup-posture.mjs && node ./tests/sqlite-schema-check.mjs && node ./tests/smoke.mjs"
   },
   "dependencies": {
     "@hono/node-server": "1.19.14",
