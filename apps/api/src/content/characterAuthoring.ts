@@ -392,7 +392,7 @@ const DND_ABILITY_LABELS: Record<(typeof DND_ABILITY_KEYS)[number], string> = {
 const DND_CREATE_LIMITATIONS = [
   "Base classes come from enabled Systems rows inside the current native support lane: PHB base classes plus TCE Artificer.",
   "Species and backgrounds come from enabled Systems rows in the current supported source matrix for this TypeScript parity slice.",
-  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Bard with a bounded known-spells package, PHB Cleric with a bounded Life Domain level-one package, PHB Druid with a bounded prepared-spells package, PHB Sorcerer with a bounded Draconic Bloodline known-spells package, PHB Warlock with a bounded Fiend Pact Magic package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
+  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Bard with a bounded known-spells package, PHB Cleric with a bounded Life Domain level-one package, PHB Druid with a bounded prepared-spells package, PHB Rogue with a bounded expertise and starter-equipment package, PHB Sorcerer with a bounded Draconic Bloodline known-spells package, PHB Warlock with a bounded Fiend Pact Magic package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
 ];
 const DND_CHARACTER_CREATE_SOURCE_PATH = "builder://dnd5e-create-level-one";
 const DND_CHARACTER_CREATE_SOURCE_TYPE = "dnd5e_character_builder_level_one";
@@ -877,6 +877,112 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
         category: "class_feature",
         source: "PHB",
         description_markdown: "This level-one TypeScript slice records Druid cantrips, prepared spells, and first-level slots.",
+      },
+    ],
+    resourceTemplates: [],
+  },
+  rogue: {
+    className: "Rogue",
+    armorClass: "leather",
+    supportedSubclassTitles: [],
+    skillProficiencies: ["Acrobatics", "Perception", "Sleight of Hand", "Stealth"],
+    skillRows: [
+      "Acrobatics",
+      "Athletics",
+      "Deception",
+      "Insight",
+      "Intimidation",
+      "Investigation",
+      "Perception",
+      "Performance",
+      "Persuasion",
+      "Sleight of Hand",
+      "Stealth",
+    ],
+    spellcasting: null,
+    proficiencies: {
+      armor: ["Light armor"],
+      weapons: ["Simple weapons", "Hand crossbows", "Longswords", "Rapiers", "Shortswords"],
+      tools: ["Thieves' tools"],
+    },
+    equipmentCatalog: [
+      {
+        id: "leather-armor-1",
+        name: "Leather Armor",
+        default_quantity: 1,
+        weight: "10 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        tags: ["armor", "light armor"],
+      },
+      {
+        id: "rapier-1",
+        name: "Rapier",
+        default_quantity: 1,
+        weight: "2 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        weapon_wield_mode: "main-hand",
+        weapon_wield_modes: ["main-hand"],
+        tags: ["weapon", "martial weapon", "melee weapon", "finesse"],
+      },
+      {
+        id: "shortbow-1",
+        name: "Shortbow",
+        default_quantity: 1,
+        weight: "2 lb.",
+        tags: ["weapon", "simple weapon", "ranged weapon"],
+      },
+      {
+        id: "arrows-1",
+        name: "Arrows",
+        default_quantity: 20,
+        weight: "1 lb.",
+        tags: ["ammunition"],
+      },
+      {
+        id: "dagger-1",
+        name: "Dagger",
+        default_quantity: 2,
+        weight: "1 lb.",
+        tags: ["weapon", "simple weapon", "melee weapon", "finesse", "thrown weapon"],
+      },
+      {
+        id: "thieves-tools-1",
+        name: "Thieves' Tools",
+        default_quantity: 1,
+        weight: "1 lb.",
+        tags: ["tool"],
+      },
+      {
+        id: "burglars-pack-1",
+        name: "Burglar's Pack",
+        default_quantity: 1,
+        weight: "47.5 lb.",
+        tags: ["gear"],
+      },
+    ],
+    features: [
+      {
+        id: "expertise-1",
+        name: "Expertise",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "This level-one TypeScript slice records bounded Expertise in Stealth and Thieves' Tools. Full expertise choice UI remains outside this slice.",
+      },
+      {
+        id: "sneak-attack-1",
+        name: "Sneak Attack",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "Once per turn, you can deal an extra 1d6 damage when the PHB Sneak Attack conditions apply. Combat-state automation remains outside this slice.",
+      },
+      {
+        id: "thieves-cant-1",
+        name: "Thieves' Cant",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "This level-one TypeScript slice records Thieves' Cant as reference text only.",
       },
     ],
     resourceTemplates: [],
@@ -8233,7 +8339,7 @@ function assertDndLevelOneClass(row: SystemsEntryRow | null): { row: SystemsEntr
   }
   const classKey = dndLevelOneClassKey(row);
   if (!classKey || normalizeDndSourceId(row.source_id) !== DND_PHB_SOURCE_ID || String(row.entry_type || "") !== "class") {
-    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, PHB Druid, PHB Sorcerer, PHB Warlock, and PHB Wizard.");
+    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, PHB Druid, PHB Rogue, PHB Sorcerer, PHB Warlock, and PHB Wizard.");
   }
   return { row, classKey };
 }
@@ -8781,6 +8887,37 @@ function dndLevelOneAttacks(classKey: DndLevelOneClassKey, abilityScores: Record
       }),
     ];
   }
+  if (classKey === "rogue") {
+    return [
+      dndWeaponAttack({
+        name: "Rapier",
+        category: "melee weapon",
+        abilityModifierValue: Math.max(strengthModifier, dexterityModifier),
+        damageDie: "1d8",
+        damageType: "piercing",
+        notes: "Finesse. Sneak Attack can add 1d6 once per turn when its PHB conditions apply.",
+        equipmentRef: "rapier-1",
+      }),
+      dndWeaponAttack({
+        name: "Shortbow",
+        category: "ranged weapon",
+        abilityModifierValue: dexterityModifier,
+        damageDie: "1d6",
+        damageType: "piercing",
+        notes: "Ammunition, two-handed, range 80/320. Sneak Attack can add 1d6 once per turn when its PHB conditions apply.",
+        equipmentRef: "shortbow-1",
+      }),
+      dndWeaponAttack({
+        name: "Dagger",
+        category: "melee or thrown weapon",
+        abilityModifierValue: Math.max(strengthModifier, dexterityModifier),
+        damageDie: "1d4",
+        damageType: "piercing",
+        notes: "Finesse, light, thrown range 20/60. Sneak Attack can add 1d6 once per turn when its PHB conditions apply.",
+        equipmentRef: "dagger-1",
+      }),
+    ];
+  }
   if (classKey === "sorcerer") {
     return [
       dndWeaponAttack({
@@ -8891,7 +9028,9 @@ function dndLevelOneArmorClass(classKey: DndLevelOneClassKey, abilityScores: Rec
 
 function dndLevelOneSkills(classKey: DndLevelOneClassKey, abilityScores: Record<string, unknown>): Array<Record<string, unknown>> {
   const proficientSkills = new Set(DND_LEVEL_ONE_CLASS_CONFIGS[classKey].skillProficiencies.map((skill) => normalizeLookup(skill)));
+  const expertiseSkills = new Set(classKey === "rogue" ? ["stealth"] : []);
   const skillAbilityKeys: Record<string, (typeof DND_ABILITY_KEYS)[number]> = {
+    acrobatics: "dex",
     "animal handling": "wis",
     arcana: "int",
     athletics: "str",
@@ -8906,17 +9045,24 @@ function dndLevelOneSkills(classKey: DndLevelOneClassKey, abilityScores: Record<
     performance: "cha",
     persuasion: "cha",
     religion: "int",
+    "sleight of hand": "dex",
+    stealth: "dex",
     survival: "wis",
   };
   return DND_LEVEL_ONE_CLASS_CONFIGS[classKey].skillRows.map((skillName) => {
     const proficient = proficientSkills.has(normalizeLookup(skillName));
+    const expertise = expertiseSkills.has(normalizeLookup(skillName));
     const abilityKey = skillAbilityKeys[normalizeLookup(skillName)] ?? "wis";
     return {
       name: skillName,
-      bonus: dndSkillBonus(abilityScores, abilityKey, proficient),
-      proficiency_level: proficient ? "proficient" : "none",
+      bonus: abilityModifier(dndAbilityScoreValue(abilityScores, abilityKey)) + (expertise ? 4 : proficient ? 2 : 0),
+      proficiency_level: expertise ? "expertise" : proficient ? "proficient" : "none",
     };
   });
+}
+
+function dndLevelOneToolExpertise(classKey: DndLevelOneClassKey): string[] {
+  return classKey === "rogue" ? ["Thieves' tools"] : [];
 }
 
 export function buildDndCreateCharacter({
@@ -9053,7 +9199,7 @@ export function buildDndCreateCharacter({
         weapons: [...classConfig.proficiencies.weapons],
         tools: [...classConfig.proficiencies.tools],
         languages,
-        tool_expertise: [],
+        tool_expertise: dndLevelOneToolExpertise(classKey),
       },
       attacks: dndLevelOneAttacks(classKey, abilityScores),
       features: classConfig.features.map((feature) => JSON.parse(JSON.stringify(feature)) as Record<string, unknown>),
