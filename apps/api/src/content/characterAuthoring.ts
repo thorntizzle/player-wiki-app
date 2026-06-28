@@ -1,11 +1,8 @@
 import { existsSync } from "node:fs";
 
-import Database from "better-sqlite3";
-
 import type { CampaignViewModel } from "../campaigns/view.js";
+import { openSqliteDatabase, type SqliteDatabase } from "../sqlite.js";
 import type { CampaignPageFileRecord } from "./types.js";
-
-type SqliteDatabase = InstanceType<typeof Database>;
 
 interface SystemsSourceAccessRow {
   source_id: string;
@@ -401,8 +398,6 @@ const DND_CHARACTER_CREATE_SOURCE_PATH = "builder://dnd5e-create-level-one";
 const DND_CHARACTER_CREATE_SOURCE_TYPE = "dnd5e_character_builder_level_one";
 const DND_CHARACTER_CREATE_VERSION = "2026-06-28.0";
 const DND_CHARACTER_CREATE_IMPORTED_FROM = "In-app DND-5E Character Creator level-one slice";
-const DND_PILOT_SPECIES = "human";
-const DND_PILOT_BACKGROUND = "soldier";
 const DND_LEVEL_ONE_CLASS_CONFIGS = {
   fighter: {
     className: "Fighter",
@@ -6332,7 +6327,7 @@ export function buildCharacterProgressionRepairPayload({
   }
 
   const submittedValues = normalizeProgressionRepairValues(values);
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const classRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "class")
       .filter((row) => row.is_enabled_override !== 0)
@@ -7366,7 +7361,7 @@ export function listAdvancedEditorOptionalFeatureRows({
   if (!existsSync(dbPath)) {
     return [];
   }
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     return loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "optionalfeature")
       .filter((row) => row.is_enabled_override !== 0);
@@ -7387,7 +7382,7 @@ export function listAdvancedEditorSpellRows({
   if (!existsSync(dbPath)) {
     return [];
   }
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     return loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "spell")
       .filter((row) => row.is_enabled_override !== 0);
@@ -7714,7 +7709,7 @@ export function buildDndCharacterCreateContext({
     };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const classRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "class")
       .filter((row) => row.is_enabled_override !== 0)
@@ -7790,16 +7785,21 @@ export function buildDndCharacterCreateContext({
   }
 }
 
-function assertDndStaticEntry(row: SystemsEntryRow | null, expectedTitle: string, expectedType: string, fieldLabel: string): SystemsEntryRow {
+function assertDndSupportedCreateEntry(
+  row: SystemsEntryRow | null,
+  expectedType: "race" | "background",
+  fieldLabel: string,
+): SystemsEntryRow {
   if (!row) {
     throw new Error(`${fieldLabel} is required for DND-5E character creation.`);
   }
   if (
-    normalizeDndSourceId(row.source_id) !== DND_PHB_SOURCE_ID ||
-    normalizeLookup(row.title) !== expectedTitle ||
+    !dndSupportsSubordinateSource(row.source_id) ||
     String(row.entry_type || "") !== expectedType
   ) {
-    throw new Error("DND-5E character creation submit currently supports only PHB Human / Soldier static choices.");
+    throw new Error(
+      `${fieldLabel} must be an enabled Systems ${expectedType === "race" ? "species" : "background"} row from the current DND-5E source matrix.`,
+    );
   }
   return row;
 }
@@ -7906,14 +7906,14 @@ function dndClassHasSkillProficiency(classKey: DndLevelOneClassKey, skillName: s
   return proficientSkills.has(normalizeLookup(skillName));
 }
 
-function dndStartingEquipmentCatalog(classKey: DndLevelOneClassKey): Array<Record<string, unknown>> {
+function dndStartingEquipmentCatalog(classKey: DndLevelOneClassKey, backgroundTitle: string): Array<Record<string, unknown>> {
   return [
     ...DND_LEVEL_ONE_CLASS_CONFIGS[classKey].equipmentCatalog.map((item) => JSON.parse(JSON.stringify(item)) as Record<string, unknown>),
     {
-      id: "insignia-rank-1",
-      name: "Insignia of Rank",
+      id: "background-package-1",
+      name: `${backgroundTitle || "Background"} Starting Package`,
       default_quantity: 1,
-      weight: "light",
+      weight: "varies",
       tags: ["background"],
     },
     {
@@ -8395,7 +8395,7 @@ export function buildDndCreateCharacter({
     throw new Error("DND-5E character creation requires an enabled Systems library.");
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const classRows = loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "class")
       .filter((row) => row.is_enabled_override !== 0)
@@ -8425,15 +8425,13 @@ export function buildDndCreateCharacter({
       classKey,
       selectedSubclass: selectedDndEntry(subclassRows, normalizedValues.subclass_slug),
     });
-    const selectedSpecies = assertDndStaticEntry(
+    const selectedSpecies = assertDndSupportedCreateEntry(
       selectedDndEntry(speciesRows, normalizedValues.species_slug),
-      DND_PILOT_SPECIES,
       "race",
       "Species",
     );
-    const selectedBackground = assertDndStaticEntry(
+    const selectedBackground = assertDndSupportedCreateEntry(
       selectedDndEntry(backgroundRows, normalizedValues.background_slug),
-      DND_PILOT_BACKGROUND,
       "background",
       "Background",
     );
@@ -8447,7 +8445,7 @@ export function buildDndCreateCharacter({
     const createdAt = new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
     const speciesSpeed = createContextInteger(firstPresent(speciesMetadata.speed, speciesMetadata.walk_speed), 30);
     const classConfig = DND_LEVEL_ONE_CLASS_CONFIGS[classKey];
-    const equipmentCatalog = dndStartingEquipmentCatalog(classKey);
+    const equipmentCatalog = dndStartingEquipmentCatalog(classKey, selectedBackground.title);
     const primaryClassRow: Record<string, unknown> = {
       class_name: classConfig.className,
       level: 1,
@@ -8473,9 +8471,9 @@ export function buildDndCreateCharacter({
       profile: {
         class_level_text: `${classConfig.className} 1`,
         classes: [primaryClassRow],
-        species: "Human",
+        species: selectedSpecies.title,
         species_ref: dndSystemsRef(selectedSpecies),
-        background: "Soldier",
+        background: selectedBackground.title,
         background_ref: dndSystemsRef(selectedBackground),
         alignment: "",
         size: String(firstPresent(speciesMetadata.size, "Medium")),
@@ -8766,7 +8764,7 @@ export function listXianxiaCultivationGenericTechniqueRows(
     return [];
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     return loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "generic_technique").filter((row) => row.is_enabled_override !== 0);
   } catch (error) {
@@ -8788,7 +8786,7 @@ export function listXianxiaManualImportMartialArtOptions(
     return [];
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const customSourceId = campaignCustomSourceId(campaign.slug);
     return loadEnabledMartialArtRows(database, campaign, campaignConfig)
@@ -8823,7 +8821,7 @@ export function listXianxiaCultivationMartialArtRows(
     return [];
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     return loadEnabledMartialArtRows(database, campaign, campaignConfig).filter((row) => row.is_enabled_override !== 0);
   } catch (error) {
@@ -8847,7 +8845,7 @@ export function listXianxiaCreateGenericTechniqueOptions(
   }
 
   const selected = new Set(selectedEntryKeys.map((entryKey) => String(entryKey || "").trim().toLowerCase()).filter(Boolean));
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     return loadEnabledSystemsEntryRows(database, campaign, campaignConfig, "generic_technique")
       .filter((row) => row.is_enabled_override !== 0)
