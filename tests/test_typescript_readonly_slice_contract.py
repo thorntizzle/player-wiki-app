@@ -316,11 +316,56 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
             CREATE TABLE invite_tokens (id INTEGER, user_id INTEGER, token_hash TEXT, expires_at TEXT, used_at TEXT, created_by_user_id INTEGER);
             CREATE TABLE password_reset_tokens (id INTEGER, user_id INTEGER, token_hash TEXT, expires_at TEXT, used_at TEXT, created_by_user_id INTEGER);
             CREATE TABLE sessions (id INTEGER, user_id INTEGER, token_hash TEXT, last_seen_at TEXT, expires_at TEXT, revoked_at TEXT);
-            CREATE TABLE campaign_sessions (id INTEGER, campaign_slug TEXT, status TEXT, started_at TEXT, ended_at TEXT, started_by_user_id INTEGER, ended_by_user_id INTEGER);
-            CREATE TABLE campaign_session_states (campaign_slug TEXT, revision INTEGER, updated_at TEXT, updated_by_user_id INTEGER);
-            CREATE TABLE campaign_session_articles (id INTEGER, campaign_slug TEXT, status TEXT, source_page_ref TEXT, created_by_user_id INTEGER, revealed_by_user_id INTEGER);
-            CREATE TABLE campaign_session_article_images (article_id INTEGER, filename TEXT, media_type TEXT, data_blob BLOB, updated_at TEXT);
-            CREATE TABLE campaign_session_messages (id INTEGER, session_id INTEGER, author_user_id INTEGER, recipient_scope TEXT, recipient_user_id INTEGER, body_text TEXT, created_at TEXT);
+            CREATE TABLE campaign_sessions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              campaign_slug TEXT,
+              status TEXT,
+              started_at TEXT,
+              ended_at TEXT,
+              started_by_user_id INTEGER,
+              ended_by_user_id INTEGER
+            );
+            CREATE TABLE campaign_session_states (
+              campaign_slug TEXT PRIMARY KEY,
+              revision INTEGER,
+              updated_at TEXT,
+              updated_by_user_id INTEGER
+            );
+            CREATE TABLE campaign_session_articles (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              campaign_slug TEXT,
+              title TEXT,
+              body_markdown TEXT,
+              source_page_ref TEXT,
+              status TEXT,
+              created_at TEXT,
+              created_by_user_id INTEGER,
+              revealed_at TEXT,
+              revealed_by_user_id INTEGER,
+              revealed_in_session_id INTEGER
+            );
+            CREATE TABLE campaign_session_article_images (
+              article_id INTEGER PRIMARY KEY,
+              filename TEXT,
+              media_type TEXT,
+              alt_text TEXT,
+              caption TEXT,
+              data_blob BLOB,
+              updated_at TEXT
+            );
+            CREATE TABLE campaign_session_messages (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              session_id INTEGER,
+              campaign_slug TEXT,
+              message_type TEXT,
+              body_text TEXT,
+              recipient_scope TEXT,
+              recipient_user_id INTEGER,
+              author_user_id INTEGER,
+              author_display_name TEXT,
+              article_id INTEGER,
+              created_at TEXT
+            );
             CREATE TABLE campaign_dm_statblocks (id INTEGER, campaign_slug TEXT, title TEXT, subsection TEXT, body_markdown TEXT, updated_by_user_id INTEGER);
             CREATE TABLE campaign_dm_condition_definitions (id INTEGER, campaign_slug TEXT, name TEXT, description_markdown TEXT, updated_by_user_id INTEGER);
             CREATE TABLE campaign_combatants (id INTEGER, campaign_slug TEXT, combatant_type TEXT, character_slug TEXT, player_detail_visible INTEGER, source_kind TEXT, source_ref TEXT, display_name TEXT, turn_value INTEGER, dexterity_modifier INTEGER, initiative_priority INTEGER, revision INTEGER, updated_by_user_id INTEGER);
@@ -1106,6 +1151,145 @@ def test_typescript_session_mutations_require_auth_like_flask(
     )
     assert status == 401
     assert payload == flask_payload
+
+
+@pytest.mark.parametrize(
+    (
+        "method",
+        "path",
+        "body",
+        "prepare_active_session",
+        "flask_status",
+        "flask_shape",
+        "typescript_status",
+        "typescript_error_code",
+        "error_message",
+    ),
+    [
+        (
+            "GET",
+            "/api/v1/campaigns/linden-pass/session/articles/999999/image",
+            None,
+            False,
+            404,
+            "html",
+            404,
+            "session_article_image_not_found",
+            "Could not find that session article image.",
+        ),
+        (
+            "GET",
+            "/api/v1/campaigns/linden-pass/session/logs/999999",
+            None,
+            False,
+            404,
+            "html",
+            404,
+            "session_log_not_found",
+            "Could not find that session log.",
+        ),
+        (
+            "PUT",
+            "/api/v1/campaigns/linden-pass/session/articles/999999",
+            {"title": "Missing", "body_markdown": "Still missing."},
+            False,
+            400,
+            "json",
+            400,
+            "validation_error",
+            "That session article could not be found.",
+        ),
+        (
+            "POST",
+            "/api/v1/campaigns/linden-pass/session/articles/999999/reveal",
+            None,
+            True,
+            400,
+            "json",
+            400,
+            "validation_error",
+            "That session article could not be found.",
+        ),
+        (
+            "DELETE",
+            "/api/v1/campaigns/linden-pass/session/articles/999999",
+            None,
+            False,
+            400,
+            "json",
+            400,
+            "validation_error",
+            "That session article could not be found.",
+        ),
+        (
+            "DELETE",
+            "/api/v1/campaigns/linden-pass/session/logs/999999",
+            None,
+            False,
+            400,
+            "json",
+            400,
+            "validation_error",
+            "That chat log could not be found.",
+        ),
+    ],
+)
+def test_typescript_session_missing_resource_json_boundary_matches_documented_flask_shapes(
+    typescript_api_mutation_server,
+    client,
+    sign_in,
+    users,
+    method,
+    path,
+    body,
+    prepare_active_session,
+    flask_status,
+    flask_shape,
+    typescript_status,
+    typescript_error_code,
+    error_message,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    if prepare_active_session:
+        flask_start = client.post(
+            "/api/v1/campaigns/linden-pass/session/start",
+            headers={"Accept": "application/json"},
+        )
+        assert flask_start.status_code == 200
+        ts_start_status, ts_start_payload = _to_json(
+            f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/session/start",
+            headers=typescript_api_mutation_server["dm_headers"],
+            method="POST",
+        )
+        assert ts_start_status == 200
+        assert ts_start_payload["ok"] is True
+
+    flask_kwargs = {"method": method, "headers": {"Accept": "application/json"}}
+    if body is not None:
+        flask_kwargs["json"] = body
+    flask_response = client.open(path, **flask_kwargs)
+    assert flask_response.status_code == flask_status
+
+    if flask_shape == "html":
+        assert flask_response.content_type.startswith("text/html")
+        assert flask_response.get_json(silent=True) is None
+    else:
+        flask_payload = flask_response.get_json()
+        assert flask_payload["ok"] is False
+        assert flask_payload["error"]["code"] == typescript_error_code
+        assert flask_payload["error"]["message"] == error_message
+
+    status, payload = _to_json(
+        f"{typescript_api_mutation_server['url']}{path}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method=method,
+        body=body,
+    )
+    assert status == typescript_status
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == typescript_error_code
+    assert payload["error"]["message"] == error_message
 
 
 def test_typescript_session_article_source_search_fixture_shell(typescript_api_server):

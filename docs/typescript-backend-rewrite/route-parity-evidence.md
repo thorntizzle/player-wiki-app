@@ -115,6 +115,23 @@ Evidence required:
 - Session/live polling responses preserve shape, cache behavior, and no-content or empty-state behavior expected by the frontend.
 - Copied-data rehearsal confirms that combat/session writes can be restored to pre-rehearsal equivalence.
 
+2026-06-28 selected-family missing-resource evidence:
+
+- `tests/test_typescript_readonly_slice_contract.py::test_typescript_session_missing_resource_json_boundary_matches_documented_flask_shapes`
+  now pins the Flask production-authority shape and TypeScript candidate shape
+  for missing Session article image reads, missing closed-log detail reads,
+  missing staged-article update/reveal/delete mutations, and missing closed-log
+  delete mutations.
+- Flask serves generic `404 text/html` pages for the missing article-image and
+  closed-log detail reads even with `Accept: application/json`; TypeScript
+  deliberately returns structured `404 application/json` envelopes with
+  `session_article_image_not_found` and `session_log_not_found`.
+- Missing staged-article update/reveal/delete and missing closed-log delete
+  remain Flask-compatible `400 application/json` `validation_error` responses
+  with matching messages. The reveal missing-article check starts a disposable
+  active session on both sides so the test measures article absence rather than
+  the earlier begin-session validation branch.
+
 ### Systems And Shared Source
 
 Routes: systems wiki reads, source and entry reads, custom entries, imports, item mechanics, visibility, and shared source-backed resources.
@@ -265,7 +282,8 @@ When copied data is used, include only sanitized identifiers in the transcript. 
 - Broad route parity must wait for an integration branch containing the active implementation lanes.
 - Character write parity still needs full fixture and copied-data proof for full DND create, advanced editor derivation, advancement persistence, cultivation, controls, portraits, and session-state surfaces.
 - Browser JSON compatibility routes need an explicit retain-vs-migrate decision before cutover.
-- Combat/session/live, systems/shared-source, DM Content, admin/auth/visibility, and remaining error shapes need family-specific fixture transcripts once implementation branches land.
+- Combat/session/live now has a focused Session article-image/log/article-mutation missing-resource boundary test; broader combat/session/live invalid-payload, stale-revision, and remaining error-shape checks still need family-specific fixture transcripts once implementation branches land.
+- Systems/shared-source, DM Content, admin/auth/visibility, and remaining error shapes need family-specific fixture transcripts once implementation branches land.
 - Publishing/content assets now have focused missing-resource boundary tests for selected read/detail and protected asset misses, but broader invalid-payload, removal-safety, and image conversion decisions remain open.
 - Missing-resource behavior currently spans JSON and generic HTML 404 paths; remaining route family expectations must be recorded before declaring parity green.
 - Publishing asset and image conversion behavior needs byte/content-type evidence before staging readiness.
