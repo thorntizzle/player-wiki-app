@@ -408,14 +408,19 @@ Do not implement these routes as part of the parity program unless a later archi
 - The Campaign Control read route now serves `GET .../control`, preserving Flask-compatible
   visibility-management auth for fixture or bearer-token DM/admin identities, default campaign
   visibility rows, optional SQLite visibility overrides, admin-only Private choices, rules, notes,
-  and Flask/Gen2 control links.
+  and Flask/Gen2 control links. The 2026-06-28 Campaign Control missing-resource/error-shape
+  slice now pins missing campaign behavior as Flask `404 text/html` versus TypeScript
+  `campaign_not_found` JSON for the read route, while preserving exact valid-campaign
+  `auth_required` and `forbidden` JSON envelopes where Flask already returns JSON.
 - The Campaign Control visibility write route now serves `PATCH .../control/visibility` for bearer
   API-token managers against `CPW_DB_PATH`, preserving Flask-compatible visibility object validation,
   admin-only Private restrictions, changed-scope labels, no-change messaging, SQLite
   `campaign_visibility_settings` upserts, `auth_audit_log` events with `campaign_control_api`
-  metadata, refreshed control payloads, and missing-campaign JSON. Current validation covers a
-  disposable fixture database only; production/staging write readiness remains gated by migration,
-  backup, and rollback rehearsal.
+  metadata, refreshed control payloads, and missing-campaign JSON. The same 2026-06-28 evidence
+  slice covers missing campaign `PATCH .../control/visibility` as Flask `404 text/html` versus
+  TypeScript `campaign_not_found` JSON, plus valid-campaign unauthenticated/player
+  `auth_required`/`forbidden` parity. Current validation covers a disposable fixture database only;
+  production/staging write readiness remains gated by migration, backup, and rollback rehearsal.
 - The first DM Content read route now serves `GET .../dm-content`, preserving Flask-compatible
   unauthenticated `auth_required`, DM/admin-only access for fixture roles and bearer API tokens,
   SQLite statblock and custom condition serialization, statblock parser feedback summaries, lane

@@ -32,6 +32,7 @@ NODE_CANDIDATES = [
 CONTENT_MANAGER_HEADERS = {"X-CPW-Fixture-Role": "dm"}
 CONTENT_PLAYER_HEADERS = {"X-CPW-Fixture-Role": "player"}
 TYPESCRIPT_DM_API_TOKEN = "typescript-golden-dm-token"
+TYPESCRIPT_PLAYER_API_TOKEN = "typescript-golden-player-token"
 
 
 def _to_json(
@@ -435,6 +436,20 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
         connection.execute(
             "INSERT INTO api_tokens (id, user_id, label, token_hash, created_at, last_used_at, expires_at, revoked_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (901, 77, "TypeScript Golden DM Token", _hash_token(TYPESCRIPT_DM_API_TOKEN), now, now, None, None, None),
+        )
+        connection.execute(
+            "INSERT INTO api_tokens (id, user_id, label, token_hash, created_at, last_used_at, expires_at, revoked_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                902,
+                79,
+                "TypeScript Golden Player Token",
+                _hash_token(TYPESCRIPT_PLAYER_API_TOKEN),
+                now,
+                now,
+                None,
+                None,
+                None,
+            ),
         )
         connection.execute(
             "INSERT INTO systems_sources (library_slug, source_id, title) VALUES (?, ?, ?)",
@@ -1491,6 +1506,85 @@ def test_typescript_campaign_control_matches_flask_auth_and_payload_contract(typ
         headers={"X-CPW-Fixture-Role": "dm"},
     )
     assert status == 200
+    assert payload == flask_payload
+
+
+def test_typescript_campaign_control_missing_resource_json_boundary_matches_documented_flask_html_404(
+    typescript_api_mutation_server,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    flask_response = client.get("/api/v1/campaigns/definitely-not-a-campaign/control")
+    assert flask_response.status_code == 404
+    assert flask_response.content_type.startswith("text/html")
+    assert flask_response.get_json(silent=True) is None
+
+    status, payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/definitely-not-a-campaign/control",
+        headers={"X-CPW-Fixture-Role": "dm"},
+    )
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "campaign_not_found"
+
+    flask_response = client.patch(
+        "/api/v1/campaigns/definitely-not-a-campaign/control/visibility",
+        json={"visibility": {"campaign": "players"}},
+    )
+    assert flask_response.status_code == 404
+    assert flask_response.content_type.startswith("text/html")
+    assert flask_response.get_json(silent=True) is None
+
+    status, payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/definitely-not-a-campaign/control/visibility",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="PATCH",
+        body={"visibility": {"campaign": "players"}},
+    )
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "campaign_not_found"
+
+
+def test_typescript_campaign_control_visibility_auth_errors_match_flask_contract(
+    typescript_api_mutation_server,
+    client,
+    sign_in,
+    users,
+):
+    flask_response = client.patch(
+        "/api/v1/campaigns/linden-pass/control/visibility",
+        json={"visibility": {"campaign": "players"}},
+    )
+    assert flask_response.status_code == 401
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/control/visibility",
+        method="PATCH",
+        body={"visibility": {"campaign": "players"}},
+    )
+    assert status == 401
+    assert payload == flask_payload
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    flask_response = client.patch(
+        "/api/v1/campaigns/linden-pass/control/visibility",
+        json={"visibility": {"campaign": "players"}},
+    )
+    assert flask_response.status_code == 403
+    flask_payload = flask_response.get_json()
+
+    status, payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/control/visibility",
+        headers=_api_headers(TYPESCRIPT_PLAYER_API_TOKEN),
+        method="PATCH",
+        body={"visibility": {"campaign": "players"}},
+    )
+    assert status == 403
     assert payload == flask_payload
 
 

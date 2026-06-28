@@ -386,6 +386,27 @@ not a Flask production behavior change. Cutover still needs an API-version or
 client-compatibility decision before treating JSON-normalized missing publishing
 resources as a general contract across all route families.
 
+### TypeScript JSON Boundary For Campaign Control
+
+The 2026-06-28 `rewrite/ts-admin-campaign-error-shape-parity` slice promotes
+Campaign Control missing-resource and auth-error checks into executable
+Flask-vs-TypeScript coverage in
+`tests/test_typescript_readonly_slice_contract.py::test_typescript_campaign_control_missing_resource_json_boundary_matches_documented_flask_html_404`
+and
+`tests/test_typescript_readonly_slice_contract.py::test_typescript_campaign_control_visibility_auth_errors_match_flask_contract`.
+Flask remains the production authority. Missing Campaign Control resources still
+fall through Flask `abort(404)` and return generic `text/html`; the TypeScript
+candidate keeps the structured `campaign_not_found` JSON envelope already listed
+in the route manifest. Valid-campaign visibility-write auth failures preserve
+Flask-compatible JSON envelopes:
+
+| Method | Normalized path | Role | Flask shape | TypeScript shape | TypeScript error code |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/v1/campaigns/<missing_campaign_slug>/control` | `dm` | `404 text/html` generic page | `404 application/json` | `campaign_not_found` |
+| `PATCH` | `/api/v1/campaigns/<missing_campaign_slug>/control/visibility` | `dm` | `404 text/html` generic page | `404 application/json` | `campaign_not_found` |
+| `PATCH` | `/api/v1/campaigns/<campaign_slug>/control/visibility` | unauthenticated | `401 application/json` | `401 application/json` | `auth_required` |
+| `PATCH` | `/api/v1/campaigns/<campaign_slug>/control/visibility` | `player` | `403 application/json` | `403 application/json` | `forbidden` |
+
 ### TypeScript JSON Boundary For Session Article Images And Logs
 
 The 2026-06-28 `rewrite/ts-session-error-shape-parity` slice promotes a
