@@ -1,7 +1,10 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "test", "check", "backup", "restore", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "test", "check", "ts-api-check", "backup", "restore", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = (Join-Path (Split-Path $PSScriptRoot -Parent) ".venv\Scripts\python.exe"),
+    [string]$NodePath = "",
+    [string]$NpmPath = "",
+    [string]$NodeRoot = "",
     [string]$DbPath = "",
     [string]$BackupArchive = "",
     [string]$BackupDir = "",
@@ -15,13 +18,16 @@ param(
     [switch]$ForceRestore,
     [switch]$SkipPreRestoreBackup,
     [switch]$ForceSyncFromFly,
-    [switch]$SkipPreSyncBackup
+    [switch]$SkipPreSyncBackup,
+    [switch]$SkipTsApiInstall,
+    [switch]$SkipRouteSnapshotCheck
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = $PSScriptRoot
 $sampleFlyApp = "campaign-player-wiki-example"
 $persistedFlyApp = [Environment]::GetEnvironmentVariable("PLAYER_WIKI_FLY_APP", "User")
+$script:ResolvedPythonPath = $null
 
 if ($FlyApp -eq $sampleFlyApp -and -not [string]::IsNullOrWhiteSpace($persistedFlyApp)) {
     $FlyApp = $persistedFlyApp
@@ -46,24 +52,6 @@ function Set-LocalTempEnvironment {
     $env:TMPDIR = $tempRoot
 }
 
-function Invoke-Python {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string[]]$Arguments
-    )
-
-    & $PythonPath @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Command failed: $PythonPath $($Arguments -join ' ')"
-    }
-}
-
-function Ensure-Python {
-    if (-not (Test-Path $PythonPath)) {
-        throw "Python executable not found at $PythonPath"
-    }
-}
-
 function Resolve-FlyctlExecutable {
     if (-not [string]::IsNullOrWhiteSpace($FlyctlPath)) {
         if (-not (Test-Path $FlyctlPath)) {
@@ -83,6 +71,231 @@ function Resolve-FlyctlExecutable {
     }
 
     throw "flyctl executable not found. Pass -FlyctlPath or install flyctl."
+}
+
+function Resolve-ExistingPath {
+    param(
+        [string]$PathValue
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $null
+    }
+    if (-not (Test-Path $PathValue)) {
+        return $null
+    }
+
+    return (Resolve-Path -LiteralPath $PathValue).Path
+}
+
+function Resolve-PythonExecutable {
+    $candidates = New-Object System.Collections.Generic.List[string]
+
+    if (-not [string]::IsNullOrWhiteSpace($PythonPath)) {
+        $candidates.Add($PythonPath)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:PLAYER_WIKI_PYTHON)) {
+        $candidates.Add($env:PLAYER_WIKI_PYTHON)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:CPW_PYTHON_BIN)) {
+        $candidates.Add($env:CPW_PYTHON_BIN)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:VIRTUAL_ENV)) {
+        $candidates.Add((Join-Path $env:VIRTUAL_ENV "Scripts\python.exe"))
+    }
+
+    $candidates.Add((Join-Path (Split-Path $projectRoot -Parent) ".venv\Scripts\python.exe"))
+    $candidates.Add((Join-Path $HOME "Documents\my_scripts\.venv\Scripts\python.exe"))
+
+    foreach ($candidate in $candidates) {
+        $resolved = Resolve-ExistingPath -PathValue $candidate
+        if ($resolved) {
+            return $resolved
+        }
+    }
+
+    throw "Python executable not found. Pass -PythonPath or set PLAYER_WIKI_PYTHON/CPW_PYTHON_BIN."
+}
+
+function Ensure-Python {
+    if ([string]::IsNullOrWhiteSpace($script:ResolvedPythonPath)) {
+        $script:ResolvedPythonPath = Resolve-PythonExecutable
+    }
+}
+
+function Invoke-Python {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    Ensure-Python
+    & $script:ResolvedPythonPath @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command failed: $script:ResolvedPythonPath $($Arguments -join ' ')"
+    }
+}
+
+function Resolve-NodeFromRoot {
+    param(
+        [string]$RootPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RootPath)) {
+        return $null
+    }
+
+    $nodeCandidates = @(
+        (Join-Path $RootPath "node.exe"),
+        (Join-Path $RootPath "bin\node.exe")
+    )
+
+    foreach ($candidate in $nodeCandidates) {
+        $resolved = Resolve-ExistingPath -PathValue $candidate
+        if ($resolved) {
+            return $resolved
+        }
+    }
+
+    return $null
+}
+
+function Resolve-NpmFromRoot {
+    param(
+        [string]$RootPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RootPath)) {
+        return $null
+    }
+
+    $npmCandidates = @(
+        @{ Path = (Join-Path $RootPath "npm.cmd"); Mode = "cmd" },
+        @{ Path = (Join-Path $RootPath "bin\npm.cmd"); Mode = "cmd" },
+        @{ Path = (Join-Path $RootPath "node_modules\npm\bin\npm-cli.js"); Mode = "node-cli" },
+        @{ Path = (Join-Path $RootPath "lib\node_modules\npm\bin\npm-cli.js"); Mode = "node-cli" }
+    )
+
+    foreach ($candidate in $npmCandidates) {
+        $resolved = Resolve-ExistingPath -PathValue $candidate.Path
+        if ($resolved) {
+            return @{
+                Path = $resolved
+                Mode = $candidate.Mode
+            }
+        }
+    }
+
+    return $null
+}
+
+function Add-NodeRootCandidate {
+    param(
+        [System.Collections.Generic.List[string]]$Candidates,
+        [string]$Candidate
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Candidate)) {
+        return
+    }
+    if ($Candidates.Contains($Candidate)) {
+        return
+    }
+
+    $Candidates.Add($Candidate)
+}
+
+function Resolve-NodeToolchain {
+    $explicitNode = if (-not [string]::IsNullOrWhiteSpace($NodePath)) { $NodePath } else { $env:CPW_NODE_BIN }
+    $explicitNpm = if (-not [string]::IsNullOrWhiteSpace($NpmPath)) { $NpmPath } else { $env:CPW_NPM_BIN }
+    $explicitRoot = if (-not [string]::IsNullOrWhiteSpace($NodeRoot)) { $NodeRoot } else { $env:CPW_NODE_ROOT }
+
+    $resolvedExplicitNode = Resolve-ExistingPath -PathValue $explicitNode
+    $resolvedExplicitNpm = Resolve-ExistingPath -PathValue $explicitNpm
+    if ($resolvedExplicitNode -and $resolvedExplicitNpm) {
+        $npmMode = if ($resolvedExplicitNpm.EndsWith(".js", [StringComparison]::OrdinalIgnoreCase)) { "node-cli" } else { "cmd" }
+        return @{
+            NodePath = $resolvedExplicitNode
+            NpmPath = $resolvedExplicitNpm
+            NpmMode = $npmMode
+        }
+    }
+
+    $rootCandidates = New-Object System.Collections.Generic.List[string]
+    Add-NodeRootCandidate -Candidates $rootCandidates -Candidate $explicitRoot
+    if ($resolvedExplicitNode) {
+        Add-NodeRootCandidate -Candidates $rootCandidates -Candidate (Split-Path $resolvedExplicitNode -Parent)
+    }
+    if ($resolvedExplicitNpm) {
+        Add-NodeRootCandidate -Candidates $rootCandidates -Candidate (Split-Path $resolvedExplicitNpm -Parent)
+    }
+
+    Add-NodeRootCandidate -Candidates $rootCandidates -Candidate (Join-Path $projectRoot ".local\node")
+    Add-NodeRootCandidate -Candidates $rootCandidates -Candidate (Join-Path $projectRoot ".local\node-v22.12.0-win-x64")
+    Add-NodeRootCandidate -Candidates $rootCandidates -Candidate (Join-Path $projectRoot ".task-temp\node-v22.12.0-win-x64")
+    Add-NodeRootCandidate -Candidates $rootCandidates -Candidate (Join-Path $HOME ".cache\codex-runtimes\codex-primary-runtime\dependencies\node")
+
+    $sharedTaskTemp = Join-Path $HOME "Documents\my_scripts\.task-temp"
+    if (Test-Path $sharedTaskTemp) {
+        $discoveredNodeRoots = Get-ChildItem -Path $sharedTaskTemp -Directory -Filter "node-v*-win-x64" -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 10
+        foreach ($nodeRootCandidate in $discoveredNodeRoots) {
+            Add-NodeRootCandidate -Candidates $rootCandidates -Candidate $nodeRootCandidate.FullName
+        }
+    }
+
+    foreach ($candidateRoot in $rootCandidates) {
+        $node = Resolve-NodeFromRoot -RootPath $candidateRoot
+        $npm = Resolve-NpmFromRoot -RootPath $candidateRoot
+        if ($node -and $npm) {
+            return @{
+                NodePath = $node
+                NpmPath = $npm.Path
+                NpmMode = $npm.Mode
+            }
+        }
+    }
+
+    $pathNodeCommand = Get-Command "node" -ErrorAction SilentlyContinue
+    $pathNpmCommand = Get-Command "npm.cmd" -ErrorAction SilentlyContinue
+    if (-not $pathNpmCommand) {
+        $pathNpmCommand = Get-Command "npm" -ErrorAction SilentlyContinue
+    }
+    if ($pathNodeCommand -and $pathNpmCommand) {
+        return @{
+            NodePath = $pathNodeCommand.Source
+            NpmPath = $pathNpmCommand.Source
+            NpmMode = "cmd"
+        }
+    }
+
+    throw "Node/npm toolchain not found. Pass -NodeRoot, -NodePath/-NpmPath, or set CPW_NODE_ROOT/CPW_NODE_BIN/CPW_NPM_BIN."
+}
+
+function Invoke-Npm {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Toolchain,
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    $previousPath = $env:PATH
+    $nodeDir = Split-Path $Toolchain.NodePath -Parent
+    $env:PATH = "$nodeDir;$previousPath"
+    try {
+        if ($Toolchain.NpmMode -eq "node-cli") {
+            & $Toolchain.NodePath $Toolchain.NpmPath @Arguments
+        } else {
+            & $Toolchain.NpmPath @Arguments
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw "Command failed: npm $($Arguments -join ' ')"
+        }
+    } finally {
+        $env:PATH = $previousPath
+    }
 }
 
 function Get-SavedFlyAccessToken {
@@ -239,6 +452,40 @@ function Run-Checks {
     Run-Tests
 }
 
+function Run-TypeScriptApiChecks {
+    $apiRoot = Join-Path $projectRoot "apps\api"
+    $packageJson = Join-Path $apiRoot "package.json"
+    if (-not (Test-Path $packageJson)) {
+        throw "TypeScript API package not found at $packageJson"
+    }
+
+    $toolchain = Resolve-NodeToolchain
+    Write-Host "Using Node: $($toolchain.NodePath)"
+    Write-Host "Using npm: $($toolchain.NpmPath)"
+
+    if (-not $SkipTsApiInstall) {
+        Write-Host "Installing TypeScript API dependencies with npm ci..."
+        Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "ci")
+    }
+
+    if (-not $SkipRouteSnapshotCheck) {
+        Write-Host "Checking Flask route snapshot..."
+        Invoke-Python -Arguments @(
+            (Join-Path $projectRoot "scripts\route_snapshots.py"),
+            "--check"
+        )
+    }
+
+    Write-Host "Running TypeScript API typecheck..."
+    Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "typecheck")
+
+    Write-Host "Building TypeScript API..."
+    Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "build")
+
+    Write-Host "Checking TypeScript API route parity..."
+    Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "test:route-parity")
+}
+
 function Backup-LocalState {
     Write-Host "Creating local backup archive..."
     $arguments = @(
@@ -363,7 +610,9 @@ function Deploy-Fly {
     }
 }
 
-Ensure-Python
+if ($Action -ne "ts-api-check" -or -not $SkipRouteSnapshotCheck) {
+    Ensure-Python
+}
 Set-LocalTempEnvironment -ScopeName $Action
 
 switch ($Action) {
@@ -383,6 +632,9 @@ switch ($Action) {
     }
     "check" {
         Run-Checks
+    }
+    "ts-api-check" {
+        Run-TypeScriptApiChecks
     }
     "backup" {
         Backup-LocalState

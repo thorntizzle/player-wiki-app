@@ -1,6 +1,6 @@
 # TypeScript Local Runtime Evidence
 
-Last updated: 2026-06-27
+Last updated: 2026-06-28
 
 Status: no-live local runtime proof for `rewrite/ts-ops-local-packaging-proof`.
 
@@ -135,12 +135,35 @@ PowerShell/.NET runtime exposed a null `ProcessStartInfo.ArgumentList`; rerunnin
 the same proof with `ProcessStartInfo.Arguments` passed. That failure is
 classified as a local harness issue, not a TypeScript API regression.
 
+## Wrapper Check Refresh
+
+The follow-up `rewrite/ts-ops-local-ts-check-wrapper` lane added a durable
+Windows wrapper action for the API validation path:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action ts-api-check
+```
+
+The wrapper resolved Node/npm from the existing pinned Node 22 runtime under the
+local workspace scratch area without requiring global `node` or `npm` on
+`PATH`, installed 46 ignored API packages with `npm ci`, ran
+`scripts/route_snapshots.py --check`, ran
+`npm --prefix apps/api run typecheck`, ran
+`npm --prefix apps/api run build`, and ran
+`npm --prefix apps/api run test:route-parity`.
+
+Result: passed. The only non-failing output was npm's upstream deprecation
+warning for `prebuild-install@7.1.3`.
+
 ## Decision
 
 - The TypeScript API has a working local install, build, compiled start, and
   fixture health-check path on Windows when the pinned Node/npm runtime is used.
 - The copied-fixture refresh also proves `/api/v1/app` reflects the disposable
   DB path, copied campaigns path, and health metadata overrides.
+- The `local.ps1 -Action ts-api-check` wrapper closes the local Windows gap for
+  repeatable API dependency install, route snapshot check, typecheck, build, and
+  route-parity validation without rediscovering Node/npm manually.
 - The proof depends on ignored local artifacts: `apps/api/node_modules`,
   `apps/api/dist`, and task-scoped local scratch space.
 - This does not prove Docker/Fly packaging because the current tracked
@@ -149,8 +172,7 @@ classified as a local harness issue, not a TypeScript API regression.
 
 ## Remaining Ops Gates
 
-- Add a stable repo-local wrapper or documented command path so operators do
-  not need to rediscover the pinned Node/npm runtime manually.
+- Keep the wrapper green on integration branches as the route manifest changes.
 - Decide whether TypeScript cutover uses a TypeScript-only image, a sidecar, or
   a combined Flask-plus-TypeScript transition image.
 - Prove Docker image build/start locally with mounted fixture paths and
