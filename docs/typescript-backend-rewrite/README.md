@@ -24,6 +24,7 @@ This folder tracks the deliberate TypeScript backend rewrite path for Campaign P
 - `session-runtime-copied-data-rehearsal-2026-06-28.md`: completed no-live copied-fixture Session/runtime backup/mutate/restore transcript.
 - `published-content-copied-data-rehearsal-2026-06-28.md`: completed no-live copied-fixture published content config/pages/assets backup/mutate/restore transcript.
 - `rollback-cutover-runbook.md`: no-live rollback and full cutover evidence runbook, including the `rollback-cutover` harness guide for last known-good Flask target, pre-cutover backups, TypeScript data-delta decisions, restore command shape, and Flask health smoke.
+- `rollback-cutover-copied-rehearsal-2026-06-28.md`: completed no-live copied-data rollback mechanics transcript with representative TypeScript smoke, one reverted TypeScript write delta, restore equivalence, and Flask fallback health smoke; no cutover readiness label change.
 - `.local/roadmaps/typescript-backend-rewrite-roadmap.md`: local active task queue for the rewrite track.
 - `docs/current-state/INDEX.md`: current product contract index. Use it to confirm present behavior before porting any workflow.
 - `docs/api-v1.md`: current JSON API contract.
