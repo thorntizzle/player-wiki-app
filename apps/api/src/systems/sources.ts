@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 
-import Database from "better-sqlite3";
+import { openSqliteDatabase, type SqliteDatabase } from "../sqlite.js";
 
 import type { CampaignViewModel } from "../campaigns/view.js";
 
@@ -809,7 +809,7 @@ function entryMatchesCategoryQuery(row: SystemsEntryRow, query: string): boolean
 }
 
 function loadAccessibleSourceEntries(
-  database: Database.Database,
+  database: SqliteDatabase,
   librarySlug: string,
   sourceId: string,
   role: FixtureSystemsRole,
@@ -856,7 +856,7 @@ function loadAccessibleSourceEntries(
 }
 
 function loadCampaignEntryOverride(
-  database: Database.Database,
+  database: SqliteDatabase,
   campaignSlug: string,
   entryKey: string,
 ): SystemsEntryOverride | null {
@@ -887,7 +887,7 @@ function loadCampaignEntryOverride(
 }
 
 export function loadCampaignEntryOverrides(
-  database: Database.Database,
+  database: SqliteDatabase,
   campaignSlug: string,
   librarySlug: string,
 ): Map<string, SystemsEntryOverride> {
@@ -922,7 +922,7 @@ export function loadCampaignEntryOverrides(
   return overrides;
 }
 
-export function loadSourceRows(database: Database.Database, campaignSlug: string, librarySlug: string): SystemsSourceRow[] {
+export function loadSourceRows(database: SqliteDatabase, campaignSlug: string, librarySlug: string): SystemsSourceRow[] {
   return database
     .prepare(
       `
@@ -955,7 +955,7 @@ export function loadSourceRows(database: Database.Database, campaignSlug: string
 }
 
 function loadCampaignSystemsPolicy(
-  database: Database.Database,
+  database: SqliteDatabase,
   campaignSlug: string,
 ): CampaignSystemsPolicyRow | undefined {
   return database
@@ -979,7 +979,7 @@ function loadCampaignSystemsPolicy(
 }
 
 function loadEntryByKey(
-  database: Database.Database,
+  database: SqliteDatabase,
   librarySlug: string,
   entryKey: string,
 ): SystemsEntryRow | undefined {
@@ -1013,7 +1013,7 @@ function loadEntryByKey(
 }
 
 function upsertCampaignSystemsPolicy(
-  database: Database.Database,
+  database: SqliteDatabase,
   {
     campaignSlug,
     librarySlug,
@@ -1068,7 +1068,7 @@ function upsertCampaignSystemsPolicy(
 }
 
 function upsertCampaignEnabledSource(
-  database: Database.Database,
+  database: SqliteDatabase,
   {
     campaignSlug,
     librarySlug,
@@ -1112,7 +1112,7 @@ function upsertCampaignEnabledSource(
 }
 
 function upsertCampaignEntryOverride(
-  database: Database.Database,
+  database: SqliteDatabase,
   {
     campaignSlug,
     librarySlug,
@@ -1172,7 +1172,7 @@ function upsertCampaignEntryOverride(
 }
 
 function insertSystemsSourceAuditEvent(
-  database: Database.Database,
+  database: SqliteDatabase,
   {
     actorUserId,
     campaignSlug,
@@ -1222,7 +1222,7 @@ function insertSystemsSourceAuditEvent(
 }
 
 function insertSystemsEntryOverrideAuditEvent(
-  database: Database.Database,
+  database: SqliteDatabase,
   {
     actorUserId,
     campaignSlug,
@@ -1287,7 +1287,7 @@ export function updateCampaignSystemsSources(
     return { status: "validation_error", message: "updates must be an array." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const library = serializeLibrary(
       database
@@ -1457,7 +1457,7 @@ export function updateCampaignSystemsEntryOverride(
     isEnabledOverride = parsed;
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const library = serializeLibrary(
       database
@@ -1551,7 +1551,7 @@ export function updateCampaignSystemsEntryOverride(
 }
 
 function loadSourceRow(
-  database: Database.Database,
+  database: SqliteDatabase,
   campaignSlug: string,
   librarySlug: string,
   sourceId: string,
@@ -1588,7 +1588,7 @@ function loadSourceRow(
 }
 
 export function loadEntriesForSources(
-  database: Database.Database,
+  database: SqliteDatabase,
   librarySlug: string,
   sourceIds: string[],
 ): SystemsEntryRow[] {
@@ -1628,7 +1628,7 @@ export function loadEntriesForSources(
 }
 
 function loadSearchableEntriesForSources(
-  database: Database.Database,
+  database: SqliteDatabase,
   librarySlug: string,
   sourceIds: string[],
   entryType: string,
@@ -1876,7 +1876,7 @@ export function buildCombatSystemsMonsterSearchPayload(
     };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const seeds = parseSourceSeeds(campaignConfig);
     const enabledSourceStates = loadSourceRows(database, campaign.slug, librarySlug)
@@ -1940,7 +1940,7 @@ export function buildCampaignSystemsSourceListPayload(
     return emptyPayload(campaign, canManage);
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const library = serializeLibrary(
       database
@@ -1997,7 +1997,7 @@ export function buildCampaignSystemsIndexPayload(
     return emptyIndexPayload(campaign, canManage, cleanedQuery, cleanedReferenceQuery);
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const library = serializeLibrary(
       database
@@ -2103,7 +2103,7 @@ export function searchSessionArticleSystemsSources(
     return [];
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const library = serializeLibrary(
       database
@@ -2171,7 +2171,7 @@ export function buildCampaignSystemsSourceDetailPayload(
     return { status: "not_found" };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const library = serializeLibrary(
       database
@@ -2273,7 +2273,7 @@ export function buildCampaignSystemsSourceCategoryPayload(
     return { status: "not_found" };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const library = serializeLibrary(
       database
@@ -2362,7 +2362,7 @@ export function buildCampaignSystemsEntryDetailPayload(
     return { status: "not_found" };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const library = serializeLibrary(
       database

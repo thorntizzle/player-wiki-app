@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import Database from "better-sqlite3";
+import { openSqliteDatabase, type SqliteDatabase } from "../sqlite.js";
 import { parse as parseYaml } from "yaml";
 
 import type { CampaignViewModel } from "../campaigns/view.js";
@@ -720,14 +720,14 @@ function serializeSessionRecord(row: SessionRow | null | undefined): SessionReco
   };
 }
 
-function loadStateRevision(database: Database.Database, campaignSlug: string): number {
+function loadStateRevision(database: SqliteDatabase, campaignSlug: string): number {
   const row = database
     .prepare("SELECT campaign_slug, revision FROM campaign_session_states WHERE campaign_slug = ?")
     .get(campaignSlug) as SessionStateRow | undefined;
   return row ? Number(row.revision || 0) : SESSION_READONLY_REVISION;
 }
 
-function loadActiveSession(database: Database.Database, campaignSlug: string): SessionRow | null {
+function loadActiveSession(database: SqliteDatabase, campaignSlug: string): SessionRow | null {
   return (
     (database
       .prepare(
@@ -744,7 +744,7 @@ function loadActiveSession(database: Database.Database, campaignSlug: string): S
   );
 }
 
-function loadArticles(database: Database.Database, campaignSlug: string, statuses: string[]): SessionArticleRow[] {
+function loadArticles(database: SqliteDatabase, campaignSlug: string, statuses: string[]): SessionArticleRow[] {
   const placeholders = statuses.map(() => "?").join(", ");
   return database
     .prepare(
@@ -770,7 +770,7 @@ function loadArticles(database: Database.Database, campaignSlug: string, statuse
     .all(campaignSlug, ...statuses) as SessionArticleRow[];
 }
 
-function loadAllArticles(database: Database.Database, campaignSlug: string): SessionArticleRow[] {
+function loadAllArticles(database: SqliteDatabase, campaignSlug: string): SessionArticleRow[] {
   return database
     .prepare(
       `
@@ -794,7 +794,7 @@ function loadAllArticles(database: Database.Database, campaignSlug: string): Ses
     .all(campaignSlug) as SessionArticleRow[];
 }
 
-function loadArticleImages(database: Database.Database, articleIds: number[]): Map<number, SessionArticleImageRow> {
+function loadArticleImages(database: SqliteDatabase, articleIds: number[]): Map<number, SessionArticleImageRow> {
   const uniqueIds = [...new Set(articleIds.map((id) => Math.trunc(id)).filter((id) => id > 0))];
   if (uniqueIds.length === 0) {
     return new Map();
@@ -813,7 +813,7 @@ function loadArticleImages(database: Database.Database, articleIds: number[]): M
 }
 
 function loadArticleImageBlob(
-  database: Database.Database,
+  database: SqliteDatabase,
   campaignSlug: string,
   articleId: number,
 ): SessionArticleImageBlobRow | null {
@@ -843,7 +843,7 @@ function loadArticleImageBlob(
 }
 
 function loadMessages(
-  database: Database.Database,
+  database: SqliteDatabase,
   campaignSlug: string,
   sessionId: number,
   role: FixtureSystemsRole,
@@ -905,7 +905,7 @@ function loadMessages(
     .all(campaignSlug, sessionId, viewerId, viewerId) as SessionMessageRow[];
 }
 
-function loadActivePlayerRows(database: Database.Database, campaignSlug: string): ActivePlayerRow[] {
+function loadActivePlayerRows(database: SqliteDatabase, campaignSlug: string): ActivePlayerRow[] {
   return database
     .prepare(
       `
@@ -944,7 +944,7 @@ function serializeActivePlayerChoices(activePlayers: ActivePlayerRow[]): Session
   });
 }
 
-function loadSessionLogs(database: Database.Database, campaignSlug: string, limit = 20): SessionSummaryRow[] {
+function loadSessionLogs(database: SqliteDatabase, campaignSlug: string, limit = 20): SessionSummaryRow[] {
   return database
     .prepare(
       `
@@ -970,7 +970,7 @@ function loadSessionLogs(database: Database.Database, campaignSlug: string, limi
     .all(campaignSlug, Math.max(1, Math.trunc(limit))) as SessionSummaryRow[];
 }
 
-function loadSessionLog(database: Database.Database, campaignSlug: string, sessionId: number): SessionRow | null {
+function loadSessionLog(database: SqliteDatabase, campaignSlug: string, sessionId: number): SessionRow | null {
   return (
     (database
       .prepare(
@@ -987,7 +987,7 @@ function loadSessionLog(database: Database.Database, campaignSlug: string, sessi
   );
 }
 
-function loadSession(database: Database.Database, campaignSlug: string, sessionId: number): SessionRow | null {
+function loadSession(database: SqliteDatabase, campaignSlug: string, sessionId: number): SessionRow | null {
   return (
     (database
       .prepare(
@@ -1003,7 +1003,7 @@ function loadSession(database: Database.Database, campaignSlug: string, sessionI
   );
 }
 
-function loadArticle(database: Database.Database, articleId: number): SessionArticleRow | null {
+function loadArticle(database: SqliteDatabase, articleId: number): SessionArticleRow | null {
   return (
     (database
       .prepare(
@@ -1029,7 +1029,7 @@ function loadArticle(database: Database.Database, articleId: number): SessionArt
   );
 }
 
-function loadArticleImage(database: Database.Database, articleId: number): SessionArticleImageRow | null {
+function loadArticleImage(database: SqliteDatabase, articleId: number): SessionArticleImageRow | null {
   return (
     (database
       .prepare(
@@ -1239,7 +1239,7 @@ async function serializeSingleMessage(
     if (!existsSync(dbPath)) {
       return new Map<number, string>();
     }
-    const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+    const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
     try {
       return buildRecipientLabelMap(loadActivePlayerRows(database, campaign.slug));
     } finally {
@@ -1296,7 +1296,7 @@ export async function buildSessionStatePayload(
     return emptySessionPayload(campaign, role);
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const manageSession = canManageSession(role);
     const sessionRevision = loadStateRevision(database, campaign.slug);
@@ -1381,7 +1381,7 @@ export function readSessionArticleImage(
     };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const row = loadArticleImageBlob(database, campaignSlug, articleId);
     if (!row) {
@@ -1446,7 +1446,7 @@ function validateRecipientUserId(value: unknown): number | null {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-function bumpSessionRevision(database: Database.Database, campaignSlug: string, actorUserId: number, now: string): number {
+function bumpSessionRevision(database: SqliteDatabase, campaignSlug: string, actorUserId: number, now: string): number {
   const existing = database
     .prepare("SELECT revision FROM campaign_session_states WHERE campaign_slug = ?")
     .get(campaignSlug) as { revision: number } | undefined;
@@ -1490,7 +1490,7 @@ export function startSession(
     return { status: "validation_error", message: "Session storage is not initialized." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const activeSession = loadActiveSession(database, campaign.slug);
     if (activeSession) {
@@ -1546,7 +1546,7 @@ export function closeSession(
     return { status: "validation_error", message: "There is no active session to close." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const activeSession = loadActiveSession(database, campaign.slug);
     if (!activeSession) {
@@ -1759,7 +1759,7 @@ async function prepareSessionArticleCreateInput(
 }
 
 function upsertArticleImage(
-  database: Database.Database,
+  database: SqliteDatabase,
   articleId: number,
   image: SessionArticleImageUpload,
   now: string,
@@ -1810,7 +1810,7 @@ export async function createSessionArticle(
     return { status: "validation_error", message: "Session storage is not initialized." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const now = utcIsoTimestamp();
     const writeArticle = database.transaction(() => {
@@ -1871,7 +1871,7 @@ export async function updateSessionArticle(
     return { status: "validation_error", message: "That session article could not be found." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const article = loadArticle(database, articleId);
     if (!article || article.campaign_slug !== campaign.slug) {
@@ -1993,7 +1993,7 @@ export async function revealSessionArticle(
     return { status: "validation_error", message: "Begin a session before revealing articles in the chat." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const activeSession = loadActiveSession(database, campaign.slug);
     if (!activeSession) {
@@ -2123,7 +2123,7 @@ export async function deleteSessionArticle(
     return { status: "validation_error", message: "That session article could not be found." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const article = loadArticle(database, articleId);
     if (!article || article.campaign_slug !== campaign.slug) {
@@ -2176,7 +2176,7 @@ export async function clearRevealedSessionArticles(
     return { status: "ok", deletedArticles: [], deletedArticleIds: [], sessionRevision: SESSION_READONLY_REVISION };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const revealedArticles = loadArticles(database, campaign.slug, ["revealed"]);
     const now = utcIsoTimestamp();
@@ -2225,7 +2225,7 @@ export function deleteSessionLog(
     return { status: "validation_error", message: "That chat log could not be found." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const session = loadSession(database, campaign.slug, sessionId);
     if (!session) {
@@ -2295,7 +2295,7 @@ export async function postSessionMessage(
     return { status: "validation_error", message: "The chat window opens when the DM begins a session." };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true });
   try {
     const activeSession = loadActiveSession(database, campaign.slug);
     if (!activeSession) {
@@ -2412,7 +2412,7 @@ export async function buildSessionLogDetailPayload(
     return { status: "not_found" };
   }
 
-  const database = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const database = openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   try {
     const session = loadSessionLog(database, campaign.slug, sessionId);
     if (!session) {

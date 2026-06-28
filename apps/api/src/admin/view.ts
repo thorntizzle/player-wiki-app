@@ -1,13 +1,12 @@
 import { existsSync } from "node:fs";
 
-import Database from "better-sqlite3";
+import { openSqliteDatabase, type SqliteDatabase } from "../sqlite.js";
 
 import type { ApiConfig } from "../config.js";
 import { listCampaigns } from "../campaigns/repository.js";
 import { listCampaignContentCharacters } from "../content/repository.js";
 import type { AuthUser } from "../auth/repository.js";
 
-type SqliteDatabase = InstanceType<typeof Database>;
 
 interface UserRow {
   id: number;
@@ -125,7 +124,7 @@ function openReadonlyDatabase(dbPath: string): SqliteDatabase | null {
     return null;
   }
   try {
-    return new Database(dbPath, { fileMustExist: true, readonly: true });
+    return openSqliteDatabase(dbPath, { fileMustExist: true, readonly: true });
   } catch {
     return null;
   }

@@ -1,10 +1,9 @@
 import { existsSync } from "node:fs";
 
-import Database from "better-sqlite3";
+import { openSqliteDatabase, type SqliteDatabase } from "../sqlite.js";
 
 import type { ApiConfig } from "../config.js";
 
-type SqliteDatabase = InstanceType<typeof Database>;
 
 interface CharacterStateRow {
   revision: number;
@@ -302,7 +301,7 @@ function openDatabase(config: ApiConfig): SqliteDatabase | null {
   if (!config.dbPath || !existsSync(config.dbPath)) {
     return null;
   }
-  return new Database(config.dbPath);
+  return openSqliteDatabase(config.dbPath);
 }
 
 function emptyItemCatalog(): ItemCatalog {
@@ -568,7 +567,7 @@ export function readCharacterStateSnapshot(
   definition: Record<string, unknown>,
 ): CharacterStateSnapshot {
   if (existsSync(config.dbPath)) {
-    const database = new Database(config.dbPath, { fileMustExist: true, readonly: true });
+    const database = openSqliteDatabase(config.dbPath, { fileMustExist: true, readonly: true });
     try {
       if (tableExists(database, "character_state")) {
         const existingState = readCharacterState(database, campaignSlug, characterSlug);
