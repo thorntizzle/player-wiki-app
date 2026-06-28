@@ -2,7 +2,7 @@
 
 Last updated: 2026-06-27
 
-Status: runbook and transcript template for copied-data and staging-snapshot rehearsals
+Status: guarded script, runbook, and transcript template for copied-data and staging-snapshot rehearsals
 
 ## Purpose
 
@@ -55,6 +55,79 @@ target. If any resolved path is outside the rehearsal root, stop.
 - Do not run broad app tests unless executable code changed. Rehearsal validation
   should be targeted to the write family under review.
 
+## Executable Harness Helper
+
+Use `scripts/staging_rehearsal_harness.py` to create the disposable folder
+layout, write the initial transcript, validate copied-data paths, capture file
+hashes plus selected SQLite row counts, and compare restored evidence.
+
+The helper deliberately does not run TypeScript mutations, Flask mutations,
+restore commands, Fly commands, deploys, or live syncs. It refuses evidence
+paths that resolve outside the rehearsal root, and the rehearsal root must be
+inside a `.task-temp` directory.
+
+Supported write families:
+
+- `content-character`
+- `combat`
+- `session`
+- `systems`
+- `dm-content`
+- `publishing`
+
+Dry-run scaffold:
+
+```powershell
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py init `
+  --rehearsal-id ts-content-character-copy-YYYYMMDD `
+  --family content-character `
+  --dry-run
+```
+
+Create a rehearsal scaffold:
+
+```powershell
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py init `
+  --rehearsal-id ts-content-character-copy-YYYYMMDD `
+  --family content-character `
+  --source-description "copied staging-equivalent snapshot, already copied into .task-temp" `
+  --source-approval "approved by operator before local copy"
+```
+
+Validate copied-data paths before any external backup, mutation, or restore
+command:
+
+```powershell
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py check-paths `
+  --root .\.task-temp\ts-content-character-copy-YYYYMMDD `
+  --db .\.task-temp\ts-content-character-copy-YYYYMMDD\input\player_wiki.sqlite3 `
+  --campaigns-dir .\.task-temp\ts-content-character-copy-YYYYMMDD\input\campaigns `
+  --backup-archive .\.task-temp\ts-content-character-copy-YYYYMMDD\backup\player-wiki-backup.zip
+```
+
+Capture baseline, post-mutation, and post-restore manifests:
+
+```powershell
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py snapshot `
+  --root .\.task-temp\ts-content-character-copy-YYYYMMDD `
+  --label pre `
+  --family content-character `
+  --db .\.task-temp\ts-content-character-copy-YYYYMMDD\input\player_wiki.sqlite3 `
+  --campaigns-dir .\.task-temp\ts-content-character-copy-YYYYMMDD\input\campaigns
+```
+
+Compare restored evidence to the baseline:
+
+```powershell
+& '<workspace>/.venv/Scripts/python.exe' .\scripts\staging_rehearsal_harness.py compare `
+  --before .\.task-temp\ts-content-character-copy-YYYYMMDD\pre\manifest.json `
+  --after .\.task-temp\ts-content-character-copy-YYYYMMDD\restore\manifest.json
+```
+
+The comparison must pass, and the human transcript must classify any accepted
+differences, before a family can claim `copied-data rollback ready` or
+`staging snapshot ready`.
+
 ## Rehearsal Inputs
 
 Record these fields before starting:
@@ -91,22 +164,24 @@ Required files under the rehearsal root:
 2. Copy the approved source SQLite and campaign content into `input/`.
 3. Resolve and record all paths.
 4. Refuse the run if any mutation target is outside the rehearsal root.
-5. Point Flask backup tooling and TypeScript runtime variables at the copied data.
-6. Capture pre-mutation evidence:
+5. Run `scripts/staging_rehearsal_harness.py check-paths` for the copied SQLite,
+   copied campaign content directory, and intended backup archive path.
+6. Point Flask backup tooling and TypeScript runtime variables at the copied data.
+7. Capture pre-mutation evidence with the helper:
    - selected file hashes;
    - selected directory listings;
    - selected table row counts and sampled rows;
    - baseline API responses from the Flask authority when practical;
    - baseline TypeScript read responses for the same entities.
-7. Create a backup archive from the copied data.
-8. Run only the approved write-family mutation commands.
-9. Capture mutation responses and immediate post-mutation evidence.
-10. Restore from the backup archive into the same disposable copy or a new
+8. Create a backup archive from the copied data.
+9. Run only the approved write-family mutation commands.
+10. Capture mutation responses and immediate post-mutation evidence.
+11. Restore from the backup archive into the same disposable copy or a new
     disposable restore target.
-11. Capture post-restore evidence.
-12. Compare pre and post-restore hashes, SQL exports, row counts, selected rows,
+12. Capture post-restore evidence.
+13. Compare pre and post-restore hashes, SQL exports, row counts, selected rows,
     and sampled API responses.
-13. Classify the result and record the readiness decision.
+14. Classify the result and record the readiness decision.
 
 ## Command Template
 
