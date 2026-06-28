@@ -431,6 +431,7 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
                     "subclass_level": 1,
                 },
             ),
+            ("DND-5E", "PHB", "PHB:class:druid", "class", "phb-druid", "Druid", {"hit_die": 8, "saving_throw_proficiencies": ["Intelligence", "Wisdom"]}),
             ("DND-5E", "PHB", "PHB:class:fighter", "class", "phb-fighter", "Fighter", {"hit_die": 10, "saving_throw_proficiencies": ["Strength", "Constitution"]}),
             ("DND-5E", "PHB", "PHB:class:wizard", "class", "phb-wizard", "Wizard", {"hit_die": 6, "saving_throw_proficiencies": ["Intelligence", "Wisdom"]}),
             ("DND-5E", "PHB", "PHB:race:human", "race", "phb-human", "Human", {"size": "Medium", "speed": 30, "languages": ["Common", "one extra language"]}),
@@ -449,7 +450,11 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
             ("DND-5E", "PHB", "PHB:spell:cure-wounds", "spell", "phb-spell-cure-wounds", "Cure Wounds", {"level": 1, "school": "V", "class_lists": {"PHB": ["Cleric"]}}),
             ("DND-5E", "PHB", "PHB:spell:detect-magic", "spell", "phb-spell-detect-magic", "Detect Magic", {"level": 1, "school": "D", "class_lists": {"PHB": ["Wizard"]}}),
             ("DND-5E", "PHB", "PHB:spell:dissonant-whispers", "spell", "phb-spell-dissonant-whispers", "Dissonant Whispers", {"level": 1, "school": "E", "class_lists": {"PHB": ["Bard"]}}),
+            ("DND-5E", "PHB", "PHB:spell:druidcraft", "spell", "phb-spell-druidcraft", "Druidcraft", {"level": 0, "school": "T", "class_lists": {"PHB": ["Druid"]}}),
+            ("DND-5E", "PHB", "PHB:spell:entangle", "spell", "phb-spell-entangle", "Entangle", {"level": 1, "school": "C", "class_lists": {"PHB": ["Druid"]}}),
+            ("DND-5E", "PHB", "PHB:spell:faerie-fire", "spell", "phb-spell-faerie-fire", "Faerie Fire", {"level": 1, "school": "V", "class_lists": {"PHB": ["Druid"]}}),
             ("DND-5E", "PHB", "PHB:spell:find-familiar", "spell", "phb-spell-find-familiar", "Find Familiar", {"level": 1, "school": "C", "class_lists": {"PHB": ["Wizard"]}}),
+            ("DND-5E", "PHB", "PHB:spell:goodberry", "spell", "phb-spell-goodberry", "Goodberry", {"level": 1, "school": "T", "class_lists": {"PHB": ["Druid"]}}),
             ("DND-5E", "PHB", "PHB:spell:guidance", "spell", "phb-spell-guidance", "Guidance", {"level": 0, "school": "D", "class_lists": {"PHB": ["Cleric"]}}),
             ("DND-5E", "PHB", "PHB:spell:healing-word", "spell", "phb-spell-healing-word", "Healing Word", {"level": 1, "school": "V", "class_lists": {"PHB": ["Bard"]}}),
             ("DND-5E", "PHB", "PHB:spell:heroism", "spell", "phb-spell-heroism", "Heroism", {"level": 1, "school": "E", "class_lists": {"PHB": ["Bard"]}}),
@@ -459,10 +464,13 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
             ("DND-5E", "PHB", "PHB:spell:magic-missile", "spell", "phb-spell-magic-missile", "Magic Missile", {"level": 1, "school": "V", "class_lists": {"PHB": ["Wizard"]}}),
             ("DND-5E", "PHB", "PHB:spell:message", "spell", "phb-spell-message", "Message", {"level": 0, "school": "T", "class_lists": {"PHB": ["Wizard"]}}),
             ("DND-5E", "PHB", "PHB:spell:minor-illusion", "spell", "phb-spell-minor-illusion", "Minor Illusion", {"level": 0, "school": "I", "class_lists": {"PHB": ["Bard"]}}),
+            ("DND-5E", "PHB", "PHB:spell:produce-flame", "spell", "phb-spell-produce-flame", "Produce Flame", {"level": 0, "school": "C", "class_lists": {"PHB": ["Druid"]}}),
             ("DND-5E", "PHB", "PHB:spell:sacred-flame", "spell", "phb-spell-sacred-flame", "Sacred Flame", {"level": 0, "school": "V", "class_lists": {"PHB": ["Cleric"]}}),
+            ("DND-5E", "PHB", "PHB:spell:shillelagh", "spell", "phb-spell-shillelagh", "Shillelagh", {"level": 0, "school": "T", "class_lists": {"PHB": ["Druid"]}}),
             ("DND-5E", "PHB", "PHB:spell:shield", "spell", "phb-spell-shield", "Shield", {"level": 1, "school": "A", "class_lists": {"PHB": ["Wizard"]}}),
             ("DND-5E", "PHB", "PHB:spell:shield-of-faith", "spell", "phb-spell-shield-of-faith", "Shield of Faith", {"level": 1, "school": "A", "class_lists": {"PHB": ["Cleric"]}}),
             ("DND-5E", "PHB", "PHB:spell:sleep", "spell", "phb-spell-sleep", "Sleep", {"level": 1, "school": "E", "class_lists": {"PHB": ["Wizard"]}}),
+            ("DND-5E", "PHB", "PHB:spell:thunderwave", "spell", "phb-spell-thunderwave", "Thunderwave", {"level": 1, "school": "V", "class_lists": {"PHB": ["Druid"]}}),
             ("DND-5E", "PHB", "PHB:spell:fog-cloud", "spell", "phb-spell-fog-cloud", "Fog Cloud", {"level": 1, "school": "C", "class_lists": {"PHB": ["Wizard"]}}),
             ("DND-5E", "PHB", "PHB:spell:vicious-mockery", "spell", "phb-spell-vicious-mockery", "Vicious Mockery", {"level": 0, "school": "E", "class_lists": {"PHB": ["Bard"]}}),
         ]
@@ -2053,6 +2061,146 @@ def test_typescript_dnd_character_create_cleric_writes_subclass_spells_and_state
                 "name": "Rejected DND Cleric",
                 "character_slug": "api-dnd-cleric-rejected",
                 "prepared_spell_1": "systems:phb-spell-bless",
+            }
+        },
+    )
+    assert rejected_status == 400
+    assert rejected_payload["error"]["code"] == "validation_error"
+    assert "Prepared Spell 1 is not valid" in rejected_payload["error"]["message"]
+
+
+def test_typescript_dnd_character_create_druid_writes_prepared_spells_and_state(
+    typescript_api_mutation_server,
+):
+    character_slug = "api-dnd-druid"
+    body = {
+        "values": {
+            "name": "API DND Druid",
+            "character_slug": character_slug,
+            "class_slug": "systems:phb-druid",
+            "species_slug": "systems:phb-human",
+            "background_slug": "systems:phb-sage",
+            "str": "10",
+            "dex": "14",
+            "con": "14",
+            "int": "12",
+            "wis": "16",
+            "cha": "8",
+            "cantrip_spell_1": "systems:phb-spell-druidcraft",
+            "cantrip_spell_2": "systems:phb-spell-produce-flame",
+            "prepared_spell_1": "systems:phb-spell-entangle",
+            "prepared_spell_2": "systems:phb-spell-faerie-fire",
+            "prepared_spell_3": "systems:phb-spell-goodberry",
+            "prepared_spell_4": "systems:phb-spell-thunderwave",
+        }
+    }
+
+    status, payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body=body,
+    )
+
+    assert status == 200
+    assert payload["message"] == "API DND Druid created."
+    definition = payload["character"]["definition"]
+    import_metadata = payload["character"]["import_metadata"]
+    state_record = payload["character"]["state_record"]
+    assert definition["character_slug"] == character_slug
+    assert definition["system"] == "DND-5E"
+    assert definition["profile"]["class_level_text"] == "Druid 1"
+    assert definition["profile"]["classes"][0]["systems_ref"]["entry_key"] == "PHB:class:druid"
+    assert definition["profile"]["species_ref"]["entry_key"] == "PHB:race:human"
+    assert definition["profile"]["background"] == "Sage"
+    assert definition["stats"]["max_hp"] == 10
+    assert definition["stats"]["armor_class"] == 15
+    assert definition["stats"]["passive_perception"] == 13
+    assert definition["stats"]["ability_scores"]["int"]["save_bonus"] == 3
+    assert definition["stats"]["ability_scores"]["wis"]["save_bonus"] == 5
+    assert definition["source"]["source_path"] == "builder://dnd5e-create-level-one"
+    assert import_metadata["source_path"] == "builder://dnd5e-create-level-one"
+    assert import_metadata["import_status"] == "managed"
+
+    assert definition["proficiencies"]["armor"] == ["Light armor", "Medium armor", "Shields"]
+    assert "Herbalism kit" in definition["proficiencies"]["tools"]
+    skills_by_name = {skill["name"]: skill for skill in definition["skills"]}
+    assert skills_by_name["Animal Handling"]["proficiency_level"] == "proficient"
+    assert skills_by_name["Survival"]["proficiency_level"] == "proficient"
+    assert skills_by_name["Nature"]["bonus"] == 1
+    assert definition["resource_templates"] == []
+    features_by_id = {feature["id"]: feature for feature in definition["features"]}
+    assert features_by_id["druidic-1"]["name"] == "Druidic"
+    assert features_by_id["spellcasting-1"]["name"] == "Spellcasting"
+    assert definition["attacks"][0]["equipment_ref"] == "scimitar-1"
+    assert any(item["name"] == "Sage Starting Package" for item in definition["equipment_catalog"])
+
+    spellcasting = definition["spellcasting"]
+    assert spellcasting["spellcasting_class"] == "Druid"
+    assert spellcasting["spellcasting_ability"] == "Wisdom"
+    assert spellcasting["spell_save_dc"] == 13
+    assert spellcasting["spell_attack_bonus"] == 5
+    assert spellcasting["class_rows"][0]["spell_mode"] == "prepared"
+    assert spellcasting["class_rows"][0]["prepared_spell_limit"] == 4
+    spells_by_slug = {spell["systems_ref"]["slug"]: spell for spell in spellcasting["spells"]}
+    assert spells_by_slug["phb-spell-druidcraft"]["mark"] == "Cantrip"
+    assert spells_by_slug["phb-spell-produce-flame"]["mark"] == "Cantrip"
+    assert spells_by_slug["phb-spell-entangle"]["mark"] == "Prepared"
+    assert spells_by_slug["phb-spell-faerie-fire"]["mark"] == "Prepared"
+    assert spells_by_slug["phb-spell-goodberry"]["mark"] == "Prepared"
+    assert spells_by_slug["phb-spell-thunderwave"]["mark"] == "Prepared"
+    assert all(spell["class_row_id"] == "class-row-1" for spell in spellcasting["spells"])
+
+    assert state_record["revision"] == 1
+    assert state_record["state"]["vitals"]["current_hp"] == 10
+    assert state_record["state"]["hit_dice"]["pools"] == [{"faces": 8, "current": 1, "max": 1}]
+    assert state_record["state"]["spell_slots"] == [{"level": 1, "max": 2, "used": 0, "slot_lane_id": "class-row-1-slots"}]
+    assert state_record["state"]["resources"] == []
+    assert state_record["state"]["inventory"][0]["catalog_ref"] == "leather-armor-1"
+    assert state_record["state"]["inventory"][1]["catalog_ref"] == "wooden-shield-1"
+    assert state_record["state"]["inventory"][2]["catalog_ref"] == "scimitar-1"
+    assert state_record["state"]["currency"]["gp"] == 10
+
+    state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
+    assert state is not None
+    assert state["revision"] == 1
+    assert state["state"]["vitals"]["current_hp"] == 10
+    assert state["state"]["spell_slots"][0]["max"] == 2
+
+    character_dir = typescript_api_mutation_server["campaigns_dir"] / "linden-pass" / "characters" / character_slug
+    written_definition = yaml.safe_load((character_dir / "definition.yaml").read_text(encoding="utf-8"))
+    written_import = yaml.safe_load((character_dir / "import.yaml").read_text(encoding="utf-8"))
+    assert written_definition["name"] == "API DND Druid"
+    assert written_definition["spellcasting"]["class_rows"][0]["spell_mode"] == "prepared"
+    assert written_definition["spellcasting"]["spells"][0]["class_row_id"] == "class-row-1"
+    assert written_import["source_path"] == "builder://dnd5e-create-level-one"
+
+    level_up_status, level_up_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{character_slug}/level-up",
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+    assert level_up_status == 200
+    assert level_up_payload["supported"] is False
+
+    duplicate_status, duplicate_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body=body,
+    )
+    assert duplicate_status == 409
+    assert duplicate_payload["error"]["code"] == "character_exists"
+
+    rejected_status, rejected_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "values": {
+                **body["values"],
+                "name": "Rejected DND Druid",
+                "character_slug": "api-dnd-druid-rejected",
+                "prepared_spell_1": "systems:phb-spell-magic-missile",
             }
         },
     )
