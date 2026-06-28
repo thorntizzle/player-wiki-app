@@ -581,8 +581,10 @@ fixture database.
 - Character portrait payload checks cover:
   - `PUT /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/portrait` and `DELETE /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/portrait` with bearer-only session-mode writes.
   - unassigned-player forbidden, stale-revision conflict, invalid-extension validation, and absent-portrait delete validation.
-  - DM upload persistence through copied-fixture `definition.yaml`/`import.yaml`, shared `character_state` revision bumps, `updated_by_user_id`, compact portrait payloads, and exact PNG byte preservation at `characters/<characterSlug>/portrait.png`.
-  - DM delete removal of profile portrait fields plus copied-fixture asset cleanup without converting image bytes.
+  - DM upload persistence through copied-fixture `definition.yaml`/`import.yaml`, shared `character_state` revision bumps, `updated_by_user_id`, compact portrait payloads, and exact PNG, JPG, GIF, and WEBP byte preservation at the corresponding `characters/<characterSlug>/portrait.<ext>` asset path.
+  - Existing WebP profile references in copied fixtures resolve with `image/webp` detail metadata and protected asset byte serving.
+  - Replacement cleanup removes the prior portrait asset across WebP-to-PNG, PNG-to-JPG, JPG-to-GIF, and GIF-to-WEBP transitions.
+  - DM delete removal of profile portrait fields plus copied-fixture WEBP asset cleanup without converting image bytes.
 - Character Xianxia inventory equipped-state payload checks cover:
   - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/equipped` with bearer-only writes.
   - unauthenticated, fixture-role bearer requirement, and stale-revision envelopes.

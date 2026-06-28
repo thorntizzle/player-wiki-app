@@ -28,7 +28,8 @@ staging-volume snapshot.
 - `docs/typescript-backend-rewrite/cutover-readiness.md`
 - `$campaign-player-wiki-characters` references:
   `character-reference-map.md`, `character-workflow-read-session.md`,
-  `character-workflow-state-editing.md`, and
+  `character-workflow-state-editing.md`,
+  `character-workflow-core-storage.md`, and
   `character-system-reimport-ux.md`
 - `$campaign-player-wiki-publishing` references:
   `publishing-reference-map.md`, `publishing-page-frontmatter.md`,
@@ -74,6 +75,12 @@ Character portrait uploads:
 - remove the prior portrait asset when a replacement uses a different extension
 - remove profile portrait fields and the current asset on delete
 - expose the resulting media type from the stored asset extension
+- existing profile references resolve through the character detail payload when
+  the referenced asset is present in the copied fixture asset tree, including
+  pre-existing WebP assets; that payload still advertises the legacy
+  `/campaigns/:campaignSlug/characters/:characterSlug/portrait` URL, while the
+  focused protected-serving proof uses `/campaigns/:campaignSlug/assets/:assetRef`
+  and does not by itself settle the direct legacy portrait URL cutover behavior
 
 Published content asset writes:
 
@@ -98,12 +105,27 @@ node ./tests/image-portrait-policy.mjs
 The test uses only copied sanitized fixtures and a disposable SQLite database. It
 proves:
 
+- An existing copied-fixture WebP portrait profile reference resolves in the
+  character detail payload as `image/webp`, and the protected asset route serves
+  the exact stored WebP bytes.
 - PNG portrait upload stores `portrait.png`, reports `image/png`, writes exact
-  PNG bytes, and serves the protected asset with exact bytes.
+  PNG bytes, serves the protected asset with exact bytes, and removes the prior
+  WebP portrait asset.
 - JPG replacement stores `portrait.jpg`, reports `image/jpeg`, writes exact JPG
   bytes, serves the protected asset with exact bytes, and removes the old PNG
   portrait asset.
-- Portrait delete removes the current JPG asset and profile portrait metadata.
+- GIF replacement stores `portrait.gif`, reports `image/gif`, writes exact GIF
+  bytes, serves the protected asset with exact bytes, and removes the old JPG
+  portrait asset.
+- WEBP replacement stores `portrait.webp`, reports `image/webp`, writes exact
+  WEBP bytes, serves the protected asset with exact bytes, and removes the old
+  GIF portrait asset.
+- Each portrait upload preserves copied-fixture `import.yaml` metadata, writes
+  profile portrait fields in `definition.yaml`, bumps the shared
+  `character_state` revision, and records the acting user id.
+- Portrait delete removes the current WEBP asset, removes profile portrait
+  metadata, preserves copied-fixture `import.yaml` metadata, and bumps the
+  shared `character_state` revision.
 - Content asset API upload of a PNG preserves the `.png` ref, `image/png` media
   type, exact bytes, and protected serving behavior, then deletes the copied
   asset.
@@ -153,6 +175,10 @@ Required proof before readiness:
 - Migration rehearsal for existing character portrait assets, including
   pre-cutover WebP assets, legacy PNG/JPG assets if present, profile references,
   protected serving, and old asset cleanup.
+- Direct legacy character portrait URL behavior must be decided or implemented:
+  current TypeScript character detail payloads still advertise
+  `/campaigns/:campaignSlug/characters/:characterSlug/portrait`, while focused
+  protected-serving proof currently exercises `/campaigns/:campaignSlug/assets/:assetRef`.
 - Published page image rehearsal for page frontmatter, asset copies, protected
   serving, and local/live mirror sync behavior on copied or staging data.
 - Backup/restore transcript on copied realistic data, then a user-approved
