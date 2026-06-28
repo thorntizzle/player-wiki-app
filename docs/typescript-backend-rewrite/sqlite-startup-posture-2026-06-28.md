@@ -31,6 +31,7 @@ This narrows the blocker from `sqlite-migration-dry-run-2026-06-28.md` without c
   - `synchronous = NORMAL` for writable opens
 - `apps/api/src/server.ts` runs `assertSqliteStartupSchema(config.dbPath)` before serving.
 - The preflight checks the 34 current Flask SQLite tables, selected required columns, and current indexes.
+- The sessions preflight and TypeScript smoke fixtures now match Flask's `sessions.token_hash` column name.
 - `local.ps1 -Action ts-api-check` now runs `npm --prefix apps/api run test:sqlite-startup-posture` after build and before route parity.
 
 ## Ownership Note
