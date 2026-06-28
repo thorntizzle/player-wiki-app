@@ -392,7 +392,7 @@ const DND_ABILITY_LABELS: Record<(typeof DND_ABILITY_KEYS)[number], string> = {
 const DND_CREATE_LIMITATIONS = [
   "Base classes come from enabled Systems rows inside the current native support lane: PHB base classes plus TCE Artificer.",
   "Species and backgrounds come from enabled Systems rows in the current supported source matrix for this TypeScript parity slice.",
-  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Bard with a bounded known-spells package, PHB Cleric with a bounded Life Domain level-one package, PHB Druid with a bounded prepared-spells package, PHB Rogue with a bounded expertise and starter-equipment package, PHB Sorcerer with a bounded Draconic Bloodline known-spells package, PHB Warlock with a bounded Fiend Pact Magic package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
+  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Bard with a bounded known-spells package, PHB Cleric with a bounded Life Domain level-one package, PHB Druid with a bounded prepared-spells package, PHB Rogue with a bounded expertise and starter-equipment package, PHB Ranger with a bounded Favored Enemy/Natural Explorer package, PHB Sorcerer with a bounded Draconic Bloodline known-spells package, PHB Warlock with a bounded Fiend Pact Magic package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
 ];
 const DND_CHARACTER_CREATE_SOURCE_PATH = "builder://dnd5e-create-level-one";
 const DND_CHARACTER_CREATE_SOURCE_TYPE = "dnd5e_character_builder_level_one";
@@ -983,6 +983,79 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
         category: "class_feature",
         source: "PHB",
         description_markdown: "This level-one TypeScript slice records Thieves' Cant as reference text only.",
+      },
+    ],
+    resourceTemplates: [],
+  },
+  ranger: {
+    className: "Ranger",
+    armorClass: "leather",
+    supportedSubclassTitles: [],
+    skillProficiencies: ["Perception", "Stealth", "Survival"],
+    skillRows: ["Animal Handling", "Athletics", "Insight", "Investigation", "Nature", "Perception", "Stealth", "Survival"],
+    spellcasting: null,
+    proficiencies: {
+      armor: ["Light armor", "Medium armor", "Shields"],
+      weapons: ["Simple weapons", "Martial weapons"],
+      tools: [],
+    },
+    equipmentCatalog: [
+      {
+        id: "leather-armor-1",
+        name: "Leather Armor",
+        default_quantity: 1,
+        weight: "10 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        tags: ["armor", "light armor"],
+      },
+      {
+        id: "shortsword-1",
+        name: "Shortsword",
+        default_quantity: 2,
+        weight: "2 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        weapon_wield_mode: "main-hand",
+        weapon_wield_modes: ["main-hand", "off-hand"],
+        tags: ["weapon", "martial weapon", "melee weapon", "finesse", "light"],
+      },
+      {
+        id: "longbow-1",
+        name: "Longbow",
+        default_quantity: 1,
+        weight: "2 lb.",
+        tags: ["weapon", "martial weapon", "ranged weapon"],
+      },
+      {
+        id: "arrows-1",
+        name: "Arrows",
+        default_quantity: 20,
+        weight: "1 lb.",
+        tags: ["ammunition"],
+      },
+      {
+        id: "explorers-pack-1",
+        name: "Explorer's Pack",
+        default_quantity: 1,
+        weight: "59 lb.",
+        tags: ["gear"],
+      },
+    ],
+    features: [
+      {
+        id: "favored-enemy-1",
+        name: "Favored Enemy",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "This level-one TypeScript slice records Beasts as the deterministic Favored Enemy. Broader favored enemy and language choice UI remains outside this slice.",
+      },
+      {
+        id: "natural-explorer-1",
+        name: "Natural Explorer",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "This level-one TypeScript slice records Forest as the deterministic favored terrain. Exploration automation remains outside this slice.",
       },
     ],
     resourceTemplates: [],
@@ -8339,7 +8412,7 @@ function assertDndLevelOneClass(row: SystemsEntryRow | null): { row: SystemsEntr
   }
   const classKey = dndLevelOneClassKey(row);
   if (!classKey || normalizeDndSourceId(row.source_id) !== DND_PHB_SOURCE_ID || String(row.entry_type || "") !== "class") {
-    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, PHB Druid, PHB Rogue, PHB Sorcerer, PHB Warlock, and PHB Wizard.");
+    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, PHB Druid, PHB Rogue, PHB Ranger, PHB Sorcerer, PHB Warlock, and PHB Wizard.");
   }
   return { row, classKey };
 }
@@ -8915,6 +8988,28 @@ function dndLevelOneAttacks(classKey: DndLevelOneClassKey, abilityScores: Record
         damageType: "piercing",
         notes: "Finesse, light, thrown range 20/60. Sneak Attack can add 1d6 once per turn when its PHB conditions apply.",
         equipmentRef: "dagger-1",
+      }),
+    ];
+  }
+  if (classKey === "ranger") {
+    return [
+      dndWeaponAttack({
+        name: "Shortsword",
+        category: "melee weapon",
+        abilityModifierValue: Math.max(strengthModifier, dexterityModifier),
+        damageDie: "1d6",
+        damageType: "piercing",
+        notes: "Finesse, light. Starting package includes two shortswords.",
+        equipmentRef: "shortsword-1",
+      }),
+      dndWeaponAttack({
+        name: "Longbow",
+        category: "ranged weapon",
+        abilityModifierValue: dexterityModifier,
+        damageDie: "1d8",
+        damageType: "piercing",
+        notes: "Ammunition, heavy, two-handed, range 150/600.",
+        equipmentRef: "longbow-1",
       }),
     ];
   }
