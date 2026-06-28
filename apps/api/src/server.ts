@@ -6718,12 +6718,19 @@ app.get(ROUTES.characterLevelUp, async (ctx) => {
 
   const stateRecord = readCharacterStateSnapshot(config, campaign.slug, character.character_slug, character.definition);
   const queryValues = Object.fromEntries(new URL(ctx.req.url).searchParams.entries());
+  const campaignConfig = (await getCampaignConfigFile(config, campaign.slug))?.config || {};
+  const spellRows = listAdvancedEditorSpellRows({
+    dbPath: config.dbPath,
+    campaign,
+    campaignConfig,
+  });
   const advancementPayload = buildCharacterLevelUpPayload({
     campaign,
     characterSlug,
     definition: character.definition,
     stateRevision: stateRecord.revision,
     values: queryValues,
+    spellRows,
   });
 
   return ctx.json({
@@ -6789,6 +6796,12 @@ app.post(ROUTES.characterLevelUpSubmit, async (ctx) => {
   }
 
   const stateRecord = readCharacterStateSnapshot(config, campaign.slug, character.character_slug, character.definition);
+  const campaignConfig = (await getCampaignConfigFile(config, campaign.slug))?.config || {};
+  const spellRows = listAdvancedEditorSpellRows({
+    dbPath: config.dbPath,
+    campaign,
+    campaignConfig,
+  });
   const advancementPayload = buildCharacterLevelUpPayload({
     campaign,
     characterSlug,
@@ -6798,6 +6811,7 @@ app.post(ROUTES.characterLevelUpSubmit, async (ctx) => {
       typeof jsonPayload.payload.values === "object" && jsonPayload.payload.values !== null && !Array.isArray(jsonPayload.payload.values)
         ? (jsonPayload.payload.values as Record<string, unknown>)
         : {},
+    spellRows,
   });
   if (!advancementPayload.supported || !advancementPayload.context) {
     const message = advancementPayload.supported
@@ -6807,7 +6821,7 @@ app.post(ROUTES.characterLevelUpSubmit, async (ctx) => {
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const levelUpUpdate = applyCharacterLevelUpUpdate(character.definition, jsonPayload.payload, advancementPayload.context);
+  const levelUpUpdate = applyCharacterLevelUpUpdate(character.definition, jsonPayload.payload, advancementPayload.context, spellRows);
   if (levelUpUpdate.status === "validation_error") {
     const error = validationError(levelUpUpdate.message);
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
@@ -6855,6 +6869,7 @@ app.post(ROUTES.characterLevelUpSubmit, async (ctx) => {
     definition: writeResult.record.definition,
     stateRevision: stateResult.revision,
     values: levelUpUpdate.values,
+    spellRows,
   });
 
   return ctx.json({

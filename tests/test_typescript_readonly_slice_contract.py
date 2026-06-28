@@ -547,7 +547,7 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
             ("DND-5E", "PHB", "PHB:spell:entangle", "spell", "phb-spell-entangle", "Entangle", {"level": 1, "school": "C", "class_lists": {"PHB": ["Druid"]}}),
             ("DND-5E", "PHB", "PHB:spell:faerie-fire", "spell", "phb-spell-faerie-fire", "Faerie Fire", {"level": 1, "school": "V", "class_lists": {"PHB": ["Druid"]}}),
             ("DND-5E", "PHB", "PHB:spell:find-familiar", "spell", "phb-spell-find-familiar", "Find Familiar", {"level": 1, "school": "C", "class_lists": {"PHB": ["Wizard"]}}),
-            ("DND-5E", "PHB", "PHB:spell:goodberry", "spell", "phb-spell-goodberry", "Goodberry", {"level": 1, "school": "T", "class_lists": {"PHB": ["Druid"]}}),
+            ("DND-5E", "PHB", "PHB:spell:goodberry", "spell", "phb-spell-goodberry", "Goodberry", {"level": 1, "school": "T", "class_lists": {"PHB": ["Druid", "Ranger"]}}),
             ("DND-5E", "PHB", "PHB:spell:guidance", "spell", "phb-spell-guidance", "Guidance", {"level": 0, "school": "D", "class_lists": {"PHB": ["Cleric"]}}),
             ("DND-5E", "PHB", "PHB:spell:healing-word", "spell", "phb-spell-healing-word", "Healing Word", {"level": 1, "school": "V", "class_lists": {"PHB": ["Bard"]}}),
             ("DND-5E", "PHB", "PHB:spell:eldritch-blast", "spell", "phb-spell-eldritch-blast", "Eldritch Blast", {"level": 0, "school": "V", "class_lists": {"PHB": ["Warlock"]}}),
@@ -567,7 +567,7 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
             ("DND-5E", "PHB", "PHB:spell:shield-of-faith", "spell", "phb-spell-shield-of-faith", "Shield of Faith", {"level": 1, "school": "A", "class_lists": {"PHB": ["Cleric"]}}),
             ("DND-5E", "PHB", "PHB:spell:sleep", "spell", "phb-spell-sleep", "Sleep", {"level": 1, "school": "E", "class_lists": {"PHB": ["Wizard"]}}),
             ("DND-5E", "PHB", "PHB:spell:thunderwave", "spell", "phb-spell-thunderwave", "Thunderwave", {"level": 1, "school": "V", "class_lists": {"PHB": ["Druid"]}}),
-            ("DND-5E", "PHB", "PHB:spell:fog-cloud", "spell", "phb-spell-fog-cloud", "Fog Cloud", {"level": 1, "school": "C", "class_lists": {"PHB": ["Wizard"]}}),
+            ("DND-5E", "PHB", "PHB:spell:fog-cloud", "spell", "phb-spell-fog-cloud", "Fog Cloud", {"level": 1, "school": "C", "class_lists": {"PHB": ["Ranger", "Wizard"]}}),
             ("DND-5E", "PHB", "PHB:spell:vicious-mockery", "spell", "phb-spell-vicious-mockery", "Vicious Mockery", {"level": 0, "school": "E", "class_lists": {"PHB": ["Bard"]}}),
         ]
         connection.executemany(
@@ -2858,7 +2858,122 @@ def test_typescript_dnd_character_create_ranger_writes_features_equipment_and_st
         headers=typescript_api_mutation_server["dm_headers"],
     )
     assert level_up_status == 200
-    assert level_up_payload["supported"] is False
+    assert level_up_payload["supported"] is True
+    assert level_up_payload["lane"] == "ready"
+    assert level_up_payload["level_up"]["state_revision"] == 1
+    assert level_up_payload["level_up"]["next_level"] == 2
+    assert level_up_payload["level_up"]["values"]["hp_gain"] == "6"
+    assert level_up_payload["level_up"]["preview"]["gained_features"] == [
+        "Fighting Style",
+        "Spellcasting",
+    ]
+    assert level_up_payload["level_up"]["preview"]["resources"] == []
+    assert level_up_payload["level_up"]["preview"]["spell_slots"] == ["1st level: 2"]
+    spell_choice_fields = {
+        field["name"]: field
+        for section in level_up_payload["level_up"]["choice_sections"]
+        for field in section["fields"]
+    }
+    assert set(spell_choice_fields) == {"known_spell_1", "known_spell_2"}
+    ranger_spell_labels = {
+        option["label"]
+        for field in spell_choice_fields.values()
+        for option in field["options"]
+    }
+    assert {"Goodberry", "Fog Cloud"} <= ranger_spell_labels
+
+    rejected_status, rejected_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{character_slug}/level-up",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": 1,
+            "values": {
+                "advancement_mode": "advance_existing",
+                "target_class_row_id": "class-1",
+                "hp_gain": "6",
+                "known_spell_1": "systems:phb-spell-goodberry",
+                "known_spell_2": "systems:phb-spell-goodberry",
+            },
+        },
+    )
+    assert rejected_status == 400
+    assert rejected_payload["error"]["code"] == "validation_error"
+    assert rejected_payload["error"]["message"] == "Choose distinct Ranger spells before saving."
+
+    level_up_status, level_up_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{character_slug}/level-up",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": 1,
+            "values": {
+                "advancement_mode": "advance_existing",
+                "target_class_row_id": "class-1",
+                "hp_gain": "6",
+                "known_spell_1": "systems:phb-spell-goodberry",
+                "known_spell_2": "systems:phb-spell-fog-cloud",
+            },
+        },
+    )
+    assert level_up_status == 200
+    assert level_up_payload["message"] == "Character level-up saved."
+    leveled_definition = level_up_payload["character"]["definition"]
+    leveled_state = level_up_payload["character"]["state_record"]
+    assert leveled_definition["profile"]["class_level_text"] == "Ranger 2"
+    assert leveled_definition["profile"]["classes"][0]["level"] == 2
+    assert leveled_definition["stats"]["max_hp"] == 18
+    leveled_features_by_id = {feature["id"]: feature for feature in leveled_definition["features"]}
+    assert leveled_features_by_id["fighting-style-2"]["name"] == "Fighting Style"
+    assert "deferred choice" in leveled_features_by_id["fighting-style-2"]["description_markdown"]
+    assert leveled_features_by_id["spellcasting-2"]["name"] == "Spellcasting"
+    assert leveled_features_by_id["spellcasting-2"]["source_kind"] == "native_progression"
+    spellcasting = leveled_definition["spellcasting"]
+    assert spellcasting["spellcasting_class"] == "Ranger"
+    assert spellcasting["spellcasting_ability"] == "Wisdom"
+    assert spellcasting["spell_save_dc"] == 12
+    assert spellcasting["spell_attack_bonus"] == 4
+    assert spellcasting["slot_progression"] == [{"level": 1, "max_slots": 2}]
+    assert spellcasting["slot_lanes"] == [
+        {
+            "id": "class-1-slots",
+            "title": "Spell slots",
+            "shared": False,
+            "row_ids": ["class-1"],
+            "slot_progression": [{"level": 1, "max_slots": 2}],
+        }
+    ]
+    assert spellcasting["class_rows"][0]["class_row_id"] == "class-1"
+    assert spellcasting["class_rows"][0]["class_name"] == "Ranger"
+    assert spellcasting["class_rows"][0]["level"] == 2
+    assert spellcasting["class_rows"][0]["caster_progression"] == "1/2"
+    assert spellcasting["class_rows"][0]["spell_mode"] == "known"
+    assert spellcasting["class_rows"][0]["known_spell_limit"] == 2
+    spells_by_name = {spell["name"]: spell for spell in spellcasting["spells"]}
+    assert set(spells_by_name) == {"Goodberry", "Fog Cloud"}
+    assert spells_by_name["Goodberry"]["mark"] == "Known"
+    assert spells_by_name["Goodberry"]["class_row_id"] == "class-1"
+    assert spells_by_name["Goodberry"]["systems_ref"]["entry_key"] == "PHB:spell:goodberry"
+    assert spells_by_name["Fog Cloud"]["systems_ref"]["entry_key"] == "PHB:spell:fog-cloud"
+    assert leveled_definition["source"]["native_progression"]["hp_baseline"] == {"level": 1, "max_hp": 12}
+    level_up_history = leveled_definition["source"]["native_progression"]["history"]
+    assert level_up_history[-1]["kind"] == "level_up"
+    assert level_up_history[-1]["class_name"] == "Ranger"
+    assert level_up_history[-1]["hp_gain"] == 6
+    assert leveled_state["revision"] == 2
+    assert leveled_state["state"]["vitals"]["current_hp"] == 18
+    assert leveled_state["state"]["hit_dice"]["pools"] == [{"faces": 10, "current": 1, "max": 2}]
+    assert leveled_state["state"]["resources"] == []
+    assert leveled_state["state"]["spell_slots"] == [
+        {"level": 1, "max": 2, "used": 0, "slot_lane_id": "class-1-slots"}
+    ]
+
+    written_definition = yaml.safe_load((character_dir / "definition.yaml").read_text(encoding="utf-8"))
+    written_import = yaml.safe_load((character_dir / "import.yaml").read_text(encoding="utf-8"))
+    assert written_definition["profile"]["class_level_text"] == "Ranger 2"
+    assert written_definition["spellcasting"]["spells"][0]["name"] == "Goodberry"
+    assert written_definition["source"]["native_progression"]["history"][-1]["class_name"] == "Ranger"
+    assert written_import["source_path"] == "builder://dnd5e-create-level-one"
 
     duplicate_status, duplicate_payload = _to_json(
         f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
