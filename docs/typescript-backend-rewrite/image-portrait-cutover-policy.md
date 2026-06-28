@@ -2,7 +2,7 @@
 
 Last updated: 2026-06-28
 
-Status: decision gate open; focused TypeScript behavior proof added
+Status: decision recommendation recorded; implementation gates open
 
 ## Operating Boundary
 
@@ -24,6 +24,8 @@ staging-volume snapshot.
 - `docs/current-state/characters-overview.md`
 - `docs/current-state/characters-dnd5e.md`
 - `docs/current-state/published-wiki.md`
+- `docs/api-v1.md` portrait, content asset, wiki image, and session image
+  sections
 - `docs/typescript-backend-rewrite/README.md`
 - `docs/typescript-backend-rewrite/cutover-readiness.md`
 - `$campaign-player-wiki-characters` references:
@@ -81,6 +83,10 @@ Character portrait uploads:
   `/campaigns/:campaignSlug/characters/:characterSlug/portrait` URL, while the
   focused protected-serving proof uses `/campaigns/:campaignSlug/assets/:assetRef`
   and does not by itself settle the direct legacy portrait URL cutover behavior
+- the portrait write/delete response helper returns protected asset URLs of the
+  form `/campaigns/:campaignSlug/assets/:assetRef`, so the rewrite currently has
+  two portrait URL shapes in play: legacy character portrait URLs on detail/read
+  payloads and protected asset URLs on write-result payloads
 
 Published content asset writes:
 
@@ -137,25 +143,39 @@ delete checks.
 
 ## Cutover Decision
 
-Decision required before cutover: TypeScript image handling must either match the
-current Flask WebP conversion contract, or the product contract must explicitly
-accept extension-preserving TypeScript behavior for selected routes.
+Decision recommendation for orchestration: choose a split cutover path.
 
-Recommended option: keep the production contract as WebP-normalized for PNG/JPG
-portrait and published article images, then add an explicit TypeScript conversion
-implementation and migration proof before cutover.
+1. Preserve Flask's WebP-normalized contract for user-facing portrait uploads
+   and browser/editor publication flows. Before TypeScript replaces Flask for
+   `PUT /api/v1/campaigns/:campaignSlug/characters/:characterSlug/portrait`,
+   PNG/JPG portrait uploads should be converted to app-owned
+   `characters/<characterSlug>/portrait.webp` assets, GIF/WebP should pass
+   through validation, profile metadata should point at the final stored asset,
+   and old portrait assets should still be cleaned up. Browser/editor
+   publication paths that create or promote published page images should keep
+   producing WebP quality 82 page assets and frontmatter by default.
+2. Explicitly allow extension-preserving behavior for the low-level content
+   asset API and protected asset serving. `PUT
+   /api/v1/campaigns/:campaignSlug/content/assets/*` should remain a raw
+   asset-file write unless a later API-version decision says otherwise; callers
+   that need a published WebP image should preconvert the file or use the Flask
+   Player Wiki editor until a TypeScript publication/editor flow owns that
+   conversion step.
+3. Keep the direct legacy character portrait URL as a read-compatibility
+   requirement through cutover. `/campaigns/:campaignSlug/characters/:characterSlug/portrait`
+   should resolve the current `profile.portrait_asset_ref` with the same
+   character-scope authorization and media type behavior as Flask. The protected
+   `/campaigns/:campaignSlug/assets/:assetRef` URL can remain available, but
+   payloads should not switch URL shape silently without a client/versioning
+   decision.
 
-Why: current current-state docs, publishing guidance, and Flask production
-behavior all teach users that PNG/JPG portrait and article image publication
-produce app-owned WebP copies. Silently accepting TypeScript extension
-preservation would make cutover change storage names, media types, and migration
-expectations for existing PNG/WebP portrait/page-image assets.
-
-Acceptable alternative: explicitly approve extension-preserving TypeScript
-behavior for JSON/API writes, then update current-state docs, publication
-guidance, frontend assumptions, and cutover migration instructions to make the
-new behavior intentional. This alternative still needs migration evidence for
-existing WebP portraits/page images and mixed-extension assets.
+Why: current current-state docs, character references, publishing guidance, API
+docs, and Flask tests all teach users that portrait/page-image publication
+normalizes PNG/JPG sources into app-owned WebP copies. At the same time, the
+Gen2 content asset API is already documented and implemented as an
+extension-preserving low-level asset writer. The split path preserves the
+user-facing product contract while avoiding unnecessary conversion behavior in
+generic asset storage.
 
 ## Remaining Gate
 
@@ -163,26 +183,34 @@ This gate is not cutover-ready.
 
 Required proof before readiness:
 
-- User decision choosing WebP-normalized parity or extension-preserving
-  TypeScript behavior.
-- If WebP-normalized parity is chosen: TypeScript conversion implementation,
-  tests proving PNG/JPG become WebP quality 82 for portraits and published page
-  images, GIF/WebP pass-through tests, and no accidental conversion of unrelated
-  generic assets.
-- If extension-preserving behavior is chosen: explicit docs/current-state and
-  publishing-reference updates plus tests covering PNG, JPG/JPEG, GIF, and WEBP
-  media types for the accepted route families.
+- User or orchestrator acceptance of the split path above, or a replacement
+  decision that intentionally changes the current product contract.
+- TypeScript portrait conversion implementation for the character portrait API:
+  PNG/JPG become WebP quality 82, GIF/WebP pass through validation, old mixed
+  extension assets are cleaned up, `definition.yaml` / `import.yaml` /
+  `character_state` revision behavior remains unchanged, and the implementation
+  does not touch unrelated character authoring lanes.
+- Focused TypeScript portrait tests covering PNG/JPG-to-WebP conversion,
+  GIF/WebP pass-through, media types, exact old-asset cleanup, stale revision
+  behavior, absent portrait delete validation, existing WebP profile reads, and
+  direct `/campaigns/:campaignSlug/characters/:characterSlug/portrait`
+  resolution.
+- Focused TypeScript content asset tests preserving the low-level raw-asset
+  contract for `PUT /content/assets/*`, including PNG/JPG/GIF/WEBP media types
+  and proof that this route does not perform portrait/page publication
+  conversion by accident.
+- Publication/editor implementation decision: either keep automatic WebP
+  conversion in Flask-only browser/editor flows until cutover, or add a
+  TypeScript publication/editor conversion slice with tests proving page
+  frontmatter points at WebP quality 82 assets for PNG/JPG sources while the raw
+  content asset API remains extension-preserving.
 - Migration rehearsal for existing character portrait assets, including
   pre-cutover WebP assets, legacy PNG/JPG assets if present, profile references,
   protected serving, and old asset cleanup.
-- Direct legacy character portrait URL behavior must be decided or implemented:
-  current TypeScript character detail payloads still advertise
-  `/campaigns/:campaignSlug/characters/:characterSlug/portrait`, while focused
-  protected-serving proof currently exercises `/campaigns/:campaignSlug/assets/:assetRef`.
 - Published page image rehearsal for page frontmatter, asset copies, protected
   serving, and local/live mirror sync behavior on copied or staging data.
 - Backup/restore transcript on copied realistic data, then a user-approved
   staging-volume snapshot before any staging/live write enablement.
 
-Until that proof exists, label this area `fixture behavior proven; image cutover
-decision open`.
+Until that proof exists, label this area `fixture behavior proven; split image
+cutover path recommended, implementation gates open`.
