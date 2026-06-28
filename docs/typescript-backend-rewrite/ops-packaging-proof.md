@@ -47,6 +47,11 @@ The TypeScript API is not production-packaged by the default image:
   `apps/api` inside Docker and starts `deploy/ts-api-proof-entrypoint.sh`.
   This target is for local no-deploy proof work only; it is not selected by the
   sanitized Fly config or the default Docker build.
+- The non-default TypeScript proof target is deliberately API-only. It does not
+  copy `frontend/dist`, does not reference the `frontend-build` stage, and does
+  not claim `/app-next/` hosting. If TypeScript becomes responsible for the
+  frontend bundle, the proof target, runtime smoke, and this document must be
+  updated together.
 
 Current production packaging therefore proves the Flask production image and
 Gen2 frontend bundle path only. The TypeScript proof target statically proves a
@@ -223,13 +228,17 @@ Current local evidence:
   sanitized fixture campaigns under the same ignored proof root, starts
   `apps/api/dist/server.js` in production-shaped env with
   `PLAYER_WIKI_RUNTIME=typescript-container-proof`, and checks local `/healthz`,
-  `/api/v1/app`, and representative protected PNG asset serving. The compiled
-  runtime proof passed with `/healthz status=ok`, `environment=production`,
-  `campaign_count=1`, `/api/v1/app ok=true`, and
+  `/api/v1/app`, representative protected PNG asset serving, and the current
+  API-only `/app-next/` boundary. The compiled runtime proof passed with
+  `/healthz status=ok`, `environment=production`, `campaign_count=1`,
+  `/api/v1/app ok=true`, and
   `/campaigns/linden-pass/assets/lore/trade-coast-map.png` returning
-  `image/png`. The same command skipped the optional Docker build/run phase with
-  `spawnSync docker ENOENT`, classifying Docker absence as a tooling/environment
-  skip rather than a touched-code regression.
+  `image/png`. On the app-next packaging-proof lane, the same proof now also
+  requires `GET /app-next/` to return `404` from the TypeScript runtime until
+  frontend bundle ownership is explicitly implemented. The same command skipped
+  the optional Docker build/run phase with `spawnSync docker ENOENT`,
+  classifying Docker absence as a tooling/environment skip rather than a
+  touched-code regression.
 
 ### Docker Context Hygiene
 
@@ -240,6 +249,10 @@ Collect:
   `apps/**/dist`, tests, docs, and scratch paths.
 - Confirmation that a future TypeScript build plan does not rely on ignored
   host-built `apps/api/dist` or `apps/api/node_modules`.
+- Confirmation that the current Flask default image builds `frontend/` inside
+  Docker and copies only Docker-built `frontend/dist`, while the TypeScript
+  proof target remains API-only and cannot inherit ignored host-built
+  `frontend/dist`.
 - A local-only Docker build transcript when available.
 
 Current gap:
@@ -371,9 +384,10 @@ Current gap:
 - Existing Fly health checks target Flask `/healthz`; no staged TypeScript image
   health transcript exists.
 - The 2026-06-28 container runtime proof covers TypeScript `/healthz`,
-  `/api/v1/app`, and representative PNG asset serving for the local compiled
-  runtime only. It does not cover `/app-next/` or a TypeScript image/container
-  boot because the proof target is API-only and Docker was unavailable.
+  `/api/v1/app`, representative PNG asset serving, and the explicit
+  `GET /app-next/` `404` boundary for the local compiled runtime only. It does
+  not cover successful `/app-next/` serving or a TypeScript image/container boot
+  because the proof target is API-only and Docker was unavailable.
 
 ### Rollback Image And Data Boundaries
 
@@ -476,6 +490,10 @@ in this worktree environment.
   `apps/api/dist`.
 - The Dockerfile builds and starts `apps/api` only in the non-default
   `ts-api-runtime-proof` target.
+- The non-default `ts-api-runtime-proof` target does not copy `frontend/dist`
+  or serve `/app-next/`; current local runtime proof requires `/app-next/` to
+  stay unserved until a future packaging decision makes frontend ownership
+  explicit.
 - The entrypoint has no TypeScript process, process supervisor, proxy, or
   TypeScript-only cutover command.
 - Fly config has no TypeScript-specific process, port, or health check.

@@ -14,6 +14,7 @@ const summaryPath = path.join(proofRoot, "summary.json");
 const sourceCampaignsDir = path.join(repoRoot, "tests", "fixtures", "sample_campaigns");
 const distServerPath = path.join(apiRoot, "dist", "server.js");
 const assetRoute = "/campaigns/linden-pass/assets/lore/trade-coast-map.png";
+const appNextRoute = "/app-next/";
 const imageTag = "campaign-player-wiki-ts-proof:local";
 
 function run(command, args, options = {}) {
@@ -212,6 +213,13 @@ function assertCommonResponses(label, port, expected) {
       throw new Error(`${label}: expected non-empty representative asset body`);
     }
 
+    const appNext = await requestBuffer(port, appNextRoute);
+    if (appNext.status !== 404) {
+      throw new Error(
+        `${label}: expected ${appNextRoute} to remain unserved by the API-only TypeScript proof runtime, got ${appNext.status}`,
+      );
+    }
+
     return {
       health_status: health.payload.status,
       health_environment: health.payload.environment,
@@ -223,6 +231,8 @@ function assertCommonResponses(label, port, expected) {
       asset_status: asset.status,
       asset_content_type: contentType,
       asset_bytes: asset.body.byteLength,
+      app_next_status: appNext.status,
+      app_next_boundary: "not_served_by_api_only_typescript_runtime",
     };
   })();
 }
@@ -407,6 +417,7 @@ writeFileSync(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
 console.log("TypeScript API container runtime proof passed.");
 console.log(`Scratch root: ${proofRoot}`);
 console.log(`Compiled runtime: /healthz ok, /api/v1/app ok, ${assetRoute} ${compiled.asset_content_type}`);
+console.log(`Compiled runtime: ${appNextRoute} ${compiled.app_next_status} (expected API-only boundary)`);
 if (docker.status === "skipped") {
   console.log(`Docker runtime: skipped (${docker.reason})`);
 } else {

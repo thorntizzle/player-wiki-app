@@ -18,6 +18,7 @@ const dockerfile = readRepoFile("Dockerfile");
 const dockerignore = readRepoFile(".dockerignore");
 const flyConfig = readRepoFile("fly.toml");
 const entrypoint = readRepoFile("deploy/ts-api-proof-entrypoint.sh");
+const routes = readRepoFile("apps/api/src/routes.ts");
 
 const proofTargetIndex = dockerfile.indexOf("FROM node:22-slim AS ts-api-runtime-proof");
 const flaskFinalIndex = dockerfile.lastIndexOf("FROM python:3.12-slim");
@@ -29,12 +30,29 @@ if (flaskFinalIndex === -1 || flaskFinalIndex < proofTargetIndex) {
   throw new Error("Dockerfile must keep the Flask/Python stage as the default final image.");
 }
 
+const proofTargetStage = dockerfile.slice(proofTargetIndex, flaskFinalIndex);
+const flaskFinalStage = dockerfile.slice(flaskFinalIndex);
+
+assertIncludes(dockerfile, "FROM node:22-slim AS frontend-build", "frontend build stage");
+assertIncludes(dockerfile, "COPY frontend/package.json frontend/package-lock.json ./", "frontend package copy");
+assertIncludes(dockerfile, "COPY frontend/ ./", "frontend source copy");
+assertIncludes(dockerfile, "RUN npm run build", "frontend Docker build command");
+assertIncludes(
+  flaskFinalStage,
+  "COPY --from=frontend-build /app/frontend/dist ./frontend/dist",
+  "Flask default image frontend bundle copy",
+);
+
 assertIncludes(dockerfile, "FROM node:22-slim AS ts-api-build", "TypeScript API build stage");
 assertIncludes(dockerfile, "RUN npm run build", "TypeScript API Docker build command");
 assertIncludes(dockerfile, "npm prune --omit=dev", "production dependency prune");
 assertIncludes(dockerfile, "COPY --from=ts-api-build /app/apps/api/dist ./apps/api/dist", "compiled API artifact copy");
 assertIncludes(dockerfile, "CMD [\"/app/deploy/ts-api-proof-entrypoint.sh\"]", "proof target command");
 assertIncludes(dockerfile, "CMD [\"/app/deploy/fly-entrypoint.sh\"]", "Flask default command");
+
+if (proofTargetStage.includes("frontend-build") || proofTargetStage.includes("frontend/dist")) {
+  throw new Error("TypeScript proof target must remain API-only until frontend bundle ownership is explicit.");
+}
 
 assertIncludes(entrypoint, 'export PORT="${PORT:-$PLAYER_WIKI_PORT}"', "PORT mapping");
 assertIncludes(entrypoint, 'export CPW_DB_PATH="${CPW_DB_PATH:-$PLAYER_WIKI_DB_PATH}"', "DB env mapping");
@@ -47,14 +65,26 @@ assertIncludes(entrypoint, "exec node /app/apps/api/dist/server.js", "TypeScript
 if (entrypoint.includes("manage.py init-db")) {
   throw new Error("TypeScript proof entrypoint must not imply Flask schema initialization.");
 }
+if (entrypoint.includes("app-next") || entrypoint.includes("frontend")) {
+  throw new Error("TypeScript proof entrypoint must not imply /app-next frontend hosting.");
+}
 
 assertIncludes(dockerignore, "apps/**/dist", "ignored host-built API dist");
 assertIncludes(dockerignore, "apps/**/node_modules", "ignored host API node_modules");
+assertIncludes(dockerignore, "frontend/dist", "ignored host-built frontend dist");
+assertIncludes(dockerignore, "frontend/node_modules", "ignored host frontend node_modules");
 assertIncludes(dockerignore, ".task-temp*", "ignored local proof scratch");
 assertIncludes(dockerignore, "**/.task-temp*", "ignored nested local proof scratch");
 
 assertIncludes(flyConfig, "app = 'campaign-player-wiki-example'", "sanitized Fly placeholder app");
 assertIncludes(flyConfig, "PLAYER_WIKI_DB_PATH = '/data/player_wiki.sqlite3'", "Fly DB path");
 assertIncludes(flyConfig, "PLAYER_WIKI_CAMPAIGNS_DIR = '/data/campaigns'", "Fly campaigns path");
+if (flyConfig.includes("target =") || flyConfig.includes("ts-api-runtime-proof")) {
+  throw new Error("Fly config must not select the non-default TypeScript API proof target.");
+}
+
+if (routes.includes("/app-next") || routes.includes("routeFamily: \"app-next\"")) {
+  throw new Error("TypeScript route manifest now includes /app-next; update packaging proof and cutover docs.");
+}
 
 console.log("TypeScript API packaging proof static checks passed.");

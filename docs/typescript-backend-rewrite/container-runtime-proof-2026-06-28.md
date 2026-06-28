@@ -113,12 +113,31 @@ Static packaging proof also confirmed:
 - Fly deploy/start behavior for TypeScript; no Fly commands were run.
 - Whether a final cutover package is TypeScript-only, Flask plus TypeScript, a
   sidecar, or local-only Hono until cutover.
-- `/app-next/` behavior if the TypeScript runtime becomes responsible for the
-  frontend bundle; the current TypeScript proof target is API-only.
+- Successful `/app-next/` serving if the TypeScript runtime becomes responsible
+  for the frontend bundle; the current TypeScript proof target is API-only.
 - Staging/live SQLite and campaign content behavior.
 - Final migration/startup boundary beyond Flask `manage.py init-db` plus
   TypeScript startup preflight.
 - Image-level rollback evidence from a TypeScript runtime back to Flask.
+
+## App-Next Packaging Boundary Addendum
+
+The `rewrite/ts-ops-app-next-packaging-proof` lane keeps Flask as the only
+runtime with a proven frontend bundle path. Static packaging proof now verifies:
+
+- the default Flask image builds `frontend/` inside Docker and copies
+  Docker-built `frontend/dist` into the final Python image;
+- host-built `frontend/dist` remains excluded from the Docker context;
+- Fly config does not select the non-default `ts-api-runtime-proof` target;
+- the TypeScript proof target and proof entrypoint are API-only and do not copy
+  or serve `frontend/dist`;
+- the TypeScript route manifest does not claim `/app-next` routes.
+
+The compiled/runtime proof now also requests `GET /app-next/` and expects the
+current `404` response. That is deliberate evidence of the open cutover gate,
+not frontend-readiness evidence. If a future TypeScript package owns the
+frontend bundle, that response check must change alongside a runtime
+implementation, Docker copy/build assertions, and updated cutover docs.
 
 ## Orchestrator Rerun
 
