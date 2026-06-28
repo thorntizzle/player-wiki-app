@@ -356,14 +356,35 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
                 "Barbarian",
                 {"hit_die": 12, "saving_throw_proficiencies": ["Strength", "Constitution"]},
             ),
+            (
+                "DND-5E",
+                "PHB",
+                "PHB:class:cleric",
+                "class",
+                "phb-cleric",
+                "Cleric",
+                {
+                    "hit_die": 8,
+                    "saving_throw_proficiencies": ["Wisdom", "Charisma"],
+                    "subclass_level": 1,
+                },
+            ),
             ("DND-5E", "PHB", "PHB:class:fighter", "class", "phb-fighter", "Fighter", {"hit_die": 10, "saving_throw_proficiencies": ["Strength", "Constitution"]}),
             ("DND-5E", "PHB", "PHB:race:human", "race", "phb-human", "Human", {"size": "Medium", "speed": 30, "languages": ["Common", "one extra language"]}),
             ("DND-5E", "PHB", "PHB:background:soldier", "background", "phb-soldier", "Soldier", {}),
             ("DND-5E", "PHB", "PHB:subclass:champion", "subclass", "phb-champion", "Champion", {"class_name": "Fighter", "class_source": "PHB"}),
+            ("DND-5E", "PHB", "PHB:subclass:life-domain", "subclass", "phb-life-domain", "Life Domain", {"class_name": "Cleric", "class_source": "PHB"}),
             ("DND-5E", "PHB", "PHB:optionalfeature:archery", "optionalfeature", "phb-optionalfeature-archery", "Archery", {"feature_type": ["FS:F"]}),
             ("DND-5E", "PHB", "PHB:optionalfeature:defense", "optionalfeature", "phb-optionalfeature-defense", "Defense", {"feature_type": ["FS:F"]}),
             ("DND-5E", "PHB", "PHB:optionalfeature:quickened-spell", "optionalfeature", "phb-optionalfeature-quickened-spell", "Quickened Spell", {"feature_type": ["MM"]}),
             ("DND-5E", "PHB", "PHB:spell:alarm", "spell", "phb-spell-alarm", "Alarm", {"level": 1, "school": "A"}),
+            ("DND-5E", "PHB", "PHB:spell:bless", "spell", "phb-spell-bless", "Bless", {"level": 1, "school": "E"}),
+            ("DND-5E", "PHB", "PHB:spell:command", "spell", "phb-spell-command", "Command", {"level": 1, "school": "E"}),
+            ("DND-5E", "PHB", "PHB:spell:cure-wounds", "spell", "phb-spell-cure-wounds", "Cure Wounds", {"level": 1, "school": "V"}),
+            ("DND-5E", "PHB", "PHB:spell:guidance", "spell", "phb-spell-guidance", "Guidance", {"level": 0, "school": "D"}),
+            ("DND-5E", "PHB", "PHB:spell:light", "spell", "phb-spell-light", "Light", {"level": 0, "school": "V"}),
+            ("DND-5E", "PHB", "PHB:spell:sacred-flame", "spell", "phb-spell-sacred-flame", "Sacred Flame", {"level": 0, "school": "V"}),
+            ("DND-5E", "PHB", "PHB:spell:shield-of-faith", "spell", "phb-spell-shield-of-faith", "Shield of Faith", {"level": 1, "school": "A"}),
             ("DND-5E", "PHB", "PHB:spell:fog-cloud", "spell", "phb-spell-fog-cloud", "Fog Cloud", {"level": 1, "school": "C"}),
         ]
         connection.executemany(
@@ -1718,6 +1739,109 @@ def test_typescript_dnd_character_create_barbarian_writes_definition_import_and_
     assert written_definition["name"] == "API DND Barbarian"
     assert written_definition["source"]["source_path"] == "builder://dnd5e-create-level-one"
     assert written_import["import_status"] == "managed"
+
+
+def test_typescript_dnd_character_create_cleric_writes_subclass_spells_and_state(
+    typescript_api_mutation_server,
+):
+    character_slug = "api-dnd-cleric"
+    body = {
+        "values": {
+            "name": "API DND Cleric",
+            "character_slug": character_slug,
+            "class_slug": "systems:phb-cleric",
+            "subclass_slug": "systems:phb-life-domain",
+            "species_slug": "systems:phb-human",
+            "background_slug": "systems:phb-soldier",
+            "str": "12",
+            "dex": "10",
+            "con": "14",
+            "int": "10",
+            "wis": "16",
+            "cha": "12",
+            "cantrip_spell_1": "systems:phb-spell-guidance",
+            "cantrip_spell_2": "systems:phb-spell-light",
+            "cantrip_spell_3": "systems:phb-spell-sacred-flame",
+            "prepared_spell_1": "systems:phb-spell-command",
+            "prepared_spell_2": "systems:phb-spell-shield-of-faith",
+        }
+    }
+
+    status, payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body=body,
+    )
+
+    assert status == 200
+    definition = payload["character"]["definition"]
+    import_metadata = payload["character"]["import_metadata"]
+    state_record = payload["character"]["state_record"]
+    assert definition["character_slug"] == character_slug
+    assert definition["system"] == "DND-5E"
+    assert definition["profile"]["class_level_text"] == "Cleric 1"
+    assert definition["profile"]["classes"][0]["systems_ref"]["entry_key"] == "PHB:class:cleric"
+    assert definition["profile"]["classes"][0]["subclass_ref"]["entry_key"] == "PHB:subclass:life-domain"
+    assert definition["profile"]["subclass_ref"]["entry_key"] == "PHB:subclass:life-domain"
+    assert definition["stats"]["max_hp"] == 10
+    assert definition["stats"]["armor_class"] == 18
+    assert definition["stats"]["passive_insight"] == 15
+    assert definition["source"]["source_path"] == "builder://dnd5e-create-level-one"
+    assert import_metadata["source_path"] == "builder://dnd5e-create-level-one"
+    assert state_record["revision"] == 1
+    assert state_record["state"]["vitals"]["current_hp"] == 10
+    assert state_record["state"]["hit_dice"]["pools"] == [{"faces": 8, "current": 1, "max": 1}]
+    assert state_record["state"]["spell_slots"] == [{"level": 1, "max": 2, "used": 0, "slot_lane_id": "class-row-1-slots"}]
+    assert state_record["state"]["inventory"][0]["catalog_ref"] == "chain-mail-1"
+
+    spellcasting = definition["spellcasting"]
+    assert spellcasting["spell_save_dc"] == 13
+    assert spellcasting["spell_attack_bonus"] == 5
+    assert spellcasting["class_rows"][0]["prepared_spell_limit"] == 4
+    spells_by_slug = {spell["systems_ref"]["slug"]: spell for spell in spellcasting["spells"]}
+    assert spells_by_slug["phb-spell-guidance"]["mark"] == "Cantrip"
+    assert spells_by_slug["phb-spell-command"]["mark"] == "Prepared"
+    assert spells_by_slug["phb-spell-shield-of-faith"]["mark"] == "Prepared"
+    assert spells_by_slug["phb-spell-bless"]["is_always_prepared"] is True
+    assert spells_by_slug["phb-spell-bless"]["grant_source_label"] == "Life Domain"
+    assert spells_by_slug["phb-spell-cure-wounds"]["is_always_prepared"] is True
+
+    state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
+    assert state is not None
+    assert state["revision"] == 1
+    assert state["state"]["spell_slots"][0]["max"] == 2
+
+    character_dir = typescript_api_mutation_server["campaigns_dir"] / "linden-pass" / "characters" / character_slug
+    written_definition = yaml.safe_load((character_dir / "definition.yaml").read_text(encoding="utf-8"))
+    written_import = yaml.safe_load((character_dir / "import.yaml").read_text(encoding="utf-8"))
+    assert written_definition["profile"]["subclass"] == "Life Domain"
+    assert written_definition["spellcasting"]["spells"][0]["class_row_id"] == "class-row-1"
+    assert written_import["import_status"] == "managed"
+
+    level_up_status, level_up_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{character_slug}/level-up",
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+    assert level_up_status == 200
+    assert level_up_payload["supported"] is False
+
+    rejected_status, rejected_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "values": {
+                **body["values"],
+                "name": "Rejected DND Cleric",
+                "character_slug": "api-dnd-cleric-rejected",
+                "prepared_spell_1": "systems:phb-spell-bless",
+            }
+        },
+    )
+    assert rejected_status == 400
+    assert rejected_payload["error"]["code"] == "validation_error"
+    assert "Prepared Spell 1 is not valid" in rejected_payload["error"]["message"]
 
 
 def test_typescript_character_advanced_editor_context_matches_flask_shell(
