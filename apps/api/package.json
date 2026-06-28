@@ -12,6 +12,7 @@
     "sqlite:schema-check": "node ./dist/sqliteSchemaCheck.js",
     "smoke": "node ./tests/smoke.mjs",
     "test:browser-json-compatibility": "node ./tests/browser-json-compatibility.mjs",
+    "test:container-runtime-proof": "npm run build && node ./tests/container-runtime-proof.mjs",
     "test:packaging-proof": "node ./tests/packaging-proof.mjs",
     "test:route-parity": "node ./tests/route-parity.mjs",
     "test:sqlite-migrate-proof": "node ./tests/sqlite-migrate-proof.mjs",

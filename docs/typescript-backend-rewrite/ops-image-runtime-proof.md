@@ -90,6 +90,23 @@ Follow-up validation on 2026-06-28 from
 - Docker is still unavailable on `PATH`, so no local image build or container
   boot transcript could be collected.
 
+Follow-up validation on 2026-06-28 from
+`rewrite/ts-ops-container-runtime-proof` at integration commit
+`d9c1cf8eb544059b36116158de5ff95dd4eb485a` confirmed:
+
+- `local.ps1 -Action ts-api-container-proof -NodeRoot <pinned Codex Node bin>`
+  passes.
+- The wrapper builds `apps/api`, initializes a disposable Flask-schema scratch
+  DB under `.task-temp\ts-ops-container-runtime-proof\`, copies sanitized
+  fixture campaigns, starts `apps/api/dist/server.js` in production-shaped env,
+  and verifies local `/healthz`, `/api/v1/app`, and representative protected
+  PNG asset serving.
+- The proof command includes an optional `ts-api-runtime-proof` Docker
+  build/run smoke, but this pass skipped that phase because `docker` was not
+  available on `PATH` (`spawnSync docker ENOENT`).
+- This strengthens repeatable no-deploy runtime evidence but still does not
+  provide a local image build or container boot transcript.
+
 ## Startup And Migration Boundary
 
 The proof entrypoint creates only the parent directories for the configured

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "test", "check", "ts-api-check", "backup", "restore", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "test", "check", "ts-api-check", "ts-api-container-proof", "backup", "restore", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = (Join-Path (Split-Path $PSScriptRoot -Parent) ".venv\Scripts\python.exe"),
     [string]$NodePath = "",
@@ -507,6 +507,38 @@ function Run-TypeScriptApiChecks {
     }
 }
 
+function Run-TypeScriptApiContainerProof {
+    $apiRoot = Join-Path $projectRoot "apps\api"
+    $packageJson = Join-Path $apiRoot "package.json"
+    if (-not (Test-Path $packageJson)) {
+        throw "TypeScript API package not found at $packageJson"
+    }
+
+    $toolchain = Resolve-NodeToolchain
+    Write-Host "Using Node: $($toolchain.NodePath)"
+    Write-Host "Using npm: $($toolchain.NpmPath)"
+
+    Ensure-Python
+    $previousCpwPythonPath = $env:CPW_PYTHON_PATH
+    $env:CPW_PYTHON_PATH = $script:ResolvedPythonPath
+
+    try {
+        if (-not $SkipTsApiInstall) {
+            Write-Host "Installing TypeScript API dependencies with npm ci..."
+            Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "ci")
+        }
+
+        Write-Host "Running TypeScript API container/runtime proof..."
+        Invoke-Npm -Toolchain $toolchain -Arguments @("--prefix", $apiRoot, "run", "test:container-runtime-proof")
+    } finally {
+        if ($null -eq $previousCpwPythonPath) {
+            Remove-Item Env:\CPW_PYTHON_PATH -ErrorAction SilentlyContinue
+        } else {
+            $env:CPW_PYTHON_PATH = $previousCpwPythonPath
+        }
+    }
+}
+
 function Backup-LocalState {
     Write-Host "Creating local backup archive..."
     $arguments = @(
@@ -656,6 +688,9 @@ switch ($Action) {
     }
     "ts-api-check" {
         Run-TypeScriptApiChecks
+    }
+    "ts-api-container-proof" {
+        Run-TypeScriptApiContainerProof
     }
     "backup" {
         Backup-LocalState
