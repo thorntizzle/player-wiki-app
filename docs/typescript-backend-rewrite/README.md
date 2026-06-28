@@ -17,7 +17,8 @@ This folder tracks the deliberate TypeScript backend rewrite path for Campaign P
 - `handoff-2026-06-26.md`: current pause/resume note for the Hono rewrite branch.
 - `content-character-staging-readiness.md`: content-character write/delete rollback evidence and staging-readiness decision.
 - `staging-rehearsal-harness.md` and `scripts/staging_rehearsal_harness.py`: guarded copied-data/staging-snapshot transcript scaffold, path checks, evidence manifests, family-specific transcript guides, and restore-equivalence comparison helper for TypeScript write-family readiness.
-- `combat-rehearsal-readiness.md`: Combat copied-data rehearsal scaffold status, commands, evidence checklist, and remaining gate before the family can claim rollback readiness.
+- `combat-rehearsal-readiness.md`: Combat copied-data rehearsal status, commands, evidence checklist, and remaining staging snapshot gate.
+- `combat-copied-data-rehearsal-2026-06-28.md`: completed no-live copied-fixture Combat backup/mutate/restore transcript.
 - `rollback-cutover-runbook.md`: no-live rollback and full cutover evidence runbook, including the `rollback-cutover` harness guide for last known-good Flask target, pre-cutover backups, TypeScript data-delta decisions, restore command shape, and Flask health smoke.
 - `.local/roadmaps/typescript-backend-rewrite-roadmap.md`: local active task queue for the rewrite track.
 - `docs/current-state/INDEX.md`: current product contract index. Use it to confirm present behavior before porting any workflow.
