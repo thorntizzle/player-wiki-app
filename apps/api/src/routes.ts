@@ -2081,6 +2081,21 @@ export const IMPLEMENTED_ROUTES: ImplementedRoute[] = [
       errorCode: "campaign_not_found",
     },
   },
+  {
+    method: "GET",
+    honoPath: "/campaigns/:campaignSlug/characters/:characterSlug/portrait",
+    snapshotFamily: "flask",
+    snapshotPath: "/campaigns/<campaign_slug>/characters/<character_slug>/portrait",
+    seedPath: "/campaigns/<campaign_slug>/characters/<character_slug>/portrait",
+    routeFamily: "character_portrait_asset",
+    missingResource: {
+      method: "GET",
+      path: "/campaigns/linden-pass/characters/missing-character/portrait",
+      status: 404,
+      contentType: "application/json",
+      errorCode: "content_character_not_found",
+    },
+  },
 ];
 
 export const ROUTES = {
@@ -2224,4 +2239,5 @@ export const ROUTES = {
   campaignGlobalSearchPreview: IMPLEMENTED_ROUTES[140].honoPath,
   sessionWikiLookupSearch: IMPLEMENTED_ROUTES[141].honoPath,
   sessionWikiLookupPreview: IMPLEMENTED_ROUTES[142].honoPath,
+  characterPortraitAsset: IMPLEMENTED_ROUTES[143].honoPath,
 } as const;
