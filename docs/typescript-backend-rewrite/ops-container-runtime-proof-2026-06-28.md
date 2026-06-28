@@ -47,6 +47,8 @@ The proof script:
    - `GET /healthz`
    - `GET /api/v1/app`
    - `GET /campaigns/linden-pass/assets/lore/trade-coast-map.png`
+   - `GET /app-next/` as an expected `404` while the proof target remains
+     API-only
 6. If the Docker CLI and daemon are available, builds the non-default
    `ts-api-runtime-proof` target with `--pull=false`, runs it with the same
    copied scratch data mounted at `/proof-data`, and repeats the same probes.
@@ -71,6 +73,7 @@ Observed proof output, sanitized:
 TypeScript API container runtime proof passed.
 Scratch root: <repo>\.task-temp\ts-ops-container-runtime-proof
 Compiled runtime: /healthz ok, /api/v1/app ok, /campaigns/linden-pass/assets/lore/trade-coast-map.png image/png
+Compiled runtime: /app-next/ 404 (expected API-only boundary)
 Docker runtime: skipped (spawnSync docker ENOENT)
 Summary: <repo>\.task-temp\ts-ops-container-runtime-proof\summary.json
 ```
@@ -89,7 +92,9 @@ Ignored summary highlights:
     "app_runtime": "typescript-container-proof",
     "asset_status": 200,
     "asset_content_type": "image/png",
-    "asset_bytes": 69
+    "asset_bytes": 69,
+    "app_next_status": 404,
+    "app_next_boundary": "not_served_by_api_only_typescript_runtime"
   },
   "docker": {
     "status": "skipped",
@@ -104,8 +109,8 @@ Ignored summary highlights:
 - New packaging label: unchanged
 - Strengthened evidence: repeatable wrapper-backed compiled runtime proof from a
   Flask-initialized scratch DB, copied sanitized campaigns, production-shaped
-  TypeScript env, `/healthz`, `/api/v1/app`, and representative protected asset
-  content type.
+  TypeScript env, `/healthz`, `/api/v1/app`, representative protected asset
+  content type, and an explicit `/app-next/` API-only `404` boundary.
 - Docker classification: tooling/environment skip because Docker was not
   available on `PATH`.
 - Not claimed: local image build, local container boot, Fly deploy readiness,
@@ -120,7 +125,8 @@ Ignored summary highlights:
   Flask-plus-TypeScript transition image, sidecar, or local-only Hono proof until
   cutover.
 - Prove frontend bundle behavior if the TypeScript runtime becomes responsible
-  for `/app-next/`.
+  for `/app-next/`; current proof only proves that the API-only target does not
+  silently serve it.
 - Finalize the startup/migration boundary between Flask `manage.py init-db` and
   TypeScript/Drizzle migration commands.
 - Complete image-level rollback evidence before any user-approved deploy or
