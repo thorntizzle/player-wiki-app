@@ -210,6 +210,7 @@ import {
 } from "./content/characterState.js";
 import {
   buildCampaignConfigPayload,
+  type CharacterDetailLinkedSystemsEntry,
   buildCharacterDetailPayload,
   buildCharacterRosterPayload,
   buildContentAssetDeletePayload,
@@ -611,6 +612,82 @@ function writeResolutionError(result: { kind: "missing" } | { kind: "invalid" } 
 
 function toFixtureSystemsRole(role: AuthRouteRole): FixtureSystemsRole {
   return role;
+}
+
+function isServerRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function collectCharacterSystemsRefSlugs(value: unknown, slugs = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectCharacterSystemsRefSlugs(item, slugs);
+    }
+    return slugs;
+  }
+  if (!isServerRecord(value)) {
+    return slugs;
+  }
+
+  const systemsRef = value.systems_ref;
+  if (isServerRecord(systemsRef)) {
+    const slug = typeof systemsRef.slug === "string" ? systemsRef.slug.trim() : "";
+    if (slug) {
+      slugs.add(slug);
+    }
+  }
+
+  for (const item of Object.values(value)) {
+    collectCharacterSystemsRefSlugs(item, slugs);
+  }
+  return slugs;
+}
+
+function isOptionalSqliteReadError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /no such (table|column)/i.test(message);
+}
+
+function buildCharacterDetailSystemsEntriesBySlug({
+  campaign,
+  campaignConfig,
+  role,
+  slugs,
+}: {
+  campaign: CampaignViewModel;
+  campaignConfig: Record<string, unknown>;
+  role: FixtureSystemsRole;
+  slugs: Set<string>;
+}): Map<string, CharacterDetailLinkedSystemsEntry> {
+  const entriesBySlug = new Map<string, CharacterDetailLinkedSystemsEntry>();
+  for (const rawSlug of slugs) {
+    const slug = rawSlug.trim();
+    if (!slug) {
+      continue;
+    }
+    try {
+      const result = buildCampaignSystemsEntryDetailPayload(config.dbPath, campaign, campaignConfig, slug, role);
+      if (result.status !== "ok") {
+        continue;
+      }
+      const entry = result.payload.entry;
+      const linkedEntry = {
+        slug: entry.slug,
+        title: entry.title,
+        entry_type: entry.entry_type,
+        metadata: entry.metadata,
+        rendered_html: entry.rendered_html,
+      };
+      entriesBySlug.set(slug.toLowerCase(), linkedEntry);
+      entriesBySlug.set(entry.slug.toLowerCase(), linkedEntry);
+    } catch (error) {
+      // Optional linked presenter enrichment should not block character detail on old local DBs.
+      if (!isOptionalSqliteReadError(error)) {
+        throw error;
+      }
+    }
+  }
+  return entriesBySlug;
 }
 
 type SessionManagerWriteResolution =
@@ -6056,6 +6133,16 @@ app.get(ROUTES.characterDetail, async (ctx) => {
   const stateRecord = readCharacterStateSnapshot(config, campaign.slug, character.character_slug, character.definition);
   const assets = (await listCampaignContentAssets(config, campaign.slug)) ?? [];
   const assetByRef = new Map(assets.map((asset) => [asset.asset_ref, asset]));
+  const campaignPageRecords = (await listCampaignContentPages(config, campaign.slug)) ?? [];
+  const campaignConfig = (await getCampaignConfigFile(config, campaign.slug))?.config || {};
+  const linkedSystemsSlugs = collectCharacterSystemsRefSlugs(character.definition);
+  collectCharacterSystemsRefSlugs(stateRecord.state, linkedSystemsSlugs);
+  const systemsEntriesBySlug = buildCharacterDetailSystemsEntriesBySlug({
+    campaign,
+    campaignConfig,
+    role: auth.role,
+    slugs: linkedSystemsSlugs,
+  });
   const canManageSession =
     (auth.role === "admin" || auth.role === "dm") &&
     campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session");
@@ -6075,6 +6162,8 @@ app.get(ROUTES.characterDetail, async (ctx) => {
         can_record_xianxia_dao_immolating_use: canManageSession,
       },
       controls: canUseControls ? buildCharacterReadControlsPayload(campaign, character, auth) : null,
+      campaignPageRecords,
+      systemsEntriesBySlug,
     }),
   );
 });
