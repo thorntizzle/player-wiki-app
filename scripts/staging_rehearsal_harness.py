@@ -61,6 +61,54 @@ FAMILY_TABLES: dict[str, tuple[str, ...]] = {
 }
 
 
+FAMILY_REHEARSAL_GUIDES: dict[str, dict[str, tuple[str, ...] | str]] = {
+    "combat": {
+        "label_before": "fixture-write validated",
+        "label_after": "copied-data rollback ready",
+        "routes": (
+            "GET /api/v1/campaigns/<slug>/combat",
+            "GET /api/v1/campaigns/<slug>/combat/live-state",
+            "POST /api/v1/campaigns/<slug>/combat/player-combatants",
+            "POST /api/v1/campaigns/<slug>/combat/npc-combatants",
+            "POST /api/v1/campaigns/<slug>/combat/statblock-combatants",
+            "POST /api/v1/campaigns/<slug>/combat/systems-monsters",
+            "POST /api/v1/campaigns/<slug>/combat/advance-turn",
+            "POST /api/v1/campaigns/<slug>/combat/combatants/<combatantId>/set-current",
+            "PATCH /api/v1/campaigns/<slug>/combat/combatants/<combatantId>/turn",
+            "PATCH /api/v1/campaigns/<slug>/combat/combatants/<combatantId>/vitals",
+            "PATCH /api/v1/campaigns/<slug>/combat/combatants/<combatantId>/resources",
+            "PATCH /api/v1/campaigns/<slug>/combat/combatants/<combatantId>/npc-resources",
+            "POST /api/v1/campaigns/<slug>/combat/combatants/<combatantId>/conditions",
+            "PATCH /api/v1/campaigns/<slug>/combat/conditions/<conditionId>",
+            "DELETE /api/v1/campaigns/<slug>/combat/conditions/<conditionId>",
+            "DELETE /api/v1/campaigns/<slug>/combat/combatants/<combatantId>",
+            "POST /api/v1/campaigns/<slug>/combat/clear",
+        ),
+        "baseline": (
+            "Save player Combat, Combat live-state, DM Status, and DM Controls response samples.",
+            "Record tracker row, ordered combatants, current turn, round, and revision values.",
+            "Record selected player-character state rows that can be mirrored by vitals/resources writes.",
+            "Record source-backed NPC resource counters and mechanic notes when present.",
+            "Record condition rows and custom condition option payloads.",
+        ),
+        "mutation": (
+            "Add one player combatant and verify character-state initialization or mirror behavior.",
+            "Add one manual NPC, then update vitals, action economy, and movement.",
+            "Add one source-backed combatant from DM Content or Systems when the copied data supports it.",
+            "Add, update, and delete one condition on a non-player combatant.",
+            "Exercise set-current, advance-turn, and turn-value editing with revision guards.",
+            "Delete one combatant and clear the tracker after post-mutation evidence is captured.",
+        ),
+        "equivalence": (
+            "Restored tracker rows must match baseline round, current turn, and revision values.",
+            "Restored combatants, conditions, counters, and notes must match baseline row counts and sampled rows.",
+            "Restored linked character_state JSON and revision values must match baseline.",
+            "Restored player Combat, DM Status, DM Controls, and live-state samples must match baseline or list exact accepted differences.",
+        ),
+    }
+}
+
+
 REHEARSAL_DIRS = ("input", "backup", "pre", "mutation", "post", "restore", "logs")
 
 
@@ -137,6 +185,7 @@ def transcript_template(
 ) -> str:
     tables = "\n".join(f"- `{table}`" for table in FAMILY_TABLES[family])
     created = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    family_guide = family_guide_markdown(family)
     return f"""# Rehearsal Transcript: {rehearsal_id}
 
 Generated: {created}
@@ -195,6 +244,38 @@ Generated: {created}
 - Label before:
 - Label after:
 - Follow-up required:
+{family_guide}
+"""
+
+
+def bullet_list(items: Sequence[str]) -> str:
+    return "\n".join(f"- {item}" for item in items)
+
+
+def family_guide_markdown(family: str) -> str:
+    guide = FAMILY_REHEARSAL_GUIDES.get(family)
+    if not guide:
+        return ""
+    return f"""
+
+## Family-Specific Rehearsal Guide
+
+### Routes And Actions
+{bullet_list(guide["routes"])}
+
+### Baseline Evidence Checklist
+{bullet_list(guide["baseline"])}
+
+### Mutation Sequence
+{bullet_list(guide["mutation"])}
+
+### Restore Equivalence Requirements
+{bullet_list(guide["equivalence"])}
+
+### Honest Label Transition
+- Label before: `{guide["label_before"]}`
+- Label after only if backup, mutation, restore, and equivalence all pass: `{guide["label_after"]}`
+- This copied-data result is not `staging snapshot ready` unless the source snapshot was explicitly approved as staging-equivalent and the transcript records that approval.
 """
 
 
@@ -219,6 +300,13 @@ def init_rehearsal(
             "root": str(rehearsal_root),
             "directories": [str(path) for path in paths],
             "transcript": str(transcript_path),
+            "transcript_preview": transcript_template(
+                rehearsal_id=rehearsal_id,
+                family=family,
+                source_description=source_description,
+                source_approval=source_approval,
+                root=rehearsal_root,
+            ),
         }
 
     if rehearsal_root.exists() and any(rehearsal_root.iterdir()):
@@ -386,6 +474,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     compare_parser.add_argument("--before", required=True, type=Path)
     compare_parser.add_argument("--after", required=True, type=Path)
 
+    guide_parser = subparsers.add_parser("guide", help="Print a family-specific transcript guide.")
+    guide_parser.add_argument("--family", required=True, choices=sorted(FAMILY_TABLES))
+
     return parser.parse_args(argv)
 
 
@@ -423,6 +514,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = compare_manifests(load_manifest(args.before), load_manifest(args.after))
             print(json.dumps(result, indent=2, sort_keys=True))
             return 0 if result["equal"] else 1
+        elif args.command == "guide":
+            result = {
+                "family": args.family,
+                "guide_markdown": family_guide_markdown(args.family),
+            }
         else:
             raise ValueError(f"Unsupported command: {args.command}")
         print(json.dumps(result, indent=2, sort_keys=True))
