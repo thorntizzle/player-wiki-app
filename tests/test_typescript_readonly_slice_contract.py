@@ -304,6 +304,59 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
               is_enabled_override INTEGER,
               PRIMARY KEY (campaign_slug, library_slug, entry_key)
             );
+
+            ALTER TABLE systems_sources ADD COLUMN id INTEGER;
+            ALTER TABLE systems_sources ADD COLUMN license_class TEXT;
+            ALTER TABLE systems_sources ADD COLUMN public_visibility_allowed INTEGER;
+            ALTER TABLE systems_sources ADD COLUMN status TEXT;
+            ALTER TABLE systems_entries ADD COLUMN id INTEGER;
+            ALTER TABLE campaign_entry_overrides ADD COLUMN visibility_override TEXT;
+            ALTER TABLE campaign_entry_overrides ADD COLUMN updated_by_user_id INTEGER;
+
+            CREATE TABLE invite_tokens (id INTEGER, user_id INTEGER, token_hash TEXT, expires_at TEXT, used_at TEXT, created_by_user_id INTEGER);
+            CREATE TABLE password_reset_tokens (id INTEGER, user_id INTEGER, token_hash TEXT, expires_at TEXT, used_at TEXT, created_by_user_id INTEGER);
+            CREATE TABLE sessions (id INTEGER, user_id INTEGER, session_token_hash TEXT, last_seen_at TEXT, expires_at TEXT, revoked_at TEXT);
+            CREATE TABLE campaign_sessions (id INTEGER, campaign_slug TEXT, status TEXT, started_at TEXT, ended_at TEXT, started_by_user_id INTEGER, ended_by_user_id INTEGER);
+            CREATE TABLE campaign_session_states (campaign_slug TEXT, revision INTEGER, updated_at TEXT, updated_by_user_id INTEGER);
+            CREATE TABLE campaign_session_articles (id INTEGER, campaign_slug TEXT, status TEXT, source_page_ref TEXT, created_by_user_id INTEGER, revealed_by_user_id INTEGER);
+            CREATE TABLE campaign_session_article_images (article_id INTEGER, filename TEXT, media_type TEXT, data_blob BLOB, updated_at TEXT);
+            CREATE TABLE campaign_session_messages (id INTEGER, session_id INTEGER, author_user_id INTEGER, recipient_scope TEXT, recipient_user_id INTEGER, body_text TEXT, created_at TEXT);
+            CREATE TABLE campaign_dm_statblocks (id INTEGER, campaign_slug TEXT, title TEXT, subsection TEXT, body_markdown TEXT, updated_by_user_id INTEGER);
+            CREATE TABLE campaign_dm_condition_definitions (id INTEGER, campaign_slug TEXT, name TEXT, description_markdown TEXT, updated_by_user_id INTEGER);
+            CREATE TABLE campaign_combatants (id INTEGER, campaign_slug TEXT, combatant_type TEXT, character_slug TEXT, player_detail_visible INTEGER, source_kind TEXT, source_ref TEXT, display_name TEXT, turn_value INTEGER, dexterity_modifier INTEGER, initiative_priority INTEGER, revision INTEGER, updated_by_user_id INTEGER);
+            CREATE TABLE campaign_combat_trackers (campaign_slug TEXT, round_number INTEGER, current_combatant_id INTEGER, revision INTEGER, updated_by_user_id INTEGER);
+            CREATE TABLE campaign_combat_conditions (id INTEGER, combatant_id INTEGER, name TEXT, duration_text TEXT, created_at TEXT);
+            CREATE TABLE campaign_combatant_resource_counters (id INTEGER, combatant_id INTEGER, resource_key TEXT, label TEXT, current_value INTEGER, max_value INTEGER, reset_label TEXT, source_label TEXT, updated_by_user_id INTEGER);
+            CREATE TABLE campaign_combatant_resource_notes (id INTEGER, combatant_id INTEGER, label TEXT, note TEXT, source_label TEXT, created_by_user_id INTEGER);
+            CREATE TABLE systems_libraries (library_slug TEXT, title TEXT, system_code TEXT, status TEXT);
+            CREATE TABLE systems_import_runs (id INTEGER, library_slug TEXT, source_id TEXT, status TEXT, summary_json TEXT, started_by_user_id INTEGER);
+            CREATE TABLE systems_shared_entry_edit_events (id INTEGER, campaign_slug TEXT, library_slug TEXT, source_id TEXT, entry_key TEXT, entry_slug TEXT, actor_user_id INTEGER, created_at TEXT);
+            CREATE TABLE systems_entry_links (id INTEGER, library_slug TEXT, from_entry_key TEXT, to_entry_key TEXT, relation_type TEXT);
+            CREATE TABLE campaign_system_policies (campaign_slug TEXT, library_slug TEXT, status TEXT, allow_dm_shared_core_entry_edits INTEGER, updated_by_user_id INTEGER);
+            CREATE TABLE campaign_pages (campaign_slug TEXT, page_ref TEXT, route_slug TEXT, section TEXT, subsection TEXT, title TEXT, body_markdown TEXT, metadata_json TEXT);
+            CREATE TABLE campaign_page_sync_state (campaign_slug TEXT, seeded_at TEXT);
+
+            CREATE INDEX idx_api_tokens_user ON api_tokens (user_id);
+            CREATE INDEX idx_campaign_sessions_active ON campaign_sessions (campaign_slug, status);
+            CREATE INDEX idx_campaign_session_articles_campaign_status ON campaign_session_articles (campaign_slug, status);
+            CREATE INDEX idx_campaign_session_messages_session ON campaign_session_messages (session_id);
+            CREATE INDEX idx_campaign_session_messages_session_recipient ON campaign_session_messages (session_id, recipient_scope, recipient_user_id);
+            CREATE INDEX idx_campaign_dm_statblocks_campaign ON campaign_dm_statblocks (campaign_slug);
+            CREATE INDEX idx_campaign_dm_condition_definitions_campaign ON campaign_dm_condition_definitions (campaign_slug);
+            CREATE INDEX idx_campaign_combatants_campaign_order ON campaign_combatants (campaign_slug, turn_value);
+            CREATE INDEX idx_campaign_combatants_campaign_order_v2 ON campaign_combatants (campaign_slug, initiative_priority, turn_value);
+            CREATE INDEX idx_campaign_combat_conditions_combatant ON campaign_combat_conditions (combatant_id);
+            CREATE INDEX idx_campaign_combatant_resource_counters_combatant ON campaign_combatant_resource_counters (combatant_id);
+            CREATE INDEX idx_campaign_combatant_resource_notes_combatant ON campaign_combatant_resource_notes (combatant_id);
+            CREATE INDEX idx_systems_sources_library ON systems_sources (library_slug);
+            CREATE INDEX idx_systems_import_runs_library_source ON systems_import_runs (library_slug, source_id);
+            CREATE INDEX idx_systems_entries_source ON systems_entries (library_slug, source_id);
+            CREATE INDEX idx_systems_entries_search ON systems_entries (library_slug, entry_type, title);
+            CREATE INDEX idx_systems_shared_entry_edit_events_entry ON systems_shared_entry_edit_events (library_slug, entry_key);
+            CREATE INDEX idx_campaign_enabled_sources_campaign ON campaign_enabled_sources (campaign_slug);
+            CREATE INDEX idx_campaign_entry_overrides_campaign ON campaign_entry_overrides (campaign_slug);
+            CREATE INDEX idx_campaign_pages_campaign_route ON campaign_pages (campaign_slug, route_slug);
+            CREATE INDEX idx_campaign_pages_campaign_section ON campaign_pages (campaign_slug, section);
             """
         )
         connection.execute(
@@ -372,6 +425,7 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
             ("DND-5E", "PHB", "PHB:class:fighter", "class", "phb-fighter", "Fighter", {"hit_die": 10, "saving_throw_proficiencies": ["Strength", "Constitution"]}),
             ("DND-5E", "PHB", "PHB:class:wizard", "class", "phb-wizard", "Wizard", {"hit_die": 6, "saving_throw_proficiencies": ["Intelligence", "Wisdom"]}),
             ("DND-5E", "PHB", "PHB:race:human", "race", "phb-human", "Human", {"size": "Medium", "speed": 30, "languages": ["Common", "one extra language"]}),
+            ("DND-5E", "PHB", "PHB:background:sage", "background", "phb-sage", "Sage", {}),
             ("DND-5E", "PHB", "PHB:background:soldier", "background", "phb-soldier", "Soldier", {}),
             ("DND-5E", "PHB", "PHB:subclass:champion", "subclass", "phb-champion", "Champion", {"class_name": "Fighter", "class_source": "PHB"}),
             ("DND-5E", "PHB", "PHB:subclass:life-domain", "subclass", "phb-life-domain", "Life Domain", {"class_name": "Cleric", "class_source": "PHB"}),
@@ -1864,7 +1918,7 @@ def test_typescript_dnd_character_create_wizard_writes_spellbook_spells_and_stat
             "character_slug": character_slug,
             "class_slug": "systems:phb-wizard",
             "species_slug": "systems:phb-human",
-            "background_slug": "systems:phb-soldier",
+            "background_slug": "systems:phb-sage",
             "str": "8",
             "dex": "14",
             "con": "13",
@@ -1903,7 +1957,8 @@ def test_typescript_dnd_character_create_wizard_writes_spellbook_spells_and_stat
     assert definition["profile"]["class_level_text"] == "Wizard 1"
     assert definition["profile"]["classes"][0]["systems_ref"]["entry_key"] == "PHB:class:wizard"
     assert definition["profile"]["species_ref"]["entry_key"] == "PHB:race:human"
-    assert definition["profile"]["background_ref"]["entry_key"] == "PHB:background:soldier"
+    assert definition["profile"]["background"] == "Sage"
+    assert definition["profile"]["background_ref"]["entry_key"] == "PHB:background:sage"
     assert definition["stats"]["max_hp"] == 7
     assert definition["stats"]["armor_class"] == 12
     assert definition["stats"]["passive_investigation"] == 13
@@ -1916,6 +1971,7 @@ def test_typescript_dnd_character_create_wizard_writes_spellbook_spells_and_stat
     assert state_record["state"]["resources"][0]["id"] == "arcane-recovery"
     assert state_record["state"]["resources"][0]["current"] == 1
     assert state_record["state"]["inventory"][0]["catalog_ref"] == "quarterstaff-1"
+    assert any(item["name"] == "Sage Starting Package" for item in definition["equipment_catalog"])
     assert state_record["state"]["currency"]["gp"] == 10
 
     spellcasting = definition["spellcasting"]
