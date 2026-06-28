@@ -315,7 +315,7 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
 
             CREATE TABLE invite_tokens (id INTEGER, user_id INTEGER, token_hash TEXT, expires_at TEXT, used_at TEXT, created_by_user_id INTEGER);
             CREATE TABLE password_reset_tokens (id INTEGER, user_id INTEGER, token_hash TEXT, expires_at TEXT, used_at TEXT, created_by_user_id INTEGER);
-            CREATE TABLE sessions (id INTEGER, user_id INTEGER, session_token_hash TEXT, last_seen_at TEXT, expires_at TEXT, revoked_at TEXT);
+            CREATE TABLE sessions (id INTEGER, user_id INTEGER, token_hash TEXT, last_seen_at TEXT, expires_at TEXT, revoked_at TEXT);
             CREATE TABLE campaign_sessions (id INTEGER, campaign_slug TEXT, status TEXT, started_at TEXT, ended_at TEXT, started_by_user_id INTEGER, ended_by_user_id INTEGER);
             CREATE TABLE campaign_session_states (campaign_slug TEXT, revision INTEGER, updated_at TEXT, updated_by_user_id INTEGER);
             CREATE TABLE campaign_session_articles (id INTEGER, campaign_slug TEXT, status TEXT, source_page_ref TEXT, created_by_user_id INTEGER, revealed_by_user_id INTEGER);
