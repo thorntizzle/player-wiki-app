@@ -1,6 +1,6 @@
 # TypeScript Route Parity Evidence
 
-Last updated: 2026-06-27
+Last updated: 2026-06-28
 
 Status: readiness artifact only. This branch does not certify TypeScript cutover because it is not an integration branch containing the active character, combat, session, systems, DM Content, publishing, and ops implementation lanes.
 
@@ -147,6 +147,22 @@ Evidence required:
 - Image conversion or optimization differences are documented with before/after fixture artifacts before staging readiness is claimed.
 - Publishing routes do not copy vault-only canon or local campaign mirrors into tracked app fixtures.
 
+2026-06-28 selected-family missing-resource evidence:
+
+- `tests/test_typescript_readonly_slice_contract.py::test_typescript_publishing_missing_resource_json_boundary_matches_documented_flask_html_404`
+  now pins the Flask production-authority shape and TypeScript candidate shape
+  for missing published wiki sections/pages, content pages/assets/characters,
+  and protected campaign assets.
+- Flask serves generic `404 text/html` pages for these missing resources even
+  with `Accept: application/json`.
+- TypeScript deliberately returns structured `404 application/json` envelopes
+  with family-specific codes (`wiki_section_not_found`,
+  `wiki_page_not_found`, `content_page_not_found`,
+  `content_asset_not_found`, `content_character_not_found`, and
+  `campaign_asset_not_found`) for the fixture-backed API/server rewrite.
+- This is recorded as a TypeScript rewrite compatibility boundary, not a broad
+  Flask normalization or cutover approval.
+
 ### Admin, Auth, And Visibility
 
 Routes: `/me`, view-as, settings, campaign membership, admin user mutation, campaign visibility, audit-like rows, and auth-dependent API gates.
@@ -249,8 +265,9 @@ When copied data is used, include only sanitized identifiers in the transcript. 
 - Broad route parity must wait for an integration branch containing the active implementation lanes.
 - Character write parity still needs full fixture and copied-data proof for full DND create, advanced editor derivation, advancement persistence, cultivation, controls, portraits, and session-state surfaces.
 - Browser JSON compatibility routes need an explicit retain-vs-migrate decision before cutover.
-- Combat/session/live, systems/shared-source, DM Content, publishing/content assets, admin/auth/visibility, and error shapes need family-specific fixture transcripts once implementation branches land.
-- Missing-resource behavior currently spans JSON and generic HTML 404 paths; route family expectations must be recorded before declaring parity green.
+- Combat/session/live, systems/shared-source, DM Content, admin/auth/visibility, and remaining error shapes need family-specific fixture transcripts once implementation branches land.
+- Publishing/content assets now have focused missing-resource boundary tests for selected read/detail and protected asset misses, but broader invalid-payload, removal-safety, and image conversion decisions remain open.
+- Missing-resource behavior currently spans JSON and generic HTML 404 paths; remaining route family expectations must be recorded before declaring parity green.
 - Publishing asset and image conversion behavior needs byte/content-type evidence before staging readiness.
 
 ## Close-Out Rule

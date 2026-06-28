@@ -471,7 +471,10 @@ Do not implement these routes as part of the parity program unless a later archi
 - The content/config, content page, content asset, and content character management read routes now
   preserve Flask-compatible content-management auth: no identity returns `auth_required`, fixture or
   bearer-token player/outsider identities return `forbidden`, and fixture or bearer-token DM/admin
-  identities can read the fixture-backed payloads.
+  identities can read the fixture-backed payloads. The 2026-06-28 missing-resource evidence slice
+  documents the deliberate boundary where Flask serves generic `404 text/html` pages for missing
+  wiki/content/protected-asset resources while TypeScript returns structured JSON 404 envelopes for
+  the same selected publishing/content family.
 - The content/config write route now serves `PATCH .../content/config` for bearer API-token DM/admin
   users against the fixture campaign tree, preserving Flask-compatible editable-field validation,
   `current_session` coercion, `system` and `systems_library` alias normalization, `campaign.yaml`
