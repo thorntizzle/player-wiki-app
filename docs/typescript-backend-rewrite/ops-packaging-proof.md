@@ -147,6 +147,16 @@ Current gap:
 
 Current local evidence:
 
+- 2026-06-28 packaging proof lane `rewrite/ts-ops-packaging-proof` started from
+  integration commit `5d886814593536dc08d17a2aa1236de668159597`. The ignored
+  `.local/roadmaps/typescript-backend-rewrite-roadmap.md` file was still absent
+  in this worktree even though `.worktreeinclude` now lists it for future
+  Codex-managed copies.
+- `powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action ts-api-check`
+  passed with pinned Node `v22.12.0` and npm from the shared
+  `.task-temp\typescript-backend-sqlite-migration-spike-20260625` runtime. The
+  wrapper completed `npm ci`, `scripts/route_snapshots.py --check`,
+  TypeScript API typecheck, TypeScript API build, and `test:route-parity`.
 - Pinned Node `v22.12.0` and npm `10.9.0` can run `npm --prefix apps/api ci`,
   `npm --prefix apps/api run typecheck`, and `npm --prefix apps/api run build`.
 - `local.ps1 -Action ts-api-check` resolves Node/npm from explicit parameters,
@@ -160,6 +170,14 @@ Current local evidence:
   `campaign_count: 1`.
 - Local `GET /api/v1/app` returns `ok: true` and reflects the disposable
   `CPW_DB_PATH`, `CPW_CAMPAIGNS_DIR`, and health metadata overrides.
+- The 2026-06-28 compiled-start smoke ran `apps/api/dist/server.js` on
+  `127.0.0.1:39891` with copied fixture campaigns under
+  `.task-temp\ts-ops-packaging-proof-runtime\campaigns`, disposable
+  `CPW_DB_PATH` under the same proof root, `PLAYER_WIKI_ENV=production`, and
+  `PLAYER_WIKI_RUNTIME=typescript-local-proof`. `/healthz` returned
+  `status: ok`, `environment: production`, `runtime_mode: fixture`, and
+  `campaign_count: 1`; `/api/v1/app` returned `ok: true`, runtime
+  `typescript-local-proof`, and matching disposable DB/campaign paths.
 - `npm --prefix apps/api run test:packaging-proof` statically verifies that the
   Dockerfile keeps Flask as the default final image, exposes a non-default
   `ts-api-runtime-proof` target, builds `apps/api` inside Docker, ignores
@@ -183,7 +201,9 @@ Current gap:
 - The `ts-api-runtime-proof` target now builds `apps/api` inside Docker and
   copies only the pruned production dependency tree plus compiled `dist`, but
   Docker is unavailable in this worktree environment so the image build itself
-  has not run.
+  has not run. On 2026-06-28, `Get-Command docker` found no Docker executable
+  on `PATH`; this remains a tooling/environment blocker, not a touched-code
+  regression.
 
 ### Entry Point And Line Endings
 
@@ -197,6 +217,12 @@ Collect:
 Current evidence:
 
 - `deploy/fly-entrypoint.sh` is tracked with `i/lf w/lf attr/text eol=lf`.
+- `deploy/ts-api-proof-entrypoint.sh` is tracked with
+  `i/lf w/lf attr/text eol=lf`.
+- `Dockerfile`, `.dockerignore`, and `fly.toml` are tracked as LF in the index;
+  in this Windows worktree their working-tree copies show CRLF with
+  `attr/text=auto`, which is acceptable because the CRLF-sensitive shell
+  entrypoints are explicitly pinned to LF.
 - `.gitattributes` contains `*.sh text eol=lf`.
 - Dockerfile includes `sed -i 's/\r$//' /app/deploy/fly-entrypoint.sh`.
 - `deploy/ts-api-proof-entrypoint.sh` is also covered by `*.sh text eol=lf`,
@@ -379,6 +405,11 @@ Current gap:
 
 Any failed build, live-path dependency, missing rollback path, or unproven data
 mutation keeps the label at the previous stage.
+
+The 2026-06-28 `rewrite/ts-ops-packaging-proof` pass strengthens the local
+compiled-start evidence and static scaffold evidence, but it does not advance
+the gate to `local image builds` because no local Docker build or container
+smoke could run in this worktree environment.
 
 ## Current Concrete Gaps
 
