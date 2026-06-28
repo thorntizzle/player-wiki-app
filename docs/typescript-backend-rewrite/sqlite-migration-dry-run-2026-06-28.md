@@ -189,7 +189,7 @@ after the final rebase to `b96c159`:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action ts-api-check `
-  -NodeRoot "C:\Users\thorn\AppData\Local\OpenAI\Codex\runtimes\cua_node\a89897d3d9baa117\bin"
+  -NodeRoot "<bundled-node-runtime>\bin"
 ```
 
 Result: passed. The command ran `npm ci`, route snapshot check, TypeScript

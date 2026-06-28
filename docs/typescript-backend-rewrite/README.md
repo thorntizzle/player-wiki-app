@@ -50,6 +50,7 @@ Do not implement these routes as part of the parity program unless a later archi
 
 - `stack-spike.md`: architecture decision record for the TypeScript backend stack evaluation and proof checklist.
 - `sqlite-migration-spike.md`: migration-layer proof for Drizzle `generate`/`migrate`, runtime probes, and driver comparison.
+- `sqlite-migration-dry-run-2026-06-28.md`: copied synthetic current-style SQLite migration dry-run evidence, including Flask additive schema initialization, TypeScript read/startup smoke, restore equivalence, and the remaining TypeScript startup migration blocker.
 - `read-only-compatibility-slice.md`: evidence for the fixture-backed compatibility API slice, including the first controlled SQLite write route validated against a disposable fixture database.
 - `ops-image-runtime-proof.md`: no-deploy TypeScript API image-target proof notes, including the current Docker tooling blocker.
 
