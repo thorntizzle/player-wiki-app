@@ -176,8 +176,8 @@ Do not implement these routes as part of the parity program unless a later archi
   - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/retraining` (bounded linked custom-feature structured-choice save parity through the Advanced Editor derivation path)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (unsupported shells plus bounded ready context for TypeScript-created DND-5E Fighter/Barbarian level-one sheets)
   - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/level-up` (bounded TypeScript-created DND-5E Fighter/Barbarian level-one to level-two fixture save; broader save parity pending)
-  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (context shell only; real save parity pending)
-  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (unsupported/current-shell response only; real save parity pending)
+  - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (unsupported/current shells plus bounded imported DND-5E class/subclass/species/background ref repair context)
+  - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/progression-repair` (bounded imported DND-5E class/subclass/species/background ref fixture save; broader repair parity pending)
   - `GET /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (supported Xianxia read context)
   - `POST /api/v1/campaigns/:campaignSlug/characters/:characterSlug/cultivation` (`save_insight`, `record_gathering_insight`, `spend_cultivation_energy`, `spend_meditation_yin_yang`, `spend_conditioning`, `spend_training`, `advance_martial_art_rank`, `learn_generic_technique`, `start_realm_ascension_review`, `reset_realm_ascension_stats`, `apply_immortal_realm_rebuild`, `apply_divine_realm_rebuild`, and `confirm_realm_ascension`)
   - `PATCH /api/v1/campaigns/:campaignSlug/characters/:characterSlug/sheet-edit`
@@ -622,7 +622,13 @@ Do not implement these routes as part of the parity program unless a later archi
   bumps SQLite state revisions, reconciles HP, Hit Dice, and derived resources, records
   `source.native_progression.hp_baseline` plus `level_up` history, and returns refreshed level-up payloads.
   Multiclassing, subclass choices, ASI/feat choices, spell growth, imported-sheet repair, and broader native
-  level-up parity remain pending. `GET/POST .../progression-repair` remains shell-only with real save parity pending.
+  level-up parity remain pending. The Character Progression Repair route now has the first bounded imported-sheet
+  fixture save slice: `GET .../progression-repair` hydrates a repairable context for imported DND-5E sheets that
+  are missing durable class/subclass/species/background refs, and `POST .../progression-repair` validates those
+  selections, writes copied-fixture `definition.yaml` / managed `import.yaml`, bumps the SQLite state revision,
+  records `source.native_progression.baseline_repaired_at` plus `repair` history, and returns either a refreshed
+  repair payload or a Level Up handoff when the sheet becomes ready. Legacy spell-mark repair, feat/optional-feature
+  repair backfills, and broader imported progression repair parity remain pending.
 - The first Character Cultivation write slices now serve
   `POST .../characters/:characterSlug/cultivation` for the `save_insight`, `record_gathering_insight`,
   `spend_cultivation_energy`, `spend_meditation_yin_yang`, `spend_conditioning`,

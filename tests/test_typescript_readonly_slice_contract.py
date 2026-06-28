@@ -3013,6 +3013,114 @@ def test_typescript_character_advancement_context_shells_match_flask_fixture(
         assert post_payload["error"]["message"] == flask_post_payload["error"]["message"]
 
 
+def test_typescript_character_progression_repair_ref_context_and_save(
+    typescript_api_mutation_server,
+):
+    character_slug = "tobin-slate"
+    character_dir = (
+        typescript_api_mutation_server["campaigns_dir"]
+        / "linden-pass"
+        / "characters"
+        / character_slug
+    )
+    definition_path = character_dir / "definition.yaml"
+    definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
+    definition.setdefault("source", {})["source_type"] = "markdown_character_sheet"
+    definition_path.write_text(yaml.safe_dump(definition, sort_keys=False), encoding="utf-8")
+
+    route_path = f"/api/v1/campaigns/linden-pass/characters/{character_slug}/progression-repair"
+    status, payload = _to_json(
+        f"{typescript_api_mutation_server['url']}{route_path}",
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["supported"] is True
+    assert payload["lane"] == "repairable"
+    assert payload["readiness"]["status"] == "repairable"
+    repair = payload["repair"]
+    assert repair["state_revision"] == payload["character"]["state_record"]["revision"]
+    class_row = repair["class_rows"][0]
+    assert class_row["class_field_name"] == "repair_class_slug_class-row-1"
+    assert class_row["class_selected"] == "systems:phb-fighter"
+    assert class_row["subclass_selected"] == ""
+    assert any(option["value"] == "systems:phb-champion" for option in class_row["subclass_options"])
+    assert repair["values"]["repair_species_slug"] == "systems:phb-human"
+    assert repair["values"]["repair_background_slug"] == ""
+
+    repair_values = {
+        "repair_class_slug_class-row-1": "systems:phb-fighter",
+        "repair_subclass_slug_class-row-1": "systems:phb-champion",
+        "repair_species_slug": "systems:phb-human",
+        "repair_background_slug": "systems:phb-soldier",
+    }
+    stale_status, stale_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}{route_path}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": repair["state_revision"] - 1,
+            "values": repair_values,
+        },
+    )
+    assert stale_status == 409
+    assert stale_payload["error"]["code"] == "state_conflict"
+
+    update_status, update_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}{route_path}",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "expected_revision": repair["state_revision"],
+            "values": repair_values,
+        },
+    )
+
+    assert update_status == 200
+    assert update_payload["ok"] is True
+    assert update_payload["lane"] == "ready"
+    assert update_payload["supported"] is False
+    assert update_payload["repair"] is None
+    assert update_payload["message"] == "Tobin Slate is ready for native level-up."
+    assert update_payload["character"]["state_record"]["revision"] == repair["state_revision"] + 1
+    assert update_payload["links"]["level_up_url"] == (
+        "/app-next/campaigns/linden-pass/characters/tobin-slate/level-up"
+    )
+
+    saved_definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
+    saved_profile = saved_definition["profile"]
+    assert saved_profile["classes"][0]["systems_ref"]["entry_key"] == "PHB:class:fighter"
+    assert saved_profile["classes"][0]["subclass_ref"]["entry_key"] == "PHB:subclass:champion"
+    assert saved_profile["species_ref"]["entry_key"] == "PHB:race:human"
+    assert saved_profile["background_ref"]["entry_key"] == "PHB:background:soldier"
+    native_progression = saved_definition["source"]["native_progression"]
+    assert native_progression["baseline_repaired_at"]
+    latest_event = native_progression["history"][-1]
+    assert latest_event["kind"] == "repair"
+    assert latest_event["target_level"] == 5
+    assert latest_event["repaired_fields"] == [
+        "class_refs",
+        "subclass_refs",
+        "species_ref",
+        "background_ref",
+    ]
+
+    saved_import = yaml.safe_load((character_dir / "import.yaml").read_text(encoding="utf-8"))
+    assert saved_import["import_status"] == "managed"
+
+    connection = sqlite3.connect(typescript_api_mutation_server["db_path"])
+    try:
+        state_revision, updated_by_user_id = connection.execute(
+            "SELECT revision, updated_by_user_id FROM character_state WHERE campaign_slug = ? AND character_slug = ?",
+            ("linden-pass", character_slug),
+        ).fetchone()
+    finally:
+        connection.close()
+    assert state_revision == repair["state_revision"] + 1
+    assert updated_by_user_id == 77
+
+
 def test_typescript_character_cultivation_context_shell_and_supported_xianxia_context(
     typescript_api_mutation_server,
     client,

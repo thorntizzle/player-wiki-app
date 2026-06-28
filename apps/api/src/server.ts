@@ -127,17 +127,18 @@ import {
   applyCharacterAdvancedEditorReferenceUpdate,
   applyCharacterCultivationAction,
   applyCharacterLevelUpUpdate,
+  applyCharacterProgressionRepairUpdate,
   applyCharacterRetrainingUpdate,
   buildCharacterAdvancedEditorPayload,
   buildCharacterAdvancementShellPayload,
   buildCharacterAuthoringLinks,
   buildCharacterCultivationShellPayload,
   buildCharacterLevelUpPayload,
+  buildCharacterProgressionRepairPayload,
   buildCharacterRetrainingPayload,
   buildDndCharacterCreateContext,
   buildDndCreateCharacter,
   buildXianxiaCreateCharacter,
-  type CharacterAdvancementRouteKind,
   listAdvancedEditorOptionalFeatureRows,
   listAdvancedEditorSpellRows,
   listXianxiaCultivationGenericTechniqueRows,
@@ -6767,11 +6768,16 @@ app.get(ROUTES.characterProgressionRepair, async (ctx) => {
   }
 
   const stateRecord = readCharacterStateSnapshot(config, campaign.slug, character.character_slug, character.definition);
-  const advancementPayload = buildCharacterAdvancementShellPayload({
+  const campaignConfig = (await getCampaignConfigFile(config, campaign.slug))?.config || {};
+  const queryValues = Object.fromEntries(new URL(ctx.req.url).searchParams.entries());
+  const advancementPayload = buildCharacterProgressionRepairPayload({
+    dbPath: config.dbPath,
     campaign,
+    campaignConfig,
     characterSlug,
     definition: character.definition,
-    kind: "progression_repair",
+    stateRevision: stateRecord.revision,
+    values: queryValues,
   });
 
   return ctx.json({
@@ -6799,12 +6805,7 @@ app.get(ROUTES.characterProgressionRepair, async (ctx) => {
   });
 });
 
-async function handleCharacterAdvancementShellSubmit(
-  ctx: Context,
-  kind: CharacterAdvancementRouteKind,
-  forbiddenMessage: string,
-  fallbackMessage: string,
-) {
+app.post(ROUTES.characterProgressionRepairSubmit, async (ctx) => {
   const campaignSlug = ctx.req.param("campaignSlug") || "";
   const campaign = await getCampaignBySlug(config, campaignSlug);
   if (!campaign) {
@@ -6830,40 +6831,128 @@ async function handleCharacterAdvancementShellSubmit(
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  if (kind === "progression_repair") {
-    const canManageSession =
-      (auth.role === "admin" || auth.role === "dm") &&
-      campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session");
-    if (!canManageSession) {
-      const error = forbidden(forbiddenMessage);
-      return ctx.json({ ok: error.ok, error: error.error }, error.status);
-    }
-  } else if (!canEditCharacterSessionState(config, campaign.slug, characterSlug, auth.role, auth.actorUserId)) {
-    const error = forbidden(forbiddenMessage);
+  const canManageSession =
+    (auth.role === "admin" || auth.role === "dm") &&
+    campaignRoleCanAccessScope(config.dbPath, campaign, auth.role, "session");
+  if (!canManageSession) {
+    const error = forbidden("You do not have permission to repair progression for this character.");
     return ctx.json({ ok: error.ok, error: error.error }, error.status);
   }
 
-  const advancementPayload = buildCharacterAdvancementShellPayload({
+  const jsonPayload = await readJsonObject(ctx);
+  if (jsonPayload.status === "error") {
+    const error = validationError(jsonPayload.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const stateRecord = readCharacterStateSnapshot(config, campaign.slug, character.character_slug, character.definition);
+  const campaignConfig = (await getCampaignConfigFile(config, campaign.slug))?.config || {};
+  const advancementPayload = buildCharacterProgressionRepairPayload({
+    dbPath: config.dbPath,
     campaign,
+    campaignConfig,
     characterSlug,
     definition: character.definition,
-    kind,
+    stateRevision: stateRecord.revision,
+    values:
+      typeof jsonPayload.payload.values === "object" && jsonPayload.payload.values !== null && !Array.isArray(jsonPayload.payload.values)
+        ? (jsonPayload.payload.values as Record<string, unknown>)
+        : {},
   });
-  const message = advancementPayload.supported
-    ? `${fallbackMessage} save parity is not implemented in the TypeScript route shell yet.`
-    : advancementPayload.unsupported_message || fallbackMessage;
-  const error = jsonError("unsupported_campaign_system", message, 400);
-  return ctx.json({ ok: error.ok, error: error.error }, error.status);
-}
+  if (!advancementPayload.supported || !advancementPayload.context) {
+    const message = advancementPayload.supported
+      ? "This character is not ready for Gen2 progression repair."
+      : advancementPayload.unsupported_message || "This character is not ready for Gen2 progression repair.";
+    const error = jsonError("unsupported_campaign_system", message, 400);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
 
-app.post(ROUTES.characterProgressionRepairSubmit, async (ctx) =>
-  handleCharacterAdvancementShellSubmit(
-    ctx,
-    "progression_repair",
-    "You do not have permission to repair progression for this character.",
-    "This character is not ready for Gen2 progression repair.",
-  ),
-);
+  const repairUpdate = applyCharacterProgressionRepairUpdate(
+    character.definition,
+    jsonPayload.payload,
+    advancementPayload.context,
+  );
+  if (repairUpdate.status === "validation_error") {
+    const error = validationError(repairUpdate.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const stateResult = updateCharacterAdvancedEditorReferenceState(
+    config,
+    campaign.slug,
+    characterSlug,
+    repairUpdate.definition,
+    {
+      expected_revision: jsonPayload.payload.expected_revision,
+      state_note_values: {},
+      manualEquipmentReconcile: { enabled: false, removedItemIds: [] },
+    },
+    auth.actorUserId ?? 0,
+  );
+  if (stateResult.status === "state_conflict") {
+    const error = stateConflict(stateResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (stateResult.status === "validation_error") {
+    const error = validationError(stateResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (stateResult.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const writeResult = await writeCampaignContentCharacter(config, campaign.slug, characterSlug, {
+    definition: repairUpdate.definition,
+    import_metadata: buildManagedCharacterImportMetadata(campaign.slug, characterSlug, character.import_metadata),
+  });
+  if (writeResult.status === "not_found") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+  if (writeResult.status === "validation_error") {
+    const error = validationError(writeResult.message);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const refreshedPayload = buildCharacterProgressionRepairPayload({
+    dbPath: config.dbPath,
+    campaign,
+    campaignConfig,
+    characterSlug,
+    definition: writeResult.record.definition,
+    stateRevision: stateResult.revision,
+    values: repairUpdate.values,
+  });
+  const repairMessage =
+    refreshedPayload.lane === "ready"
+      ? `${String(writeResult.record.definition.name || "This character").trim()} is ready for native level-up.`
+      : "Progression repair saved, but this character still needs a few more linked details before native level-up.";
+
+  return ctx.json({
+    ok: true,
+    message: repairMessage,
+    campaign,
+    character: {
+      definition: writeResult.record.definition,
+      import_metadata: writeResult.record.import_metadata,
+      state_record: {
+        campaign_slug: campaign.slug,
+        character_slug: writeResult.record.character_slug,
+        revision: stateResult.revision,
+        state: stateResult.state,
+        updated_at: stateResult.updatedAt,
+        updated_by_user_id: auth.actorUserId ?? null,
+      },
+    },
+    lane: refreshedPayload.lane,
+    supported: refreshedPayload.supported,
+    unsupported_message: refreshedPayload.unsupported_message,
+    readiness: refreshedPayload.readiness,
+    repair: refreshedPayload.context,
+    links: refreshedPayload.links,
+  });
+});
 
 app.get(ROUTES.characterCultivation, async (ctx) => {
   const campaignSlug = ctx.req.param("campaignSlug") || "";
