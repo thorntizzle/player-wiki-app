@@ -392,7 +392,7 @@ const DND_ABILITY_LABELS: Record<(typeof DND_ABILITY_KEYS)[number], string> = {
 const DND_CREATE_LIMITATIONS = [
   "Base classes come from enabled Systems rows inside the current native support lane: PHB base classes plus TCE Artificer.",
   "Species and backgrounds come from enabled Systems rows in the current supported source matrix for this TypeScript parity slice.",
-  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Bard with a bounded known-spells package, PHB Cleric with a bounded Life Domain level-one package, PHB Druid with a bounded prepared-spells package, PHB Warlock with a bounded Fiend Pact Magic package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
+  "DND-5E submit currently supports PHB Fighter, PHB Barbarian, PHB Bard with a bounded known-spells package, PHB Cleric with a bounded Life Domain level-one package, PHB Druid with a bounded prepared-spells package, PHB Sorcerer with a bounded Draconic Bloodline known-spells package, PHB Warlock with a bounded Fiend Pact Magic package, and PHB Wizard with a bounded level-one spellbook package; broader choice parity remains pending.",
 ];
 const DND_CHARACTER_CREATE_SOURCE_PATH = "builder://dnd5e-create-level-one";
 const DND_CHARACTER_CREATE_SOURCE_TYPE = "dnd5e_character_builder_level_one";
@@ -877,6 +877,108 @@ const DND_LEVEL_ONE_CLASS_CONFIGS = {
         category: "class_feature",
         source: "PHB",
         description_markdown: "This level-one TypeScript slice records Druid cantrips, prepared spells, and first-level slots.",
+      },
+    ],
+    resourceTemplates: [],
+  },
+  sorcerer: {
+    className: "Sorcerer",
+    armorClass: "draconic-resilience",
+    supportedSubclassTitles: ["draconic bloodline"],
+    skillProficiencies: ["Arcana", "Persuasion"],
+    skillRows: ["Arcana", "Deception", "Insight", "Intimidation", "Persuasion", "Religion"],
+    spellcasting: {
+      abilityKey: "cha",
+      abilityLabel: "Charisma",
+      spellMode: "known",
+      casterProgression: "full",
+      slotProgression: [{ level: 1, max_slots: 2 }],
+      slotLaneId: "class-row-1-slots",
+      slotLaneTitle: "Spell slots",
+      cantripCount: 4,
+      cantripFieldPrefix: "cantrip_spell",
+      knownSpellCount: 2,
+      alwaysPreparedSpellTitles: [],
+      alwaysPreparedGrantSourceLabel: "",
+      preparedSpellFieldPrefix: "known_spell",
+      spellbookFieldPrefix: "",
+      spellbookCount: 0,
+      spellSourceLabel: "Sorcerer",
+    },
+    proficiencies: {
+      armor: [],
+      weapons: ["Daggers", "Darts", "Slings", "Quarterstaffs", "Light crossbows"],
+      tools: [],
+    },
+    equipmentCatalog: [
+      {
+        id: "light-crossbow-1",
+        name: "Light Crossbow",
+        default_quantity: 1,
+        weight: "5 lb.",
+        tags: ["weapon", "simple weapon", "ranged weapon"],
+      },
+      {
+        id: "crossbow-bolts-1",
+        name: "Crossbow Bolts",
+        default_quantity: 20,
+        weight: "1.5 lb.",
+        tags: ["ammunition"],
+      },
+      {
+        id: "dagger-1",
+        name: "Dagger",
+        default_quantity: 2,
+        weight: "1 lb.",
+        is_equipped: true,
+        supports_equipped_state: true,
+        weapon_wield_mode: "main-hand",
+        weapon_wield_modes: ["main-hand", "off-hand"],
+        tags: ["weapon", "simple weapon", "melee weapon", "finesse", "thrown weapon"],
+      },
+      {
+        id: "component-pouch-1",
+        name: "Component Pouch",
+        default_quantity: 1,
+        weight: "2 lb.",
+        tags: ["spellcasting focus"],
+      },
+      {
+        id: "explorers-pack-1",
+        name: "Explorer's Pack",
+        default_quantity: 1,
+        weight: "59 lb.",
+        tags: ["gear"],
+      },
+    ],
+    features: [
+      {
+        id: "spellcasting-1",
+        name: "Spellcasting",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "This level-one TypeScript slice records Sorcerer cantrips, known spells, and first-level slots.",
+      },
+      {
+        id: "sorcerous-origin-1",
+        name: "Sorcerous Origin",
+        category: "class_feature",
+        source: "PHB",
+        description_markdown: "Draconic Bloodline is the bounded level-one origin supported by this TypeScript create slice.",
+      },
+      {
+        id: "draconic-ancestry-1",
+        name: "Draconic Ancestry",
+        category: "subclass_feature",
+        source: "PHB",
+        description_markdown: "This slice records a deterministic gold dragon ancestry, including Draconic language access. Broader ancestry choices remain outside this slice.",
+      },
+      {
+        id: "draconic-resilience-1",
+        name: "Draconic Resilience",
+        category: "subclass_feature",
+        source: "PHB",
+        description_markdown: "Your hit point maximum increases by 1 at level 1, and your unarmored Armor Class is 13 + Dexterity modifier.",
       },
     ],
     resourceTemplates: [],
@@ -8131,7 +8233,7 @@ function assertDndLevelOneClass(row: SystemsEntryRow | null): { row: SystemsEntr
   }
   const classKey = dndLevelOneClassKey(row);
   if (!classKey || normalizeDndSourceId(row.source_id) !== DND_PHB_SOURCE_ID || String(row.entry_type || "") !== "class") {
-    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, PHB Druid, PHB Warlock, and PHB Wizard.");
+    throw new Error("DND-5E character creation submit currently supports only PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric, PHB Druid, PHB Sorcerer, PHB Warlock, and PHB Wizard.");
   }
   return { row, classKey };
 }
@@ -8679,6 +8781,28 @@ function dndLevelOneAttacks(classKey: DndLevelOneClassKey, abilityScores: Record
       }),
     ];
   }
+  if (classKey === "sorcerer") {
+    return [
+      dndWeaponAttack({
+        name: "Dagger",
+        category: "melee or thrown weapon",
+        abilityModifierValue: Math.max(strengthModifier, dexterityModifier),
+        damageDie: "1d4",
+        damageType: "piercing",
+        notes: "Finesse, light, thrown range 20/60.",
+        equipmentRef: "dagger-1",
+      }),
+      dndWeaponAttack({
+        name: "Light Crossbow",
+        category: "ranged weapon",
+        abilityModifierValue: dexterityModifier,
+        damageDie: "1d8",
+        damageType: "piercing",
+        notes: "Ammunition, loading, range 80/320.",
+        equipmentRef: "light-crossbow-1",
+      }),
+    ];
+  }
   if (classKey === "warlock") {
     return [
       dndWeaponAttack({
@@ -8752,6 +8876,9 @@ function dndLevelOneArmorClass(classKey: DndLevelOneClassKey, abilityScores: Rec
   }
   if (armorClass === "unarmored-dex") {
     return 10 + abilityModifier(dndAbilityScoreValue(abilityScores, "dex"));
+  }
+  if (armorClass === "draconic-resilience") {
+    return 13 + abilityModifier(dndAbilityScoreValue(abilityScores, "dex"));
   }
   if (armorClass === "leather") {
     return 11 + abilityModifier(dndAbilityScoreValue(abilityScores, "dex"));
@@ -8861,11 +8988,21 @@ export function buildDndCreateCharacter({
     const hitDie = createContextInteger(classMetadata.hit_die, 10);
     const abilityScores = dndAbilityScores(normalizedValues, classMetadata);
     const conModifier = abilityModifier(dndAbilityScoreValue(abilityScores, "con"));
-    const maxHp = Math.max(1, hitDie + conModifier);
+    const draconicResilienceHpBonus =
+      classKey === "sorcerer" && normalizeLookup(selectedSubclass?.title) === "draconic bloodline" ? 1 : 0;
+    const maxHp = Math.max(1, hitDie + conModifier + draconicResilienceHpBonus);
     const createdAt = new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
     const speciesSpeed = createContextInteger(firstPresent(speciesMetadata.speed, speciesMetadata.walk_speed), 30);
     const classConfig = DND_LEVEL_ONE_CLASS_CONFIGS[classKey];
     const equipmentCatalog = dndStartingEquipmentCatalog(classKey, selectedBackground.title);
+    const languages = asArray(speciesMetadata.languages).map(String).filter(Boolean);
+    if (
+      classKey === "sorcerer" &&
+      normalizeLookup(selectedSubclass?.title) === "draconic bloodline" &&
+      !languages.some((language) => normalizeLookup(language) === "draconic")
+    ) {
+      languages.push("Draconic");
+    }
     const primaryClassRow: Record<string, unknown> = {
       class_name: classConfig.className,
       level: 1,
@@ -8915,7 +9052,7 @@ export function buildDndCreateCharacter({
         armor: [...classConfig.proficiencies.armor],
         weapons: [...classConfig.proficiencies.weapons],
         tools: [...classConfig.proficiencies.tools],
-        languages: asArray(speciesMetadata.languages).map(String).filter(Boolean),
+        languages,
         tool_expertise: [],
       },
       attacks: dndLevelOneAttacks(classKey, abilityScores),

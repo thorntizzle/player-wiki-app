@@ -436,6 +436,19 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
             (
                 "DND-5E",
                 "PHB",
+                "PHB:class:sorcerer",
+                "class",
+                "phb-sorcerer",
+                "Sorcerer",
+                {
+                    "hit_die": 6,
+                    "saving_throw_proficiencies": ["Constitution", "Charisma"],
+                    "subclass_level": 1,
+                },
+            ),
+            (
+                "DND-5E",
+                "PHB",
                 "PHB:class:warlock",
                 "class",
                 "phb-warlock",
@@ -453,6 +466,7 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
             ("DND-5E", "PHB", "PHB:subclass:champion", "subclass", "phb-champion", "Champion", {"class_name": "Fighter", "class_source": "PHB"}),
             ("DND-5E", "PHB", "PHB:subclass:fiend", "subclass", "phb-fiend", "The Fiend", {"class_name": "Warlock", "class_source": "PHB"}),
             ("DND-5E", "PHB", "PHB:subclass:life-domain", "subclass", "phb-life-domain", "Life Domain", {"class_name": "Cleric", "class_source": "PHB"}),
+            ("DND-5E", "PHB", "PHB:subclass:draconic-bloodline", "subclass", "phb-draconic-bloodline", "Draconic Bloodline", {"class_name": "Sorcerer", "class_source": "PHB"}),
             ("DND-5E", "PHB", "PHB:optionalfeature:archery", "optionalfeature", "phb-optionalfeature-archery", "Archery", {"feature_type": ["FS:F"]}),
             ("DND-5E", "PHB", "PHB:optionalfeature:defense", "optionalfeature", "phb-optionalfeature-defense", "Defense", {"feature_type": ["FS:F"]}),
             ("DND-5E", "PHB", "PHB:optionalfeature:quickened-spell", "optionalfeature", "phb-optionalfeature-quickened-spell", "Quickened Spell", {"feature_type": ["MM"]}),
@@ -473,18 +487,19 @@ def _seed_typescript_mutation_db(db_path: Path) -> None:
             ("DND-5E", "PHB", "PHB:spell:guidance", "spell", "phb-spell-guidance", "Guidance", {"level": 0, "school": "D", "class_lists": {"PHB": ["Cleric"]}}),
             ("DND-5E", "PHB", "PHB:spell:healing-word", "spell", "phb-spell-healing-word", "Healing Word", {"level": 1, "school": "V", "class_lists": {"PHB": ["Bard"]}}),
             ("DND-5E", "PHB", "PHB:spell:eldritch-blast", "spell", "phb-spell-eldritch-blast", "Eldritch Blast", {"level": 0, "school": "V", "class_lists": {"PHB": ["Warlock"]}}),
+            ("DND-5E", "PHB", "PHB:spell:fire-bolt", "spell", "phb-spell-fire-bolt", "Fire Bolt", {"level": 0, "school": "V", "class_lists": {"PHB": ["Sorcerer", "Wizard"]}}),
             ("DND-5E", "PHB", "PHB:spell:heroism", "spell", "phb-spell-heroism", "Heroism", {"level": 1, "school": "E", "class_lists": {"PHB": ["Bard"]}}),
             ("DND-5E", "PHB", "PHB:spell:hex", "spell", "phb-spell-hex", "Hex", {"level": 1, "school": "E", "class_lists": {"PHB": ["Warlock"]}}),
-            ("DND-5E", "PHB", "PHB:spell:light", "spell", "phb-spell-light", "Light", {"level": 0, "school": "V", "class_lists": {"PHB": ["Cleric", "Wizard"]}}),
+            ("DND-5E", "PHB", "PHB:spell:light", "spell", "phb-spell-light", "Light", {"level": 0, "school": "V", "class_lists": {"PHB": ["Cleric", "Sorcerer", "Wizard"]}}),
             ("DND-5E", "PHB", "PHB:spell:mage-armor", "spell", "phb-spell-mage-armor", "Mage Armor", {"level": 1, "school": "A", "class_lists": {"PHB": ["Wizard"]}}),
-            ("DND-5E", "PHB", "PHB:spell:mage-hand", "spell", "phb-spell-mage-hand", "Mage Hand", {"level": 0, "school": "C", "class_lists": {"PHB": ["Warlock", "Wizard"]}}),
-            ("DND-5E", "PHB", "PHB:spell:magic-missile", "spell", "phb-spell-magic-missile", "Magic Missile", {"level": 1, "school": "V", "class_lists": {"PHB": ["Wizard"]}}),
-            ("DND-5E", "PHB", "PHB:spell:message", "spell", "phb-spell-message", "Message", {"level": 0, "school": "T", "class_lists": {"PHB": ["Wizard"]}}),
+            ("DND-5E", "PHB", "PHB:spell:mage-hand", "spell", "phb-spell-mage-hand", "Mage Hand", {"level": 0, "school": "C", "class_lists": {"PHB": ["Sorcerer", "Warlock", "Wizard"]}}),
+            ("DND-5E", "PHB", "PHB:spell:magic-missile", "spell", "phb-spell-magic-missile", "Magic Missile", {"level": 1, "school": "V", "class_lists": {"PHB": ["Sorcerer", "Wizard"]}}),
+            ("DND-5E", "PHB", "PHB:spell:message", "spell", "phb-spell-message", "Message", {"level": 0, "school": "T", "class_lists": {"PHB": ["Sorcerer", "Wizard"]}}),
             ("DND-5E", "PHB", "PHB:spell:minor-illusion", "spell", "phb-spell-minor-illusion", "Minor Illusion", {"level": 0, "school": "I", "class_lists": {"PHB": ["Bard"]}}),
             ("DND-5E", "PHB", "PHB:spell:produce-flame", "spell", "phb-spell-produce-flame", "Produce Flame", {"level": 0, "school": "C", "class_lists": {"PHB": ["Druid"]}}),
             ("DND-5E", "PHB", "PHB:spell:sacred-flame", "spell", "phb-spell-sacred-flame", "Sacred Flame", {"level": 0, "school": "V", "class_lists": {"PHB": ["Cleric"]}}),
             ("DND-5E", "PHB", "PHB:spell:shillelagh", "spell", "phb-spell-shillelagh", "Shillelagh", {"level": 0, "school": "T", "class_lists": {"PHB": ["Druid"]}}),
-            ("DND-5E", "PHB", "PHB:spell:shield", "spell", "phb-spell-shield", "Shield", {"level": 1, "school": "A", "class_lists": {"PHB": ["Wizard"]}}),
+            ("DND-5E", "PHB", "PHB:spell:shield", "spell", "phb-spell-shield", "Shield", {"level": 1, "school": "A", "class_lists": {"PHB": ["Sorcerer", "Wizard"]}}),
             ("DND-5E", "PHB", "PHB:spell:shield-of-faith", "spell", "phb-spell-shield-of-faith", "Shield of Faith", {"level": 1, "school": "A", "class_lists": {"PHB": ["Cleric"]}}),
             ("DND-5E", "PHB", "PHB:spell:sleep", "spell", "phb-spell-sleep", "Sleep", {"level": 1, "school": "E", "class_lists": {"PHB": ["Wizard"]}}),
             ("DND-5E", "PHB", "PHB:spell:thunderwave", "spell", "phb-spell-thunderwave", "Thunderwave", {"level": 1, "school": "V", "class_lists": {"PHB": ["Druid"]}}),
@@ -2224,6 +2239,169 @@ def test_typescript_dnd_character_create_druid_writes_prepared_spells_and_state(
     assert rejected_status == 400
     assert rejected_payload["error"]["code"] == "validation_error"
     assert "Prepared Spell 1 is not valid" in rejected_payload["error"]["message"]
+
+
+def test_typescript_dnd_character_create_sorcerer_writes_draconic_bloodline_spells_and_state(
+    typescript_api_mutation_server,
+):
+    character_slug = "api-dnd-sorcerer"
+    body = {
+        "values": {
+            "name": "API DND Sorcerer",
+            "character_slug": character_slug,
+            "class_slug": "systems:phb-sorcerer",
+            "subclass_slug": "systems:phb-draconic-bloodline",
+            "species_slug": "systems:phb-human",
+            "background_slug": "systems:phb-sage",
+            "str": "8",
+            "dex": "14",
+            "con": "14",
+            "int": "10",
+            "wis": "12",
+            "cha": "16",
+            "cantrip_spell_1": "systems:phb-spell-fire-bolt",
+            "cantrip_spell_2": "systems:phb-spell-light",
+            "cantrip_spell_3": "systems:phb-spell-mage-hand",
+            "cantrip_spell_4": "systems:phb-spell-message",
+            "known_spell_1": "systems:phb-spell-magic-missile",
+            "known_spell_2": "systems:phb-spell-shield",
+        }
+    }
+
+    status, payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body=body,
+    )
+
+    assert status == 200
+    assert payload["message"] == "API DND Sorcerer created."
+    assert payload["links"]["character_url"] == f"/app-next/campaigns/linden-pass/characters/{character_slug}"
+    assert payload["links"]["flask_character_url"] == f"/campaigns/linden-pass/characters/{character_slug}"
+    definition = payload["character"]["definition"]
+    import_metadata = payload["character"]["import_metadata"]
+    state_record = payload["character"]["state_record"]
+    assert definition["character_slug"] == character_slug
+    assert definition["system"] == "DND-5E"
+    assert definition["profile"]["class_level_text"] == "Sorcerer 1"
+    assert definition["profile"]["classes"][0]["systems_ref"]["entry_key"] == "PHB:class:sorcerer"
+    assert definition["profile"]["classes"][0]["subclass_name"] == "Draconic Bloodline"
+    assert definition["profile"]["classes"][0]["subclass_ref"]["entry_key"] == "PHB:subclass:draconic-bloodline"
+    assert definition["profile"]["subclass"] == "Draconic Bloodline"
+    assert definition["profile"]["subclass_ref"]["entry_key"] == "PHB:subclass:draconic-bloodline"
+    assert definition["profile"]["species_ref"]["entry_key"] == "PHB:race:human"
+    assert definition["profile"]["background"] == "Sage"
+    assert definition["stats"]["max_hp"] == 9
+    assert definition["stats"]["armor_class"] == 15
+    assert definition["stats"]["ability_scores"]["con"]["save_bonus"] == 4
+    assert definition["stats"]["ability_scores"]["cha"]["save_bonus"] == 5
+    assert definition["source"]["source_path"] == "builder://dnd5e-create-level-one"
+    assert import_metadata["source_path"] == "builder://dnd5e-create-level-one"
+    assert import_metadata["import_status"] == "managed"
+
+    assert definition["proficiencies"]["armor"] == []
+    assert definition["proficiencies"]["weapons"] == ["Daggers", "Darts", "Slings", "Quarterstaffs", "Light crossbows"]
+    assert "Draconic" in definition["proficiencies"]["languages"]
+    skills_by_name = {skill["name"]: skill for skill in definition["skills"]}
+    assert skills_by_name["Arcana"]["proficiency_level"] == "proficient"
+    assert skills_by_name["Persuasion"]["proficiency_level"] == "proficient"
+    assert skills_by_name["Deception"]["proficiency_level"] == "none"
+    assert definition["resource_templates"] == []
+    features_by_id = {feature["id"]: feature for feature in definition["features"]}
+    assert features_by_id["sorcerous-origin-1"]["name"] == "Sorcerous Origin"
+    assert features_by_id["draconic-ancestry-1"]["category"] == "subclass_feature"
+    assert features_by_id["draconic-resilience-1"]["category"] == "subclass_feature"
+    assert definition["attacks"][0]["equipment_ref"] == "dagger-1"
+    assert definition["attacks"][1]["equipment_ref"] == "light-crossbow-1"
+    assert any(item["name"] == "Sage Starting Package" for item in definition["equipment_catalog"])
+
+    spellcasting = definition["spellcasting"]
+    assert spellcasting["spellcasting_class"] == "Sorcerer"
+    assert spellcasting["spellcasting_ability"] == "Charisma"
+    assert spellcasting["spell_save_dc"] == 13
+    assert spellcasting["spell_attack_bonus"] == 5
+    assert spellcasting["slot_progression"] == [{"level": 1, "max_slots": 2}]
+    assert spellcasting["slot_lanes"] == [
+        {
+            "id": "class-row-1-slots",
+            "title": "Spell slots",
+            "shared": False,
+            "row_ids": ["class-row-1"],
+            "slot_progression": [{"level": 1, "max_slots": 2}],
+        }
+    ]
+    assert spellcasting["class_rows"][0]["caster_progression"] == "full"
+    assert spellcasting["class_rows"][0]["spell_mode"] == "known"
+    assert spellcasting["class_rows"][0]["known_spell_limit"] == 2
+    assert spellcasting["class_rows"][0]["slot_lane_id"] == "class-row-1-slots"
+    spells_by_slug = {spell["systems_ref"]["slug"]: spell for spell in spellcasting["spells"]}
+    assert spells_by_slug["phb-spell-fire-bolt"]["mark"] == "Cantrip"
+    assert spells_by_slug["phb-spell-light"]["mark"] == "Cantrip"
+    assert spells_by_slug["phb-spell-mage-hand"]["mark"] == "Cantrip"
+    assert spells_by_slug["phb-spell-message"]["mark"] == "Cantrip"
+    assert spells_by_slug["phb-spell-magic-missile"]["mark"] == "Known"
+    assert spells_by_slug["phb-spell-shield"]["mark"] == "Known"
+    assert all(spell["class_row_id"] == "class-row-1" for spell in spellcasting["spells"])
+
+    assert state_record["revision"] == 1
+    assert state_record["state"]["vitals"]["current_hp"] == 9
+    assert state_record["state"]["hit_dice"]["pools"] == [{"faces": 6, "current": 1, "max": 1}]
+    assert state_record["state"]["spell_slots"] == [{"level": 1, "max": 2, "used": 0, "slot_lane_id": "class-row-1-slots"}]
+    assert state_record["state"]["resources"] == []
+    assert state_record["state"]["inventory"][0]["catalog_ref"] == "light-crossbow-1"
+    assert state_record["state"]["inventory"][1]["catalog_ref"] == "crossbow-bolts-1"
+    assert state_record["state"]["inventory"][2]["catalog_ref"] == "dagger-1"
+    assert state_record["state"]["currency"]["gp"] == 10
+
+    state = _read_sqlite_character_state(typescript_api_mutation_server["db_path"], character_slug)
+    assert state is not None
+    assert state["revision"] == 1
+    assert state["state"]["vitals"]["current_hp"] == 9
+    assert state["state"]["hit_dice"]["pools"][0]["faces"] == 6
+    assert state["state"]["spell_slots"][0]["max"] == 2
+
+    character_dir = typescript_api_mutation_server["campaigns_dir"] / "linden-pass" / "characters" / character_slug
+    written_definition = yaml.safe_load((character_dir / "definition.yaml").read_text(encoding="utf-8"))
+    written_import = yaml.safe_load((character_dir / "import.yaml").read_text(encoding="utf-8"))
+    assert written_definition["name"] == "API DND Sorcerer"
+    assert written_definition["profile"]["subclass"] == "Draconic Bloodline"
+    assert written_definition["spellcasting"]["class_rows"][0]["spell_mode"] == "known"
+    assert written_definition["spellcasting"]["spells"][0]["systems_ref"]["slug"] == "phb-spell-fire-bolt"
+    assert written_import["source_path"] == "builder://dnd5e-create-level-one"
+
+    level_up_status, level_up_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/{character_slug}/level-up",
+        headers=typescript_api_mutation_server["dm_headers"],
+    )
+    assert level_up_status == 200
+    assert level_up_payload["supported"] is False
+
+    duplicate_status, duplicate_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body=body,
+    )
+    assert duplicate_status == 409
+    assert duplicate_payload["error"]["code"] == "character_exists"
+
+    rejected_status, rejected_payload = _to_json(
+        f"{typescript_api_mutation_server['url']}/api/v1/campaigns/linden-pass/characters/create",
+        headers=typescript_api_mutation_server["dm_headers"],
+        method="POST",
+        body={
+            "values": {
+                **body["values"],
+                "name": "Rejected DND Sorcerer",
+                "character_slug": "api-dnd-sorcerer-rejected",
+                "known_spell_1": "systems:phb-spell-hex",
+            }
+        },
+    )
+    assert rejected_status == 400
+    assert rejected_payload["error"]["code"] == "validation_error"
+    assert "Known Spell 1 is not valid" in rejected_payload["error"]["message"]
 
 
 def test_typescript_dnd_character_create_warlock_writes_pact_magic_patron_and_state(
