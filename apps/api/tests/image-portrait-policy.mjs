@@ -121,8 +121,10 @@ async function requestJson(pathname, options = {}) {
   };
 }
 
-async function requestBytes(pathname) {
-  const response = await app.request(pathname);
+async function requestBytes(pathname, options = {}) {
+  const response = await app.request(pathname, {
+    headers: options.headers || {},
+  });
   return {
     status: response.status,
     contentType: response.headers.get("content-type") || "",
@@ -132,6 +134,7 @@ async function requestBytes(pathname) {
 
 const authHeaders = { Authorization: `Bearer ${dmApiToken}` };
 const portraitPath = "/api/v1/campaigns/linden-pass/characters/arden-march/portrait";
+const legacyPortraitPath = "/campaigns/linden-pass/characters/arden-march/portrait";
 const portraitDir = path.join(campaignsDir, "linden-pass", "assets", "characters", "arden-march");
 const definitionPath = path.join(campaignsDir, "linden-pass", "characters", "arden-march", "definition.yaml");
 const importPath = path.join(campaignsDir, "linden-pass", "characters", "arden-march", "import.yaml");
@@ -190,6 +193,13 @@ async function assertProtectedAsset(assetRef, expectedContentType, expectedBytes
   assert.deepEqual(served.bytes, expectedBytes);
 }
 
+async function assertLegacyPortraitAsset(expectedContentType, expectedBytes) {
+  const served = await requestBytes(legacyPortraitPath, { headers: authHeaders });
+  assert.equal(served.status, 200);
+  assert.match(served.contentType, expectedContentType);
+  assert.deepEqual(served.bytes, expectedBytes);
+}
+
 async function uploadPortrait({ expectedRevision, filename, bytes, assetRef, mediaType, contentType, altText, caption, removedRefs }) {
   const upload = await requestJson(portraitPath, {
     method: "PUT",
@@ -214,6 +224,7 @@ async function uploadPortrait({ expectedRevision, filename, bytes, assetRef, med
     assert.equal(existsSync(assetPath(removedRef)), false);
   }
   await assertProtectedAsset(assetRef, contentType, bytes);
+  await assertLegacyPortraitAsset(contentType, bytes);
   assertProfileMetadata(assetRef, altText, caption);
   assertImportMetadataPreserved();
   const stateRow = readCharacterStateRow();
@@ -231,6 +242,11 @@ try {
   assert.equal(existingDetail.payload.character.portrait.media_type, "image/webp");
   assert.equal(existingDetail.payload.character.portrait.url, "/campaigns/linden-pass/characters/arden-march/portrait");
   await assertProtectedAsset(existingWebpAssetRef, /^image\/webp\b/, existingWebpBytes);
+  await assertLegacyPortraitAsset(/^image\/webp\b/, existingWebpBytes);
+
+  const blockedLegacyPortrait = await requestJson(legacyPortraitPath);
+  assert.equal(blockedLegacyPortrait.status, 401);
+  assert.equal(blockedLegacyPortrait.payload.error.code, "auth_required");
 
   await uploadPortrait({
     expectedRevision: 1,
@@ -298,6 +314,9 @@ try {
   const stateAfterDelete = readCharacterStateRow();
   assert.equal(stateAfterDelete.revision, 6);
   assert.equal(stateAfterDelete.updated_by_user_id, 81);
+  const absentLegacyPortrait = await requestJson(legacyPortraitPath, { headers: authHeaders });
+  assert.equal(absentLegacyPortrait.status, 404);
+  assert.equal(absentLegacyPortrait.payload.error.code, "campaign_asset_not_found");
 
   const assetBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x61, 0x73, 0x73, 0x65, 0x74]);
   const assetRef = "wiki-pages/policy-proof.png";

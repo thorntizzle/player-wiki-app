@@ -6079,6 +6079,65 @@ app.get(ROUTES.characterDetail, async (ctx) => {
   );
 });
 
+app.get(ROUTES.characterPortraitAsset, async (ctx) => {
+  const campaignSlug = ctx.req.param("campaignSlug") || "";
+  const campaign = await getCampaignBySlug(config, campaignSlug);
+  if (!campaign) {
+    const error = campaignNotFound(campaignSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const auth = resolveCampaignRole(ctx, campaign.slug);
+  if (auth.kind !== "authenticated") {
+    const error = roleResolutionError(auth);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const characterSlug = sanitizeContentCharacterSlug(ctx.req.param("characterSlug") || "") || "";
+  if (!characterSlug) {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const character = await getCampaignContentCharacter(config, campaign.slug, characterSlug);
+  if (!character || String(character.definition.status || "").trim() !== "active") {
+    const error = contentCharacterNotFound(campaign.slug, characterSlug);
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  if (!canReadCharacterDetail(campaign, characterSlug, auth)) {
+    const error = forbidden("You do not have access to this character.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const profile =
+    typeof character.definition.profile === "object" &&
+    character.definition.profile !== null &&
+    !Array.isArray(character.definition.profile)
+      ? (character.definition.profile as Record<string, unknown>)
+      : {};
+  const assetRef = typeof profile.portrait_asset_ref === "string" ? profile.portrait_asset_ref.trim() : "";
+  if (!assetRef) {
+    const error = notFound("campaign_asset_not_found", "Could not find that campaign asset.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  const asset = await readCampaignProtectedAsset(config, campaign.slug, assetRef);
+  if (!asset) {
+    const error = notFound("campaign_asset_not_found", "Could not find that campaign asset.");
+    return ctx.json({ ok: error.ok, error: error.error }, error.status);
+  }
+
+  return new Response(asset.data, {
+    status: 200,
+    headers: {
+      "Content-Type": asset.record.media_type,
+      "Content-Disposition": inlineContentDisposition(path.basename(asset.record.file_path)),
+      "Content-Length": String(asset.data.byteLength),
+    },
+  });
+});
+
 app.get(ROUTES.characterAdvancedEditor, async (ctx) => {
   const campaignSlug = ctx.req.param("campaignSlug") || "";
   const campaign = await getCampaignBySlug(config, campaignSlug);

@@ -25,6 +25,7 @@ This folder tracks the deliberate TypeScript backend rewrite path for Campaign P
 - `published-content-copied-data-rehearsal-2026-06-28.md`: completed no-live copied-fixture published content config/pages/assets backup/mutate/restore transcript.
 - `rollback-cutover-runbook.md`: no-live rollback and full cutover evidence runbook, including the `rollback-cutover` harness guide for last known-good Flask target, pre-cutover backups, TypeScript data-delta decisions, restore command shape, and Flask health smoke.
 - `rollback-cutover-copied-rehearsal-2026-06-28.md`: completed no-live copied-data rollback mechanics transcript with representative TypeScript smoke, one reverted TypeScript write delta, restore equivalence, and Flask fallback health smoke; no cutover readiness label change.
+- `image-portrait-compat-proof-2026-06-28.md`: focused no-live proof for direct legacy character portrait URL serving and extension-preserving portrait/content asset behavior.
 - `.local/roadmaps/typescript-backend-rewrite-roadmap.md`: local active task queue for the rewrite track.
 - `docs/current-state/INDEX.md`: current product contract index. Use it to confirm present behavior before porting any workflow.
 - `docs/api-v1.md`: current JSON API contract.
@@ -559,9 +560,12 @@ Do not implement these routes as part of the parity program unless a later archi
   field removal, absent-portrait validation, and refreshed `character.state_record` plus compact
   `portrait` payloads. Deliberate TypeScript divergence while Flask remains production authority:
   TS does not add `sharp` or convert portrait uploads; it preserves validated PNG/JPG/GIF/WEBP
-  bytes and writes `characters/<characterSlug>/portrait.<ext>`. Existing production Flask/WebP
-  behavior and broader vault PNG data migration remain outside this slice and require the normal
-  cutover decision path.
+  bytes and writes `characters/<characterSlug>/portrait.<ext>`. The legacy browser portrait asset
+  route `GET /campaigns/:campaignSlug/characters/:characterSlug/portrait` now resolves the same
+  profile asset reference advertised by roster/detail payloads, uses the character detail read gate,
+  and streams preserved bytes/media types for existing WebP references and extension-preserved
+  PNG/JPG/GIF/WEBP uploads. Existing production Flask/WebP conversion behavior and broader vault
+  PNG data migration remain outside this slice and require the normal cutover decision path.
 - The Character Controls JSON route slice now serves
   `POST .../characters/:characterSlug/controls/assignment`,
   `DELETE .../characters/:characterSlug/controls/assignment`, and
