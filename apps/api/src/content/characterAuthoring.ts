@@ -7383,7 +7383,7 @@ function supportedTypeScriptLevelUpClassRow(definition: Record<string, unknown>)
   if (!(classKey in DND_LEVEL_ONE_CLASS_CONFIGS) || currentLevel !== 1) {
     return null;
   }
-  if (classKey !== "fighter" && classKey !== "barbarian") {
+  if (classKey !== "fighter" && classKey !== "barbarian" && classKey !== "rogue") {
     return null;
   }
   return {
@@ -7395,7 +7395,13 @@ function supportedTypeScriptLevelUpClassRow(definition: Record<string, unknown>)
 }
 
 function averageHpGainForClass(classKey: DndLevelOneClassKey): number {
-  return classKey === "barbarian" ? 7 : 6;
+  if (classKey === "barbarian") {
+    return 7;
+  }
+  if (classKey === "rogue") {
+    return 5;
+  }
+  return 6;
 }
 
 function parseLevelUpHpGain(value: unknown): number {
@@ -7437,6 +7443,18 @@ function levelTwoFeatureRows(classKey: DndLevelOneClassKey): Array<Record<string
         source: "PHB",
         source_kind: "native_progression",
         description_markdown: "At 2nd level, you gain an uncanny sense of nearby danger.",
+      },
+    ];
+  }
+  if (classKey === "rogue") {
+    return [
+      {
+        id: "cunning-action-2",
+        name: "Cunning Action",
+        category: "class_feature",
+        source: "PHB",
+        source_kind: "native_progression",
+        description_markdown: "Starting at 2nd level, your quick thinking and agility let you take a bonus action to Dash, Disengage, or Hide.",
       },
     ];
   }
@@ -7589,7 +7607,7 @@ export function buildCharacterLevelUpPayload({
     requires_subclass: false,
     choice_sections: [],
     limitations: [
-      "TypeScript level-up save parity currently supports only the bounded level-1 to level-2 Fighter/Barbarian sheets created by the TypeScript DND-5E level-one slice.",
+      "TypeScript level-up save parity currently supports only the bounded level-1 to level-2 Fighter/Barbarian/Rogue sheets created by the TypeScript DND-5E level-one slice.",
       "Multiclassing, subclass choices, ASI/feat choices, spell growth, imported-sheet repair, and broader native builder derivation remain pending.",
     ],
     preview: {

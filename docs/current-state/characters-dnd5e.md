@@ -28,6 +28,7 @@ Last updated: 2026-06-28
 - The TypeScript create parity path currently has bounded level-one PHB Fighter, PHB Barbarian, PHB Bard, PHB Cleric/Life Domain, PHB Druid, PHB Rogue, PHB Ranger, PHB Monk, PHB Paladin, PHB Sorcerer/Draconic Bloodline, PHB Warlock/Fiend, and PHB Wizard slices; full DND builder parity remains pending.
 - Supported subordinate non-PHB rows include current accepted SCAG, XGE, EGW, and DMG rows when attached to supported base classes.
 - Native level-up is one level at a time through level 20 and can advance an existing class row or add a class row when the support matrix allows it.
+- The TypeScript level-up parity path currently supports bounded TypeScript-created PHB Fighter, PHB Barbarian, and PHB Rogue level-one to level-two saves; the Rogue slice adds Cunning Action, HP/Hit Dice reconciliation, copied definition/import YAML writes, SQLite revision bumps, and native progression history.
 - Progression repair resolves ambiguous imported class/subclass/species/background links and converts legacy imported spell marks to durable spell flags.
 - Retraining is intentionally narrow: it supports persisted structured choices on existing linked custom features, not generic rebuilds or full respec.
 
