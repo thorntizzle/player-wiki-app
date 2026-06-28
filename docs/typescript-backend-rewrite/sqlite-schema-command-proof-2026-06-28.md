@@ -80,7 +80,7 @@ This does not close production or staging migration readiness. Flask `manage.py 
 
 Remaining gates:
 
-- choose and implement an additive TypeScript/Drizzle migration command or an explicitly approved transitional migration hook;
+- add real allowlisted TypeScript schema deltas or a Drizzle migration set beyond the ledger-only `sqlite:migrate-proof` command;
 - rehearse that migration path against a user-approved staging-equivalent SQLite snapshot;
 - cover failed or partial migration rollback;
 - run post-migration TypeScript startup/read smoke against the rehearsed snapshot;

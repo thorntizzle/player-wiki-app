@@ -56,6 +56,7 @@ Do not implement these routes as part of the parity program unless a later archi
 - `sqlite-migration-dry-run-2026-06-28.md`: copied synthetic current-style SQLite migration dry-run evidence, including Flask additive schema initialization, TypeScript read/startup smoke, restore equivalence, and the remaining TypeScript startup migration blocker.
 - `sqlite-startup-posture-2026-06-28.md`: transitional TypeScript SQLite startup posture, shared helper PRAGMAs, startup schema preflight, and remaining full migration-command blockers.
 - `sqlite-schema-command-proof-2026-06-28.md`: tracked TypeScript read-only schema command proof against a Flask-initialized scratch DB plus missing-schema failure evidence; additive migration readiness remains pending.
+- `sqlite-migration-hook-proof-2026-06-28.md`: tracked TypeScript explicit migration-hook proof command that refuses unsafe targets, requires a Flask-current schema, creates only a TypeScript migration ledger, and runs only when manually invoked against disposable or approved copied databases.
 - `read-only-compatibility-slice.md`: evidence for the fixture-backed compatibility API slice, including the first controlled SQLite write route validated against a disposable fixture database.
 - `ops-image-runtime-proof.md`: no-deploy TypeScript API image-target proof notes, including the current Docker tooling blocker.
 
@@ -219,6 +220,13 @@ Do not implement these routes as part of the parity program unless a later archi
   includes the focused Flask-initialized scratch DB and missing-schema command
   test. This is not an additive migration hook and does not replace Flask
   `manage.py init-db`.
+- The tracked SQLite migration hook proof command now runs as
+  `npm --prefix apps/api run sqlite:migrate-proof -- --db <sqlite-path> --apply`.
+  It is never called at API startup, ignores `CPW_DB_PATH`, refuses missing and
+  live-ish targets, requires the current Flask-initialized schema, and creates
+  only the TypeScript migration ledger table when explicitly applied. There are
+  no allowlisted TypeScript schema deltas yet, so successful reports show
+  `applied: []`; Flask `manage.py init-db` remains production schema authority.
 - The Combat state shell now serves read-only tracker payloads for `GET .../combat` and
   `GET .../combat/live-state`, preserving Flask-compatible unauthenticated `auth_required`, fixture
   or bearer-token membership-derived player/DM permission splits, live polling metadata,
