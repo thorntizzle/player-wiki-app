@@ -123,6 +123,34 @@ def test_all_copied_data_families_have_staging_snapshot_guides():
         assert "staging-equivalent snapshot" in guide
 
 
+def test_staging_snapshot_guides_use_current_api_contract_routes():
+    harness = _load_harness_module()
+
+    session_guide = harness.family_guide_markdown("session")
+    assert "PUT /api/v1/campaigns/<slug>/session/articles/<articleId>" in session_guide
+    assert "PATCH /api/v1/campaigns/<slug>/session/articles/<articleId>" not in session_guide
+
+    systems_guide = harness.family_guide_markdown("systems")
+    assert "PUT /api/v1/campaigns/<slug>/systems/sources" in systems_guide
+    assert "PUT /api/v1/campaigns/<slug>/systems/overrides/<entryKey>" in systems_guide
+    assert "PUT /api/v1/campaigns/<slug>/systems/custom-entries/<entrySlug>" in systems_guide
+    assert "POST /api/v1/campaigns/<slug>/systems/item-mechanics/import" in systems_guide
+    assert "/systems/source-policy" not in systems_guide
+    assert "/systems/import-item-mechanics" not in systems_guide
+
+    dm_content_guide = harness.family_guide_markdown("dm-content")
+    assert "PUT /api/v1/campaigns/<slug>/dm-content/statblocks/<statblockId>" in dm_content_guide
+    assert "PUT /api/v1/campaigns/<slug>/dm-content/conditions/<conditionDefinitionId>" in dm_content_guide
+    assert "PATCH /api/v1/campaigns/<slug>/dm-content/statblocks/<statblockId>" not in dm_content_guide
+    assert "/dm-content/conditions/<conditionId>" not in dm_content_guide
+
+    publishing_guide = harness.family_guide_markdown("publishing")
+    assert "PUT /api/v1/campaigns/<slug>/content/pages/<pageRef>" in publishing_guide
+    assert "PUT /api/v1/campaigns/<slug>/content/assets/<assetRef>" in publishing_guide
+    assert "POST /api/v1/campaigns/<slug>/content/pages" not in publishing_guide
+    assert "POST /api/v1/campaigns/<slug>/content/assets" not in publishing_guide
+
+
 def test_rollback_cutover_transcript_captures_runbook_evidence(tmp_path):
     harness = _load_harness_module()
     root = tmp_path / ".task-temp" / "rollback-cutover"
