@@ -196,6 +196,21 @@ Current local evidence:
   `sessions.session_token_hash`, while the Flask initializer created
   `sessions.token_hash`. This keeps the compiled-start-from-Flask-schema proof
   blocked on the latest integration baseline.
+- On 2026-06-28, `rewrite/ts-ops-compiled-start-proof` started from integration
+  commit `1325faac7ceed1fb399359d2e84bf2e706482f6e` and reran the
+  Flask-initialized scratch DB proof after the session-token startup preflight
+  fix. `local.ps1 -Action ts-api-check -NodeRoot <pinned Codex Node bin>`
+  passed. A clean scratch DB created by Flask `manage.py init-db` under
+  `.task-temp\ts-ops-compiled-start-proof-20260628\player_wiki.sqlite3` plus
+  copied sanitized fixture campaigns under
+  `.task-temp\ts-ops-compiled-start-proof-20260628\campaigns` allowed
+  `apps/api/dist/server.js` to start locally. `/healthz` returned `status: ok`,
+  `environment: production`, `runtime_mode: fixture`, and `campaign_count: 1`.
+  `/api/v1/app` returned `ok: true`, runtime `typescript-local-proof`,
+  `git_sha: 1325faac7cee`, `git_dirty: false`, and matching disposable
+  DB/campaign metadata. The standalone packaging proof also passed with the
+  pinned Node/npm runtime on `PATH`. Docker remained unavailable on `PATH`, so
+  no local image build or container boot transcript was collected.
 
 ### Docker Context Hygiene
 
@@ -441,10 +456,11 @@ smoke could run in this worktree environment.
 - Fly config has no TypeScript-specific process, port, or health check.
 - TypeScript env names are mapped only in the proof entrypoint, not in the
   default Flask entrypoint or Fly process model.
-- Startup schema behavior is still Flask `manage.py init-db`; TypeScript
-  migration dry-run/startup behavior is unproven, and the latest local
-  Flask-initialized scratch DB did not pass TypeScript startup preflight because
-  of the `sessions` token column mismatch.
+- Startup schema behavior is still Flask `manage.py init-db` plus TypeScript
+  startup preflight. The latest local Flask-initialized scratch DB now passes
+  TypeScript compiled-start proof after the `sessions.token_hash` fix, but a
+  tracked TypeScript migration command, migration dry-run, and startup
+  migration hook remain unproven.
 - No local Docker build transcript exists for a TypeScript API runtime because
   Docker was unavailable in the current worktree environment.
 - A no-live rollback/cutover transcript scaffold exists, but no image-level
