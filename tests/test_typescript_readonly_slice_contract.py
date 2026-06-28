@@ -6446,6 +6446,77 @@ def test_typescript_protected_campaign_asset_missing_returns_404(typescript_api_
     assert payload["error"]["code"] == "campaign_asset_not_found"
 
 
+@pytest.mark.parametrize(
+    ("role", "flask_path", "typescript_path", "headers", "error_code"),
+    [
+        (
+            "party",
+            "/api/v1/campaigns/linden-pass/wiki/sections/definitely-not-a-section",
+            "/api/v1/campaigns/linden-pass/wiki/sections/definitely-not-a-section",
+            CONTENT_PLAYER_HEADERS,
+            "wiki_section_not_found",
+        ),
+        (
+            "party",
+            "/api/v1/campaigns/linden-pass/wiki/pages/definitely-not-a-page",
+            "/api/v1/campaigns/linden-pass/wiki/pages/definitely-not-a-page",
+            CONTENT_PLAYER_HEADERS,
+            "wiki_page_not_found",
+        ),
+        (
+            "dm",
+            "/api/v1/campaigns/linden-pass/content/pages/definitely-not-a-page",
+            "/api/v1/campaigns/linden-pass/content/pages/definitely-not-a-page",
+            CONTENT_MANAGER_HEADERS,
+            "content_page_not_found",
+        ),
+        (
+            "dm",
+            "/api/v1/campaigns/linden-pass/content/assets/definitely-not-an-asset.png",
+            "/api/v1/campaigns/linden-pass/content/assets/definitely-not-an-asset.png",
+            CONTENT_MANAGER_HEADERS,
+            "content_asset_not_found",
+        ),
+        (
+            "dm",
+            "/api/v1/campaigns/linden-pass/content/characters/missing-character",
+            "/api/v1/campaigns/linden-pass/content/characters/missing-character",
+            CONTENT_MANAGER_HEADERS,
+            "content_character_not_found",
+        ),
+        (
+            "dm",
+            "/campaigns/linden-pass/assets/definitely-not-an-asset.png",
+            "/campaigns/linden-pass/assets/definitely-not-an-asset.png",
+            CONTENT_MANAGER_HEADERS,
+            "campaign_asset_not_found",
+        ),
+    ],
+)
+def test_typescript_publishing_missing_resource_json_boundary_matches_documented_flask_html_404(
+    typescript_api_mutation_server,
+    client,
+    sign_in,
+    users,
+    role,
+    flask_path,
+    typescript_path,
+    headers,
+    error_code,
+):
+    sign_in(users[role]["email"], users[role]["password"])
+
+    flask_response = client.get(flask_path, headers={"Accept": "application/json"})
+    assert flask_response.status_code == 404
+    assert flask_response.content_type.startswith("text/html")
+    assert flask_response.get_json(silent=True) is None
+
+    status, payload = _to_json(f"{typescript_api_mutation_server['url']}{typescript_path}", headers=headers)
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == error_code
+
+
 def test_typescript_content_characters_list_matches_flask_contract(typescript_api_server, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     flask_response = client.get("/api/v1/campaigns/linden-pass/content/characters")

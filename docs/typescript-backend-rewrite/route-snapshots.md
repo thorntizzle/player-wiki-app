@@ -1,6 +1,6 @@
 # TypeScript Backend Rewrite - Route Snapshots
 
-Last updated: 2026-06-25
+Last updated: 2026-06-28
 
 Status: documentation review companion for executable source-of-truth fixtures
 
@@ -362,6 +362,29 @@ deciding whether a later API-version break should normalize them to JSON.
 | `PUT` | `/api/v1/campaigns/<campaign_slug>/characters/missing-character/portrait` | `dm` | `404` | `text/html` | `html/text` | `` | Generic Flask HTML 404 page |
 | `PATCH` | `/api/v1/campaigns/<campaign_slug>/characters/missing-character/session/vitals` | `dm` | `404` | `text/html` | `html/text` | `` | Generic Flask HTML 404 page |
 | `POST` | `/api/v1/campaigns/<campaign_slug>/characters/missing-character/session/rest/long` | `dm` | `404` | `text/html` | `html/text` | `` | Generic Flask HTML 404 page |
+
+### TypeScript JSON Boundary For Publishing/Content
+
+The 2026-06-28 `rewrite/ts-error-shape-parity-matrix` slice promotes the
+published wiki/content asset family from an observed Flask-only matrix entry to
+an executable Flask-vs-TypeScript boundary test. Flask remains the production
+authority and still serves generic `text/html` 404 pages for these missing
+resources even with `Accept: application/json`; the TypeScript candidate keeps
+structured JSON 404 envelopes for the fixture API surface:
+
+| Method | Normalized path | Role | Flask shape | TypeScript shape | TypeScript error code |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/v1/campaigns/<campaign_slug>/wiki/sections/missing-section` | `player` | `404 text/html` generic page | `404 application/json` | `wiki_section_not_found` |
+| `GET` | `/api/v1/campaigns/<campaign_slug>/wiki/pages/missing-page` | `player` | `404 text/html` generic page | `404 application/json` | `wiki_page_not_found` |
+| `GET` | `/api/v1/campaigns/<campaign_slug>/content/pages/missing-page` | `dm` | `404 text/html` generic page | `404 application/json` | `content_page_not_found` |
+| `GET` | `/api/v1/campaigns/<campaign_slug>/content/assets/missing.png` | `dm` | `404 text/html` generic page | `404 application/json` | `content_asset_not_found` |
+| `GET` | `/api/v1/campaigns/<campaign_slug>/content/characters/missing-character` | `dm` | `404 text/html` generic page | `404 application/json` | `content_character_not_found` |
+| `GET` | `/campaigns/<campaign_slug>/assets/missing.png` | `dm` | `404 text/html` generic page | `404 application/json` | `campaign_asset_not_found` |
+
+This is an explicit compatibility boundary for the TypeScript rewrite evidence,
+not a Flask production behavior change. Cutover still needs an API-version or
+client-compatibility decision before treating JSON-normalized missing publishing
+resources as a general contract across all route families.
 
 ## Source-Level 404 Notes
 
