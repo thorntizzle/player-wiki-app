@@ -6,13 +6,13 @@ from copy import deepcopy
 import player_wiki.app as app_module
 import pytest
 import yaml
-from tests.test_character_builder import (
+from tests.helpers.character_builder_fakes import (
     _builder_context_fixture,
     _level_up_context_fixture,
     _minimal_character_definition,
     _minimal_import_metadata,
 )
-from tests.test_character_read_routes import _seed_systems_item_entry
+from tests.helpers.systems_seed_helpers import _seed_systems_item_entry
 
 
 @pytest.fixture
