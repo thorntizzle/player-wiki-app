@@ -12,6 +12,46 @@ from .session_models import (
 from .systems_labels import systems_entry_type_label
 
 
+def get_pullable_session_wiki_page_record(
+    campaign: Any,
+    page_ref: str,
+    *,
+    page_store: Any,
+    include_body: bool = False,
+):
+    try:
+        record = page_store.get_page_record(
+            campaign.slug,
+            page_ref,
+            include_body=include_body,
+        )
+    except ValueError:
+        return None
+    if record is None or not campaign.is_page_visible(record.page):
+        return None
+    return record
+
+
+def get_pullable_session_systems_entry(
+    campaign_slug: str,
+    entry_slug: str,
+    *,
+    systems_service: Any,
+    can_access_systems: bool,
+    can_access_systems_entry: Callable[[str], bool],
+):
+    normalized_entry_slug = str(entry_slug or "").strip()
+    if not normalized_entry_slug:
+        return None
+    if not can_access_systems:
+        return None
+
+    entry = systems_service.get_entry_by_slug_for_campaign(campaign_slug, normalized_entry_slug)
+    if entry is None or not can_access_systems_entry(entry.slug):
+        return None
+    return entry
+
+
 def build_session_article_source_search_results(
     *,
     campaign: Any,

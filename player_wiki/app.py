@@ -51,7 +51,6 @@ from .character_builder import (
     CAMPAIGN_ITEMS_SECTION,
     CAMPAIGN_MECHANICS_SECTION,
     _normalize_equipment_payloads,
-    _normalize_weapon_wield_mode_value,
     _build_spell_catalog,
     _list_campaign_enabled_entries,
     CharacterBuildError,
@@ -61,7 +60,6 @@ from .character_builder import (
     build_imported_progression_repair_context,
     build_level_one_builder_context,
     build_level_one_character_definition,
-    describe_equipment_state_support,
     normalize_definition_to_native_model,
     native_level_up_readiness,
     resolve_weapon_wield_mode,
@@ -80,7 +78,6 @@ from .character_editor import (
     CharacterEditValidationError,
     apply_character_spell_management_edit,
     apply_equipment_catalog_edit,
-    apply_equipment_state_edit,
     apply_native_character_retraining,
     build_character_spell_management_context,
     apply_native_character_edits,
@@ -91,6 +88,15 @@ from .character_editor import (
     search_character_spell_management_options,
 )
 from .character_importer import write_yaml
+from .character_equipment_state import (
+    build_equipment_state_update_result as build_shared_equipment_state_update_result,
+    build_record_equipment_support_lookup,
+)
+from .character_workspace_sections import (
+    SESSION_CHARACTER_SECTION_LABELS,
+    build_combat_character_workspace_sections,
+    build_session_character_sections,
+)
 from .character_page_records import (
     list_builder_campaign_page_records as list_builder_campaign_page_records_for_store,
     list_visible_character_page_records as list_visible_character_page_records_for_store,
@@ -157,6 +163,7 @@ from .character_presenter import (
 )
 from .character_mechanics_projection import (
     build_character_mechanics_projection,
+    build_character_inventory_item_ref,
     find_item_use_action,
     parse_item_action_slot_selection,
 )
@@ -248,6 +255,8 @@ from .session_presenter import (
 )
 from .session_source_presenter import (
     build_session_article_source_search_results as build_shared_session_article_source_search_results,
+    get_pullable_session_systems_entry as get_shared_pullable_session_systems_entry,
+    get_pullable_session_wiki_page_record as get_shared_pullable_session_wiki_page_record,
 )
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
 from .systems_ingest import SystemsIngestError, extracted_systems_archive
@@ -258,6 +267,10 @@ from .systems_labels import (
     systems_entry_type_label,
     systems_entry_type_sort_key,
     systems_source_browse_intro,
+)
+from .systems_access import (
+    filter_accessible_systems_entries as filter_shared_accessible_systems_entries,
+    list_accessible_campaign_source_entries as list_shared_accessible_campaign_source_entries,
 )
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError, SystemsService
 from .systems_store import SystemsStore
@@ -319,17 +332,6 @@ CHARACTER_READ_SUBPAGE_LABELS = {
 }
 CHARACTER_CONTROLS_SUBPAGE_LABELS = {
     "controls": "Controls",
-}
-SESSION_CHARACTER_SECTION_LABELS = {
-    "overview": "Overview",
-    "spells": "Spells",
-    "resources": "Resources",
-    "features": "Features",
-    "equipment": "Equipment",
-    "inventory": "Inventory",
-    "abilities_skills": "Abilities and Skills",
-    "notes": "Notes",
-    "personal": "Personal",
 }
 SESSION_CHARACTER_SECTION_ALIASES = {
     normalize_lookup("overview"): "overview",
@@ -410,18 +412,6 @@ COMBAT_SOURCE_LABELS = {
     COMBAT_SOURCE_KIND_MANUAL_NPC: "Manual NPC",
     COMBAT_SOURCE_KIND_DM_STATBLOCK: "DM Content",
     COMBAT_SOURCE_KIND_SYSTEMS_MONSTER: "Systems",
-}
-COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS = {
-    "actions": "Actions",
-    "bonus_actions": "Bonus Actions",
-    "reactions": "Reactions",
-    "attacks": "Attacks",
-    "spells": "Spells",
-    "resources": "Resources",
-    "features": "Features",
-    "equipment": "Equipment",
-    "inventory": "Inventory",
-    "abilities_skills": "Abilities and Skills",
 }
 COMBAT_NPC_WORKSPACE_SECTION_LABELS = {
     "reference": "Reference",
@@ -1581,36 +1571,6 @@ def create_app() -> Flask:
             return None
         return candidate
 
-    def get_pullable_session_wiki_page_record(
-        campaign,
-        page_ref: str,
-        *,
-        include_body: bool = False,
-    ):
-        try:
-            record = get_campaign_page_store().get_page_record(
-                campaign.slug,
-                page_ref,
-                include_body=include_body,
-            )
-        except ValueError:
-            return None
-        if record is None or not campaign.is_page_visible(record.page):
-            return None
-        return record
-
-    def get_pullable_session_systems_entry(campaign_slug: str, entry_slug: str):
-        normalized_entry_slug = str(entry_slug or "").strip()
-        if not normalized_entry_slug:
-            return None
-        if not can_access_campaign_scope(campaign_slug, "systems"):
-            return None
-
-        entry = get_systems_service().get_entry_by_slug_for_campaign(campaign_slug, normalized_entry_slug)
-        if entry is None or not can_access_campaign_systems_entry(campaign_slug, entry.slug):
-            return None
-        return entry
-
     def can_player_access_campaign_scope(campaign_slug: str, scope: str) -> bool:
         if get_repository().get_campaign(campaign_slug) is None:
             return False
@@ -1626,7 +1586,11 @@ def create_app() -> Flask:
         campaign = load_campaign_context(campaign_slug)
         if not can_player_access_campaign_scope(campaign_slug, "wiki"):
             return None
-        return get_pullable_session_wiki_page_record(campaign, page_ref)
+        return get_shared_pullable_session_wiki_page_record(
+            campaign,
+            page_ref,
+            page_store=get_campaign_page_store(),
+        )
 
     def build_player_session_wiki_search_results(
         campaign_slug: str,
@@ -1703,19 +1667,6 @@ def create_app() -> Flask:
             "lookup_page_image_url": page_image_url,
             "lookup_body_html": body_html,
         }
-
-    def build_session_article_source_search_results(campaign_slug: str, query: str, *, limit: int = 30) -> list[dict[str, str]]:
-        campaign = load_campaign_context(campaign_slug)
-        return build_shared_session_article_source_search_results(
-            campaign=campaign,
-            campaign_slug=campaign_slug,
-            query=query,
-            page_store=get_campaign_page_store(),
-            systems_service=get_systems_service(),
-            can_access_systems=can_access_campaign_scope(campaign_slug, "systems"),
-            can_access_systems_entry=lambda entry_slug: can_access_campaign_systems_entry(campaign_slug, entry_slug),
-            limit=limit,
-        )
 
     def build_campaign_global_search_results(
         campaign_slug: str,
@@ -2084,10 +2035,6 @@ def create_app() -> Flask:
             "source_id": str(entry.source_id or "").strip(),
         }
 
-    def build_character_inventory_item_ref(item: object) -> str:
-        payload = dict(item or {}) if isinstance(item, dict) else {}
-        return str(payload.get("catalog_ref") or payload.get("id") or "").strip()
-
     def build_character_item_catalog(campaign_slug: str) -> dict[str, object]:
         return build_shared_character_item_catalog(
             get_systems_service(),
@@ -2095,34 +2042,12 @@ def create_app() -> Flask:
             campaign_slug,
         )
 
-    def build_record_equipment_support_lookup(
-        record,
-        *,
-        item_catalog: dict[str, object],
-    ) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:
-        normalized_definition_equipment = _normalize_equipment_payloads(
-            list(record.definition.equipment_catalog or []),
-            item_catalog=item_catalog,
-        )
-        definition_item_lookup = {
-            str(item.get("id") or "").strip(): dict(item)
-            for item in normalized_definition_equipment
-            if str(item.get("id") or "").strip()
+    def build_equipment_state_form_values() -> dict[str, object]:
+        return {
+            "is_equipped": bool(request.form.get("is_equipped")),
+            "is_attuned": bool(request.form.get("is_attuned")),
+            "weapon_wield_mode": request.form.get("weapon_wield_mode"),
         }
-        support_lookup: dict[str, dict[str, object]] = {}
-        for inventory_item in list((record.state_record.state or {}).get("inventory") or []):
-            item_ref = build_character_inventory_item_ref(inventory_item)
-            if not item_ref:
-                continue
-            definition_item = dict(definition_item_lookup.get(item_ref) or {})
-            support_item = dict(definition_item or inventory_item or {})
-            if not str(support_item.get("name") or "").strip():
-                support_item["name"] = str(dict(inventory_item or {}).get("name") or "").strip()
-            support_lookup[item_ref] = describe_equipment_state_support(
-                support_item,
-                item_catalog=item_catalog,
-            )
-        return definition_item_lookup, support_lookup
 
     def build_character_inventory_manager_context(
         campaign_slug: str,
@@ -2814,46 +2739,8 @@ def create_app() -> Flask:
     def render_flash_stack_html() -> str:
         return render_template("_flash_stack.html")
 
-    def build_combat_live_view_token(
-        campaign_slug: str,
-        combat_subpage: str,
-        *,
-        selected_combatant_id: int | None = None,
-        combat_dm_view: str | None = None,
-    ) -> str:
-        return build_shared_combat_live_view_token(
-            campaign_slug,
-            combat_subpage,
-            selected_combatant_id=selected_combatant_id,
-            combat_dm_view=combat_dm_view,
-            can_manage_combat=can_manage_campaign_combat(campaign_slug),
-            owned_character_slugs=get_owned_character_slugs(campaign_slug),
-            normalize_combat_dm_view=normalize_combat_dm_view,
-        )
-
-    def build_session_live_view_token(campaign_slug: str, session_subpage: str) -> str:
-        current_preferences = get_current_user_preferences()
-        return build_shared_session_live_view_token(
-            campaign_slug,
-            session_subpage,
-            session_chat_order=current_preferences.session_chat_order,
-            can_manage_session=can_manage_campaign_session(campaign_slug),
-            can_post_session_messages=can_post_campaign_session_messages(campaign_slug),
-        )
-
     def parse_live_detail_state_token_header() -> str:
         return parse_shared_live_detail_state_token_header(request.headers)
-
-    def should_short_circuit_live_response(
-        *,
-        live_revision: int,
-        live_view_token: str,
-    ) -> bool:
-        return should_short_circuit_shared_live_response(
-            request.headers,
-            live_revision=live_revision,
-            live_view_token=live_view_token,
-        )
 
     def attach_live_response_diagnostics(
         response,
@@ -2973,19 +2860,29 @@ def create_app() -> Flask:
         return {
             "snapshot_sync_metrics": snapshot_sync_metrics,
             "live_revision": combat_service.get_live_revision(campaign_slug),
-            "live_view_token": build_combat_live_view_token(
+            "live_view_token": build_shared_combat_live_view_token(
                 campaign_slug,
                 combat_subpage,
                 selected_combatant_id=selected_combatant_id,
                 combat_dm_view=combat_dm_view,
+                can_manage_combat=can_manage_campaign_combat(campaign_slug),
+                owned_character_slugs=get_owned_character_slugs(campaign_slug),
+                normalize_combat_dm_view=normalize_combat_dm_view,
             ),
         }
 
     def build_session_live_metadata(campaign_slug: str, session_subpage: str) -> dict[str, object]:
         session_service = get_campaign_session_service()
+        current_preferences = get_current_user_preferences()
         return {
             "live_revision": session_service.get_live_revision(campaign_slug),
-            "live_view_token": build_session_live_view_token(campaign_slug, session_subpage),
+            "live_view_token": build_shared_session_live_view_token(
+                campaign_slug,
+                session_subpage,
+                session_chat_order=current_preferences.session_chat_order,
+                can_manage_session=can_manage_campaign_session(campaign_slug),
+                can_post_session_messages=can_post_campaign_session_messages(campaign_slug),
+            ),
         }
 
     def build_session_manager_state_token(
@@ -4383,7 +4280,16 @@ def create_app() -> Flask:
                     ),
                 }
             elif source_kind == SESSION_ARTICLE_SOURCE_KIND_SYSTEMS and source_ref:
-                systems_entry = get_pullable_session_systems_entry(campaign_slug, source_ref)
+                systems_entry = get_shared_pullable_session_systems_entry(
+                    campaign_slug,
+                    source_ref,
+                    systems_service=get_systems_service(),
+                    can_access_systems=can_access_campaign_scope(campaign_slug, "systems"),
+                    can_access_systems_entry=lambda entry_slug: can_access_campaign_systems_entry(
+                        campaign_slug,
+                        entry_slug,
+                    ),
+                )
                 source_items[article.id] = {
                     "label": "Systems entry",
                     "action_label": "View Systems entry",
@@ -4465,9 +4371,20 @@ def create_app() -> Flask:
         session_player_poll_settings = build_session_poll_settings("session")
         session_dm_poll_settings = build_session_poll_settings("dm")
         session_live_revision = session_service.get_live_revision(campaign_slug)
-        session_live_view_token = build_session_live_view_token(campaign_slug, normalized_session_subpage)
-        session_player_live_view_token = build_session_live_view_token(campaign_slug, "session")
-        session_dm_live_view_token = build_session_live_view_token(campaign_slug, "dm")
+        current_preferences = get_current_user_preferences()
+
+        def _session_live_view_token(subpage: str) -> str:
+            return build_shared_session_live_view_token(
+                campaign_slug,
+                subpage,
+                session_chat_order=current_preferences.session_chat_order,
+                can_manage_session=can_manage_session,
+                can_post_session_messages=can_post_messages,
+            )
+
+        session_live_view_token = _session_live_view_token(normalized_session_subpage)
+        session_player_live_view_token = _session_live_view_token("session")
+        session_dm_live_view_token = _session_live_view_token("dm")
         accessible_session_character_records = list_session_accessible_character_records(campaign_slug)
         show_session_character_tab = bool(accessible_session_character_records)
         default_session_character_slug = get_default_session_character_slug(
@@ -4629,7 +4546,16 @@ def create_app() -> Flask:
                     request.form.get("source_ref", "") or request.form.get("wiki_page_ref", "")
                 )
                 if source_kind == SESSION_ARTICLE_SOURCE_KIND_SYSTEMS:
-                    entry = get_pullable_session_systems_entry(campaign_slug, source_ref)
+                    entry = get_shared_pullable_session_systems_entry(
+                        campaign_slug,
+                        source_ref,
+                        systems_service=get_systems_service(),
+                        can_access_systems=can_access_campaign_scope(campaign_slug, "systems"),
+                        can_access_systems_entry=lambda entry_slug: can_access_campaign_systems_entry(
+                            campaign_slug,
+                            entry_slug,
+                        ),
+                    )
                     if entry is None:
                         raise CampaignSessionValidationError(
                             "Choose a visible published wiki page or Systems entry before pulling it into the session store."
@@ -4651,9 +4577,10 @@ def create_app() -> Flask:
                         created_by_user_id=created_by_user_id,
                     )
                 else:
-                    page_record = get_pullable_session_wiki_page_record(
+                    page_record = get_shared_pullable_session_wiki_page_record(
                         campaign,
                         source_ref,
+                        page_store=get_campaign_page_store(),
                         include_body=True,
                     )
                     if page_record is None:
@@ -4971,6 +4898,10 @@ def create_app() -> Flask:
                     character,
                     equipment_state_manager=equipment_state_manager,
                     include_spellcasting=include_spellcasting_subpage,
+                    session_character_subpage_labels=get_session_character_subpage_labels(
+                        include_spellcasting=include_spellcasting_subpage,
+                        xianxia_read=xianxia_read_context,
+                    ),
                 )
             ]
             can_view_full_character_sheet = bool(
@@ -5470,368 +5401,6 @@ def create_app() -> Flask:
             section["is_default"] = section["slug"] == default_section
         return sections, default_section
 
-    def build_session_character_sections(
-        character_detail: dict[str, object],
-        *,
-        equipment_state_manager: dict[str, object] | None = None,
-        include_spellcasting: bool = False,
-    ) -> list[dict[str, object]]:
-        xianxia_read = (
-            dict(character_detail.get("xianxia_read") or {})
-            if isinstance(character_detail.get("xianxia_read"), dict)
-            else None
-        )
-        spellcasting = dict(character_detail.get("spellcasting") or {})
-        resources = [dict(item or {}) for item in list(character_detail.get("resources") or [])]
-        feature_groups = [dict(group or {}) for group in list(character_detail.get("feature_groups") or [])]
-        overview_stats = [dict(item or {}) for item in list(character_detail.get("overview_stats") or [])]
-        overview_stat_rows = [
-            list(row or []) for row in list(character_detail.get("overview_stat_rows") or [])
-        ]
-        defensive_rules = [dict(item or {}) for item in list(character_detail.get("defensive_rules") or [])]
-        equipment_rows = [
-            dict(item or {})
-            for item in list((equipment_state_manager or {}).get("rows") or [])
-        ]
-        item_use_actions = [
-            dict(item or {}) for item in list(character_detail.get("item_use_actions") or [])
-        ]
-        arcane_armor_available = bool(
-            dict(character_detail.get("arcane_armor_state") or {}).get("available")
-            if isinstance(character_detail.get("arcane_armor_state"), dict)
-            else False
-        )
-        inventory_rows = [dict(item or {}) for item in list(character_detail.get("inventory") or [])]
-        skills = [dict(item or {}) for item in list(character_detail.get("skills") or [])]
-        reference_sections = [
-            dict(item or {}) for item in list(character_detail.get("reference_sections") or [])
-        ]
-        spell_count = sum(
-            len(list(section.get("spells") or []))
-            for section in list(spellcasting.get("row_sections") or [])
-            if isinstance(section, dict)
-        )
-        if xianxia_read:
-            xianxia_resources = dict(xianxia_read.get("resources") or {})
-            xianxia_approval = dict(xianxia_read.get("approval") or {})
-            xianxia_equipment = dict(xianxia_read.get("equipment") or {})
-            xianxia_inventory = dict(xianxia_read.get("inventory") or {})
-            xianxia_quick_reference = dict(xianxia_read.get("quick_reference") or {})
-            xianxia_status_groups = [
-                dict(group or {})
-                for group in list(xianxia_approval.get("status_groups") or [])
-                if isinstance(group, dict)
-            ]
-            xianxia_counts = {
-                "quick": (
-                    len(overview_stats)
-                    + int(bool(xianxia_quick_reference.get("check_formula")))
-                    + int(bool(xianxia_quick_reference.get("difficulty_states")))
-                    + int(bool(xianxia_quick_reference.get("honor_interactions")))
-                    + int(bool(xianxia_quick_reference.get("skill_use_guardrails")))
-                    + len(list(xianxia_quick_reference.get("rule_text_references") or []))
-                    + int(bool(xianxia_quick_reference.get("actions")))
-                    + int(bool(xianxia_quick_reference.get("defense")))
-                    + int(bool(xianxia_quick_reference.get("effort_damage")))
-                    + len(list(xianxia_quick_reference.get("active_state_reminders") or []))
-                    + int(bool(xianxia_quick_reference.get("stance_break")))
-                ),
-                "martial_arts": len(list(xianxia_read.get("martial_arts") or [])),
-                "techniques": (
-                    len(list(xianxia_read.get("generic_techniques") or []))
-                    + len(list(xianxia_read.get("basic_actions") or []))
-                    + sum(len(list(group.get("records") or [])) for group in xianxia_status_groups)
-                    + len(list(xianxia_approval.get("dao_immolating_prepared") or []))
-                ),
-                "resources": (
-                    len(list(xianxia_resources.get("durability") or []))
-                    + len(list(xianxia_resources.get("energies") or []))
-                    + len(list(xianxia_resources.get("yin_yang") or []))
-                    + int(bool(xianxia_resources.get("dao")))
-                    + int(bool(xianxia_resources.get("insight")))
-                ),
-                "skills": len(list(dict(xianxia_read.get("skills") or {}).get("trained") or [])),
-                "equipment": (
-                    1
-                    + len(list(xianxia_equipment.get("necessary_weapons") or []))
-                    + len(list(xianxia_equipment.get("necessary_tools") or []))
-                ),
-                "inventory": len(list(xianxia_inventory.get("quantities") or [])),
-                "personal": (
-                    int(bool(character_detail.get("portrait")))
-                    + int(bool(character_detail.get("physical_description_html")))
-                    + int(bool(character_detail.get("personal_background_html")))
-                ),
-                "notes": int(bool(character_detail.get("player_notes_html"))) + len(reference_sections),
-            }
-            return [
-                {
-                    "slug": slug,
-                    "label": label,
-                    "count": int(xianxia_counts.get(slug) or 0),
-                }
-                for slug, label in get_session_character_subpage_labels(
-                    xianxia_read=xianxia_read
-                ).items()
-            ]
-
-        sections = [
-            {
-                "slug": "overview",
-                "label": SESSION_CHARACTER_SECTION_LABELS["overview"],
-                "count": (
-                    sum(len(row) for row in overview_stat_rows)
-                    if overview_stat_rows
-                    else len(overview_stats)
-                )
-                + len(defensive_rules),
-            },
-        ]
-        if include_spellcasting:
-            sections.append(
-                {
-                    "slug": "spells",
-                    "label": SESSION_CHARACTER_SECTION_LABELS["spells"],
-                    "count": spell_count,
-                }
-            )
-        sections.extend(
-            [
-                {
-                    "slug": "resources",
-                    "label": SESSION_CHARACTER_SECTION_LABELS["resources"],
-                    "count": len(resources),
-                },
-                {
-                    "slug": "features",
-                    "label": SESSION_CHARACTER_SECTION_LABELS["features"],
-                    "count": sum(
-                        len(list(group.get("entries") or [])) for group in feature_groups
-                    ),
-                },
-                {
-                    "slug": "equipment",
-                    "label": SESSION_CHARACTER_SECTION_LABELS["equipment"],
-                    "count": len(equipment_rows) + len(item_use_actions) + int(arcane_armor_available),
-                },
-                {
-                    "slug": "inventory",
-                    "label": SESSION_CHARACTER_SECTION_LABELS["inventory"],
-                    "count": len(inventory_rows),
-                },
-                {
-                    "slug": "abilities_skills",
-                    "label": SESSION_CHARACTER_SECTION_LABELS["abilities_skills"],
-                    "count": len(skills),
-                },
-                {
-                    "slug": "notes",
-                    "label": SESSION_CHARACTER_SECTION_LABELS["notes"],
-                    "count": int(bool(character_detail.get("player_notes_html")))
-                    + len(reference_sections),
-                },
-                {
-                    "slug": "personal",
-                    "label": SESSION_CHARACTER_SECTION_LABELS["personal"],
-                    "count": (
-                        int(bool(character_detail.get("portrait")))
-                        + int(bool(character_detail.get("physical_description_html")))
-                        + int(bool(character_detail.get("personal_background_html")))
-                    ),
-                },
-            ]
-        )
-        return sections
-
-    def build_combat_character_workspace_sections(
-        character_detail: dict[str, object],
-        equipment_state_manager: dict[str, object],
-    ) -> tuple[list[dict[str, object]], str]:
-        action_features: list[dict[str, object]] = []
-        bonus_action_features: list[dict[str, object]] = []
-        reaction_features: list[dict[str, object]] = []
-        feature_groups = [dict(group or {}) for group in list(character_detail.get("feature_groups") or [])]
-
-        def iter_feature_entries(entries: object):
-            for item in list(entries or []):
-                if not isinstance(item, dict):
-                    continue
-                yield item
-                yield from iter_feature_entries(item.get("children"))
-
-        for group in feature_groups:
-            group_title = str(group.get("title") or "Features").strip() or "Features"
-            for feature in iter_feature_entries(group.get("entries")):
-                feature_payload = dict(feature or {})
-                feature_payload.pop("children", None)
-                feature_payload["group_title"] = group_title
-                combat_availability = dict(feature_payload.get("combat_availability") or {})
-                if combat_availability and not bool(combat_availability.get("available", True)):
-                    continue
-                activation_type = str(feature_payload.get("activation_type") or "").strip().lower()
-                if activation_type == "action":
-                    action_features.append(feature_payload)
-                elif activation_type == "bonus_action":
-                    bonus_action_features.append(feature_payload)
-                elif activation_type == "reaction":
-                    reaction_features.append(feature_payload)
-
-        attack_reminders = [dict(item or {}) for item in list(character_detail.get("attack_reminders") or [])]
-        defensive_rules = [dict(item or {}) for item in list(character_detail.get("defensive_rules") or [])]
-        spellcasting = dict(character_detail.get("spellcasting") or {})
-        resources = [dict(item or {}) for item in list(character_detail.get("resources") or [])]
-        attacks = [dict(item or {}) for item in list(character_detail.get("attacks") or [])]
-        hidden_attacks = []
-        for item in list(character_detail.get("hidden_attacks") or []):
-            if isinstance(item, dict):
-                name = str(item.get("name") or "").strip()
-                if not name:
-                    continue
-                hidden_attacks.append(
-                    {
-                        "name": name,
-                        "href": str(item.get("href") or "").strip(),
-                    }
-                )
-                continue
-            name = str(item).strip()
-            if not name:
-                continue
-            hidden_attacks.append({"name": name, "href": ""})
-        equipment_rows = [dict(item or {}) for item in list(equipment_state_manager.get("rows") or [])]
-        item_use_actions = [dict(item or {}) for item in list(character_detail.get("item_use_actions") or [])]
-        arcane_armor_state = (
-            dict(character_detail.get("arcane_armor_state") or {})
-            if isinstance(character_detail.get("arcane_armor_state"), dict)
-            else {}
-        )
-        inventory_rows = [dict(item or {}) for item in list(character_detail.get("inventory") or [])]
-        equipment_item_refs = {
-            str(item_ref).strip()
-            for item_ref in list(equipment_state_manager.get("equipment_item_refs") or [])
-            if str(item_ref).strip()
-        }
-        attunable_item_refs = {
-            str(item_ref).strip()
-            for item_ref in list(equipment_state_manager.get("attunable_item_refs") or [])
-            if str(item_ref).strip()
-        }
-        for item in inventory_rows:
-            item_ref = str(item.get("item_ref") or item.get("id") or "").strip()
-            item["show_equipped_badge"] = bool(item_ref in equipment_item_refs and item.get("is_equipped"))
-            item["show_attuned_badge"] = bool(item_ref in attunable_item_refs and item.get("is_attuned"))
-        currency_rows = [dict(item or {}) for item in list(character_detail.get("currency") or [])]
-        other_currency = [str(item).strip() for item in list(character_detail.get("other_currency") or []) if str(item).strip()]
-        abilities = [dict(item or {}) for item in list(character_detail.get("abilities") or [])]
-        skills = [dict(item or {}) for item in list(character_detail.get("skills") or [])]
-        proficiency_groups = [dict(item or {}) for item in list(character_detail.get("proficiency_groups") or [])]
-
-        spell_count = sum(
-            len(list(section.get("spells") or []))
-            for section in list(spellcasting.get("row_sections") or [])
-            if isinstance(section, dict)
-        )
-        sections = [
-            {
-                "slug": "actions",
-                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["actions"],
-                "count": len(action_features),
-                "has_content": bool(action_features),
-                "features": action_features,
-                "empty_message": "No action-specific features are recorded on this sheet yet.",
-            },
-            {
-                "slug": "bonus_actions",
-                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["bonus_actions"],
-                "count": len(bonus_action_features),
-                "has_content": bool(bonus_action_features),
-                "features": bonus_action_features,
-                "empty_message": "No bonus-action features are recorded on this sheet yet.",
-            },
-            {
-                "slug": "reactions",
-                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["reactions"],
-                "count": len(reaction_features),
-                "has_content": bool(reaction_features),
-                "features": reaction_features,
-                "empty_message": "No reaction features are recorded on this sheet yet.",
-            },
-            {
-                "slug": "attacks",
-                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["attacks"],
-                "count": len(attacks),
-                "has_content": bool(attacks or hidden_attacks or attack_reminders),
-                "attacks": attacks,
-                "hidden_attacks": hidden_attacks,
-                "attack_reminders": attack_reminders,
-                "empty_message": "No attacks are currently active on this sheet.",
-            },
-            {
-                "slug": "spells",
-                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["spells"],
-                "count": spell_count,
-                "has_content": bool(spellcasting),
-                "spellcasting": spellcasting,
-                "empty_message": "No spellcasting details are recorded on this sheet.",
-            },
-            {
-                "slug": "resources",
-                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["resources"],
-                "count": len(resources),
-                "has_content": bool(resources),
-                "resources": resources,
-                "empty_message": "No tracked limited-use resources are recorded on this sheet.",
-            },
-            {
-                "slug": "features",
-                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["features"],
-                "count": sum(len(list(group.get("entries") or [])) for group in feature_groups),
-                "has_content": bool(feature_groups or defensive_rules),
-                "feature_groups": feature_groups,
-                "defensive_rules": defensive_rules,
-                "empty_message": "No feature details are recorded on this sheet yet.",
-            },
-            {
-                "slug": "equipment",
-                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["equipment"],
-                "count": len(equipment_rows) + len(item_use_actions) + int(bool(arcane_armor_state.get("available"))),
-                "has_content": bool(equipment_rows or item_use_actions or arcane_armor_state.get("available")),
-                "equipment_state_manager": equipment_state_manager,
-                "arcane_armor_state": arcane_armor_state,
-                "item_use_actions": item_use_actions,
-                "empty_message": "No equipment is listed on this sheet yet.",
-            },
-            {
-                "slug": "inventory",
-                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["inventory"],
-                "count": len(inventory_rows),
-                "has_content": bool(
-                    inventory_rows
-                    or any(int(item.get("amount") or 0) for item in currency_rows)
-                    or other_currency
-                ),
-                "inventory": inventory_rows,
-                "currency": currency_rows,
-                "other_currency": other_currency,
-                "empty_message": "No inventory or currency is listed on this sheet yet.",
-            },
-            {
-                "slug": "abilities_skills",
-                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["abilities_skills"],
-                "count": len(skills),
-                "has_content": bool(abilities or skills or proficiency_groups),
-                "abilities": abilities,
-                "skills": skills,
-                "proficiency_groups": proficiency_groups,
-                "empty_message": "No ability or skill details are recorded on this sheet yet.",
-            },
-        ]
-        sections = [section for section in sections if section["has_content"]]
-        default_section = next((section["slug"] for section in sections), "")
-        for section in sections:
-            section["is_default"] = section["slug"] == default_section
-        return sections, default_section
-
     def build_combat_character_detail_context(campaign_slug: str, campaign, record) -> dict[str, object]:
         campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
         item_catalog = build_character_item_catalog(campaign_slug)
@@ -6094,11 +5663,14 @@ def create_app() -> Flask:
             combat_tracker_section_meta = (
                 "Choose a combatant from the focus picker above to inspect and edit one participant at a time."
             )
-        combat_live_view_token = build_combat_live_view_token(
+        combat_live_view_token = build_shared_combat_live_view_token(
             campaign_slug,
             combat_subpage,
             selected_combatant_id=requested_combatant_id,
             combat_dm_view=normalized_combat_dm_view,
+            can_manage_combat=can_manage_combat,
+            owned_character_slugs=get_owned_character_slugs(campaign_slug),
+            normalize_combat_dm_view=normalize_combat_dm_view,
         )
         selected_combat_character_row = next(
             (
@@ -7114,39 +6686,6 @@ def create_app() -> Flask:
             "reference_scope": reference_scope,
         }
 
-    def filter_accessible_systems_entries(
-        campaign_slug: str,
-        entries: list[object],
-        *,
-        limit: int | None = None,
-    ) -> list[object]:
-        accessible_entries = [
-            entry
-            for entry in entries
-            if can_access_campaign_systems_entry(campaign_slug, str(getattr(entry, "slug", "") or ""))
-        ]
-        if limit is not None:
-            return accessible_entries[:limit]
-        return accessible_entries
-
-    def list_accessible_campaign_source_entries(
-        campaign_slug: str,
-        source_id: str,
-        *,
-        entry_type: str | None = None,
-        query: str = "",
-        limit: int | None = None,
-    ) -> list[object]:
-        systems_service = get_systems_service()
-        entries = systems_service.list_entries_for_campaign_source(
-            campaign_slug,
-            source_id,
-            entry_type=entry_type,
-            query=query,
-            limit=None,
-        )
-        return filter_accessible_systems_entries(campaign_slug, entries, limit=limit)
-
     def build_campaign_systems_index_context(
         campaign_slug: str,
         *,
@@ -7159,19 +6698,22 @@ def create_app() -> Flask:
         for state in systems_service.list_campaign_source_states(campaign_slug):
             if not state.is_enabled or not can_access_campaign_systems_source(campaign_slug, state.source.source_id):
                 continue
-            accessible_source_entries = list_accessible_campaign_source_entries(
+            accessible_source_entries = list_shared_accessible_campaign_source_entries(
                 campaign_slug,
                 state.source.source_id,
+                systems_service=systems_service,
+                can_access_campaign_systems_entry=can_access_campaign_systems_entry,
                 limit=None,
             )
             source_has_rules_reference_entries = bool(
-                filter_accessible_systems_entries(
+                filter_shared_accessible_systems_entries(
                     campaign_slug,
                     systems_service.list_rules_reference_entries_for_campaign(
                         campaign_slug,
                         include_source_ids=[state.source.source_id],
                         limit=None,
                     ),
+                    can_access_campaign_systems_entry=can_access_campaign_systems_entry,
                     limit=1,
                 )
             )
@@ -7210,7 +6752,7 @@ def create_app() -> Flask:
         ]
         search_results = []
         if search_query:
-            for entry in filter_accessible_systems_entries(
+            for entry in filter_shared_accessible_systems_entries(
                 campaign_slug,
                 systems_service.search_entries_for_campaign(
                     campaign_slug,
@@ -7218,6 +6760,7 @@ def create_app() -> Flask:
                     include_source_ids=include_source_ids,
                     limit=None,
                 ),
+                can_access_campaign_systems_entry=can_access_campaign_systems_entry,
                 limit=250,
             ):
                 search_results.append(
@@ -7234,7 +6777,7 @@ def create_app() -> Flask:
                 )
         rules_reference_results = []
         if rules_reference_query:
-            for entry in filter_accessible_systems_entries(
+            for entry in filter_shared_accessible_systems_entries(
                 campaign_slug,
                 systems_service.search_rules_reference_entries_for_campaign(
                     campaign_slug,
@@ -7242,6 +6785,7 @@ def create_app() -> Flask:
                     include_source_ids=global_rules_reference_source_ids,
                     limit=None,
                 ),
+                can_access_campaign_systems_entry=can_access_campaign_systems_entry,
                 limit=100,
             ):
                 rules_reference_results.append(build_rules_reference_search_result(entry))
@@ -7273,9 +6817,11 @@ def create_app() -> Flask:
         accessible_entries_by_type: dict[str, list[object]] = {}
         all_entry_groups = []
         for entry_type, _ in systems_service.list_entry_type_counts_for_campaign_source(campaign_slug, source_id):
-            accessible_entries = list_accessible_campaign_source_entries(
+            accessible_entries = list_shared_accessible_campaign_source_entries(
                 campaign_slug,
                 source_id,
+                systems_service=systems_service,
+                can_access_campaign_systems_entry=can_access_campaign_systems_entry,
                 entry_type=entry_type,
                 limit=None,
             )
@@ -7306,9 +6852,10 @@ def create_app() -> Flask:
             include_source_ids=[source_id],
             limit=None,
         )
-        rules_reference_entries = filter_accessible_systems_entries(
+        rules_reference_entries = filter_shared_accessible_systems_entries(
             campaign_slug,
             raw_rules_reference_entries,
+            can_access_campaign_systems_entry=can_access_campaign_systems_entry,
             limit=None,
         )
         has_book_rules_reference_entries = any(
@@ -7354,7 +6901,7 @@ def create_app() -> Flask:
         rules_reference_query = reference_query.strip()
         rules_reference_results = []
         if rules_reference_query:
-            for entry in filter_accessible_systems_entries(
+            for entry in filter_shared_accessible_systems_entries(
                 campaign_slug,
                 systems_service.search_rules_reference_entries_for_campaign(
                     campaign_slug,
@@ -7362,6 +6909,7 @@ def create_app() -> Flask:
                     include_source_ids=[source_id],
                     limit=None,
                 ),
+                can_access_campaign_systems_entry=can_access_campaign_systems_entry,
                 limit=100,
             ):
                 rules_reference_results.append(build_rules_reference_search_result(entry))
@@ -7405,9 +6953,11 @@ def create_app() -> Flask:
         if not normalized_entry_type:
             abort(404)
         entry_count = len(
-            list_accessible_campaign_source_entries(
+            list_shared_accessible_campaign_source_entries(
                 campaign_slug,
                 source_id,
+                systems_service=systems_service,
+                can_access_campaign_systems_entry=can_access_campaign_systems_entry,
                 entry_type=normalized_entry_type,
                 limit=None,
             )
@@ -7415,9 +6965,11 @@ def create_app() -> Flask:
         if not entry_count:
             abort(404)
         normalized_query = query.strip()
-        entries = list_accessible_campaign_source_entries(
+        entries = list_shared_accessible_campaign_source_entries(
             campaign_slug,
             source_id,
+            systems_service=systems_service,
+            can_access_campaign_systems_entry=can_access_campaign_systems_entry,
             entry_type=normalized_entry_type,
             query=normalized_query,
             limit=None,
@@ -9999,7 +9551,8 @@ def create_app() -> Flask:
         live_metadata = build_combat_live_metadata(campaign_slug, "combat")
         snapshot_sync_metrics = live_metadata.get("snapshot_sync_metrics")
         state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
-        if should_short_circuit_live_response(
+        if should_short_circuit_shared_live_response(
+            request.headers,
             live_revision=int(live_metadata["live_revision"] or 0),
             live_view_token=str(live_metadata["live_view_token"] or ""),
         ):
@@ -10072,7 +9625,8 @@ def create_app() -> Flask:
         )
         snapshot_sync_metrics = live_metadata.get("snapshot_sync_metrics")
         state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
-        if should_short_circuit_live_response(
+        if should_short_circuit_shared_live_response(
+            request.headers,
             live_revision=int(live_metadata["live_revision"] or 0),
             live_view_token=str(live_metadata["live_view_token"] or ""),
         ):
@@ -10142,7 +9696,8 @@ def create_app() -> Flask:
         )
         snapshot_sync_metrics = live_metadata.get("snapshot_sync_metrics")
         state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
-        if should_short_circuit_live_response(
+        if should_short_circuit_shared_live_response(
+            request.headers,
             live_revision=int(live_metadata["live_revision"] or 0),
             live_view_token=str(live_metadata["live_view_token"] or ""),
         ):
@@ -10209,7 +9764,8 @@ def create_app() -> Flask:
         live_metadata = build_combat_live_metadata(campaign_slug, "character")
         snapshot_sync_metrics = live_metadata.get("snapshot_sync_metrics")
         state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
-        if should_short_circuit_live_response(
+        if should_short_circuit_shared_live_response(
+            request.headers,
             live_revision=int(live_metadata["live_revision"] or 0),
             live_view_token=str(live_metadata["live_view_token"] or ""),
         ):
@@ -10345,11 +9901,13 @@ def create_app() -> Flask:
             combatant_id,
             anchor="combat-character-equipment",
             success_message="Equipment state updated.",
-            action=lambda record: build_equipment_state_update_result(
+            action=lambda record: build_shared_equipment_state_update_result(
                 campaign_slug,
                 record,
                 item_id,
                 item_catalog=item_catalog,
+                systems_service=get_systems_service(),
+                values=build_equipment_state_form_values(),
             ),
         )
 
@@ -11141,7 +10699,8 @@ def create_app() -> Flask:
         state_check_started_at = time.perf_counter()
         live_metadata = build_session_live_metadata(campaign_slug, session_subpage)
         state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
-        if should_short_circuit_live_response(
+        if should_short_circuit_shared_live_response(
+            request.headers,
             live_revision=int(live_metadata["live_revision"] or 0),
             live_view_token=str(live_metadata["live_view_token"] or ""),
         ):
@@ -11189,7 +10748,20 @@ def create_app() -> Flask:
                 }
             )
 
-        results = build_session_article_source_search_results(campaign_slug, query, limit=30)
+        campaign = load_campaign_context(campaign_slug)
+        results = build_shared_session_article_source_search_results(
+            campaign=campaign,
+            campaign_slug=campaign_slug,
+            query=query,
+            page_store=get_campaign_page_store(),
+            systems_service=get_systems_service(),
+            can_access_systems=can_access_campaign_scope(campaign_slug, "systems"),
+            can_access_systems_entry=lambda entry_slug: can_access_campaign_systems_entry(
+                campaign_slug,
+                entry_slug,
+            ),
+            limit=30,
+        )
         message = (
             "Showing the first 30 matching articles."
             if len(results) == 30
@@ -13301,11 +12873,13 @@ def create_app() -> Flask:
         item_catalog = build_character_item_catalog(campaign_slug)
 
         def _action(record):
-            return build_equipment_state_update_result(
+            return build_shared_equipment_state_update_result(
                 campaign_slug,
                 record,
                 item_id,
                 item_catalog=item_catalog,
+                systems_service=get_systems_service(),
+                values=build_equipment_state_form_values(),
             )
 
         return run_character_definition_mutation(
@@ -13331,98 +12905,6 @@ def create_app() -> Flask:
                 enabled=request.form.get("enabled") == "1",
                 updated_by_user_id=user_id,
             ),
-        )
-
-    def build_equipment_state_update_result(
-        campaign_slug: str,
-        record,
-        item_id: str,
-        *,
-        item_catalog: list[dict[str, object]],
-    ):
-        inventory_by_ref = {
-            build_character_inventory_item_ref(item): dict(item)
-            for item in list((record.state_record.state or {}).get("inventory") or [])
-            if build_character_inventory_item_ref(item)
-        }
-        if item_id not in inventory_by_ref:
-            raise CharacterEditValidationError("Choose a valid equipment entry to update.")
-        _, support_lookup = build_record_equipment_support_lookup(
-            record,
-            item_catalog=item_catalog,
-        )
-        target_support = dict(support_lookup.get(item_id) or {})
-        if not bool(target_support.get("supports_equipped_state")):
-            raise CharacterEditValidationError(
-                "That inventory row stays on Inventory because it does not support equipment state."
-            )
-
-        weapon_wield_mode = ""
-        if bool(target_support.get("supports_weapon_wield_mode")):
-            weapon_wield_mode = _normalize_weapon_wield_mode_value(request.form.get("weapon_wield_mode"))
-            allowed_modes = [
-                _normalize_weapon_wield_mode_value(value)
-                for value in list(target_support.get("weapon_wield_modes") or [])
-                if _normalize_weapon_wield_mode_value(value)
-            ]
-            allowed_mode_set = {
-                _normalize_weapon_wield_mode_value(value)
-                for value in list(target_support.get("weapon_wield_modes") or [])
-                if _normalize_weapon_wield_mode_value(value)
-            }
-            if weapon_wield_mode and weapon_wield_mode not in allowed_mode_set:
-                raise CharacterEditValidationError("Choose a valid wielding mode for that weapon.")
-            if not weapon_wield_mode and bool(request.form.get("is_equipped")) and allowed_modes:
-                weapon_wield_mode = allowed_modes[0]
-            is_equipped = bool(weapon_wield_mode)
-        else:
-            is_equipped = bool(request.form.get("is_equipped"))
-        requested_attunement = bool(request.form.get("is_attuned"))
-        if requested_attunement and not bool(target_support.get("supports_attunement")):
-            raise CharacterEditValidationError(
-                "Only items whose durable metadata explicitly requires attunement can be attuned."
-            )
-        is_attuned = bool(requested_attunement and target_support.get("supports_attunement"))
-        attunement_payload = dict((record.state_record.state or {}).get("attunement") or {})
-        max_attuned_items = int(attunement_payload.get("max_attuned_items") or 3)
-        currently_attuned_refs = {
-            item_ref
-            for item_ref, item in inventory_by_ref.items()
-            if (
-                item_ref != item_id
-                and bool(item.get("is_attuned", False))
-                and bool(dict(support_lookup.get(item_ref) or {}).get("supports_attunement"))
-            )
-        }
-        next_attuned_count = len(currently_attuned_refs) + (1 if is_attuned else 0)
-        if max_attuned_items >= 0 and next_attuned_count > max_attuned_items:
-            raise CharacterEditValidationError(
-                f"This character already has {max_attuned_items} attuned item"
-                f"{'' if max_attuned_items == 1 else 's'}. Clear one first."
-            )
-
-        definition, import_metadata = apply_equipment_state_edit(
-            campaign_slug,
-            record.definition,
-            record.import_metadata,
-            item_catalog=item_catalog,
-            systems_service=get_systems_service(),
-            target_item_id=item_id,
-            is_equipped=is_equipped,
-            is_attuned=is_attuned,
-            weapon_wield_mode=weapon_wield_mode,
-        )
-        return (
-            definition,
-            import_metadata,
-            {},
-            {
-                item_id: {
-                    "is_equipped": is_equipped,
-                    "is_attuned": is_attuned,
-                    "weapon_wield_mode": weapon_wield_mode,
-                }
-            },
         )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/<item_id>/remove")

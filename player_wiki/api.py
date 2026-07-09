@@ -108,8 +108,6 @@ from .character_builder import (
     CAMPAIGN_MECHANICS_SECTION,
     _build_spell_catalog,
     _list_campaign_enabled_entries,
-    _normalize_equipment_payloads,
-    _normalize_weapon_wield_mode_value,
     CharacterBuildError,
     apply_imported_progression_repairs,
     build_imported_progression_repair_context,
@@ -117,7 +115,6 @@ from .character_builder import (
     build_level_one_character_definition,
     build_native_level_up_character_definition,
     build_native_level_up_context,
-    describe_equipment_state_support,
     native_level_up_readiness,
     normalize_definition_to_native_model,
     resolve_weapon_wield_mode,
@@ -140,12 +137,16 @@ from .character_editor import (
     apply_artificer_infusion_state_edit,
     apply_native_character_retraining,
     apply_native_character_edits,
-    apply_equipment_state_edit,
     build_linked_feature_authoring_support,
     build_managed_character_import_metadata,
     build_native_character_edit_context,
     build_native_character_retraining_context,
 )
+from .character_equipment_state import (
+    build_equipment_state_update_result as build_shared_equipment_state_update_result,
+    build_record_equipment_support_lookup,
+)
+from .character_workspace_sections import build_combat_character_workspace_sections_payload
 from .character_artificer_infusions import (
     ENHANCED_DEFENSE_INFUSION_KEY,
     artificer_infusion_active_capacity,
@@ -194,6 +195,8 @@ from .session_article_publisher import list_published_pages_for_session_articles
 from .session_presenter import present_session_dm_passive_score_rows
 from .session_source_presenter import (
     build_session_article_source_search_results as build_shared_session_article_source_search_results,
+    get_pullable_session_systems_entry as get_shared_pullable_session_systems_entry,
+    get_pullable_session_wiki_page_record as get_shared_pullable_session_wiki_page_record,
 )
 from .live_presenter import (
     build_combat_live_view_token as build_shared_combat_live_view_token,
@@ -208,6 +211,10 @@ from .systems_labels import (
     systems_entry_type_label,
     systems_entry_type_choice_labels,
     systems_entry_type_sort_key,
+)
+from .systems_access import (
+    filter_accessible_systems_entries as filter_shared_accessible_systems_entries,
+    list_accessible_campaign_source_entries as list_shared_accessible_campaign_source_entries,
 )
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError
 from .system_policy import (
@@ -1338,54 +1345,6 @@ def register_api(app) -> None:
             return None
         return candidate
 
-    def get_pullable_session_wiki_page_record(
-        campaign,
-        page_ref: str,
-        *,
-        include_body: bool = False,
-    ):
-        try:
-            record = get_campaign_page_store().get_page_record(
-                campaign.slug,
-                page_ref,
-                include_body=include_body,
-            )
-        except ValueError:
-            return None
-        if record is None or not campaign.is_page_visible(record.page):
-            return None
-        return record
-
-    def get_pullable_session_systems_entry(campaign_slug: str, entry_slug: str):
-        normalized_entry_slug = str(entry_slug or "").strip()
-        if not normalized_entry_slug:
-            return None
-        if not can_access_campaign_scope(campaign_slug, "systems"):
-            return None
-
-        entry = current_app.extensions["systems_service"].get_entry_by_slug_for_campaign(
-            campaign_slug,
-            normalized_entry_slug,
-        )
-        if entry is None or not can_access_campaign_systems_entry(campaign_slug, entry.slug):
-            return None
-        return entry
-
-    def build_session_article_source_search_results(campaign_slug: str, query: str, *, limit: int = 30) -> list[dict[str, str]]:
-        campaign = get_repository().get_campaign(campaign_slug)
-        if campaign is None:
-            abort(404)
-        return build_shared_session_article_source_search_results(
-            campaign=campaign,
-            campaign_slug=campaign_slug,
-            query=query,
-            page_store=get_campaign_page_store(),
-            systems_service=current_app.extensions["systems_service"],
-            can_access_systems=can_access_campaign_scope(campaign_slug, "systems"),
-            can_access_systems_entry=lambda entry_slug: can_access_campaign_systems_entry(campaign_slug, entry_slug),
-            limit=limit,
-        )
-
     def build_session_message_recipient_player_choices(campaign_slug: str) -> list[dict[str, object]]:
         store = get_auth_store()
         character_names_by_user_id: dict[int, list[str]] = {}
@@ -1517,39 +1476,6 @@ def register_api(app) -> None:
             )
 
         return payload
-
-    def build_session_live_view_token(campaign_slug: str, session_subpage: str) -> str:
-        current_preferences = get_current_user_preferences()
-        return build_shared_session_live_view_token(
-            campaign_slug,
-            session_subpage,
-            session_chat_order=current_preferences.session_chat_order,
-            can_manage_session=can_manage_campaign_session(campaign_slug),
-            can_post_session_messages=can_post_campaign_session_messages(campaign_slug),
-            normalize_hash_parts=True,
-        )
-
-    def build_combat_live_view_token(
-        campaign_slug: str,
-        *,
-        selected_combatant_id: int | None = None,
-    ) -> str:
-        return build_shared_combat_live_view_token(
-            campaign_slug,
-            "player",
-            selected_combatant_id=selected_combatant_id,
-            can_manage_combat=can_manage_campaign_combat(campaign_slug),
-            owned_character_slugs=get_owned_character_slugs(campaign_slug),
-            include_dm_view_part=False,
-            normalize_hash_parts=True,
-        )
-
-    def should_short_circuit_live_response(*, live_revision: int, live_view_token: str) -> bool:
-        return should_short_circuit_shared_live_response(
-            request.headers,
-            live_revision=live_revision,
-            live_view_token=live_view_token,
-        )
 
     def serialize_dm_statblock(statblock) -> dict[str, Any]:
         return {
@@ -1777,39 +1703,6 @@ def register_api(app) -> None:
             "slug": entry.slug,
             "reference_scope": reference_scope,
         }
-
-    def filter_accessible_systems_entries(
-        campaign_slug: str,
-        entries: list[object],
-        *,
-        limit: int | None = None,
-    ) -> list[object]:
-        accessible_entries = [
-            entry
-            for entry in entries
-            if can_access_campaign_systems_entry(campaign_slug, str(getattr(entry, "slug", "") or ""))
-        ]
-        if limit is not None:
-            return accessible_entries[:limit]
-        return accessible_entries
-
-    def list_accessible_campaign_source_entries(
-        campaign_slug: str,
-        source_id: str,
-        *,
-        entry_type: str | None = None,
-        query: str = "",
-        limit: int | None = None,
-    ) -> list[object]:
-        systems_service = current_app.extensions["systems_service"]
-        entries = systems_service.list_entries_for_campaign_source(
-            campaign_slug,
-            source_id,
-            entry_type=entry_type,
-            query=query,
-            limit=None,
-        )
-        return filter_accessible_systems_entries(campaign_slug, entries, limit=limit)
 
     def serialize_systems_import_run(import_run) -> dict[str, Any]:
         return {
@@ -2150,7 +2043,7 @@ def register_api(app) -> None:
         search_results = (
             [
                 serialize_systems_entry_summary(entry)
-                for entry in filter_accessible_systems_entries(
+                for entry in filter_shared_accessible_systems_entries(
                     campaign_slug,
                     systems_service.search_entries_for_campaign(
                         campaign_slug,
@@ -2158,6 +2051,7 @@ def register_api(app) -> None:
                         include_source_ids=include_source_ids,
                         limit=None,
                     ),
+                    can_access_campaign_systems_entry=can_access_campaign_systems_entry,
                     limit=250,
                 )
             ]
@@ -2166,13 +2060,14 @@ def register_api(app) -> None:
         )
         source_cards = []
         for state in source_states:
-            rules_reference_entries = filter_accessible_systems_entries(
+            rules_reference_entries = filter_shared_accessible_systems_entries(
                 campaign_slug,
                 systems_service.list_rules_reference_entries_for_campaign(
                     campaign_slug,
                     include_source_ids=[state.source.source_id],
                     limit=None,
                 ),
+                can_access_campaign_systems_entry=can_access_campaign_systems_entry,
             )
             source_cards.append(
                 {
@@ -2197,7 +2092,7 @@ def register_api(app) -> None:
         rules_reference_results = (
             [
                 serialize_systems_rules_reference_result(entry)
-                for entry in filter_accessible_systems_entries(
+                for entry in filter_shared_accessible_systems_entries(
                     campaign_slug,
                     systems_service.search_rules_reference_entries_for_campaign(
                         campaign_slug,
@@ -2205,6 +2100,7 @@ def register_api(app) -> None:
                         include_source_ids=global_rules_reference_source_ids,
                         limit=None,
                     ),
+                    can_access_campaign_systems_entry=can_access_campaign_systems_entry,
                     limit=100,
                 )
             ]
@@ -2246,150 +2142,6 @@ def register_api(app) -> None:
                 f"Combat tracker support for {campaign.system or 'this system'} is not available yet."
             )
         return campaign
-
-    COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS = {
-        "actions": "Actions",
-        "bonus_actions": "Bonus Actions",
-        "reactions": "Reactions",
-        "attacks": "Attacks",
-        "features": "Features",
-    }
-
-    def iter_feature_entries(entries: object):
-        for item in list(entries or []):
-            if not isinstance(item, dict):
-                continue
-            yield item
-            yield from iter_feature_entries(item.get("children"))
-
-    def serialize_combat_workspace_feature(feature: dict[str, Any], *, group_title: str) -> dict[str, Any]:
-        return {
-            "name": str(feature.get("name") or "").strip(),
-            "href": str(feature.get("href") or "").strip(),
-            "group_title": group_title,
-            "metadata": [str(item).strip() for item in list(feature.get("metadata") or []) if str(item).strip()],
-            "description_html": str(feature.get("description_html") or "").strip(),
-        }
-
-    def build_combat_character_workspace_sections_payload(
-        campaign_slug: str,
-        campaign,
-        record: CharacterRecord,
-    ) -> list[dict[str, Any]]:
-        campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
-        character_detail = present_character_detail(
-            campaign,
-            record,
-            include_player_notes_section=False,
-            systems_service=current_app.extensions["systems_service"],
-            campaign_page_records=campaign_page_records,
-        )
-        action_features: list[dict[str, Any]] = []
-        bonus_action_features: list[dict[str, Any]] = []
-        reaction_features: list[dict[str, Any]] = []
-        feature_groups = [
-            dict(group or {})
-            for group in list(character_detail.get("feature_groups") or [])
-            if isinstance(group, dict)
-        ]
-        for group in feature_groups:
-            group_title = str(group.get("title") or "Features").strip() or "Features"
-            for feature in iter_feature_entries(group.get("entries")):
-                feature_payload = dict(feature or {})
-                combat_availability = dict(feature_payload.get("combat_availability") or {})
-                if combat_availability and not bool(combat_availability.get("available", True)):
-                    continue
-                activation_type = str(feature_payload.get("activation_type") or "").strip().lower()
-                serialized = serialize_combat_workspace_feature(feature_payload, group_title=group_title)
-                if not serialized["name"]:
-                    continue
-                if activation_type == "action":
-                    action_features.append(serialized)
-                elif activation_type == "bonus_action":
-                    bonus_action_features.append(serialized)
-                elif activation_type == "reaction":
-                    reaction_features.append(serialized)
-
-        attacks = [
-            {
-                "name": str(item.get("name") or "").strip(),
-                "attack_bonus": str(item.get("attack_bonus") or item.get("to_hit") or "").strip(),
-                "damage": str(item.get("damage") or item.get("damage_label") or "").strip(),
-                "range": str(item.get("range") or item.get("range_label") or "").strip(),
-                "notes": str(item.get("notes") or item.get("description") or "").strip(),
-            }
-            for item in list(character_detail.get("attacks") or [])
-            if isinstance(item, dict) and str(item.get("name") or "").strip()
-        ]
-        hidden_attacks = []
-        for item in list(character_detail.get("hidden_attacks") or []):
-            if isinstance(item, dict):
-                name = str(item.get("name") or "").strip()
-                href = str(item.get("href") or "").strip()
-            else:
-                name = str(item or "").strip()
-                href = ""
-            if name:
-                hidden_attacks.append({"name": name, "href": href})
-
-        feature_group_summaries = [
-            {
-                "title": str(group.get("title") or "Features").strip() or "Features",
-                "features": [
-                    serialize_combat_workspace_feature(
-                        dict(feature or {}),
-                        group_title=str(group.get("title") or "Features").strip() or "Features",
-                    )
-                    for feature in iter_feature_entries(group.get("entries"))
-                    if str(dict(feature or {}).get("name") or "").strip()
-                ],
-            }
-            for group in feature_groups
-        ]
-
-        sections = [
-            {
-                "slug": "actions",
-                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["actions"],
-                "count": len(action_features),
-                "features": action_features,
-                "empty_message": "No action-specific features are recorded on this sheet yet.",
-            },
-            {
-                "slug": "bonus_actions",
-                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["bonus_actions"],
-                "count": len(bonus_action_features),
-                "features": bonus_action_features,
-                "empty_message": "No bonus-action features are recorded on this sheet yet.",
-            },
-            {
-                "slug": "reactions",
-                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["reactions"],
-                "count": len(reaction_features),
-                "features": reaction_features,
-                "empty_message": "No reaction features are recorded on this sheet yet.",
-            },
-            {
-                "slug": "attacks",
-                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["attacks"],
-                "count": len(attacks),
-                "attacks": attacks,
-                "hidden_attacks": hidden_attacks,
-                "empty_message": "No attacks are currently active on this sheet.",
-            },
-            {
-                "slug": "features",
-                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["features"],
-                "count": sum(len(group["features"]) for group in feature_group_summaries),
-                "feature_groups": feature_group_summaries,
-                "empty_message": "No feature details are recorded on this sheet yet.",
-            },
-        ]
-        return [
-            section
-            for section in sections
-            if int(section.get("count") or 0) > 0 or section.get("hidden_attacks")
-        ]
 
     def build_combat_payload(campaign_slug: str, *, include_sidebar_choices: bool = True) -> dict[str, Any]:
         campaign = get_repository().get_campaign(campaign_slug)
@@ -2527,10 +2279,16 @@ def register_api(app) -> None:
                 selected_player_slug = str(selected_player_character.get("character_slug") or "").strip()
                 selected_player_record = character_records_by_slug.get(selected_player_slug)
                 if selected_player_record is not None:
-                    selected_player_combat_sections = build_combat_character_workspace_sections_payload(
-                        campaign_slug,
+                    campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
+                    selected_player_detail = present_character_detail(
                         campaign,
                         selected_player_record,
+                        include_player_notes_section=False,
+                        systems_service=current_app.extensions["systems_service"],
+                        campaign_page_records=campaign_page_records,
+                    )
+                    selected_player_combat_sections = build_combat_character_workspace_sections_payload(
+                        selected_player_detail
                     )
 
             if can_manage_combat and include_sidebar_choices:
@@ -2574,9 +2332,14 @@ def register_api(app) -> None:
             if selected_combatant is not None and selected_combatant.get("id") is not None
             else None
         )
-        live_view_token = build_combat_live_view_token(
+        live_view_token = build_shared_combat_live_view_token(
             campaign_slug,
+            "player",
             selected_combatant_id=selected_combatant_id,
+            can_manage_combat=can_manage_campaign_combat(campaign_slug),
+            owned_character_slugs=get_owned_character_slugs(campaign_slug),
+            include_dm_view_part=False,
+            normalize_hash_parts=True,
         )
 
         return {
@@ -4668,35 +4431,6 @@ def register_api(app) -> None:
             include_body=True,
         )
 
-    def build_record_equipment_support_lookup(
-        record: CharacterRecord,
-        *,
-        item_catalog: dict[str, object],
-    ) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:
-        normalized_definition_equipment = _normalize_equipment_payloads(
-            list(record.definition.equipment_catalog or []),
-            item_catalog=item_catalog,
-        )
-        definition_item_lookup = {
-            str(item.get("id") or "").strip(): dict(item)
-            for item in normalized_definition_equipment
-            if str(item.get("id") or "").strip()
-        }
-        support_lookup: dict[str, dict[str, object]] = {}
-        for inventory_item in list((record.state_record.state or {}).get("inventory") or []):
-            item_ref = build_character_inventory_item_ref(inventory_item)
-            if not item_ref:
-                continue
-            definition_item = dict(definition_item_lookup.get(item_ref) or {})
-            support_item = dict(definition_item or inventory_item or {})
-            if not str(support_item.get("name") or "").strip():
-                support_item["name"] = str(dict(inventory_item or {}).get("name") or "").strip()
-            support_lookup[item_ref] = describe_equipment_state_support(
-                support_item,
-                item_catalog=item_catalog,
-            )
-        return definition_item_lookup, support_lookup
-
     def build_artificer_infusions_state_payload(
         record: CharacterRecord,
         *,
@@ -6638,17 +6372,21 @@ def register_api(app) -> None:
         if state is None or not state.is_enabled:
             abort(404)
 
-        book_entries = list_accessible_campaign_source_entries(
+        book_entries = list_shared_accessible_campaign_source_entries(
             campaign_slug,
             source_id,
+            systems_service=systems_service,
+            can_access_campaign_systems_entry=can_access_campaign_systems_entry,
             entry_type="book",
             limit=None,
         )
         all_entry_groups = []
         for entry_type, _ in systems_service.list_entry_type_counts_for_campaign_source(campaign_slug, source_id):
-            accessible_entries = list_accessible_campaign_source_entries(
+            accessible_entries = list_shared_accessible_campaign_source_entries(
                 campaign_slug,
                 source_id,
+                systems_service=systems_service,
+                can_access_campaign_systems_entry=can_access_campaign_systems_entry,
                 entry_type=entry_type,
                 limit=None,
             )
@@ -6675,9 +6413,10 @@ def register_api(app) -> None:
             include_source_ids=[source_id],
             limit=None,
         )
-        rules_reference_entries = filter_accessible_systems_entries(
+        rules_reference_entries = filter_shared_accessible_systems_entries(
             campaign_slug,
             raw_rules_reference_entries,
+            can_access_campaign_systems_entry=can_access_campaign_systems_entry,
         )
         has_book_rules_reference_entries = any(entry.entry_type == "book" for entry in rules_reference_entries)
         has_rule_rules_reference_entries = any(entry.entry_type == "rule" for entry in rules_reference_entries)
@@ -6709,7 +6448,7 @@ def register_api(app) -> None:
         rules_reference_results = (
             [
                 serialize_systems_rules_reference_result(entry)
-                for entry in filter_accessible_systems_entries(
+                for entry in filter_shared_accessible_systems_entries(
                     campaign_slug,
                     systems_service.search_rules_reference_entries_for_campaign(
                         campaign_slug,
@@ -6717,6 +6456,7 @@ def register_api(app) -> None:
                         include_source_ids=[source_id],
                         limit=None,
                     ),
+                    can_access_campaign_systems_entry=can_access_campaign_systems_entry,
                     limit=100,
                 )
             ]
@@ -6769,9 +6509,11 @@ def register_api(app) -> None:
             campaign_slug,
             source_id,
         ):
-            accessible_entries = list_accessible_campaign_source_entries(
+            accessible_entries = list_shared_accessible_campaign_source_entries(
                 campaign_slug,
                 source_id,
+                systems_service=systems_service,
+                can_access_campaign_systems_entry=can_access_campaign_systems_entry,
                 entry_type=grouped_entry_type,
                 limit=None,
             )
@@ -6794,9 +6536,11 @@ def register_api(app) -> None:
             item for item in all_entry_groups if item["entry_type"] not in SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES
         ]
 
-        all_entries = list_accessible_campaign_source_entries(
+        all_entries = list_shared_accessible_campaign_source_entries(
             campaign_slug,
             source_id,
+            systems_service=systems_service,
+            can_access_campaign_systems_entry=can_access_campaign_systems_entry,
             entry_type=normalized_entry_type,
             limit=None,
         )
@@ -6805,9 +6549,11 @@ def register_api(app) -> None:
             abort(404)
 
         query = request.args.get("q", "").strip()
-        entries = list_accessible_campaign_source_entries(
+        entries = list_shared_accessible_campaign_source_entries(
             campaign_slug,
             source_id,
+            systems_service=systems_service,
+            can_access_campaign_systems_entry=can_access_campaign_systems_entry,
             entry_type=normalized_entry_type,
             query=query,
             limit=None,
@@ -6936,8 +6682,17 @@ def register_api(app) -> None:
     def session_state(campaign_slug: str):
         session_service = current_app.extensions["campaign_session_service"]
         live_revision = session_service.get_live_revision(campaign_slug)
-        live_view_token = build_session_live_view_token(campaign_slug, "session")
-        if should_short_circuit_live_response(
+        current_preferences = get_current_user_preferences()
+        live_view_token = build_shared_session_live_view_token(
+            campaign_slug,
+            "session",
+            session_chat_order=current_preferences.session_chat_order,
+            can_manage_session=can_manage_campaign_session(campaign_slug),
+            can_post_session_messages=can_post_campaign_session_messages(campaign_slug),
+            normalize_hash_parts=True,
+        )
+        if should_short_circuit_shared_live_response(
+            request.headers,
             live_revision=live_revision,
             live_view_token=live_view_token,
         ):
@@ -6972,7 +6727,22 @@ def register_api(app) -> None:
                 }
             )
 
-        results = build_session_article_source_search_results(campaign_slug, query, limit=30)
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+        results = build_shared_session_article_source_search_results(
+            campaign=campaign,
+            campaign_slug=campaign_slug,
+            query=query,
+            page_store=get_campaign_page_store(),
+            systems_service=current_app.extensions["systems_service"],
+            can_access_systems=can_access_campaign_scope(campaign_slug, "systems"),
+            can_access_systems_entry=lambda entry_slug: can_access_campaign_systems_entry(
+                campaign_slug,
+                entry_slug,
+            ),
+            limit=30,
+        )
         message = (
             "Showing the first 30 matching articles."
             if len(results) == 30
@@ -7200,7 +6970,16 @@ def register_api(app) -> None:
                     str(payload.get("source_ref") or payload.get("page_ref") or "")
                 )
                 if source_kind == SESSION_ARTICLE_SOURCE_KIND_SYSTEMS:
-                    entry = get_pullable_session_systems_entry(campaign_slug, source_ref)
+                    entry = get_shared_pullable_session_systems_entry(
+                        campaign_slug,
+                        source_ref,
+                        systems_service=current_app.extensions["systems_service"],
+                        can_access_systems=can_access_campaign_scope(campaign_slug, "systems"),
+                        can_access_systems_entry=lambda entry_slug: can_access_campaign_systems_entry(
+                            campaign_slug,
+                            entry_slug,
+                        ),
+                    )
                     if entry is None:
                         raise CampaignSessionValidationError(
                             "Choose a visible published wiki page or Systems entry before pulling it into the session store."
@@ -7222,9 +7001,10 @@ def register_api(app) -> None:
                         created_by_user_id=user.id,
                     )
                 else:
-                    page_record = get_pullable_session_wiki_page_record(
+                    page_record = get_shared_pullable_session_wiki_page_record(
                         campaign,
                         source_ref,
+                        page_store=get_campaign_page_store(),
                         include_body=True,
                     )
                     if page_record is None:
@@ -7896,7 +7676,8 @@ def register_api(app) -> None:
     @api_campaign_scope_access_required("combat")
     def combat_state(campaign_slug: str):
         payload = build_combat_payload(campaign_slug)
-        if should_short_circuit_live_response(
+        if should_short_circuit_shared_live_response(
+            request.headers,
             live_revision=int(payload["live_revision"] or 0),
             live_view_token=str(payload["live_view_token"] or ""),
         ):
@@ -7914,7 +7695,8 @@ def register_api(app) -> None:
     @api_campaign_scope_access_required("combat")
     def combat_live_state(campaign_slug: str):
         payload = build_combat_payload(campaign_slug, include_sidebar_choices=False)
-        if should_short_circuit_live_response(
+        if should_short_circuit_shared_live_response(
+            request.headers,
             live_revision=int(payload["live_revision"] or 0),
             live_view_token=str(payload["live_view_token"] or ""),
         ):
@@ -9125,96 +8907,6 @@ def register_api(app) -> None:
 
         return serialize_updated_character(campaign_slug, character_slug)
 
-    def build_equipment_state_update_result(
-        campaign_slug: str,
-        record: CharacterRecord,
-        item_id: str,
-        payload: dict[str, Any],
-        *,
-        item_catalog: dict[str, object],
-    ):
-        inventory_by_ref = {
-            build_character_inventory_item_ref(item): dict(item)
-            for item in list((record.state_record.state or {}).get("inventory") or [])
-            if build_character_inventory_item_ref(item)
-        }
-        if item_id not in inventory_by_ref:
-            raise CharacterEditValidationError("Choose a valid equipment entry to update.")
-        _, support_lookup = build_record_equipment_support_lookup(
-            record,
-            item_catalog=item_catalog,
-        )
-        target_support = dict(support_lookup.get(item_id) or {})
-        if not bool(target_support.get("supports_equipped_state")):
-            raise CharacterEditValidationError(
-                "That inventory row stays on Inventory because it does not support equipment state."
-            )
-
-        weapon_wield_mode = ""
-        if bool(target_support.get("supports_weapon_wield_mode")):
-            weapon_wield_mode = _normalize_weapon_wield_mode_value(payload.get("weapon_wield_mode"))
-            allowed_modes = [
-                _normalize_weapon_wield_mode_value(value)
-                for value in list(target_support.get("weapon_wield_modes") or [])
-                if _normalize_weapon_wield_mode_value(value)
-            ]
-            allowed_mode_set = set(allowed_modes)
-            if weapon_wield_mode and weapon_wield_mode not in allowed_mode_set:
-                raise CharacterEditValidationError("Choose a valid wielding mode for that weapon.")
-            if not weapon_wield_mode and bool(payload.get("is_equipped")) and allowed_modes:
-                weapon_wield_mode = allowed_modes[0]
-            is_equipped = bool(weapon_wield_mode)
-        else:
-            is_equipped = bool(payload.get("is_equipped"))
-
-        requested_attunement = bool(payload.get("is_attuned"))
-        if requested_attunement and not bool(target_support.get("supports_attunement")):
-            raise CharacterEditValidationError(
-                "Only items whose durable metadata explicitly requires attunement can be attuned."
-            )
-        is_attuned = bool(requested_attunement and target_support.get("supports_attunement"))
-        attunement_payload = dict((record.state_record.state or {}).get("attunement") or {})
-        max_attuned_items = int(attunement_payload.get("max_attuned_items") or 3)
-        currently_attuned_refs = {
-            item_ref
-            for item_ref, item in inventory_by_ref.items()
-            if (
-                item_ref != item_id
-                and bool(item.get("is_attuned", False))
-                and bool(dict(support_lookup.get(item_ref) or {}).get("supports_attunement"))
-            )
-        }
-        next_attuned_count = len(currently_attuned_refs) + (1 if is_attuned else 0)
-        if max_attuned_items >= 0 and next_attuned_count > max_attuned_items:
-            raise CharacterEditValidationError(
-                f"This character already has {max_attuned_items} attuned item"
-                f"{'' if max_attuned_items == 1 else 's'}. Clear one first."
-            )
-
-        definition, import_metadata = apply_equipment_state_edit(
-            campaign_slug,
-            record.definition,
-            record.import_metadata,
-            item_catalog=item_catalog,
-            systems_service=current_app.extensions["systems_service"],
-            target_item_id=item_id,
-            is_equipped=is_equipped,
-            is_attuned=is_attuned,
-            weapon_wield_mode=weapon_wield_mode,
-        )
-        return (
-            definition,
-            import_metadata,
-            {},
-            {
-                item_id: {
-                    "is_equipped": is_equipped,
-                    "is_attuned": is_attuned,
-                    "weapon_wield_mode": weapon_wield_mode,
-                }
-            },
-        )
-
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/sheet-edit")
     @api_campaign_scope_access_required("characters")
     @api_login_required
@@ -9567,12 +9259,17 @@ def register_api(app) -> None:
         return run_character_definition_mutation(
             campaign_slug,
             character_slug,
-            lambda record, payload, user_id: build_equipment_state_update_result(
+            lambda record, payload, user_id: build_shared_equipment_state_update_result(
                 campaign_slug,
                 record,
                 item_id,
-                payload,
                 item_catalog=item_catalog,
+                systems_service=current_app.extensions["systems_service"],
+                values={
+                    "is_equipped": bool(payload.get("is_equipped")),
+                    "is_attuned": bool(payload.get("is_attuned")),
+                    "weapon_wield_mode": payload.get("weapon_wield_mode"),
+                },
             ),
         )
 
