@@ -667,7 +667,7 @@ def present_xianxia_honor_interactions(
             ),
             "support_label": "Reference only" if support_state == "reference_only" else "",
             "reference_lines": (
-                _extract_xianxia_rule_reference_lines(entry)
+                _extract_xianxia_rule_reference_lines(entry, facet_name="quick_reference")
                 if entry is not None
                 else []
             ),
@@ -693,7 +693,11 @@ def present_xianxia_skill_use_guardrails(
     if entry is None:
         return None
 
-    reference_lines = _extract_xianxia_skill_guardrail_lines(entry)
+    reference_lines = _extract_xianxia_rule_facet_lines(
+        entry,
+        "guardrails",
+        fallback_to_body=False,
+    )
     if not reference_lines:
         return None
 
@@ -730,7 +734,7 @@ def present_xianxia_rule_text_references(
         if entry is None:
             continue
 
-        reference_lines = _extract_xianxia_rule_reference_lines(entry)
+        reference_lines = _extract_xianxia_rule_reference_lines(entry, facet_name="quick_reference")
         if not reference_lines:
             continue
 
@@ -794,11 +798,19 @@ def present_xianxia_active_state_reminders(
         if entry is None:
             continue
 
-        label = str(spec["label"])
+        reminder_facet = _xianxia_rule_facet_payload(entry, "active_state_reminders")
+        label = str(reminder_facet.get("label") or spec["label"])
+        state_key = str(reminder_facet.get("state_key") or spec["state_key"])
         active_record = coerce_xianxia_active_state_record(
-            xianxia_state.get(str(spec["state_key"]))
+            xianxia_state.get(state_key)
         )
         active_name = str(active_record.get("name") or "").strip()
+        active_status_template = str(
+            reminder_facet.get("active_status_label_template") or f"Active {label}: {{name}}"
+        ).strip()
+        empty_status_label = str(
+            reminder_facet.get("empty_status_label") or f"No active {label} recorded"
+        ).strip()
         metadata = dict(getattr(entry, "metadata", {}) or {})
         body = dict(getattr(entry, "body", {}) or {})
         support_state = str(
@@ -810,14 +822,17 @@ def present_xianxia_active_state_reminders(
                 "label": label,
                 "title": str(getattr(entry, "title", "") or f"{label} Activation Rules"),
                 "status_label": (
-                    f"Active {label}: {active_name}"
+                    active_status_template.replace("{name}", active_name)
                     if active_name
-                    else f"No active {label} recorded"
+                    else empty_status_label
                 ),
                 "support_label": "Reference only"
                 if support_state == "reference_only"
                 else "",
-                "reference_lines": _extract_xianxia_rule_reference_lines(entry),
+                "reference_lines": _extract_xianxia_rule_reference_lines(
+                    entry,
+                    facet_name="active_state_reminders",
+                ),
                 "rule_href": build_systems_entry_href(
                     campaign.slug,
                     {
@@ -839,7 +854,23 @@ def coerce_xianxia_active_state_record(value: Any) -> dict[str, Any]:
     return {}
 
 
-def _extract_xianxia_rule_reference_lines(entry: Any) -> list[str]:
+def _extract_xianxia_rule_reference_lines(
+    entry: Any,
+    *,
+    facet_name: str = "",
+    fallback_to_body: bool = True,
+) -> list[str]:
+    if facet_name:
+        facet_lines = _extract_xianxia_rule_facet_lines(
+            entry,
+            facet_name,
+            fallback_to_body=False,
+        )
+        if facet_lines:
+            return facet_lines
+        if not fallback_to_body:
+            return []
+
     body = dict(getattr(entry, "body", {}) or {})
     raw_lines: list[str] = []
     summary = str(body.get("summary") or "").strip()
@@ -867,17 +898,71 @@ def _extract_xianxia_rule_reference_lines(entry: Any) -> list[str]:
     return lines
 
 
-def _extract_xianxia_skill_guardrail_lines(entry: Any) -> list[str]:
-    guardrail_lines: list[str] = []
-    for line in _extract_xianxia_rule_reference_lines(entry):
-        normalized = line.casefold()
-        if (
-            "active battle" in normalized
-            or "pre-battle" in normalized
-            or "surroundings" in normalized
-        ):
-            guardrail_lines.append(line)
-    return guardrail_lines
+def _extract_xianxia_rule_facet_lines(
+    entry: Any,
+    facet_name: str,
+    *,
+    fallback_to_body: bool = False,
+) -> list[str]:
+    facet_payload = _xianxia_rule_facet_payload(entry, facet_name)
+    raw_lines = _xianxia_rule_facet_string_list(facet_payload, "reference_lines")
+    if not raw_lines:
+        raw_lines = _xianxia_rule_facet_string_list(facet_payload, "lines")
+    if not raw_lines:
+        raw_lines = _xianxia_rule_facet_string_list(facet_payload, "bullets")
+    lines = dedupe_values(raw_lines)
+    if lines or not fallback_to_body:
+        return lines
+    return _extract_xianxia_rule_reference_lines(entry)
+
+
+def _extract_xianxia_rule_break_reference(entry: Any) -> dict[str, Any]:
+    facet_payload = _xianxia_rule_facet_payload(entry, "break_reference")
+    if not facet_payload:
+        return {}
+    return {
+        "status_label": str(facet_payload.get("status_label") or "").strip(),
+        "reference_lines": dedupe_values(
+            _xianxia_rule_facet_string_list(facet_payload, "reference_lines")
+        ),
+        "recovery_lines": dedupe_values(
+            _xianxia_rule_facet_string_list(facet_payload, "recovery_lines")
+        ),
+    }
+
+
+def _xianxia_rule_facet_payload(entry: Any, facet_name: str) -> dict[str, Any]:
+    normalized_name = str(facet_name or "").strip()
+    if not normalized_name:
+        return {}
+    for source in (
+        dict(getattr(entry, "metadata", {}) or {}),
+        dict(getattr(entry, "body", {}) or {}),
+    ):
+        facets = source.get("xianxia_rule_facets")
+        if not isinstance(facets, dict):
+            continue
+        payload = facets.get(normalized_name)
+        if isinstance(payload, dict):
+            return dict(payload)
+        if isinstance(payload, list):
+            return {"reference_lines": list(payload)}
+    return {}
+
+
+def _xianxia_rule_facet_string_list(payload: Any, key: str) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    raw_value = payload.get(key)
+    if raw_value in (None, "", [], ()):
+        return []
+    if isinstance(raw_value, str):
+        candidates = [raw_value]
+    elif isinstance(raw_value, (list, tuple, set)):
+        candidates = list(raw_value)
+    else:
+        candidates = [raw_value]
+    return [str(value or "").strip() for value in candidates if str(value or "").strip()]
 
 
 def present_xianxia_stance_break_reference(
@@ -903,22 +988,12 @@ def present_xianxia_stance_break_reference(
 
     reference_lines: list[str] = []
     recovery_lines: list[str] = []
+    status_label = "Current Stance 0"
     if entry is not None:
-        for section in list(dict(entry.body or {}).get("sections") or []):
-            section_payload = dict(section or {})
-            for raw_bullet in list(section_payload.get("bullets") or []):
-                bullet = str(raw_bullet or "").strip()
-                if not bullet:
-                    continue
-                normalized = bullet.lower()
-                if (
-                    "current stance reaches 0" in normalized
-                    or "stance breaks" in normalized
-                    or "stance break" in normalized
-                ):
-                    reference_lines.append(bullet)
-                elif "stance recovers" in normalized:
-                    recovery_lines.append(bullet)
+        break_reference = _extract_xianxia_rule_break_reference(entry)
+        reference_lines = list(break_reference.get("reference_lines") or [])
+        recovery_lines = list(break_reference.get("recovery_lines") or [])
+        status_label = str(break_reference.get("status_label") or status_label).strip()
 
     if not reference_lines:
         reference_lines.append("Current Stance is 0.")
@@ -931,7 +1006,7 @@ def present_xianxia_stance_break_reference(
     }
     return {
         "current_stance": current_stance,
-        "status_label": "Current Stance 0",
+        "status_label": status_label,
         "reference_lines": reference_lines,
         "recovery_lines": recovery_lines,
         "rule_title": systems_ref["title"],

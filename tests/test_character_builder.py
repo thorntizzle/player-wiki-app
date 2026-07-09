@@ -7,7 +7,10 @@ from types import SimpleNamespace
 import player_wiki.app as app_module
 import pytest
 import yaml
-from player_wiki.campaign_item_mechanics import build_campaign_item_mechanics_metadata
+from player_wiki.campaign_item_mechanics import (
+    build_campaign_item_mechanics_metadata,
+    campaign_item_special_effect_metadata,
+)
 from player_wiki.character_campaign_options import normalize_campaign_character_option
 from player_wiki.character_campaign_progression import build_campaign_page_progression_entries
 from player_wiki.character_builder import (
@@ -9519,6 +9522,105 @@ def test_recalculate_definition_attacks_uses_approved_campaign_systems_item_mech
     assert attack["equipment_refs"] == ["consecrated-huran-blade-1"]
 
 
+def _innovators_bolt_body_markdown() -> str:
+    return (
+        "*Weapon (pistol), very rare (requires attunement by an artificer)*\n\n"
+        "Martial weapon, ranged weapon\n\n"
+        "1d10 piercing; ammunition (20/60), reload (1 bullet)\n\n"
+        "You gain a +1 bonus to attack and damage rolls made with this magic weapon.\n\n"
+        "When reloading this weapon, an artificer attuned to it can expend a spell slot to load an "
+        "enchanted bullet from its current developed list. Additional bullets may be developed "
+        "through research.\n\n"
+        "Current known enchanted bullet options:\n\n"
+        "| Bullet | Damage per spell level | Additional effect |\n"
+        "| --- | --- | --- |\n"
+        "| Incendiary | 1d6 fire | Creatures within 5 feet of the target must make a Dexterity save "
+        "against the bearer's spell save DC or take the fire damage. |\n"
+        "| Booming | 1d8 thunder | Constitution save against the bearer's spell save DC or be "
+        "deafened for 1 minute and knocked prone. |\n"
+        "| Smoke | 1d6 bludgeoning | Wisdom save against the bearer's spell save DC or be blinded "
+        "for 1 minute. |\n"
+    )
+
+
+def _innovators_bolt_systems_entry(*, review_status: str = "approved") -> SystemsEntryRecord:
+    return _systems_entry(
+        "item",
+        "custom-linden-pass-innovators-bolt",
+        "Innovator's Bolt",
+        source_id="CUSTOM-LINDEN-PASS",
+        metadata=build_campaign_item_mechanics_metadata(
+            title="Innovator's Bolt",
+            body_markdown=_innovators_bolt_body_markdown(),
+            source_page_ref="items/innovators-bolt",
+            review_status=review_status,
+        ),
+    )
+
+
+def test_recalculate_definition_attacks_uses_approved_innovators_bolt_base_weapon_mechanics():
+    item_entry = _innovators_bolt_systems_entry()
+    definition = _minimal_character_definition("flair-sparkmantle", "Flair Sparkmantle")
+    definition.profile["class_level_text"] = "Artificer 6"
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Artificer",
+            "subclass_name": "Armorer",
+            "level": 6,
+        }
+    ]
+    definition.stats["proficiency_bonus"] = 3
+    definition.stats["ability_scores"]["dex"] = {
+        "score": 17,
+        "modifier": 3,
+        "save_bonus": 3,
+    }
+    definition.proficiencies["weapons"] = ["Firearms"]
+    definition.equipment_catalog = [
+        {
+            "id": "manual-item-innovators-bolt",
+            "name": "Innovator's Bolt",
+            "default_quantity": 1,
+            "weight": "",
+            "notes": "",
+            "systems_ref": _systems_ref(item_entry),
+            "page_ref": {
+                "slug": "items/innovators-bolt",
+                "title": "Innovator's Bolt",
+            },
+            "is_equipped": True,
+            "is_attuned": True,
+        }
+    ]
+
+    recalculated = _recalculate_definition_attacks(
+        definition,
+        item_catalog=_build_item_catalog([item_entry]),
+    )
+    review_payload = dict(item_entry.metadata.get("campaign_item_mechanics") or {})
+    flag_codes = {
+        str(flag.get("code") or "").strip()
+        for flag in list(review_payload.get("flags") or [])
+    }
+
+    assert len(recalculated) == 1
+    attack = recalculated[0]
+    assert campaign_item_special_effect_metadata("Innovator's Bolt") == {}
+    assert review_payload["review_status"] == "approved"
+    assert review_payload["support_state"] == "needs_implementation"
+    assert {"area_effect", "condition_effect", "spell_slot_expenditure"}.issubset(flag_codes)
+    assert attack["name"] == "Innovator's Bolt"
+    assert attack["category"] == "ranged weapon"
+    assert attack["attack_bonus"] == 7
+    assert attack["damage"] == "1d10+4 piercing"
+    assert attack["damage_type"] == "piercing"
+    assert attack["notes"] == "Ammunition, loading, range 30/90."
+    assert attack["systems_ref"]["slug"] == item_entry.slug
+    assert attack["page_ref"]["slug"] == "items/innovators-bolt"
+    assert attack["equipment_refs"] == ["manual-item-innovators-bolt"]
+
+
 def test_recalculate_definition_attacks_ignores_unapproved_campaign_systems_item_mechanics():
     definition = _minimal_character_definition("draft-bearer", "Draft Bearer")
     definition.proficiencies["weapons"] = ["Martial Weapons"]
@@ -9652,6 +9754,47 @@ def test_recalculate_definition_attacks_preserves_matching_campaign_page_attack_
     assert recalculated[0]["page_ref"]["slug"] == "items/consecrated-huran-blade"
 
 
+def _hourglass_pendant_systems_entry(*, review_status: str = "approved"):
+    return _systems_entry(
+        "item",
+        "custom-linden-pass-hourglass-pendant",
+        "Hourglass Pendant",
+        source_id="CUSTOM-LINDEN-PASS",
+        metadata=build_campaign_item_mechanics_metadata(
+            title="Hourglass Pendant",
+            body_markdown=(
+                "*Wondrous item, very rare (requires attunement by a chronurgy wizard)*\n\n"
+                "A timeworn focus for chronurgy magic."
+            ),
+            explicit_mechanics={
+                "spell_support": [
+                    {
+                        "source": {
+                            "id": "spell-source:item:hourglass-pendant",
+                            "title": "Hourglass Pendant",
+                            "kind": "item",
+                            "ability_key": "int",
+                        },
+                        "grants": {
+                            "_": [
+                                {
+                                    "spell": "Gift of Alacrity",
+                                    "access_type": "free_cast",
+                                    "access_uses": 1,
+                                    "access_reset_on": "long_rest",
+                                }
+                            ]
+                        },
+                    }
+                ],
+                "resource_template_bonuses": [{"id": "chronal-shift", "bonus": 1}],
+            },
+            source_page_ref="items/hourglass-pendant",
+            review_status=review_status,
+        ),
+    )
+
+
 def test_normalize_definition_to_native_model_applies_hourglass_pendant_spell_and_resource_bonus():
     gift_of_alacrity = _systems_entry(
         "spell",
@@ -9659,6 +9802,7 @@ def test_normalize_definition_to_native_model_applies_hourglass_pendant_spell_an
         "Gift of Alacrity",
         metadata={"level": 1},
     )
+    hourglass_pendant = _hourglass_pendant_systems_entry()
     definition = _minimal_character_definition("olin-itador", "Olin Itador")
     definition.profile["class_level_text"] = "Wizard 2"
     definition.profile["classes"] = [
@@ -9688,25 +9832,11 @@ def test_normalize_definition_to_native_model_applies_hourglass_pendant_spell_an
             "notes": "",
             "is_equipped": True,
             "is_attuned": True,
-            "page_ref": "items/hourglass-pendant",
+            "systems_ref": _systems_ref(hourglass_pendant),
         }
     ]
 
-    item_catalog = _attach_campaign_item_page_support(
-        {},
-        [
-            _campaign_page_record(
-                "items/hourglass-pendant",
-                "Hourglass Pendant",
-                section="Items",
-                body_markdown=(
-                    "*Wondrous item, very rare (requires attunement by a chronurgy wizard)*\n\n"
-                    "While wearing this pendant, you can cast Gift of Alacrity once without expending a spell slot. "
-                    "You regain that use when you finish a long rest. While attuned to the pendant, you gain one additional use of Chronal Shift.\n"
-                ),
-            )
-        ],
-    )
+    item_catalog = _build_item_catalog([hourglass_pendant])
 
     normalized = normalize_definition_to_native_model(
         definition,
@@ -9722,6 +9852,7 @@ def test_normalize_definition_to_native_model_applies_hourglass_pendant_spell_an
 
     assert resources_by_id["chronal-shift"]["max"] == 3
     assert resources_by_id["chronal-shift"]["initial_current"] == 3
+    assert campaign_item_special_effect_metadata("Hourglass Pendant") == {}
     assert spells_by_name["Gift of Alacrity"]["spell_source_row_id"] == "spell-source:item:hourglass-pendant"
     assert spells_by_name["Gift of Alacrity"]["spell_access_type"] == "free_cast"
     assert spells_by_name["Gift of Alacrity"]["spell_access_uses"] == 1
@@ -9747,6 +9878,74 @@ def test_normalize_definition_to_native_model_requires_hourglass_pendant_worn_an
         "Gift of Alacrity",
         metadata={"level": 1},
     )
+    hourglass_pendant = _hourglass_pendant_systems_entry()
+    definition = _minimal_character_definition("olin-itador", "Olin Itador")
+    definition.profile["class_level_text"] = "Wizard 2"
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Wizard",
+            "subclass_name": "Chronurgy Magic",
+            "level": 2,
+        }
+    ]
+    definition.features = [
+        {
+            "id": "chronal-shift-1",
+            "name": "Chronal Shift",
+            "category": "subclass_feature",
+            "source": "EGW",
+            "description_markdown": "",
+            "class_row_id": "class-row-1",
+        }
+    ]
+    definition.spellcasting["spells"] = [
+        {
+            "name": "Gift of Alacrity",
+            "mark": "Item",
+            "spell_source_row_id": "spell-source:item:hourglass-pendant",
+        }
+    ]
+    definition.equipment_catalog = [
+        {
+            "id": "hourglass-pendant-1",
+            "name": "Hourglass Pendant",
+            "default_quantity": 1,
+            "weight": "--",
+            "notes": "",
+            "is_equipped": is_equipped,
+            "is_attuned": is_attuned,
+            "systems_ref": _systems_ref(hourglass_pendant),
+        }
+    ]
+
+    item_catalog = _build_item_catalog([hourglass_pendant])
+
+    normalized = normalize_definition_to_native_model(
+        definition,
+        item_catalog=item_catalog,
+        spell_catalog=_build_spell_catalog([gift_of_alacrity]),
+    )
+    spells_by_name = {spell["name"]: spell for spell in normalized.spellcasting["spells"]}
+    source_row_ids = {
+        row["source_row_id"]
+        for row in list(normalized.spellcasting.get("source_rows") or [])
+    }
+    resources_by_id = {resource["id"]: resource for resource in normalized.resource_templates}
+
+    assert "Gift of Alacrity" not in spells_by_name
+    assert "spell-source:item:hourglass-pendant" not in source_row_ids
+    assert resources_by_id["chronal-shift"]["max"] == 2
+
+
+def test_normalize_definition_to_native_model_ignores_unapproved_campaign_item_special_metadata():
+    gift_of_alacrity = _systems_entry(
+        "spell",
+        "egw-spell-gift-of-alacrity",
+        "Gift of Alacrity",
+        metadata={"level": 1},
+    )
+    hourglass_pendant = _hourglass_pendant_systems_entry(review_status="draft")
     definition = _minimal_character_definition("olin-itador", "Olin Itador")
     definition.profile["class_level_text"] = "Wizard 2"
     definition.profile["classes"] = [
@@ -9774,46 +9973,96 @@ def test_normalize_definition_to_native_model_requires_hourglass_pendant_worn_an
             "default_quantity": 1,
             "weight": "--",
             "notes": "",
-            "is_equipped": is_equipped,
-            "is_attuned": is_attuned,
-            "page_ref": "items/hourglass-pendant",
+            "is_equipped": True,
+            "is_attuned": True,
+            "systems_ref": _systems_ref(hourglass_pendant),
         }
     ]
 
-    item_catalog = _attach_campaign_item_page_support(
-        {},
-        [
-            _campaign_page_record(
-                "items/hourglass-pendant",
-                "Hourglass Pendant",
-                section="Items",
-                body_markdown=(
-                    "*Wondrous item, very rare (requires attunement by a chronurgy wizard)*\n\n"
-                    "While wearing this pendant, you can cast Gift of Alacrity once without expending a spell slot. "
-                    "You regain that use when you finish a long rest. While attuned to the pendant, you gain one additional use of Chronal Shift.\n"
-                ),
-            )
-        ],
-    )
-
     normalized = normalize_definition_to_native_model(
         definition,
-        item_catalog=item_catalog,
+        item_catalog=_build_item_catalog([hourglass_pendant]),
         spell_catalog=_build_spell_catalog([gift_of_alacrity]),
     )
-    spells_by_name = {spell["name"]: spell for spell in normalized.spellcasting["spells"]}
-    source_row_ids = {
-        row["source_row_id"]
-        for row in list(normalized.spellcasting.get("source_rows") or [])
-    }
     resources_by_id = {resource["id"]: resource for resource in normalized.resource_templates}
+    spells_by_name = {spell["name"]: spell for spell in normalized.spellcasting["spells"]}
 
     assert "Gift of Alacrity" not in spells_by_name
-    assert "spell-source:item:hourglass-pendant" not in source_row_ids
     assert resources_by_id["chronal-shift"]["max"] == 2
 
 
 def test_normalize_definition_to_native_model_applies_psionic_circlet_item_effects():
+    psionic_circlet = _systems_entry(
+        "item",
+        "custom-linden-pass-psionic-circlet",
+        "Psionic Circlet",
+        source_id="CUSTOM-LINDEN-PASS",
+        metadata=build_campaign_item_mechanics_metadata(
+            title="Psionic Circlet",
+            body_markdown=(
+                "*Wondrous item, rare (requires attunement)*\n\n"
+                "The circlet stabilizes psionic talent."
+            ),
+            explicit_mechanics={
+                "ability_score_minimums": {"int": 14},
+                "resource_template_bonuses": [
+                    {
+                        "id": "psionic-power-psionic-energy",
+                        "bonus": 1,
+                    }
+                ],
+                "attack_reminder_rules": [
+                    {
+                        "id": "item:psionic-circlet:psionic-options",
+                        "title": "Psionic Circlet",
+                        "save_dc_ability_key": "int",
+                        "condition": (
+                            "Once on each of your turns, after you hit a target within 30 feet with a weapon "
+                            "attack and deal damage to it, you can expend one Psionic Energy die to use one "
+                            "of these options."
+                        ),
+                        "attack_scope": {
+                            "label": "Weapon attacks",
+                            "categories": ["melee weapon", "ranged weapon"],
+                        },
+                        "effects": [
+                            {
+                                "kind": "saving_throw",
+                                "label": "Wisdom save DC",
+                                "summary": "Psychic Hindrance and Psychic Anchor use Wisdom save DC {save_dc}.",
+                            },
+                            {
+                                "kind": "disadvantage",
+                                "label": "Psychic Hindrance",
+                                "summary": (
+                                    "On a failed Wisdom save, the target's next attack roll before the end of "
+                                    "its next turn is made with disadvantage."
+                                ),
+                            },
+                            {
+                                "kind": "advantage",
+                                "label": "Psychic Opening",
+                                "summary": (
+                                    "The next attack roll made against the target before the start of your next "
+                                    "turn has advantage."
+                                ),
+                            },
+                            {
+                                "kind": "speed_control",
+                                "label": "Psychic Anchor",
+                                "summary": (
+                                    "On a failed Wisdom save, the target's speed becomes 0 until the end of "
+                                    "its next turn."
+                                ),
+                            },
+                        ],
+                    }
+                ],
+            },
+            source_page_ref="items/psionic-circlet",
+            review_status="approved",
+        ),
+    )
     definition = _minimal_character_definition("zigzag-blackscar", "Zigzag Blackscar")
     definition.profile["class_level_text"] = "Fighter 3"
     definition.profile["classes"] = [
@@ -9855,77 +10104,11 @@ def test_normalize_definition_to_native_model_applies_psionic_circlet_item_effec
             "notes": "",
             "is_equipped": True,
             "is_attuned": True,
-            "page_ref": "items/psionic-circlet",
+            "systems_ref": _systems_ref(psionic_circlet),
         }
     ]
 
-    item_catalog = _attach_campaign_item_page_support(
-        {},
-        [
-            _campaign_page_record(
-                "items/psionic-circlet",
-                "Psionic Circlet",
-                section="Items",
-                metadata={
-                    "ability_score_minimums": {"int": 14},
-                    "resource_template_bonuses": [
-                        {
-                            "id": "psionic-power-psionic-energy",
-                            "bonus": 1,
-                        }
-                    ],
-                    "attack_reminder_rules": [
-                        {
-                            "id": "item:psionic-circlet:psionic-options",
-                            "title": "Psionic Circlet",
-                            "save_dc_ability_key": "int",
-                            "condition": (
-                                "Once on each of your turns, after you hit a target within 30 feet with a weapon "
-                                "attack and deal damage to it, you can expend one Psionic Energy die to use one "
-                                "of these options."
-                            ),
-                            "attack_scope": {
-                                "label": "Weapon attacks",
-                                "categories": ["melee weapon", "ranged weapon"],
-                            },
-                            "effects": [
-                                {
-                                    "kind": "saving_throw",
-                                    "label": "Wisdom save DC",
-                                    "summary": "Psychic Hindrance and Psychic Anchor use Wisdom save DC {save_dc}.",
-                                },
-                                {
-                                    "kind": "disadvantage",
-                                    "label": "Psychic Hindrance",
-                                    "summary": (
-                                        "On a failed Wisdom save, the target's next attack roll before the end of "
-                                        "its next turn is made with disadvantage."
-                                    ),
-                                },
-                                {
-                                    "kind": "advantage",
-                                    "label": "Psychic Opening",
-                                    "summary": (
-                                        "The next attack roll made against the target before the start of your next "
-                                        "turn has advantage."
-                                    ),
-                                },
-                                {
-                                    "kind": "speed_control",
-                                    "label": "Psychic Anchor",
-                                    "summary": (
-                                        "On a failed Wisdom save, the target's speed becomes 0 until the end of "
-                                        "its next turn."
-                                    ),
-                                },
-                            ],
-                        }
-                    ],
-                },
-                body_markdown="*Wondrous item, rare (requires attunement)*\n\nThe circlet stabilizes psionic talent.\n",
-            )
-        ],
-    )
+    item_catalog = _build_item_catalog([psionic_circlet])
 
     normalized = normalize_definition_to_native_model(
         definition,
@@ -9936,6 +10119,7 @@ def test_normalize_definition_to_native_model_applies_psionic_circlet_item_effec
     circlet_rule = next(rule for rule in list(reminder_state.get("rules") or []) if rule["title"] == "Psionic Circlet")
     reminder_effects = {effect["label"]: effect["summary"] for effect in list(circlet_rule.get("effects") or [])}
 
+    assert campaign_item_special_effect_metadata("Psionic Circlet") == {}
     assert normalized.stats["ability_scores"]["int"]["score"] == 14
     assert normalized.stats["ability_scores"]["int"]["modifier"] == 2
     assert resources_by_id["psionic-power-psionic-energy"]["max"] == 5

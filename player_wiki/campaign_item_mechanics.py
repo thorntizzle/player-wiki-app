@@ -496,6 +496,7 @@ def _append_unsupported_flags(
         ("extra_damage", r"\badditional\s+\d+d\d+\s+\w+\s+damage\b|\bextra\s+\d+d\d+\s+\w+\s+damage\b"),
         ("area_effect", r"\bradius\b|\bwithin \d+ feet\b|\bcreatures? within\b"),
         ("condition_effect", r"\bblinded\b|\bdeafened\b|\bknocked prone\b|\bspeed becomes 0\b|\bdisadvantage\b|\badvantage\b"),
+        ("spell_slot_expenditure", r"\bexpend(?:s|ed|ing)?\s+a\s+spell\s+slot\b|\bspend(?:s|ing)?\s+a\s+spell\s+slot\b"),
         ("charges", r"\bcharges?\b|\brecharge\b"),
         ("activation_timing", r"\bbonus action\b|\breaction\b|\bas an action\b"),
     ]
@@ -525,6 +526,9 @@ def _flag_message(code: str) -> str:
         "extra_damage": "Extra damage is visible for review but is not yet added to generated attack damage.",
         "area_effect": "Area or target effects are visible for review but are not automated.",
         "condition_effect": "Condition, advantage, or movement-control effects are visible for review but are not automated.",
+        "spell_slot_expenditure": (
+            "Spell-slot expenditure is visible for review but is not yet a character-state or UI control."
+        ),
         "charges": "Charges and recharge rules are stored for review but are not yet a character-state counter.",
         "activation_timing": "Activation timing is stored for review but is not yet an action-economy control.",
     }.get(code, "This mechanic needs manual review before automation.")
@@ -622,30 +626,9 @@ def _excerpt_for(body_text: str, token: str) -> str:
     return _nearby_text(body_text, index)
 
 
+# Legacy interpreter fallback for campaign item pages that have not yet been
+# migrated to explicit approved Systems item mechanics metadata.
 _SPECIAL_EFFECTS_BY_TITLE = {
-    normalize_lookup("Hourglass Pendant"): {
-        "spell_support": [
-            {
-                "source": {
-                    "id": "spell-source:item:hourglass-pendant",
-                    "title": "Hourglass Pendant",
-                    "kind": "item",
-                    "ability_key": "int",
-                },
-                "grants": {
-                    "_": [
-                        {
-                            "spell": "Gift of Alacrity",
-                            "access_type": "free_cast",
-                            "access_uses": 1,
-                            "access_reset_on": "long_rest",
-                        }
-                    ]
-                },
-            }
-        ],
-        "resource_template_bonuses": [{"id": "chronal-shift", "bonus": 1}],
-    },
     normalize_lookup("Censer of Last Light"): {
         "spell_support": [
             {
@@ -691,62 +674,6 @@ _SPECIAL_EFFECTS_BY_TITLE = {
                         "label": "Sleep ward",
                         "summary": "You can't be magically put to sleep.",
                     }
-                ],
-            }
-        ],
-    },
-    normalize_lookup("Psionic Circlet"): {
-        "ability_score_minimums": {"int": 14},
-        "resource_template_bonuses": [
-            {
-                "id": "psionic-power-psionic-energy",
-                "bonus": 1,
-            }
-        ],
-        "attack_reminder_rules": [
-            {
-                "id": "item:psionic-circlet:psionic-options",
-                "title": "Psionic Circlet",
-                "save_dc_ability_key": "int",
-                "condition": (
-                    "Once on each of your turns, after you hit a target within 30 feet with a weapon "
-                    "attack and deal damage to it, you can expend one Psionic Energy die to use one "
-                    "of these options."
-                ),
-                "attack_scope": {
-                    "label": "Weapon attacks",
-                    "categories": ["melee weapon", "ranged weapon"],
-                },
-                "effects": [
-                    {
-                        "kind": "saving_throw",
-                        "label": "Wisdom save DC",
-                        "summary": "Psychic Hindrance and Psychic Anchor use Wisdom save DC {save_dc}.",
-                    },
-                    {
-                        "kind": "disadvantage",
-                        "label": "Psychic Hindrance",
-                        "summary": (
-                            "On a failed Wisdom save, the target's next attack roll before the end of "
-                            "its next turn is made with disadvantage."
-                        ),
-                    },
-                    {
-                        "kind": "advantage",
-                        "label": "Psychic Opening",
-                        "summary": (
-                            "The next attack roll made against the target before the start of your next "
-                            "turn has advantage."
-                        ),
-                    },
-                    {
-                        "kind": "speed_control",
-                        "label": "Psychic Anchor",
-                        "summary": (
-                            "On a failed Wisdom save, the target's speed becomes 0 until the end of "
-                            "its next turn."
-                        ),
-                    },
                 ],
             }
         ],

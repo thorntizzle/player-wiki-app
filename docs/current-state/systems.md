@@ -34,9 +34,9 @@ Last updated: 2026-07-09
 - Campaign Mechanics pages can expose structured `character_option.mechanic_effects`; the app preserves those rows and projects legacy effect keys for current DND-5E builder compatibility.
 - Campaign Mechanics pages can define scaled `character_option.resource` grants such as `scaling.mode: half_level`; normalization mirrors those grants into `resource_template` mechanic effects, and DND-5E builders derive trackers from that structured metadata rather than prose.
 - Review statuses are `draft`, `approved`, `reference_only`, and `manual_review`. Support states are `modeled`, `reference_only`, `unsupported`, `needs_implementation`, and `manual_review`.
-- The interpreter handles the first safe DND-style slice: item classification, rarity, attunement, PHB weapon/armor profile mapping, `+X` weapon/armor bonuses, simple spell grants, known curated Linden Pass item effects, field provenance, and unsupported-mechanic flags.
+- The interpreter handles the first safe DND-style slice: item classification, rarity, attunement, PHB weapon/armor profile mapping, `+X` weapon/armor bonuses, simple spell grants, legacy curated Linden Pass page-prose fallbacks, field provenance, and unsupported-mechanic flags.
 - Approved campaign item mechanics can feed character-facing automation through the same metadata paths as shared DND item rows. `draft`, `manual_review`, and `reference_only` campaign item rows remain visible/reviewable but do not silently drive character automation.
-- The first local Linden Pass migration pass created/refreshed structured records for Consecrated Huran Blade, Censer of Last Light, Hourglass Pendant, Staff of the Crescent Moon, Psionic Circlet, and Innovator's Bolt. Innovator's Bolt is held at `manual_review`; the other five are `approved` but carry `needs_implementation` flags where bespoke effects exceed the modeled slice.
+- The first local Linden Pass migration pass created/refreshed structured records for Consecrated Huran Blade, Censer of Last Light, Hourglass Pendant, Staff of the Crescent Moon, Psionic Circlet, and Innovator's Bolt. Hourglass Pendant, Psionic Circlet, and Innovator's Bolt base weapon mechanics are the first formerly curated/special cases covered by approved structured metadata only. Records can still carry `needs_implementation` flags where bespoke effects exceed the modeled slice, including Innovator's Bolt spell-slot expenditure, enchanted bullet selection, area damage, and condition riders.
 
 ## DND-5E Import Contract
 
@@ -50,6 +50,7 @@ Last updated: 2026-07-09
 
 - Xianxia uses a built-in shared Systems library identity and `XIANXIA-HOMEBREW` source.
 - Curated managed seed data in `player_wiki/data/xianxia_systems_seed.json` owns the first Xianxia source rows for core rules, Martial Arts, Generic Techniques, and Basic Actions.
+- Seeded Xianxia rule rows can expose structured `xianxia_rule_facets` for character-facing reminders. Current facets include Skills `guardrails`, Stance `break_reference`, Stance/Aura `active_state_reminders`, and generic `quick_reference` lines for linked rule-text cards.
 - Xianxia seeded entries are currently reference-heavy; Basic Action/status automation and combat automation remain deferred.
 
 ## Current Tests Or Verification

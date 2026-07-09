@@ -4118,7 +4118,20 @@
           "stance",
           "durability"
         ],
-        "xianxia_rule_key": "stance"
+        "xianxia_rule_key": "stance",
+        "xianxia_rule_facets": {
+          "break_reference": {
+            "state_key": "current_stance",
+            "trigger_value": 0,
+            "status_label": "Current Stance 0",
+            "reference_lines": [
+              "When current Stance reaches 0, the character's Stance breaks."
+            ],
+            "recovery_lines": [
+              "Stance recovers with one day of rest unless another effect prevents recovery."
+            ]
+          }
+        }
       },
       "sections": [
         {
@@ -4355,7 +4368,15 @@
           "skill",
           "trained_skill"
         ],
-        "xianxia_rule_key": "skills"
+        "xianxia_rule_key": "skills",
+        "xianxia_rule_facets": {
+          "guardrails": {
+            "reference_lines": [
+              "Skills cannot be used in active battle to affect Attacks or Damage.",
+              "Skills can affect surroundings or pre-battle preparation when the GM agrees."
+            ]
+          }
+        }
       },
       "sections": [
         {
@@ -4497,7 +4518,20 @@
           "range",
           "distance"
         ],
-        "xianxia_rule_key": "ranges_and_distance"
+        "xianxia_rule_key": "ranges_and_distance",
+        "xianxia_rule_facets": {
+          "quick_reference": {
+            "reference_lines": [
+              "Xianxia range labels map to feet, adjacency, and 5-foot spaces.",
+              "Touch requires physical contact through a Melee Attack.",
+              "Close means within 5 feet, adjacent, or dueling.",
+              "Near means up to 30 feet.",
+              "Far means up to 60 feet.",
+              "One Space is a 5-foot square.",
+              "Area dimensions such as 30x30 are measured in feet."
+            ]
+          }
+        }
       },
       "sections": [
         {
@@ -4535,7 +4569,19 @@
           "initiative"
         ],
         "support_state": "reference_only",
-        "xianxia_rule_key": "timing_and_initiative"
+        "xianxia_rule_key": "timing_and_initiative",
+        "xianxia_rule_facets": {
+          "quick_reference": {
+            "reference_lines": [
+              "Timing terms define turns, rounds, days, initiative order, and once-per-combat limits.",
+              "A Turn is one character's time for Actions in combat.",
+              "A Round is the full pass through every participant's Turn in initiative order.",
+              "Initiative is set at the beginning of combat with a Dex Check, runs highest to lowest, and is not rerolled each Round.",
+              "A Day is 24 hours.",
+              "Once-per-combat means once per combat encounter."
+            ]
+          }
+        }
       },
       "sections": [
         {
@@ -4569,7 +4615,22 @@
           "active_state"
         ],
         "support_state": "reference_only",
-        "xianxia_rule_key": "stance_activation_rules"
+        "xianxia_rule_key": "stance_activation_rules",
+        "xianxia_rule_facets": {
+          "active_state_reminders": {
+            "state_key": "active_stance",
+            "label": "Stance",
+            "empty_status_label": "No active Stance recorded",
+            "active_status_label_template": "Active Stance: {name}",
+            "reference_lines": [
+              "A character can have only one Stance active at a time.",
+              "Entering a Stance costs an Action plus any Stance-specific costs.",
+              "A Stance ends when the character's Stance breaks.",
+              "A Stance ends when the character switches Stances.",
+              "A Stance ends when the character can no longer maintain the Stance's requirements."
+            ]
+          }
+        }
       },
       "sections": [
         {
@@ -4602,7 +4663,19 @@
           "active_state"
         ],
         "support_state": "reference_only",
-        "xianxia_rule_key": "aura_activation_rules"
+        "xianxia_rule_key": "aura_activation_rules",
+        "xianxia_rule_facets": {
+          "active_state_reminders": {
+            "state_key": "active_aura",
+            "label": "Aura",
+            "empty_status_label": "No active Aura recorded",
+            "active_status_label_template": "Active Aura: {name}",
+            "reference_lines": [
+              "A character can have only one Aura active at a time.",
+              "Auras are assumed to remain active once activated unless the Aura says otherwise or the GM overrules it."
+            ]
+          }
+        }
       },
       "sections": [
         {
@@ -4666,7 +4739,15 @@
           "damage"
         ],
         "support_state": "reference_only",
-        "xianxia_rule_key": "critical_hits"
+        "xianxia_rule_key": "critical_hits",
+        "xianxia_rule_facets": {
+          "quick_reference": {
+            "reference_lines": [
+              "Critical Hits automatically hit and add Ultimate Effort damage.",
+              "Critical Hits occur on a natural 20, or on a lower natural roll when modified by a Martial Art or Technique. Critical Hits automatically hit and deal additional +Ultimate Effort damage."
+            ]
+          }
+        }
       },
       "sections": [
         {
@@ -4696,7 +4777,15 @@
           "critical_hit"
         ],
         "support_state": "reference_only",
-        "xianxia_rule_key": "sneak_attacks"
+        "xianxia_rule_key": "sneak_attacks",
+        "xianxia_rule_facets": {
+          "quick_reference": {
+            "reference_lines": [
+              "Sneak Attack is a special kind of Critical Hit enabled by explicit circumstances.",
+              "Sneak Attack only occurs under specific circumstances, such as a Martial Art or Technique explicitly enabling it or the target being completely off guard."
+            ]
+          }
+        }
       },
       "sections": [
         {
@@ -4726,7 +4815,15 @@
           "npc_reference"
         ],
         "support_state": "reference_only",
-        "xianxia_rule_key": "minions"
+        "xianxia_rule_key": "minions",
+        "xianxia_rule_facets": {
+          "quick_reference": {
+            "reference_lines": [
+              "Minion is a tag for generic fodder enemies and martial artists.",
+              "Minions are NPCs whose Realm and HP/Stance are lower than the player characters, usually fragile enough to be removed in a single blow, such as an NPC with only 5 HP and 5 Stance."
+            ]
+          }
+        }
       },
       "sections": [
         {
@@ -4758,7 +4855,15 @@
           "derived_stats"
         ],
         "support_state": "reference_only",
-        "xianxia_rule_key": "companion_derivation"
+        "xianxia_rule_key": "companion_derivation",
+        "xianxia_rule_facets": {
+          "quick_reference": {
+            "reference_lines": [
+              "Puppets, phantoms, animals, and similar companions derive from the user's Stats unless their creating ability says otherwise.",
+              "Companions usually use half the user's Stats plus any listed modifications from the ability that creates or commands them. Richer companion automation is deferred."
+            ]
+          }
+        }
       },
       "sections": [
         {

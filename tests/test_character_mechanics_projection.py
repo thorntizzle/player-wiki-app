@@ -270,33 +270,61 @@ class _FakeXianxiaSystemsService:
             "skills": _entry(
                 "Skills",
                 "skills",
-                paragraphs=[
-                    "Trained skills never add active battle Attack or Damage bonuses.",
-                    "Pre-battle preparation and surroundings can still matter.",
-                ],
+                paragraphs=["General skill prose that should not drive Quick Reference guardrails."],
+                rule_facets={
+                    "guardrails": {
+                        "reference_lines": [
+                            "Trained skills never add active battle Attack or Damage bonuses.",
+                            "Pre-battle preparation and surroundings can still matter.",
+                        ]
+                    }
+                },
             ),
             "stance": _entry(
                 "Stance",
                 "stance",
-                bullets=[
-                    "When current Stance reaches 0, Stance Breaks.",
-                    "Stance recovers after a short rest.",
-                ],
+                bullets=["General Stance prose that should not drive Stance Break."],
+                rule_facets={
+                    "break_reference": {
+                        "status_label": "Current Stance 0",
+                        "reference_lines": ["When current Stance reaches 0, Stance Breaks."],
+                        "recovery_lines": ["Stance recovers after a short rest."],
+                    }
+                },
             ),
             "stance-activation-rules": _entry(
                 "Stance Activation Rules",
                 "stance-activation-rules",
-                summary="Only one Stance can be active at a time.",
+                summary="General Stance activation prose.",
+                rule_facets={
+                    "active_state_reminders": {
+                        "state_key": "active_stance",
+                        "label": "Stance",
+                        "reference_lines": ["Only one Stance can be active at a time."],
+                    }
+                },
             ),
             "aura-activation-rules": _entry(
                 "Aura Activation Rules",
                 "aura-activation-rules",
-                summary="Only one Aura can be active at a time.",
+                summary="General Aura activation prose.",
+                rule_facets={
+                    "active_state_reminders": {
+                        "state_key": "active_aura",
+                        "label": "Aura",
+                        "reference_lines": ["Only one Aura can be active at a time."],
+                    }
+                },
             ),
             "critical-hits": _entry(
                 "Critical Hits",
                 "critical-hits",
-                summary="Critical Hits are reference-only in this slice.",
+                summary="General critical hit prose.",
+                rule_facets={
+                    "quick_reference": {
+                        "reference_lines": ["Critical Hits are reference-only in this slice."],
+                    }
+                },
             ),
         }
 
@@ -307,11 +335,22 @@ class _FakeXianxiaSystemsService:
         return self.entries_by_slug.get(slug)
 
 
-def _entry(title: str, slug: str, *, summary: str = "", paragraphs=None, bullets=None):
+def _entry(
+    title: str,
+    slug: str,
+    *,
+    summary: str = "",
+    paragraphs=None,
+    bullets=None,
+    rule_facets=None,
+):
     return SimpleNamespace(
         title=title,
         slug=slug,
-        metadata={"support_state": "reference_only"},
+        metadata={
+            "support_state": "reference_only",
+            "xianxia_rule_facets": dict(rule_facets or {}),
+        },
         body={
             "summary": summary,
             "sections": [
@@ -367,6 +406,16 @@ def test_xianxia_rule_reminders_are_projected_from_systems_entries():
         reminder["status_label"]
         for reminder in xianxia_projection["active_state_reminders"]
     ] == ["Active Stance: Falling Leaf", "No active Aura recorded"]
+    assert [
+        reminder["reference_lines"]
+        for reminder in xianxia_projection["active_state_reminders"]
+    ] == [
+        ["Only one Stance can be active at a time."],
+        ["Only one Aura can be active at a time."],
+    ]
     assert [entry["title"] for entry in xianxia_projection["rule_text_references"]] == [
         "Critical Hits"
+    ]
+    assert xianxia_projection["rule_text_references"][0]["reference_lines"] == [
+        "Critical Hits are reference-only in this slice."
     ]

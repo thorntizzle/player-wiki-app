@@ -12,6 +12,7 @@ Last updated: 2026-07-09
 - Xianxia omits DND-5E Spellcasting and Features routes.
 - Session Character uses the same Xianxia read-sheet subpage slugs and labels except `Controls`, which remains on the full Character page.
 - Quick Reference shows Defense, Realm action count, Effort damage, check formula, EASY/Normal/HARD reminders, Honor reminders, Skills guardrails, Stance Break when relevant, active Stance/Aura reminder cards, and linked rule-text references.
+- Xianxia Quick Reference rule reminders are projected from structured Systems `xianxia_rule_facets` such as `guardrails`, `break_reference`, `active_state_reminders`, and `quick_reference`; the presenter does not keyword-scan rule prose for those cards.
 - Martial Arts shows linked arts, rank-progress ladders, learned rank-granted abilities, Systems links, and intentional incomplete-draft markers.
 - Techniques shows known Generic Techniques, Basic Actions, approval status groups, optional prepared Dao Immolating notes, use-request forms, and approved-use recording when authorized.
 - Resources shows current/max HP, Stance, Jing/Qi/Shen, Yin/Yang, Dao, Insight, and active Stance/Aura names.

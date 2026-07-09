@@ -424,6 +424,32 @@ def test_xianxia_core_rule_seed_entries_cover_milestone_one_references():
     assert "spirit stones" in currency["search_text"]
     assert "Coin is standardized currency" in currency["rendered_html"]
     assert "restore ALL Energy" in currency["rendered_html"]
+    assert entry_map["skills"]["metadata"]["xianxia_rule_facets"]["guardrails"] == {
+        "reference_lines": [
+            "Skills cannot be used in active battle to affect Attacks or Damage.",
+            "Skills can affect surroundings or pre-battle preparation when the GM agrees.",
+        ]
+    }
+    assert entry_map["stance"]["metadata"]["xianxia_rule_facets"]["break_reference"] == {
+        "state_key": "current_stance",
+        "trigger_value": 0,
+        "status_label": "Current Stance 0",
+        "reference_lines": [
+            "When current Stance reaches 0, the character's Stance breaks.",
+        ],
+        "recovery_lines": [
+            "Stance recovers with one day of rest unless another effect prevents recovery.",
+        ],
+    }
+    assert entry_map["stance-activation-rules"]["metadata"]["xianxia_rule_facets"][
+        "active_state_reminders"
+    ]["state_key"] == "active_stance"
+    assert entry_map["aura-activation-rules"]["metadata"]["xianxia_rule_facets"][
+        "active_state_reminders"
+    ]["state_key"] == "active_aura"
+    assert entry_map["critical-hits"]["metadata"]["xianxia_rule_facets"][
+        "quick_reference"
+    ]["reference_lines"][0] == "Critical Hits automatically hit and add Ultimate Effort damage."
     assert entry_map["dying-and-unconsciousness"]["metadata"]["support_state"] == "reference_only"
     assert entry_map["minions"]["metadata"]["support_state"] == "reference_only"
     bing_ti_errata = entry_map["bing-ti-legendary-errata"]

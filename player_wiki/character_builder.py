@@ -6384,6 +6384,10 @@ def _derive_definition_core_sheet_payloads(
         normalized_equipment,
         item_catalog=effective_item_catalog,
     )
+    item_effect_source_row_ids = _item_effect_source_row_ids_from_equipment(
+        normalized_equipment,
+        item_catalog=effective_item_catalog,
+    )
     recoverable_penalties = normalize_recoverable_penalties((sanitized_definition.stats or {}).get("recoverable_penalties"))
     ability_scores = _ability_scores_from_definition(
         sanitized_definition,
@@ -6462,6 +6466,7 @@ def _derive_definition_core_sheet_payloads(
     derived_spellcasting["spells"] = _apply_item_effect_spell_grants(
         list(derived_spellcasting.get("spells") or []),
         item_effect_entries=item_effect_entries,
+        known_source_row_ids=item_effect_source_row_ids,
         spell_catalog=effective_spell_catalog,
         current_level=max(current_level, 1),
     )
@@ -8485,35 +8490,10 @@ _CAMPAIGN_ITEM_PAGE_SUPPORT_METADATA_KEYS = (
     "resource_template_bonuses",
     "spell_support",
 )
+
+# Legacy page-prose fallback for campaign item pages that have not yet been
+# migrated to approved Systems item mechanics metadata.
 _CAMPAIGN_ITEM_SPECIAL_EFFECTS_BY_TITLE = {
-    normalize_lookup("Hourglass Pendant"): {
-        "spell_support": [
-            {
-                "source": {
-                    "id": "spell-source:item:hourglass-pendant",
-                    "title": "Hourglass Pendant",
-                    "kind": "item",
-                    "ability_key": "int",
-                },
-                "grants": {
-                    "_": [
-                        {
-                            "spell": "Gift of Alacrity",
-                            "access_type": SPELL_ACCESS_TYPE_FREE_CAST,
-                            "access_uses": 1,
-                            "access_reset_on": SPELL_ACCESS_RESET_LONG_REST,
-                        }
-                    ]
-                },
-            }
-        ],
-        "resource_template_bonuses": [
-            {
-                "id": "chronal-shift",
-                "bonus": 1,
-            }
-        ],
-    },
     normalize_lookup("Censer of Last Light"): {
         "spell_support": [
             {
@@ -10898,6 +10878,24 @@ def _campaign_item_effect_source_row_ids() -> set[str]:
     return source_row_ids
 
 
+def _item_effect_source_row_ids_from_equipment(
+    equipment_catalog: list[dict[str, Any]] | None,
+    *,
+    item_catalog: dict[str, Any] | None,
+) -> set[str]:
+    source_row_ids = set(_campaign_item_effect_source_row_ids())
+    for item in list(equipment_catalog or []):
+        payload = dict(item or {})
+        metadata = _resolve_item_support_metadata(payload, item_catalog)
+        effect_payload = _item_effect_metadata(metadata)
+        for block in list(effect_payload.get("spell_support") or []):
+            support_payload = _spell_source_support_payload(block)
+            source_row_id = str(support_payload.get("spell_source_row_id") or "").strip()
+            if source_row_id:
+                source_row_ids.add(source_row_id)
+    return source_row_ids
+
+
 def _item_effect_metadata(
     metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
@@ -11024,13 +11022,15 @@ def _apply_item_effect_spell_grants(
     spell_payloads: list[dict[str, Any]] | None,
     *,
     item_effect_entries: list[dict[str, Any]] | None = None,
+    known_source_row_ids: set[str] | None = None,
     spell_catalog: dict[str, Any],
     current_level: int,
 ) -> list[dict[str, Any]]:
     spells_by_key: dict[str, dict[str, Any]] = {}
-    known_source_row_ids = _campaign_item_effect_source_row_ids()
+    generated_item_source_row_ids = set(known_source_row_ids or set()) | _campaign_item_effect_source_row_ids()
     for spell_payload in _normalize_spell_payloads(list(spell_payloads or [])):
-        if str(spell_payload.get("spell_source_row_id") or "").strip() in known_source_row_ids:
+        source_row_id = str(spell_payload.get("spell_source_row_id") or "").strip()
+        if source_row_id in generated_item_source_row_ids or source_row_id.startswith("spell-source:item:"):
             continue
         payload_key = _spell_payload_map_key(spell_payload)
         if payload_key:
