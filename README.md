@@ -134,7 +134,7 @@ The app now treats deployed functionality and live content as separate concerns:
 - live SQLite-backed content is updated through the JSON API
 - live campaign files on Fly live on the mounted `/data/campaigns` volume instead of inside the image
 - campaign config, published assets, published wiki pages, and character definition/import files can also be managed through the JSON API
-- Flask owns the browser app again; the JSON-backed character create/import, Advanced Editor, Level Up, Retraining, Progression Repair, and Xianxia Cultivation flows now support Flask routes and API clients without a separate TanStack frontend
+- Flask is the only browser frontend; the JSON-backed character create/import, Advanced Editor, Level Up, Retraining, Progression Repair, and Xianxia Cultivation flows now support Flask routes and API clients without a separate preview frontend
 - DMs/admins can create, edit, attach images to, promote staged/session articles into, unpublish/archive, and hard-delete published wiki page files from the browser under DM Content -> Player Wiki; hard delete is blocked when backlinks, character hooks, or session provenance make removal risky
 - shared DND 5E source ingest can now be driven through an admin-only JSON API upload plus import-run history endpoints
 - Xianxia is a first-class campaign system lane using the shared `Xianxia` Systems library and `XIANXIA-HOMEBREW` source; its Systems Wiki defaults to DM-only while Player Wiki access remains player-facing until changed through the existing visibility/source controls

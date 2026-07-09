@@ -18,7 +18,7 @@ This directory is the fast reference layer for the current Campaign Player Wiki 
 - [Admin, Auth, And Visibility](admin-auth.md): sign-in, account settings, roles, membership, assignment, audit, and campaign visibility behavior.
 - [Combat](combat.md): player combat, DM status, encounter controls, combatant source identity, live updates, and current automation boundaries.
 - [DM Content](dm-content.md): Statblocks, Player Wiki management, Systems management lane, Staged Articles, Conditions, and cross-surface handoffs.
-- [Flask Browser App](flask-browser.md): browser route ownership, Flask template shell behavior, loading cover behavior, browser/API links, and the removed TanStack preview boundary.
+- [Flask Browser App](flask-browser.md): browser route ownership, Flask template shell behavior, loading cover behavior, browser/API links, and the retired preview-route boundary.
 - [Live Session](live-session.md): player Session, DM Session, Session Character, staged/revealed articles, logs, and polling behavior.
 - [Ops And Fly Deployment](ops-deploy.md): local wrapper usage, Fly deployment shape, SQLite volume boundaries, and verification expectations.
 - [Published Wiki And Publishing](published-wiki.md): player-facing wiki pages, section/grouping conventions, images, Campaign Home, and publication/removal guardrails.

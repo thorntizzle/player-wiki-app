@@ -33,7 +33,7 @@ def test_parse_image_association_report_extracts_source_png(tmp_path):
                 "",
                 "| Article | Subsection | Page Ref | Live WebP Asset | Source PNG | Source Match |",
                 "|---|---|---|---|---|---|",
-                "| [Captain Lyra Vale](https://example.test/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale) | Harbor Allies | `npcs/captain-lyra-vale` | [npcs/captain-lyra-vale.webp](https://example.test/campaigns/linden-pass/assets/npcs/captain-lyra-vale.webp) | `C:\\Vault\\Images\\Captain Lyra Vale Portrait.png` | filename-match |",
+                "| [Captain Lyra Vale](https://example.test/campaigns/linden-pass/pages/npcs/captain-lyra-vale) | Harbor Allies | `npcs/captain-lyra-vale` | [npcs/captain-lyra-vale.webp](https://example.test/campaigns/linden-pass/assets/npcs/captain-lyra-vale.webp) | `C:\\Vault\\Images\\Captain Lyra Vale Portrait.png` | filename-match |",
                 "",
             ]
         ),
@@ -45,7 +45,7 @@ def test_parse_image_association_report_extracts_source_png(tmp_path):
     assert rows == [
         {
             "article": "Captain Lyra Vale",
-            "article_url": "https://example.test/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale",
+            "article_url": "https://example.test/campaigns/linden-pass/pages/npcs/captain-lyra-vale",
             "section": "NPCs",
             "subsection": "Harbor Allies",
             "page_ref": "npcs/captain-lyra-vale",
@@ -69,7 +69,7 @@ def test_campaign_package_export_includes_systems_characters_and_image_associati
                 "",
                 "| Article | Subsection | Page Ref | Live WebP Asset | Source PNG | Source Match |",
                 "|---|---|---|---|---|---|",
-                "| [Captain Lyra Vale](https://example.test/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale) | Harbor Allies | `npcs/captain-lyra-vale` | [npcs/captain-lyra-vale.png](https://example.test/campaigns/linden-pass/assets/npcs/captain-lyra-vale.png) | `C:\\Vault\\Images\\Captain Lyra Vale Portrait.png` | filename-match |",
+                "| [Captain Lyra Vale](https://example.test/campaigns/linden-pass/pages/npcs/captain-lyra-vale) | Harbor Allies | `npcs/captain-lyra-vale` | [npcs/captain-lyra-vale.png](https://example.test/campaigns/linden-pass/assets/npcs/captain-lyra-vale.png) | `C:\\Vault\\Images\\Captain Lyra Vale Portrait.png` | filename-match |",
                 "",
             ]
         ),

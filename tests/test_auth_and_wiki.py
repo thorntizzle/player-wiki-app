@@ -75,7 +75,7 @@ def test_campaign_picker_defaults_to_flask_without_preview_card(client):
     body = response.get_data(as_text=True)
     assert "Frontend preview" not in body
     assert "Stable Flask mode is active." not in body
-    assert "Gen2 preview mode is active." not in body
+    assert "Preview mode is active." not in body
     assert 'href="/campaigns/linden-pass"' in body
     assert 'href="/app-next/campaigns/linden-pass"' not in body
 
@@ -97,7 +97,7 @@ def test_frontend_account_setting_is_retired(app, client, sign_in, users):
     account_body = account.get_data(as_text=True)
     assert "Preferred frontend" not in account_body
     assert "Stable Flask" not in account_body
-    assert "Gen2 frontend" not in account_body
+    assert "Preview frontend" not in account_body
     assert 'href="/app-next/' not in account_body
 
     picker = client.get("/campaigns")
@@ -107,7 +107,7 @@ def test_frontend_account_setting_is_retired(app, client, sign_in, users):
 
     enable_response = client.post(
         "/account/frontend-mode",
-        data={"frontend_mode": "gen2"},
+        data={"frontend_mode": "preview"},
         follow_redirects=True,
     )
     assert enable_response.status_code == 404
@@ -166,7 +166,7 @@ def test_campaign_home_flask_fallback_has_no_preview_card(client):
     body = response.get_data(as_text=True)
     assert "Frontend preview" not in body
     assert "Stable Flask mode is active." not in body
-    assert "Gen2 preview mode is active." not in body
+    assert "Preview mode is active." not in body
     assert "Use stable Flask for campaign views" not in body
     assert 'href="/app-next/campaigns/linden-pass"' not in body
 
@@ -203,7 +203,7 @@ def test_signed_in_user_can_open_account_settings_with_default_theme(client, sig
     assert "Parchment" in body
     assert "Preferred frontend" not in body
     assert "Stable Flask" not in body
-    assert "Gen2 frontend" not in body
+    assert "Preview frontend" not in body
     assert "Newest first" in body
 
 

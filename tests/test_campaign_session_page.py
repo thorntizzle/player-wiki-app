@@ -37,6 +37,10 @@ def assert_webp_bytes(data_blob: bytes) -> None:
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _session_live_script_text() -> str:
+    return (PROJECT_ROOT / "player_wiki" / "static" / "session-live.js").read_text(encoding="utf-8")
+
+
 def _html_segment_after(html: str, marker: str, *, length: int = 2000) -> str:
     start = html.index(marker)
     return html[start : start + length]
@@ -408,10 +412,8 @@ def test_session_page_with_character_access_exposes_shell_switch_data_hooks(clie
         f'data-session-shell-pane-url="/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;fragment=1"'
         in html
     )
-    assert "history.pushState" in html
-    assert "showShellView" in html
-    assert "playerWiki:session-state-changed" in html
-    assert "sessionShellPaneStale" in html
+    assert '/static/session-shell.js?v=' in html
+    assert '/static/session-live.js?v=' in html
 
 
 def test_session_page_without_character_access_does_not_expose_shell_fragment_hooks(
@@ -1622,11 +1624,13 @@ def test_player_session_page_mounts_global_search_outside_live_session_root(clie
     assert session_html.index('class="campaign-global-search"') < session_html.index('class="page-layout session-layout session-layout--single"')
     assert 'data-session-wiki-lookup-root' not in session_html
     assert 'data-loading="0"' in session_html
-    assert "window.__playerWikiLiveUiTools" in session_html
-    assert "uiStateTools.captureViewportAnchor(liveRoot)" in session_html
-    assert 'liveRoot.dataset.loading = "1";' in session_html
+    assert '/static/session-live.js?v=' in session_html
     assert 'data-live-active-interval-ms="3000"' in session_html
     assert 'data-live-idle-interval-ms="6000"' in session_html
+    session_script = _session_live_script_text()
+    assert "window.__playerWikiLiveUiTools" in session_script
+    assert "uiStateTools.captureViewportAnchor(liveRoot)" in session_script
+    assert 'liveRoot.dataset.loading = "1";' in session_script
 
 
 def test_session_loading_styles_do_not_dim_live_session_surfaces():
@@ -1652,10 +1656,12 @@ def test_session_dm_page_preserves_open_article_details_across_live_rerenders(cl
     assert session_page.status_code == 200
     session_html = session_page.get_data(as_text=True)
     assert 'data-session-article-id="1"' in session_html
-    assert 'const collectOpenSessionArticleIds = (root) => {' in session_html
-    assert 'restoreOpenSessionArticleIds(stagedRoot, openSessionArticleIds);' in session_html
-    assert 'restoreOpenSessionArticleIds(revealedRoot, openSessionArticleIds);' in session_html
-    assert session_html.count('statusCard = liveRoot.querySelector("[data-session-status-card]");') == 2
+    assert '/static/session-live.js?v=' in session_html
+    session_script = _session_live_script_text()
+    assert 'const collectOpenSessionArticleIds = (root) => {' in session_script
+    assert 'restoreOpenSessionArticleIds(stagedRoot, openSessionArticleIds);' in session_script
+    assert 'restoreOpenSessionArticleIds(revealedRoot, openSessionArticleIds);' in session_script
+    assert session_script.count('statusCard = liveRoot.querySelector("[data-session-status-card]");') == 2
 
 
 def test_dm_can_open_session_page_and_session_dm_page(client, sign_in, users):

@@ -4,7 +4,6 @@ import base64
 import binascii
 from collections import defaultdict
 from functools import wraps
-import hashlib
 from io import BytesIO
 from pathlib import Path
 import re
@@ -94,10 +93,7 @@ from .campaign_dm_content_service import (
     build_statblock_parser_feedback,
 )
 from .campaign_wiki_safety import build_dm_player_wiki_removal_safety_index
-from .campaign_session_service import (
-    ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS,
-    CampaignSessionValidationError,
-)
+from .campaign_session_service import CampaignSessionValidationError
 from .campaign_visibility import (
     CAMPAIGN_VISIBILITY_SCOPES,
     CAMPAIGN_VISIBILITY_SCOPE_LABELS,
@@ -110,8 +106,6 @@ from .campaign_visibility import (
 from .character_builder import (
     CAMPAIGN_ITEMS_SECTION,
     CAMPAIGN_MECHANICS_SECTION,
-    _attach_campaign_item_page_support,
-    _build_item_catalog,
     _build_spell_catalog,
     _list_campaign_enabled_entries,
     _normalize_equipment_payloads,
@@ -128,6 +122,14 @@ from .character_builder import (
     normalize_definition_to_native_model,
     resolve_weapon_wield_mode,
     weapon_wield_mode_label,
+)
+from .character_assets import (
+    build_character_item_catalog as build_shared_character_item_catalog,
+    build_character_portrait_asset_ref,
+    character_portrait_profile,
+    prepare_character_portrait_file,
+    update_character_portrait_profile,
+    validate_character_portrait_text,
 )
 from .character_page_records import (
     list_builder_campaign_page_records as list_builder_campaign_page_records_for_store,
@@ -193,7 +195,11 @@ from .session_presenter import present_session_dm_passive_score_rows
 from .session_source_presenter import (
     build_session_article_source_search_results as build_shared_session_article_source_search_results,
 )
-from .image_publish import prepare_published_article_image
+from .live_presenter import (
+    build_combat_live_view_token as build_shared_combat_live_view_token,
+    build_session_live_view_token as build_shared_session_live_view_token,
+    should_short_circuit_live_response as should_short_circuit_shared_live_response,
+)
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
 from .systems_ingest import SystemsIngestError, extracted_systems_archive
 from .systems_labels import (
@@ -241,13 +247,16 @@ from .xianxia_advancement import (
 from . import xianxia_cultivation
 from .xianxia_character_builder import (
     XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT,
-    XIANXIA_MARTIAL_ART_IMPORT_RANKS,
     build_xianxia_character_create_context,
     build_xianxia_character_definition,
     build_xianxia_character_initial_state,
-    list_xianxia_manual_import_martial_art_options,
 )
 from .xianxia_character_importer import build_xianxia_manual_import_character
+from .xianxia_import_presenter import (
+    build_xianxia_manual_import_context,
+    build_xianxia_manual_import_payload,
+    build_xianxia_manual_import_preview,
+)
 from .xianxia_character_model import (
     XIANXIA_ATTRIBUTE_KEYS,
     XIANXIA_ATTRIBUTE_LABELS,
@@ -255,11 +264,6 @@ from .xianxia_character_model import (
     XIANXIA_EFFORT_LABELS,
     XIANXIA_ENERGY_KEYS,
 )
-
-
-CHARACTER_PORTRAIT_ALT_MAX_LENGTH = 200
-CHARACTER_PORTRAIT_CAPTION_MAX_LENGTH = 300
-CHARACTER_PORTRAIT_MAX_BYTES = 8 * 1024 * 1024
 
 
 def register_api(app) -> None:
@@ -1514,20 +1518,15 @@ def register_api(app) -> None:
 
         return payload
 
-    def build_live_hash(*parts: object) -> str:
-        normalized_parts = [str(part).strip().lower() for part in parts]
-        digest = hashlib.sha1("||".join(normalized_parts).encode("utf-8")).hexdigest()
-        return digest[:12]
-
     def build_session_live_view_token(campaign_slug: str, session_subpage: str) -> str:
-        normalized_subpage = "session" if str(session_subpage or "").strip().lower() != "dm" else "dm"
         current_preferences = get_current_user_preferences()
-        return build_live_hash(
-            "session",
-            normalized_subpage,
-            current_preferences.session_chat_order,
-            "1" if can_manage_campaign_session(campaign_slug) else "0",
-            "1" if can_post_campaign_session_messages(campaign_slug) else "0",
+        return build_shared_session_live_view_token(
+            campaign_slug,
+            session_subpage,
+            session_chat_order=current_preferences.session_chat_order,
+            can_manage_session=can_manage_campaign_session(campaign_slug),
+            can_post_session_messages=can_post_campaign_session_messages(campaign_slug),
+            normalize_hash_parts=True,
         )
 
     def build_combat_live_view_token(
@@ -1535,40 +1534,22 @@ def register_api(app) -> None:
         *,
         selected_combatant_id: int | None = None,
     ) -> str:
-        return build_live_hash(
-            "combat",
+        return build_shared_combat_live_view_token(
+            campaign_slug,
             "player",
-            "1" if can_manage_campaign_combat(campaign_slug) else "0",
-            str(selected_combatant_id or ""),
-            *sorted(get_owned_character_slugs(campaign_slug)),
+            selected_combatant_id=selected_combatant_id,
+            can_manage_combat=can_manage_campaign_combat(campaign_slug),
+            owned_character_slugs=get_owned_character_slugs(campaign_slug),
+            include_dm_view_part=False,
+            normalize_hash_parts=True,
         )
 
-    def parse_live_revision_header() -> int | None:
-        raw_value = request.headers.get("X-Live-Revision", "").strip()
-        if not raw_value:
-            return None
-        try:
-            parsed_value = int(raw_value)
-        except ValueError:
-            return None
-        return parsed_value if parsed_value >= 0 else None
-
-    def parse_live_view_token_header() -> str:
-        return request.headers.get("X-Live-View-Token", "").strip()
-
-    def should_short_circuit_live_session(*, live_revision: int, live_view_token: str) -> bool:
-        requested_revision = parse_live_revision_header()
-        requested_view_token = parse_live_view_token_header()
-        if requested_revision is None or not requested_view_token:
-            return False
-        return requested_revision == live_revision and requested_view_token == live_view_token
-
     def should_short_circuit_live_response(*, live_revision: int, live_view_token: str) -> bool:
-        requested_revision = parse_live_revision_header()
-        requested_view_token = parse_live_view_token_header()
-        if requested_revision is None or not requested_view_token:
-            return False
-        return requested_revision == live_revision and requested_view_token == live_view_token
+        return should_short_circuit_shared_live_response(
+            request.headers,
+            live_revision=live_revision,
+            live_view_token=live_view_token,
+        )
 
     def serialize_dm_statblock(statblock) -> dict[str, Any]:
         return {
@@ -2664,36 +2645,16 @@ def register_api(app) -> None:
             "updated_by_user_id": state_record.updated_by_user_id,
         }
 
-    def build_character_portrait_asset_ref(character_slug: str, filename: str) -> str:
-        extension = Path(filename).suffix.lower()
-        return f"characters/{character_slug}/portrait{extension}"
-
     def validate_character_portrait_payload(payload: dict[str, Any]) -> dict[str, Any]:
         portrait_file = decode_embedded_file(payload.get("portrait_file"), label="portrait_file")
-        filename = Path(str(portrait_file["filename"] or "").strip()).name
-        if not filename:
-            raise ValueError("Choose an image file before saving the portrait.")
-        extension = Path(filename).suffix.lower()
-        if extension not in ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS:
-            raise ValueError("Character portraits must be PNG, JPG, GIF, or WEBP files.")
-        data_blob = portrait_file["data_blob"]
-        if not data_blob:
-            raise ValueError("Uploaded portrait files cannot be empty.")
-        if len(data_blob) > CHARACTER_PORTRAIT_MAX_BYTES:
-            raise ValueError("Character portraits must stay under 8 MB.")
-        try:
-            filename, data_blob = prepare_published_article_image(filename, data_blob)
-        except ValueError as exc:
-            message = str(exc)
-            message = message.replace("Wiki page images", "Character portraits")
-            message = message.replace("Uploaded wiki page images", "Uploaded portrait files")
-            raise ValueError(message) from exc
-        alt_text = str(payload.get("alt_text") or "").strip()
-        caption = str(payload.get("caption") or "").strip()
-        if len(alt_text) > CHARACTER_PORTRAIT_ALT_MAX_LENGTH:
-            raise ValueError(f"Portrait alt text must stay under {CHARACTER_PORTRAIT_ALT_MAX_LENGTH} characters.")
-        if len(caption) > CHARACTER_PORTRAIT_CAPTION_MAX_LENGTH:
-            raise ValueError(f"Portrait captions must stay under {CHARACTER_PORTRAIT_CAPTION_MAX_LENGTH} characters.")
+        filename, data_blob = prepare_character_portrait_file(
+            str(portrait_file["filename"] or ""),
+            portrait_file["data_blob"],
+        )
+        alt_text, caption = validate_character_portrait_text(
+            payload.get("alt_text", ""),
+            payload.get("caption", ""),
+        )
         return {
             "filename": filename,
             "data_blob": data_blob,
@@ -2701,30 +2662,9 @@ def register_api(app) -> None:
             "caption": caption,
         }
 
-    def update_character_portrait_profile(
-        definition,
-        *,
-        asset_ref: str = "",
-        alt_text: str = "",
-        caption: str = "",
-    ):
-        definition_payload = definition.to_dict()
-        profile = dict(definition_payload.get("profile") or {})
-        clean_asset_ref = str(asset_ref or "").strip()
-        if clean_asset_ref:
-            profile["portrait_asset_ref"] = clean_asset_ref
-            profile["portrait_alt"] = str(alt_text or "").strip()
-            profile["portrait_caption"] = str(caption or "").strip()
-        else:
-            profile.pop("portrait_asset_ref", None)
-            profile.pop("portrait_alt", None)
-            profile.pop("portrait_caption", None)
-        definition_payload["profile"] = profile
-        return definition.__class__.from_dict(definition_payload)
-
     def build_character_portrait_payload(campaign, record: CharacterRecord) -> dict[str, Any] | None:
-        profile = dict(record.definition.profile or {})
-        asset_ref = str(profile.get("portrait_asset_ref") or "").strip()
+        portrait = character_portrait_profile(record.definition)
+        asset_ref = str(portrait["asset_ref"])
         if not asset_ref:
             return None
         try:
@@ -2741,9 +2681,8 @@ def register_api(app) -> None:
                 character_slug=record.definition.character_slug,
             ),
             "media_type": asset_record.media_type,
-            "alt_text": str(profile.get("portrait_alt") or record.definition.name).strip()
-            or record.definition.name,
-            "caption": str(profile.get("portrait_caption") or "").strip(),
+            "alt_text": str(portrait["alt_text"]),
+            "caption": str(portrait["caption"]),
         }
 
     def serialize_character_roster_tools(campaign_slug: str, campaign) -> dict[str, Any]:
@@ -2942,127 +2881,6 @@ def register_api(app) -> None:
             initial_state,
         )
         return load_character_record(campaign_slug, definition.character_slug)
-
-    def build_xianxia_manual_import_martial_art_rows(values: dict[str, Any]) -> list[dict[str, object]]:
-        row_numbers: set[int] = set()
-        for key in values:
-            match = re.match(
-                r"^martial_art_(\d+)_(slug|name|rank|teacher|breakthrough|notes)$",
-                str(key),
-            )
-            if match:
-                row_numbers.add(int(match.group(1)))
-        row_count = max(max(row_numbers, default=0), 3)
-        return [
-            {
-                "index": index,
-                "slug_input_name": f"martial_art_{index}_slug",
-                "name_input_name": f"martial_art_{index}_name",
-                "rank_input_name": f"martial_art_{index}_rank",
-                "teacher_input_name": f"martial_art_{index}_teacher",
-                "breakthrough_input_name": f"martial_art_{index}_breakthrough",
-                "notes_input_name": f"martial_art_{index}_notes",
-                "selected_slug": values.get(f"martial_art_{index}_slug", ""),
-                "name": values.get(f"martial_art_{index}_name", ""),
-                "rank": values.get(f"martial_art_{index}_rank", ""),
-                "teacher": values.get(f"martial_art_{index}_teacher", ""),
-                "breakthrough": values.get(f"martial_art_{index}_breakthrough", ""),
-                "notes": values.get(f"martial_art_{index}_notes", ""),
-            }
-            for index in range(1, row_count + 1)
-        ]
-
-    def build_xianxia_manual_import_context(
-        campaign_slug: str,
-        values: dict[str, Any] | None = None,
-        *,
-        preview: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        normalized_values = normalize_character_authoring_values({"values": values or {}})
-        martial_art_options = list_xianxia_manual_import_martial_art_options(
-            systems_service=current_app.extensions["systems_service"],
-            campaign_slug=campaign_slug,
-        )
-        return {
-            "values": normalized_values,
-            "realm_choices": ("Mortal", "Immortal", "Divine"),
-            "honor_choices": ("Venerable", "Majestic", "Honorable", "Disgraced", "Demonic"),
-            "martial_art_rank_choices": list(XIANXIA_MARTIAL_ART_IMPORT_RANKS),
-            "martial_art_rows": build_xianxia_manual_import_martial_art_rows(normalized_values),
-            "attribute_fields": [
-                {
-                    "key": key,
-                    "label": XIANXIA_ATTRIBUTE_LABELS[key],
-                    "input_name": f"attribute_{key}",
-                    "value": normalized_values.get(f"attribute_{key}", "0"),
-                }
-                for key in XIANXIA_ATTRIBUTE_KEYS
-            ],
-            "effort_fields": [
-                {
-                    "key": key,
-                    "label": XIANXIA_EFFORT_LABELS[key],
-                    "input_name": f"effort_{key}",
-                    "value": normalized_values.get(f"effort_{key}", "0"),
-                }
-                for key in XIANXIA_EFFORT_KEYS
-            ],
-            "energy_fields": [
-                {
-                    "key": key,
-                    "label": key.title(),
-                    "max_input_name": f"energy_{key}_max",
-                    "max_value": normalized_values.get(f"energy_{key}_max", "0"),
-                }
-                for key in XIANXIA_ENERGY_KEYS
-            ],
-            "martial_art_options": make_json_safe(martial_art_options),
-            "preview": preview,
-        }
-
-    def build_xianxia_manual_import_payload(values: dict[str, Any]) -> dict[str, Any]:
-        ignored_inputs = {"active_stance", "active_aura"}
-        normalized_values = {
-            key: str(value or "")
-            for key, value in dict(values or {}).items()
-            if key not in ignored_inputs
-        }
-        payload: dict[str, Any] = dict(normalized_values)
-        payload["energy_maxima"] = {
-            key: normalized_values.get(f"energy_{key}_max", "")
-            for key in XIANXIA_ENERGY_KEYS
-        }
-        payload["state"] = {
-            "xianxia": {
-                "currency": {
-                    "coin": normalized_values.get("coin", ""),
-                    "supply": normalized_values.get("supply", ""),
-                    "spirit_stones": normalized_values.get("spirit_stones", ""),
-                },
-                "notes": {
-                    "player_notes_markdown": normalized_values.get("player_notes_markdown", ""),
-                },
-            },
-        }
-        return payload
-
-    def build_xianxia_manual_import_preview(definition, initial_state: dict[str, Any]) -> dict[str, Any]:
-        xianxia = dict(getattr(definition, "xianxia", {}) or {})
-        state_xianxia = dict(initial_state.get("xianxia") or {})
-        inventory = dict(state_xianxia.get("inventory") or {})
-        return {
-            "name": definition.name,
-            "slug": definition.character_slug,
-            "realm": xianxia.get("realm"),
-            "actions_per_turn": xianxia.get("actions_per_turn"),
-            "trained_skill_count": len(list(dict(xianxia.get("skills") or {}).get("trained") or [])),
-            "martial_art_count": len(list(xianxia.get("martial_arts") or [])),
-            "inventory_count": len(list(inventory.get("quantities") or [])),
-            "hp": dict(state_xianxia.get("vitals") or {}).get("current_hp"),
-            "hp_max": dict(xianxia.get("durability") or {}).get("hp_max"),
-            "stance": dict(state_xianxia.get("vitals") or {}).get("current_stance"),
-            "stance_max": dict(xianxia.get("durability") or {}).get("stance_max"),
-        }
 
     def serialize_character_links(campaign_slug: str, campaign, record: CharacterRecord) -> dict[str, str]:
         character_slug = record.definition.character_slug
@@ -4809,20 +4627,11 @@ def register_api(app) -> None:
         }
 
     def build_character_item_catalog(campaign_slug: str) -> dict[str, object]:
-        systems_service = current_app.extensions["systems_service"]
-        item_catalog = _build_item_catalog(
-            _list_campaign_enabled_entries(
-                systems_service,
-                campaign_slug,
-                "item",
-            )
+        return build_shared_character_item_catalog(
+            current_app.extensions["systems_service"],
+            get_campaign_page_store(),
+            campaign_slug,
         )
-        campaign_item_pages = [
-            page_record
-            for page_record in get_campaign_page_store().list_page_records(campaign_slug, include_body=True)
-            if str(getattr(getattr(page_record, "page", None), "section", "") or "").strip() == CAMPAIGN_ITEMS_SECTION
-        ]
-        return _attach_campaign_item_page_support(item_catalog, campaign_item_pages)
 
     def build_projected_item_use_actions(campaign_slug: str, record: CharacterRecord) -> list[dict[str, Any]]:
         campaign = get_repository().get_campaign(campaign_slug)
@@ -7128,7 +6937,7 @@ def register_api(app) -> None:
         session_service = current_app.extensions["campaign_session_service"]
         live_revision = session_service.get_live_revision(campaign_slug)
         live_view_token = build_session_live_view_token(campaign_slug, "session")
-        if should_short_circuit_live_session(
+        if should_short_circuit_live_response(
             live_revision=live_revision,
             live_view_token=live_view_token,
         ):
@@ -8810,7 +8619,12 @@ def register_api(app) -> None:
                 "campaign": serialize_campaign(campaign),
                 "lane": CHARACTER_ROUTE_LANE_XIANXIA,
                 "links": serialize_character_authoring_links(campaign_slug, campaign),
-                "import_context": build_xianxia_manual_import_context(campaign_slug, values),
+                "import_context": build_xianxia_manual_import_context(
+                    systems_service=current_app.extensions["systems_service"],
+                    campaign_slug=campaign_slug,
+                    values=values,
+                    json_safe=make_json_safe,
+                ),
             }
         )
 
@@ -8831,7 +8645,12 @@ def register_api(app) -> None:
             return json_error(str(exc), 400, code="invalid_json")
 
         values = normalize_character_authoring_values(request_payload)
-        import_context = build_xianxia_manual_import_context(campaign_slug, values)
+        import_context = build_xianxia_manual_import_context(
+            systems_service=current_app.extensions["systems_service"],
+            campaign_slug=campaign_slug,
+            values=values,
+            json_safe=make_json_safe,
+        )
         import_payload = build_xianxia_manual_import_payload(values)
         try:
             definition, import_metadata, initial_state = build_xianxia_manual_import_character(
@@ -8852,9 +8671,11 @@ def register_api(app) -> None:
                     "lane": CHARACTER_ROUTE_LANE_XIANXIA,
                     "links": serialize_character_authoring_links(campaign_slug, campaign),
                     "import_context": build_xianxia_manual_import_context(
-                        campaign_slug,
-                        values,
+                        systems_service=current_app.extensions["systems_service"],
+                        campaign_slug=campaign_slug,
+                        values=values,
                         preview=preview,
+                        json_safe=make_json_safe,
                     ),
                 }
             )

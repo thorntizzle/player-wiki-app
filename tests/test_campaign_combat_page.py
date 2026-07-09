@@ -21,6 +21,23 @@ from tests.sample_data import (
 )
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _combat_live_script_text() -> str:
+    return (PROJECT_ROOT / "player_wiki" / "static" / "combat-live.js").read_text(encoding="utf-8")
+
+
+def _combat_status_live_script_text() -> str:
+    return (PROJECT_ROOT / "player_wiki" / "templates" / "_combat_status_live_scripts.html").read_text(
+        encoding="utf-8"
+    )
+
+
+def _live_ui_helper_script_text() -> str:
+    return (PROJECT_ROOT / "player_wiki" / "templates" / "_live_ui_helper.html").read_text(encoding="utf-8")
+
+
 def _async_headers():
     return {
         "X-Requested-With": "XMLHttpRequest",
@@ -88,9 +105,8 @@ def _assert_expected_combatant_revision_field(html: str, revision: int, *, at_le
 
 
 def test_combat_async_form_posts_include_clicked_submit_button():
-    templates_dir = Path(__file__).resolve().parents[1] / "player_wiki" / "templates"
-    combat_script = (templates_dir / "_combat_live_scripts.html").read_text(encoding="utf-8")
-    status_script = (templates_dir / "_combat_status_live_scripts.html").read_text(encoding="utf-8")
+    combat_script = _combat_live_script_text()
+    status_script = _combat_status_live_script_text()
 
     for script in (combat_script, status_script):
         assert "const submitterByForm = new WeakMap();" in script
@@ -359,8 +375,8 @@ def test_campaign_member_can_open_combat_page_and_campaign_links_to_it(client, s
     assert "/campaigns/linden-pass/combat/character" not in combat_html
     assert 'data-combat-live-root' in combat_html
     assert 'data-loading="0"' in combat_html
-    assert "window.__playerWikiLiveUiTools" in combat_html
-    assert "uiStateTools.captureViewportAnchor(liveRoot)" in combat_html
+    assert '/static/combat-live.js?v=' in combat_html
+    assert "window.__playerWikiLiveUiTools" in _combat_live_script_text()
     assert "/campaigns/linden-pass/combat/dm" not in combat_html
     assert "/campaigns/linden-pass/combat/status" not in combat_html
     assert "Add player character" not in combat_html
@@ -411,21 +427,22 @@ def test_combat_page_initializes_carousel_default_position_behavior(app, client,
     assert 'data-combatant-carousel-track' in body
     assert 'data-combatant-carousel-prev' in body
     assert 'data-combatant-carousel-next' in body
-    assert 'const getDefaultCombatantCarouselCard' in body
-    assert "const scrollCombatantCarouselByCard = (track, direction) => {" in body
-    assert "scrollBy({" in body
-    assert 'behavior: "smooth"' in body
-    assert 'const scrollToDefaultCombatantCarouselCard' in body
     assert 'data-combatant-current-turn="' in body
     assert 'data-combatant-selected="' in body
-    current_turn_precedence = body.find('card.dataset.combatantCurrentTurn === "true"')
-    selected_precedence = body.find('card.dataset.combatantSelected === "true"')
-    first_card_fallback = body.find("return cards[0];")
+    combat_script = _combat_live_script_text()
+    assert 'const getDefaultCombatantCarouselCard' in combat_script
+    assert "const scrollCombatantCarouselByCard = (track, direction) => {" in combat_script
+    assert "scrollBy({" in combat_script
+    assert 'behavior: "smooth"' in combat_script
+    assert 'const scrollToDefaultCombatantCarouselCard' in combat_script
+    current_turn_precedence = combat_script.find('card.dataset.combatantCurrentTurn === "true"')
+    selected_precedence = combat_script.find('card.dataset.combatantSelected === "true"')
+    first_card_fallback = combat_script.find("return cards[0];")
     assert current_turn_precedence != -1
     assert selected_precedence != -1
     assert first_card_fallback != -1
     assert current_turn_precedence < selected_precedence < first_card_fallback
-    assert 'data-combatant-initial-default' in body
+    assert 'data-combatant-initial-default' in combat_script
 
 
 def test_combat_page_player_workspace_carousel_renders_jump_dropdown_options(
@@ -599,13 +616,15 @@ def test_combat_page_tracks_carousel_intent_for_live_rerender_autoscroll(app, cl
     response = client.get("/campaigns/linden-pass/combat")
     assert response.status_code == 200
     body = response.get_data(as_text=True)
-    assert "let combatantCarouselUserIntentObserved = false;" in body
-    assert "const markCombatantCarouselUserIntent = () => {" in body
-    assert "const scrollToCurrentTurnCombatantCarouselCard = (scope = liveRoot) => {" in body
-    assert "if (combatantCarouselUserIntentObserved) {" in body
-    assert "scrollToCurrentTurnCombatantCarouselCard(liveRoot);" in body
-    assert "markCombatantCarouselUserIntent();" in body
-    assert "if (event.isTrusted) {" in body
+    assert '/static/combat-live.js?v=' in body
+    combat_script = _combat_live_script_text()
+    assert "let combatantCarouselUserIntentObserved = false;" in combat_script
+    assert "const markCombatantCarouselUserIntent = () => {" in combat_script
+    assert "const scrollToCurrentTurnCombatantCarouselCard = (scope = liveRoot) => {" in combat_script
+    assert "if (combatantCarouselUserIntentObserved) {" in combat_script
+    assert "scrollToCurrentTurnCombatantCarouselCard(liveRoot);" in combat_script
+    assert "markCombatantCarouselUserIntent();" in combat_script
+    assert "if (event.isTrusted) {" in combat_script
 
 
 def test_combat_page_render_payload_restores_carousel_state_on_user_intent(app, client, sign_in, users):
@@ -635,35 +654,37 @@ def test_combat_page_render_payload_restores_carousel_state_on_user_intent(app, 
     response = client.get("/campaigns/linden-pass/combat")
     assert response.status_code == 200
     body = response.get_data(as_text=True)
-    assert "const captureCombatantCarouselState = (scope = liveRoot) => {" in body
-    assert "const restoreCombatantCarouselState = (scope = liveRoot, carouselStates = []) => {" in body
+    assert '/static/combat-live.js?v=' in body
+    combat_script = _combat_live_script_text()
+    assert "const captureCombatantCarouselState = (scope = liveRoot) => {" in combat_script
+    assert "const restoreCombatantCarouselState = (scope = liveRoot, carouselStates = []) => {" in combat_script
 
-    render_payload_anchor = body.find(
+    render_payload_anchor = combat_script.find(
         'const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {'
     )
-    refresh_payload_anchor = body.find("const refreshLiveState = async ({", render_payload_anchor)
+    refresh_payload_anchor = combat_script.find("const refreshLiveState = async ({", render_payload_anchor)
     assert render_payload_anchor != -1
     assert refresh_payload_anchor != -1
     assert render_payload_anchor < refresh_payload_anchor
-    render_payload_block = body[render_payload_anchor:refresh_payload_anchor]
+    render_payload_block = combat_script[render_payload_anchor:refresh_payload_anchor]
     assert "const carouselState = captureCombatantCarouselState(liveRoot);" in render_payload_block
     assert "restoreCombatantCarouselState(liveRoot, carouselState);" in render_payload_block
     assert "if (combatantCarouselUserIntentObserved) {" in render_payload_block
     assert "scrollToCurrentTurnCombatantCarouselCard(liveRoot);" in render_payload_block
 
-    capture_helper_anchor = body.find("const captureCombatantCarouselState = (scope = liveRoot) => {")
-    restore_helper_anchor = body.find(
+    capture_helper_anchor = combat_script.find("const captureCombatantCarouselState = (scope = liveRoot) => {")
+    restore_helper_anchor = combat_script.find(
         "const restoreCombatantCarouselState = (scope = liveRoot, carouselStates = []) => {",
         capture_helper_anchor,
     )
-    next_function_anchor = body.find("const scrollToAnchor = (anchor) => {", restore_helper_anchor)
+    next_function_anchor = combat_script.find("const scrollToAnchor = (anchor) => {", restore_helper_anchor)
     assert capture_helper_anchor != -1
     assert restore_helper_anchor != -1
     assert next_function_anchor != -1
     assert capture_helper_anchor < restore_helper_anchor < next_function_anchor
 
-    capture_helper_block = body[capture_helper_anchor:restore_helper_anchor]
-    restore_helper_block = body[restore_helper_anchor:next_function_anchor]
+    capture_helper_block = combat_script[capture_helper_anchor:restore_helper_anchor]
+    restore_helper_block = combat_script[restore_helper_anchor:next_function_anchor]
     assert "setCombatantCarouselSelectedById" in restore_helper_block
     assert "getCombatantCarouselTrack(carousel)" in restore_helper_block
     assert "track.scrollLeft = Math.min(maxScrollLeft, trackScrollLeft);" in restore_helper_block
@@ -707,21 +728,28 @@ def test_combat_page_carousel_jump_select_updates_local_inspected_state_without_
     assert "data-combatant-carousel-jump-select" in body
     assert "data-combatant-selected-badge" in body
     assert "data-combatant-selected-summary" in body
-    assert 'const setCombatantCarouselCardSelectedState = (card, isSelected) => {' in body
-    assert 'const setCombatantCarouselSelectedById = (carousel, combatantId) => {' in body
-    assert 'setCombatantCarouselCardSelectedState(card, card === selectedCard);' in body
-    assert 'card.setAttribute("aria-current", isSelected ? "true" : "false");' in body
     assert "combat-turn-order-row--selected" in body
+    combat_script = _combat_live_script_text()
+    assert 'const setCombatantCarouselCardSelectedState = (card, isSelected) => {' in combat_script
+    assert 'const setCombatantCarouselSelectedById = (carousel, combatantId) => {' in combat_script
+    assert 'setCombatantCarouselCardSelectedState(card, card === selectedCard);' in combat_script
+    assert 'card.setAttribute("aria-current", isSelected ? "true" : "false");' in combat_script
 
-    change_handler_anchor = body.find('liveRoot.addEventListener("change", async (event) => {')
-    jump_select_anchor = body.find('if (target.matches("[data-combatant-carousel-jump-select]")) {', change_handler_anchor)
-    navigation_select_anchor = body.find('if (target.matches("[data-combat-navigation-select]")) {', jump_select_anchor)
+    change_handler_anchor = combat_script.find('liveRoot.addEventListener("change", async (event) => {')
+    jump_select_anchor = combat_script.find(
+        'if (target.matches("[data-combatant-carousel-jump-select]")) {',
+        change_handler_anchor,
+    )
+    navigation_select_anchor = combat_script.find(
+        'if (target.matches("[data-combat-navigation-select]")) {',
+        jump_select_anchor,
+    )
     assert change_handler_anchor != -1
     assert jump_select_anchor != -1
     assert navigation_select_anchor != -1
     assert change_handler_anchor < jump_select_anchor < navigation_select_anchor
 
-    jump_block = body[jump_select_anchor:navigation_select_anchor]
+    jump_block = combat_script[jump_select_anchor:navigation_select_anchor]
     assert "const selectedCombatantId = target.value;" in jump_block
     assert "setCombatantCarouselSelectedById(carousel, selectedCombatantId);" in jump_block
     assert "markCombatantCarouselUserIntent();" in jump_block
@@ -761,12 +789,14 @@ def test_combat_page_carousel_controls_scroll_without_state_mutation(app, client
     response = client.get("/campaigns/linden-pass/combat")
     assert response.status_code == 200
     body = response.get_data(as_text=True)
+    assert '/static/combat-live.js?v=' in body
+    combat_script = _combat_live_script_text()
 
-    click_handler_anchor = body.find('liveRoot.addEventListener("click", (event) => {')
-    focus_handler_anchor = body.find('liveRoot.addEventListener("focusin", (event) => {')
+    click_handler_anchor = combat_script.find('liveRoot.addEventListener("click", (event) => {')
+    focus_handler_anchor = combat_script.find('liveRoot.addEventListener("focusin", (event) => {')
     assert click_handler_anchor != -1
     assert focus_handler_anchor > click_handler_anchor
-    carousel_click_block = body[click_handler_anchor:focus_handler_anchor]
+    carousel_click_block = combat_script[click_handler_anchor:focus_handler_anchor]
 
     assert "data-combatant-carousel-prev" in carousel_click_block
     assert "data-combatant-carousel-next" in carousel_click_block
@@ -906,16 +936,19 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
         r"<div[^>]*data-combat-status-selection-loading[^>]*>",
         dm_controls_html,
     )
-    assert "captureSystemsMonsterSearchState" in dm_html
-    assert "captureControlsAddMode" in dm_html
-    assert "restoreControlsAddMode(controlsAddMode)" in dm_html
-    assert 'liveRoot.dataset.loading = "1";' in dm_html
-    assert "const findMatchingForm = (root, descriptor) =>" in dm_html
-    assert 'focusState.form = describeForm(root, form);' in dm_html
-    assert "const fieldRoot = findMatchingForm(root, focusState.form) || root;" in dm_html
-    assert "window.history.replaceState(null, \"\", nextPageUrl);" in dm_html
-    assert "buildLiveHeaders({ allowShortCircuit: false })" in dm_html
-    assert "window.location.assign(nextUrl);" not in dm_html
+    assert '/static/combat-live.js?v=' in dm_html
+    combat_script = _combat_live_script_text()
+    assert "captureSystemsMonsterSearchState" in combat_script
+    assert "captureControlsAddMode" in combat_script
+    assert "restoreControlsAddMode(controlsAddMode)" in combat_script
+    assert 'liveRoot.dataset.loading = "1";' in combat_script
+    live_ui_helper_script = _live_ui_helper_script_text()
+    assert "const findMatchingForm = (root, descriptor) =>" in live_ui_helper_script
+    assert 'focusState.form = describeForm(root, form);' in live_ui_helper_script
+    assert "const fieldRoot = findMatchingForm(root, focusState.form) || root;" in live_ui_helper_script
+    assert "window.history.replaceState(null, \"\", nextPageUrl);" in combat_script
+    assert "buildLiveHeaders({ allowShortCircuit: false })" in combat_script
+    assert "window.location.assign(nextUrl);" not in combat_script
     assert "DM status |" in status_html
     assert 'aria-label="Combat pages"' not in status_html
     assert 'class="page-layout combat-status-layout"' in status_html
@@ -2614,26 +2647,27 @@ def test_owner_player_combat_page_uses_full_width_workspace_layout_and_preserves
     assert selected_card_match is not None
     assert selected_option_id == selected_card_match.group(1)
 
-    jump_select_anchor = body.find('if (target.matches("[data-combatant-carousel-jump-select]"))')
-    change_handler_anchor = body.find('liveRoot.addEventListener("change", async (event) => {')
+    combat_script = _combat_live_script_text()
+    jump_select_anchor = combat_script.find('if (target.matches("[data-combatant-carousel-jump-select]"))')
+    change_handler_anchor = combat_script.find('liveRoot.addEventListener("change", async (event) => {')
     assert change_handler_anchor != -1
     assert jump_select_anchor != -1
     assert change_handler_anchor < jump_select_anchor
 
-    assert "const getDefaultCombatantCarouselCard" in body
-    assert "const scrollToDefaultCombatantCarouselCard" in body
-    assert "const captureCombatantCarouselState = (scope = liveRoot) => {" in body
-    assert "const restoreCombatantCarouselState = (scope = liveRoot, carouselStates = []) => {" in body
-    assert "const workspaceSectionState = combatWorkspaceTools ? combatWorkspaceTools.capture(liveRoot) : \"\";" in body
-    assert "combatWorkspaceTools.restore(liveRoot, workspaceSectionState);" in body
+    assert "const getDefaultCombatantCarouselCard" in combat_script
+    assert "const scrollToDefaultCombatantCarouselCard" in combat_script
+    assert "const captureCombatantCarouselState = (scope = liveRoot) => {" in combat_script
+    assert "const restoreCombatantCarouselState = (scope = liveRoot, carouselStates = []) => {" in combat_script
+    assert "const workspaceSectionState = combatWorkspaceTools ? combatWorkspaceTools.capture(liveRoot) : \"\";" in combat_script
+    assert "combatWorkspaceTools.restore(liveRoot, workspaceSectionState);" in combat_script
 
-    render_payload_anchor = body.find(
+    render_payload_anchor = combat_script.find(
         'const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {'
     )
     assert render_payload_anchor != -1
-    refresh_payload_anchor = body.find("const refreshLiveState = async ({", render_payload_anchor)
+    refresh_payload_anchor = combat_script.find("const refreshLiveState = async ({", render_payload_anchor)
     assert refresh_payload_anchor != -1
-    render_payload_block = body[render_payload_anchor:refresh_payload_anchor]
+    render_payload_block = combat_script[render_payload_anchor:refresh_payload_anchor]
     assert "const carouselState = captureCombatantCarouselState(liveRoot);" in render_payload_block
     assert "restoreCombatantCarouselState(liveRoot, carouselState);" in render_payload_block
     assert "if (combatantCarouselUserIntentObserved) {" in render_payload_block
@@ -4091,16 +4125,18 @@ def test_dm_status_combined_page_script_hydrates_selected_combatant_live_state_a
     page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={hound.id}")
     assert page.status_code == 200
     body = page.get_data(as_text=True)
-    assert "const fetchDmStatusCombatant = async (combatantId, { carousel = null } = {}) => {" in body
-    assert "const setDmStatusSelectionLoading = (isLoading) => {" in body
-    assert "const getPayloadSelectedCombatantId = (payload = {}) => {" in body
-    assert "const isStaleDmStatusPayload = (payload = {}) => {" in body
-    assert 'if (target.matches("[data-combatant-carousel-jump-select]")) {' in body
-    assert "if (isDmStatusLiveRoot && selectedCombatantId) {" in body
-    assert "setDmStatusSelectionLoading(true);" in body
-    assert "setDmStatusSelectionLoading(false);" in body
-    assert "void fetchDmStatusCombatant(selectedCombatantId, { carousel });" in body
-    assert "await fetchDmStatusCombatant(selectedCombatantId, { carousel });" in body
+    assert '/static/combat-live.js?v=' in body
+    combat_script = _combat_live_script_text()
+    assert "const fetchDmStatusCombatant = async (combatantId, { carousel = null } = {}) => {" in combat_script
+    assert "const setDmStatusSelectionLoading = (isLoading) => {" in combat_script
+    assert "const getPayloadSelectedCombatantId = (payload = {}) => {" in combat_script
+    assert "const isStaleDmStatusPayload = (payload = {}) => {" in combat_script
+    assert 'if (target.matches("[data-combatant-carousel-jump-select]")) {' in combat_script
+    assert "if (isDmStatusLiveRoot && selectedCombatantId) {" in combat_script
+    assert "setDmStatusSelectionLoading(true);" in combat_script
+    assert "setDmStatusSelectionLoading(false);" in combat_script
+    assert "void fetchDmStatusCombatant(selectedCombatantId, { carousel });" in combat_script
+    assert "await fetchDmStatusCombatant(selectedCombatantId, { carousel });" in combat_script
     assert 'data-combat-status-selection-loading' in body
     assert 'data-combat-status-detail-content-root' in body
     assert "Loading selected combatant..." in body
@@ -4109,13 +4145,13 @@ def test_dm_status_combined_page_script_hydrates_selected_combatant_live_state_a
     assert 'aria-atomic="true"' in body
     assert (
         'const trackerDetailContentRoot = document.querySelector("[data-combat-status-detail-content-root]");'
-        in body
+        in combat_script
     )
-    assert "const trackerDetailTarget = trackerDetailContentRoot || trackerDetailRoot;" in body
-    assert "pollUrl = nextPollUrl;" in body
-    assert "liveRoot.dataset.selectedCombatantId = normalizedCombatantId;" in body
-    assert "if (isStaleDmStatusPayload(payload)) {" in body
-    assert 'logLiveDiagnostics("combat-stale", response, payload);' in body
+    assert "const trackerDetailTarget = trackerDetailContentRoot || trackerDetailRoot;" in combat_script
+    assert "pollUrl = nextPollUrl;" in combat_script
+    assert "liveRoot.dataset.selectedCombatantId = normalizedCombatantId;" in combat_script
+    assert "if (isStaleDmStatusPayload(payload)) {" in combat_script
+    assert 'logLiveDiagnostics("combat-stale", response, payload);' in combat_script
     assert 'data-combat-live-url="/campaigns/linden-pass/combat/dm/live-state?combatant=' in body
     assert f'data-selected-combatant-id="{hound.id}"' in body
 

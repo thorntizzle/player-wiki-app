@@ -42,6 +42,13 @@ TEST_JPG_BYTES = (
 )
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _character_read_shell_script_text() -> str:
+    return (PROJECT_ROOT / "player_wiki" / "static" / "character-read-shell.js").read_text(encoding="utf-8")
+
+
 def _write_campaign_config(app, mutator) -> None:
     campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
     payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
@@ -5700,6 +5707,7 @@ def test_character_read_sheet_exposes_character_shell_data_hooks(client, sign_in
     assert 'data-character-read-subpage-link' in html
     assert 'data-character-read-target-subpage="quick"' in html
     assert 'data-character-read-target-subpage="features"' in html
+    assert '/static/character-read-shell.js?v=' in html
 
 
 def test_character_read_subpage_nav_links_keep_fallback_hrefs(client, sign_in, users):
@@ -5733,18 +5741,20 @@ def test_character_read_shell_scripts_are_embedded_for_progressive_enhancement(
     assert response.status_code == 200
     html = response.get_data(as_text=True)
 
-    assert "window.__playerWikiCharacterReadShell" in html
-    assert "history.pushState" in html
-    assert "new FormData(form, submitter)" in html
-    assert "addEventListener(\"popstate\"" in html
+    assert '/static/character-read-shell.js?v=' in html
     assert "data-character-read-subpage-link" in html
-    assert "loadPanelFromResponseText" in html
-    assert "replaceFlashStack" in html
-    assert "event.button !== 0" in html
-    assert "event.preventDefault();" in html
-    assert "\"X-Requested-With\": \"XMLHttpRequest\"" in html
-    assert "\"Accept\": \"text/html\"" in html
-    assert "if (initialPanelState.mode !== \"read\")" in html
+    character_script = _character_read_shell_script_text()
+    assert "window.__playerWikiCharacterReadShell" in character_script
+    assert "history.pushState" in character_script
+    assert "new FormData(form, submitter)" in character_script
+    assert "addEventListener(\"popstate\"" in character_script
+    assert "loadPanelFromResponseText" in character_script
+    assert "replaceFlashStack" in character_script
+    assert "event.button !== 0" in character_script
+    assert "event.preventDefault();" in character_script
+    assert "\"X-Requested-With\": \"XMLHttpRequest\"" in character_script
+    assert "\"Accept\": \"text/html\"" in character_script
+    assert "if (initialPanelState.mode !== \"read\")" in character_script
 
 
 def test_dnd_read_view_exposes_expected_character_read_shell_subpages_when_manageable(

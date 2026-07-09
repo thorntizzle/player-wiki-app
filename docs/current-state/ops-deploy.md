@@ -21,7 +21,7 @@ Last updated: 2026-07-09
 - Real app identity comes from `PLAYER_WIKI_FLY_APP`, `local.ps1 -Action deploy-fly`, or an explicit Fly app argument.
 - Fly deploys snapshot the current working tree. Deploy from a clean copy if live should match committed state exactly.
 - `.local/`, SQLite files, and local content mirrors are intentionally excluded from images.
-- The Docker image is Python-only; it no longer builds or copies a React/Vite/TanStack bundle.
+- The Docker image is Python-only; it no longer builds or copies a separate browser bundle.
 
 ## Data And Volume Boundaries
 
@@ -35,7 +35,7 @@ Last updated: 2026-07-09
 
 - Normal deploy verification checks Fly status plus the live `/healthz` URL.
 - After browser route changes, verify representative Flask `/campaigns/...` URLs.
-- After app-shell/static-serving changes, verify versioned CSS cache headers where relevant.
+- After app-shell/static-serving changes, verify versioned CSS/JS cache headers where relevant.
 - After campaign asset-serving changes, verify representative asset content type.
 
 ## Related Backlog

@@ -50,8 +50,6 @@ from .auth import (
 from .character_builder import (
     CAMPAIGN_ITEMS_SECTION,
     CAMPAIGN_MECHANICS_SECTION,
-    _attach_campaign_item_page_support,
-    _build_item_catalog,
     _normalize_equipment_payloads,
     _normalize_weapon_wield_mode_value,
     _build_spell_catalog,
@@ -69,6 +67,14 @@ from .character_builder import (
     resolve_weapon_wield_mode,
     supports_native_level_up,
     weapon_wield_mode_label,
+)
+from .character_assets import (
+    build_character_item_catalog as build_shared_character_item_catalog,
+    build_character_portrait_asset_ref,
+    character_portrait_profile,
+    prepare_character_portrait_file,
+    update_character_portrait_profile,
+    validate_character_portrait_text,
 )
 from .character_editor import (
     CharacterEditValidationError,
@@ -120,13 +126,16 @@ from .xianxia_character_model import (
 )
 from .xianxia_character_builder import (
     XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT,
-    XIANXIA_MARTIAL_ART_IMPORT_RANKS,
     build_xianxia_character_create_context,
     build_xianxia_character_definition,
     build_xianxia_character_initial_state,
-    list_xianxia_manual_import_martial_art_options,
 )
 from .xianxia_character_importer import build_xianxia_manual_import_character
+from .xianxia_import_presenter import (
+    build_xianxia_manual_import_context,
+    build_xianxia_manual_import_payload,
+    build_xianxia_manual_import_preview,
+)
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
 from .combat_npc_resources import (
     build_npc_resource_seeds_from_markdown,
@@ -248,6 +257,17 @@ from .systems_labels import (
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError, SystemsService
 from .systems_store import SystemsStore
 from .image_publish import prepare_published_article_image
+from .live_presenter import (
+    build_combat_live_view_token as build_shared_combat_live_view_token,
+    build_combat_poll_settings,
+    build_session_live_view_token as build_shared_session_live_view_token,
+    build_session_poll_settings,
+    build_unchanged_live_payload,
+    normalize_session_subpage,
+    parse_live_detail_state_token_header as parse_shared_live_detail_state_token_header,
+    should_short_circuit_live_response as should_short_circuit_shared_live_response,
+    should_skip_selected_combatant_detail_render,
+)
 from .system_policy import (
     CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION,
     CHARACTER_ROUTE_LANE_DND5E,
@@ -529,9 +549,6 @@ BUILDER_RELEVANT_CAMPAIGN_SECTIONS = frozenset(
         CAMPAIGN_ITEMS_SECTION,
     }
 )
-CHARACTER_PORTRAIT_ALT_MAX_LENGTH = 200
-CHARACTER_PORTRAIT_CAPTION_MAX_LENGTH = 300
-CHARACTER_PORTRAIT_MAX_BYTES = 8 * 1024 * 1024
 def normalize_session_article_form_mode(value: str) -> str:
     normalized = (value or "").strip().lower()
     if normalized in SESSION_ARTICLE_FORM_MODES:
@@ -1405,16 +1422,19 @@ def create_app() -> Flask:
         )
         return digest
 
-    def _build_stylesheet_url(filename: str = "styles.css") -> str:
+    def _build_static_asset_url(filename: str) -> str:
         version = _resolve_static_asset_version(filename)
         if version:
             return url_for("static", filename=filename, v=version)
         return url_for("static", filename=filename)
 
-    def _is_stylesheet_request() -> bool:
-        if request.endpoint != "static":
+    def _build_stylesheet_url(filename: str = "styles.css") -> str:
+        return _build_static_asset_url(filename)
+
+    def _is_versioned_static_asset_request() -> bool:
+        if request.endpoint != "static" or not request.args.get("v"):
             return False
-        return request.path.endswith("/static/styles.css")
+        return Path(request.path).suffix.lower() in {".css", ".js"}
 
     def _strip_cookie_vary_header(response):
         vary_header = response.headers.get("Vary")
@@ -1535,13 +1555,12 @@ def create_app() -> Flask:
         return response
 
     @app.after_request
-    def tune_stylesheet_caching(response):
-        if not _is_stylesheet_request():
+    def tune_versioned_static_asset_caching(response):
+        if not _is_versioned_static_asset_request():
             return response
 
-        if request.args.get("v"):
-            if app.config["APP_ENV"] == "production":
-                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        if app.config["APP_ENV"] == "production":
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
 
         _strip_cookie_vary_header(response)
         return response
@@ -2115,19 +2134,10 @@ def create_app() -> Flask:
         return str(payload.get("catalog_ref") or payload.get("id") or "").strip()
 
     def build_character_item_catalog(campaign_slug: str) -> dict[str, object]:
-        return _attach_campaign_item_page_support(
-            _build_item_catalog(
-                _list_campaign_enabled_entries(
-                    get_systems_service(),
-                    campaign_slug,
-                    "item",
-                )
-            ),
-            [
-                page_record
-                for page_record in get_campaign_page_store().list_page_records(campaign_slug, include_body=True)
-                if str(getattr(getattr(page_record, "page", None), "section", "") or "").strip() == CHARACTER_ITEMS_SECTION
-            ],
+        return build_shared_character_item_catalog(
+            get_systems_service(),
+            get_campaign_page_store(),
+            campaign_slug,
         )
 
     def build_record_equipment_support_lookup(
@@ -2590,34 +2600,15 @@ def create_app() -> Flask:
             "is_multiclass": len(row_sections) > 1,
         }
 
-    def build_character_portrait_asset_ref(character_slug: str, filename: str) -> str:
-        extension = Path(filename).suffix.lower()
-        return f"characters/{character_slug}/portrait{extension}"
-
     def validate_character_portrait_upload(upload) -> tuple[str, bytes]:
-        filename = Path(str(getattr(upload, "filename", "") or "").strip()).name
-        if not filename:
-            raise ValueError("Choose an image file before saving the portrait.")
-        extension = Path(filename).suffix.lower()
-        if extension not in ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS:
-            raise ValueError("Character portraits must be PNG, JPG, GIF, or WEBP files.")
-        data_blob = upload.read() if upload is not None else b""
-        if not data_blob:
-            raise ValueError("Uploaded portrait files cannot be empty.")
-        if len(data_blob) > CHARACTER_PORTRAIT_MAX_BYTES:
-            raise ValueError("Character portraits must stay under 8 MB.")
-        try:
-            filename, data_blob = prepare_published_article_image(filename, data_blob)
-        except ValueError as exc:
-            message = str(exc)
-            message = message.replace("Wiki page images", "Character portraits")
-            message = message.replace("Uploaded wiki page images", "Uploaded portrait files")
-            raise ValueError(message) from exc
-        return filename, data_blob
+        return prepare_character_portrait_file(
+            str(getattr(upload, "filename", "") or ""),
+            upload.read() if upload is not None else b"",
+        )
 
     def build_character_portrait_context(campaign, definition) -> dict[str, str] | None:
-        profile = dict(definition.profile or {})
-        asset_ref = str(profile.get("portrait_asset_ref") or "").strip()
+        portrait = character_portrait_profile(definition)
+        asset_ref = str(portrait["asset_ref"])
         if not asset_ref:
             return None
         if get_campaign_asset_file(campaign, asset_ref) is None:
@@ -2629,32 +2620,9 @@ def create_app() -> Flask:
                 campaign_slug=campaign.slug,
                 character_slug=definition.character_slug,
             ),
-            "alt": str(profile.get("portrait_alt") or definition.name).strip() or definition.name,
-            "caption": str(profile.get("portrait_caption") or "").strip(),
+            "alt": str(portrait["alt_text"]),
+            "caption": str(portrait["caption"]),
         }
-
-    def update_character_portrait_profile(
-        definition,
-        *,
-        asset_ref: str = "",
-        alt_text: str = "",
-        caption: str = "",
-    ):
-        payload = definition.to_dict()
-        profile = dict(payload.get("profile") or {})
-        clean_asset_ref = str(asset_ref or "").strip()
-        clean_alt_text = str(alt_text or "").strip()
-        clean_caption = str(caption or "").strip()
-        if clean_asset_ref:
-            profile["portrait_asset_ref"] = clean_asset_ref
-            profile["portrait_alt"] = clean_alt_text
-            profile["portrait_caption"] = clean_caption
-        else:
-            profile.pop("portrait_asset_ref", None)
-            profile.pop("portrait_alt", None)
-            profile.pop("portrait_caption", None)
-        payload["profile"] = profile
-        return definition.__class__.from_dict(payload)
 
     def finalize_character_definition_for_write(
         campaign_slug: str,
@@ -2891,11 +2859,6 @@ def create_app() -> Flask:
     def render_flash_stack_html() -> str:
         return render_template("_flash_stack.html")
 
-    def build_live_hash(*parts: object) -> str:
-        normalized_parts = [str(part) for part in parts]
-        digest = hashlib.sha1("||".join(normalized_parts).encode("utf-8")).hexdigest()
-        return digest[:12]
-
     def build_combat_live_view_token(
         campaign_slug: str,
         combat_subpage: str,
@@ -2903,104 +2866,39 @@ def create_app() -> Flask:
         selected_combatant_id: int | None = None,
         combat_dm_view: str | None = None,
     ) -> str:
-        return build_live_hash(
-            "combat",
+        return build_shared_combat_live_view_token(
+            campaign_slug,
             combat_subpage,
-            normalize_combat_dm_view(combat_dm_view or "") if combat_subpage == "dm" else "",
-            "1" if can_manage_campaign_combat(campaign_slug) else "0",
-            str(selected_combatant_id or ""),
-            *sorted(get_owned_character_slugs(campaign_slug)),
+            selected_combatant_id=selected_combatant_id,
+            combat_dm_view=combat_dm_view,
+            can_manage_combat=can_manage_campaign_combat(campaign_slug),
+            owned_character_slugs=get_owned_character_slugs(campaign_slug),
+            normalize_combat_dm_view=normalize_combat_dm_view,
         )
-
-    def normalize_session_subpage(value: str) -> str:
-        normalized = str(value or "").strip().lower()
-        if normalized == "dm":
-            return "dm"
-        return "session"
 
     def build_session_live_view_token(campaign_slug: str, session_subpage: str) -> str:
-        normalized_subpage = normalize_session_subpage(session_subpage)
         current_preferences = get_current_user_preferences()
-        return build_live_hash(
-            "session",
-            normalized_subpage,
-            current_preferences.session_chat_order,
-            "1" if can_manage_campaign_session(campaign_slug) else "0",
-            "1" if can_post_campaign_session_messages(campaign_slug) else "0",
+        return build_shared_session_live_view_token(
+            campaign_slug,
+            session_subpage,
+            session_chat_order=current_preferences.session_chat_order,
+            can_manage_session=can_manage_campaign_session(campaign_slug),
+            can_post_session_messages=can_post_campaign_session_messages(campaign_slug),
         )
 
-    def build_combat_poll_settings(combat_subpage: str) -> dict[str, int]:
-        if combat_subpage == "status":
-            return {
-                "active_interval_ms": 1500,
-                "idle_interval_ms": 4000,
-                "idle_threshold_ms": 30000,
-            }
-        return {
-            "active_interval_ms": 500,
-            "idle_interval_ms": 3000,
-            "idle_threshold_ms": 30000,
-        }
-
-    def build_session_poll_settings(session_subpage: str) -> dict[str, int]:
-        if session_subpage == "dm":
-            return {
-                "active_interval_ms": 2000,
-                "idle_interval_ms": 5000,
-                "idle_threshold_ms": 30000,
-            }
-        return {
-            "active_interval_ms": 3000,
-            "idle_interval_ms": 6000,
-            "idle_threshold_ms": 30000,
-        }
-
-    def parse_live_revision_header() -> int | None:
-        raw_value = request.headers.get("X-Live-Revision", "").strip()
-        if not raw_value:
-            return None
-        try:
-            parsed_value = int(raw_value)
-        except ValueError:
-            return None
-        return parsed_value if parsed_value >= 0 else None
-
-    def parse_live_view_token_header() -> str:
-        return request.headers.get("X-Live-View-Token", "").strip()
-
     def parse_live_detail_state_token_header() -> str:
-        return request.headers.get("X-Live-Detail-State-Token", "").strip()
-
-    def should_skip_selected_combatant_detail_render(
-        *,
-        requested_detail_state_token: str,
-        selected_detail_state_token: str,
-    ) -> bool:
-        if not requested_detail_state_token:
-            return False
-        return requested_detail_state_token == selected_detail_state_token
+        return parse_shared_live_detail_state_token_header(request.headers)
 
     def should_short_circuit_live_response(
         *,
         live_revision: int,
         live_view_token: str,
     ) -> bool:
-        requested_revision = parse_live_revision_header()
-        requested_view_token = parse_live_view_token_header()
-        if requested_revision is None or not requested_view_token:
-            return False
-        return requested_revision == live_revision and requested_view_token == live_view_token
-
-    def build_unchanged_live_payload(
-        *,
-        live_revision: int,
-        live_view_token: str,
-    ) -> dict[str, object]:
-        return {
-            "changed": False,
-            "live_revision": live_revision,
-            "live_view_token": live_view_token,
-        }
+        return should_short_circuit_shared_live_response(
+            request.headers,
+            live_revision=live_revision,
+            live_view_token=live_view_token,
+        )
 
     def attach_live_response_diagnostics(
         response,
@@ -4761,135 +4659,6 @@ def create_app() -> Flask:
             ),
             status_code,
         )
-
-    def build_xianxia_manual_import_martial_art_rows(
-        values: dict[str, str],
-    ) -> list[dict[str, object]]:
-        row_numbers: set[int] = set()
-        row_pattern = re.compile(
-            r"^martial_art_(\d+)_(slug|name|rank|teacher|breakthrough|notes)$"
-        )
-        for key in values:
-            match = row_pattern.match(str(key))
-            if not match:
-                continue
-            row_number = int(match.group(1))
-            if row_number > 0:
-                row_numbers.add(row_number)
-        row_count = max(max(row_numbers, default=0), 3)
-        return [
-            {
-                "index": index,
-                "slug_input_name": f"martial_art_{index}_slug",
-                "name_input_name": f"martial_art_{index}_name",
-                "rank_input_name": f"martial_art_{index}_rank",
-                "teacher_input_name": f"martial_art_{index}_teacher",
-                "breakthrough_input_name": f"martial_art_{index}_breakthrough",
-                "notes_input_name": f"martial_art_{index}_notes",
-                "selected_slug": values.get(f"martial_art_{index}_slug", ""),
-                "name": values.get(f"martial_art_{index}_name", ""),
-                "rank": values.get(f"martial_art_{index}_rank", ""),
-                "teacher": values.get(f"martial_art_{index}_teacher", ""),
-                "breakthrough": values.get(f"martial_art_{index}_breakthrough", ""),
-                "notes": values.get(f"martial_art_{index}_notes", ""),
-            }
-            for index in range(1, row_count + 1)
-        ]
-
-    def build_xianxia_manual_import_context(
-        campaign_slug: str,
-        form_values: dict[str, object] | None = None,
-        *,
-        preview: dict[str, object] | None = None,
-    ) -> dict[str, object]:
-        values = {key: str(value or "") for key, value in dict(form_values or {}).items()}
-        martial_art_options = list_xianxia_manual_import_martial_art_options(
-            systems_service=get_systems_service(),
-            campaign_slug=campaign_slug,
-        )
-        return {
-            "values": values,
-            "realm_choices": ("Mortal", "Immortal", "Divine"),
-            "honor_choices": ("Venerable", "Majestic", "Honorable", "Disgraced", "Demonic"),
-            "martial_art_rank_choices": list(XIANXIA_MARTIAL_ART_IMPORT_RANKS),
-            "martial_art_rows": build_xianxia_manual_import_martial_art_rows(values),
-            "attribute_fields": [
-                {
-                    "key": key,
-                    "label": XIANXIA_ATTRIBUTE_LABELS[key],
-                    "input_name": f"attribute_{key}",
-                    "value": values.get(f"attribute_{key}", "0"),
-                }
-                for key in XIANXIA_ATTRIBUTE_KEYS
-            ],
-            "effort_fields": [
-                {
-                    "key": key,
-                    "label": XIANXIA_EFFORT_LABELS[key],
-                    "input_name": f"effort_{key}",
-                    "value": values.get(f"effort_{key}", "0"),
-                }
-                for key in XIANXIA_EFFORT_KEYS
-            ],
-            "energy_fields": [
-                {
-                    "key": key,
-                    "label": key.title(),
-                    "max_input_name": f"energy_{key}_max",
-                    "max_value": values.get(f"energy_{key}_max", "0"),
-                }
-                for key in XIANXIA_ENERGY_KEYS
-            ],
-            "martial_art_options": list(martial_art_options or []),
-            "preview": preview,
-        }
-
-    def build_xianxia_manual_import_payload(form_values: dict[str, object]) -> dict[str, object]:
-        ignored_inputs = {"active_stance", "active_aura"}
-        values = {
-            key: str(value or "")
-            for key, value in dict(form_values or {}).items()
-            if key not in ignored_inputs
-        }
-        payload: dict[str, object] = dict(values)
-        payload["energy_maxima"] = {
-            key: values.get(f"energy_{key}_max", "")
-            for key in XIANXIA_ENERGY_KEYS
-        }
-        payload["state"] = {
-            "xianxia": {
-                "currency": {
-                    "coin": values.get("coin", ""),
-                    "supply": values.get("supply", ""),
-                    "spirit_stones": values.get("spirit_stones", ""),
-                },
-                "notes": {
-                    "player_notes_markdown": values.get("player_notes_markdown", ""),
-                },
-            },
-        }
-        return payload
-
-    def build_xianxia_manual_import_preview(
-        definition,
-        initial_state: dict[str, object],
-    ) -> dict[str, object]:
-        xianxia = dict(getattr(definition, "xianxia", {}) or {})
-        state_xianxia = dict(initial_state.get("xianxia") or {})
-        inventory = dict(state_xianxia.get("inventory") or {})
-        return {
-            "name": definition.name,
-            "slug": definition.character_slug,
-            "realm": xianxia.get("realm"),
-            "actions_per_turn": xianxia.get("actions_per_turn"),
-            "trained_skill_count": len(list(dict(xianxia.get("skills") or {}).get("trained") or [])),
-            "martial_art_count": len(list(xianxia.get("martial_arts") or [])),
-            "inventory_count": len(list(inventory.get("quantities") or [])),
-            "hp": dict(state_xianxia.get("vitals") or {}).get("current_hp"),
-            "hp_max": dict(xianxia.get("durability") or {}).get("hp_max"),
-            "stance": dict(state_xianxia.get("vitals") or {}).get("current_stance"),
-            "stance_max": dict(xianxia.get("durability") or {}).get("stance_max"),
-        }
 
     def render_xianxia_manual_import_page(
         campaign_slug: str,
@@ -9105,6 +8874,7 @@ def create_app() -> Flask:
             "slugify": slugify,
             "app_metadata": build_app_metadata(app.config),
             "stylesheet_url": _build_stylesheet_url,
+            "static_asset_url": _build_static_asset_url,
             "app_loading_media_urls": loading_media_urls,
             "app_loading_image_url": loading_image_url,
         }
@@ -12803,7 +12573,11 @@ def create_app() -> Flask:
             return redirect(url_for("character_roster_view", campaign_slug=campaign_slug))
 
         form_values = dict(request.form if request.method == "POST" else request.args)
-        import_context = build_xianxia_manual_import_context(campaign_slug, form_values)
+        import_context = build_xianxia_manual_import_context(
+            systems_service=get_systems_service(),
+            campaign_slug=campaign_slug,
+            values=form_values,
+        )
         if request.method != "POST":
             return render_xianxia_manual_import_page(campaign_slug, import_context)
 
@@ -12820,8 +12594,9 @@ def create_app() -> Flask:
 
         preview = build_xianxia_manual_import_preview(definition, initial_state)
         import_context = build_xianxia_manual_import_context(
-            campaign_slug,
-            form_values,
+            systems_service=get_systems_service(),
+            campaign_slug=campaign_slug,
+            values=form_values,
             preview=preview,
         )
         if not request.form.get("confirm_import"):
@@ -14464,16 +14239,10 @@ def create_app() -> Flask:
         try:
             expected_revision = parse_expected_revision()
             filename, data_blob = validate_character_portrait_upload(portrait_upload)
-            alt_text = request.form.get("portrait_alt", "").strip()
-            caption = request.form.get("portrait_caption", "").strip()
-            if len(alt_text) > CHARACTER_PORTRAIT_ALT_MAX_LENGTH:
-                raise ValueError(
-                    f"Portrait alt text must stay under {CHARACTER_PORTRAIT_ALT_MAX_LENGTH} characters."
-                )
-            if len(caption) > CHARACTER_PORTRAIT_CAPTION_MAX_LENGTH:
-                raise ValueError(
-                    f"Portrait captions must stay under {CHARACTER_PORTRAIT_CAPTION_MAX_LENGTH} characters."
-                )
+            alt_text, caption = validate_character_portrait_text(
+                request.form.get("portrait_alt", ""),
+                request.form.get("portrait_caption", ""),
+            )
 
             existing_asset_ref = str((record.definition.profile or {}).get("portrait_asset_ref") or "").strip()
             next_asset_ref = build_character_portrait_asset_ref(character_slug, filename)

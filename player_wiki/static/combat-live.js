@@ -1,0 +1,1404 @@
+﻿  (() => {
+    const liveRoot = document.querySelector("[data-combat-live-root]");
+    if (!liveRoot) {
+      return;
+    }
+
+    const flashRoot = document.querySelector("[data-flash-stack-root]");
+    const summaryRoot = document.querySelector("[data-combat-summary-root]");
+    const trackerRoot = document.querySelector("[data-combat-tracker-root]");
+    const statusTrackerRoot = document.querySelector("[data-combat-status-tracker-root]");
+    const trackerDetailRoot = document.querySelector("[data-combat-status-detail-root]");
+    const trackerDetailContentRoot = document.querySelector("[data-combat-status-detail-content-root]");
+    const statusAuthorityRoot = document.querySelector("[data-combat-status-authority-root]");
+    const combatStatusSelectionLoadingRoot = document.querySelector("[data-combat-status-selection-loading]");
+    const contextRoot = document.querySelector("[data-combat-context-root]");
+    const controlsRoot = document.querySelector("[data-combat-controls-root]");
+    let pollUrl = liveRoot.dataset.combatLiveUrl || "";
+    const uiStateTools = window.__playerWikiLiveUiTools || null;
+    const combatWorkspaceTools = window.__playerWikiCombatWorkspace || null;
+    let combatStateToken = liveRoot.dataset.combatStateToken || "";
+    let liveRevision = Number.parseInt(liveRoot.dataset.liveRevision || "0", 10);
+    if (!Number.isFinite(liveRevision) || liveRevision < 0) {
+      liveRevision = 0;
+    }
+    let liveViewToken = liveRoot.dataset.liveViewToken || "";
+    const activeIntervalMs = Number.parseInt(liveRoot.dataset.liveActiveIntervalMs || "1000", 10) || 1000;
+    const idleIntervalMs = Number.parseInt(liveRoot.dataset.liveIdleIntervalMs || String(activeIntervalMs), 10) || activeIntervalMs;
+    const idleThresholdMs = Number.parseInt(liveRoot.dataset.liveIdleThresholdMs || "30000", 10) || 30000;
+    const diagnosticsEnabled = liveRoot.dataset.liveDiagnosticsEnabled === "1";
+    const diagnosticsTools = diagnosticsEnabled ? window.__playerWikiLiveDiagnosticsTools : null;
+    const isDmStatusLiveRoot = liveRoot.dataset.combatSubpage === "dm"
+      && (liveRoot.dataset.combatDmView === "status" || !liveRoot.dataset.combatDmView);
+    let selectedCombatantDetailStateToken = liveRoot.dataset.combatDetailStateToken || "";
+    let monsterSearchAbortController = null;
+    let monsterSearchTimerId = 0;
+    let pollTimerId = 0;
+    let pollInFlight = false;
+    let requestInFlight = false;
+    let lastActivityAt = Date.now();
+    const submitterByForm = new WeakMap();
+
+    const buildCombatFormData = (form, submitter) => {
+      const formData = new FormData(form);
+      if (
+        (submitter instanceof HTMLButtonElement || submitter instanceof HTMLInputElement) &&
+        submitter.name
+      ) {
+        formData.append(submitter.name, submitter.value);
+      }
+      return formData;
+    };
+
+    const isSubmitterControl = (element) => {
+      if (element instanceof HTMLButtonElement) {
+        return element.type === "submit";
+      }
+      if (element instanceof HTMLInputElement) {
+        const type = String(element.type || "").toLowerCase();
+        return type === "submit" || type === "image";
+      }
+      return false;
+    };
+
+    const resolveCombatSubmitter = (form, submitter) => {
+      if (isSubmitterControl(submitter) && submitter.form === form) {
+        return submitter;
+      }
+      const storedSubmitter = submitterByForm.get(form);
+      if (isSubmitterControl(storedSubmitter) && storedSubmitter.form === form) {
+        return storedSubmitter;
+      }
+      const activeElement = document.activeElement;
+      if (isSubmitterControl(activeElement) && activeElement.form === form) {
+        return activeElement;
+      }
+      return null;
+    };
+
+    document.addEventListener(
+      "click",
+      (event) => {
+        const submitter = event.target instanceof Element
+          ? event.target.closest("button, input[type='submit'], input[type='image']")
+          : null;
+        if (!isSubmitterControl(submitter)) {
+          return;
+        }
+        const form = submitter.form;
+        if (!(form instanceof HTMLFormElement) || !form.matches("[data-combat-async]")) {
+          return;
+        }
+        if (!liveRoot.contains(form)) {
+          return;
+        }
+        submitterByForm.set(form, submitter);
+      },
+      true,
+    );
+
+    const buildFormStateKey = (form, index) => {
+      const method = String(form.getAttribute("method") || "get").toLowerCase();
+      const action = String(form.getAttribute("action") || "");
+      return `${method}:${action}:${index}`;
+    };
+
+    const captureControlsFormState = () => {
+      if (!(controlsRoot instanceof HTMLElement)) {
+        return new Map();
+      }
+      const states = new Map();
+      Array.from(controlsRoot.querySelectorAll("form")).forEach((form, index) => {
+        if (!(form instanceof HTMLFormElement)) {
+          return;
+        }
+        const values = {};
+        for (const element of Array.from(form.elements)) {
+          if (
+            !(element instanceof HTMLInputElement)
+            && !(element instanceof HTMLSelectElement)
+            && !(element instanceof HTMLTextAreaElement)
+          ) {
+            continue;
+          }
+          if (!element.name || element.type === "file" || element.type === "submit" || element.type === "button") {
+            continue;
+          }
+          if (element instanceof HTMLInputElement && (element.type === "checkbox" || element.type === "radio")) {
+            if (!element.checked) {
+              continue;
+            }
+          }
+          values[element.name] = element.value;
+        }
+        states.set(buildFormStateKey(form, index), values);
+      });
+      return states;
+    };
+
+    const restoreControlsFormState = (states) => {
+      if (!(controlsRoot instanceof HTMLElement) || !(states instanceof Map) || !states.size) {
+        return;
+      }
+      Array.from(controlsRoot.querySelectorAll("form")).forEach((form, index) => {
+        if (!(form instanceof HTMLFormElement)) {
+          return;
+        }
+        const values = states.get(buildFormStateKey(form, index));
+        if (!values) {
+          return;
+        }
+        for (const [name, value] of Object.entries(values)) {
+          const field = form.elements.namedItem(name);
+          if (field instanceof RadioNodeList) {
+            field.value = String(value);
+            continue;
+          }
+          if (
+            field instanceof HTMLInputElement
+            || field instanceof HTMLSelectElement
+            || field instanceof HTMLTextAreaElement
+          ) {
+            field.value = String(value);
+          }
+        }
+      });
+    };
+
+    const captureControlsAddMode = () => {
+      if (!(controlsRoot instanceof HTMLElement)) {
+        return "";
+      }
+      const selectedMode = controlsRoot.querySelector('input[name="combat-add-mode"]:checked');
+      return selectedMode instanceof HTMLInputElement ? selectedMode.id : "";
+    };
+
+    const restoreControlsAddMode = (selectedModeId) => {
+      if (!(controlsRoot instanceof HTMLElement) || !selectedModeId) {
+        return;
+      }
+      const modeInputs = Array.from(controlsRoot.querySelectorAll('input[name="combat-add-mode"]'));
+      const selectedMode = modeInputs.find(
+        (input) => input instanceof HTMLInputElement && input.id === selectedModeId,
+      );
+      if (selectedMode instanceof HTMLInputElement) {
+        selectedMode.checked = true;
+      }
+    };
+
+    const captureSystemsMonsterSearchState = () => {
+      if (!(controlsRoot instanceof HTMLElement)) {
+        return null;
+      }
+      const form = controlsRoot.querySelector("[data-systems-monster-search-form]");
+      if (!(form instanceof HTMLFormElement)) {
+        return null;
+      }
+      const searchInput = form.querySelector("[data-systems-monster-query]");
+      const resultsSelect = form.querySelector("[data-systems-monster-results]");
+      const status = form.querySelector("[data-systems-monster-status]");
+      if (
+        !(searchInput instanceof HTMLInputElement)
+        || !(resultsSelect instanceof HTMLSelectElement)
+        || !(status instanceof HTMLElement)
+      ) {
+        return null;
+      }
+      return {
+        query: searchInput.value,
+        selectedValue: resultsSelect.value,
+        disabled: resultsSelect.disabled,
+        statusText: status.textContent || "",
+        options: Array.from(resultsSelect.options).map((option) => ({
+          value: option.value,
+          text: option.text,
+        })),
+      };
+    };
+
+    const markActivity = () => {
+      lastActivityAt = Date.now();
+    };
+
+    const setDmStatusSelectionLoading = (isLoading) => {
+      if (!isDmStatusLiveRoot || !(combatStatusSelectionLoadingRoot instanceof HTMLElement)) {
+        return;
+      }
+      combatStatusSelectionLoadingRoot.textContent = isLoading
+        ? "Loading selected combatant..."
+        : "";
+      combatStatusSelectionLoadingRoot.hidden = !isLoading;
+    };
+
+    const getNextPollDelay = () => {
+      if (document.hidden) {
+        return idleIntervalMs;
+      }
+      return Date.now() - lastActivityAt >= idleThresholdMs ? idleIntervalMs : activeIntervalMs;
+    };
+
+    const scheduleNextPoll = (delayMs = getNextPollDelay()) => {
+      window.clearTimeout(pollTimerId);
+      pollTimerId = window.setTimeout(() => {
+        pollTimerId = 0;
+        refreshLiveState();
+      }, delayMs);
+    };
+
+    const syncLiveMetadata = (payload = {}, response = null) => {
+      const payloadRevision = Number.parseInt(
+        typeof payload.live_revision === "number" || typeof payload.live_revision === "string"
+          ? String(payload.live_revision)
+          : "",
+        10,
+      );
+      if (Number.isFinite(payloadRevision) && payloadRevision >= 0) {
+        liveRevision = payloadRevision;
+      } else if (response instanceof Response) {
+        const headerRevision = Number.parseInt(response.headers.get("X-Live-Revision") || "", 10);
+        if (Number.isFinite(headerRevision) && headerRevision >= 0) {
+          liveRevision = headerRevision;
+        }
+      }
+
+      if (typeof payload.live_view_token === "string" && payload.live_view_token) {
+        liveViewToken = payload.live_view_token;
+      }
+
+      liveRoot.dataset.liveRevision = String(liveRevision);
+      liveRoot.dataset.liveViewToken = liveViewToken;
+    };
+
+    const buildLiveHeaders = ({ allowShortCircuit = true } = {}) => {
+      const headers = {
+        "X-Requested-With": "XMLHttpRequest",
+      };
+      if (allowShortCircuit) {
+        headers["X-Live-Revision"] = String(liveRevision);
+        if (liveViewToken) {
+          headers["X-Live-View-Token"] = liveViewToken;
+        }
+        if (selectedCombatantDetailStateToken) {
+          headers["X-Live-Detail-State-Token"] = selectedCombatantDetailStateToken;
+        }
+      }
+      return headers;
+    };
+
+    const logLiveDiagnostics = (viewName, response, payload = null) => {
+      if (!diagnosticsEnabled || !(response instanceof Response) || typeof console === "undefined" || !console.debug) {
+        return;
+      }
+      console.debug(`[live:${viewName}]`, {
+        changed:
+          typeof payload?.changed === "boolean"
+            ? payload.changed
+            : response.headers.get("X-Live-State-Changed"),
+        revision: response.headers.get("X-Live-Revision") || liveRevision,
+        payloadBytes: response.headers.get("X-Live-Payload-Bytes"),
+        serverTiming: response.headers.get("Server-Timing"),
+      });
+    };
+
+    const recordLiveMetric = (metric) => {
+      if (!diagnosticsEnabled || !diagnosticsTools) {
+        return metric;
+      }
+      return diagnosticsTools.recordMetric("combat", metric);
+    };
+
+    const buildLiveMetric = (response, payload, { mode, requestMs = 0, applyMs = 0 } = {}) => {
+      const headerChanged = response.headers.get("X-Live-State-Changed");
+      const queryCount = Number.parseInt(response.headers.get("X-Live-Query-Count") || "0", 10);
+      const queryTimeMs = Number.parseFloat(response.headers.get("X-Live-Query-Time-Ms") || "0");
+      const requestTimeMs = Number.parseFloat(response.headers.get("X-Live-Request-Time-Ms") || "0");
+      const payloadBytes = Number.parseInt(response.headers.get("X-Live-Payload-Bytes") || "0", 10);
+      return recordLiveMetric({
+        mode,
+        changed: typeof payload?.changed === "boolean" ? payload.changed : headerChanged === "true",
+        requestMs: Number(requestMs.toFixed(2)),
+        applyMs: Number(applyMs.toFixed(2)),
+        liveRevision,
+        liveViewToken,
+        payloadBytes: Number.isFinite(payloadBytes) ? payloadBytes : 0,
+        queryCount: Number.isFinite(queryCount) ? queryCount : 0,
+        queryTimeMs: Number.isFinite(queryTimeMs) ? Number(queryTimeMs.toFixed(2)) : 0,
+        requestTimeMs: Number.isFinite(requestTimeMs) ? Number(requestTimeMs.toFixed(2)) : 0,
+        serverTiming: response.headers.get("Server-Timing") || "",
+      });
+    };
+
+    const hasFocusedFormControl = () => {
+      const activeElement = document.activeElement;
+      if (!activeElement || !liveRoot.contains(activeElement)) {
+        return false;
+      }
+      return activeElement.matches("input, textarea, select");
+    };
+
+    const combatantCarouselsInitialized = new WeakSet();
+    let combatantCarouselInitialDefaultsApplied = false;
+    let combatantCarouselUserIntentObserved = false;
+
+    const getCombatantCarouselFromTarget = (target) => {
+      if (!(target instanceof HTMLElement)) {
+        return null;
+      }
+      return target.closest("[data-combatant-carousel]");
+    };
+
+    const getCombatantCarouselTrack = (carousel) => {
+      if (!(carousel instanceof HTMLElement)) {
+        return null;
+      }
+      const track = carousel.querySelector("[data-combatant-carousel-track]");
+      return track instanceof HTMLElement ? track : null;
+    };
+
+    const updateCombatantCarouselControls = (carousel) => {
+      if (!(carousel instanceof HTMLElement)) {
+        return;
+      }
+      const track = getCombatantCarouselTrack(carousel);
+      if (!track) {
+        return;
+      }
+      const prevButton = carousel.querySelector("[data-combatant-carousel-prev]");
+      const nextButton = carousel.querySelector("[data-combatant-carousel-next]");
+      if (!(prevButton instanceof HTMLButtonElement) || !(nextButton instanceof HTMLButtonElement)) {
+        return;
+      }
+
+      const maxScrollLeft = Math.max(0, track.scrollWidth - track.clientWidth);
+      if (maxScrollLeft <= 1) {
+        prevButton.disabled = true;
+        nextButton.disabled = true;
+        return;
+      }
+
+      prevButton.disabled = track.scrollLeft <= 0;
+      nextButton.disabled = track.scrollLeft >= maxScrollLeft - 1;
+    };
+
+    const initializeCombatantCarousel = (carousel) => {
+      if (!(carousel instanceof HTMLElement) || combatantCarouselsInitialized.has(carousel)) {
+        return;
+      }
+      const track = getCombatantCarouselTrack(carousel);
+      if (!track) {
+        return;
+      }
+      const onScroll = () => updateCombatantCarouselControls(carousel);
+      track.addEventListener("scroll", onScroll, { passive: true });
+      updateCombatantCarouselControls(carousel);
+      combatantCarouselsInitialized.add(carousel);
+    };
+
+    const initializeCombatantCarousels = (scope = liveRoot) => {
+      if (!(scope instanceof Document) && !(scope instanceof HTMLElement)) {
+        return;
+      }
+      Array.from(scope.querySelectorAll("[data-combatant-carousel]")).forEach((carousel) => {
+        initializeCombatantCarousel(carousel);
+      });
+    };
+
+    const scrollCombatantCarouselByCard = (track, direction) => {
+      if (!(track instanceof HTMLElement)) {
+        return;
+      }
+      const cardWidth = Math.max(200, Math.min(280, track.clientWidth / 2));
+      track.scrollBy({
+        left: cardWidth * direction,
+        behavior: "smooth",
+      });
+    };
+
+    const focusCombatantCarouselCard = (card) => {
+      if (!(card instanceof HTMLElement) || !card.matches("[data-combatant-carousel-card]")) {
+        return;
+      }
+      card.scrollIntoView({ block: "nearest", inline: "nearest" });
+    };
+
+    const setCombatantCarouselCardSelectedState = (card, isSelected) => {
+      if (!(card instanceof HTMLElement) || !card.matches("[data-combatant-carousel-card]")) {
+        return;
+      }
+      card.dataset.combatantSelected = isSelected ? "true" : "false";
+      card.setAttribute("aria-current", isSelected ? "true" : "false");
+      card.classList.toggle("combat-turn-order-row--selected", isSelected);
+      const selectedBadge = card.querySelector("[data-combatant-selected-badge]");
+      if (selectedBadge instanceof HTMLElement) {
+        selectedBadge.hidden = !isSelected;
+      }
+      const selectedSummary = card.querySelector("[data-combatant-selected-summary]");
+      if (selectedSummary instanceof HTMLElement) {
+        selectedSummary.hidden = !isSelected;
+      }
+    };
+
+    const setCombatantCarouselSelectedById = (carousel, combatantId) => {
+      if (!(carousel instanceof HTMLElement)) {
+        return null;
+      }
+      const targetId = String(combatantId || "").trim();
+      if (!targetId) {
+        return null;
+      }
+      const cards = Array.from(carousel.querySelectorAll("[data-combatant-carousel-card]"));
+      const selectedCard = cards.find((card) =>
+        card instanceof HTMLElement && card.dataset.combatantId === targetId
+      ) || null;
+      if (!(selectedCard instanceof HTMLElement)) {
+        return null;
+      }
+      cards.forEach((card) => {
+        if (!(card instanceof HTMLElement)) {
+          return;
+        }
+        setCombatantCarouselCardSelectedState(card, card === selectedCard);
+      });
+      return selectedCard;
+    };
+
+    const markCombatantCarouselUserIntent = () => {
+      combatantCarouselUserIntentObserved = true;
+    };
+
+    const buildDmStatusCombatantLiveUrl = (combatantId) => {
+      if (!pollUrl) {
+        return "";
+      }
+      const normalizedCombatantId = String(combatantId || "").trim();
+      if (!normalizedCombatantId) {
+        return "";
+      }
+      const nextPollUrl = new URL(pollUrl, window.location.origin);
+      nextPollUrl.searchParams.set("combatant", normalizedCombatantId);
+      nextPollUrl.searchParams.delete("view");
+      return `${nextPollUrl.pathname}${nextPollUrl.search}${nextPollUrl.hash}`;
+    };
+
+    const buildDmStatusPageUrl = (combatantId) => {
+      const normalizedCombatantId = String(combatantId || "").trim();
+      if (!normalizedCombatantId) {
+        return "";
+      }
+      const nextPage = new URL(window.location.pathname, window.location.origin);
+      nextPage.search = "";
+      nextPage.searchParams.set("combatant", normalizedCombatantId);
+      return `${nextPage.pathname}${nextPage.search}${nextPage.hash}`;
+    };
+
+    const getPayloadSelectedCombatantId = (payload = {}) => {
+      if (typeof payload.selected_combatant_id === "number") {
+        return String(payload.selected_combatant_id);
+      }
+      if (typeof payload.selected_combatant_id === "string" && payload.selected_combatant_id.trim()) {
+        return payload.selected_combatant_id.trim();
+      }
+      return "";
+    };
+
+    const isStaleDmStatusPayload = (payload = {}) => {
+      if (!isDmStatusLiveRoot) {
+        return false;
+      }
+      const currentSelectedCombatantId = String(liveRoot.dataset.selectedCombatantId || "").trim();
+      const payloadSelectedCombatantId = getPayloadSelectedCombatantId(payload);
+      return Boolean(currentSelectedCombatantId && payloadSelectedCombatantId && currentSelectedCombatantId !== payloadSelectedCombatantId);
+    };
+
+    const fetchDmStatusCombatant = async (combatantId, { carousel = null } = {}) => {
+      if (!isDmStatusLiveRoot || requestInFlight) {
+        return false;
+      }
+      const normalizedCombatantId = String(combatantId || "").trim();
+      if (!normalizedCombatantId) {
+        return false;
+      }
+      const nextPollUrl = buildDmStatusCombatantLiveUrl(normalizedCombatantId);
+      const nextPageUrl = buildDmStatusPageUrl(normalizedCombatantId);
+      if (!nextPollUrl) {
+        if (nextPageUrl) {
+          window.location.assign(nextPageUrl);
+        }
+        return false;
+      }
+
+      pollUrl = nextPollUrl;
+      liveRoot.dataset.combatLiveUrl = pollUrl;
+      liveRoot.dataset.selectedCombatantId = normalizedCombatantId;
+      const controls = [];
+      if (carousel instanceof HTMLElement) {
+        const jumpSelect = carousel.closest("section")?.querySelector("[data-combatant-carousel-jump-select]");
+        if (jumpSelect instanceof HTMLSelectElement) {
+          controls.push(jumpSelect);
+        }
+        for (const button of Array.from(
+          carousel.querySelectorAll("[data-combatant-carousel-prev], [data-combatant-carousel-next]"),
+        )) {
+          if (button instanceof HTMLButtonElement) {
+            controls.push(button);
+          }
+        }
+        const cards = Array.from(carousel.querySelectorAll("[data-combatant-carousel-card]"));
+        controls.push(...cards);
+      }
+
+      requestInFlight = true;
+      liveRoot.dataset.loading = "1";
+      setDmStatusSelectionLoading(true);
+      for (const control of controls) {
+        if (control instanceof HTMLElement) {
+          control.ariaBusy = "true";
+          control.setAttribute("aria-disabled", "true");
+        }
+      }
+
+      markActivity();
+      try {
+        const response = await fetch(nextPollUrl, {
+          headers: buildLiveHeaders({ allowShortCircuit: false }),
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+        if (!response.ok) {
+          if (nextPageUrl) {
+            window.location.assign(nextPageUrl);
+          }
+          return false;
+        }
+
+        const payload = await response.json();
+        syncLiveMetadata(payload, response);
+        liveRoot.dataset.selectedCombatantId = getPayloadSelectedCombatantId(payload) || normalizedCombatantId;
+        logLiveDiagnostics("combat-dm-status-navigation", response, payload);
+        syncViewUrls(payload);
+        renderPayload(payload, { force: true });
+        setDmStatusSelectionLoading(false);
+        return true;
+      } catch (_) {
+        if (nextPageUrl) {
+          window.location.assign(nextPageUrl);
+        }
+        return false;
+      } finally {
+        requestInFlight = false;
+        liveRoot.dataset.loading = "0";
+        setDmStatusSelectionLoading(false);
+        for (const control of controls) {
+          if (control instanceof HTMLElement) {
+            control.ariaBusy = "false";
+            control.setAttribute("aria-disabled", "false");
+          }
+        }
+        scheduleNextPoll(activeIntervalMs);
+      }
+    };
+
+    const getDefaultCombatantCarouselCard = (carousel) => {
+      if (!(carousel instanceof HTMLElement)) {
+        return null;
+      }
+      const cards = Array.from(carousel.querySelectorAll("[data-combatant-carousel-card]"));
+      if (!cards.length) {
+        return null;
+      }
+      const currentTurnCard = cards.find((card) => card.dataset.combatantCurrentTurn === "true");
+      if (currentTurnCard instanceof HTMLElement) {
+        return currentTurnCard;
+      }
+      const selectedCard = cards.find((card) => card.dataset.combatantSelected === "true");
+      if (selectedCard instanceof HTMLElement) {
+        return selectedCard;
+      }
+      return cards[0];
+    };
+
+    const scrollToDefaultCombatantCarouselCard = (carousel) => {
+      if (!(carousel instanceof HTMLElement)) {
+        return;
+      }
+      const defaultCard = getDefaultCombatantCarouselCard(carousel);
+      if (!(defaultCard instanceof HTMLElement)) {
+        return;
+      }
+      defaultCard.scrollIntoView({ block: "nearest", inline: "nearest" });
+      defaultCard.setAttribute("data-combatant-initial-default", "1");
+    };
+
+    const scrollToCurrentTurnCombatantCarouselCard = (scope = liveRoot) => {
+      if (combatantCarouselUserIntentObserved) {
+        return;
+      }
+      if (!(scope instanceof Document) && !(scope instanceof HTMLElement)) {
+        return;
+      }
+      Array.from(scope.querySelectorAll("[data-combatant-carousel]"))
+        .forEach((carousel) => {
+          if (!(carousel instanceof HTMLElement)) {
+            return;
+          }
+          scrollToDefaultCombatantCarouselCard(carousel);
+        });
+    };
+
+    const initializeCombatantCarouselDefaults = (scope = liveRoot) => {
+      if (combatantCarouselInitialDefaultsApplied) {
+        return;
+      }
+      if (!(scope instanceof Document) && !(scope instanceof HTMLElement)) {
+        return;
+      }
+      Array.from(scope.querySelectorAll("[data-combatant-carousel]"))
+        .forEach((carousel) => {
+          if (!(carousel instanceof HTMLElement)) {
+            return;
+          }
+          scrollToDefaultCombatantCarouselCard(carousel);
+        });
+      combatantCarouselInitialDefaultsApplied = true;
+    };
+
+    const captureCombatantCarouselState = (scope = liveRoot) => {
+      if (!(scope instanceof Document) && !(scope instanceof HTMLElement)) {
+        return [];
+      }
+      return Array.from(scope.querySelectorAll("[data-combatant-carousel]"))
+        .map((carousel) => {
+          if (!(carousel instanceof HTMLElement)) {
+            return null;
+          }
+          const track = getCombatantCarouselTrack(carousel);
+          const cards = Array.from(carousel.querySelectorAll("[data-combatant-carousel-card]"));
+          const inspectedCard = cards.find((card) =>
+            card instanceof HTMLElement && card.dataset.combatantSelected === "true"
+          );
+          return {
+            scrollLeft: track instanceof HTMLElement ? track.scrollLeft : 0,
+            inspectedCombatantId: inspectedCard instanceof HTMLElement
+              ? String(inspectedCard.dataset.combatantId || "")
+              : "",
+          };
+        })
+        .filter((state) => state && Object.keys(state).length > 0);
+    };
+
+    const restoreCombatantCarouselState = (scope = liveRoot, carouselStates = []) => {
+      if (!Array.isArray(carouselStates) || !(scope instanceof Document) && !(scope instanceof HTMLElement)) {
+        return;
+      }
+      const carousels = Array.from(scope.querySelectorAll("[data-combatant-carousel]"));
+      if (!carousels.length) {
+        return;
+      }
+      carousels.forEach((carousel, index) => {
+        if (!(carousel instanceof HTMLElement) || index >= carouselStates.length) {
+          return;
+        }
+        const state = carouselStates[index];
+        if (!state || typeof state !== "object") {
+          return;
+        }
+        const track = getCombatantCarouselTrack(carousel);
+        const targetCombatantId = typeof state.inspectedCombatantId === "string" ? state.inspectedCombatantId.trim() : "";
+        if (targetCombatantId && track instanceof HTMLElement) {
+          setCombatantCarouselSelectedById(carousel, targetCombatantId);
+        }
+        if (track instanceof HTMLElement) {
+          const trackScrollLeft = Number(state.scrollLeft);
+          if (Number.isFinite(trackScrollLeft) && trackScrollLeft >= 0) {
+            const maxScrollLeft = Math.max(0, track.scrollWidth - track.clientWidth);
+            track.scrollLeft = Math.min(maxScrollLeft, trackScrollLeft);
+          }
+          updateCombatantCarouselControls(carousel);
+        }
+      });
+    };
+
+    const scrollToAnchor = (anchor) => {
+      if (!anchor) {
+        return;
+      }
+      const target = document.getElementById(anchor);
+      if (target) {
+        target.scrollIntoView({ block: "start" });
+      }
+    };
+
+    const buildCanonicalPageUrl = (pageUrl) => {
+      const nextUrl = new URL(pageUrl, window.location.origin);
+      if (!nextUrl.hash && window.location.hash) {
+        nextUrl.hash = window.location.hash;
+      }
+      return `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
+    };
+
+    const syncViewUrls = (payload = {}) => {
+      if (typeof payload.live_url === "string" && payload.live_url) {
+        pollUrl = payload.live_url;
+        liveRoot.dataset.combatLiveUrl = pollUrl;
+      }
+      if (typeof payload.page_url !== "string" || !payload.page_url) {
+        return;
+      }
+      const nextPageUrl = buildCanonicalPageUrl(payload.page_url);
+      const currentPageUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      if (nextPageUrl !== currentPageUrl) {
+        window.history.replaceState(null, "", nextPageUrl);
+      }
+    };
+
+    const initializeSystemsMonsterSearch = (savedState = null) => {
+      if (!controlsRoot) {
+        return;
+      }
+
+      const form = controlsRoot.querySelector("[data-systems-monster-search-form]");
+      if (!(form instanceof HTMLFormElement)) {
+        return;
+      }
+
+      const searchInput = form.querySelector("[data-systems-monster-query]");
+      const resultsSelect = form.querySelector("[data-systems-monster-results]");
+      const status = form.querySelector("[data-systems-monster-status]");
+      const submitButton = form.querySelector("[data-systems-monster-submit]");
+      const searchUrl = form.dataset.systemsMonsterSearchUrl || "";
+
+      if (
+        !(searchInput instanceof HTMLInputElement)
+        || !(resultsSelect instanceof HTMLSelectElement)
+        || !searchUrl
+      ) {
+        return;
+      }
+
+      const setStatus = (message) => {
+        if (status instanceof HTMLElement) {
+          status.textContent = message;
+        }
+      };
+
+      const syncSubmitState = () => {
+        if (submitButton instanceof HTMLButtonElement) {
+          submitButton.disabled = resultsSelect.disabled || !resultsSelect.value;
+        }
+      };
+
+      const resetResults = (message) => {
+        resultsSelect.innerHTML = "";
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "Search to load matching monsters";
+        resultsSelect.append(option);
+        resultsSelect.disabled = true;
+        setStatus(message);
+        syncSubmitState();
+      };
+
+      const restoreSavedState = () => {
+        if (!savedState || typeof savedState !== "object") {
+          return false;
+        }
+        const savedQuery = typeof savedState.query === "string" ? savedState.query : "";
+        const savedOptions = Array.isArray(savedState.options) ? savedState.options : [];
+        if (!savedQuery && !savedOptions.length) {
+          return false;
+        }
+        searchInput.value = savedQuery;
+        resultsSelect.innerHTML = "";
+        for (const optionState of savedOptions) {
+          const option = document.createElement("option");
+          option.value = String(optionState.value || "");
+          option.textContent = String(optionState.text || "");
+          resultsSelect.append(option);
+        }
+        if (!resultsSelect.options.length) {
+          resetResults("Type at least 2 letters to search the Systems monster list.");
+          return true;
+        }
+        resultsSelect.disabled = Boolean(savedState.disabled);
+        resultsSelect.value = String(savedState.selectedValue || "");
+        if (!resultsSelect.value && resultsSelect.options.length > 0) {
+          resultsSelect.selectedIndex = 0;
+        }
+        setStatus(
+          typeof savedState.statusText === "string" && savedState.statusText
+            ? savedState.statusText
+            : "Type at least 2 letters to search the Systems monster list."
+        );
+        syncSubmitState();
+        return true;
+      };
+
+      const renderResults = (results, message) => {
+        if (!Array.isArray(results) || !results.length) {
+          resetResults(message || "No Systems monsters matched that search.");
+          return;
+        }
+
+        resultsSelect.innerHTML = "";
+        for (const result of results) {
+          const option = document.createElement("option");
+          option.value = String(result.entry_key || "");
+          option.textContent = [
+            String(result.title || ""),
+            String(result.source_id || ""),
+            String(result.subtitle || ""),
+            `Init ${String(result.initiative_bonus || "0")}`,
+          ].join(" - ");
+          resultsSelect.append(option);
+        }
+        resultsSelect.disabled = false;
+        resultsSelect.selectedIndex = 0;
+        setStatus(message || `Found ${results.length} matching monsters.`);
+        syncSubmitState();
+      };
+
+      const runSearch = async () => {
+        const query = searchInput.value.trim();
+        if (monsterSearchAbortController) {
+          monsterSearchAbortController.abort();
+        }
+        if (query.length < 2) {
+          resetResults("Type at least 2 letters to search the Systems monster list.");
+          return;
+        }
+
+        setStatus("Searching Systems monsters...");
+        monsterSearchAbortController = new AbortController();
+        try {
+          const response = await fetch(`${searchUrl}?q=${encodeURIComponent(query)}`, {
+            headers: {
+              "X-Requested-With": "XMLHttpRequest",
+              "Accept": "application/json",
+            },
+            cache: "no-store",
+            credentials: "same-origin",
+            signal: monsterSearchAbortController.signal,
+          });
+          if (!response.ok) {
+            resetResults("Could not search Systems monsters right now.");
+            return;
+          }
+
+          const payload = await response.json();
+          renderResults(payload.results, typeof payload.message === "string" ? payload.message : "");
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
+          resetResults("Could not search Systems monsters right now.");
+        } finally {
+          monsterSearchAbortController = null;
+        }
+      };
+
+      resultsSelect.addEventListener("change", syncSubmitState);
+      searchInput.addEventListener("input", () => {
+        window.clearTimeout(monsterSearchTimerId);
+        monsterSearchTimerId = window.setTimeout(runSearch, 250);
+      });
+
+      if (!restoreSavedState()) {
+        resetResults("Type at least 2 letters to search the Systems monster list.");
+      }
+    };
+
+    const buildInlineFormState = (form) => {
+      if (!(form instanceof HTMLFormElement)) {
+        return "";
+      }
+      const params = new URLSearchParams();
+      for (const [name, value] of new FormData(form).entries()) {
+        params.append(name, typeof value === "string" ? value : "");
+      }
+      return params.toString();
+    };
+
+    const markInlineFormState = (root = liveRoot) => {
+      if (!(root instanceof HTMLElement)) {
+        return;
+      }
+      root.querySelectorAll("[data-combat-inline-autosubmit]").forEach((form) => {
+        if (!(form instanceof HTMLFormElement)) {
+          return;
+        }
+        form.dataset.combatInlineState = buildInlineFormState(form);
+      });
+    };
+
+    const queueInlineSubmit = (form) => {
+      if (!(form instanceof HTMLFormElement) || requestInFlight) {
+        return;
+      }
+      if (buildInlineFormState(form) === String(form.dataset.combatInlineState || "")) {
+        return;
+      }
+      if (typeof form.requestSubmit === "function") {
+        form.requestSubmit();
+        return;
+      }
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    };
+
+    const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {
+      const nextToken = payload.combat_state_token ? String(payload.combat_state_token) : "";
+      const nextDetailStateToken = payload.combatant_detail_state_token
+        ? String(payload.combatant_detail_state_token)
+        : selectedCombatantDetailStateToken;
+      const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
+      const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
+      const workspaceSectionState = combatWorkspaceTools ? combatWorkspaceTools.capture(liveRoot) : "";
+      const carouselState = captureCombatantCarouselState(liveRoot);
+      const controlsFormState = captureControlsFormState();
+      const controlsAddMode = captureControlsAddMode();
+      const systemsMonsterSearchState = captureSystemsMonsterSearchState();
+      if (!force && nextToken === combatStateToken) {
+        if (typeof payload.combatant_detail_state_token === "string") {
+          selectedCombatantDetailStateToken = String(payload.combatant_detail_state_token);
+          liveRoot.dataset.combatDetailStateToken = selectedCombatantDetailStateToken;
+        }
+        syncViewUrls(payload);
+        if (forceFlash && flashRoot && typeof payload.flash_html === "string") {
+          flashRoot.innerHTML = payload.flash_html;
+        }
+        scrollToAnchor(payload.anchor || "");
+        return;
+      }
+      if (!force && isStaleDmStatusPayload(payload)) {
+        return;
+      }
+
+      if (summaryRoot && typeof payload.summary_html === "string") {
+        summaryRoot.innerHTML = payload.summary_html;
+      }
+      if (isDmStatusLiveRoot && statusTrackerRoot && typeof payload.tracker_html === "string") {
+        statusTrackerRoot.innerHTML = payload.tracker_html;
+      } else if (trackerRoot && typeof payload.tracker_html === "string") {
+        trackerRoot.innerHTML = payload.tracker_html;
+      }
+      if (typeof payload.tracker_detail_html === "string") {
+        const trackerDetailTarget = trackerDetailContentRoot || trackerDetailRoot;
+        if (trackerDetailTarget) {
+          trackerDetailTarget.innerHTML = payload.tracker_detail_html;
+        }
+      }
+      if (isDmStatusLiveRoot && statusAuthorityRoot && typeof payload.tracker_authority_html === "string") {
+        statusAuthorityRoot.innerHTML = payload.tracker_authority_html;
+      }
+      if (contextRoot && typeof payload.context_html === "string") {
+        contextRoot.innerHTML = payload.context_html;
+      }
+      if (controlsRoot && typeof payload.controls_html === "string") {
+        if (monsterSearchAbortController) {
+          monsterSearchAbortController.abort();
+        }
+        window.clearTimeout(monsterSearchTimerId);
+        controlsRoot.innerHTML = payload.controls_html;
+        initializeSystemsMonsterSearch(systemsMonsterSearchState);
+        restoreControlsAddMode(controlsAddMode);
+        restoreControlsFormState(controlsFormState);
+      }
+      if (forceFlash && flashRoot && typeof payload.flash_html === "string") {
+        flashRoot.innerHTML = payload.flash_html;
+      }
+
+      if (combatWorkspaceTools) {
+        combatWorkspaceTools.restore(liveRoot, workspaceSectionState);
+      }
+      markInlineFormState(liveRoot);
+      combatStateToken = nextToken;
+      liveRoot.dataset.combatStateToken = combatStateToken;
+      selectedCombatantDetailStateToken = nextDetailStateToken;
+      liveRoot.dataset.combatDetailStateToken = selectedCombatantDetailStateToken;
+      if (payload.selected_combatant_id) {
+        liveRoot.dataset.selectedCombatantId = String(payload.selected_combatant_id);
+      } else {
+        liveRoot.dataset.selectedCombatantId = "";
+      }
+      syncViewUrls(payload);
+      initializeCombatantCarousels(liveRoot);
+      // Initial defaulting for carousel position is intentionally one-time and handled during page boot.
+      if (uiStateTools) {
+        uiStateTools.restoreFocus(liveRoot, focusState);
+        uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
+      }
+      if (combatantCarouselUserIntentObserved) {
+        restoreCombatantCarouselState(liveRoot, carouselState);
+      } else {
+        scrollToCurrentTurnCombatantCarouselCard(liveRoot);
+      }
+      scrollToAnchor(payload.anchor || "");
+    };
+
+    const refreshLiveState = async ({
+      allowShortCircuit = true,
+      bypassGuards = false,
+      reschedule = true,
+      forceApply = false,
+      forceFlash = false,
+      mode = allowShortCircuit ? "steady" : "cold",
+    } = {}) => {
+      if (!bypassGuards && (pollInFlight || requestInFlight || document.hidden || hasFocusedFormControl())) {
+        if (reschedule) {
+          scheduleNextPoll();
+        }
+        return;
+      }
+
+      pollInFlight = true;
+      liveRoot.dataset.loading = "1";
+      try {
+        const requestStartedAt = performance.now();
+        const response = await fetch(pollUrl, {
+          headers: buildLiveHeaders({ allowShortCircuit }),
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = await response.json();
+        if (isStaleDmStatusPayload(payload)) {
+          logLiveDiagnostics("combat-stale", response, payload);
+          const requestMs = performance.now() - requestStartedAt;
+          return buildLiveMetric(response, payload, { mode: "stale", requestMs, applyMs: 0 });
+        }
+        syncLiveMetadata(payload, response);
+        logLiveDiagnostics("combat", response, payload);
+        const requestMs = performance.now() - requestStartedAt;
+        if (payload && payload.changed === false) {
+          return buildLiveMetric(response, payload, { mode, requestMs, applyMs: 0 });
+        }
+        const applyStartedAt = performance.now();
+        renderPayload(payload, { force: forceApply, forceFlash });
+        return buildLiveMetric(response, payload, {
+          mode,
+          requestMs,
+          applyMs: performance.now() - applyStartedAt,
+        });
+      } catch (_) {
+        return;
+      } finally {
+        pollInFlight = false;
+        liveRoot.dataset.loading = "0";
+        if (reschedule) {
+          scheduleNextPoll();
+        }
+      }
+    };
+
+    document.addEventListener("submit", async (event) => {
+      const form = event.target;
+      if (!(form instanceof HTMLFormElement) || !form.matches("[data-combat-async]")) {
+        return;
+      }
+      if (!liveRoot.contains(form)) {
+        return;
+      }
+
+      event.preventDefault();
+      const submitter = resolveCombatSubmitter(form, event.submitter);
+      if (requestInFlight) {
+        submitterByForm.delete(form);
+        return;
+      }
+
+      requestInFlight = true;
+      const buttons = Array.from(form.querySelectorAll("button, input[type='submit']"));
+      for (const button of buttons) {
+        button.disabled = true;
+      }
+
+      try {
+        const response = await fetch(form.action, {
+          method: (form.method || "POST").toUpperCase(),
+          headers: {
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "application/json",
+          },
+          body: buildCombatFormData(form, submitter),
+          credentials: "same-origin",
+        });
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = await response.json();
+        syncLiveMetadata(payload, response);
+        logLiveDiagnostics("combat-mutation", response, payload);
+        renderPayload(payload, { force: true, forceFlash: true });
+      } catch (_) {
+        return;
+      } finally {
+        requestInFlight = false;
+        submitterByForm.delete(form);
+        for (const button of buttons) {
+          button.disabled = false;
+        }
+        scheduleNextPoll(activeIntervalMs);
+      }
+    });
+
+    liveRoot.addEventListener(
+      "focusout",
+      (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
+        const form = target.closest("[data-combat-inline-autosubmit]");
+        if (!(form instanceof HTMLFormElement)) {
+          return;
+        }
+        const nextFocused = event.relatedTarget;
+        if (nextFocused instanceof HTMLElement && form.contains(nextFocused)) {
+          return;
+        }
+        queueInlineSubmit(form);
+      },
+      true,
+    );
+
+    liveRoot.addEventListener("click", (event) => {
+      // Carousel prev/next controls are client-side navigation only; do not post mutations.
+      const button = event.target instanceof HTMLElement
+        ? event.target.closest("[data-combatant-carousel-prev], [data-combatant-carousel-next]")
+        : null;
+      if (!(button instanceof HTMLButtonElement)) {
+        const card = event.target instanceof HTMLElement ? event.target.closest("[data-combatant-carousel-card]") : null;
+        if (card instanceof HTMLElement && event.isTrusted) {
+          markCombatantCarouselUserIntent();
+          const carousel = getCombatantCarouselFromTarget(card);
+          const selectedCombatantId = card instanceof HTMLElement
+            ? String(card.dataset.combatantId || "").trim()
+            : "";
+          if (isDmStatusLiveRoot && selectedCombatantId) {
+            event.preventDefault();
+            setCombatantCarouselSelectedById(carousel, selectedCombatantId);
+            if (selectedCombatantId !== String(liveRoot.dataset.selectedCombatantId || "")) {
+              void fetchDmStatusCombatant(selectedCombatantId, { carousel });
+            }
+            return;
+          }
+        }
+        return;
+      }
+      if (event.isTrusted) {
+        markCombatantCarouselUserIntent();
+      }
+      const carousel = getCombatantCarouselFromTarget(button);
+      if (!(carousel instanceof HTMLElement)) {
+        return;
+      }
+      const track = getCombatantCarouselTrack(carousel);
+      if (!track) {
+        return;
+      }
+      const direction = button.matches("[data-combatant-carousel-prev]") ? -1 : 1;
+      const previousFocusTarget = document.activeElement;
+      event.preventDefault();
+      scrollCombatantCarouselByCard(track, direction);
+      if (previousFocusTarget instanceof HTMLElement && previousFocusTarget.closest("[data-combatant-carousel]")) {
+        window.setTimeout(() => focusCombatantCarouselCard(previousFocusTarget), 150);
+      }
+      window.setTimeout(() => {
+        updateCombatantCarouselControls(carousel);
+      }, 200);
+    });
+
+    liveRoot.addEventListener("focusin", (event) => {
+      const card = event.target instanceof HTMLElement ? event.target.closest("[data-combatant-carousel-card]") : null;
+      if (!(card instanceof HTMLElement)) {
+        return;
+      }
+      if (event.isTrusted) {
+        markCombatantCarouselUserIntent();
+      }
+      focusCombatantCarouselCard(card);
+    });
+
+    liveRoot.addEventListener("keydown", (event) => {
+      if (!(event instanceof KeyboardEvent) || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+        return;
+      }
+      const activeCard = document.activeElement instanceof HTMLElement
+        ? document.activeElement.closest("[data-combatant-carousel-card]")
+        : null;
+      if (!(activeCard instanceof HTMLElement) || !liveRoot.contains(activeCard)) {
+        return;
+      }
+      const carousel = getCombatantCarouselFromTarget(activeCard);
+      if (!(carousel instanceof HTMLElement)) {
+        return;
+      }
+      const cards = Array.from(carousel.querySelectorAll("[data-combatant-carousel-card]"));
+      const activeIndex = cards.indexOf(activeCard);
+      if (!cards.length || activeIndex === -1) {
+        return;
+      }
+      if (event.isTrusted) {
+        markCombatantCarouselUserIntent();
+      }
+      event.preventDefault();
+      if (event.key === "Home") {
+        cards[0].focus();
+        return;
+      }
+      if (event.key === "End") {
+        cards[cards.length - 1].focus();
+        return;
+      }
+      const nextIndex = event.key === "ArrowLeft"
+        ? activeIndex - 1
+        : activeIndex + 1;
+      const clampedIndex = Math.max(0, Math.min(nextIndex, cards.length - 1));
+      cards[clampedIndex].focus();
+      if (clampedIndex !== activeIndex) {
+        focusCombatantCarouselCard(cards[clampedIndex]);
+      }
+    });
+
+    liveRoot.addEventListener("change", async (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      if (target.matches("[data-combatant-carousel-jump-select]")) {
+        const jumpSection = target.closest("section");
+        const carousel = jumpSection instanceof HTMLElement
+          ? jumpSection.querySelector("[data-combatant-carousel]")
+          : null;
+        // Inspection via jump-select is local to this Combat page interaction in this pass:
+        // update visual inspected state only; do not mutate deep links or URL history.
+        const selectedCombatantId = target.value;
+        const selectedCard = setCombatantCarouselSelectedById(carousel, selectedCombatantId);
+        if (event.isTrusted) {
+          markCombatantCarouselUserIntent();
+        }
+        if (selectedCard instanceof HTMLElement) {
+          selectedCard.focus({ preventScroll: true });
+          focusCombatantCarouselCard(selectedCard);
+        }
+        if (isDmStatusLiveRoot && selectedCombatantId) {
+          await fetchDmStatusCombatant(selectedCombatantId, { carousel });
+          return;
+        }
+        return;
+      }
+      if (target.matches("[data-combat-navigation-select]")) {
+        const form = target.closest("[data-combat-navigation-form]");
+        if (!(form instanceof HTMLFormElement) || requestInFlight) {
+          return;
+        }
+        const action = form.getAttribute("action") || window.location.pathname;
+        const nextPage = new URL(action, window.location.origin);
+        const params = new URLSearchParams();
+        for (const [name, value] of new FormData(form).entries()) {
+          if (typeof value === "string" && value) {
+            params.append(name, value);
+          }
+        }
+        nextPage.search = params.toString();
+        const nextPageUrl = `${nextPage.pathname}${nextPage.search}${nextPage.hash}`;
+        if (!pollUrl) {
+          window.location.assign(nextPageUrl);
+          return;
+        }
+
+        const nextPoll = new URL(pollUrl, window.location.origin);
+        nextPoll.search = params.toString();
+        const nextPollUrl = `${nextPoll.pathname}${nextPoll.search}${nextPoll.hash}`;
+        const fields = Array.from(form.elements).filter(
+          (field) =>
+            field instanceof HTMLInputElement
+            || field instanceof HTMLSelectElement
+            || field instanceof HTMLTextAreaElement
+            || field instanceof HTMLButtonElement,
+        );
+
+        requestInFlight = true;
+        liveRoot.dataset.loading = "1";
+        for (const field of fields) {
+          field.disabled = true;
+        }
+        markActivity();
+        try {
+          const response = await fetch(nextPollUrl, {
+            headers: buildLiveHeaders({ allowShortCircuit: false }),
+            cache: "no-store",
+            credentials: "same-origin",
+          });
+          if (!response.ok) {
+            window.location.assign(nextPageUrl);
+            return;
+          }
+
+          const payload = await response.json();
+          syncLiveMetadata(payload, response);
+          logLiveDiagnostics("combat-navigation", response, payload);
+          pollUrl = nextPollUrl;
+          liveRoot.dataset.combatLiveUrl = pollUrl;
+          renderPayload(payload, { force: true });
+          window.history.replaceState(null, "", nextPageUrl);
+        } catch (_) {
+          window.location.assign(nextPageUrl);
+        } finally {
+          requestInFlight = false;
+          liveRoot.dataset.loading = "0";
+          for (const field of fields) {
+            field.disabled = false;
+          }
+          scheduleNextPoll(activeIntervalMs);
+        }
+        return;
+      }
+      const form = target.closest("[data-combat-inline-autosubmit]");
+      if (!(form instanceof HTMLFormElement)) {
+        return;
+      }
+      if (form.dataset.combatInlineSubmitOnChange === "1") {
+        queueInlineSubmit(form);
+      }
+    });
+
+    ["pointerdown", "keydown", "input", "focusin"].forEach((eventName) => {
+      liveRoot.addEventListener(eventName, markActivity, true);
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        markActivity();
+        refreshLiveState();
+        return;
+      }
+      scheduleNextPoll(idleIntervalMs);
+    });
+
+    initializeSystemsMonsterSearch();
+    initializeCombatantCarousels(liveRoot);
+    initializeCombatantCarouselDefaults(liveRoot);
+    if (combatWorkspaceTools) {
+      combatWorkspaceTools.restore(liveRoot);
+    }
+    markInlineFormState(liveRoot);
+    if (diagnosticsEnabled && diagnosticsTools) {
+      diagnosticsTools.ensureMetricsStore();
+      diagnosticsTools.registerSampler("combat", async (options = {}) => {
+        const requestedMode = options && options.mode === "cold" ? "cold" : "steady";
+        return refreshLiveState({
+          allowShortCircuit: requestedMode !== "cold",
+          bypassGuards: true,
+          reschedule: false,
+          forceApply: Boolean(options.forceApply),
+          forceFlash: Boolean(options.forceFlash),
+          mode: requestedMode,
+        });
+      });
+    }
+    scheduleNextPoll(activeIntervalMs);
+  })();
