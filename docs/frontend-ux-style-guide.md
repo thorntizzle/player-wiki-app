@@ -1,6 +1,6 @@
 # Frontend UX Style Guide
 
-This guide defines the working UX standards for the Campaign Player Wiki frontend. It is intended for Gen2/TanStack work and for Flask compatibility surfaces that share the same visual language.
+This guide defines the working UX standards for the Campaign Player Wiki browser frontend. It is intended for Flask surfaces and API-backed browser workflows that share the same visual language.
 
 The goal is not to copy a generic SaaS design system. The app is a live tabletop operations tool and campaign reference. Its interface should be dense enough for play, calm enough for repeated use, and consistent enough that new features feel native without needing a fresh design conversation every time.
 
@@ -20,7 +20,7 @@ Use these external standards as the baseline:
 - Hide implementation details. Do not surface revisions, slugs, internal status fields, source paths, tokens, raw IDs, or backend vocabulary unless the user is in a debugging/admin context where it is meaningful.
 - Prefer recognition over recall. Section tabs, button labels, field labels, card headings, and status text should make the next action obvious without reading documentation.
 - Keep chrome light. Do not add context widgets, duplicate navigation, or low-value metric boxes when the header, active route, or existing page structure already communicates the information.
-- Keep parity intentional. Gen2 can improve on Flask, but it should not drift into a different design language without a reason.
+- Keep parity intentional. New browser workflows should feel native to the existing Flask app instead of introducing a separate design language without a reason.
 
 ## Page Structure
 
@@ -92,8 +92,8 @@ Use these external standards as the baseline:
 
 ## Navigation And Route Behavior
 
-- Keep Gen2 navigation inside `/app-next` unless the user explicitly chooses a Flask fallback or unsupported legacy lane.
-- Top navigation and page subnavigation should use real hrefs for fallback and new-tab behavior while preserving same-document TanStack navigation when possible.
+- Keep browser navigation on Flask routes such as `/campaigns/...`, `/account`, and `/admin`.
+- Top navigation and page subnavigation should use real hrefs for ordinary browser behavior and open-in-new-tab support.
 - Use hero-local subnavigation for major page modes such as Session, Character, DM, DM Content lanes, and Combat DM subviews.
 - Use section-navigation subheaders for wiki section/article pages, but not for the campaign home section-card grid.
 - Preserve route search params for meaningful selected state, such as active lanes, combat views, selected combatants, and searches.

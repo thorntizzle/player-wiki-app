@@ -1,6 +1,6 @@
 # Systems Wiki
 
-Last updated: 2026-06-25
+Last updated: 2026-07-09
 
 ## Owns
 
@@ -52,7 +52,7 @@ Last updated: 2026-06-25
 ## Current Tests Or Verification
 
 - Systems changes usually need focused source policy tests, importer tests, route/API tests, or seed validation depending on the touched lane.
-- Campaign item mechanics coverage includes API import/review serialization, approved-vs-draft character automation gating, existing published-item fallback behavior, Gen2 Systems lane source checks, and TypeScript typecheck.
+- Campaign item mechanics coverage includes API import/review serialization, approved-vs-draft character automation gating, existing published-item fallback behavior, and Flask Systems lane source checks.
 - The 2026-06-25 local DND-5E duplicate audit is recorded in `.local/systems-duplicate-audit/summary.md`; it found no confirmed true importer or normalization duplicate requiring cleanup.
 - If local Systems DB changes matter on Fly, a code deploy is not enough; sync the volume-backed SQLite data separately.
 
@@ -74,7 +74,5 @@ Last updated: 2026-06-25
 - `player_wiki/systems_ingest.py`
 - `player_wiki/systems_labels.py`
 - `player_wiki/xianxia_systems_seed.py`
-- `frontend/src/pages/SystemsRoutes.tsx`
-- `frontend/src/pages/DmContentSystemsLane.tsx`
 - `tests/test_systems_importer.py`
 - `tests/test_campaign_systems_policy.py`

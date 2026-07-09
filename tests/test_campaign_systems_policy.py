@@ -177,10 +177,10 @@ def test_dm_can_open_systems_control_panel_and_visibility_panel_shows_systems_sc
     assert "Wayfarer&#39;s Guide to Eberron" not in systems_html
     assert "Proprietary-source acknowledgement" in systems_html
     assert "Authoring Model" in systems_html
-    assert "First model: both, kept as separate lanes." in systems_html
-    assert "Custom campaign entries are the DM-authored lane" in systems_html
-    assert "Shared-source imports are admin-only shared-library refreshes" in systems_html
-    assert "shared/core content editor is app-admin-only" in systems_html
+    assert "Authoring model: both." in systems_html
+    assert "Management Lanes" in systems_html
+    assert "Shared/Core Editing" in systems_html
+    assert "Shared Source Imports" in systems_html
     assert 'class="checkbox-label"' in systems_html
 
 
@@ -1453,7 +1453,7 @@ def test_xianxia_campaign_systems_scope_defaults_dm_only_while_wiki_stays_visibl
 
     sign_in(users["party"]["email"], users["party"]["password"])
     campaign = client.get("/campaigns/linden-pass")
-    wiki_page = client.get("/campaigns/linden-pass/pages/index")
+    wiki_page = client.get("/campaigns/linden-pass/pages/sessions/session-2-the-brass-vault")
     systems = client.get("/campaigns/linden-pass/systems")
 
     assert campaign.status_code == 200
@@ -1505,7 +1505,7 @@ def test_xianxia_source_policy_defaults_entries_dm_only_while_player_wiki_stays_
 
     sign_in(users["party"]["email"], users["party"]["password"])
     campaign = client.get("/campaigns/linden-pass")
-    wiki_page = client.get("/campaigns/linden-pass/pages/index")
+    wiki_page = client.get("/campaigns/linden-pass/pages/sessions/session-2-the-brass-vault")
     systems = client.get("/campaigns/linden-pass/systems")
     source = client.get(f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}")
     entry_response = client.get(f"/campaigns/linden-pass/systems/entries/{entry_slug}")
@@ -2460,7 +2460,7 @@ def test_shared_core_systems_edit_flow_stays_separate_from_overrides_and_custom_
     assert "Entry Management" in detail_body
     assert "Shared library entry" in detail_body
     assert "Manage campaign override" in detail_body
-    assert "shared/core content editing is app-admin-only" in detail_body
+    assert "app admins can allow trusted campaign DMs to edit shared/core content directly" in detail_body
     assert "#systems-entry-overrides" in detail_body
     assert "Edit shared/core entry" not in detail_body
     assert "Edit custom entry" not in detail_body

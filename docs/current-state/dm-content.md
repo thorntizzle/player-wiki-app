@@ -1,6 +1,6 @@
 # DM Content
 
-Last updated: 2026-06-25
+Last updated: 2026-07-09
 
 ## Owns
 
@@ -11,7 +11,7 @@ Last updated: 2026-06-25
 - DM Content is a campaign page with default `dm` visibility.
 - Current lanes are `Statblocks`, `Player Wiki`, `Systems`, `Staged Articles`, and `Conditions`.
 - The compatibility `/dm-content` entry still defaults to the statblock lane.
-- Gen2 covers ordinary statblock/condition management, staged-article prep, Player Wiki create/search/load/edit/archive/checked-delete, image asset upload, and Systems management lane behavior.
+- Flask covers ordinary statblock/condition management, staged-article prep, Player Wiki create/search/load/edit/archive/checked-delete, image asset upload, and Systems management lane behavior.
 
 ## Lane Contracts
 
@@ -34,7 +34,7 @@ Last updated: 2026-06-25
 
 ## Known Limits
 
-- Flask remains the advanced session-article prefill/promotion and automatic WebP conversion fallback where Gen2 does not yet cover the full path.
+- Some advanced session-article prefill/promotion and automatic WebP conversion behavior remains browser-first rather than raw API-first.
 
 ## Related Backlog
 
@@ -49,11 +49,3 @@ Last updated: 2026-06-25
 - `player_wiki/campaign_dm_content_store.py`
 - `player_wiki/campaign_dm_content_service.py`
 - `player_wiki/templates/dm_content.html`
-- `frontend/src/pages/DmContentPage.tsx`
-- `frontend/src/pages/DmContentSystemsLane.tsx`
-- `frontend/src/dmContentMutations.ts`
-- `frontend/src/dmContentSystemsMutations.ts`
-- `frontend/src/components/DmStatblocksLane.tsx`
-- `frontend/src/components/DmPlayerWikiLane.tsx`
-- `frontend/src/components/DmStagedArticlesLane.tsx`
-- `frontend/src/components/DmConditionsLane.tsx`

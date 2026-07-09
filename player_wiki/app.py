@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict, defaultdict
-from html import escape, unescape
+from html import unescape
 import hashlib
 from io import BytesIO
 import json
@@ -11,7 +11,6 @@ import re
 import secrets
 import time
 from threading import Lock
-from urllib.parse import unquote
 
 from flask import Flask, abort, flash, g, jsonify, make_response, redirect, render_template, request, send_file, send_from_directory, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -1294,24 +1293,6 @@ def create_app() -> Flask:
     register_admin(app)
     register_api(app)
 
-    def _app_next_preview_enabled() -> bool:
-        return bool(app.config.get("APP_NEXT_PREVIEW_ENABLED"))
-
-    def _app_next_dist_dir() -> Path:
-        return Path(app.config.get("APP_NEXT_DIST_DIR", app.config["BASE_DIR"] / "frontend" / "dist"))
-
-    def _app_next_index_html() -> Path:
-        return _app_next_dist_dir() / "index.html"
-
-    def _app_next_available() -> bool:
-        return _app_next_preview_enabled() and _app_next_index_html().is_file()
-
-    def _app_next_campaign_slug_from_asset_path(asset_path: str = "") -> str:
-        path_parts = [part for part in asset_path.strip("/").split("/") if part]
-        if len(path_parts) >= 2 and path_parts[0] == "campaigns":
-            return unquote(path_parts[1]).strip()
-        return ""
-
     def _build_campaign_loading_media_urls(campaign_slug: str) -> list[str]:
         campaign_slug = str(campaign_slug or "").strip()
         if not campaign_slug:
@@ -1332,120 +1313,6 @@ def create_app() -> Flask:
             image_exists=lambda _campaign, image_path: get_campaign_asset_file(_campaign, image_path) is not None,
             max_loading_images=4,
         )
-
-    def _inject_app_next_theme(index_html: str) -> str:
-        theme_key = escape(get_current_theme().key, quote=True)
-
-        def replace_html_tag(match: re.Match[str]) -> str:
-            attributes = re.sub(
-                r"\sdata-theme=(\"[^\"]*\"|'[^']*'|[^\s>]+)",
-                "",
-                match.group("attributes"),
-                flags=re.IGNORECASE,
-            )
-            return f"<html{attributes} data-theme=\"{theme_key}\">"
-
-        return re.sub(
-            r"<html(?P<attributes>[^>]*)>",
-            replace_html_tag,
-            index_html,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-
-    def _inject_app_next_loading_media(index_html: str, media_urls: list[str]) -> str:
-        if not media_urls:
-            return index_html
-
-        media_urls_json = escape(json.dumps(media_urls), quote=False).replace("'", "&#39;")
-        first_media_url = escape(media_urls[0], quote=True)
-        loading_media_style = f"--app-loading-media: url({json.dumps(media_urls[0])});"
-        loading_media_style_attr = escape(loading_media_style, quote=True)
-        replacement_attrs = (
-            f" data-app-loading-media-urls='{media_urls_json}'"
-            f" data-app-loading-media-url=\"{first_media_url}\""
-        )
-        cover_replaced = False
-
-        def replace_cover_tag(match: re.Match[str]) -> str:
-            nonlocal cover_replaced
-            tag = match.group(0)
-            if cover_replaced or "app-loading-cover" not in tag:
-                return tag
-
-            cover_replaced = True
-            media_attrs = replacement_attrs
-            tag = re.sub(
-                r"\sdata-app-loading-media-urls=(\"[^\"]*\"|'[^']*'|[^\s>]+)",
-                "",
-                tag,
-                flags=re.IGNORECASE,
-            )
-            tag = re.sub(
-                r"\sdata-app-loading-media-url=(\"[^\"]*\"|'[^']*'|[^\s>]+)",
-                "",
-                tag,
-                flags=re.IGNORECASE,
-            )
-
-            def replace_class(match: re.Match[str]) -> str:
-                quote = match.group(1)
-                class_names = match.group(2).split()
-                if "app-loading-cover--with-image" not in class_names:
-                    class_names.append("app-loading-cover--with-image")
-                if "app-loading-cover--media-ready" not in class_names:
-                    class_names.append("app-loading-cover--media-ready")
-                return f"class={quote}{' '.join(class_names)}{quote}"
-
-            tag = re.sub(r"class=(['\"])(.*?)\1", replace_class, tag, count=1, flags=re.IGNORECASE)
-            if re.search(r"\sstyle=(['\"])(.*?)\1", tag, flags=re.IGNORECASE):
-                def replace_style(match: re.Match[str]) -> str:
-                    quote = match.group(1)
-                    existing_style = re.sub(
-                        r"(^|;)\s*--app-loading-media\s*:\s*url\([^;]*\)\s*;?",
-                        ";",
-                        match.group(2),
-                        flags=re.IGNORECASE,
-                    ).strip()
-                    separator = " " if not existing_style or existing_style.endswith(";") else "; "
-                    return f"style={quote}{existing_style}{separator}{loading_media_style_attr}{quote}"
-
-                tag = re.sub(r"\sstyle=(['\"])(.*?)\1", replace_style, tag, count=1, flags=re.IGNORECASE)
-            else:
-                media_attrs += f" style=\"{loading_media_style_attr}\""
-            return f"{tag[:-1]}{media_attrs}>"
-
-        return re.sub(r"<div\b[^>]*>", replace_cover_tag, index_html, flags=re.IGNORECASE)
-
-    def _app_next_index_response(asset_path: str = ""):
-        index_html = _app_next_index_html().read_text(encoding="utf-8")
-        index_html = _inject_app_next_theme(index_html)
-        media_urls = _build_campaign_loading_media_urls(_app_next_campaign_slug_from_asset_path(asset_path))
-        index_html = _inject_app_next_loading_media(index_html, media_urls)
-        response = make_response(index_html)
-        response.headers["Content-Type"] = "text/html; charset=utf-8"
-        return response
-
-    @app.get("/app-next")
-    @app.get("/app-next/")
-    def app_next_root_or_index():
-        if not _app_next_available():
-            abort(404)
-        return _app_next_index_response()
-
-    @app.get("/app-next/<path:asset_path>")
-    def app_next_path(asset_path: str):
-        if not _app_next_available():
-            abort(404)
-
-        dist_dir = _app_next_dist_dir()
-        asset_file = dist_dir / asset_path
-
-        if asset_file.is_file():
-            return send_from_directory(dist_dir, asset_path)
-        if asset_path.startswith("assets/"):
-            abort(404)
-        return _app_next_index_response(asset_path)
 
     if app.config["TRUST_PROXY"]:
         hops = app.config["PROXY_FIX_HOPS"]
@@ -5082,7 +4949,17 @@ def create_app() -> Flask:
                 campaign_slug=campaign_slug,
                 character_slug=character_slug,
             )
-        return f"/app-next/campaigns/{campaign_slug}/characters/{character_slug}"
+        if has_session_mode_access(campaign_slug, character_slug):
+            return url_for(
+                "campaign_session_character_view",
+                campaign_slug=campaign_slug,
+                character=character_slug,
+            )
+        return url_for(
+            "character_read_view",
+            campaign_slug=campaign_slug,
+            character_slug=character_slug,
+        )
 
     def render_character_level_up_page(
         campaign_slug: str,

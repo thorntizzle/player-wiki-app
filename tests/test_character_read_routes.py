@@ -5084,7 +5084,7 @@ def test_xianxia_hides_dnd_spellcasting_read_and_session_affordances(
     assert "?page=spellcasting" not in read_html
     assert "/spellcasting/" not in read_html
     assert "Spell slots" not in read_html
-    assert "Message" not in read_html
+    assert 'class="spell-card' not in read_html
 
     assert session_response.status_code == 200
     session_html = session_response.get_data(as_text=True)
@@ -5765,6 +5765,7 @@ def test_dnd_read_view_exposes_expected_character_read_shell_subpages_when_manag
         "equipment",
         "inventory",
         "personal",
+        "portrait",
         "notes",
         "controls",
     ]
@@ -5776,6 +5777,7 @@ def test_dnd_read_view_exposes_expected_character_read_shell_subpages_when_manag
     assert "Equipment" in html
     assert "Inventory" in html
     assert "Personal" in html
+    assert "Portrait" in html
     assert "Notes" in html
     assert "Controls" in html
     assert 'href="/campaigns/linden-pass/characters/arden-march?page=quick"' in html
@@ -5822,6 +5824,7 @@ def test_xianxia_read_view_exposes_xianxia_shell_subpages_and_keeps_cultivation_
         "skills",
         "equipment",
         "inventory",
+        "portrait",
         "personal",
         "notes",
         "controls",
@@ -5833,6 +5836,7 @@ def test_xianxia_read_view_exposes_xianxia_shell_subpages_and_keeps_cultivation_
     assert "Skills" in html
     assert "Equipment" in html
     assert "Inventory" in html
+    assert "Portrait" in html
     assert "Personal" in html
     assert "Notes" in html
     assert "Controls" in html
@@ -5890,7 +5894,7 @@ def test_spellcasting_subpage_is_only_shown_for_casters_and_holds_spell_list(cli
     assert "?page=spellcasting" in caster_quick_html
     assert "Sorcerer" in caster_quick_html
     assert "Spell slots" in caster_quick_html
-    assert "Message" not in caster_quick_html
+    assert 'class="spell-card' not in caster_quick_html
 
     assert caster_spellcasting.status_code == 200
     caster_spellcasting_html = caster_spellcasting.get_data(as_text=True)

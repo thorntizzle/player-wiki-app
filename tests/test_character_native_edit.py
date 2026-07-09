@@ -2929,10 +2929,10 @@ def test_owner_player_can_save_native_character_edits_and_reconcile_inventory_st
     read_html = read_response.get_data(as_text=True)
     assert "/campaigns/linden-pass/pages/mechanics/arcane-overload" in read_html
 
-    equipment_response = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
-    assert equipment_response.status_code == 200
-    equipment_html = equipment_response.get_data(as_text=True)
-    assert "/campaigns/linden-pass/pages/items/stormglass-compass" in equipment_html
+    inventory_response = client.get("/campaigns/linden-pass/characters/arden-march?page=inventory")
+    assert inventory_response.status_code == 200
+    inventory_html = inventory_response.get_data(as_text=True)
+    assert "/campaigns/linden-pass/pages/items/stormglass-compass" in inventory_html
 
 
 def test_native_character_edit_relinks_manual_psionic_circlet_into_shared_reward_derivation(
@@ -3143,13 +3143,6 @@ The circlet stabilizes psionic talent and expands the wearer's combat options.
     assert reminder_effects["Psychic Opening"] == (
         "The next attack roll made against the target before the start of your next turn has advantage."
     )
-
-    quick_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
-    assert quick_response.status_code == 200
-    quick_html = quick_response.get_data(as_text=True)
-    assert "Psionic Circlet" in quick_html
-    assert "Psychic Hindrance" in quick_html
-    assert "Psychic Anchor" in quick_html
 
 
 def test_stale_revision_is_rejected_for_native_character_edits(
@@ -3502,7 +3495,9 @@ def test_native_character_edits_can_apply_and_recover_recoverable_penalties(
     quick_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
     assert quick_response.status_code == 200
     quick_html = quick_response.get_data(as_text=True)
-    assert "32 / 38" in quick_html
+    assert 'name="current_hp"' in quick_html
+    assert 'value="32"' in quick_html
+    assert "/ 38" in quick_html
 
 
 def test_native_character_edits_recalculate_downstream_math_for_recoverable_ability_penalties(

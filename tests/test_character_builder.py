@@ -20996,7 +20996,7 @@ def test_native_level_up_advances_wizard_to_level_four_with_cantrip_and_asi_grow
     assert spells_by_name["Prestidigitation"]["mark"] == "Cantrip"
     assert spells_by_name["Mirror Image"]["mark"] == "Spellbook"
     assert spells_by_name["Web"]["mark"] == "Prepared + Spellbook"
-    assert spells_by_name["Burning Hands"]["mark"] == "Spellbook + Prepared"
+    assert spells_by_name["Burning Hands"]["mark"] == "Prepared + Spellbook"
 
 
 def test_native_level_up_applies_tough_feat_hit_points_to_definition_and_state():
@@ -22809,7 +22809,7 @@ def test_builder_progression_cache_uses_source_and_page_revisions():
     assert systems_service.class_progression_calls == 3
 
 
-def test_choice_section_stabilizer_skips_rebuild_when_only_stale_values_drop():
+def test_choice_section_stabilizer_rebuilds_after_stale_values_drop():
     build_calls = 0
 
     def build_sections(values: dict[str, str]) -> list[dict[str, object]]:
@@ -22841,7 +22841,7 @@ def test_choice_section_stabilizer_skips_rebuild_when_only_stale_values_drop():
 
     assert values == {"name": "Preview Hero", "known_choice": "alpha"}
     assert sections[0]["fields"][0]["selected"] == "alpha"
-    assert build_calls == 1
+    assert build_calls == 2
 
 
 def test_build_level_one_builder_context_marks_choice_fields_with_live_preview_regions():
@@ -23466,7 +23466,7 @@ def test_assigned_player_can_open_level_up_without_characters_scope(
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Level Up Leveler" in html
-    assert 'href="/app-next/campaigns/linden-pass/characters/arden-march"' in html
+    assert 'href="/campaigns/linden-pass/session/character?character=arden-march"' in html
 
     sign_in(users["party"]["email"], users["party"]["password"])
     blocked_response = client.get("/campaigns/linden-pass/characters/arden-march/level-up")

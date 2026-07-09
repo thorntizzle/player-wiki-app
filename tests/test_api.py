@@ -562,7 +562,7 @@ def test_api_me_and_campaigns_use_bearer_token_auth(client, app, users):
     assert me_payload["user"]["email"] == users["dm"]["email"]
     assert me_payload["preferences"]["theme_key"] is not None
     assert me_payload["preferences"]["session_chat_order"] is not None
-    assert me_payload["preferences"]["frontend_mode"] == "gen2"
+    assert me_payload["preferences"]["frontend_mode"] == "flask"
 
     campaigns_response = client.get("/api/v1/campaigns", headers=api_headers(token))
 
@@ -595,7 +595,7 @@ def test_api_account_settings_reads_and_updates_user_preferences(client, app, us
     assert settings_payload["preferences"] == {
         "theme_key": "parchment",
         "session_chat_order": "newest_first",
-        "frontend_mode": "gen2",
+        "frontend_mode": "flask",
     }
     assert [theme["key"] for theme in settings_payload["theme_presets"]] == [
         "parchment",
@@ -620,7 +620,7 @@ def test_api_account_settings_reads_and_updates_user_preferences(client, app, us
     assert update_payload["preferences"] == {
         "theme_key": "moonlit",
         "session_chat_order": "oldest_first",
-        "frontend_mode": "gen2",
+        "frontend_mode": "flask",
     }
 
     me_response = client.get("/api/v1/me", headers=api_headers(token))
@@ -631,7 +631,7 @@ def test_api_account_settings_reads_and_updates_user_preferences(client, app, us
         preferences = AuthStore().get_user_preferences(users["party"]["id"])
         assert preferences.theme_key == "moonlit"
         assert preferences.session_chat_order == "oldest_first"
-        assert preferences.frontend_mode == "gen2"
+        assert preferences.frontend_mode == "flask"
 
 
 def test_api_account_settings_rejects_invalid_preferences(client, app, users):
@@ -675,12 +675,12 @@ def test_api_account_settings_rejects_invalid_preferences(client, app, users):
         preferences = AuthStore().get_user_preferences(users["party"]["id"])
         assert preferences.theme_key == "parchment"
         assert preferences.session_chat_order == "newest_first"
-        assert preferences.frontend_mode == "gen2"
+        assert preferences.frontend_mode == "flask"
 
 
 def test_api_admin_user_management_context_actions_and_permissions(client, app, users):
-    admin_token = issue_api_token(app, users["admin"]["email"], label="admin-gen2-api")
-    owner_token = issue_api_token(app, users["owner"]["email"], label="admin-gen2-blocked-api")
+    admin_token = issue_api_token(app, users["admin"]["email"], label="admin-api")
+    owner_token = issue_api_token(app, users["owner"]["email"], label="admin-blocked-api")
 
     anonymous = client.get("/api/v1/admin")
     blocked = client.get("/api/v1/admin", headers=api_headers(owner_token))
@@ -691,7 +691,7 @@ def test_api_admin_user_management_context_actions_and_permissions(client, app, 
     assert dashboard.status_code == 200
     dashboard_payload = dashboard.get_json()
     assert dashboard_payload["ok"] is True
-    assert dashboard_payload["links"]["gen2_admin_url"] == "/app-next/admin"
+    assert dashboard_payload["links"]["admin_url"] == "/admin"
     assert any(user["email"] == users["owner"]["email"] for user in dashboard_payload["user_cards"])
     assert any(choice["value"] == "user_invited" for choice in dashboard_payload["audit_event_type_choices"])
 
@@ -699,14 +699,14 @@ def test_api_admin_user_management_context_actions_and_permissions(client, app, 
         "/api/v1/admin/users/invite",
         headers=api_headers(admin_token),
         json={
-            "email": "gen2-admin-api@example.com",
-            "display_name": "Gen2 Admin API",
+            "email": "flask-admin-api@example.com",
+            "display_name": "Flask Admin API",
             "user_type": "standard",
         },
     )
     assert invite_response.status_code == 201
     invite_payload = invite_response.get_json()
-    assert invite_payload["managed_user"]["email"] == "gen2-admin-api@example.com"
+    assert invite_payload["managed_user"]["email"] == "flask-admin-api@example.com"
     assert "/invite/" in invite_payload["invite_url"]
     assert "/invite/" in invite_payload["message"]
     created_user_id = invite_payload["managed_user"]["id"]
@@ -715,7 +715,7 @@ def test_api_admin_user_management_context_actions_and_permissions(client, app, 
     detail_payload = detail_response.get_json()
     assert detail_response.status_code == 200
     assert detail_payload["managed_user"]["status"] == "invited"
-    assert detail_payload["links"]["gen2_user_url"] == f"/app-next/admin/users/{created_user_id}"
+    assert detail_payload["links"]["user_url"] == f"/admin/users/{created_user_id}"
 
     membership_response = client.post(
         f"/api/v1/admin/users/{created_user_id}/membership",
@@ -749,7 +749,7 @@ def test_api_admin_user_management_context_actions_and_permissions(client, app, 
         for assignment in assignment_payload["assignments"]
     )
     assert assignment_payload["message"] == (
-        "Assigned Selene Brook in Echoes of the Alloy Coast to gen2-admin-api@example.com."
+        "Assigned Selene Brook in Echoes of the Alloy Coast to flask-admin-api@example.com."
     )
 
     filtered_detail = client.get(
@@ -799,12 +799,12 @@ def test_api_admin_user_management_context_actions_and_permissions(client, app, 
     delete_response = client.delete(
         f"/api/v1/admin/users/{created_user_id}",
         headers=api_headers(admin_token),
-        json={"confirm_email": "gen2-admin-api@example.com"},
+        json={"confirm_email": "flask-admin-api@example.com"},
     )
     assert delete_response.status_code == 200
     delete_payload = delete_response.get_json()
-    assert delete_payload["deleted_user"]["email"] == "gen2-admin-api@example.com"
-    assert all(user["email"] != "gen2-admin-api@example.com" for user in delete_payload["user_cards"])
+    assert delete_payload["deleted_user"]["email"] == "flask-admin-api@example.com"
+    assert all(user["email"] != "flask-admin-api@example.com" for user in delete_payload["user_cards"])
 
     with app.app_context():
         store = AuthStore()
@@ -823,7 +823,7 @@ def test_api_campaign_help_returns_surface_guidance_for_viewer_access(client, ap
     assert payload["viewer_role_label"] == "Player"
     assert payload["campaign_system_label"] == "DND-5E"
     assert payload["links"]["flask_help_url"] == "/campaigns/linden-pass/help"
-    assert payload["links"]["gen2_help_url"] == "/app-next/campaigns/linden-pass/help"
+    assert payload["links"]["help_url"] == "/campaigns/linden-pass/help"
 
     surface_labels = [surface["label"] for surface in payload["surfaces"]]
     assert "Campaign Home" in surface_labels
@@ -861,7 +861,7 @@ def test_api_campaign_control_visibility_requires_manager_and_updates_scopes(cli
     assert payload["ok"] is True
     assert payload["campaign"]["slug"] == "linden-pass"
     assert payload["links"]["flask_control_url"] == "/campaigns/linden-pass/control-panel"
-    assert payload["links"]["gen2_control_url"] == "/app-next/campaigns/linden-pass/control"
+    assert payload["links"]["control_url"] == "/campaigns/linden-pass/control-panel"
     rows_by_scope = {row["scope"]: row for row in payload["visibility_rows"]}
     assert rows_by_scope["campaign"]["selected_visibility"] == "public"
     assert rows_by_scope["characters"]["effective_visibility"] == "dm"
@@ -912,7 +912,7 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
         (
             note_path.read_text(encoding="utf-8")
             + "\nLegacy route check: [Captain Lyra Vale](/campaigns/linden-pass/pages/npcs/captain-lyra-vale).\n"
-            + "Already Gen2 check: [Harbor Row](/app-next/campaigns/linden-pass/pages/locations/harbor-row).\n"
+            + "Stale app-next check: [Harbor Row](/app-next/campaigns/linden-pass/pages/locations/harbor-row).\n"
         ),
         encoding="utf-8",
     )
@@ -942,7 +942,7 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert home_response.status_code == 200
     home_payload = home_response.get_json()
     assert home_payload["ok"] is True
-    assert home_payload["frontend_mode"] == "gen2"
+    assert home_payload["frontend_mode"] == "flask"
     assert home_payload["can_view_wiki"] is True
     assert home_payload["overview_page"] is None
     assert home_payload["latest_session_summary"] is not None
@@ -952,21 +952,21 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert all(section["section_name"] != "Overview" for section in home_payload["grouped_sections"])
     assert all(section["section_name"] != "Overview" for section in home_payload["section_navigation"])
     locations_group = next(section for section in home_payload["grouped_sections"] if section["section_name"] == "Locations")
-    assert locations_group["href"] == "/app-next/campaigns/linden-pass/sections/locations"
+    assert locations_group["href"] == "/campaigns/linden-pass/sections/locations"
     locations_nav_item = next(section for section in home_payload["section_navigation"] if section["section_name"] == "Locations")
     assert locations_nav_item == {
         "section_name": "Locations",
         "section_slug": "locations",
-        "href": "/app-next/campaigns/linden-pass/sections/locations",
+        "href": "/campaigns/linden-pass/sections/locations",
         "page_count": locations_group["page_count"],
     }
     bestiary_group = next(section for section in home_payload["grouped_sections"] if section["section_name"] == "Bestiary")
-    assert bestiary_group["href"] == "/app-next/campaigns/linden-pass/sections/bestiary"
+    assert bestiary_group["href"] == "/campaigns/linden-pass/sections/bestiary"
     bestiary_nav_item = next(section for section in home_payload["section_navigation"] if section["section_name"] == "Bestiary")
     assert bestiary_nav_item == {
         "section_name": "Bestiary",
         "section_slug": "bestiary",
-        "href": "/app-next/campaigns/linden-pass/sections/bestiary",
+        "href": "/campaigns/linden-pass/sections/bestiary",
         "page_count": 1,
     }
 
@@ -986,7 +986,7 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
         for page in section["pages"]
     ]
     captain = next(page for page in search_pages if page["page_ref"] == "npcs/captain-lyra-vale")
-    assert captain["href"] == "/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
+    assert captain["href"] == "/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
     assert "source_ref" not in captain
     assert "aliases" not in captain
     assert any(section["section_name"] == "Locations" for section in search_payload["section_navigation"])
@@ -998,10 +998,10 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert section_response.status_code == 200
     section_payload = section_response.get_json()
     assert section_payload["section_name"] == "Locations"
-    assert section_payload["frontend_mode"] == "gen2"
+    assert section_payload["frontend_mode"] == "flask"
     assert section_payload["show_subsections"] is True
     assert section_payload["top_level_pages"][0]["title"] == "Port Meridian"
-    assert section_payload["top_level_pages"][0]["href"].startswith("/app-next/campaigns/linden-pass/pages/")
+    assert section_payload["top_level_pages"][0]["href"].startswith("/campaigns/linden-pass/pages/")
     subsection_names = [group["subsection_name"] for group in section_payload["subsection_groups"]]
     assert "Civic and Institutional Sites" in subsection_names
     assert "Venues and Residences" in subsection_names
@@ -1027,9 +1027,9 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert page_payload["page"]["image"]["caption"] == "Harbor watch captain and trusted ally of the crew."
     assert "Captain Lyra Vale coordinates inspections" in page_payload["page"]["body_html"]
     assert page_payload["links"]["flask_page_url"] == "/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
-    assert page_payload["links"]["campaign_url"] == "/app-next/campaigns/linden-pass"
-    assert page_payload["links"]["section_url"] == "/app-next/campaigns/linden-pass/sections/npcs"
-    assert page_payload["links"]["gen2_campaign_url"] == "/app-next/campaigns/linden-pass"
+    assert page_payload["links"]["campaign_url"] == "/campaigns/linden-pass"
+    assert page_payload["links"]["section_url"] == "/campaigns/linden-pass/sections/npcs"
+    assert "gen2_campaign_url" not in page_payload["links"]
     assert any(section["section_slug"] == "npcs" for section in page_payload["section_navigation"])
 
     note_response = client.get(
@@ -1038,10 +1038,10 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     )
     assert note_response.status_code == 200
     note_body = note_response.get_json()["page"]["body_html"]
-    assert 'href="/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale"' in note_body
-    assert 'href="/app-next/campaigns/linden-pass/pages/locations/harbor-row"' in note_body
+    assert 'href="/campaigns/linden-pass/pages/npcs/captain-lyra-vale"' in note_body
+    assert 'href="/campaigns/linden-pass/pages/locations/harbor-row"' in note_body
     assert "/app-next/app-next/" not in note_body
-    assert 'href="/campaigns/linden-pass/pages/' not in note_body
+    assert 'href="/app-next/campaigns/linden-pass/pages/' not in note_body
 
     overview_section_response = client.get(
         "/api/v1/campaigns/linden-pass/wiki/sections/overview",
@@ -1060,7 +1060,7 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     legacy_home_response = client.get("/api/v1/campaigns/linden-pass/wiki", headers=api_headers(player_token))
     assert legacy_home_response.status_code == 200
     legacy_home_payload = legacy_home_response.get_json()
-    assert legacy_home_payload["frontend_mode"] == "gen2"
+    assert legacy_home_payload["frontend_mode"] == "flask"
     assert legacy_home_payload["overview_page"] is None
     assert legacy_home_payload["latest_session_summary"] is not None
     assert legacy_home_payload["latest_session_summary"]["title"] == "Session 2 - The Brass Vault"
@@ -1068,11 +1068,11 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     assert all(section["section_name"] != "Overview" for section in legacy_home_payload["grouped_sections"])
     assert all(section["section_name"] != "Overview" for section in legacy_home_payload["section_navigation"])
     legacy_locations_group = next(section for section in legacy_home_payload["grouped_sections"] if section["section_name"] == "Locations")
-    assert legacy_locations_group["href"] == "/app-next/campaigns/linden-pass/sections/locations"
+    assert legacy_locations_group["href"] == "/campaigns/linden-pass/sections/locations"
     legacy_locations_nav_item = next(
         section for section in legacy_home_payload["section_navigation"] if section["section_name"] == "Locations"
     )
-    assert legacy_locations_nav_item["href"] == "/app-next/campaigns/linden-pass/sections/locations"
+    assert legacy_locations_nav_item["href"] == "/campaigns/linden-pass/sections/locations"
 
     legacy_search_response = client.get(
         "/api/v1/campaigns/linden-pass/wiki?q=capt",
@@ -1085,7 +1085,7 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
         for page in section["pages"]
     ]
     legacy_captain = next(page for page in legacy_search_pages if page["page_ref"] == "npcs/captain-lyra-vale")
-    assert legacy_captain["href"] == "/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
+    assert legacy_captain["href"] == "/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
 
     legacy_page_response = client.get(
         "/api/v1/campaigns/linden-pass/wiki/pages/npcs/captain-lyra-vale",
@@ -1093,8 +1093,8 @@ def test_api_player_wiki_read_endpoints_follow_visible_campaign_pages(client, ap
     )
     assert legacy_page_response.status_code == 200
     legacy_page_payload = legacy_page_response.get_json()
-    assert legacy_page_payload["links"]["campaign_url"] == "/app-next/campaigns/linden-pass"
-    assert legacy_page_payload["links"]["section_url"] == "/app-next/campaigns/linden-pass/sections/npcs"
+    assert legacy_page_payload["links"]["campaign_url"] == "/campaigns/linden-pass"
+    assert legacy_page_payload["links"]["section_url"] == "/campaigns/linden-pass/sections/npcs"
     assert legacy_page_payload["links"]["flask_page_url"] == "/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
 
 
@@ -3260,7 +3260,7 @@ def test_api_character_list_derives_multiclass_summary_from_class_rows(client, a
     assert tobin["class_level_text"] == "Fighter 3 / Wizard 2"
 
 
-def test_api_character_roster_exposes_gen2_links_search_and_portraits(client, app, users, set_campaign_visibility):
+def test_api_character_roster_exposes_flask_links_search_and_portraits(client, app, users, set_campaign_visibility):
     set_campaign_visibility("linden-pass", characters="players")
 
     tiny_png = base64.b64decode(
@@ -3272,7 +3272,7 @@ def test_api_character_roster_exposes_gen2_links_search_and_portraits(client, ap
         / "assets"
         / "characters"
         / "arden-march"
-        / "portrait.webp"
+        / "portrait.png"
     )
     portrait_path.parent.mkdir(parents=True, exist_ok=True)
     portrait_path.write_bytes(tiny_png)
@@ -3283,13 +3283,13 @@ def test_api_character_roster_exposes_gen2_links_search_and_portraits(client, ap
             {
                 "portrait_asset_ref": "characters/arden-march/portrait.png",
                 "portrait_alt": "Arden portrait",
-                "portrait_caption": "Shown on the Gen2 sheet.",
+                "portrait_caption": "Shown on the Flask sheet.",
             }
         )
         payload["profile"] = profile
 
     _write_character_definition(app, "arden-march", _mutate)
-    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-gen2-api")
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-api")
 
     response = client.get(
         "/api/v1/campaigns/linden-pass/characters?q=arden",
@@ -3302,15 +3302,16 @@ def test_api_character_roster_exposes_gen2_links_search_and_portraits(client, ap
     assert payload["result_count"] == 1
     assert payload["tools"]["can_create_characters"] is True
     assert payload["links"]["flask_roster_url"] == "/campaigns/linden-pass/characters"
-    assert payload["links"]["create_character_url"] == "/app-next/campaigns/linden-pass/characters/new"
+    assert payload["links"]["roster_url"] == "/campaigns/linden-pass/characters"
+    assert payload["links"]["create_character_url"] == "/campaigns/linden-pass/characters/new"
     assert payload["links"]["flask_create_character_url"] == "/campaigns/linden-pass/characters/new"
     arden = payload["characters"][0]
     assert arden["slug"] == "arden-march"
-    assert arden["href"] == "/app-next/campaigns/linden-pass/characters/arden-march"
+    assert arden["href"] == "/campaigns/linden-pass/characters/arden-march"
     assert arden["flask_href"] == "/campaigns/linden-pass/characters/arden-march"
     assert arden["portrait"]["url"] == "/campaigns/linden-pass/characters/arden-march/portrait"
     assert arden["portrait"]["alt_text"] == "Arden portrait"
-    assert arden["portrait"]["caption"] == "Shown on the Gen2 sheet."
+    assert arden["portrait"]["caption"] == "Shown on the Flask sheet."
     assert arden["hit_dice"]["value"]
     assert isinstance(arden["resource_preview"], list)
 
@@ -3332,7 +3333,7 @@ def test_api_character_roster_exposes_gen2_links_search_and_portraits(client, ap
     assert detail_payload["character"]["controls"]["can_delete_character"] is True
     assert detail_payload["character"]["controls"]["can_assign_owner"] is False
     assert detail_payload["links"]["flask_character_url"] == "/campaigns/linden-pass/characters/arden-march"
-    assert detail_payload["links"]["advanced_editor_url"] == "/app-next/campaigns/linden-pass/characters/arden-march/edit"
+    assert detail_payload["links"]["advanced_editor_url"] == "/campaigns/linden-pass/characters/arden-march/edit"
     assert detail_payload["links"]["flask_advanced_editor_url"] == "/campaigns/linden-pass/characters/arden-march/edit"
 
 
@@ -3386,7 +3387,7 @@ def test_api_character_advanced_editor_context_save_and_access(client, app, user
     payload = response.get_json()
     assert payload["supported"] is True
     assert payload["lane"] == "dnd5e"
-    assert payload["links"]["advanced_editor_url"] == "/app-next/campaigns/linden-pass/characters/arden-march/edit"
+    assert payload["links"]["advanced_editor_url"] == "/campaigns/linden-pass/characters/arden-march/edit"
     assert payload["links"]["flask_advanced_editor_url"] == "/campaigns/linden-pass/characters/arden-march/edit"
     editor = payload["editor"]
     assert editor["state_revision"] == payload["character"]["state_record"]["revision"]
@@ -3412,8 +3413,8 @@ def test_api_character_advanced_editor_context_save_and_access(client, app, user
     assert blocked_response.get_json()["error"]["code"] == "forbidden"
 
     values = _advanced_editor_values(editor)
-    values["physical_description_markdown"] = "Gen2 physical reference text."
-    values["biography_markdown"] = "Gen2 biography reference text."
+    values["physical_description_markdown"] = "Flask physical reference text."
+    values["biography_markdown"] = "Flask biography reference text."
     values["stat_adjustment_speed"] = "5"
     update_response = client.put(
         "/api/v1/campaigns/linden-pass/characters/arden-march/advanced-editor",
@@ -3425,9 +3426,9 @@ def test_api_character_advanced_editor_context_save_and_access(client, app, user
     updated_payload = update_response.get_json()
     assert updated_payload["message"] == "Character details updated."
     assert updated_payload["editor"]["state_revision"] == editor["state_revision"] + 1
-    assert updated_payload["character"]["definition"]["profile"]["biography_markdown"] == "Gen2 biography reference text."
+    assert updated_payload["character"]["definition"]["profile"]["biography_markdown"] == "Flask biography reference text."
     assert updated_payload["character"]["state_record"]["state"]["notes"]["physical_description_markdown"] == (
-        "Gen2 physical reference text."
+        "Flask physical reference text."
     )
     assert updated_payload["character"]["definition"]["stats"]["manual_adjustments"]["speed"] == 5
 
@@ -3546,7 +3547,7 @@ The harbor masters insist on repetition until every motion is clean.
     )
     assert add_response.status_code == 200
     assert add_response.get_json()["links"]["retraining_url"] == (
-        "/app-next/campaigns/linden-pass/characters/arden-march/retraining"
+        "/campaigns/linden-pass/characters/arden-march/retraining"
     )
 
     detail_response = client.get(
@@ -3555,7 +3556,7 @@ The harbor masters insist on repetition until every motion is clean.
     )
     assert detail_response.status_code == 200
     detail_links = detail_response.get_json()["links"]
-    assert detail_links["retraining_url"] == "/app-next/campaigns/linden-pass/characters/arden-march/retraining"
+    assert detail_links["retraining_url"] == "/campaigns/linden-pass/characters/arden-march/retraining"
     assert detail_links["flask_retraining_url"] == "/campaigns/linden-pass/characters/arden-march/retraining"
 
     response = client.get(
@@ -3566,7 +3567,7 @@ The harbor masters insist on repetition until every motion is clean.
     payload = response.get_json()
     assert payload["supported"] is True
     assert payload["lane"] == "dnd5e"
-    assert payload["links"]["retraining_url"] == "/app-next/campaigns/linden-pass/characters/arden-march/retraining"
+    assert payload["links"]["retraining_url"] == "/campaigns/linden-pass/characters/arden-march/retraining"
     assert payload["links"]["flask_retraining_url"] == "/campaigns/linden-pass/characters/arden-march/retraining"
     retraining = payload["retraining"]
     assert retraining["state_revision"] == payload["character"]["state_record"]["revision"]
@@ -3724,7 +3725,7 @@ def test_api_character_level_up_context_save_and_access(client, app, users, set_
     )
     assert detail_response.status_code == 200
     detail_links = detail_response.get_json()["links"]
-    assert detail_links["level_up_url"] == "/app-next/campaigns/linden-pass/characters/arden-march/level-up"
+    assert detail_links["level_up_url"] == "/campaigns/linden-pass/characters/arden-march/level-up"
     assert detail_links["flask_level_up_url"] == "/campaigns/linden-pass/characters/arden-march/level-up"
 
     owner_detail_response = client.get(
@@ -3733,7 +3734,7 @@ def test_api_character_level_up_context_save_and_access(client, app, users, set_
     )
     assert owner_detail_response.status_code == 200
     owner_detail_links = owner_detail_response.get_json()["links"]
-    assert owner_detail_links["level_up_url"] == "/app-next/campaigns/linden-pass/characters/arden-march/level-up"
+    assert owner_detail_links["level_up_url"] == "/campaigns/linden-pass/characters/arden-march/level-up"
     assert owner_detail_links["flask_level_up_url"] == "/campaigns/linden-pass/characters/arden-march/level-up"
     assert "advanced_editor_url" not in owner_detail_links
     assert "progression_repair_url" not in owner_detail_links
@@ -3747,7 +3748,7 @@ def test_api_character_level_up_context_save_and_access(client, app, users, set_
     payload = response.get_json()
     assert payload["supported"] is True
     assert payload["lane"] == "dnd5e"
-    assert payload["links"]["level_up_url"] == "/app-next/campaigns/linden-pass/characters/arden-march/level-up"
+    assert payload["links"]["level_up_url"] == "/campaigns/linden-pass/characters/arden-march/level-up"
     assert payload["links"]["flask_level_up_url"] == "/campaigns/linden-pass/characters/arden-march/level-up"
     level_up = payload["level_up"]
     assert level_up["state_revision"] == payload["character"]["state_record"]["revision"]
@@ -3898,7 +3899,7 @@ def test_api_character_progression_repair_context_save_and_access(
     assert detail_response.status_code == 200
     detail_links = detail_response.get_json()["links"]
     assert detail_links["progression_repair_url"] == (
-        "/app-next/campaigns/linden-pass/characters/arden-march/progression-repair"
+        "/campaigns/linden-pass/characters/arden-march/progression-repair"
     )
     assert detail_links["flask_progression_repair_url"] == (
         "/campaigns/linden-pass/characters/arden-march/progression-repair"
@@ -3913,7 +3914,7 @@ def test_api_character_progression_repair_context_save_and_access(
     assert level_up_repairable_payload["supported"] is False
     assert level_up_repairable_payload["lane"] == "repairable"
     assert level_up_repairable_payload["links"]["progression_repair_url"] == (
-        "/app-next/campaigns/linden-pass/characters/arden-march/progression-repair"
+        "/campaigns/linden-pass/characters/arden-march/progression-repair"
     )
 
     retraining_repairable_response = client.get(
@@ -3925,7 +3926,7 @@ def test_api_character_progression_repair_context_save_and_access(
     assert retraining_repairable_payload["supported"] is False
     assert retraining_repairable_payload["lane"] == "repairable"
     assert retraining_repairable_payload["links"]["progression_repair_url"] == (
-        "/app-next/campaigns/linden-pass/characters/arden-march/progression-repair"
+        "/campaigns/linden-pass/characters/arden-march/progression-repair"
     )
 
     response = client.get(
@@ -3937,7 +3938,7 @@ def test_api_character_progression_repair_context_save_and_access(
     assert payload["supported"] is True
     assert payload["lane"] == "repairable"
     assert payload["links"]["progression_repair_url"] == (
-        "/app-next/campaigns/linden-pass/characters/arden-march/progression-repair"
+        "/campaigns/linden-pass/characters/arden-march/progression-repair"
     )
     repair = payload["repair"]
     assert repair["state_revision"] == payload["character"]["state_record"]["revision"]
@@ -3997,7 +3998,7 @@ def test_api_character_progression_repair_context_save_and_access(
     assert stale_response.get_json()["error"]["code"] == "state_conflict"
 
 
-def test_api_character_create_context_uses_gen2_links_and_permissions(client, app, users):
+def test_api_character_create_context_uses_flask_links_and_permissions(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-create-api")
     player_token = issue_api_token(app, users["party"]["email"], label="player-character-create-api")
 
@@ -4010,7 +4011,7 @@ def test_api_character_create_context_uses_gen2_links_and_permissions(client, ap
     payload = response.get_json()
     assert payload["lane"] == "dnd5e"
     assert payload["create"]["lane"] == "dnd5e"
-    assert payload["links"]["create_character_url"] == "/app-next/campaigns/linden-pass/characters/new"
+    assert payload["links"]["create_character_url"] == "/campaigns/linden-pass/characters/new"
     assert payload["links"]["flask_create_character_url"] == "/campaigns/linden-pass/characters/new"
     assert payload["links"]["flask_create_url"] == "/campaigns/linden-pass/characters/new"
 
@@ -4028,7 +4029,7 @@ def test_api_character_create_context_uses_gen2_links_and_permissions(client, ap
     assert anonymous_response.get_json()["error"]["code"] == "auth_required"
 
 
-def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_records(
+def test_api_xianxia_create_manual_import_and_cultivation_write_native_records(
     client,
     app,
     users,
@@ -4048,25 +4049,25 @@ def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_reco
     context_payload = context_response.get_json()
     assert context_payload["lane"] == "xianxia"
     assert context_payload["create"]["lane"] == "xianxia"
-    assert context_payload["links"]["create_character_url"] == "/app-next/campaigns/linden-pass/characters/new"
-    assert context_payload["links"]["import_xianxia_url"] == "/app-next/campaigns/linden-pass/characters/import/xianxia-manual"
+    assert context_payload["links"]["create_character_url"] == "/campaigns/linden-pass/characters/new"
+    assert context_payload["links"]["import_xianxia_url"] == "/campaigns/linden-pass/characters/import/xianxia-manual"
     assert context_payload["links"]["flask_import_xianxia_url"] == "/campaigns/linden-pass/characters/import/xianxia-manual"
 
     create_response = client.post(
         "/api/v1/campaigns/linden-pass/characters/create",
         headers=api_headers(dm_token),
-        json={"values": _valid_xianxia_create_data("Gen2 Crane", slug="gen2-crane")},
+        json={"values": _valid_xianxia_create_data("Flask Crane", slug="flask-crane")},
     )
 
     assert create_response.status_code == 200
     create_payload = create_response.get_json()
-    assert create_payload["message"] == "Gen2 Crane created."
-    assert create_payload["links"]["character_url"] == "/app-next/campaigns/linden-pass/characters/gen2-crane"
+    assert create_payload["message"] == "Flask Crane created."
+    assert create_payload["links"]["character_url"] == "/campaigns/linden-pass/characters/flask-crane"
     created_definition_path = (
         app.config["TEST_CAMPAIGNS_DIR"]
         / "linden-pass"
         / "characters"
-        / "gen2-crane"
+        / "flask-crane"
         / "definition.yaml"
     )
     created_definition = yaml.safe_load(created_definition_path.read_text(encoding="utf-8"))
@@ -4074,7 +4075,7 @@ def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_reco
     assert created_definition["xianxia"]["realm"] == "Mortal"
 
     unsupported_editor_response = client.get(
-        "/api/v1/campaigns/linden-pass/characters/gen2-crane/advanced-editor",
+        "/api/v1/campaigns/linden-pass/characters/flask-crane/advanced-editor",
         headers=api_headers(dm_token),
     )
 
@@ -4084,14 +4085,14 @@ def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_reco
     assert unsupported_editor_payload["lane"] == "unsupported"
     assert unsupported_editor_payload["editor"] is None
     assert unsupported_editor_payload["links"]["cultivation_url"] == (
-        "/app-next/campaigns/linden-pass/characters/gen2-crane/cultivation"
+        "/campaigns/linden-pass/characters/flask-crane/cultivation"
     )
     assert unsupported_editor_payload["links"]["flask_cultivation_url"] == (
-        "/campaigns/linden-pass/characters/gen2-crane/cultivation"
+        "/campaigns/linden-pass/characters/flask-crane/cultivation"
     )
 
     unsupported_level_up_response = client.get(
-        "/api/v1/campaigns/linden-pass/characters/gen2-crane/level-up",
+        "/api/v1/campaigns/linden-pass/characters/flask-crane/level-up",
         headers=api_headers(dm_token),
     )
     assert unsupported_level_up_response.status_code == 200
@@ -4100,11 +4101,11 @@ def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_reco
     assert unsupported_level_up_payload["lane"] == "unsupported"
     assert unsupported_level_up_payload["level_up"] is None
     assert unsupported_level_up_payload["links"]["cultivation_url"] == (
-        "/app-next/campaigns/linden-pass/characters/gen2-crane/cultivation"
+        "/campaigns/linden-pass/characters/flask-crane/cultivation"
     )
 
     unsupported_retraining_response = client.get(
-        "/api/v1/campaigns/linden-pass/characters/gen2-crane/retraining",
+        "/api/v1/campaigns/linden-pass/characters/flask-crane/retraining",
         headers=api_headers(dm_token),
     )
     assert unsupported_retraining_response.status_code == 200
@@ -4113,14 +4114,14 @@ def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_reco
     assert unsupported_retraining_payload["lane"] == "unsupported"
     assert unsupported_retraining_payload["retraining"] is None
     assert unsupported_retraining_payload["links"]["cultivation_url"] == (
-        "/app-next/campaigns/linden-pass/characters/gen2-crane/cultivation"
+        "/campaigns/linden-pass/characters/flask-crane/cultivation"
     )
     assert unsupported_retraining_payload["links"]["flask_cultivation_url"] == (
-        "/campaigns/linden-pass/characters/gen2-crane/cultivation"
+        "/campaigns/linden-pass/characters/flask-crane/cultivation"
     )
 
     unsupported_repair_response = client.get(
-        "/api/v1/campaigns/linden-pass/characters/gen2-crane/progression-repair",
+        "/api/v1/campaigns/linden-pass/characters/flask-crane/progression-repair",
         headers=api_headers(dm_token),
     )
     assert unsupported_repair_response.status_code == 200
@@ -4129,32 +4130,32 @@ def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_reco
     assert unsupported_repair_payload["lane"] == "unsupported"
     assert unsupported_repair_payload["repair"] is None
     assert unsupported_repair_payload["links"]["cultivation_url"] == (
-        "/app-next/campaigns/linden-pass/characters/gen2-crane/cultivation"
+        "/campaigns/linden-pass/characters/flask-crane/cultivation"
     )
 
     blocked_level_up_response = client.get(
-        "/api/v1/campaigns/linden-pass/characters/gen2-crane/level-up",
+        "/api/v1/campaigns/linden-pass/characters/flask-crane/level-up",
         headers=api_headers(player_token),
     )
     assert blocked_level_up_response.status_code == 403
     assert blocked_level_up_response.get_json()["error"]["code"] == "forbidden"
 
     blocked_retraining_response = client.get(
-        "/api/v1/campaigns/linden-pass/characters/gen2-crane/retraining",
+        "/api/v1/campaigns/linden-pass/characters/flask-crane/retraining",
         headers=api_headers(player_token),
     )
     assert blocked_retraining_response.status_code == 403
     assert blocked_retraining_response.get_json()["error"]["code"] == "forbidden"
 
     blocked_repair_response = client.get(
-        "/api/v1/campaigns/linden-pass/characters/gen2-crane/progression-repair",
+        "/api/v1/campaigns/linden-pass/characters/flask-crane/progression-repair",
         headers=api_headers(player_token),
     )
     assert blocked_repair_response.status_code == 403
     assert blocked_repair_response.get_json()["error"]["code"] == "forbidden"
 
     cultivation_response = client.get(
-        "/api/v1/campaigns/linden-pass/characters/gen2-crane/cultivation",
+        "/api/v1/campaigns/linden-pass/characters/flask-crane/cultivation",
         headers=api_headers(dm_token),
     )
     assert cultivation_response.status_code == 200
@@ -4162,16 +4163,16 @@ def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_reco
     assert cultivation_payload["supported"] is True
     assert cultivation_payload["lane"] == "xianxia"
     assert cultivation_payload["links"]["cultivation_url"] == (
-        "/app-next/campaigns/linden-pass/characters/gen2-crane/cultivation"
+        "/campaigns/linden-pass/characters/flask-crane/cultivation"
     )
     assert cultivation_payload["links"]["flask_cultivation_url"] == (
-        "/campaigns/linden-pass/characters/gen2-crane/cultivation"
+        "/campaigns/linden-pass/characters/flask-crane/cultivation"
     )
     assert cultivation_payload["cultivation"]["insight"]["available"] == 0
     cultivation_revision = cultivation_payload["character"]["state_record"]["revision"]
 
     blocked_cultivation_response = client.get(
-        "/api/v1/campaigns/linden-pass/characters/gen2-crane/cultivation",
+        "/api/v1/campaigns/linden-pass/characters/flask-crane/cultivation",
         headers=api_headers(player_token),
     )
     assert blocked_cultivation_response.status_code == 403
@@ -4192,7 +4193,7 @@ def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_reco
     assert unsupported_cultivation_payload["cultivation"] is None
 
     insight_response = client.post(
-        "/api/v1/campaigns/linden-pass/characters/gen2-crane/cultivation",
+        "/api/v1/campaigns/linden-pass/characters/flask-crane/cultivation",
         headers=api_headers(dm_token),
         json={
             "expected_revision": cultivation_revision,
@@ -4214,7 +4215,7 @@ def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_reco
     assert updated_definition["xianxia"]["advancement_history"][-1]["action"] == "insight_counter_adjustment"
 
     stale_cultivation_response = client.post(
-        "/api/v1/campaigns/linden-pass/characters/gen2-crane/cultivation",
+        "/api/v1/campaigns/linden-pass/characters/flask-crane/cultivation",
         headers=api_headers(dm_token),
         json={
             "expected_revision": cultivation_revision,
@@ -4228,7 +4229,7 @@ def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_reco
     assert stale_cultivation_response.status_code == 409
     assert stale_cultivation_response.get_json()["error"]["code"] == "state_conflict"
 
-    import_values = _valid_xianxia_manual_import_data("Gen2 Imported Lotus", slug="gen2-imported-lotus")
+    import_values = _valid_xianxia_manual_import_data("Flask Imported Lotus", slug="flask-imported-lotus")
     preview_response = client.post(
         "/api/v1/campaigns/linden-pass/characters/import/xianxia-manual",
         headers=api_headers(dm_token),
@@ -4238,12 +4239,12 @@ def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_reco
     assert preview_response.status_code == 200
     preview_payload = preview_response.get_json()
     assert preview_payload["message"] == "Review the imported sheet summary, then confirm to create the character."
-    assert preview_payload["import_context"]["preview"]["name"] == "Gen2 Imported Lotus"
+    assert preview_payload["import_context"]["preview"]["name"] == "Flask Imported Lotus"
     preview_definition_path = (
         app.config["TEST_CAMPAIGNS_DIR"]
         / "linden-pass"
         / "characters"
-        / "gen2-imported-lotus"
+        / "flask-imported-lotus"
         / "definition.yaml"
     )
     assert not preview_definition_path.exists()
@@ -4256,14 +4257,14 @@ def test_api_xianxia_gen2_create_manual_import_and_cultivation_write_native_reco
 
     assert confirm_response.status_code == 200
     confirm_payload = confirm_response.get_json()
-    assert confirm_payload["message"] == "Gen2 Imported Lotus imported."
-    assert confirm_payload["links"]["character_url"] == "/app-next/campaigns/linden-pass/characters/gen2-imported-lotus"
+    assert confirm_payload["message"] == "Flask Imported Lotus imported."
+    assert confirm_payload["links"]["character_url"] == "/campaigns/linden-pass/characters/flask-imported-lotus"
     imported_definition = yaml.safe_load(preview_definition_path.read_text(encoding="utf-8"))
     assert imported_definition["system"] == "Xianxia"
     assert imported_definition["source"]["source_path"] == "importer://xianxia-manual"
 
 
-def test_api_character_controls_assignment_and_delete_use_gen2_contract(client, app, users):
+def test_api_character_controls_assignment_and_delete_use_flask_contract(client, app, users):
     admin_token = issue_api_token(app, users["admin"]["email"], label="admin-character-controls-api")
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-controls-api")
     player_token = issue_api_token(app, users["party"]["email"], label="player-character-controls-api")
@@ -4347,7 +4348,7 @@ def test_api_character_controls_assignment_and_delete_use_gen2_contract(client, 
     assert delete_response.status_code == 200
     delete_payload = delete_response.get_json()
     assert delete_payload["deleted_character_slug"] == "arden-march"
-    assert delete_payload["links"]["gen2_roster_url"] == "/app-next/campaigns/linden-pass/characters"
+    assert delete_payload["links"]["roster_url"] == "/campaigns/linden-pass/characters"
 
     with app.app_context():
         store = AuthStore()
@@ -4357,7 +4358,7 @@ def test_api_character_controls_assignment_and_delete_use_gen2_contract(client, 
     assert not definition_path.exists()
 
 
-def test_api_character_portrait_upload_remove_uses_revisioned_gen2_contract(
+def test_api_character_portrait_upload_remove_uses_revisioned_contract(
     client,
     app,
     users,
@@ -4406,7 +4407,7 @@ def test_api_character_portrait_upload_remove_uses_revisioned_gen2_contract(
                 "media_type": "image/png",
             },
             "alt_text": "Arden updated portrait",
-            "caption": "Uploaded through Gen2.",
+            "caption": "Uploaded through Flask.",
         },
     )
 
@@ -4415,14 +4416,14 @@ def test_api_character_portrait_upload_remove_uses_revisioned_gen2_contract(
     assert uploaded_character["state_record"]["revision"] == starting_revision + 1
     assert uploaded_character["portrait"]["asset_ref"] == "characters/arden-march/portrait.webp"
     assert uploaded_character["portrait"]["alt_text"] == "Arden updated portrait"
-    assert uploaded_character["portrait"]["caption"] == "Uploaded through Gen2."
+    assert uploaded_character["portrait"]["caption"] == "Uploaded through Flask."
     portrait_bytes = portrait_path.read_bytes()
     assert portrait_bytes[:4] == b"RIFF"
     assert portrait_bytes[8:12] == b"WEBP"
     profile = yaml.safe_load(definition_path.read_text(encoding="utf-8"))["profile"]
     assert profile["portrait_asset_ref"] == "characters/arden-march/portrait.webp"
     assert profile["portrait_alt"] == "Arden updated portrait"
-    assert profile["portrait_caption"] == "Uploaded through Gen2."
+    assert profile["portrait_caption"] == "Uploaded through Flask."
 
     portrait_response = client.get(uploaded_character["portrait"]["url"], headers=api_headers(dm_token))
     assert portrait_response.status_code == 200
@@ -5676,10 +5677,10 @@ def test_api_combat_endpoints_allow_dm_management_and_owner_player_vitals_update
     assert live_state.get_json()["tracker"]["combatant_count"] == 2
 
 
-def test_api_combat_read_exposes_gen2_live_selection_and_fallback_links(client, app, users):
-    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-combat-gen2-read-api")
-    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-combat-gen2-read-api")
-    player_token = issue_api_token(app, users["party"]["email"], label="player-combat-gen2-read-api")
+def test_api_combat_read_exposes_live_selection_and_fallback_links(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-combat-read-api")
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-combat-read-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="player-combat-read-api")
 
     add_player = client.post(
         "/api/v1/campaigns/linden-pass/combat/player-combatants",
@@ -5740,7 +5741,7 @@ def test_api_combat_read_exposes_gen2_live_selection_and_fallback_links(client, 
             "name": "Arden March",
             "subtitle": "Sorcerer 5",
             "is_selected": True,
-            "href": f"/app-next/campaigns/linden-pass/combat?combatant={arden['id']}",
+            "href": f"/campaigns/linden-pass/combat?combatant={arden['id']}",
             "flask_href": f"/campaigns/linden-pass/combat?combatant={arden['id']}",
         }
     ]
@@ -5795,7 +5796,7 @@ def test_api_combat_read_exposes_gen2_live_selection_and_fallback_links(client, 
 
 def test_api_combat_read_reports_unsupported_system_without_live_poll_targets(client, app, users):
     _configure_xianxia_campaign(app)
-    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-combat-gen2-xianxia-api")
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-combat-xianxia-api")
 
     response = client.get("/api/v1/campaigns/linden-pass/combat", headers=api_headers(dm_token))
     assert response.status_code == 200

@@ -1,6 +1,6 @@
 # Ops And Fly Deployment
 
-Last updated: 2026-06-25
+Last updated: 2026-07-09
 
 ## Owns
 
@@ -10,7 +10,6 @@ Last updated: 2026-06-25
 
 - Work from the `campaign_player_wiki` app repo root for app repo operations.
 - Prefer the workspace virtualenv Python or `local.ps1` instead of bare `python`.
-- Prefer existing `frontend/node_modules` tools or bundled Node; do not assume global `npm` is on `PATH`.
 - `local.ps1` is the Windows-first wrapper for bootstrap, run, test, check, backup, restore, prepare-fly-campaigns, sync-fly, and deploy-fly.
 - Disposable local runtime temp files belong under `.local/tmp/<action>/` or task-specific `.task-temp` folders outside durable app data.
 
@@ -21,7 +20,8 @@ Last updated: 2026-06-25
 - The health endpoint is `/healthz`.
 - Real app identity comes from `PLAYER_WIKI_FLY_APP`, `local.ps1 -Action deploy-fly`, or an explicit Fly app argument.
 - Fly deploys snapshot the current working tree. Deploy from a clean copy if live should match committed state exactly.
-- `.local/`, SQLite files, local content mirrors, and local frontend build output are intentionally excluded from images.
+- `.local/`, SQLite files, and local content mirrors are intentionally excluded from images.
+- The Docker image is Python-only; it no longer builds or copies a React/Vite/TanStack bundle.
 
 ## Data And Volume Boundaries
 
@@ -34,7 +34,7 @@ Last updated: 2026-06-25
 ## Verification Contract
 
 - Normal deploy verification checks Fly status plus the live `/healthz` URL.
-- After Gen2/frontend changes, verify an explicit `/app-next/` URL.
+- After browser route changes, verify representative Flask `/campaigns/...` URLs.
 - After app-shell/static-serving changes, verify versioned CSS cache headers where relevant.
 - After campaign asset-serving changes, verify representative asset content type.
 

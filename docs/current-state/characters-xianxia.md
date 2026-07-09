@@ -1,6 +1,6 @@
 # Characters: Xianxia
 
-Last updated: 2026-06-25
+Last updated: 2026-07-09
 
 ## Owns
 
@@ -81,5 +81,3 @@ Last updated: 2026-06-25
 - `player_wiki/xianxia_character_importer.py`
 - `player_wiki/xianxia_advancement.py`
 - `player_wiki/xianxia_cultivation.py`
-- `frontend/src/components/CharacterXianxiaSections.tsx`
-- `frontend/src/components/CharacterCultivationRealmAscension.tsx`

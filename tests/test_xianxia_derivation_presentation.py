@@ -203,6 +203,7 @@ def test_xianxia_read_presenter_context_collects_first_pass_sheet_facts(
         "Skills",
         "Equipment",
         "Inventory",
+        "Portrait",
         "Personal",
         "Notes",
         "Controls",

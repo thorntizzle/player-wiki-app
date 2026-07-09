@@ -1,6 +1,6 @@
 # Frontend UX Audit Checklist
 
-Use this checklist when reviewing or polishing Gen2 and shared Flask-compatible frontend surfaces. The detailed standards live in [frontend-ux-style-guide.md](frontend-ux-style-guide.md).
+Use this checklist when reviewing or polishing Flask browser surfaces. The detailed standards live in [frontend-ux-style-guide.md](frontend-ux-style-guide.md).
 
 The checklist is intentionally practical. Mark each item as Pass, Needs Work, or Not Applicable, then capture the smallest concrete follow-up that would make the page consistent.
 
@@ -38,9 +38,8 @@ Recommended baseline roles:
 
 ## 2. Navigation And Route Behavior
 
-- Gen2 links stay inside `/app-next` unless they intentionally open a Flask fallback or unsupported legacy lane.
+- Links stay on Flask routes such as `/campaigns/...`, `/account`, and `/admin` unless they intentionally leave the app.
 - Links use real `href` values and work with open-in-new-tab behavior.
-- In-app TanStack navigation does not trigger a hard document reload for ordinary Gen2 route changes.
 - Route search params preserve meaningful state, such as active lane, selected combatant, selected page, or search query.
 - Subnavigation active states are visually obvious and not color-only.
 - Back, close, cancel, and return links have predictable destinations.

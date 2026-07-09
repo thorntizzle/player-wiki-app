@@ -7028,9 +7028,6 @@ def _stabilize_choice_section_values(
         if sanitized_values == current_values:
             break
         current_values = sanitized_values
-        sanitized_relevant_value_key = _relevant_section_value_key(current_values, choice_sections)
-        if sanitized_relevant_value_key == relevant_value_key:
-            break
         choice_sections = _build_sections(current_values)
         relevant_value_key = _relevant_section_value_key(current_values, choice_sections)
     return current_values, choice_sections
@@ -9912,7 +9909,6 @@ def _build_level_one_attacks(
         str(item.get("id") or "").strip()
         for item in equipment_catalog
         if _is_shield_item(item)
-        if resolve_item_equipped_state(item, item_catalog=item_catalog)
         if str(item.get("id") or "").strip()
     ]
     has_shield = any(
@@ -18920,6 +18916,8 @@ def _canonicalize_legacy_spell_mark(
 ) -> str:
     clean_mark = str(mark or "").strip()
     tokens = _spell_mark_tokens(clean_mark)
+    if "granted" in tokens:
+        return "Granted"
     if spell_level == 0 or "cantrip" in tokens:
         return "Cantrip"
     if spell_mode == "ritual_book":

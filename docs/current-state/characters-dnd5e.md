@@ -1,6 +1,6 @@
 # Characters: DND-5E
 
-Last updated: 2026-06-25
+Last updated: 2026-07-09
 
 ## Owns
 
@@ -8,14 +8,14 @@ Last updated: 2026-06-25
 
 ## Current User-Facing Behavior
 
-- DND-5E character detail subpages: `Quick Reference` or Gen2 `Overview`, `Resources`, `Spellcasting` or Gen2 `Spells`, `Equipment`, `Inventory`, `Abilities and Skills`, `Personal`, `Portrait`, `Notes`, and `Controls`.
-- Quick Reference or Gen2 Overview shows core overview rows, editable HP/temp HP/Hit Dice for authorized users, tracked resources, carrying capacity when derivable, and defensive rules when modeled. On the normal Gen2 sheet, the vitals/rest editor appears only on Overview rather than repeating across every subpage.
+- DND-5E character detail subpages: `Quick Reference`, `Resources`, `Spellcasting`, `Equipment`, `Inventory`, `Abilities and Skills`, `Personal`, `Portrait`, `Notes`, and `Controls`.
+- Quick Reference shows core overview rows, editable HP/temp HP/Hit Dice for authorized users, tracked resources, carrying capacity when derivable, and defensive rules when modeled.
 - Combat reminders from `stats.attack_reminder_state` belong on combat-facing attack panels, not normal Character Quick Reference.
 - Spellcasting is the durable home for spell-list management. Prepared casters and wizards use local `Current spells` and `Preparation` subviews over the same durable rows.
 - Equipment is the durable home for equip/unequip, attunement, weapon wield mode, supported feature-state toggles such as Armorer Arcane Armor, and Artificer infusion activation.
 - Inventory is the durable home for carried item rows, supplemental item adds, supported removals, quantity controls, and DND currency.
 - Resources shows tracked current/max resource cards. Authorized editors can change each current value through the existing resource state path with both blur autosave and a visible per-card `Save` action.
-- Spell detail popups in Gen2 include resolved upcasting text (e.g., `At Higher Levels`) when source-backed spell payload includes it; non-upcastable spells do not show an empty upcast section.
+- Spell detail popups include resolved upcasting text (e.g., `At Higher Levels`) when source-backed spell payload includes it; non-upcastable spells do not show an empty upcast section.
 - Personal displays physical description/background reference text. Physical description/background authoring belongs in Advanced Editor.
 - Notes displays player notes and imported/reference note sections. Editable users can save or confirmed-delete the mutable player note through the shared revision-checked notes path.
 - Portrait displays a large unframed current portrait and supports one portrait slot with upload/remove for authorized users. PNG/JPG uploads are stored as WebP; GIF/WebP uploads pass through validation.
@@ -35,7 +35,8 @@ Last updated: 2026-06-25
 - Save-time derivation is the authority for computed DND-5E sheet math on supported write paths.
 - Shared derivation covers proficiency, saves, skills, passive checks, initiative, speed, carrying capacity, max HP when provenance exists, spell DC/attack, slot progression, Armor Class, attacks, and resource templates.
 - DND mutable state includes HP/temp HP, per-die-size Hit Dice pools, resources, spell-slot usage by slot lane, equipment state, inventory quantity, currency, notes, and feature states such as Arcane Armor.
-- Hit Dice max pools derive from class-row levels and hit-die metadata; current counts stay in SQLite. Long rests restore expended Hit Dice equal to half total character level, capped by pool maximum, and do not auto-heal HP. Gen2 rest confirmation fields let the user set final Current HP and current Hit Dice after the modeled rest recovery before applying the rest.
+- `scripts/export_dnd_character_sheet.py` exports visible DND-5E character sheets to Markdown for a single character or all visible DND-5E characters in a campaign. The export uses the same presenter-normalized definition plus SQLite mutable state as the read sheet and intentionally omits image assets.
+- Hit Dice max pools derive from class-row levels and hit-die metadata; current counts stay in SQLite. Long rests restore expended Hit Dice equal to half total character level, capped by pool maximum, and do not auto-heal HP. Rest confirmation fields let the user set final Current HP and current Hit Dice after the modeled rest recovery before applying the rest.
 - State reconciliation treats unlabeled legacy spell-slot rows as migration-only once tracked slot lanes exist.
 - Artificer active infusion state lives on targeted equipment rows as normalized `active_infusions`. Known infusions derive from modeled Artificer Infusions feature rows and known-infusion summaries, while active capacity derives from Artificer level.
 
@@ -84,9 +85,10 @@ Last updated: 2026-06-25
 
 - `player_wiki/character_builder.py`
 - `player_wiki/character_editor.py`
+- `player_wiki/character_markdown_exporter.py`
 - `player_wiki/character_artificer_infusions.py`
 - `player_wiki/character_presenter.py`
 - `player_wiki/character_state_service.py`
 - `player_wiki/managed_resource_registry.py`
 - `player_wiki/character_source_matrix.py`
-- `frontend/src/components/CharacterDndSections.tsx`
+- `scripts/export_dnd_character_sheet.py`

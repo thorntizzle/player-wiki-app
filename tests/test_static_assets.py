@@ -191,6 +191,25 @@ def _extract_loading_media_url(html: str) -> str | None:
     return urls[0]
 
 
+def _browser_loading_media_urls(page) -> list[str]:
+    return page.evaluate(
+        """
+        () => {
+          const cover = document.querySelector('.app-loading-cover');
+          if (!cover) {
+            return [];
+          }
+          try {
+            const parsed = JSON.parse(cover.getAttribute('data-app-loading-media-urls') || '[]');
+            return Array.isArray(parsed) ? parsed.filter((url) => typeof url === 'string') : [];
+          } catch {
+            return [];
+          }
+        }
+        """
+    )
+
+
 def _sign_in_in_browser(page, base_url: str, email: str, password: str):
     page.goto(f"{base_url}/sign-in", wait_until="load")
     page.wait_for_selector("input[name='email']")
@@ -1055,7 +1074,7 @@ def test_browser_loading_media_rotation_advances_between_navigation(static_asset
             page.goto(f"{static_asset_live_server}/campaigns/linden-pass", wait_until="load")
             expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
 
-            media_urls = _extract_loading_media_urls(page.content())
+            media_urls = _browser_loading_media_urls(page)
             if len(media_urls) < 2:
                 pytest.skip("insufficient loading media candidates for rotation test")
 
@@ -1068,8 +1087,8 @@ def test_browser_loading_media_rotation_advances_between_navigation(static_asset
                 () => {
                   const link = document.createElement('a');
                   link.id = 'app-loading-rotation-link';
-                  link.href = '/campaigns/linden-pass/overview';
-                  link.textContent = 'overview';
+                  link.href = '/campaigns/linden-pass/pages/npcs/captain-lyra-vale';
+                  link.textContent = 'captain';
                   link.style.position = 'relative';
                   document.body.appendChild(link);
                 }

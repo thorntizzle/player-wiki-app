@@ -17,6 +17,7 @@ from .character_importer import (
     preserve_existing_character_overrides,
     write_yaml,
 )
+from .character_builder import _normalize_attack_payloads, _normalize_equipment_payloads
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .character_profile import ensure_profile_class_rows, sync_profile_class_summary
 from .character_repository import load_campaign_character_config
@@ -1173,25 +1174,25 @@ def apply_systems_links_to_definition(
 
     attack_links = list(systems_links.get("attacks") or [])
     linked_attacks: list[dict[str, Any]] = []
-    for attack, link in zip(list(linked_definition.attacks or []), attack_links):
+    for index, attack in enumerate(list(linked_definition.attacks or [])):
+        link = dict(attack_links[index] or {}) if index < len(attack_links) else {}
         attack_payload = dict(attack or {})
         systems_ref = _systems_ref_from_match(dict(link.get("match") or {}))
         if systems_ref is not None:
             attack_payload["systems_ref"] = systems_ref
         linked_attacks.append(attack_payload)
-    if len(linked_attacks) == len(linked_definition.attacks):
-        linked_definition.attacks = linked_attacks
+    linked_definition.attacks = _normalize_attack_payloads(linked_attacks)
 
     equipment_links = list(systems_links.get("equipment") or [])
     linked_equipment: list[dict[str, Any]] = []
-    for item, link in zip(list(linked_definition.equipment_catalog or []), equipment_links):
+    for index, item in enumerate(list(linked_definition.equipment_catalog or [])):
+        link = dict(equipment_links[index] or {}) if index < len(equipment_links) else {}
         item_payload = dict(item or {})
         systems_ref = _systems_ref_from_match(dict(link.get("match") or {}))
         if systems_ref is not None:
             item_payload["systems_ref"] = systems_ref
         linked_equipment.append(item_payload)
-    if len(linked_equipment) == len(linked_definition.equipment_catalog):
-        linked_definition.equipment_catalog = linked_equipment
+    linked_definition.equipment_catalog = _normalize_equipment_payloads(linked_equipment)
 
     spellcasting = dict(linked_definition.spellcasting or {})
     spell_links = list(systems_links.get("spells") or [])

@@ -558,10 +558,10 @@ def test_session_character_reloads_after_session_started_from_another_session_pa
 
             page.locator("[data-session-switch-target='character']").click()
             expect(page.locator("[data-session-shell-active='character']")).to_be_visible(timeout=5000)
-            expect(page.locator("form[data-character-sheet-edit-form='vitals']")).to_have_count(2)
+            expect(page.locator("form[data-character-sheet-edit-form='vitals']")).to_have_count(3)
             expect(page.locator("text=Save current HP")).to_have_count(0)
             expect(page.locator("text=Save temp HP")).to_have_count(0)
-            expect(page.locator("form[data-character-sheet-edit-form='vitals'][data-character-autosubmit]")).to_have_count(2)
+            expect(page.locator("form[data-character-sheet-edit-form='vitals'][data-character-autosubmit]")).to_have_count(3)
         finally:
             browser.close()
 
@@ -696,7 +696,9 @@ def test_feedback_item44_browser_header_combat_spells_and_session_chrome(
                 timeout=5000,
             )
             expect(page.locator("h1")).to_have_text("Session", timeout=5000)
-            expect(page.locator("text=Type at least 2 letters to search.")).to_be_visible()
+            expect(page.locator("#session-chat-compose")).to_be_visible()
+            expect(page.locator("textarea[name='body']")).to_be_visible()
+            expect(page.locator("text=Post to chat")).to_be_visible()
             expect(page.locator("text=Search and choose a player-visible wiki article")).to_have_count(0)
             expect(page.locator("text=Live session tools")).to_have_count(0)
         finally:

@@ -66,7 +66,6 @@ from .auth import (
 from .auth_store import (
     SESSION_CHAT_ORDER_CHOICES,
     is_valid_session_chat_order,
-    normalize_frontend_mode,
     normalize_session_chat_order,
     isoformat,
 )
@@ -537,7 +536,7 @@ def register_api(app) -> None:
             user_id,
             display_name,
             email,
-            href=f"/app-next/admin/users/{user_id}",
+            href=url_for("admin_user_detail", user_id=user_id),
             flask_href=url_for("admin_user_detail", user_id=user_id),
         )
 
@@ -576,7 +575,7 @@ def register_api(app) -> None:
             store,
             campaign_lookup,
             get_activity_filters(request.args, campaign_choices),
-            build_page_url=lambda filters, page: build_activity_query_url("/app-next/admin", filters, page=page),
+            build_page_url=lambda filters, page: build_activity_query_url("/admin", filters, page=page),
             build_export_url=lambda filters: url_for(
                 "admin_activity_export",
                 **build_activity_params(filters, page=1),
@@ -598,12 +597,12 @@ def register_api(app) -> None:
                 campaign_lookup,
                 assignment_label_lookup=assignment_label_lookup,
                 build_links=lambda user: {
-                    "href": f"/app-next/admin/users/{user.id}",
+                    "href": url_for("admin_user_detail", user_id=user.id),
                     "flask_href": url_for("admin_user_detail", user_id=user.id),
                 },
             ),
             "links": {
-                "gen2_admin_url": "/app-next/admin",
+                "admin_url": url_for("admin_dashboard"),
                 "flask_admin_url": url_for("admin_dashboard"),
             },
             **dashboard_audit_context,
@@ -634,7 +633,7 @@ def register_api(app) -> None:
             get_activity_filters(request.args, campaigns),
             user_id=user.id,
             build_page_url=lambda filters, page: build_activity_query_url(
-                f"/app-next/admin/users/{user.id}",
+                url_for("admin_user_detail", user_id=user.id),
                 filters,
                 page=page,
             ),
@@ -662,9 +661,9 @@ def register_api(app) -> None:
             "assignment_form_defaults": get_assignment_form_defaults(request.args, character_choices),
             "can_manage_account": current_user is not None and current_user.id != user.id,
             "links": {
-                "gen2_admin_url": "/app-next/admin",
+                "admin_url": url_for("admin_dashboard"),
                 "flask_admin_url": url_for("admin_dashboard"),
-                "gen2_user_url": f"/app-next/admin/users/{user.id}",
+                "user_url": url_for("admin_user_detail", user_id=user.id),
                 "flask_user_url": url_for("admin_user_detail", user_id=user.id),
             },
             **user_audit_context,
@@ -747,20 +746,11 @@ def register_api(app) -> None:
             return f"/campaigns/{campaign_slug}/{suffix}"
         return f"/campaigns/{campaign_slug}"
 
-    def gen2_campaign_href(campaign_slug: str, suffix: str = "") -> str:
-        suffix = suffix.strip("/")
-        if suffix:
-            return f"/app-next/campaigns/{campaign_slug}/{suffix}"
-        return f"/app-next/campaigns/{campaign_slug}"
-
-    def preferred_campaign_href(campaign_slug: str, suffix: str = "", frontend_mode: str = "gen2") -> str:
-        if normalize_frontend_mode(frontend_mode) == "gen2":
-            return gen2_campaign_href(campaign_slug, suffix)
+    def preferred_campaign_href(campaign_slug: str, suffix: str = "", frontend_mode: str = "flask") -> str:
         return flask_campaign_href(campaign_slug, suffix)
 
-    def preferred_wiki_body_html(campaign_slug: str, body_html: str, frontend_mode: str = "gen2") -> str:
-        normalized_frontend_mode = normalize_frontend_mode(frontend_mode)
-        base = "/app-next/campaigns" if normalized_frontend_mode == "gen2" else "/campaigns"
+    def preferred_wiki_body_html(campaign_slug: str, body_html: str, frontend_mode: str = "flask") -> str:
+        base = "/campaigns"
         rewritten = re.sub(
             rf"(?:/app-next)?/campaigns/{re.escape(campaign_slug)}/(pages|sections)/",
             rf"{base}/{campaign_slug}/\1/",
@@ -798,7 +788,7 @@ def register_api(app) -> None:
         page,
         *,
         include_image: bool = False,
-        frontend_mode: str = "gen2",
+        frontend_mode: str = "flask",
     ) -> dict[str, Any]:
         payload = {
             "page_ref": page.route_slug,
@@ -833,7 +823,7 @@ def register_api(app) -> None:
         page,
         body_html: str,
         *,
-        frontend_mode: str = "gen2",
+        frontend_mode: str = "flask",
     ) -> dict[str, Any]:
         return {
             **serialize_public_wiki_page(
@@ -850,7 +840,7 @@ def register_api(app) -> None:
         section_name: str,
         pages: list[Any],
         *,
-        frontend_mode: str = "gen2",
+        frontend_mode: str = "flask",
     ) -> dict[str, Any]:
         return {
             "section_name": section_name,
@@ -871,7 +861,7 @@ def register_api(app) -> None:
         campaign,
         pages: list[Any],
         *,
-        frontend_mode: str = "gen2",
+        frontend_mode: str = "flask",
     ) -> list[dict[str, Any]]:
         grouped_pages_map: dict[str, list[Any]] = defaultdict(list)
         for page in pages:
@@ -895,7 +885,7 @@ def register_api(app) -> None:
         section_name: str,
         pages: list[Any],
         *,
-        frontend_mode: str = "gen2",
+        frontend_mode: str = "flask",
     ) -> dict[str, Any]:
         top_level_pages = [page for page in pages if not page.subsection]
         subsection_groups: dict[str, list[Any]] = defaultdict(list)
@@ -2538,7 +2528,7 @@ def register_api(app) -> None:
                         selected_player_character is not None
                         and combatant.get("id") == selected_player_character.get("id")
                     ),
-                    "href": gen2_campaign_href(campaign_slug, f"combat?combatant={combatant.get('id')}"),
+                    "href": flask_campaign_href(campaign_slug, f"combat?combatant={combatant.get('id')}"),
                     "flask_href": url_for(
                         "campaign_combat_view",
                         campaign_slug=campaign_slug,
@@ -2766,22 +2756,19 @@ def register_api(app) -> None:
 
     def serialize_character_roster_links(campaign_slug: str, campaign) -> dict[str, str]:
         tools = serialize_character_roster_tools(campaign_slug, campaign)
-        encoded_campaign_slug = campaign_slug
         links = {
             "flask_roster_url": url_for("character_roster_view", campaign_slug=campaign_slug),
-            "gen2_roster_url": f"/app-next/campaigns/{encoded_campaign_slug}/characters",
+            "roster_url": flask_campaign_href(campaign_slug, "characters"),
         }
         if tools["can_create_characters"]:
             links["flask_create_character_url"] = url_for("character_create_view", campaign_slug=campaign_slug)
-            links["create_character_url"] = f"/app-next/campaigns/{encoded_campaign_slug}/characters/new"
+            links["create_character_url"] = flask_campaign_href(campaign_slug, "characters/new")
         if tools["can_import_xianxia_characters"]:
             links["flask_import_xianxia_url"] = url_for(
                 "character_import_xianxia_manual_view",
                 campaign_slug=campaign_slug,
             )
-            links["import_xianxia_url"] = (
-                f"/app-next/campaigns/{encoded_campaign_slug}/characters/import/xianxia-manual"
-            )
+            links["import_xianxia_url"] = flask_campaign_href(campaign_slug, "characters/import/xianxia-manual")
         return links
 
     def list_builder_campaign_page_records(campaign_slug: str, campaign) -> list[object]:
@@ -2826,15 +2813,13 @@ def register_api(app) -> None:
     def serialize_character_authoring_links(campaign_slug: str, campaign) -> dict[str, str]:
         links = serialize_character_roster_links(campaign_slug, campaign)
         links["flask_create_url"] = url_for("character_create_view", campaign_slug=campaign_slug)
-        links["gen2_create_url"] = f"/app-next/campaigns/{campaign_slug}/characters/new"
+        links["create_url"] = flask_campaign_href(campaign_slug, "characters/new")
         if native_character_create_lane(getattr(campaign, "system", "")) == CHARACTER_ROUTE_LANE_XIANXIA:
             links["flask_import_xianxia_url"] = url_for(
                 "character_import_xianxia_manual_view",
                 campaign_slug=campaign_slug,
             )
-            links["gen2_import_xianxia_url"] = (
-                f"/app-next/campaigns/{campaign_slug}/characters/import/xianxia-manual"
-            )
+            links["import_xianxia_url"] = flask_campaign_href(campaign_slug, "characters/import/xianxia-manual")
         return links
 
     def ensure_character_authoring_access(campaign_slug: str):
@@ -3091,7 +3076,7 @@ def register_api(app) -> None:
             and supports_native_character_tools(campaign_system)
             and supports_native_character_tools(getattr(record.definition, "system", ""))
         ):
-            links["advanced_editor_url"] = gen2_campaign_href(
+            links["advanced_editor_url"] = flask_campaign_href(
                 campaign_slug,
                 f"characters/{character_slug}/edit",
             )
@@ -3102,7 +3087,7 @@ def register_api(app) -> None:
             )
             retraining_availability = character_retraining_availability(campaign_slug, campaign, record)
             if str(retraining_availability.get("status") or "").strip() == "ready":
-                links["retraining_url"] = gen2_campaign_href(
+                links["retraining_url"] = flask_campaign_href(
                     campaign_slug,
                     f"characters/{character_slug}/retraining",
                 )
@@ -3126,7 +3111,7 @@ def register_api(app) -> None:
             )
             readiness_status = str(level_up_readiness.get("status") or "").strip()
             if readiness_status == "ready":
-                links["level_up_url"] = gen2_campaign_href(
+                links["level_up_url"] = flask_campaign_href(
                     campaign_slug,
                     f"characters/{character_slug}/level-up",
                 )
@@ -3136,7 +3121,7 @@ def register_api(app) -> None:
                     character_slug=character_slug,
                 )
             elif readiness_status == "repairable" and can_manage_character:
-                links["progression_repair_url"] = gen2_campaign_href(
+                links["progression_repair_url"] = flask_campaign_href(
                     campaign_slug,
                     f"characters/{character_slug}/progression-repair",
                 )
@@ -3150,7 +3135,7 @@ def register_api(app) -> None:
             and can_manage_campaign_session(campaign_slug)
             and character_advancement_lane(campaign_system) == CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION
         ):
-            links["cultivation_url"] = gen2_campaign_href(
+            links["cultivation_url"] = flask_campaign_href(
                 campaign_slug,
                 f"characters/{character_slug}/cultivation",
             )
@@ -3263,12 +3248,12 @@ def register_api(app) -> None:
                 "unsupported_message": (
                     ""
                     if supported
-                    else "Advanced Editor is currently available only for DND-5E native character tools in Gen2."
+                    else "Advanced Editor is currently available only for DND-5E native character tools."
                 ),
                 "editor": make_json_safe(edit_context) if edit_context is not None else None,
                 "links": {
                     **serialize_character_links(campaign_slug, campaign, record),
-                    "character_url": gen2_campaign_href(
+                    "character_url": flask_campaign_href(
                         campaign_slug,
                         f"characters/{record.definition.character_slug}",
                     ),
@@ -3325,7 +3310,7 @@ def register_api(app) -> None:
             return access_error
         if not character_advanced_editor_is_supported(campaign, record):
             return json_error(
-                "Advanced Editor is currently available only for DND-5E native character tools in Gen2.",
+                "Advanced Editor is currently available only for DND-5E native character tools.",
                 400,
                 code="unsupported_campaign_system",
             )
@@ -3452,7 +3437,7 @@ def register_api(app) -> None:
         if not supports_native_character_tools(getattr(record.definition, "system", "")):
             return {
                 "status": "unsupported",
-                "message": "Retraining is currently available only for DND-5E native character tools in Gen2.",
+                "message": "Retraining is currently available only for DND-5E native character tools.",
             }
         level_up_readiness = native_level_up_readiness(
             current_app.extensions["systems_service"],
@@ -3586,7 +3571,7 @@ def register_api(app) -> None:
         character_slug = record.definition.character_slug
         links = {
             **serialize_character_links(campaign_slug, campaign, record),
-            "character_url": gen2_campaign_href(campaign_slug, f"characters/{character_slug}"),
+            "character_url": flask_campaign_href(campaign_slug, f"characters/{character_slug}"),
             "flask_character_url": url_for(
                 "character_read_view",
                 campaign_slug=campaign_slug,
@@ -3594,7 +3579,7 @@ def register_api(app) -> None:
             ),
         }
         if character_advanced_editor_is_supported(campaign, record):
-            links["advanced_editor_url"] = gen2_campaign_href(campaign_slug, f"characters/{character_slug}/edit")
+            links["advanced_editor_url"] = flask_campaign_href(campaign_slug, f"characters/{character_slug}/edit")
             links["flask_advanced_editor_url"] = url_for(
                 "character_edit_view",
                 campaign_slug=campaign_slug,
@@ -3607,7 +3592,7 @@ def register_api(app) -> None:
         if readiness_status != "repairable" and nested_level_up_status == "repairable":
             readiness_status = "repairable"
         if readiness_status == "ready":
-            links["retraining_url"] = gen2_campaign_href(
+            links["retraining_url"] = flask_campaign_href(
                 campaign_slug,
                 f"characters/{character_slug}/retraining",
             )
@@ -3617,7 +3602,7 @@ def register_api(app) -> None:
                 character_slug=character_slug,
             )
         elif readiness_status == "repairable":
-            links["progression_repair_url"] = gen2_campaign_href(
+            links["progression_repair_url"] = flask_campaign_href(
                 campaign_slug,
                 f"characters/{character_slug}/progression-repair",
             )
@@ -3649,7 +3634,7 @@ def register_api(app) -> None:
         supported = character_retraining_is_supported(readiness)
         lane = "dnd5e" if supported else ("repairable" if readiness_status == "repairable" else "unsupported")
         unsupported_message = "" if supported else str(
-            readiness.get("message") or "This character is not ready for Gen2 retraining."
+            readiness.get("message") or "This character is not ready for retraining."
         )
         serialized_readiness = {
             key: value
@@ -3714,7 +3699,7 @@ def register_api(app) -> None:
         readiness = character_retraining_availability(campaign_slug, campaign, record)
         if not character_retraining_is_supported(readiness):
             return json_error(
-                str(readiness.get("message") or "This character is not ready for Gen2 retraining."),
+                str(readiness.get("message") or "This character is not ready for retraining."),
                 400,
                 code="unsupported_campaign_system",
             )
@@ -3824,7 +3809,7 @@ def register_api(app) -> None:
         if not supports_native_character_tools(getattr(record.definition, "system", "")):
             return {
                 "status": "unsupported",
-                "message": "Level-up is currently available only for DND-5E native character tools in Gen2.",
+                "message": "Level-up is currently available only for DND-5E native character tools.",
             }
         return native_level_up_readiness(
             current_app.extensions["systems_service"],
@@ -3892,7 +3877,7 @@ def register_api(app) -> None:
         character_slug = record.definition.character_slug
         links = {
             **serialize_character_links(campaign_slug, campaign, record),
-            "character_url": gen2_campaign_href(campaign_slug, f"characters/{character_slug}"),
+            "character_url": flask_campaign_href(campaign_slug, f"characters/{character_slug}"),
             "flask_character_url": url_for(
                 "character_read_view",
                 campaign_slug=campaign_slug,
@@ -3901,7 +3886,7 @@ def register_api(app) -> None:
         }
         readiness_status = str(readiness.get("status") or "").strip()
         if readiness_status == "ready":
-            links["level_up_url"] = gen2_campaign_href(
+            links["level_up_url"] = flask_campaign_href(
                 campaign_slug,
                 f"characters/{character_slug}/level-up",
             )
@@ -3911,7 +3896,7 @@ def register_api(app) -> None:
                 character_slug=character_slug,
             )
         elif readiness_status == "repairable" and can_manage_campaign_session(campaign_slug):
-            links["progression_repair_url"] = gen2_campaign_href(
+            links["progression_repair_url"] = flask_campaign_href(
                 campaign_slug,
                 f"characters/{character_slug}/progression-repair",
             )
@@ -3935,7 +3920,7 @@ def register_api(app) -> None:
         readiness_status = str(readiness.get("status") or "").strip() or "unsupported"
         supported = character_level_up_is_supported(readiness)
         lane = "dnd5e" if supported else ("repairable" if readiness_status == "repairable" else "unsupported")
-        unsupported_message = "" if supported else str(readiness.get("message") or "This character is not ready for Gen2 level-up.")
+        unsupported_message = "" if supported else str(readiness.get("message") or "This character is not ready for level-up.")
         return jsonify(
             {
                 "ok": True,
@@ -4005,7 +3990,7 @@ def register_api(app) -> None:
         readiness = character_level_up_readiness(campaign_slug, campaign, record)
         if not character_level_up_is_supported(readiness):
             return json_error(
-                str(readiness.get("message") or "This character is not ready for Gen2 level-up."),
+                str(readiness.get("message") or "This character is not ready for level-up."),
                 400,
                 code="unsupported_campaign_system",
             )
@@ -4099,7 +4084,7 @@ def register_api(app) -> None:
         if not supports_native_character_tools(getattr(record.definition, "system", "")):
             return {
                 "status": "unsupported",
-                "message": "Progression repair is currently available only for DND-5E imported character sheets in Gen2.",
+                "message": "Progression repair is currently available only for DND-5E imported character sheets.",
             }
         return native_level_up_readiness(
             current_app.extensions["systems_service"],
@@ -4153,7 +4138,7 @@ def register_api(app) -> None:
         character_slug = record.definition.character_slug
         links = {
             **serialize_character_links(campaign_slug, campaign, record),
-            "character_url": gen2_campaign_href(campaign_slug, f"characters/{character_slug}"),
+            "character_url": flask_campaign_href(campaign_slug, f"characters/{character_slug}"),
             "flask_character_url": url_for(
                 "character_read_view",
                 campaign_slug=campaign_slug,
@@ -4162,7 +4147,7 @@ def register_api(app) -> None:
         }
         readiness_status = str(readiness.get("status") or "").strip()
         if readiness_status == "repairable":
-            links["progression_repair_url"] = gen2_campaign_href(
+            links["progression_repair_url"] = flask_campaign_href(
                 campaign_slug,
                 f"characters/{character_slug}/progression-repair",
             )
@@ -4172,7 +4157,7 @@ def register_api(app) -> None:
                 character_slug=character_slug,
             )
         elif readiness_status == "ready":
-            links["level_up_url"] = gen2_campaign_href(
+            links["level_up_url"] = flask_campaign_href(
                 campaign_slug,
                 f"characters/{character_slug}/level-up",
             )
@@ -4277,7 +4262,7 @@ def register_api(app) -> None:
         readiness = character_progression_repair_readiness(campaign_slug, campaign, record)
         if not character_progression_repair_is_supported(readiness):
             return json_error(
-                str(readiness.get("message") or "This character is not ready for Gen2 progression repair."),
+                str(readiness.get("message") or "This character is not ready for progression repair."),
                 400,
                 code="unsupported_campaign_system",
             )
@@ -4442,13 +4427,13 @@ def register_api(app) -> None:
                 ),
                 "links": {
                     **serialize_character_links(campaign_slug, campaign, record),
-                    "character_url": gen2_campaign_href(campaign_slug, f"characters/{character_slug}"),
+                    "character_url": flask_campaign_href(campaign_slug, f"characters/{character_slug}"),
                     "flask_character_url": url_for(
                         "character_read_view",
                         campaign_slug=campaign_slug,
                         character_slug=character_slug,
                     ),
-                    "cultivation_url": gen2_campaign_href(
+                    "cultivation_url": flask_campaign_href(
                         campaign_slug,
                         f"characters/{character_slug}/cultivation",
                     ),
@@ -4799,7 +4784,7 @@ def register_api(app) -> None:
                     character_slug=character_slug,
                     page="controls",
                 ),
-                "gen2_roster_url": gen2_campaign_href(campaign_slug, "characters"),
+                "roster_url": flask_campaign_href(campaign_slug, "characters"),
             },
         }
 
@@ -4808,7 +4793,7 @@ def register_api(app) -> None:
         return {
             **presented,
             "system": record.definition.system,
-            "href": gen2_campaign_href(campaign.slug, f"characters/{record.definition.character_slug}"),
+            "href": flask_campaign_href(campaign.slug, f"characters/{record.definition.character_slug}"),
             "flask_href": url_for(
                 "character_read_view",
                 campaign_slug=campaign.slug,
@@ -6001,7 +5986,7 @@ def register_api(app) -> None:
                 ),
                 "links": {
                     "flask_control_url": url_for("campaign_control_panel_view", campaign_slug=campaign_slug),
-                    "gen2_control_url": gen2_campaign_href(campaign_slug, "control"),
+                    "control_url": flask_campaign_href(campaign_slug, "control-panel"),
                 },
             }
         )
@@ -6141,8 +6126,8 @@ def register_api(app) -> None:
                 "account_note": str(context.get("help_account_note") or ""),
                 "links": {
                     "flask_help_url": url_for("campaign_help_view", campaign_slug=campaign_slug),
-                    "gen2_help_url": gen2_campaign_href(campaign_slug, "help"),
-                    "account_url": "/app-next/account",
+                    "help_url": flask_campaign_href(campaign_slug, "help"),
+                    "account_url": url_for("account_settings_view"),
                     "flask_account_url": url_for("account_settings_view"),
                     "sign_in_url": url_for("sign_in", next=url_for("campaign_help_view", campaign_slug=campaign_slug)),
                 },
@@ -6160,7 +6145,7 @@ def register_api(app) -> None:
         wiki_visibility = get_effective_campaign_visibility(campaign_slug, "wiki")
         wiki_visibility_label = VISIBILITY_LABELS.get(wiki_visibility, wiki_visibility)
         can_view_wiki = can_access_campaign_scope(campaign_slug, "wiki")
-        frontend_mode = normalize_frontend_mode(get_current_user_preferences().frontend_mode)
+        frontend_mode = get_current_user_preferences().frontend_mode
         query = request.args.get("q", "").strip() if can_view_wiki else ""
         grouped_sections: list[dict[str, Any]] = []
         navigation_pages: list[Any] = []
@@ -6237,7 +6222,6 @@ def register_api(app) -> None:
                 "links": {
                     "flask_campaign_url": url_for("campaign_view", campaign_slug=campaign.slug),
                     "campaign_url": preferred_campaign_href(campaign.slug, frontend_mode=frontend_mode),
-                    "gen2_campaign_url": gen2_campaign_href(campaign.slug),
                 },
             }
         )
@@ -6254,7 +6238,7 @@ def register_api(app) -> None:
         if not pages:
             abort(404)
 
-        frontend_mode = normalize_frontend_mode(get_current_user_preferences().frontend_mode)
+        frontend_mode = get_current_user_preferences().frontend_mode
         section_name = pages[0].section
         navigation_pages = repository.search_pages(campaign_slug, "")
         split_pages = split_public_wiki_pages_by_subsection(
@@ -6288,7 +6272,6 @@ def register_api(app) -> None:
                         section_slug=section_slug,
                     ),
                     "campaign_url": preferred_campaign_href(campaign.slug, frontend_mode=frontend_mode),
-                    "gen2_campaign_url": gen2_campaign_href(campaign.slug),
                 },
             }
         )
@@ -6310,7 +6293,7 @@ def register_api(app) -> None:
             abort(404)
 
         backlinks = repository.get_backlinks(campaign_slug, page_slug)
-        frontend_mode = normalize_frontend_mode(get_current_user_preferences().frontend_mode)
+        frontend_mode = get_current_user_preferences().frontend_mode
         navigation_pages = repository.search_pages(campaign_slug, "")
         return jsonify(
             {
@@ -6344,8 +6327,6 @@ def register_api(app) -> None:
                         f"sections/{slugify(page.section)}",
                         frontend_mode=frontend_mode,
                     ),
-                    "gen2_campaign_url": gen2_campaign_href(campaign.slug),
-                    "gen2_section_url": gen2_campaign_href(campaign.slug, f"sections/{slugify(page.section)}"),
                 },
             }
         )
@@ -8764,9 +8745,9 @@ def register_api(app) -> None:
                 "character": serialize_character_record(campaign_slug, record),
                 "links": {
                     **serialize_character_authoring_links(campaign_slug, campaign),
-                    "character_url": (
-                        f"/app-next/campaigns/{campaign_slug}/characters/"
-                        f"{record.definition.character_slug}"
+                    "character_url": flask_campaign_href(
+                        campaign_slug,
+                        f"characters/{record.definition.character_slug}",
                     ),
                     "flask_character_url": url_for(
                         "character_read_view",
@@ -8856,9 +8837,9 @@ def register_api(app) -> None:
                 "character": serialize_character_record(campaign_slug, record),
                 "links": {
                     **serialize_character_authoring_links(campaign_slug, campaign),
-                    "character_url": (
-                        f"/app-next/campaigns/{campaign_slug}/characters/"
-                        f"{record.definition.character_slug}"
+                    "character_url": flask_campaign_href(
+                        campaign_slug,
+                        f"characters/{record.definition.character_slug}",
                     ),
                     "flask_character_url": url_for(
                         "character_read_view",
@@ -8955,7 +8936,7 @@ def register_api(app) -> None:
             metadata={
                 "previous_user_id": previous.user_id if previous is not None else None,
                 "assignment_type": assignment.assignment_type,
-                "source": "gen2_character_controls",
+                "source": "character_controls_api",
             },
         )
 
@@ -8997,7 +8978,7 @@ def register_api(app) -> None:
             character_slug=character_slug,
             metadata={
                 "assignment_type": removed_assignment.assignment_type,
-                "source": "gen2_character_controls",
+                "source": "character_controls_api",
             },
         )
 
@@ -9047,7 +9028,7 @@ def register_api(app) -> None:
                 "deleted_state": deleted.deleted_state,
                 "deleted_assignment": deleted.deleted_assignment,
                 "deleted_assets": deleted.deleted_assets,
-                "source": "gen2_character_controls",
+                "source": "character_controls_api",
             },
         )
         return jsonify(
@@ -9057,7 +9038,7 @@ def register_api(app) -> None:
                 "deleted_character_slug": character_slug,
                 "deleted_character_name": record.definition.name,
                 "links": {
-                    "gen2_roster_url": gen2_campaign_href(campaign_slug, "characters"),
+                    "roster_url": flask_campaign_href(campaign_slug, "characters"),
                     "flask_roster_url": url_for("character_roster_view", campaign_slug=campaign.slug),
                 },
             }

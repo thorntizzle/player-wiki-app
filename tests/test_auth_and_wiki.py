@@ -80,9 +80,7 @@ def test_campaign_picker_defaults_to_flask_without_preview_card(client):
     assert 'href="/app-next/campaigns/linden-pass"' not in body
 
 
-def test_campaign_picker_uses_flask_links_when_gen2_hosting_is_disabled(app, client):
-    app.config["APP_NEXT_PREVIEW_ENABLED"] = False
-
+def test_campaign_picker_uses_flask_links_without_app_next_preview(client):
     response = client.get("/campaigns")
 
     assert response.status_code == 200
@@ -91,7 +89,7 @@ def test_campaign_picker_uses_flask_links_when_gen2_hosting_is_disabled(app, cli
     assert 'href="/app-next/campaigns/linden-pass"' not in body
 
 
-def test_gen2_frontend_account_setting_is_retired(app, client, sign_in, users):
+def test_frontend_account_setting_is_retired(app, client, sign_in, users):
     sign_in(users["party"]["email"], users["party"]["password"])
 
     account = client.get("/account")
@@ -116,7 +114,7 @@ def test_gen2_frontend_account_setting_is_retired(app, client, sign_in, users):
 
     with app.app_context():
         preferences = AuthStore().get_user_preferences(users["party"]["id"])
-        assert preferences.frontend_mode == "gen2"
+        assert preferences.frontend_mode == "flask"
 
     flask_picker = client.get("/campaigns")
     flask_body = flask_picker.get_data(as_text=True)
@@ -147,7 +145,7 @@ def test_legacy_flask_account_preference_keeps_flask_campaign_picker(app, client
         )
         connection.commit()
         preferences = AuthStore().get_user_preferences(users["party"]["id"])
-        assert preferences.frontend_mode == "gen2"
+        assert preferences.frontend_mode == "flask"
 
     signed_in_picker = client.get("/campaigns")
     signed_in_body = signed_in_picker.get_data(as_text=True)
@@ -314,7 +312,7 @@ def test_signed_in_user_can_save_theme_preference(app, client, sign_in, users):
         preferences = store.get_user_preferences(users["party"]["id"])
         assert preferences.theme_key == "moonlit"
         assert preferences.session_chat_order == "newest_first"
-        assert preferences.frontend_mode == "gen2"
+        assert preferences.frontend_mode == "flask"
 
 
 def test_signed_in_user_can_save_live_session_chat_order_preference(app, client, sign_in, users):
@@ -336,7 +334,7 @@ def test_signed_in_user_can_save_live_session_chat_order_preference(app, client,
         preferences = store.get_user_preferences(users["party"]["id"])
         assert preferences.session_chat_order == "oldest_first"
         assert preferences.theme_key == "parchment"
-        assert preferences.frontend_mode == "gen2"
+        assert preferences.frontend_mode == "flask"
 
 
 def test_invalid_theme_preference_is_rejected(app, client, sign_in, users):
@@ -358,7 +356,7 @@ def test_invalid_theme_preference_is_rejected(app, client, sign_in, users):
         preferences = store.get_user_preferences(users["party"]["id"])
         assert preferences.theme_key == "parchment"
         assert preferences.session_chat_order == "newest_first"
-        assert preferences.frontend_mode == "gen2"
+        assert preferences.frontend_mode == "flask"
 
 
 def test_invalid_live_session_chat_order_preference_is_rejected(app, client, sign_in, users):
@@ -379,7 +377,7 @@ def test_invalid_live_session_chat_order_preference_is_rejected(app, client, sig
         store = AuthStore()
         preferences = store.get_user_preferences(users["party"]["id"])
         assert preferences.session_chat_order == "newest_first"
-        assert preferences.frontend_mode == "gen2"
+        assert preferences.frontend_mode == "flask"
 
 
 def test_theme_update_recovers_from_legacy_user_preferences_schema(app, client, sign_in, users):
@@ -430,7 +428,18 @@ def test_theme_update_recovers_from_legacy_user_preferences_schema(app, client, 
         preferences = store.get_user_preferences(users["party"]["id"])
         assert preferences.theme_key == "moonlit"
         assert preferences.session_chat_order == "newest_first"
-        assert preferences.frontend_mode == "gen2"
+        assert preferences.frontend_mode == "flask"
+
+
+def test_app_next_routes_are_not_registered(client):
+    for path in [
+        "/app-next",
+        "/app-next/",
+        "/app-next/assets/app.js",
+        "/app-next/campaigns/linden-pass/session",
+    ]:
+        response = client.get(path)
+        assert response.status_code == 404
 
 
 def test_campaign_search_shows_matching_page_tiles(client, sign_in, users):

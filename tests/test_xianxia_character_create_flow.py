@@ -377,14 +377,14 @@ def test_xianxia_create_flow_stays_isolated_from_dnd5e_builder_fields(
     assert dnd_response.status_code == 200
     dnd_html = dnd_response.get_data(as_text=True)
     assert "Native Level 1 Builder" in dnd_html
-    assert "Create Echoes of the Alloy Coast Xianxia Character" not in dnd_html
+    assert "Create Xianxia Character" not in dnd_html
 
     _configure_xianxia_campaign(app)
 
     xianxia_response = client.get("/campaigns/linden-pass/characters/new")
     assert xianxia_response.status_code == 200
     xianxia_html = xianxia_response.get_data(as_text=True)
-    assert "Create Echoes of the Alloy Coast Xianxia Character" in xianxia_html
+    assert "Create Xianxia Character" in xianxia_html
     assert "Native Level 1 Builder" not in xianxia_html
     assert "Spell Preview" not in xianxia_html
     assert 'name="class_slug"' not in xianxia_html

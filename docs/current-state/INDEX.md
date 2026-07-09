@@ -1,6 +1,6 @@
 # Current State Index
 
-Last updated: 2026-06-28
+Last updated: 2026-07-09
 
 This directory is the fast reference layer for the current Campaign Player Wiki app contract. It is meant for implementation, audits, and roadmap close-out. Prefer these atomized docs over old roadmap completion notes when deciding what the app does now.
 
@@ -18,7 +18,7 @@ This directory is the fast reference layer for the current Campaign Player Wiki 
 - [Admin, Auth, And Visibility](admin-auth.md): sign-in, account settings, roles, membership, assignment, audit, and campaign visibility behavior.
 - [Combat](combat.md): player combat, DM status, encounter controls, combatant source identity, live updates, and current automation boundaries.
 - [DM Content](dm-content.md): Statblocks, Player Wiki management, Systems management lane, Staged Articles, Conditions, and cross-surface handoffs.
-- [Frontend And Gen2 Shell](frontend-gen2.md): `/app-next` hosting, route ownership, app shell, global search, loading behavior, and shared UX conventions.
+- [Flask Browser App](flask-browser.md): browser route ownership, Flask template shell behavior, loading cover behavior, browser/API links, and the removed TanStack preview boundary.
 - [Live Session](live-session.md): player Session, DM Session, Session Character, staged/revealed articles, logs, and polling behavior.
 - [Ops And Fly Deployment](ops-deploy.md): local wrapper usage, Fly deployment shape, SQLite volume boundaries, and verification expectations.
 - [Published Wiki And Publishing](published-wiki.md): player-facing wiki pages, section/grouping conventions, images, Campaign Home, and publication/removal guardrails.
@@ -30,7 +30,6 @@ This directory is the fast reference layer for the current Campaign Player Wiki 
 ## Existing Contract Docs
 
 - [API v1](../api-v1.md): JSON API and browser/API contract reference.
-- [Gen2 Migration Readiness](../gen2-migration-readiness.md): current `/app-next` hosting, route ownership, and migration readiness notes.
 - [Frontend UX Style Guide](../frontend-ux-style-guide.md): app-wide UX, action, form, density, accessibility, and feedback conventions.
 - [Frontend UX Audit Checklist](../frontend-ux-audit-checklist.md): page-by-page UX audit checklist.
 
@@ -40,7 +39,7 @@ Local roadmaps are intentionally not tracked:
 
 - `.local/roadmaps/INDEX.md`
 - `.local/roadmaps/feedback-inbox.md`
-- `.local/roadmaps/gen2-frontend-backlog.md`
+- `.local/roadmaps/flask-only-tanstack-removal-plan.md`
 - `.local/roadmaps/ux-backlog.md`
 - `.local/roadmaps/publishing-backlog.md`
 - `.local/roadmaps/dm-content-backlog.md`
