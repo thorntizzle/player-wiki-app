@@ -280,7 +280,7 @@ def _page_payload(
     is_visible: bool,
     base_url: str,
 ) -> dict[str, Any]:
-    page_url = f"{base_url}/app-next/campaigns/{record.campaign_slug}/pages/{page.route_slug}" if base_url else ""
+    page_url = f"{base_url}/campaigns/{record.campaign_slug}/pages/{page.route_slug}" if base_url else ""
     asset_url = (
         f"{base_url}/campaigns/{record.campaign_slug}/assets/{page.image_path}"
         if base_url and page.image_path

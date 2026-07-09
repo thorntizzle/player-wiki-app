@@ -118,7 +118,7 @@ def test_campaign_package_export_includes_systems_characters_and_image_associati
     captain_page = next(page for page in pages if page["route_slug"] == "npcs/captain-lyra-vale")
     assert captain_page["image"]["asset_ref"] == "npcs/captain-lyra-vale.png"
     assert captain_page["url"] == (
-        "https://example.test/app-next/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
+        "https://example.test/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
     )
 
     image_associations = _read_jsonl(output_dir / "assets" / "image-associations.jsonl")

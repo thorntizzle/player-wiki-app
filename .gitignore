@@ -1,4 +1,7 @@
 .local/
+node_modules/
+**/node_modules/
+apps/api/dist/
 .task-temp*/
 .mypy_cache/
 **/.mypy_cache/
